@@ -6699,7 +6699,10 @@ items dropped first, `todo_write` ids kept) unless the successor still shows
 the same plan. The note is a steering segment with `Instruction` provenance,
 appended atomically to the compacted successor. Mid-turn it is therefore
 visible immediately after the fold; after an idle compaction it is already the
-last segment when the next turn appends its prompt. It is ordinary committed
+last segment when the next turn appends its prompt. A native successor retains
+no earlier post-compaction note ahead of its compaction item (§10.4), so the function is given
+that successor, and the note it derives is appended after the retained tail,
+before the continuation note, as after a first compaction. It is ordinary committed
 history, so release, resume and recovery replay it exactly once. A
 session-workflow fold that `recover_compaction` or the next open publishes from
 its recorded summary (§10.5) appends the note the same way, derived by the
@@ -6722,16 +6725,23 @@ of the conversation, since a native successor's compaction item follows the
 retained user messages; that the task is not finished; that the model should
 continue from the latest tool result with its next tool call; and that it
 should end the turn only when the task is done or it needs the user. A turn carries at most one such note: a fold only appends
-(the compaction provenance pins the successor prefix) and steering is never
-folded inside its own turn, so the first mid-turn fold's note stays, and a
-later fold in the same turn whose successor already holds it after the latest
-user intent appends nothing; that note then sits just before the current
-round's batch. A later turn folds it whole with its intent group. A fold before a new prompt (fence (a)), an
-endpoint compaction and a recovery-published fold append no continuation note.
-A native compaction gets the note on the same rule: a native successor that
-keeps the current round's batch after its compaction item ends in that tool
-exchange, while one published without the tail ends in the compaction item and
-gets none.
+(the compaction provenance pins the successor prefix) and a semantic fold never
+folds steering inside its own turn, so the first mid-turn semantic fold's note
+stays, and a later semantic fold in the same turn whose successor already holds
+it after the latest user intent appends nothing; that note then sits just
+before the current round's batch. A later turn folds it whole with its intent
+group. A fold before a new prompt (fence (a)), an endpoint compaction and a
+recovery-published fold append no continuation note.
+A native compaction gets the note on the same rule, placed after the retained
+tail: a native successor that keeps the current round's batch after its
+compaction item ends in that tool exchange (or the steering after it) and gets
+the note last, while one published without the tail ends in the compaction
+item and gets none. A native successor retains no continuation note among
+the groups before its compaction item (§10.4), so a repeated native compaction
+in one turn drops the earlier note and, when it keeps the tail, appends a fresh
+one after it. The note is recognized by its shape and marker: a steering
+segment of exactly one `Instruction` user text item opening with the marker.
+A person's steering is never taken for it.
 The note is part of the published successor, like the plan note, and failure to
 build it fails the publication.
 
@@ -7099,8 +7109,17 @@ whole groups only, then exactly one native compaction segment, then the
 source's protected current-round tail (§10.1) verbatim: the newest tool
 exchange after the latest user intent with every segment after it, so steering
 after that batch stays after it in order. Older assistant, tool, reasoning and
-prior compaction groups are not retained, and a tail that would hold a
-compaction segment is not kept. Upstream Codex drops every tool item; Plak
+prior compaction groups are not retained, and neither are harness notes before
+the tail (steering segments of exactly one `Instruction` user text item): the
+continuation note, post-compaction notes, placeholder notes and replay-omission
+notes (§10.2). The compaction item covers them, and they are removed before
+the budget walk, so they consume none of it. Process-notice batches (§8.5) use
+the same encoding but carry facts delivered once, so they are retained as
+user-role groups, as is a person's steering. A tail that would hold a
+compaction segment is not kept. Publication then appends, after the tail, the
+post-compaction note the builder's function derives for this successor and,
+after a live turn-fence fold, the continuation note (§10.2), exactly as after
+a first compaction. Upstream Codex drops every tool item; Plak
 keeps the current batch because the model has not yet acted on it.
 
 Both successor shapes — with that tail and without it — are pure functions of
@@ -7236,7 +7255,8 @@ after input is not strictly smaller than its recorded before. A native receipt
 is accepted only when its successor is exactly one of the two source-derived
 shapes of §10.4, rebuilt from the source checkpoint and the recorded compaction
 item, with provenance, ledger and context recomputed from that shape; any other
-successor is corrupt. A success receipt's published history, harness or
+successor, such as one retaining a continuation, post-compaction, placeholder
+or replay-omission note ahead of its compaction item, is corrupt. A success receipt's published history, harness or
 native, must be that recomputed successor followed by nothing but what
 publication appends to it (§10.2): at most one post-compaction note and, after
 a live turn-fence fold, the turn continuation note (recovery never publishes a

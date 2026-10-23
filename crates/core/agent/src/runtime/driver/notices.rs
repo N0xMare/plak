@@ -9,6 +9,8 @@ use plakous_tools::{JobStatus, JobStopReason, JobView};
 use std::fmt::Write;
 
 const BATCH_BYTES: usize = 16 * 1024;
+/// Opens every process-notice batch.
+const BATCH_MARKER: &str = "[harness]\n";
 pub(super) const OUTCOME_UNKNOWN: &str = "Plak stopped unexpectedly while this command was running. It may still be running outside Plak and may hold locks or ports; the runtime cap no longer applies. Check before relying on its effects.";
 
 impl Driver {
@@ -150,7 +152,7 @@ fn render_batch(
         summary_bytes += summaries[coalesced].len() + usize::from(coalesced != 0) * 2;
         coalesced += 1;
     }
-    let mut text = "[harness]\n".to_owned();
+    let mut text = BATCH_MARKER.to_owned();
     if coalesced != 0 {
         let _ = writeln!(
             text,
@@ -160,6 +162,13 @@ fn render_batch(
     }
     text.push_str(&notices[coalesced..].join("\n"));
     Ok(text)
+}
+
+/// Whether `text` is a process-notice batch as `render_batch` writes it.
+pub(in crate::runtime) fn is_process_notice_batch(text: &str) -> bool {
+    text.strip_prefix(BATCH_MARKER).is_some_and(|body| {
+        body.starts_with("<process_notice id=\"p") || body.contains(" more processes finished: ")
+    })
 }
 
 fn summary_status(status: JobStatus) -> String {
@@ -331,6 +340,30 @@ mod tests {
             assert!(notice.contains(&format!("status=\"stopped\" by=\"{by}\"")));
             assert!(!notice.contains("exit_code="));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn rendered_batches_are_recognized_as_process_notices() -> TestResult {
+        let single = render_batch(
+            &[job(2, JobStatus::Exited(Some(1)), "tail".to_owned())?],
+            false,
+            &[None],
+        )?;
+        assert!(is_process_notice_batch(&single));
+        let jobs = (1..=40)
+            .map(|number| job(number, JobStatus::Exited(Some(0)), "x".repeat(4_000)))
+            .collect::<TestResult<Vec<_>>>()?;
+        let files = jobs.iter().map(|_| None).collect::<Vec<_>>();
+        let coalesced = render_batch(&jobs, false, &files)?;
+        assert!(coalesced.contains(" more processes finished: "));
+        assert!(is_process_notice_batch(&coalesced));
+        assert!(!is_process_notice_batch(
+            "[harness] This turn has used its entire model-operation budget"
+        ));
+        assert!(!is_process_notice_batch(
+            "[plak: earlier work in this turn was summarized]"
+        ));
         Ok(())
     }
 

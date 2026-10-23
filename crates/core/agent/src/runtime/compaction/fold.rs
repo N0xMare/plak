@@ -2,7 +2,7 @@
 
 use crate::runtime::OperationId;
 use crate::runtime::admission::validate_configuration_runtime_authority;
-use crate::runtime::compaction::continuation::is_user_intent;
+use crate::runtime::compaction::continuation::{is_covered_harness_note, is_user_intent};
 use crate::runtime::compaction::record::{
     compaction_attempt_id, compaction_operation_component, compaction_uuid,
 };
@@ -341,7 +341,10 @@ fn native_protected_tail_start(source: &CanonicalHistory) -> Option<usize> {
 ///
 /// Both shapes are pure functions of the source history and the item, so
 /// publication and reopen validation derive them identically. `WithTail`
-/// returns `None` when the source has no protected current-round tail.
+/// returns `None` when the source has no protected current-round tail. No
+/// covered harness note before the tail is retained, and none counts against
+/// the retained-message budget; process notices are retained. Publication
+/// appends the post-compaction and continuation notes after the tail.
 pub(in crate::runtime) fn native_compaction_successor(
     source: &CanonicalHistory,
     summary: HistorySegment,
@@ -363,7 +366,8 @@ pub(in crate::runtime) fn native_compaction_successor(
             HistorySegmentKind::Compaction
                 | HistorySegmentKind::ToolExchange
                 | HistorySegmentKind::ReasoningReplay
-        ) {
+        ) || is_covered_harness_note(segment)
+        {
             continue;
         }
         if segment.items().iter().all(native_compaction_keeps_item) {

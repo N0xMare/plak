@@ -394,7 +394,9 @@ impl AgentBuilder {
     /// A note is a steering segment: during a turn it is appended right after
     /// the commit, and after an idle compaction it opens the next turn. The
     /// runtime knows nothing of what it says; a tool pack supplies it (the plan
-    /// pack restores the latest task list this way).
+    /// pack restores the latest task list this way). A native compaction
+    /// successor drops earlier harness notes ahead of its compaction item, so
+    /// `note` must not rely on seeing its own earlier note there.
     #[must_use]
     pub fn post_compaction_note(mut self, note: PostCompactionNote) -> Self {
         self.post_compaction_note = Some(note);

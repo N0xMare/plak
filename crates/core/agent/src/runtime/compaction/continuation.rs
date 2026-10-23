@@ -11,10 +11,10 @@
 use crate::runtime::PostCompactionNote;
 use crate::runtime::compaction::placeholder::harness_note_segment;
 use crate::runtime::compaction::record::compaction_uuid;
+use crate::runtime::driver::is_process_notice_batch;
 use crate::{AgentError, AgentErrorKind, SessionWorkflowId};
 use plakous_model::{
-    Actor, CanonicalHistory, ContentBlock, ConversationItem, EntryId, HistorySegment,
-    HistorySegmentKind,
+    Actor, CanonicalHistory, ContentBlock, EntryId, HistorySegment, HistorySegmentKind, Provenance,
 };
 
 /// Opens the continuation note so a later fold in the same turn recognizes it.
@@ -25,19 +25,6 @@ const TURN_CONTINUATION_NOTE_BODY: &str = "The earlier part of this turn is now 
      above. The task is not finished: continue from the latest tool result with your next tool \
      call, and end the turn only when the task is done or you need the user.";
 
-/// Appends the continuation note to a fold successor whose newest
-/// non-steering segment is a tool exchange: the fence-(b) shape, where the same
-/// turn's next round follows. Trailing steering (the plan restoration note)
-/// does not change that shape.
-///
-/// A native successor that keeps the current round's batch after its
-/// compaction item gets the note like any fold; one that ends in its compaction
-/// item does not. A successor ending anywhere else (a fold before a new prompt) is returned
-/// unchanged, and so is one whose current turn already carries a note. The
-/// compaction provenance pins the successor prefix, so a fold may only append,
-/// and steering is never folded inside its own turn: an earlier fold's note
-/// stays, and after the next fold it sits just before the current round's
-/// batch, still in front of the model. Appending one per fold would stack them.
 /// The history planner's notion of user intent: steering is not intent.
 pub(in crate::runtime) fn is_user_intent(segment: &HistorySegment) -> bool {
     segment.kind() == HistorySegmentKind::RecentIntent
@@ -48,16 +35,37 @@ pub(in crate::runtime) fn is_user_intent(segment: &HistorySegment) -> bool {
                 .any(|item| item.actor() == Actor::User))
 }
 
+/// The text of a harness note: a steering segment shaped exactly as
+/// [`harness_note_segment`] builds it, one `Instruction` user item holding one
+/// text block. A person's steering carries `UserInput` and is never one.
+fn harness_note_text(segment: &HistorySegment) -> Option<&str> {
+    if segment.kind() != HistorySegmentKind::Steering {
+        return None;
+    }
+    let [item] = segment.items() else {
+        return None;
+    };
+    if item.actor() != Actor::User || item.provenance() != Provenance::Instruction {
+        return None;
+    }
+    let [ContentBlock::Text(text)] = item.blocks() else {
+        return None;
+    };
+    Some(text.text())
+}
+
+/// Whether a native successor leaves `segment` out of the groups it retains
+/// ahead of its compaction item: a harness note such as the continuation,
+/// plan restoration, placeholder or replay-omission note, which the server's
+/// compaction item covers and which is not user intent. A process-notice
+/// batch is kept: it carries facts delivered once (exit codes, output tails,
+/// the unknown-outcome warning) that nothing appends again.
+pub(in crate::runtime) fn is_covered_harness_note(segment: &HistorySegment) -> bool {
+    harness_note_text(segment).is_some_and(|text| !is_process_notice_batch(text))
+}
+
 fn is_turn_continuation_note(segment: &HistorySegment) -> bool {
-    segment.kind() == HistorySegmentKind::Steering
-        && segment
-            .items()
-            .iter()
-            .flat_map(ConversationItem::blocks)
-            .any(|block| {
-                matches!(block, ContentBlock::Text(text)
-                    if text.text().starts_with(TURN_CONTINUATION_NOTE_MARKER))
-            })
+    harness_note_text(segment).is_some_and(|text| text.starts_with(TURN_CONTINUATION_NOTE_MARKER))
 }
 
 /// Appends the post-compaction note `note` derives from a fold of `source`
@@ -83,6 +91,23 @@ pub(in crate::runtime) fn with_post_compaction_note(
         })
 }
 
+/// Appends the continuation note to a fold successor whose newest
+/// non-steering segment is a tool exchange: the fence-(b) shape, where the same
+/// turn's next round follows. Trailing steering (the plan restoration note)
+/// does not change that shape.
+///
+/// A successor ending anywhere else (a fold before a new prompt) is returned
+/// unchanged, and so is one whose current turn already carries a note. The
+/// compaction provenance pins the successor prefix, so a fold may only append.
+/// A semantic fold never folds steering inside its own turn: an earlier fold's
+/// note stays, and after the next fold it sits just before the current round's
+/// batch, still in front of the model. Appending one per fold would stack them.
+///
+/// A native successor that keeps the current round's batch after its
+/// compaction item gets the note after that tail; one that ends in its
+/// compaction item does not. A native successor retains no harness note ahead
+/// of its item, so a repeated native compaction in one turn gets a fresh note
+/// after its tail.
 pub(in crate::runtime) fn with_turn_continuation_note(
     successor: CanonicalHistory,
     workflow_id: SessionWorkflowId,

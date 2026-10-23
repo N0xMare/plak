@@ -49,6 +49,7 @@ mod effects;
 mod model;
 pub(super) use model::completed_history_prefix;
 mod notices;
+pub(super) use notices::is_process_notice_batch;
 mod observation;
 mod operations;
 mod placeholders;

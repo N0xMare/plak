@@ -2895,3 +2895,382 @@ fn native_compaction_successor_has_no_tail_without_a_current_round_batch()
     );
     Ok(())
 }
+
+/// A harness note opening with the continuation marker.
+fn is_continuation_note(segment: &HistorySegment) -> bool {
+    crate::runtime::compaction::continuation::is_covered_harness_note(segment)
+        && segment
+            .items()
+            .iter()
+            .flat_map(ConversationItem::blocks)
+            .any(|block| {
+                matches!(block, ContentBlock::Text(text)
+                if text.text().starts_with(
+                    crate::runtime::compaction::continuation::TURN_CONTINUATION_NOTE_MARKER,
+                ))
+            })
+}
+
+fn continuation_note_positions(history: &CanonicalHistory) -> Vec<usize> {
+    history
+        .segments()
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| is_continuation_note(segment))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// The live turn-fence publication of a native successor: the fold, then the
+/// turn continuation note it derives.
+fn native_turn_fence_successor(
+    source: &CanonicalHistory,
+    summary: HistorySegment,
+    workflow: u8,
+) -> Result<CanonicalHistory, Box<dyn std::error::Error>> {
+    let successor = native_compaction_successor(source, summary, NativeSuccessorShape::WithTail)?
+        .ok_or("the current round has a protected tail")?;
+    Ok(
+        crate::runtime::compaction::continuation::with_turn_continuation_note(
+            successor,
+            SessionWorkflowId::new([workflow; 32])?,
+        )?,
+    )
+}
+
+#[test]
+fn native_successors_in_one_turn_each_end_with_a_fresh_note_after_the_tail()
+-> Result<(), Box<dyn std::error::Error>> {
+    let older = native_text_segment(
+        HistorySegmentKind::Conversation,
+        81,
+        Actor::User,
+        "plant the seed",
+    )?;
+    let intent = native_text_segment(HistorySegmentKind::RecentIntent, 82, Actor::User, "grow it")?;
+    let consumed = native_tool_exchange(90, "page one")?;
+    let first_batch = native_tool_exchange(100, "page two")?;
+    let source = CanonicalHistory::new(vec![
+        older.clone(),
+        intent.clone(),
+        consumed,
+        first_batch.clone(),
+    ])?;
+    let first_item = native_summary_segment(83)?;
+
+    // One native compaction: retained groups, the item, the current batch,
+    // then the note.
+    let first = native_turn_fence_successor(&source, first_item.clone(), 1)?;
+    let kept = first.segments().to_vec();
+    assert_eq!(kept.len(), 5);
+    assert!(kept[0].shares_storage_with(&older));
+    assert!(kept[1].shares_storage_with(&intent));
+    assert_eq!(kept[2].identity(), first_item.identity());
+    assert!(kept[3].shares_storage_with(&first_batch));
+    assert_eq!(continuation_note_positions(&first), vec![4]);
+    let first_note = kept[4].clone();
+
+    // The turn runs another round, then compacts natively again.
+    let second_batch = native_tool_exchange(110, "page three")?;
+    let mut grown = kept;
+    grown.push(second_batch.clone());
+    let second_item = native_summary_segment(84)?;
+    let second =
+        native_turn_fence_successor(&CanonicalHistory::new(grown)?, second_item.clone(), 2)?;
+    let kept = second.segments().to_vec();
+    assert_eq!(kept.len(), 5, "the earlier note is not a retained group");
+    assert!(kept[0].shares_storage_with(&older));
+    assert!(kept[1].shares_storage_with(&intent));
+    assert_eq!(kept[2].identity(), second_item.identity());
+    assert!(kept[3].shares_storage_with(&second_batch));
+    assert_eq!(continuation_note_positions(&second), vec![4]);
+    assert_ne!(
+        kept[4].identity(),
+        first_note.identity(),
+        "the second compaction appends its own note"
+    );
+    // Same text, so no render moves; only the entry differs.
+    let text = |segment: &HistorySegment| -> Vec<String> {
+        segment
+            .items()
+            .iter()
+            .flat_map(ConversationItem::blocks)
+            .filter_map(|block| match block {
+                ContentBlock::Text(text) => Some(text.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(text(&kept[4]), text(&first_note));
+    Ok(())
+}
+
+#[test]
+fn a_tail_less_native_successor_drops_the_earlier_note_and_gets_none()
+-> Result<(), Box<dyn std::error::Error>> {
+    let intent = native_text_segment(
+        HistorySegmentKind::RecentIntent,
+        121,
+        Actor::User,
+        "grow it",
+    )?;
+    let steer = native_text_segment(
+        HistorySegmentKind::Steering,
+        122,
+        Actor::User,
+        "also water it",
+    )?;
+    let first = native_turn_fence_successor(
+        &CanonicalHistory::new(vec![intent.clone(), native_tool_exchange(130, "one")?])?,
+        native_summary_segment(123)?,
+        3,
+    )?;
+    assert_eq!(continuation_note_positions(&first), vec![3]);
+    let mut grown = first.segments().to_vec();
+    grown.push(steer.clone());
+    grown.push(native_tool_exchange(140, "two")?);
+    let summary = native_summary_segment(124)?;
+    let without_tail = native_compaction_successor(
+        &CanonicalHistory::new(grown)?,
+        summary.clone(),
+        NativeSuccessorShape::WithoutTail,
+    )?
+    .ok_or("tail-less native successor")?;
+    let kept = without_tail.segments().to_vec();
+    // User steering stays a retained message; the harness note does not.
+    assert_eq!(kept.len(), 3);
+    assert!(kept[0].shares_storage_with(&intent));
+    assert!(kept[1].shares_storage_with(&steer));
+    assert_eq!(kept[2].identity(), summary.identity());
+    let published = crate::runtime::compaction::continuation::with_turn_continuation_note(
+        without_tail,
+        SessionWorkflowId::new([4; 32])?,
+    )?;
+    assert_eq!(continuation_note_positions(&published), Vec::<usize>::new());
+    Ok(())
+}
+
+fn person_steering(entries: &[(u128, &str)]) -> Result<HistorySegment, Box<dyn std::error::Error>> {
+    Ok(HistorySegment::new(
+        HistorySegmentKind::Steering,
+        entries
+            .iter()
+            .map(|(entry, text)| {
+                ConversationItem::new(
+                    EntryId::try_from(uuid::Uuid::from_u128(*entry))?,
+                    Actor::User,
+                    vec![ContentBlock::Text(TextBlock::new(*text, None)?)],
+                    Provenance::UserInput,
+                )
+                .map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?,
+    )?)
+}
+
+fn harness_note(entry: u128, text: &str) -> Result<HistorySegment, Box<dyn std::error::Error>> {
+    Ok(
+        crate::runtime::compaction::placeholder::harness_note_segment(
+            EntryId::try_from(uuid::Uuid::from_u128(entry))?,
+            text.to_owned(),
+        )?,
+    )
+}
+
+#[test]
+fn a_native_successor_keeps_person_steering_that_opens_like_the_continuation_note()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::runtime::compaction::continuation::TURN_CONTINUATION_NOTE_MARKER;
+    let marked = format!("{TURN_CONTINUATION_NOTE_MARKER} my own words");
+    let intent = native_text_segment(
+        HistorySegmentKind::RecentIntent,
+        201,
+        Actor::User,
+        "grow it",
+    )?;
+    let single = person_steering(&[(202, &marked)])?;
+    let multi = person_steering(&[(203, &marked), (204, "and one more thing")])?;
+    let source = CanonicalHistory::new(vec![
+        intent.clone(),
+        native_tool_exchange(210, "one")?,
+        single.clone(),
+        multi.clone(),
+        native_tool_exchange(220, "two")?,
+    ])?;
+    let summary = native_summary_segment(205)?;
+    let published = native_turn_fence_successor(&source, summary.clone(), 7)?;
+    let kept = published.segments().to_vec();
+    assert_eq!(kept.len(), 6);
+    assert!(kept[0].shares_storage_with(&intent));
+    assert!(
+        kept[1].shares_storage_with(&single),
+        "single-item steering stays"
+    );
+    assert!(
+        kept[2].shares_storage_with(&multi),
+        "multi-item steering stays"
+    );
+    assert_eq!(kept[3].identity(), summary.identity());
+    assert_eq!(kept[4].kind(), HistorySegmentKind::ToolExchange);
+    // A person's steering is not the continuation note, so the turn still
+    // gets one after its tail.
+    assert_eq!(continuation_note_positions(&published), vec![5]);
+    Ok(())
+}
+
+#[test]
+fn a_native_successor_retains_no_harness_note_and_spends_no_budget_on_one()
+-> Result<(), Box<dyn std::error::Error>> {
+    // 200 000 bytes is 50 000 tokens: it fits the 64 000-token retained
+    // budget alone, but not after a 25 000-token harness note.
+    let older = native_text_segment(
+        HistorySegmentKind::Conversation,
+        231,
+        Actor::User,
+        &"o".repeat(200_000),
+    )?;
+    let intent = native_text_segment(
+        HistorySegmentKind::RecentIntent,
+        232,
+        Actor::User,
+        "grow it",
+    )?;
+    let plan = harness_note(233, &format!("PLAN\n{}", "p".repeat(100_000)))?;
+    let other = harness_note(234, "a placeholder pass removed two results")?;
+    let source = CanonicalHistory::new(vec![
+        older.clone(),
+        intent.clone(),
+        native_tool_exchange(240, "one")?,
+        plan,
+        other,
+        native_tool_exchange(250, "two")?,
+    ])?;
+    let summary = native_summary_segment(235)?;
+    for shape in [
+        NativeSuccessorShape::WithTail,
+        NativeSuccessorShape::WithoutTail,
+    ] {
+        let successor = native_compaction_successor(&source, summary.clone(), shape)?
+            .ok_or("native successor")?;
+        let kept = successor.segments().to_vec();
+        assert!(kept[0].shares_storage_with(&older), "{shape:?}");
+        assert!(kept[1].shares_storage_with(&intent), "{shape:?}");
+        assert_eq!(kept[2].identity(), summary.identity(), "{shape:?}");
+        assert!(
+            !kept
+                .iter()
+                .any(crate::runtime::compaction::continuation::is_covered_harness_note),
+            "{shape:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_plan_shown_in_the_tail_leaves_no_plan_note_above_the_item()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::runtime::compaction::continuation::{
+        is_covered_harness_note, with_post_compaction_note, with_turn_continuation_note,
+    };
+    let intent = native_text_segment(
+        HistorySegmentKind::RecentIntent,
+        261,
+        Actor::User,
+        "grow it",
+    )?;
+    let first = native_turn_fence_successor(
+        &CanonicalHistory::new(vec![intent.clone(), native_tool_exchange(270, "one")?])?,
+        native_summary_segment(262)?,
+        8,
+    )?;
+    let mut grown = first.segments().to_vec();
+    // The first publication's plan note, before its continuation note.
+    grown.insert(
+        grown.len() - 1,
+        harness_note(263, "PLAN\n- [pending] old step")?,
+    );
+    grown.push(native_tool_exchange(
+        280,
+        "revision=2\n- [completed] old step",
+    )?);
+    let source = CanonicalHistory::new(grown)?;
+    // The newest batch already shows the plan, so the note function derives
+    // nothing for this successor.
+    let shown: crate::runtime::PostCompactionNote = Arc::new(|_, _| None);
+    let summary = native_summary_segment(264)?;
+    let successor =
+        native_compaction_successor(&source, summary.clone(), NativeSuccessorShape::WithTail)?
+            .ok_or("tail")?;
+    let published = with_turn_continuation_note(
+        with_post_compaction_note(successor, &source, Some(&shown), || {
+            EntryId::try_from(uuid::Uuid::from_u128(265))
+                .map_err(|error| AgentError::from_identity(&error))
+        })?,
+        SessionWorkflowId::new([9; 32])?,
+    )?;
+    let kept = published.segments().to_vec();
+    assert_eq!(kept.len(), 4, "intent, item, tail, continuation note");
+    assert!(kept[0].shares_storage_with(&intent));
+    assert_eq!(kept[1].identity(), summary.identity());
+    assert_eq!(kept[2].kind(), HistorySegmentKind::ToolExchange);
+    assert!(!kept.iter().take(3).any(is_covered_harness_note));
+    assert_eq!(continuation_note_positions(&published), vec![3]);
+    Ok(())
+}
+
+#[test]
+fn a_native_successor_keeps_process_notices_on_first_and_repeated_compactions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let intent = native_text_segment(
+        HistorySegmentKind::RecentIntent,
+        291,
+        Actor::User,
+        "build it",
+    )?;
+    let notice = harness_note(
+        292,
+        "[harness]\n<process_notice id=\"p1\" status=\"outcome_unknown\" elapsed=\"0m9s\">\n\
+         command: cargo build\nstarted: 2026-10-04T12:00:03Z\nPlak stopped unexpectedly while \
+         this command was running. It may still be running outside Plak and may hold locks or \
+         ports; the runtime cap no longer applies. Check before relying on its effects.\n\
+         </process_notice>",
+    )?;
+    let plan = harness_note(293, "PLAN\n- [pending] build")?;
+    let source = CanonicalHistory::new(vec![
+        intent.clone(),
+        native_tool_exchange(300, "spawned")?,
+        notice.clone(),
+        plan,
+        native_tool_exchange(310, "one")?,
+    ])?;
+    let first_item = native_summary_segment(294)?;
+    let first = native_turn_fence_successor(&source, first_item.clone(), 10)?;
+    let kept = first.segments().to_vec();
+    assert_eq!(
+        kept.len(),
+        5,
+        "intent, notice, item, tail, continuation note"
+    );
+    assert!(kept[0].shares_storage_with(&intent));
+    assert!(
+        kept[1].shares_storage_with(&notice),
+        "the process notice stays"
+    );
+    assert_eq!(kept[2].identity(), first_item.identity());
+    assert_eq!(continuation_note_positions(&first), vec![4]);
+
+    let mut grown = kept;
+    grown.push(native_tool_exchange(320, "two")?);
+    let second_item = native_summary_segment(295)?;
+    let second =
+        native_turn_fence_successor(&CanonicalHistory::new(grown)?, second_item.clone(), 11)?;
+    let kept = second.segments().to_vec();
+    assert_eq!(kept.len(), 5);
+    assert!(
+        kept[1].shares_storage_with(&notice),
+        "and survives the next one"
+    );
+    assert_eq!(kept[2].identity(), second_item.identity());
+    assert_eq!(continuation_note_positions(&second), vec![4]);
+    Ok(())
+}

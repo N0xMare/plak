@@ -73,7 +73,12 @@ one cross-build carrier (a build imports its own and the previous version).
 - A Codex native compaction mid-turn keeps the current round's tool batch
   verbatim after the compaction item, so the model still sees the output it
   asked for; when that successor would not fit or shrink, the tail-less
-  successor from the same compaction item is published instead.
+  successor from the same compaction item is published instead. A native
+  compaction no longer keeps earlier continuation, plan restoration,
+  placeholder or replay-omission notes above its compaction item; process
+  notices stay. The plan restoration and continuation notes are appended after
+  the batch, so a second native compaction in a turn no longer leaves the
+  earlier note above the new summary.
 - Re-reading a compaction's receipt (recovery, or `/compact` repeated with the
   same operation) no longer reports the session as corrupt when the successor
   carries a post-compaction note, and a compaction completed during recovery
