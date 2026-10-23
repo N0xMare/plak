@@ -2689,7 +2689,10 @@ bodiless GETs). It qualifies when it ended (`Complete`, `ProtocolComplete`,
 Nth event, counted as the fault counts them (§2.8: comment-only blocks such as
 keep-alives are not events), in a provider failure, and the turn failed as a
 provider error (an in-band provider kind `RateLimited`, `Unavailable` or
-`Timeout`, or a provider HTTP status), which a transport kind is not. The
+`Timeout`, or a provider HTTP status), which a transport kind is not, or
+completed after the product retried it: the turn records a transport or
+provider retry and the segment holds a later request with the same
+conversation, as for a provider HTTP error that consumed the faulted request. The
 injected cut lands exactly at the Nth event, so it never qualifies. That
 outcome is `provider`.
 

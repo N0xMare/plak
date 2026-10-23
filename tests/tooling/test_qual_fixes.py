@@ -582,6 +582,39 @@ class UnfiredFaultTests(unittest.TestCase):
                              turn=live.Turn(phase="failed", model_error_kind="Transport"))
         self.assertEqual(failure.outcome, live.HARNESS)
 
+    def test_a_retried_head_timeout_before_the_cut_is_provider(self):
+        # The recorded shape: the targeted Messages request got no response
+        # head within the dispatch deadline, the product retried it and the
+        # turn completed, so the reset armed after three events never fired.
+        head = ("Failed(Failure { phase: ResponseHead, transmission: MayHaveTransmitted, "
+                "kind: DeadlineExceeded, cause: None, http2_reason: None, os_error: None, tls: None, "
+                "tls_alert: None, alpn: Some(\"http/1.1\"), http2_io: false, "
+                "connection: Some(Fresh), idle_age: None })")
+        retried = live.Turn(phase="completed", retries=[{
+            "attempt": 2, "cause_kind": "transport_after_send", "max_attempts": 4}])
+        failure = self.judge(b"", status="None", terminal=head, turn=retried)
+        self.assertEqual((failure.outcome, str(failure)), (
+            live.PROVIDER, "the provider ended the targeted stream (exchange-0002) in a transport "
+                           "failure (DeadlineExceeded) in ResponseHead after 0 of 3 events, before "
+                           "the reset fired; the product retried it and completed the turn"))
+        # Without a transport or provider retry, or without a replay of the
+        # targeted request, it stays harness.
+        other_retry = live.Turn(phase="completed", retries=[{"cause_kind": "model_output"}])
+        for name, turn, later in (
+                ("no retry", live.Turn(phase="completed"), b'{"messages":[]}'),
+                ("not a replay cause", other_retry, b'{"messages":[]}'),
+                ("no later request", retried, None),
+                ("a different request", retried, b'{"messages":[{"role":"user"}]}')):
+            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
+                segment = Path(directory)
+                self.write_exchange(segment, 1, b"", status="None", terminal=head)
+                if later is not None:
+                    self.write_exchange(segment, 2, b"data: {}\n\n", request=later,
+                                        terminal="Complete")
+                with self.assertRaises(live.ScenarioFailure) as raised:
+                    smoke.judge_fault_reset(turn, segment / "hello.txt", [segment], 3)
+                self.assertEqual(raised.exception.outcome, live.HARNESS)
+
     def test_a_request_without_a_conversation_is_not_the_target(self):
         with tempfile.TemporaryDirectory() as directory:
             segment = Path(directory)

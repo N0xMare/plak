@@ -171,6 +171,12 @@ def after_events(plan: str) -> int | None:
     return None
 
 
+# Retry causes under which the product replays a request the provider or the
+# network ended (spec 01 §13.1).
+REPLAY_CAUSES = frozenset({"connect", "record_rejected_in_transit", "transport_after_send",
+                           "stream_interrupted", "http_status"})
+
+
 def provider_ended_before_cut(turn: live.Turn, segments: list[Path] | None,
                              threshold: int | None) -> str | None:
     """Why an `after-events` reset never fired, when the provider is the reason.
@@ -184,19 +190,30 @@ def provider_ended_before_cut(turn: live.Turn, segments: list[Path] | None,
     well-formed in-band error as its last event, or that transport failure.
     The injected cut lands exactly at the Nth event, so it is never this. The
     turn must have failed as a provider error (an in-band provider kind or a
-    provider HTTP status), which a transport kind is not.
+    provider HTTP status), which a transport kind is not, or have completed
+    after the product retried: a recorded transport or provider retry and a
+    later conversation request with the same items show the product replayed
+    the failed request, as it does for a provider HTTP error
+    (`judge_fault_reset`).
     """
-    if threshold is None or not segments or len(segments) != 1 or turn.completed:
+    if threshold is None or not segments or len(segments) != 1:
         return None
-    if turn.model_error_kind not in live.IN_BAND_PROVIDER_KINDS \
+    if turn.completed:
+        if not any(retry.get("cause_kind") in REPLAY_CAUSES for retry in turn.retries):
+            return None
+    elif turn.model_error_kind not in live.IN_BAND_PROVIDER_KINDS \
             and turn.http_status not in live.PROVIDER_HTTP_STATUSES:
         return None
     segment = segments[0]
     try:
         requests = sorted(segment.glob("exchange-*.request"),
                           key=lambda path: int(path.stem.removeprefix("exchange-")))
-        target = next((path for path in requests if live.request_items(path) is not None), None)
-        if target is None:
+        conversations = [path for path in requests if live.request_items(path) is not None]
+        if not conversations:
+            return None
+        target = conversations[0]
+        if turn.completed and not any(live.request_items(path) == live.request_items(target)
+                                      for path in conversations[1:]):
             return None
         fields = live.terminal_fields(target.with_suffix(".info"), target.with_suffix(".body"))
         body = target.with_suffix(".body").read_bytes()
@@ -210,8 +227,9 @@ def provider_ended_before_cut(turn: live.Turn, segments: list[Path] | None,
     events = live.sse_events(body)
     if failure is None or not ended or len(events) >= threshold:
         return None
+    retried = "; the product retried it and completed the turn" if turn.completed else ""
     return (f"the provider ended the targeted stream ({target.stem}) in {failure} after "
-            f"{len(events)} of {threshold} events, before the reset fired")
+            f"{len(events)} of {threshold} events, before the reset fired{retried}")
 
 
 def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None,
