@@ -2097,6 +2097,11 @@ def _omitted_observation(event: dict) -> bool:
     return op.get("kind") in _STREAM_KINDS
 
 
+# How long a `plak agent` that said `bye` at startup gets to exit before its
+# stderr is read; its final line is the failure the startup reports.
+STARTUP_EXIT_WAIT_S = 10.0
+
+
 class Agent:
     """A `plak agent` process spoken to over JSONL."""
 
@@ -2134,6 +2139,12 @@ class Agent:
         # Leave room to observe the catalog outer deadline after setup/refresh.
         hello = self.wait_for(lambda event: event.get("kind") in ("ready", "bye"), 180)
         if hello.get("kind") != "ready" or not self.session_id:
+            # `bye` precedes the process's final stderr line (the startup
+            # failure itself), so read stderr only once the process has exited.
+            try:
+                self.proc.wait(timeout=STARTUP_EXIT_WAIT_S)
+            except subprocess.TimeoutExpired:
+                pass
             self.stderr.flush()
             detail = Path(self.stderr.name).read_text(errors="replace")
             classify_cli_failure(self.proc.poll() or 5, detail + json.dumps(hello),

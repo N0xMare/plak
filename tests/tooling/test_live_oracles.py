@@ -1249,3 +1249,31 @@ class LiveOracleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentStartupFailureTests(unittest.TestCase):
+    """A startup failure is read from stderr only after the process exits."""
+
+    def test_the_final_stderr_line_after_bye_decides_the_class(self):
+        # `bye` reaches stdout before the exiting process writes its final
+        # stderr line, here an exhausted lookup on a provider timeout.
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            binary = base / "plak"
+            binary.write_text(
+                "#!/bin/sh\n"
+                "echo 'retrying model lookup (2/3): HTTP transport failed in ResponseHead "
+                "(MayHaveTransmitted, DeadlineExceeded)' >&2\n"
+                "echo '{\"kind\": \"bye\", \"v\": 1}'\n"
+                "sleep 1\n"
+                "echo 'plak: resolve codex/gpt-6.1-sol: model lookup failed after 2 attempts: "
+                "transport timeout' >&2\n"
+                "exit 5\n")
+            binary.chmod(0o755)
+            (base / "home").mkdir()
+            env = live.Env(binary, base / "home", base)
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                live.Agent(env, base, "startup", args=[])
+            self.assertEqual(raised.exception.outcome, live.PROVIDER)
+            self.assertIn("model lookup failed after 2 attempts: transport timeout",
+                          str(raised.exception))
