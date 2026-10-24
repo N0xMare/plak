@@ -1077,7 +1077,8 @@ fall back to the earlier lease or dispatch the checkpoint. This adds one renewal
 transaction per publication: periodic renewal alone cannot protect a slow commit
 while publication excludes the heartbeat. It does not promise a full lease period
 after acknowledgement, extend the configured lease duration, or make an expired
-lease valid when storage latency exceeds the remaining authority.
+lease valid when storage latency exceeds the remaining authority. The renewal is
+not a durability point; the commit that follows it is.
 
 Dispatch admission reads `SessionStore::lease_now` synchronously from the same
 clock used by that store's acquire, renew and mutations. This required port
@@ -1185,9 +1186,19 @@ only record, ledger and checkpoint digests do.
 ### 5.2 SQLite
 
 The built-in durable backend is SQLite behind `SessionStore`: one database,
-one bounded blocking actor and connection, WAL, `synchronous=FULL`,
-explicit canonical codecs, and atomic publication of relational authority plus
-content-addressed objects. Async runtime workers never perform SQLite work.
+one bounded blocking actor and connection, WAL, `synchronous=FULL` for every
+transaction except lease renewal and revival, explicit canonical codecs, and
+atomic publication of relational authority plus content-addressed objects.
+Renewal and revival commit under `synchronous=NORMAL`, with no commit fsync of
+their own (a WAL restart or an automatic checkpoint may still sync): they append
+no feed record, so nothing in another file depends on them; no grant outlives its
+holder's boot, because the next open retires the old clock domain; WAL
+preserves commit order, so the next `FULL` commit syncs them; and a process
+crash loses nothing that committed. The actor restores `FULL` before the job
+returns. A connection that cannot restore it is poisoned: that job and every
+later one return `BackendUnavailable`, later ones without running, and an
+ERROR under `plakous_store::sqlite_actor` records it; only a reopen clears it.
+Async runtime workers never perform SQLite work.
 The single actor has separately bounded critical and read queues (the configured
 queue capacity applies to each). Authority changes, recovery, flush and shutdown
 are critical; branch/checkpoint/feed loads, listing and stats are reads. Critical

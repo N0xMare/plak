@@ -53,6 +53,8 @@ mod gc;
 mod gc_tests;
 #[cfg(test)]
 mod index_tests;
+#[cfg(test)]
+mod lease_sync_tests;
 mod objects;
 mod open;
 mod ops;
@@ -353,7 +355,7 @@ struct Backend {
     clock: Arc<dyn LeaseClock>,
     domain: LeaseDomain,
     limits: MemoryStoreLimits,
-    shutdown_report: Option<DurabilityReport>,
+    state: BackendState,
     /// Host-local proof of who is holding which branch right now.
     holders: crate::holder::HolderClaims,
     gc_pending: bool,
@@ -365,6 +367,23 @@ struct Backend {
     checkpoint_decodes: usize,
     #[cfg(test)]
     job_hook: Option<Box<dyn FnMut(ExecutedJob) + Send>>,
+    /// Receives `PRAGMA synchronous` inside each unsynced job and after every
+    /// job and background step, with the job's label.
+    #[cfg(test)]
+    synchronous_probe: Option<Box<dyn FnMut(&'static str, i64) + Send>>,
+    /// Fails the next restore of `synchronous=FULL` with this error.
+    #[cfg(test)]
+    full_restore_fault: Option<SessionStoreError>,
+}
+
+/// Whether the actor's connection still takes work.
+#[derive(Clone, Copy)]
+enum BackendState {
+    Open,
+    /// `synchronous=FULL` could not be restored after an unsynced job, so no
+    /// later job may run on this connection; only a reopen clears it.
+    Poisoned,
+    Shutdown(DurabilityReport),
 }
 
 impl SqliteSessionStore {
@@ -781,7 +800,13 @@ impl SqliteSessionStore {
             }
             #[cfg(feature = "commit-trace")]
             let settle = crate::commit_trace::SettleGuard;
-            let result = operation(backend);
+            let result = if matches!(backend.state, BackendState::Poisoned) {
+                Err(SessionStoreError::BackendUnavailable)
+            } else {
+                operation(backend)
+            };
+            #[cfg(test)]
+            backend.probe_synchronous(label);
             if matches!(lane, Lane::Critical) {
                 *snapshot
                     .lock()
@@ -903,7 +928,7 @@ impl Backend {
             clock,
             domain,
             limits,
-            shutdown_report: None,
+            state: BackendState::Open,
             holders: crate::holder::HolderClaims::beside(path),
             gc_pending,
             usage_snapshot: None,
@@ -914,15 +939,74 @@ impl Backend {
             checkpoint_decodes: 0,
             #[cfg(test)]
             job_hook: None,
+            #[cfg(test)]
+            synchronous_probe: None,
+            #[cfg(test)]
+            full_restore_fault: None,
         })
     }
 
     fn require_open(&self) -> Result<(), SessionStoreError> {
-        if self.shutdown_report.is_some() {
-            Err(SessionStoreError::Shutdown)
-        } else {
-            Ok(())
+        match self.state {
+            BackendState::Open => Ok(()),
+            BackendState::Poisoned => Err(SessionStoreError::BackendUnavailable),
+            BackendState::Shutdown(_) => Err(SessionStoreError::Shutdown),
         }
+    }
+
+    /// Runs one lease renewal or revival under `synchronous=NORMAL`.
+    ///
+    /// Its commit is visible to every connection at once and survives a
+    /// process crash. Only power loss can lose it, and the next boot retires
+    /// the grant it extended either way; WAL keeps commit order, so the next
+    /// `FULL` commit syncs it. `FULL` is restored before the job returns. A
+    /// connection that cannot restore it is poisoned, so no later commit can
+    /// run weakened.
+    fn unsynced<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T, SessionStoreError>,
+    ) -> Result<T, SessionStoreError> {
+        self.require_open()?;
+        let result = self
+            .connection
+            .execute_batch("PRAGMA synchronous=NORMAL;")
+            .map_err(map_sqlite)
+            .and_then(|()| {
+                #[cfg(test)]
+                self.probe_synchronous("unsynced");
+                operation(self)
+            });
+        if self.restore_full().is_err() {
+            self.state = BackendState::Poisoned;
+            tracing::error!(
+                target: "plakous_store::sqlite_actor",
+                "SQLite store could not restore synchronous=FULL; refusing all further work until reopened"
+            );
+            return Err(SessionStoreError::BackendUnavailable);
+        }
+        result
+    }
+
+    fn restore_full(&mut self) -> Result<(), SessionStoreError> {
+        #[cfg(test)]
+        if let Some(error) = self.full_restore_fault.take() {
+            return Err(error);
+        }
+        self.connection
+            .execute_batch("PRAGMA synchronous=FULL;")
+            .map_err(map_sqlite)
+    }
+
+    #[cfg(test)]
+    fn probe_synchronous(&mut self, label: &'static str) {
+        let Some(probe) = self.synchronous_probe.as_mut() else {
+            return;
+        };
+        let level = self
+            .connection
+            .pragma_query_value(None, "synchronous", |row| row.get(0))
+            .unwrap_or(-1);
+        probe(label, level);
     }
 
     fn load_branch(&mut self, selector: SessionRef) -> Result<LoadedBranch, SessionStoreError> {
@@ -1022,7 +1106,7 @@ impl Backend {
     }
 
     fn background_step(&mut self) -> bool {
-        if self.shutdown_report.is_some()
+        if !matches!(self.state, BackendState::Open)
             || (!self.gc_pending && !self.vacuum_pending && !self.wal_pending)
         {
             return false;
@@ -1047,6 +1131,8 @@ impl Backend {
                     .is_ok_and(|pages| pages > 0);
             self.wal_pending = true;
         }
+        #[cfg(test)]
+        self.probe_synchronous("background");
         true
     }
 }
@@ -1098,14 +1184,14 @@ impl SessionStore for SqliteSessionStore {
         self.dispatch("renew", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("renew");
-            renew(b, &l)
+            b.unsynced(|b| renew(b, &l))
         })
     }
     fn revive(&self, l: BranchLease) -> StoreFuture<'_, BranchLease> {
         self.dispatch("revive", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("revive");
-            revive(b, &l)
+            b.unsynced(|b| revive(b, &l))
         })
     }
     fn release(&self, l: BranchLease) -> StoreFuture<'_, ()> {
@@ -1268,12 +1354,13 @@ impl SessionStore for SqliteSessionStore {
         self.dispatch("shutdown", |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("shutdown");
-            if let Some(r) = b.shutdown_report {
+            if let BackendState::Shutdown(r) = b.state {
                 return Ok(r);
             }
+            b.require_open()?;
             checkpoint_wal(&b.connection, true)?;
             let r = report();
-            b.shutdown_report = Some(r);
+            b.state = BackendState::Shutdown(r);
             Ok(r)
         })
     }

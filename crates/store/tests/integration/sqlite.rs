@@ -74,12 +74,12 @@ impl LeaseClock for ObservedLeaseClock {
     }
 }
 
-struct Database {
+pub(super) struct Database {
     directory: PathBuf,
-    path: PathBuf,
+    pub(super) path: PathBuf,
 }
 impl Database {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let directory = std::env::temp_dir().join(format!(
             "plakous-store-v13-{}-{}",
             std::process::id(),
@@ -96,14 +96,14 @@ impl Drop for Database {
     }
 }
 
-struct Seed {
-    selector: SessionRef,
-    checkpoint_id: CheckpointId,
-    bundle: CheckpointObjectBundle,
-    request: CreateSession,
+pub(super) struct Seed {
+    pub(super) selector: SessionRef,
+    pub(super) checkpoint_id: CheckpointId,
+    pub(super) bundle: CheckpointObjectBundle,
+    pub(super) request: CreateSession,
 }
 
-fn seed(
+pub(super) fn seed(
     base: u128,
     durability: RuntimeDurability,
     history_len: u32,
@@ -134,7 +134,7 @@ fn seed(
     })
 }
 
-fn successor(
+pub(super) fn successor(
     seed: &Seed,
     checkpoint_id: CheckpointId,
     parent: CheckpointId,

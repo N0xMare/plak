@@ -1495,7 +1495,9 @@ An owner whose own lease expired without being replaced may revive it under the
 same fence, and only when the branch still names exactly that lease as active,
 its last granted fence is unchanged, the store still holds the host-local claim
 it took with the lease, and the clock domain is unchanged; a reboot, any
-intervening acquire, or a store reopened since refuses (chapter 01 §5.1).
+intervening acquire, or a store reopened since refuses (chapter 01 §5.1). A
+renewal or revival lost to power loss is indistinguishable from the reboot that
+lost it: the next boot retires the grant either way (chapter 01 §5.2).
 
 Compiled subscription expiry and credential time checks always use the system
 clock in supported builds; documented API review dates never refuse a route.

@@ -8,3 +8,5 @@ mod feed;
 mod sqlite;
 #[cfg(feature = "sqlite")]
 mod sqlite_feed;
+#[cfg(all(feature = "sqlite", unix))]
+mod sqlite_power_loss;

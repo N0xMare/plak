@@ -151,6 +151,28 @@ fn timestamp() -> TestResult<Timestamp> {
     Ok(Timestamp::new(1, 0)?)
 }
 
+/// The fixed test boot's store clock, which a crash fixture can move forward.
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+struct SteppedLeaseClock(std::sync::atomic::AtomicU64);
+
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+impl SteppedLeaseClock {
+    fn at(seconds: u64) -> Arc<Self> {
+        Arc::new(Self(std::sync::atomic::AtomicU64::new(seconds)))
+    }
+}
+
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+impl LeaseClock for SteppedLeaseClock {
+    fn now(&self) -> Result<LeaseInstant, SessionStoreError> {
+        LeaseInstant::new(
+            LeaseDomain::new([1; 16], [2; 32]),
+            self.0.load(Ordering::Acquire),
+            0,
+        )
+    }
+}
+
 fn descriptor_for(route: &str, model: &str) -> TestResult<ResolvedModelDescriptor> {
     descriptor_for_adapter(route, model, "test.adapter")
 }
@@ -1539,6 +1561,11 @@ const NO_LOCATOR_ROOT_ENV: &str = "PLAKOUS_NO_LOCATOR_CRASH_ROOT";
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 const PAID_COMPACTION_WAIT: Duration = Duration::from_secs(30);
 
+/// Store time the revival cut jumps to once `Dispatched` is durable, far past
+/// any lease the fixture granted at its start time.
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+const REVIVAL_CUT_SECONDS: u64 = 10_000;
+
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CompactionCrashCut {
@@ -1595,6 +1622,7 @@ impl CompactionCrashCut {
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CompactionCommitStage {
+    DispatchedWorking,
     ProviderCompletedWorking,
     OutcomeUnknownWorking,
     FinalizedSuccess,
@@ -1612,14 +1640,20 @@ enum NoLocatorCrashCut {
     /// Exact SQLite after-commit seam for the one-commit abandonment closure.
     /// There is no working abandonment-evidence head to cut.
     Abandoned,
+    /// A revival after durable `Dispatched`, before the provider start: the
+    /// lease expires untaken, the owner revives it (an unsynced commit; start
+    /// admission in practice, though a heartbeat tick could get there first),
+    /// and the process dies right after.
+    RevivedBeforeStart,
 }
 
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 impl NoLocatorCrashCut {
-    const ALL: [Self; 3] = [
+    const ALL: [Self; 4] = [
         Self::PhysicalDispatch,
         Self::OutcomeUnknown,
         Self::Abandoned,
+        Self::RevivedBeforeStart,
     ];
 
     const fn name(self) -> &'static str {
@@ -1627,6 +1661,7 @@ impl NoLocatorCrashCut {
             Self::PhysicalDispatch => "physical-dispatch",
             Self::OutcomeUnknown => "outcome-unknown",
             Self::Abandoned => "abandoned",
+            Self::RevivedBeforeStart => "revived-before-start",
         }
     }
 
@@ -1636,7 +1671,7 @@ impl NoLocatorCrashCut {
 
     const fn target(self) -> Option<CompactionCommitStage> {
         match self {
-            Self::PhysicalDispatch => None,
+            Self::PhysicalDispatch | Self::RevivedBeforeStart => None,
             Self::OutcomeUnknown => Some(CompactionCommitStage::OutcomeUnknownWorking),
             Self::Abandoned => Some(CompactionCommitStage::FinalizedSourcePreserving),
         }
@@ -1729,6 +1764,19 @@ fn compaction_commit_stage(
     let [provider_state] = providers.as_slice() else {
         return Ok(None);
     };
+    let working = matches!(
+        manifest.lifecycle(),
+        RuntimeLifecycle::Working {
+            root: RuntimeWorkingRoot::SessionWorkflow(candidate),
+            ..
+        } if candidate == workflow_id
+    );
+    if working
+        && matches!(compaction_state, DurableOperationState::Dispatched)
+        && matches!(provider_state, DurableOperationState::Dispatched)
+    {
+        return Ok(Some(CompactionCommitStage::DispatchedWorking));
+    }
     let both_completed = matches!(compaction_state, DurableOperationState::Completed(_))
         && matches!(provider_state, DurableOperationState::Completed(_));
     if both_completed
@@ -1799,6 +1847,8 @@ struct CrashCutStore {
     armed: Arc<AtomicBool>,
     marker: Option<PathBuf>,
     oracle: Option<CrashOracle>,
+    /// The revival cut's clock and the file its revived lease is written to.
+    revival: Option<(Arc<SteppedLeaseClock>, PathBuf)>,
     commits: Arc<AtomicUsize>,
     branch_loads: Arc<AtomicUsize>,
 }
@@ -1818,6 +1868,7 @@ impl CrashCutStore {
             armed: Arc::new(AtomicBool::new(true)),
             marker: Some(marker),
             oracle: Some(oracle),
+            revival: None,
             commits: Arc::new(AtomicUsize::new(0)),
             branch_loads: Arc::new(AtomicUsize::new(0)),
         }
@@ -1831,8 +1882,18 @@ impl CrashCutStore {
             armed: Arc::new(AtomicBool::new(false)),
             marker: None,
             oracle: None,
+            revival: None,
             commits: Arc::new(AtomicUsize::new(0)),
             branch_loads: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Expires the lease once `Dispatched` is durable, so the owner revives it
+    /// before the provider start, and parks right after that revival commits.
+    fn with_revival_cut(self, clock: Arc<SteppedLeaseClock>, lease: PathBuf) -> Self {
+        Self {
+            revival: Some((clock, lease)),
+            ..self
         }
     }
 
@@ -1849,6 +1910,7 @@ impl CrashCutStore {
             armed: Arc::new(AtomicBool::new(true)),
             marker: Some(marker),
             oracle: Some(oracle),
+            revival: None,
             commits: Arc::new(AtomicUsize::new(0)),
             branch_loads: Arc::new(AtomicUsize::new(0)),
         }
@@ -1938,6 +2000,26 @@ impl SessionStore for CrashCutStore {
         self.inner.renew(lease)
     }
 
+    fn revive(
+        &self,
+        lease: plakous_agent::internal::BranchLease,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::BranchLease> {
+        Box::pin(async move {
+            let revived = self.inner.revive(lease).await?;
+            if let Some((_, path)) = &self.revival
+                && self
+                    .armed
+                    .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                durable_test_write(path, lease_record(&revived).as_bytes())
+                    .map_err(|_| SessionStoreError::BackendUnavailable)?;
+                self.mark_and_park().await?;
+            }
+            Ok(revived)
+        })
+    }
+
     fn release(
         &self,
         lease: plakous_agent::internal::BranchLease,
@@ -1959,6 +2041,11 @@ impl SessionStore for CrashCutStore {
             let receipt = self.inner.commit(request).await?;
             if self.should_cut(stage, CommitCutLocation::After) {
                 self.mark_and_park().await?;
+            }
+            if stage == Some(CompactionCommitStage::DispatchedWorking)
+                && let Some((clock, _)) = &self.revival
+            {
+                clock.0.store(REVIVAL_CUT_SECONDS, Ordering::Release);
             }
             Ok(receipt)
         })
@@ -2050,6 +2137,41 @@ impl SessionStore for CrashCutStore {
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
         self.inner.shutdown()
     }
+}
+
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+fn lease_record(lease: &plakous_agent::internal::BranchLease) -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}\n",
+        lease.owner(),
+        lease.fence(),
+        lease.expires_at().seconds(),
+        lease.expires_at().nanoseconds(),
+        lease.lease_seconds()
+    )
+}
+
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+fn read_lease_record(
+    path: &Path,
+    session: SessionRef,
+) -> TestResult<plakous_agent::internal::BranchLease> {
+    let record = std::fs::read_to_string(path)?;
+    let fields = record.lines().collect::<Vec<_>>();
+    let [owner, fence, seconds, nanoseconds, lease_seconds] = fields.as_slice() else {
+        return Err(format!("malformed lease record: {record:?}").into());
+    };
+    Ok(plakous_agent::internal::BranchLease::from_store(
+        session,
+        owner.parse()?,
+        fence.parse()?,
+        LeaseInstant::new(
+            LeaseDomain::new([1; 16], [2; 32]),
+            seconds.parse()?,
+            nanoseconds.parse()?,
+        )?,
+        lease_seconds.parse()?,
+    ))
 }
 
 #[cfg(all(unix, feature = "sessions-sqlite"))]
@@ -2271,6 +2393,7 @@ impl LanguageModel for CrashRecoveryModel {
 struct CompactionCrashPaths {
     root: PathBuf,
     database: PathBuf,
+    lease: PathBuf,
     marker: PathBuf,
     oracle: PathBuf,
     physical_starts: PathBuf,
@@ -2282,6 +2405,7 @@ impl CompactionCrashPaths {
     fn new(root: PathBuf) -> Self {
         Self {
             database: root.join("sessions.sqlite3"),
+            lease: root.join("revived-lease"),
             marker: root.join("cut.reached"),
             oracle: root.join("provider-oracle.json"),
             physical_starts: root.join("physical-starts"),
@@ -2459,11 +2583,9 @@ async fn run_no_locator_crash_child(
     durable_test_write(&paths.physical_starts, b"0")?;
     let recovery = plakous_test_support::ScriptedRecoveryState::new();
     let starts = Arc::new(AtomicU32::new(0));
-    let sqlite = SqliteSessionStore::open_with_clock(
-        &paths.database,
-        Arc::new(FixedLeaseClock::new(timestamp()?)),
-    )?;
-    let store = Arc::new(CrashCutStore::armed_no_locator(
+    let clock = SteppedLeaseClock::at(timestamp()?.seconds());
+    let sqlite = SqliteSessionStore::open_with_clock(&paths.database, clock.clone())?;
+    let store = CrashCutStore::armed_no_locator(
         sqlite,
         cut,
         paths.marker.clone(),
@@ -2473,7 +2595,12 @@ async fn run_no_locator_crash_child(
             oracle_path: paths.oracle.clone(),
             count_path: paths.physical_starts.clone(),
         },
-    ));
+    );
+    let store = Arc::new(if cut == NoLocatorCrashCut::RevivedBeforeStart {
+        store.with_revival_cut(clock, paths.lease.clone())
+    } else {
+        store
+    });
     let sessions = AgentSessions::new(SessionBackend::from_store(
         store.clone(),
         RuntimeDurability::Required,
@@ -2911,15 +3038,50 @@ async fn verify_no_locator_reopen(
 ) -> TestResult {
     let operation_id = SessionOperationId::new(NO_LOCATOR_OPERATION)?;
     let source: SessionLocator = std::str::from_utf8(&std::fs::read(&paths.source)?)?.parse()?;
+    let revival = cut == NoLocatorCrashCut::RevivedBeforeStart;
+    // The revival cut dies before the provider start, the others after it.
+    let crashed_starts = u32::from(!revival);
     assert_eq!(
         std::str::from_utf8(&std::fs::read(&paths.physical_starts)?)?.parse::<u32>()?,
-        1,
-        "the ambiguous operation did not have exactly one physical start"
+        crashed_starts,
+        "the ambiguous operation did not have exactly its physical starts"
     );
-    let sqlite = SqliteSessionStore::open_with_clock(
-        &paths.database,
-        Arc::new(FixedLeaseClock::new(Timestamp::new(100, 0)?)),
-    )?;
+    let reopened_at = if revival {
+        REVIVAL_CUT_SECONDS + 1
+    } else {
+        100
+    };
+    let sqlite =
+        SqliteSessionStore::open_with_clock(&paths.database, SteppedLeaseClock::at(reopened_at))?;
+    let revived = if revival {
+        let revived = read_lease_record(&paths.lease, source.session_ref())?;
+        // The unsynced revival survived the process crash: it is the live grant.
+        assert_eq!(
+            sqlite
+                .acquire(AcquireBranch::new(
+                    source.session_ref(),
+                    revived.owner(),
+                    revived.lease_seconds(),
+                ))
+                .await?,
+            revived
+        );
+        assert!(revived.expires_at().seconds() > reopened_at);
+        // A store reopened since the revival never revives it again, here seen
+        // at a later moment of the same boot (a read-only refusal).
+        let later = SqliteSessionStore::open_with_clock(
+            &paths.database,
+            SteppedLeaseClock::at(revived.expires_at().seconds() + 1),
+        )?;
+        assert_eq!(
+            later.revive(revived.clone()).await,
+            Err(SessionStoreError::FenceSuperseded)
+        );
+        drop(later);
+        Some(revived)
+    } else {
+        None
+    };
     let store = Arc::new(CrashCutStore::observing(sqlite));
     let sessions = AgentSessions::new(SessionBackend::from_store(
         store.clone(),
@@ -2941,7 +3103,7 @@ async fn verify_no_locator_reopen(
     );
 
     let workspace = Arc::new(WorkspacePolicy::host(&paths.root, ".")?);
-    let starts = Arc::new(AtomicU32::new(1));
+    let starts = Arc::new(AtomicU32::new(crashed_starts));
     let recovery_model = CrashRecoveryModel::no_locator(
         descriptor()?,
         b"sqlite-sigkill-no-locator-account",
@@ -2998,11 +3160,21 @@ async fn verify_no_locator_reopen(
         other => return Err(format!("unexpected no-locator recovery: {other:?}").into()),
     };
     assert_eq!(recovery_model.work_counts(), (0, 0));
-    assert_eq!(starts.load(Ordering::Acquire), 1);
+    assert_eq!(starts.load(Ordering::Acquire), crashed_starts);
     assert_eq!(
         std::str::from_utf8(&std::fs::read(&paths.physical_starts)?)?.parse::<u32>()?,
-        1
+        crashed_starts
     );
+    if let Some(revived) = &revived {
+        // Recovery took the branch while the revived grant was still live,
+        // which only the dead holder's free lock allows; that grant is over.
+        for refused in [
+            store.renew(revived.clone()).await,
+            store.revive(revived.clone()).await,
+        ] {
+            assert_eq!(refused, Err(SessionStoreError::FenceSuperseded));
+        }
+    }
 
     if abandoned_target.is_none() {
         abandoned_target = Some(
@@ -3106,7 +3278,7 @@ async fn verify_no_locator_reopen(
     assert_eq!(retry_work.1, 0);
     assert_eq!(
         std::str::from_utf8(&std::fs::read(&paths.physical_starts)?)?.parse::<u32>()?,
-        2
+        crashed_starts + 1
     );
     let repeat_retry = sessions
         .compact(CompactSessionRequest::new(
@@ -3133,7 +3305,7 @@ async fn verify_no_locator_reopen(
     assert_eq!(retry_model.work_counts(), retry_work);
     assert_eq!(
         std::str::from_utf8(&std::fs::read(&paths.physical_starts)?)?.parse::<u32>()?,
-        2
+        crashed_starts + 1
     );
     let _ = session.release().await;
     Ok(())

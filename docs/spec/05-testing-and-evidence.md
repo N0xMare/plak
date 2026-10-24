@@ -315,7 +315,16 @@ and each claim × cause note, the process-session and Code Cell abandonments at
 reopen, Esc inside a paid fold ending `Cancelled` with the fold finalized, a
 failed paid fold falling to placeholders with one fold dispatched, lease
 revival under the same fence (and its refusal after an acquire or a store
-reopen), and a pre-dispatch lease refusal being definite.
+reopen), and a pre-dispatch lease refusal being definite. Unsynced renewal and
+revival are pinned by a pragma probe, a restore-failure refusal, and power-loss
+image tests that restore the database and WAL as of the last `FULL` commit: a
+new boot retires the grant, a revival never survives a reboot, a dead holder in
+the same boot is taken over through holder proof, a renewal is inside the
+next `FULL` commit's image, and a renewal whose WAL frames are torn or fail
+their checksum recovers as exactly the state before it. The SQLite SIGKILL
+campaign also cuts commits that follow unsynced renewals, and the no-locator
+compaction SIGKILL cuts after a revival that follows durable `Dispatched`,
+before the provider start.
 Offline compaction regressions cover artifact-gated replay across twelve tool
 rounds, pressure preparation refusal leaving the paid guard unspent, occupancy
 folds after that guard is spent, strict shrink against fresh source lowering,

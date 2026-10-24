@@ -101,6 +101,12 @@ fn the_object_table_admits_the_current_format_epoch() {
 /// `flush` is one passive checkpoint and `shutdown` one truncating
 /// checkpoint. Prune schedules separate background housekeeping; release
 /// itself never checkpoints (preserves `synchronous=FULL`).
+///
+/// Renewal and revival are the only commits with no commit fsync of their own:
+/// they run under `synchronous=NORMAL` through one helper, so a publication
+/// (renewal, then commit) has one commit fsync instead of two (a WAL restart or
+/// an automatic checkpoint may still sync). No grant outlives its holder's
+/// boot, and the next `FULL` commit syncs the renewal frame.
 #[test]
 fn release_flush_and_shutdown_perform_a_bounded_number_of_fsyncs() {
     let source = [
@@ -154,6 +160,26 @@ fn release_flush_and_shutdown_perform_a_bounded_number_of_fsyncs() {
         source.contains("PRAGMA synchronous=FULL;"),
         "the durability pragma stays in force"
     );
+    assert_eq!(
+        source.matches("PRAGMA synchronous=NORMAL;").count(),
+        1,
+        "one helper weakens a commit"
+    );
+    let unsynced = source
+        .split("fn unsynced<T>(")
+        .nth(1)
+        .and_then(|rest| rest.split("fn restore_full(").next())
+        .expect("unsynced body");
+    assert!(unsynced.contains("PRAGMA synchronous=NORMAL;"));
+    assert!(unsynced.contains("self.restore_full()"));
+    assert!(unsynced.contains("BackendState::Poisoned"));
+    assert_eq!(
+        source.matches(".unsynced(").count(),
+        2,
+        "renew and revive, and nothing else, commit unsynced"
+    );
+    assert!(source.contains("b.unsynced(|b| renew(b, &l))"));
+    assert!(source.contains("b.unsynced(|b| revive(b, &l))"));
 }
 
 #[cfg(unix)]
@@ -168,6 +194,8 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::time::Instant;
 
+#[cfg(unix)]
+use plakous_agent::internal::{AcquireBranch, BranchLease};
 use plakous_agent::internal::{
     CheckpointId, CheckpointObjectBundle, CommitCheckpoint, CreateReceipt, CreateSession,
     LeaseClock, RuntimeCheckpoint, RuntimeDurability, SessionRef, SessionStore, SessionStoreError,
@@ -195,6 +223,8 @@ use super::{
 const CRASH_DB_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_DB";
 #[cfg(unix)]
 const CRASH_HISTORY_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_HISTORY";
+#[cfg(unix)]
+const CRASH_RENEWALS_ENV: &str = "PLAKOUS_SQLITE_TEST_CRASH_RENEWALS";
 #[cfg(unix)]
 const CRASH_CHILD_TEST: &str = "sqlite::tests::sqlite_crash_cut_child";
 #[cfg(unix)]
@@ -400,6 +430,7 @@ async fn cold_start_query_count_is_constant_for_large_authoritative_history() ->
 fn crash_commit(
     seed: &CrashSeed,
     created: &CreateReceipt,
+    lease: &BranchLease,
     checkpoint_id: CheckpointId,
     history_len: u32,
 ) -> TestResult<CrashCommit> {
@@ -417,7 +448,7 @@ fn crash_commit(
         RuntimeDurability::Required,
     )?;
     let request = CommitCheckpoint::new(
-        created.lease().clone(),
+        lease.clone(),
         created.branch(),
         fixture::bundle(&checkpoint, Some(&seed.bundle))?,
     );
@@ -453,9 +484,24 @@ pub(super) fn wait_for_marker(child: &mut Child, marker: &Path) -> TestResult {
     }
 }
 
+/// Exactly the baseline, except that each of up to `renewals` lease
+/// renewals may have counted one semantic mutation.
 #[cfg(unix)]
-fn assert_old_stats(actual: SqliteStoreStats, baseline: SqliteStoreStats) {
-    assert_eq!(actual, baseline);
+fn assert_old_stats(actual: SqliteStoreStats, baseline: SqliteStoreStats, renewals: u64) {
+    if renewals == 0 {
+        assert_eq!(actual, baseline);
+        return;
+    }
+    assert_eq!(actual.sessions(), baseline.sessions());
+    assert_eq!(actual.branches(), baseline.branches());
+    assert_eq!(actual.checkpoints(), baseline.checkpoints());
+    assert_eq!(actual.objects(), baseline.objects());
+    assert_eq!(actual.object_bytes(), baseline.object_bytes());
+    assert_eq!(actual.tombstones(), baseline.tombstones());
+    assert!(
+        (baseline.semantic_mutations()..=baseline.semantic_mutations() + renewals)
+            .contains(&actual.semantic_mutations())
+    );
 }
 
 #[cfg(unix)]
@@ -463,6 +509,7 @@ fn assert_new_stats(
     actual: SqliteStoreStats,
     baseline: SqliteStoreStats,
     request: &CommitCheckpoint,
+    renewals: u64,
 ) {
     let added_objects = u64::try_from(request.checkpoint().supplied_objects().len())
         .expect("fixture object count fits u64");
@@ -480,9 +527,9 @@ fn assert_new_stats(
     assert_eq!(actual.checkpoints(), baseline.checkpoints() + 1);
     assert_eq!(actual.objects(), baseline.objects() + added_objects);
     assert_eq!(actual.object_bytes(), baseline.object_bytes() + added_bytes);
-    assert_eq!(
-        actual.semantic_mutations(),
-        baseline.semantic_mutations() + 1
+    assert!(
+        (baseline.semantic_mutations() + 1..=baseline.semantic_mutations() + 1 + renewals)
+            .contains(&actual.semantic_mutations())
     );
 }
 
@@ -513,6 +560,10 @@ async fn assert_commit_record(
     Ok(())
 }
 
+/// Reopens after a cut as exactly the old or the new commit. The child may
+/// have renewed its lease `renewals` times before committing: the active
+/// grant is then the creation lease or one exact renewal of it, never a torn
+/// row, and the commit binds the active grant.
 #[cfg(unix)]
 async fn assert_old_or_new_reopen(
     database: &CrashDatabase,
@@ -521,8 +572,34 @@ async fn assert_old_or_new_reopen(
     commit: &CrashCommit,
     checkpoint_id: CheckpointId,
     baseline: SqliteStoreStats,
+    renewals: u64,
 ) -> TestResult<bool> {
     let reopened = SqliteSessionStore::open(&database.path)?;
+    let granted = created.lease();
+    // The same owner and duration read the live grant back without a write.
+    let active = reopened
+        .acquire(AcquireBranch::new(
+            seed.selector,
+            granted.owner(),
+            granted.lease_seconds(),
+        ))
+        .await?;
+    assert_eq!(active.fence(), granted.fence());
+    assert_ne!(
+        active.expires_at().same_domain_cmp(granted.expires_at())?,
+        std::cmp::Ordering::Less
+    );
+    if renewals == 0 {
+        assert_eq!(&active, granted);
+    }
+    let commit = CrashCommit {
+        request: CommitCheckpoint::new(
+            active.clone(),
+            commit.request.expected(),
+            commit.request.checkpoint().clone(),
+        ),
+        checkpoint: commit.checkpoint.clone(),
+    };
     let head = reopened.load_branch(seed.selector).await?.head();
     let committed = if head.checkpoint().checkpoint_id() == checkpoint_id {
         assert_eq!(head.revision().get(), 1);
@@ -540,7 +617,7 @@ async fn assert_old_or_new_reopen(
         let loaded = reopened.load_checkpoint(checkpoint_id).await?;
         assert_eq!(loaded.reference(), recovered.receipt().checkpoint());
         assert_eq!(loaded.checkpoint().as_ref(), &commit.checkpoint);
-        assert_new_stats(reopened.stats().await?, baseline, &commit.request);
+        assert_new_stats(reopened.stats().await?, baseline, &commit.request, renewals);
         assert_commit_record(&reopened, seed, checkpoint_id, &recovered.receipt()).await?;
         true
     } else {
@@ -561,7 +638,8 @@ async fn assert_old_or_new_reopen(
                 .as_ref(),
             &seed.checkpoint
         );
-        assert_old_stats(reopened.stats().await?, baseline);
+        let before_retry = reopened.stats().await?;
+        assert_old_stats(before_retry, baseline, renewals);
         assert_eq!(
             reopened.feed_tail(seed.selector.session_id()).await?.tail(),
             created.feed_seq(),
@@ -581,7 +659,7 @@ async fn assert_old_or_new_reopen(
         );
         let loaded = reopened.load_checkpoint(checkpoint_id).await?;
         assert_eq!(loaded.checkpoint().as_ref(), &commit.checkpoint);
-        assert_new_stats(reopened.stats().await?, baseline, &commit.request);
+        assert_new_stats(reopened.stats().await?, before_retry, &commit.request, 0);
         assert_commit_record(&reopened, seed, checkpoint_id, &receipt).await?;
         false
     };
@@ -809,12 +887,23 @@ async fn sqlite_crash_cut_child() {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(2);
+    let renewals: u32 = std::env::var(CRASH_RENEWALS_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
     let store = SqliteSessionStore::open(path).expect("open child store");
     let created = store
         .recover_create(seed.request.clone())
         .await
         .expect("recover create");
-    let commit = crash_commit(&seed, &created, checkpoint_id, history_len).expect("commit request");
+    // Heartbeat-style unsynced renewals ahead of the `FULL` commit, as before
+    // every runtime publication.
+    let mut lease = created.lease().clone();
+    for _ in 0..renewals {
+        lease = store.renew(lease).await.expect("renew");
+    }
+    let commit =
+        crash_commit(&seed, &created, &lease, checkpoint_id, history_len).expect("commit request");
     let result = store.commit(commit.request).await;
     panic!("configured crash cut did not stop the child: {result:?}");
 }
@@ -834,7 +923,7 @@ async fn sigkill_commit_cuts_reopen_as_exact_old_or_new_authority() -> TestResul
         let checkpoint_id = fixture::id::<CheckpointId>(50_010)?;
         let store = SqliteSessionStore::open(&database.path)?;
         let created = store.create(seed.request.clone()).await?;
-        let commit = crash_commit(&seed, &created, checkpoint_id, 2)?;
+        let commit = crash_commit(&seed, &created, created.lease(), checkpoint_id, 2)?;
         let baseline = store.stats().await?;
         drop(store);
 
@@ -857,8 +946,16 @@ async fn sigkill_commit_cuts_reopen_as_exact_old_or_new_authority() -> TestResul
         assert_eq!(status.signal(), Some(9));
 
         assert_eq!(
-            assert_old_or_new_reopen(&database, &seed, &created, &commit, checkpoint_id, baseline)
-                .await?,
+            assert_old_or_new_reopen(
+                &database,
+                &seed,
+                &created,
+                &commit,
+                checkpoint_id,
+                baseline,
+                0
+            )
+            .await?,
             committed
         );
     }
@@ -871,6 +968,7 @@ async fn bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit() -
     use std::os::unix::process::ExitStatusExt as _;
 
     const HISTORY_ITEMS: u32 = 1_024;
+    const RENEWALS: u32 = 3;
     let delays = [
         Duration::ZERO,
         Duration::from_micros(50),
@@ -881,13 +979,24 @@ async fn bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit() -
         Duration::from_millis(5),
         Duration::from_millis(10),
     ];
-    for (attempt, delay) in delays.into_iter().enumerate() {
+    // Each delay runs once on a fresh lease and once after unsynced renewals,
+    // so the cut also lands in a WAL whose last frames are `NORMAL` commits.
+    let attempts = [0, RENEWALS]
+        .into_iter()
+        .flat_map(|renewals| delays.into_iter().map(move |delay| (renewals, delay)));
+    for (attempt, (renewals, delay)) in attempts.enumerate() {
         let database = CrashDatabase::new()?;
         let seed = crash_seed(50_000)?;
         let checkpoint_id = fixture::id::<CheckpointId>(50_010)?;
         let store = SqliteSessionStore::open(&database.path)?;
         let created = store.create(seed.request.clone()).await?;
-        let commit = crash_commit(&seed, &created, checkpoint_id, HISTORY_ITEMS)?;
+        let commit = crash_commit(
+            &seed,
+            &created,
+            created.lease(),
+            checkpoint_id,
+            HISTORY_ITEMS,
+        )?;
         let baseline = store.stats().await?;
         drop(store);
 
@@ -900,6 +1009,7 @@ async fn bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit() -
             .arg("--nocapture")
             .env(CRASH_DB_ENV, &database.path)
             .env(CRASH_HISTORY_ENV, HISTORY_ITEMS.to_string())
+            .env(CRASH_RENEWALS_ENV, renewals.to_string())
             .env(CRASH_CUT_STAGE_ENV, "async-in-commit")
             .env(CRASH_CUT_MARKER_ENV, &marker)
             .env("RUST_TEST_THREADS", "1")
@@ -913,8 +1023,16 @@ async fn bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit() -
         let status = child.sigkill()?;
         assert_eq!(status.signal(), Some(9));
 
-        assert_old_or_new_reopen(&database, &seed, &created, &commit, checkpoint_id, baseline)
-            .await?;
+        assert_old_or_new_reopen(
+            &database,
+            &seed,
+            &created,
+            &commit,
+            checkpoint_id,
+            baseline,
+            u64::from(renewals),
+        )
+        .await?;
     }
     Ok(())
 }
