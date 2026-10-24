@@ -145,7 +145,10 @@ impl AnthropicRetrieval {
         query: MessagesRetrievalQuery,
         cancellation: &CancellationToken,
     ) -> Result<MessagesRetrievalOutcome, MessagesRetrievalError> {
-        #[cfg_attr(not(feature = "native-auth"), allow(unused_mut))]
+        #[cfg_attr(
+            not(feature = "native-auth"),
+            allow(unused_mut, reason = "only the Claude OAuth executor adds metadata")
+        )]
         let mut request = self.request(query);
         #[cfg(feature = "native-auth")]
         if let Executor::ClaudeOAuth { model, session_id } = &self.executor {
