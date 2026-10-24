@@ -43,15 +43,26 @@ pub(in crate::runtime) async fn queue_join(
     .await
 }
 
+/// What the after-ack pass leaves: the queue the projected views and the
+/// stored intents name, and the views' root-turn count.
+pub(in crate::runtime) struct AfterAck {
+    pub(in crate::runtime) commands: crate::sessions::QueueCommands,
+    pub(in crate::runtime) root_turns: u64,
+}
+
+/// The projector pass after an acknowledged command. The session's live
+/// projector serves it when there is one, so its cached views stay current
+/// and nothing reloads them; otherwise a pass from the stored views.
 pub(in crate::runtime) async fn queue_after_ack(
     sessions: &AgentSessions,
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
-) -> Result<crate::sessions::QueueCommands, String> {
+    live: Option<(&mut live::LiveProjector, &live::LiveTarget)>,
+) -> Result<AfterAck, String> {
     tokio::time::timeout(
         super::host_loop::FINAL_PROJECTION_BOUND,
-        after_ack_pass(sessions, store, product_id, followed),
+        after_ack_pass(sessions, store, product_id, followed, live),
     )
     .await
     .unwrap_or_else(|_| Err("the after-ack projector pass exceeded its bound".to_owned()))
@@ -64,13 +75,19 @@ async fn after_ack_pass(
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
-) -> Result<crate::sessions::QueueCommands, String> {
-    let views = project_to_tail(sessions, store, product_id, followed).await?;
+    live: Option<(&mut live::LiveProjector, &live::LiveTarget)>,
+) -> Result<AfterAck, String> {
+    let views = match live.filter(|(_, target)| {
+        target.product_id == product_id && target.followed.session_id() == followed.session_id()
+    }) {
+        Some((live, target)) => live.settle(target.clone()).await?,
+        None => project_to_tail(sessions, store, product_id, followed).await?,
+    };
     let intents = blocking(store, product_id, |store, id| store.load_intents(id)).await?;
-    Ok(crate::sessions::QueueCommands::from_join(
-        &intents,
-        Some(&views),
-    ))
+    Ok(AfterAck {
+        commands: crate::sessions::QueueCommands::from_join(&intents, Some(&views)),
+        root_turns: views.state.counters.root_turns,
+    })
 }
 
 /// Step 0 of the reopen (spec 02 §4.2): a lease-free projector pass to the

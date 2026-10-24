@@ -168,6 +168,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// on the missing session row and change nothing.
     fn project(&mut self) {
         let target = self.live_target();
+        // A stopped task (it panicked or was aborted) is replaced: the new
+        // one loads the views again and reconciles the settled rows once.
+        if self
+            .live
+            .as_ref()
+            .is_some_and(super::projection::live::LiveProjector::stopped)
+        {
+            self.live = None;
+        }
         if self.live.is_none() {
             self.live = self
                 .executor
@@ -252,10 +261,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.commit_notice_intents();
         let target = self.live_target();
         let deadline = self.projection_deadline(one_shot);
+        // The task keeps its views and the rows it has shown for the next
+        // turn: no cold reload and no re-emission of settled rows.
+        let live = self.live.as_mut();
         let projected = self.executor.block_on(async {
             let pass = async {
-                match self.live.take() {
-                    Some(live) => live.finish(target.clone(), None).await,
+                match live {
+                    Some(live) => live.settle(target.clone()).await,
                     None => target.views(None).await.map(|projected| projected.views),
                 }
             };

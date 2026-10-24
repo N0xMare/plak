@@ -190,9 +190,15 @@ fn non_live_passes_present_usage_once_to_ledger_events_and_log() {
                         "after_ack" => {
                             // Unbounded: the live loop's wall-clock bound only
                             // defers the pass, so it is not presentation law.
-                            super::super::after_ack_pass(&sessions, &presenting, &id, locator)
-                                .await
-                                .unwrap();
+                            super::super::after_ack_pass(
+                                &sessions,
+                                &presenting,
+                                &id,
+                                locator,
+                                None,
+                            )
+                            .await
+                            .unwrap();
                         }
                         "before_open" => {
                             super::super::project_before_open(&sessions, &presenting, &record)

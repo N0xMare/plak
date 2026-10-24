@@ -32,7 +32,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         roots,
         store,
         projection_store,
-        live_projector,
+        mut live_projector,
         live_target,
         home,
         session,
@@ -89,6 +89,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
     let resubmitted_steer = existing_submission.as_ref().is_some_and(|submission| {
         submission.kind == sessions::projector::SubmissionKind::SendNowSteer
     });
+    let mut projected_root_turns = None;
     let (turn, duplicate_result) = {
         #[cfg(test)]
         let operation_id = format!("plak:deliver:{}:{}", item.id, item.revision);
@@ -234,10 +235,16 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 projection_store,
                 &session.id,
                 followed,
+                live_projector
+                    .as_deref_mut()
+                    .map(|live| (live, &live_target)),
             )
             .await
             {
-                Ok(commands) => session.queue_commands = commands,
+                Ok(after_ack) => {
+                    session.queue_commands = after_ack.commands;
+                    projected_root_turns = Some(after_ack.root_turns);
+                }
                 Err(error) => {
                     session.queue_projection_debt = true;
                     super::super::logging::log_event(
@@ -415,7 +422,11 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
     if let Some(user_line) = user_line {
         candidate.append_transcript(user_line);
     }
-    if let Some(views) = store.load_views(&session.id)? {
+    // The after-ack pass's views already hold the count; a stored read is
+    // only for a pass that left debt.
+    if let Some(root_turns) = projected_root_turns {
+        candidate.root_turn_count = root_turns;
+    } else if let Some(views) = store.load_views(&session.id)? {
         candidate.root_turn_count = views.state.counters.root_turns;
     }
     if !host_authored {

@@ -1569,20 +1569,33 @@ the task follows the session's `subscribe_feed` and the host's requests (one
 before each action it takes from its loop), coalesces them, and always passes
 over the newest target. Its store reads and commits run on the blocking
 pool, so a slow commit never holds a runtime worker.
-The live task keeps its committed views between pages and passes, loading them
-once per followed session and again after a moved-cursor retry or a failed pass.
+The live task lives for the whole attachment and keeps its committed views, and
+the settled tool rows it has already shown, between pages, passes and turns. It
+loads the views once per followed session and again only after a moved-cursor
+retry or a failed pass, and it emits a settled tool row only when the row is new
+or changed, never again at the next turn, unless its feed subscription is
+replaced, which reconciles every retained settled row once. A task that stopped
+(it panicked or was aborted) is replaced at the host's next request by a fresh
+one, which loads the views and reconciles the retained settled rows the same
+way.
 Projection consumes and updates those views in place; a failed pass drops them,
 so uncommitted changes never become the next pass's starting point. Ordinary
 passes do not reload a session record or transcript to discover a clear join;
 only a clear target's creation identity or an unresolved clear request needs
 that join. Call bookkeeping is pruned when its owning turn ends, while the
 settled transcript rows and counters remain.
-The host loop never waits on it while streaming. Before terminal publication
-and before release it
-requests a final pass; interactive terminal publication, quit and release
-bound that pass at 400 ms. Past the bound the host proceeds with projection
-debt, not a snapshot of stale rows.
-Terminal publication takes the final pass's views and counters directly from
+The host loop never waits on it for a feed notification while streaming; it
+settles the task after an acknowledged command (an admission or a send-now) and
+before terminal publication: one pass to the tail, then a copy of the task's
+views, which stay with the task. The command's queue join and root-turn count,
+and terminal publication, read that copy rather than a stored load. Before
+release it requests a final pass that stops the task. The after-ack settle,
+interactive terminal publication's settle and release are bounded at 400 ms;
+quit stages share the one-second quit deadline. Past the bound the host
+proceeds with projection debt, not a snapshot of stale rows. A task that stops
+while a settle waits fails that request at once rather than leaving it
+unanswered.
+Terminal publication takes the settled views and counters directly from
 the live task and still emits the full presentation snapshot; it does not reload
 the session record or transcript for that snapshot.
 It normalizes and bounds those rows exactly as a stored transcript load does.

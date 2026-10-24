@@ -410,3 +410,393 @@ fn changed_keys_emit_the_same_settled_rows_as_a_full_scan() {
         "a replacement subscription reconciles settled rows even at an unchanged cursor"
     );
 }
+
+/// Sends `prompt` and waits for the turn's completion and the idle that
+/// follows its terminal publication. Returns the host events up to it and
+/// the product views the store parsed meanwhile.
+fn run_turn(
+    actions: &crate::surface_protocol::UserActionSender<crate::runtime::test_kit::TestExtension>,
+    events: &crate::surface_protocol::HostEventReceiver<crate::runtime::test_kit::TestExtension>,
+    store: &MemoryStore,
+    prompt: &str,
+) -> (
+    Vec<crate::surface_protocol::HostEvent<crate::runtime::test_kit::TestExtension>>,
+    usize,
+) {
+    use crate::runtime::recover_tests::{turn_completed, wait_for};
+    let reads = store.view_read_count();
+    crate::runtime::test_support::send_attached_action(
+        actions,
+        crate::surface_protocol::UserAction::Prompt(prompt.to_owned().into()),
+    );
+    let mut seen = Vec::new();
+    wait_for(events, &mut seen, "the turn's completion", turn_completed);
+    wait_for(events, &mut seen, "the idle after the turn", |event| {
+        matches!(event, crate::surface_protocol::HostEvent::SetBusy(false))
+    });
+    (seen, store.view_read_count() - reads)
+}
+
+/// A scripted host whose model makes one `loopback_effect` call and then
+/// answers, `turns` times.
+fn tool_turns_host(
+    root: &std::path::Path,
+    turns: usize,
+) -> (
+    crate::runtime::HostConfig<crate::runtime::test_kit::TestExtension>,
+    std::path::PathBuf,
+) {
+    let steps: Vec<_> = (0..turns)
+        .flat_map(|turn| {
+            [
+                serde_json::json!({
+                    "output": {"tool": {"name": "loopback_effect", "arguments": {}}},
+                    "finish": "tool_calls"
+                }),
+                serde_json::json!({"output": {"text": format!("answer {turn}")}}),
+            ]
+        })
+        .collect();
+    crate::runtime::recover_tests::scripted_host_with(
+        root,
+        crate::runtime::recover_tests::script(serde_json::Value::Array(steps)),
+    )
+}
+
+/// A target over the stored session through a fresh view of the same
+/// homes, and the call ids of the settled tool rows it emits, in order.
+fn recording_target(
+    root: &std::path::Path,
+    store: &Arc<MemoryStore>,
+    id: &str,
+) -> (LiveTarget, Arc<std::sync::Mutex<Vec<String>>>) {
+    let (config, _) = crate::runtime::test_support::fresh_injected_attached_host(root);
+    let record = store.load(id).unwrap();
+    let emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = Arc::clone(&emitted);
+    let target = LiveTarget {
+        sessions: config.state_roots.runtime_sessions().unwrap(),
+        store: store.clone(),
+        roots: config.state_roots,
+        product_id: id.to_owned(),
+        followed: record.plakous_locator.unwrap(),
+        tree_id: id.to_owned(),
+        emit_settled: Arc::new(move |row| {
+            if let TranscriptRow::Tool(tool) = row {
+                sink.lock().unwrap().push(tool.call_id);
+            }
+        }),
+    };
+    (target, emitted)
+}
+
+/// The views a cold pass to the feed's tail builds from the stored ones.
+fn rebuilt(
+    executor: &plakous::application::ApplicationExecutor,
+    store: &Arc<MemoryStore>,
+    target: &LiveTarget,
+) -> SessionViews {
+    let records: Arc<dyn SessionRecordStore> = store.clone();
+    executor
+        .block_on(super::super::project_to_tail(
+            &target.sessions,
+            &records,
+            &target.product_id,
+            target.followed,
+        ))
+        .unwrap()
+        .unwrap()
+}
+
+/// One attachment's live projector keeps its views and the rows it has
+/// shown across turns (spec 02 §2.6): the attachment parses the stored views
+/// once, when the first pass finds the session stored, and every settled
+/// tool row is emitted once over the attachment instead of again at every
+/// turn.
+#[test]
+fn an_attachment_keeps_its_live_views_and_shown_rows_across_turns() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = tool_turns_host(root.path(), 4);
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    // The attachment publishes a snapshot and goes idle before any prompt.
+    crate::runtime::recover_tests::wait_for(&events, &mut seen, "the attached idle", |event| {
+        matches!(event, crate::surface_protocol::HostEvent::SetBusy(false))
+    });
+    let mut parsed = Vec::new();
+    for turn in 0..4 {
+        let (turn_events, reads) = run_turn(&actions, &events, &store, &format!("turn {turn}"));
+        parsed.push(reads);
+        seen.extend(turn_events);
+    }
+    assert_eq!(
+        parsed.iter().sum::<usize>(),
+        1,
+        "one cold load for the attachment, none per turn: {parsed:?}"
+    );
+    crate::runtime::test_support::send_attached_action(
+        &actions,
+        crate::surface_protocol::UserAction::Quit,
+    );
+    worker.join().unwrap().unwrap();
+    seen.extend(events.try_iter());
+    let mut emitted = std::collections::BTreeMap::<String, usize>::new();
+    for event in &seen {
+        if let crate::surface_protocol::HostEvent::Row(TranscriptRow::Tool(tool)) = event
+            && tool.state != "running"
+        {
+            *emitted.entry(tool.call_id.clone()).or_default() += 1;
+        }
+    }
+    assert_eq!(
+        emitted.len(),
+        4,
+        "every turn settles its tool call: {emitted:?}"
+    );
+    assert!(
+        emitted.values().all(|count| *count == 1),
+        "a settled row was emitted again: {emitted:?}"
+    );
+}
+
+/// Settling keeps the task and its views: a later settle parses nothing, a
+/// refused pass is reported once by the settle and drops its views, the next
+/// settle reloads and resyncs, and every settled copy equals a rebuild of
+/// the views from the stored feed.
+#[test]
+fn settling_keeps_the_task_and_resyncs_after_a_refused_pass() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = crate::runtime::test_support::fresh_injected_attached_host(root.path());
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let id = config.session.id.clone();
+    super::super::tests::run_prompts(config, &["recorded turn"]);
+    let record = store.load(&id).unwrap();
+    let (config, _) = crate::runtime::test_support::fresh_injected_attached_host(root.path());
+    let refuse = Arc::new(AtomicBool::new(false));
+    let target = LiveTarget {
+        sessions: config.state_roots.runtime_sessions().unwrap(),
+        store: Arc::new(FaultStore::new(
+            store.clone(),
+            RefuseCommit(Arc::clone(&refuse)),
+        )),
+        roots: config.state_roots,
+        product_id: id.clone(),
+        followed: record.plakous_locator.unwrap(),
+        tree_id: id.clone(),
+        emit_settled: Arc::new(|_| {}),
+    };
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let records: Arc<dyn SessionRecordStore> = store.clone();
+    let rebuilt = executor
+        .block_on(super::super::project_to_tail(
+            &target.sessions,
+            &records,
+            &target.product_id,
+            target.followed,
+        ))
+        .unwrap()
+        .unwrap();
+    store.delete_views(&id);
+    executor
+        .block_on(async {
+            let mut live = LiveProjector::spawn();
+            refuse.store(true, Ordering::SeqCst);
+            let reads = store.view_read_count();
+            assert_eq!(
+                live.settle(target.clone()).await.unwrap_err(),
+                "injected projection commit failure"
+            );
+            assert_eq!(live.take_refusal(), None, "the settle reported it");
+            refuse.store(false, Ordering::SeqCst);
+            assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
+            assert_eq!(
+                store.view_read_count(),
+                reads + 2,
+                "the refused pass dropped its views and the next one reloaded"
+            );
+            assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
+            assert_eq!(
+                store.view_read_count(),
+                reads + 2,
+                "a settled task keeps its views"
+            );
+            assert_eq!(live.finish(target, None).await.unwrap(), rebuilt);
+            assert_eq!(store.view_read_count(), reads + 2);
+        })
+        .unwrap();
+}
+
+/// A task that stopped (it panicked or was aborted) does not leave the
+/// attachment without a projector: the next settle restarts it, the new task
+/// loads the views once and reconciles the settled tool row once, and the
+/// settles after it read and emit nothing.
+#[test]
+fn a_stopped_task_is_restarted_by_the_next_settle_with_one_cold_load() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = tool_turns_host(root.path(), 1);
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let id = config.session.id.clone();
+    super::super::tests::run_prompts(config, &["one tool call"]);
+    let (target, emitted) = recording_target(root.path(), &store, &id);
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let rebuilt = rebuilt(&executor, &store, &target);
+    executor
+        .block_on(async {
+            let mut live = LiveProjector::spawn();
+            assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
+            let calls = emitted.lock().unwrap().clone();
+            assert_eq!(calls.len(), 1, "the turn's tool call: {calls:?}");
+            live.task.abort();
+            while !live.stopped() {
+                tokio::task::yield_now().await;
+            }
+            let reads = store.view_read_count();
+            assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
+            assert_eq!(
+                store.view_read_count(),
+                reads + 1,
+                "the restarted task loads the views once"
+            );
+            assert_eq!(
+                *emitted.lock().unwrap(),
+                [calls.clone(), calls.clone()].concat(),
+                "the restarted task reconciles the settled row once"
+            );
+            assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
+            assert_eq!(store.view_read_count(), reads + 1);
+            assert_eq!(emitted.lock().unwrap().len(), 2);
+            assert_eq!(live.finish(target, None).await.unwrap(), rebuilt);
+        })
+        .unwrap();
+}
+
+/// Another writer that projects more feed records between two settles moves
+/// the stored cursor under the task: its next commit finds the cursor moved,
+/// it reloads the views once, its copy equals a rebuild, and each settled
+/// tool call is emitted exactly once over both settles.
+#[test]
+fn a_settle_after_another_writer_moved_the_cursor_reloads_once() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = tool_turns_host(root.path(), 1);
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let id = config.session.id.clone();
+    super::super::tests::run_prompts(config, &["first tool call"]);
+    let (target, emitted) = recording_target(root.path(), &store, &id);
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let mut live = executor.block_on(async { LiveProjector::spawn() }).unwrap();
+    executor
+        .block_on(live.settle(target.clone()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(emitted.lock().unwrap().len(), 1);
+    // A reopened host runs a second tool-bearing turn and projects it.
+    let (mut config, _) = tool_turns_host(root.path(), 1);
+    config.store = store.clone();
+    config.session = store.load(&id).unwrap();
+    super::super::tests::run_prompts(config, &["second tool call"]);
+    let reads = store.view_read_count();
+    let settled = executor
+        .block_on(live.settle(target.clone()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store.view_read_count(),
+        reads + 1,
+        "one reload after the moved cursor"
+    );
+    assert_eq!(settled, rebuilt(&executor, &store, &target));
+    let calls = emitted.lock().unwrap().clone();
+    assert_eq!(calls.len(), 2, "each call once: {calls:?}");
+    assert_ne!(calls[0], calls[1], "each call once: {calls:?}");
+    executor
+        .block_on(live.finish(target, None))
+        .unwrap()
+        .unwrap();
+}
+
+/// A task that stops after a settle's request and before its reply does not
+/// leave the settle waiting: the settle restarts it once, the new task loads
+/// the views once and answers. A task that stops again is reported, and no
+/// third task is spawned.
+#[test]
+fn a_settle_whose_task_stops_before_replying_restarts_it_once() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = tool_turns_host(root.path(), 1);
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let id = config.session.id.clone();
+    super::super::tests::run_prompts(config, &["one tool call"]);
+    let (target, _) = recording_target(root.path(), &store, &id);
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let rebuilt = rebuilt(&executor, &store, &target);
+    executor
+        .block_on(async {
+            let mut live = LiveProjector::spawn();
+            arm_stops(&id, 1);
+            let reads = store.view_read_count();
+            assert_eq!(live.settle(target.clone()).await.unwrap(), rebuilt);
+            assert_eq!(
+                store.view_read_count(),
+                reads + 1,
+                "only the restarted task loads the views"
+            );
+            arm_stops(&id, 2);
+            assert_eq!(
+                live.settle(target.clone()).await.unwrap_err(),
+                "the projector task stopped"
+            );
+            assert!(live.stopped(), "no third task was spawned");
+            arm_stops(&id, 0);
+            assert_eq!(
+                live.finish(target, None).await.unwrap_err(),
+                "the projector task stopped"
+            );
+        })
+        .unwrap();
+}
+
+#[test]
+fn aborting_after_a_settle_request_restarts_once_but_not_after_a_second_stop() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = tool_turns_host(root.path(), 1);
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let id = config.session.id.clone();
+    super::super::tests::run_prompts(config, &["one tool call"]);
+    let (target, _) = recording_target(root.path(), &store, &id);
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let expected = rebuilt(&executor, &store, &target);
+    // Keep the first task from running until join! has polled the settle
+    // (sending its request), then polled the abort. No scheduling race.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        for second_stop in [false, true] {
+            let mut live = LiveProjector::spawn();
+            let abort = live.task.abort_handle();
+            arm_stops(&id, usize::from(second_stop));
+            let reads = store.view_read_count();
+            let (result, ()) = tokio::join!(
+                biased;
+                live.settle(target.clone()),
+                async { abort.abort() },
+            );
+            if second_stop {
+                assert_eq!(result.unwrap_err(), "the projector task stopped");
+                assert!(live.stopped(), "no third task was spawned");
+                assert_eq!(store.view_read_count(), reads);
+            } else {
+                assert_eq!(result.unwrap(), expected);
+                assert_eq!(store.view_read_count(), reads + 1);
+                live.finish(target.clone(), None).await.unwrap();
+            }
+        }
+    });
+}

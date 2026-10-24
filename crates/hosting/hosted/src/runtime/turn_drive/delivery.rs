@@ -126,14 +126,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         self.host.projection_store,
                         &self.host.session.id,
                         followed,
+                        self.host
+                            .live_projector
+                            .as_deref_mut()
+                            .map(|live| (live, &self.host.live_target)),
                     )
                     .await
                 }
                 Err(error) => Err(error.message().to_owned()),
             };
             match projected {
-                Ok(commands) => {
-                    self.apply_queue_join(commands);
+                Ok(after_ack) => {
+                    self.apply_queue_join(after_ack.commands);
                 }
                 Err(_) => self.host.session.queue_projection_debt = true,
             }

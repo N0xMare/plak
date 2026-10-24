@@ -1,15 +1,17 @@
 //! The live projector tick (spec 02 §2.6): one background task per attached
-//! session applies the feed to the views after each acknowledged commit. The
-//! host loop never waits on it while streaming; terminal publication and
-//! release grant it a bounded final pass. The tree projector runs
-//! from the host loop itself. Projection debt is safe:
-//! every write is CAS'd on the cursor and the next open catches up.
+//! session applies the feed to the views after each acknowledged commit and
+//! keeps them, with the settled rows it has shown, for the whole attachment.
+//! The host loop never waits on it while streaming; admission, send-now and
+//! terminal publication settle it (a pass and a copy of its views), and
+//! release grants it a bounded final pass. The tree projector runs from the host loop
+//! itself. Projection debt is safe: every write is CAS'd on the cursor and
+//! the next open catches up.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use plakous::sessions::{AgentSessions, SessionLocator};
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Notify, oneshot, watch};
 
 use crate::agent::ProductStateRoots;
 use crate::session_store::SessionRecordStore;
@@ -93,11 +95,15 @@ struct Applied {
     error: Option<String>,
 }
 
+/// Where a settling request's views go: taken by the pass that serves it.
+type SettleReply = Arc<std::sync::Mutex<Option<oneshot::Sender<Result<SessionViews, String>>>>>;
+
 #[derive(Clone)]
 struct Request {
     generation: u64,
     target: LiveTarget,
     finish: bool,
+    settle: Option<SettleReply>,
 }
 
 /// The host loop's handle on its session's projector task.
@@ -136,8 +142,76 @@ impl LiveProjector {
             generation: self.generation,
             target,
             finish: false,
+            settle: None,
         }));
         self.wake.notify_one();
+    }
+
+    /// True once the task has stopped: it panicked or was aborted.
+    pub(crate) fn stopped(&self) -> bool {
+        self.task.is_finished()
+    }
+
+    /// Replaces a stopped task with a fresh one, which loads the views
+    /// again and reconciles every retained settled row once. Call it inside
+    /// the host's executor.
+    fn restart(&mut self) {
+        let generation = self.generation;
+        *self = Self::spawn();
+        self.generation = generation;
+        self.reported = generation;
+    }
+
+    /// Requests a pass over `target` and waits for it, keeping the task and
+    /// its views for the next turn. Returns a copy of the views, or the pass's
+    /// refusal, which is reported here and not again by
+    /// [`Self::take_refusal`]. A stopped task is restarted first, and once
+    /// more when it stops during the pass.
+    pub(crate) async fn settle(&mut self, target: LiveTarget) -> Result<SessionViews, String> {
+        if self.stopped() {
+            self.restart();
+        }
+        if let Some(settled) = self.request_settle(target.clone()).await {
+            return settled;
+        }
+        if self.stopped() {
+            self.restart();
+            if let Some(settled) = self.request_settle(target).await {
+                return settled;
+            }
+        }
+        Err("the projector task stopped".to_owned())
+    }
+
+    /// The pass's views or refusal; `None` when the task stopped before it
+    /// replied.
+    async fn request_settle(&mut self, target: LiveTarget) -> Option<Result<SessionViews, String>> {
+        self.generation = self.generation.saturating_add(1);
+        let (reply, settled) = oneshot::channel();
+        let _ = self.requests.send(Some(Request {
+            generation: self.generation,
+            target,
+            finish: false,
+            settle: Some(Arc::new(std::sync::Mutex::new(Some(reply)))),
+        }));
+        self.wake.notify_one();
+        // The reply's sender stays in the request the watch channel holds, so
+        // a task that stops before replying never closes it: wait on the task
+        // too.
+        let mut settled = settled;
+        let task = &mut self.task;
+        let settled = std::future::poll_fn(|cx| {
+            if let std::task::Poll::Ready(reply) = std::pin::Pin::new(&mut settled).poll(cx) {
+                return std::task::Poll::Ready(reply.ok());
+            }
+            if std::pin::Pin::new(&mut *task).poll(cx).is_ready() {
+                return std::task::Poll::Ready(None);
+            }
+            std::task::Poll::Pending
+        })
+        .await;
+        self.reported = self.generation;
+        settled
     }
 
     /// The refusal of a pass finished since the last call, once.
@@ -160,11 +234,16 @@ impl LiveProjector {
         target: LiveTarget,
         bound: Option<Duration>,
     ) -> Result<SessionViews, String> {
+        // A settle may already have consumed a stopped task's handle.
+        if self.stopped() {
+            return Err("the projector task stopped".to_owned());
+        }
         self.generation = self.generation.saturating_add(1);
         let _ = self.requests.send(Some(Request {
             generation: self.generation,
             target,
             finish: true,
+            settle: None,
         }));
         self.wake.notify_one();
         let task = &mut self.task;
@@ -251,6 +330,8 @@ async fn run(
         let Some(request) = &current else {
             continue;
         };
+        #[cfg(test)]
+        stop_if_armed(&request.target.product_id);
         let error = match request.target.views(cached.take()).await {
             Ok(super::ProjectedViews { views, changed }) => {
                 let current_target = requests
@@ -278,6 +359,18 @@ async fn run(
             }
             Err(error) => Some(error),
         };
+        if let Some(reply) = request
+            .settle
+            .as_ref()
+            .and_then(|reply| reply.lock().ok()?.take())
+        {
+            let settled = match (&error, &cached) {
+                (Some(error), _) => Err(error.clone()),
+                (None, Some(views)) => Ok(views.clone()),
+                (None, None) => Err("the projector pass kept no views".to_owned()),
+            };
+            let _ = reply.send(settled);
+        }
         report.send_replace(Applied {
             generation: request.generation,
             error,
@@ -340,6 +433,37 @@ fn emit_settled_changes(
     }
     for call in removed {
         shown.calls.remove(&call);
+    }
+}
+
+/// Passes a test stops for a product session: the next `count` passes over
+/// it panic before they read anything, as a projector bug would.
+#[cfg(test)]
+fn armed_stops() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, usize>> {
+    static STOPS: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<String, usize>>> =
+        std::sync::OnceLock::new();
+    STOPS.get_or_init(std::sync::Mutex::default)
+}
+
+#[cfg(test)]
+pub(in crate::runtime) fn arm_stops(product_id: &str, count: usize) {
+    armed_stops()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(product_id.to_owned(), count);
+}
+
+#[cfg(test)]
+fn stop_if_armed(product_id: &str) {
+    let mut stops = armed_stops()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(count) = stops.get_mut(product_id)
+        && *count > 0
+    {
+        *count -= 1;
+        drop(stops);
+        panic!("injected projector stop");
     }
 }
 

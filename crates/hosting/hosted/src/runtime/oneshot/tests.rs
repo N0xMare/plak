@@ -320,6 +320,20 @@ fn one_shot_waits_past_the_interactive_bound_for_its_final_projection() {
     );
 }
 
+/// A projector task that stops mid-pass fails the one-shot command instead of
+/// leaving its unbounded terminal settle waiting for a reply.
+#[test]
+fn one_shot_fails_when_its_projector_task_stops() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    crate::runtime::projection::live::arm_stops(&config.session.id, usize::MAX);
+    let error = OneShot::run(config, "one root turn".into(), |_, _| {}).unwrap_err();
+    assert!(
+        error.to_string().contains("the projector task stopped"),
+        "{error}"
+    );
+}
+
 #[test]
 fn one_shot_fails_when_its_final_projection_is_refused() {
     let root = tempfile::tempdir().unwrap();
