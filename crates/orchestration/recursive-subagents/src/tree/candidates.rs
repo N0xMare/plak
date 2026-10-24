@@ -5,6 +5,8 @@ use std::path::Path;
 
 use plakous_workspace::occupancy_vcs::is_jj_copy_root as jj_layout_copy;
 
+use plakous_workspace::occupancy_vcs::ConflictPath;
+
 use super::{
     AdoptCandidateRequest, AdoptFailure, AdoptLanding, AdoptOutcome, AdoptTicket, AttemptFailure,
     AttemptId, AttemptStatus, CandidateId, CandidateRecord, NodeStatus, ProductAgentTree,
@@ -991,12 +993,18 @@ impl ProductAgentTree {
                 }
                 self.bump();
                 Err(match failure {
-                    AdoptFailure::Conflict(paths) => {
+                    AdoptFailure::Conflict(conflicts) => {
                         let error = TopologyError::new(
                             TopologyErrorCode::MergeConflict,
-                            merge_conflict_message(&paths, &ticket.child_path),
+                            merge_conflict_message(&conflicts, &ticket.child_path),
                         );
-                        self.record_adopt_conflict(ticket.candidate.candidate_id.as_str(), paths);
+                        self.record_adopt_conflict(
+                            ticket.candidate.candidate_id.as_str(),
+                            conflicts
+                                .into_iter()
+                                .map(|conflict| conflict.path)
+                                .collect(),
+                        );
                         error
                     }
                     AdoptFailure::TargetChanged(current) => TopologyError::new(
@@ -1018,26 +1026,187 @@ impl ProductAgentTree {
 
 const CONFLICT_PATHS_LEAD: &str = " path(s): ";
 const CONFLICT_PATHS_END: &str = "; the child copy at ";
+const CONFLICT_TAIL: &str = " is retained untouched and nothing was applied";
+const CONFLICT_MESSAGE_CAP: usize = 512;
 
-/// The `merge_conflict` refusal of an adopt. The message is bounded; the
-/// adopting call's host reads every path from its call facts instead.
+/// The `merge_conflict` refusal of an adopt.
+///
+/// `N` is the full count. Entries are `path (kind)`, de-duplicated in order,
+/// cut at whole entries inside the 512-byte wire cap, with `+N more` for what
+/// was left out. A child path long enough to blow the cap on its own is
+/// shortened; conflict paths are not. The adopting call's facts keep every
+/// path, uncut.
 #[must_use]
-pub fn merge_conflict_message(paths: &[String], child_path: &Path) -> String {
-    format!(
-        "merge_conflict in {}{CONFLICT_PATHS_LEAD}{}{CONFLICT_PATHS_END}{} is retained untouched \
-         and nothing was applied",
-        paths.len(),
-        paths.join(", "),
-        child_path.display()
-    )
+pub fn merge_conflict_message(paths: &[ConflictPath], child_path: &Path) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let entries: Vec<String> = paths
+        .iter()
+        .filter_map(|conflict| {
+            let entry = format!("{} ({})", conflict.path, conflict.kind);
+            seen.insert(entry.clone()).then_some(entry)
+        })
+        .collect();
+    let head = format!("merge_conflict in {}{CONFLICT_PATHS_LEAD}", entries.len());
+    let marker_room = format!("+{} more", entries.len()).len();
+    let child = capped_child_path(&head, child_path, marker_room);
+    let suffix = format!("{CONFLICT_PATHS_END}{child}{CONFLICT_TAIL}");
+    let budget = CONFLICT_MESSAGE_CAP.saturating_sub(head.len() + suffix.len());
+    let take = entries_that_fit(&entries, budget);
+    let omitted = entries.len() - take;
+    let mut listed = entries[..take].join(", ");
+    if omitted > 0 {
+        let marker = format!("+{omitted} more");
+        let with = if listed.is_empty() {
+            marker
+        } else {
+            format!("{listed}, {marker}")
+        };
+        if head.len() + with.len() + suffix.len() <= CONFLICT_MESSAGE_CAP {
+            listed = with;
+        }
+    }
+    format!("{head}{listed}{suffix}")
+}
+
+/// Shortens only the child path, on a char boundary, when the head and the
+/// fixed suffix already exceed the wire cap.
+fn capped_child_path(head: &str, child_path: &Path, marker_room: usize) -> String {
+    let raw = child_path.display().to_string();
+    let fixed = CONFLICT_PATHS_END.len() + CONFLICT_TAIL.len();
+    let room = CONFLICT_MESSAGE_CAP.saturating_sub(head.len() + fixed + marker_room);
+    if raw.len() <= room {
+        return raw;
+    }
+    let keep = room.saturating_sub(3);
+    let mut end = keep.min(raw.len());
+    while end > 0 && !raw.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &raw[..end])
+}
+
+/// Largest prefix whose joined text, plus `+N more` when entries remain,
+/// fits in `budget`. A full take can be shorter than the marker alone, so
+/// the scan walks down from every entry rather than assuming a bigger
+/// prefix costs more. Prefix lengths make each step constant work.
+fn entries_that_fit(entries: &[String], budget: usize) -> usize {
+    if entries.is_empty() {
+        return 0;
+    }
+    let mut prefix = Vec::with_capacity(entries.len());
+    let mut sum = 0usize;
+    for (index, entry) in entries.iter().enumerate() {
+        sum = sum.saturating_add(entry.len());
+        if index > 0 {
+            sum = sum.saturating_add(2);
+        }
+        prefix.push(sum);
+    }
+    let mut take = entries.len();
+    loop {
+        let omitted = entries.len() - take;
+        let used = if take == 0 {
+            format!("+{} more", entries.len()).len()
+        } else {
+            let more = if omitted == 0 {
+                0
+            } else {
+                format!(", +{omitted} more").len()
+            };
+            prefix[take - 1].saturating_add(more)
+        };
+        if used <= budget || take == 0 {
+            return take;
+        }
+        take -= 1;
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::SEAL_OUTCOME_KIND;
+    use super::merge_conflict_message;
     use crate::tree::test_support::*;
     use crate::tree::vcs_fixtures::*;
+    use plakous_workspace::occupancy_vcs::ConflictPath;
+
+    /// A long conflict list stops on a whole entry and names how many remain.
+    #[test]
+    fn conflict_message_cuts_whole_entries_and_says_plus_n() {
+        let child = Path::new("/tmp/child-copy");
+        let paths: Vec<ConflictPath> = (0..40)
+            .map(|index| ConflictPath {
+                path: format!("src/file-{index:02}.rs"),
+                kind: if index == 1 {
+                    "binary".to_owned()
+                } else {
+                    "contents".to_owned()
+                },
+            })
+            .collect();
+        let message = merge_conflict_message(&paths, child);
+        let bytes = message.len();
+        assert!(bytes <= 512, "{bytes} bytes: {message}");
+        assert!(
+            message.starts_with("merge_conflict in 40 path(s): "),
+            "{message}"
+        );
+        assert!(
+            message.ends_with(
+                "; the child copy at /tmp/child-copy is retained untouched and nothing was applied"
+            ),
+            "{message}"
+        );
+        let listed = message
+            .split_once(" path(s): ")
+            .unwrap()
+            .1
+            .split_once("; the child copy at ")
+            .unwrap()
+            .0;
+        let (shown, omitted) = listed.rsplit_once(", +").unwrap();
+        let omitted: usize = omitted.strip_suffix(" more").unwrap().parse().unwrap();
+        let shown: Vec<&str> = shown.split(", ").collect();
+        assert_eq!(shown.len() + omitted, 40, "{listed}");
+        assert!(shown.len() >= 2, "{listed}");
+        assert_eq!(shown[0], "src/file-00.rs (contents)");
+        assert_eq!(shown[1], "src/file-01.rs (binary)");
+        for entry in &shown {
+            assert!(
+                entry.ends_with(" (contents)") || entry.ends_with(" (binary)"),
+                "cut inside an entry: {entry}"
+            );
+        }
+        let short = merge_conflict_message(&paths[..2], child);
+        assert!(short.len() <= 512);
+        assert!(!short.contains("more"), "{short}");
+        assert!(
+            short.contains("src/file-00.rs (contents), src/file-01.rs (binary)"),
+            "{short}"
+        );
+    }
+
+    #[test]
+    fn conflict_message_deduplicates_and_reserves_the_omission_marker_for_a_long_child_path() {
+        let conflict = ConflictPath {
+            path: " leading and trailing ".into(),
+            kind: "contents".into(),
+        };
+        let paths = vec![conflict.clone(), conflict];
+        let message = merge_conflict_message(&paths, Path::new("copy"));
+        assert!(
+            message.starts_with("merge_conflict in 1 path(s):  leading and trailing  (contents)"),
+            "{message}"
+        );
+        let message = merge_conflict_message(&paths, Path::new(&"é".repeat(600)));
+        assert!(message.len() <= 512, "{message}");
+        assert!(message.contains("+1 more"), "{message}");
+        assert!(
+            message.ends_with("is retained untouched and nothing was applied"),
+            "{message}"
+        );
+    }
 
     #[test]
     fn jj_off_base_followup_seals_and_replays_the_whole_tree_notice() {
@@ -1362,7 +1531,10 @@ mod tests {
         let workspace_id = tree.node(&child.agent_id).unwrap().workspace_id.clone();
         for (failure, code) in [
             (
-                AdoptFailure::Conflict(vec!["a.rs".to_owned()]),
+                AdoptFailure::Conflict(vec![ConflictPath {
+                    path: "a.rs".to_owned(),
+                    kind: "contents".to_owned(),
+                }]),
                 TopologyErrorCode::MergeConflict,
             ),
             (

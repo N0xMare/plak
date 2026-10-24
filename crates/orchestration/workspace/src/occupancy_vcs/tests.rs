@@ -8,6 +8,30 @@ fn git_repo() -> tempfile::TempDir {
 }
 
 #[test]
+fn conflict_parser_preserves_whitespace_and_tabs_in_paths() {
+    let path = " leading\ttab and trailing ";
+    let info = format!(
+        "tree\0{mode} blob 1\t{path}\0{mode} blob 2\t{path}\0\0",
+        mode = "100644"
+    );
+    assert_eq!(
+        parse_merge_tree_conflicts(&info),
+        vec![ConflictPath {
+            path: path.into(),
+            kind: "contents".into()
+        }]
+    );
+    let messages = format!("tree\0\x001\0{path}\0CONFLICT (contents)\0message\0");
+    assert_eq!(
+        parse_merge_tree_conflicts(&messages),
+        vec![ConflictPath {
+            path: path.into(),
+            kind: "contents".into()
+        }]
+    );
+}
+
+#[test]
 fn copy_layout_matches_only_the_leaf_parent_and_grandparent() {
     for (path, expected) in [
         ("launch/.plak/worktrees/c1", Some(SessionVcs::Git)),
@@ -1027,11 +1051,99 @@ fn snapshot_excludes_secret_paths() {
 
 #[test]
 fn parse_merge_tree_conflicts_reads_the_info_section() {
-    let stdout = "abc123\n100644 aaa 1\tsrc/a.rs\n100644 bbb 2\tsrc/a.rs\n\nCONFLICT (content)\n";
+    let stdout = "\
+abc123\0\
+100644 aaa 1\tsrc/a.rs\0\
+100644 bbb 2\timg.png\0\
+100644 ccc 1\tgone.txt\0\
+\0\
+1\0src/a.rs\0Auto-merging\0Auto-merging src/a.rs\n\0\
+1\0src/a.rs\0CONFLICT (contents)\0CONFLICT (content): Merge conflict in src/a.rs\n\0\
+1\0img.png\0CONFLICT (binary)\0warning: Cannot merge binary files: img.png\n\0\
+1\0img.png\0CONFLICT (contents)\0CONFLICT (content): Merge conflict in img.png\n\0\
+1\0gone.txt\0CONFLICT (modify/delete)\0CONFLICT (modify/delete): gone.txt deleted\n\0";
     assert_eq!(
         parse_merge_tree_conflicts(stdout),
-        vec!["src/a.rs".to_owned()]
+        vec![
+            ConflictPath {
+                path: "src/a.rs".to_owned(),
+                kind: "contents".to_owned(),
+            },
+            ConflictPath {
+                path: "img.png".to_owned(),
+                kind: "binary".to_owned(),
+            },
+            ConflictPath {
+                path: "gone.txt".to_owned(),
+                kind: "modify/delete".to_owned(),
+            },
+        ]
     );
+}
+
+/// A real `merge-tree -z` names binary and modify/delete instead of collapsing
+/// them into a contents conflict. The child copy stays untouched.
+#[test]
+fn binary_and_modify_delete_conflicts_name_their_kinds() {
+    let repo = git_repo();
+    std::fs::create_dir(repo.path().join("src")).unwrap();
+    std::fs::write(repo.path().join("src/a.rs"), "base\n").unwrap();
+    std::fs::write(repo.path().join("img.png"), b"AAA").unwrap();
+    std::fs::write(repo.path().join("gone.txt"), "base\n").unwrap();
+    git_in(repo.path(), &["add", "."]);
+    git_in(repo.path(), &["commit", "-q", "-m", "files"]);
+
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(repo.path().join("src/a.rs"), "parent\n").unwrap();
+    std::fs::write(repo.path().join("img.png"), b"BBB\0").unwrap();
+    std::fs::write(repo.path().join("gone.txt"), "parent\n").unwrap();
+    std::fs::write(minted.path.join("src/a.rs"), "child\n").unwrap();
+    std::fs::write(minted.path.join("img.png"), b"CCC\0").unwrap();
+    std::fs::remove_file(minted.path.join("gone.txt")).unwrap();
+
+    let candidate = SystemVcs
+        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .unwrap();
+    let failure = SystemVcs
+        .adopt(
+            repo.path(),
+            &minted.path,
+            &minted.base.commit,
+            None,
+            &candidate,
+            None,
+        )
+        .unwrap_err();
+    let AdoptFailure::Conflict(paths) = failure else {
+        panic!("expected a conflict, got {failure:?}");
+    };
+    let kind = |name: &str| {
+        paths
+            .iter()
+            .find(|conflict| conflict.path == name)
+            .map(|conflict| conflict.kind.as_str())
+    };
+    assert_eq!(kind("src/a.rs"), Some("contents"), "{paths:?}");
+    assert_eq!(kind("img.png"), Some("binary"), "{paths:?}");
+    assert_eq!(kind("gone.txt"), Some("modify/delete"), "{paths:?}");
+    assert_eq!(
+        std::fs::read(minted.path.join("src/a.rs")).unwrap(),
+        b"child\n"
+    );
+    assert_eq!(
+        std::fs::read(minted.path.join("img.png")).unwrap(),
+        b"CCC\0"
+    );
+    assert!(!minted.path.join("gone.txt").exists());
 }
 
 #[test]

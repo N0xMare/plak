@@ -25,7 +25,9 @@ use jj_lib::working_copy::{SnapshotOptions, WorkingCopyFreshness};
 use jj_lib::workspace::Workspace;
 use sha2::{Digest, Sha256};
 
-use super::occupancy_vcs::{AdoptFailure, AdoptLanding, MintedCopy, VcsError, VcsSnapshot};
+use super::occupancy_vcs::{
+    AdoptFailure, AdoptLanding, ConflictPath, MintedCopy, VcsError, VcsSnapshot,
+};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Result<T> = std::result::Result<T, Error>;
@@ -405,7 +407,10 @@ pub(super) fn adopt(
             if merged.has_conflict() {
                 let paths = merged
                     .conflicts()
-                    .map(|(path, _)| path.as_internal_file_string().to_owned())
+                    .map(|(path, _)| ConflictPath {
+                        path: path.as_internal_file_string().to_owned(),
+                        kind: "contents".to_owned(),
+                    })
                     .collect();
                 return Ok(Err(AdoptFailure::Conflict(paths)));
             }

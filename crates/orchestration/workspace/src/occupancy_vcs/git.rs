@@ -4,8 +4,8 @@ use std::io::Write;
 use std::process::{Command, Output};
 
 use super::{
-    AdoptFailure, AdoptLanding, ChangeKind, ChangedPath, GIT_CLI_ENABLED, Path, VcsError,
-    VcsErrorKind, VcsSnapshot, create_private, mint_error, private_scratch, wait_bounded,
+    AdoptFailure, AdoptLanding, ChangeKind, ChangedPath, ConflictPath, GIT_CLI_ENABLED, Path,
+    VcsError, VcsErrorKind, VcsSnapshot, create_private, mint_error, private_scratch, wait_bounded,
 };
 
 /// Ceiling on a `git` read: status, rev-parse, counts, name lists.
@@ -373,6 +373,7 @@ pub(super) fn git_adopt(
         &[
             "merge-tree",
             "--write-tree",
+            "-z",
             &format!("--merge-base={base_commit}"),
             target.commit.as_str(),
             candidate_commit,
@@ -396,11 +397,12 @@ pub(super) fn git_adopt(
             stderr_excerpt(&merged.stderr)
         )));
     }
+    // `-z` ends the tree id with NUL rather than a newline.
     let Some(merged_tree) = stdout
-        .lines()
+        .split('\0')
         .next()
         .map(str::trim)
-        .filter(|id| !id.is_empty())
+        .filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
     else {
         return Err(AdoptFailure::Unavailable(
             "git merge-tree produced no tree".to_owned(),
@@ -608,23 +610,101 @@ pub(super) fn stderr_excerpt(stderr: &[u8]) -> String {
     joined[..end].to_owned()
 }
 
-/// `git merge-tree --write-tree` prints the tree, then a conflicted-file info
-/// section of `<mode> <object> <stage>\t<path>` rows, then the messages.
-pub(super) fn parse_merge_tree_conflicts(stdout: &str) -> Vec<String> {
-    let mut paths = Vec::new();
-    for line in stdout.lines().skip(1) {
-        if line.trim().is_empty() {
+/// `git merge-tree --write-tree -z` prints `<tree>NUL`, then conflicted-file
+/// info records (`<mode> <object> <stage>\t<path>NUL`), an empty record, then
+/// messages `<n>NUL<path>...NUL<type>NUL<message>NUL`.
+///
+/// Kind is the first non-`contents` `CONFLICT` type for a path, else
+/// `contents`, so a binary path (both `binary` and `contents`) stays `binary`.
+pub(super) fn parse_merge_tree_conflicts(stdout: &str) -> Vec<ConflictPath> {
+    let fields: Vec<&str> = stdout.split('\0').collect();
+    let mut index = 0;
+    if fields
+        .first()
+        .is_some_and(|field| !field.contains('\t') && field.parse::<usize>().is_err())
+    {
+        index = 1;
+    }
+    let mut from_info = Vec::new();
+    let mut seen_info = std::collections::HashSet::new();
+    while index < fields.len() {
+        let field = fields[index];
+        if field.is_empty() {
+            index += 1;
             break;
         }
-        let Some((_, path)) = line.rsplit_once('\t') else {
+        let Some((_, path)) = field.split_once('\t') else {
+            break;
+        };
+        if !path.is_empty() && seen_info.insert(path) {
+            from_info.push(path.to_owned());
+        }
+        index += 1;
+    }
+    let mut order = Vec::<String>::new();
+    let mut kinds = std::collections::BTreeMap::<String, String>::new();
+    while index < fields.len() {
+        let Ok(count) = fields[index].parse::<usize>() else {
+            break;
+        };
+        index += 1;
+        if index + count + 2 > fields.len() {
+            break;
+        }
+        let paths = &fields[index..index + count];
+        index += count;
+        let type_field = fields[index];
+        index += 2;
+        let Some(kind) = conflict_type_kind(type_field) else {
             continue;
         };
-        let path = path.trim().to_owned();
-        if !path.is_empty() && !paths.contains(&path) {
-            paths.push(path);
+        for path in paths {
+            if path.is_empty() {
+                continue;
+            }
+            note_conflict_kind(&mut order, &mut kinds, path, kind);
         }
     }
-    paths
+    if order.is_empty() {
+        from_info
+            .into_iter()
+            .map(|path| ConflictPath {
+                path,
+                kind: "contents".to_owned(),
+            })
+            .collect()
+    } else {
+        order
+            .into_iter()
+            .map(|path| ConflictPath {
+                kind: kinds.remove(&path).unwrap_or_else(|| "contents".to_owned()),
+                path,
+            })
+            .collect()
+    }
+}
+
+fn conflict_type_kind(field: &str) -> Option<&str> {
+    let kind = field.strip_prefix("CONFLICT (")?.strip_suffix(')')?;
+    (!kind.is_empty()).then_some(kind)
+}
+
+fn note_conflict_kind(
+    order: &mut Vec<String>,
+    kinds: &mut std::collections::BTreeMap<String, String>,
+    path: &str,
+    kind: &str,
+) {
+    match kinds.get(path).map(String::as_str) {
+        None => {
+            order.push(path.to_owned());
+            kinds.insert(path.to_owned(), kind.to_owned());
+        }
+        Some("contents") if kind != "contents" => {
+            kinds.insert(path.to_owned(), kind.to_owned());
+        }
+        Some(_) => {}
+    }
 }
 
 pub(super) fn git_worktree_dirty(path: &Path) -> bool {

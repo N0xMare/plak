@@ -99,13 +99,26 @@ pub struct MintedCopy {
     pub base: VcsSnapshot,
 }
 
+/// One path a three-way merge could not resolve, and the kind the VCS named.
+///
+/// Git's kind is the first non-`contents` `CONFLICT` type for the path
+/// (`binary`, `modify/delete`, and the rest), otherwise `contents`. A binary
+/// path is reported as both, so `binary` wins. jj names every path `contents`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConflictPath {
+    /// The path as the VCS named it.
+    pub path: String,
+    /// `contents`, `binary`, `modify/delete`, or another `CONFLICT (...)` word.
+    pub kind: String,
+}
+
 /// Why an adopt did not land. Never a success status.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdoptFailure {
     /// Repository publication or checkout needs explicit reconciliation.
     RecoveryRequired(String),
     /// Three-way merge conflicted; the child copy is retained untouched.
-    Conflict(Vec<String>),
+    Conflict(Vec<ConflictPath>),
     /// The target moved under the adopt; nothing was applied. Carries the
     /// current target token.
     TargetChanged(String),

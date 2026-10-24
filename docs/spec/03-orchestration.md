@@ -1735,7 +1735,8 @@ full token, the commit alone, or the content alone. A mismatch is
 
 1. Snapshot the target. A failure here is `mint_unavailable`.
 2. Check `expected_target`.
-3. `git merge-tree --write-tree --merge-base=<base_commit> <target_commit> <candidate_commit>`.
+3. `git merge-tree --write-tree -z --merge-base=<base_commit> <target_commit>
+   <candidate_commit>`.
 4. `git diff --no-ext-diff --no-textconv --name-status -z -M <target_tree>
    <merged_tree>` gives `files_changed` and the receipt's `files`. A rename is
    `R <old> -> <new>`. A zero count lands nothing and reports
@@ -1749,10 +1750,17 @@ full token, the commit alone, or the content alone. A mismatch is
 7. Snapshot the target again for `target_after`. The child copy is untouched.
 
 **Failure classification is typed, never collapsed.** `merge-tree` exiting
-**1** is `merge_conflict{paths, child_path}`, the paths parsed from its
-conflict report. Any **other** non-zero exit — a bad base object, a corrupt ref
-— is `mint_unavailable` carrying a 240-byte stderr excerpt, so a broken
-repository is never reported as a content conflict.
+**1** is `merge_conflict{paths, child_path}`. Each path carries the kind git
+named: the first non-`contents` `CONFLICT` type on that path (`binary`,
+`modify/delete`, and the rest), otherwise `contents`. A binary path is
+reported as both and is `binary`. The message lists `path (kind)`. `N` is the
+full count. When the 512-byte cap would split an entry, the list stops at a
+whole entry and says `+N more`. Duplicate entries are counted once and path
+whitespace is preserved. An overlong child-copy path is shortened on a UTF-8
+boundary, reserving room for the omission marker. The adopting call's facts keep every path,
+uncut. Any **other** non-zero exit — a bad base object, a corrupt ref — is
+`mint_unavailable` carrying a 240-byte stderr excerpt, so a broken repository
+is never reported as a content conflict.
 
 On the `git apply` leg, only stderr matching *"does not match index"*, *"patch
 does not apply"*, or *"already exists"* yields `target_changed`: those mean the
@@ -1765,7 +1773,9 @@ closes the snapshot-to-apply race without taking a second snapshot.
 Adoption merges the immutable recorded base tree, sealed candidate tree, and
 current target tree through `jj-lib`. It does not rebase or squash the child's
 history, and it never includes edits made after sealing. Conflicts return
-`merge_conflict` before any target checkout or transaction publication.
+`merge_conflict` before any target checkout or transaction publication. A jj
+conflict names every path with kind `contents`; git is what names `binary`
+and `modify/delete`.
 
 The target is snapshotted, the expected target checked, and then the working
 copy is locked and re-snapshotted before publication. Working-file changes
@@ -3837,14 +3847,12 @@ as proof that cancellation completed.
 These are shipped gaps, stated so nothing above reads as a promise it does not
 keep.
 
-1. **No `+N` marker on truncated conflict paths.** A `merge_conflict` list is
-   bounded only by the 512-byte message cap and says nothing when it is cut.
-2. **No depth-remaining term on the template card**, and no observed duration.
-3. **A snapshot copy minted over a candidate can answer `git status` with "no
+1. **No depth-remaining term on the template card**, and no observed duration.
+2. **A snapshot copy minted over a candidate can answer `git status` with "no
    usable git dir".** Cosmetic; the seal and adopt paths are unaffected.
-4. **Schema fail-closed message.** A DDL fingerprint drift is refused, but the
+3. **Schema fail-closed message.** A DDL fingerprint drift is refused, but the
    message reads as an ordinary version mismatch.
-5. **Storage cost is real.** Each `workspace=fork` `mutate` copy is a true
+4. **Storage cost is real.** Each `workspace=fork` `mutate` copy is a true
    worktree; a non-mutate fork is a detached snapshot. Inherit mints nothing.
    Workspace crates fingerprint on absolute path and rebuild per
    worktree, and cargo's exclusive target lock serializes a reviewer behind a
