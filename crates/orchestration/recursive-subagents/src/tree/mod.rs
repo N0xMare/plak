@@ -2459,9 +2459,8 @@ fn next_child_id(
     loop {
         let id = format!("c{n}");
         let copy_id = copy_id(tree_id, &id);
-        // A git worktree under this tree-scoped id that no row records is a
-        // crashed mint of this tree: the git mint reclaims it rather than
-        // skipping the id forever.
+        // A jj workspace under this tree-scoped id that no row records is a
+        // crashed mint. Skip the id; this probe does not reclaim it.
         let workspace_dest = launch.join(".plak/workspaces").join(&copy_id);
         if !nodes.contains_key(&id)
             && !workspaces.contains_key(&format!("ws-{id}"))

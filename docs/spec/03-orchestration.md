@@ -1066,7 +1066,7 @@ so the host retries it once per process and marks the row `discarded` on
 success. The explicit discard that reserved such a row already gave up its
 unadopted candidates, so they do not hold the copy. In a Git checkout, a copy
 whose directory and worktree registration are both already gone counts as
-removed; only its `plak/<agent_id>` branch is then dropped.
+removed; only its `plak/<copy_id>` branch is then dropped.
 
 ### 4.9 Error codes
 
@@ -1400,7 +1400,7 @@ skip a `.plak/worktrees/<copy_id>` the tree has no row for.
 
 **Seal.** `snapshot(<child path>)`, then
 `git update-ref refs/plak/<namespace>/candidates/<candidate_id> <commit>` run inside the
-child, so discarding the worktree and the `plak/<agent_id>` branch cannot
+child, so discarding the worktree and the `plak/<copy_id>` branch cannot
 orphan the candidate. The child's own `HEAD` is deliberately **not** advanced;
 adoption never needs a checkout.
 Model-visible candidate ids stay short: `cand-<attempt_id>` (the node id
@@ -1690,7 +1690,7 @@ Three rules govern every landing:
 - **No checkout, no child mutation, no commit.** The child's work arrives in the
   caller's working tree as ordinary changes; new files arrive untracked.
 - **The root checkout MUST NEVER receive a Plak-authored commit.** Children
-  commit freely on `plak/<agent_id>` branches inside `.plak/`. Commit, push, and
+  commit freely on `plak/<copy_id>` branches inside `.plak/`. Commit, push, and
   pull request happen only when the user instructs the root, which then uses the
   `git`, `gh`, or `jj` CLIs itself. **Plak ships no commit or PR tool.**
 - **A conflict never destroys the only copy.** Conflicts stay in the retained

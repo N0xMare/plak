@@ -746,7 +746,8 @@ impl ProductAgentTree {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
                 format!(
-                    "an earlier candidate from that copy ({earlier}) landed in {adopter}; adopt                      {adopter}'s candidate instead, or nothing carries both deltas"
+                    "an earlier candidate from that copy ({earlier}) landed in {adopter}; adopt \
+                     {adopter}'s candidate instead, or nothing carries both deltas"
                 ),
             ));
         }
@@ -791,7 +792,8 @@ impl ProductAgentTree {
             return Err(TopologyError::new(
                 TopologyErrorCode::NotSealed,
                 format!(
-                    "{} sealed that candidate on {} but is running a later attempt; adopt after                      the node finishes, or the two attempts' copies diverge under you",
+                    "{} sealed that candidate on {} but is running a later attempt; adopt after \
+                     the node finishes, or the two attempts' copies diverge under you",
                     candidate.producing_agent_id, candidate.producing_attempt_id
                 ),
             ));
@@ -3799,6 +3801,11 @@ mod tests {
         assert_eq!(error.code, TopologyErrorCode::AdoptNotApplicable);
         assert!(error.message.contains(&hub.agent_id), "{}", error.message);
         assert!(error.message.contains(first.as_str()), "{}", error.message);
+        assert!(
+            !error.message.contains("  "),
+            "the refusal must not run spaces together: {}",
+            error.message
+        );
         // The hub itself may still land its own next candidate.
         assert_eq!(
             tree.adopt_candidate(&hub.agent_id, &adopt_req(&second), None)
@@ -3837,7 +3844,8 @@ mod tests {
                 && error.message.contains("later attempt")
                 && !error
                     .message
-                    .contains("the producing attempt has not finished"),
+                    .contains("the producing attempt has not finished")
+                && !error.message.contains("  "),
             "{}",
             error.message
         );

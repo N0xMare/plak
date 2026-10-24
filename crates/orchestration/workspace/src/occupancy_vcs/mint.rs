@@ -144,8 +144,8 @@ pub(super) fn mint_git_worktree(
             args.push("-B");
             args.push(branch);
         }
-        // an `execute` copy is a read-only source that is thrown
-        // away unless something seals and adopts it, so it takes no branch.
+        // A snapshot copy takes no branch. It is thrown away unless
+        // something seals and adopts it.
         None => args.push("--detach"),
     }
     args.push(dest_text.as_str());
