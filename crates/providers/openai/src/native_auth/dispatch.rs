@@ -242,7 +242,7 @@ pub(crate) fn codex_responses_preflight<'a>(
             },
             ResponsesHeaderBinding::PublicExact {
                 name: HeaderName::from_static("originator"),
-                value: b"plak".to_vec(),
+                value: crate::oauth_pins::CODEX_ORIGINATOR.as_bytes().to_vec(),
             },
             ResponsesHeaderBinding::PublicExact {
                 name: HeaderName::from_static("user-agent"),

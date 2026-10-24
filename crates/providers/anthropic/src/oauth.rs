@@ -675,6 +675,48 @@ pub fn claude_oauth_scope_admits_inference(scope: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Every consent-bearing Claude OAuth fact, hashed: client id, authorize
+    /// and token origins and paths, both scope strings, the redirect and the
+    /// authorize query contract. A digest change is a consent-contract
+    /// change: under spec 01 §7.2 it requires a new profile id, notice
+    /// revision and kill-switch revision in the same edit.
+    #[cfg(feature = "native-auth")]
+    #[test]
+    fn claude_consent_facts_are_bound_to_the_contract_revision() {
+        let authorize_url = claude_authorize_url("<challenge>", "<state>");
+        let mut facts = String::new();
+        for (name, value) in [
+            ("client_id", CLAUDE_OAUTH_CLIENT_ID),
+            ("authorize_origin", CLAUDE_OAUTH_AUTHORIZE_ORIGIN),
+            ("authorize_path", CLAUDE_OAUTH_AUTHORIZE_PATH),
+            ("token_origin", CLAUDE_OAUTH_TOKEN_ORIGIN),
+            ("token_path", CLAUDE_OAUTH_TOKEN_PATH),
+            ("authorize_scopes", CLAUDE_OAUTH_AUTHORIZE_SCOPES),
+            ("refresh_scopes", CLAUDE_OAUTH_REFRESH_SCOPES),
+            ("redirect_uri", CLAUDE_OAUTH_REDIRECT_URI),
+            ("authorize_url", authorize_url.as_str()),
+        ] {
+            facts.push_str(name);
+            facts.push('=');
+            facts.push_str(value);
+            facts.push('\n');
+        }
+        assert_eq!(
+            (
+                CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
+                CLAUDE_OAUTH_NOTICE_REVISION,
+                CLAUDE_OAUTH_KILL_SWITCH_REVISION,
+                plakous_model::sha256_hex(&[facts.as_bytes()]).as_str(),
+            ),
+            (
+                "anthropic.claude.oauth.compat.2026-09-22.r2",
+                "anthropic.claude.oauth.notice.2026-08-20.r1",
+                "anthropic.claude.oauth.kill.2026-08-20.r1",
+                "bd49ccd00968811b1669b46c3d41ab971626ac28215256487d3999dc069cf54b",
+            )
+        );
+    }
+
     #[test]
     fn authorize_url_uses_cai_not_platform_authorize() {
         let url = claude_authorize_url("challenge", "verifier-state");

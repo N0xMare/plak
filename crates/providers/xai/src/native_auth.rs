@@ -3054,7 +3054,7 @@ fn authorization_url(
         code_challenge: pkce.challenge().as_str(),
         state: binding.expose_state(),
         nonce: Some(binding.expose_nonce()),
-        extra_pairs: &[("plan", "generic"), ("referrer", "plak")],
+        extra_pairs: crate::oauth_pins::XAI_AUTHORIZE_EXTRA_PAIRS,
     })
     .map_err(|_| XaiNativeAuthError::Request)
 }

@@ -128,11 +128,7 @@ impl CodexSubscriptionCredentialManager {
             code_challenge: pkce.challenge().as_str(),
             state: state.expose_secret(),
             nonce: None,
-            extra_pairs: &[
-                ("id_token_add_organizations", "true"),
-                ("codex_cli_simplified_flow", "true"),
-                ("originator", "plak"),
-            ],
+            extra_pairs: crate::oauth_pins::CODEX_AUTHORIZE_EXTRA_PAIRS,
         })
         .map_err(|_| NativeCodexAuthError::Binding)?;
         Ok(BrowserLoginAttempt {

@@ -7,6 +7,10 @@ const XAI_REVIEWED_AT_UNIX: u64 = 1_785_456_000;
 
 const XAI_LOOPBACK_PORTS: &[u16] = &[56121];
 
+/// Extra authorization-URL pairs of the Grok login, in wire order.
+pub(crate) const XAI_AUTHORIZE_EXTRA_PAIRS: &[(&str, &str)] =
+    &[("plan", "generic"), ("referrer", "plak")];
+
 pub(crate) const XAI_OAUTH: SubscriptionOAuthPins = SubscriptionOAuthPins {
     client_id: "b1a00492-073a-47ea-816f-4c329264a828",
     auth_origin: "https://auth.x.ai",
@@ -42,8 +46,33 @@ pub(crate) const XAI_PROFILE: CompatibilityProfilePins = CompatibilityProfilePin
 
 #[cfg(test)]
 mod tests {
-    use super::{XAI_OAUTH, XAI_PROFILE, XAI_REVIEWED_AT_UNIX};
+    use super::{XAI_AUTHORIZE_EXTRA_PAIRS, XAI_OAUTH, XAI_PROFILE, XAI_REVIEWED_AT_UNIX};
     use plakous_auth::oauth_pins::{CompatibilityProfilePins, SubscriptionOAuthPins};
+
+    /// Every consent-bearing Grok OAuth fact, hashed. A digest change is a
+    /// consent-contract change: under spec 01 §7.2 it requires a new profile
+    /// id, notice revision and kill-switch revision in the same edit.
+    #[test]
+    fn xai_consent_facts_are_bound_to_the_contract_revision() {
+        let mut facts = XAI_OAUTH.consent_fact_lines();
+        for &(name, value) in XAI_AUTHORIZE_EXTRA_PAIRS {
+            facts.extend(["authorize_extra=", name, "=", value, "\n"]);
+        }
+        assert_eq!(
+            (
+                XAI_PROFILE.profile_id,
+                XAI_PROFILE.notice_revision,
+                XAI_PROFILE.kill_switch_revision,
+                plakous_model::sha256_hex(&[facts.as_bytes()]).as_str(),
+            ),
+            (
+                "xai.grok.compat.2026-07-31.r1",
+                "xai.grok.compat.notice.2026-07-31.r1",
+                "xai.grok.compat.kill.2026-07-31.r1",
+                "3bd089ce47db3b7fae2011bc0250a35c2c56aec773119ac311d4409e7662ba13",
+            )
+        );
+    }
 
     #[test]
     fn xai_exact_provider_pins_are_owned_here() {

@@ -3539,7 +3539,14 @@ revision. The receipt (schema 2) still records the review and expiry dates the
 operator was shown, but they are informational and are not compared; an
 acceptance is current while the profile is active, the tuple matches and the
 acceptance time is not after the clock. Each provider applies the same law to
-the acceptance it is handed. What a pin change requires follows from that:
+the acceptance it is handed. Because no review date forces a new acceptance,
+each vertical's pin tests hash a canonical encoding of its consent-bearing
+OAuth facts (the shared OAuth pin table, or Claude's client id, origins, paths,
+scopes, redirect and authorize query; for Codex also its `originator` and
+authorize-URL pairs; for Grok its authorize-URL pairs) and pin that digest
+together with the profile id, notice and kill-switch revisions, so an edit to
+those facts fails until the revisions are bumped. What a pin change requires
+follows from that:
 
 - An OAuth client id, scope, endpoint, callback, grant or originator/identity
   contract change is a new profile id (the new contract pin date, or `r<N+1>`

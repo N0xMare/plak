@@ -58,6 +58,68 @@ impl SubscriptionOAuthPins {
     pub const fn primary_loopback_port(self) -> u16 {
         self.loopback_ports[0]
     }
+
+    /// Canonical encoding of every consent-bearing fact in this table: one
+    /// `name=value` line per field in declaration order, `-` for an absent
+    /// value. Provider fingerprint tests hash it so that a pin edit without a
+    /// contract-revision bump fails (spec 01 §7.2).
+    #[must_use]
+    pub fn consent_fact_lines(self) -> String {
+        let Self {
+            client_id,
+            auth_origin,
+            oidc_discovery_url,
+            scopes,
+            authorize_path,
+            token_path,
+            revoke_path,
+            jwks_path,
+            userinfo_path,
+            device_authorization_path,
+            device_token_path,
+            device_verification_path,
+            device_redirect_path,
+            browser_callback_path,
+            loopback_redirect_uri,
+            loopback_authority,
+            loopback_ports,
+        } = self;
+        let ports = loopback_ports
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let lines: [(&str, &str); 17] = [
+            ("client_id", client_id),
+            ("auth_origin", auth_origin),
+            ("oidc_discovery_url", oidc_discovery_url.unwrap_or("-")),
+            ("scopes", scopes),
+            ("authorize_path", authorize_path),
+            ("token_path", token_path),
+            ("revoke_path", revoke_path),
+            ("jwks_path", jwks_path),
+            ("userinfo_path", userinfo_path),
+            ("device_authorization_path", device_authorization_path),
+            ("device_token_path", device_token_path.unwrap_or("-")),
+            (
+                "device_verification_path",
+                device_verification_path.unwrap_or("-"),
+            ),
+            ("device_redirect_path", device_redirect_path.unwrap_or("-")),
+            ("browser_callback_path", browser_callback_path),
+            ("loopback_redirect_uri", loopback_redirect_uri),
+            ("loopback_authority", loopback_authority),
+            ("loopback_ports", &ports),
+        ];
+        let mut encoded = String::new();
+        for (name, value) in lines {
+            encoded.push_str(name);
+            encoded.push('=');
+            encoded.push_str(value);
+            encoded.push('\n');
+        }
+        encoded
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +300,20 @@ mod tests {
         assert!(!pins.is_acceptance_current(now, now));
         assert!(!pins.is_acceptance_current_at(now, now, false));
         assert!(!pins.is_acceptance_current_until(now, now, pins.expires_at_unix));
+    }
+
+    #[test]
+    fn consent_fact_lines_encode_every_field_in_order() {
+        let lines = super::browser_test_pins().consent_fact_lines();
+        assert_eq!(lines.lines().count(), 17);
+        assert!(
+            lines.starts_with(
+                "client_id=browser-test-client\nauth_origin=https://browser.example/\n"
+            )
+        );
+        assert!(lines.contains("\noidc_discovery_url=-\n"));
+        assert!(lines.ends_with("loopback_authority=localhost:1455\nloopback_ports=1455,1457\n"));
+        assert_ne!(lines, super::oidc_test_pins().consent_fact_lines());
     }
 
     #[test]

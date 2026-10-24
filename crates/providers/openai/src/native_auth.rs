@@ -105,7 +105,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 use zeroize::{Zeroize as _, Zeroizing};
 
-use crate::oauth_pins::{CODEX_OAUTH, CODEX_PROFILE};
+use crate::oauth_pins::{CODEX_OAUTH, CODEX_ORIGINATOR, CODEX_PROFILE};
 use crate::{
     AuthError, CodexSubscriptionRouteConfig, EndpointOrigin, NativeCodexCatalogWitness,
     NativeCodexCredentialAuthority, NativeCodexForcedRefresh, NativeCodexPreflight,
@@ -1235,7 +1235,7 @@ impl NativeCodexAuthorization {
         headers.insert(HeaderName::from_static("chatgpt-account-id"), account);
         headers.insert(
             HeaderName::from_static("originator"),
-            HeaderValue::from_static("plak"),
+            HeaderValue::from_static(CODEX_ORIGINATOR),
         );
         headers.insert(
             HeaderName::from_static("user-agent"),
@@ -1787,7 +1787,7 @@ fn base_headers() -> HeaderMap {
     );
     headers.insert(
         HeaderName::from_static("originator"),
-        HeaderValue::from_static("plak"),
+        HeaderValue::from_static(CODEX_ORIGINATOR),
     );
     headers.insert(
         HeaderName::from_static("user-agent"),
