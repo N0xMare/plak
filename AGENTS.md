@@ -79,7 +79,10 @@ here, while publication dry runs and uploads require more than a third of each
 review window remaining). Check runs all but rustdoc, durability and package; platform runs
 static without the platform-independent structure checkers, builds and the
 three lanes; full runs every group, and a full pass on a clean tree records that
-tree as the evidence `just publish` requires.
+tree as the evidence `just publish` requires. Later commits that change only
+`CHANGELOG.md`, `tests/live/STATUS.md`, `docs/spec/**` (not spec 07) or
+`docs/user-guide/**` keep that evidence; a `README.md` change also needs
+`just steps package` on the new tree (spec 06 §6.5).
 `just fast` maps the working-tree diff against HEAD to packages (a root Cargo
 input means all of them), runs static and the parallel lane over `rdeps(...)`
 of those packages; it is iteration evidence, not a substitute for check. Every

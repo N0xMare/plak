@@ -154,6 +154,10 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def evidence(self):
         return self.root / 'custom target' / 'gate-evidence' / 'full'
 
+    @property
+    def package_evidence(self):
+        return self.root / 'custom target' / 'gate-evidence' / 'package'
+
     def assert_feature_builds_deny_warnings(self, calls):
         builds = [c for c in calls if c['args'][0] == 'build']
         self.assertEqual(len(builds), 2)
@@ -249,16 +253,17 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def test_static_reports_every_failed_step_and_later_groups_still_run(self):
         self.env['GATE_CARGO_FAILURES'] = json.dumps({'fmt': 3, 'clippy': 4})
         self.env['GATE_PYTHON_FAILURES'] = json.dumps({
-            'check_workspace.py': 5, 'check_features.py': 6, 'run_tooling_tests.py': 7,
+            'check_workspace.py': 5, 'check_features.py': 6, 'gate_evidence.py': 9,
+            'run_tooling_tests.py': 7,
         })
         result, calls, scripts = self.run_gate('--steps', 'static,contracts,tooling')
         self.assertEqual(result.returncode, 1)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'],
                          ['fmt', 'fetch', 'clippy'])
         self.assertEqual([Path(s[0]).name for s in scripts if s[0].endswith('.py')],
-                         ['check_workspace.py', 'check_features.py', 'check_public_compile.py',
-                          'run_tooling_tests.py'])
-        self.assertIn('failed static steps: fmt workspace features clippy', result.stdout)
+                         ['check_workspace.py', 'check_features.py', 'gate_evidence.py',
+                          'check_public_compile.py', 'run_tooling_tests.py'])
+        self.assertIn('failed static steps: fmt workspace features evidence clippy', result.stdout)
         self.assertIn('failed groups: static tooling', result.stdout)
         self.assertEqual([line.split()[2] for line in result.stdout.splitlines()
                           if line.startswith('== time: ')], ['static', 'contracts', 'tooling'])
@@ -434,7 +439,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(records[fmt + 1]['args'], ['fetch', '--locked', '--offline'])
         self.assertEqual(records[fmt + 2]['python'], ['tools/checks/check_workspace.py'])
         self.assertEqual(records[fmt + 3]['python'], ['tools/checks/check_features.py'])
-        self.assertEqual(records[fmt + 4]['args'][0], 'clippy')
+        self.assertEqual(records[fmt + 4]['python'], ['tools/release/gate_evidence.py', 'audit'])
+        self.assertEqual(records[fmt + 5]['args'][0], 'clippy')
 
     def test_cold_cache_fetches_locked_online_before_structure_checks(self):
         self.env['GATE_COLD_CACHE'] = '1'
@@ -520,10 +526,17 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
 
     def test_only_a_passing_full_run_on_a_clean_tree_records_evidence(self):
         tree = self.commit_fixture()
-        for tier in (('--steps', 'package'), ()):
-            result, _, _ = self.run_gate(*tier)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse(self.evidence.exists(), tier)
+        result, _, _ = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.evidence.exists())
+        self.assertFalse(self.package_evidence.exists())
+        # A passing package group alone records package evidence, never full.
+        result, _, _ = self.run_gate('--steps', 'package')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.evidence.exists())
+        self.assertEqual(self.package_evidence.read_text(), tree + '\n')
+        self.assertIn(f'evidence: package group passed on tree {tree}', result.stdout)
+        self.package_evidence.unlink()
         self.env['GATE_PUBLISH_FAILURE'] = '1'
         result, _, _ = self.run_gate('--full')
         self.assertNotEqual(result.returncode, 0)
@@ -538,3 +551,4 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, _, _ = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.evidence.read_text(), tree + '\n')
+        self.assertEqual(self.package_evidence.read_text(), tree + '\n')

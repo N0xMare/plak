@@ -179,6 +179,8 @@ run_group() {
         python3 tools/checks/check_workspace.py || failed_steps="${failed_steps:+$failed_steps }workspace"
         echo "== structure: features (static) =="
         python3 tools/checks/check_features.py || failed_steps="${failed_steps:+$failed_steps }features"
+        echo "== structure: evidence allowlist =="
+        python3 tools/release/gate_evidence.py audit || failed_steps="${failed_steps:+$failed_steps }evidence"
       fi
       echo "== clippy =="
       cargo clippy --locked --workspace --all-features --all-targets ${target_args[@]+"${target_args[@]}"} -- -D warnings \
@@ -228,9 +230,12 @@ run_group() {
 }
 
 # A passing full tier on a clean tree records that tree as publication
-# evidence (scripts/publish.sh refuses a tree without it).
+# evidence, and a passing package group (full, or `--steps` naming it) records
+# package evidence. scripts/publish.sh refuses a tree neither covers
+# (tools/release/gate_evidence.py: documentation-only deltas keep the full
+# evidence; a packaged-file delta also needs package evidence for HEAD).
 evidence_tree=''
-if [[ "$tier" == full ]]; then
+if [[ "$tier" == full || ",$selection," == *",package,"* ]]; then
   evidence_tree="$(python3 tools/checks/vcs_listing.py evidence-tree)"
 fi
 
@@ -276,12 +281,16 @@ fi
 if [[ -n "$evidence_tree" ]]; then
   if [[ "$(python3 tools/checks/vcs_listing.py evidence-tree)" == "$evidence_tree" ]]; then
     mkdir -p "$target_dir/gate-evidence"
-    printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/full"
-    echo "== evidence: full gate passed on tree $evidence_tree =="
+    printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/package"
+    echo "== evidence: package group passed on tree $evidence_tree =="
+    if [[ "$tier" == full ]]; then
+      printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/full"
+      echo "== evidence: full gate passed on tree $evidence_tree =="
+    fi
   else
     echo "== no evidence: the tree changed during the run ==" >&2
   fi
-elif [[ "$tier" == full ]]; then
+elif [[ "$tier" == full || ",$selection," == *",package,"* ]]; then
   echo "== no evidence: evidence requires a clean git tree or unconflicted colocated jj root with a .git directory =="
 fi
 echo "== ok: $tier gate passed =="

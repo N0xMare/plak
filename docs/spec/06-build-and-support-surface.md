@@ -1114,7 +1114,7 @@ a debug build per crate selection and is roughly 20 GB.
 
 | Invocation | Preconditions | Effect |
 | --- | --- | --- |
-| `scripts/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` | Package and verify; nothing uploaded |
+| `scripts/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` or a tree that differs from it only in documentation (below) | Package and verify; nothing uploaded |
 | `scripts/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification |
 | `scripts/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
 
@@ -1140,8 +1140,43 @@ in linked Git or secondary JJ workspaces; their package dry run still uses
 the shared VCS listing. Copies reuse the launch's `.dev-tools` when they have
 none of their own. Install/relink builds likewise require a `.git` directory.
 The evidence file is written only by a passing `just full` that began and
-ended on the same clean Git tree or unconflicted colocated JJ tree (chapter 05 §1),
-so an upload always follows a full gate on exactly the bytes it packages. Publishing is a maintainer act;
+ended on the same clean Git tree or unconflicted colocated JJ tree (chapter 05 §1).
+`tools/release/gate_evidence.py verify` accepts that evidence for tree T at
+HEAD when T is HEAD's tree, or when the plumbing delta
+(`git diff-tree -r --no-renames --ignore-submodules=none T HEAD^{tree}`, which
+no diff configuration can narrow) touches nothing but:
+
+- documentation no gate reads: `tests/live/STATUS.md`, `CHANGELOG.md`,
+  `docs/spec/**` and `docs/user-guide/**`, except
+  `docs/spec/07-config-reference.md`, which `plak` configuration tests read;
+  and
+- `README.md`, which `readme.workspace` packages and no test reads, when
+  `gate-evidence/package` also names HEAD's tree (rerun `just steps package`
+  on HEAD).
+
+The changed documentation must still pass the tracked-file hygiene scan of
+the workspace checker, which `verify` reruns on the delta. Any other path, a
+symlink or submodule entry on either side, evidence that is not a 40- or
+64-hex tree id git knows, differing trees with no readable delta, or an
+unreadable state refuses. `verify` prints T, HEAD's tree and every changed
+path with its class, so the decision is auditable. On the `README.md` path the
+publish run's own packaging still packages and verifies the whole cohort at
+HEAD.
+
+The static group's `structure: evidence allowlist` step (`gate_evidence.py
+audit`) keeps the allowlist honest as a best-effort lint. It flags, in every
+tracked Rust, Python, shell, manifest, recipe or workflow file outside a
+comment or URL: an allowlisted path, a bare path-component literal (`"docs"`,
+`"spec"`, `"user-guide"`, `"STATUS"`, including `"../../docs"`), `CHANGELOG`,
+`README`, and Markdown globs (`*.md`). Each hit must be listed by its exact
+text for its file with a reason, or be the exact excluded path its reviewed
+reader reads; a listed text that no longer occurs fails as stale. It also
+fails on a root README read through `include_str!` (multi-line forms
+included), a `CARGO_MANIFEST_DIR` join or the repository root. A path built in
+a way the lint cannot see is still covered by the rule itself: only the listed
+documentation is inert, and every other delta invalidates the evidence. So an
+upload always follows a full gate on bytes that differ from the packaged ones
+at most in inert documentation. Publishing is a maintainer act;
 no gate or workflow uploads. The maintainer runs `just full` and then
 `just publish --execute` on a gated host, from the tagged tree whose release
 tarballs §6.6 builds.

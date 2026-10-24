@@ -2,7 +2,9 @@
 # Package, verify and (only when asked) publish the crate cohort to crates.io.
 # Usage: scripts/publish.sh [--gate | --execute]
 #   (none)     dry run: refuse a dirty tree or one without passing `just full`
-#              evidence, then package and verify every publishable crate
+#              evidence (for HEAD, or for a tree that differs from HEAD only in
+#              documentation; see tools/release/gate_evidence.py), then package
+#              and verify every publishable crate
 #   --gate     package and verify without clean-tree/full-evidence preconditions
 #   --execute  the dry run, then `cargo publish` each crate in dependency order
 #              with CARGO_REGISTRY_TOKEN, waiting for each to appear in the
@@ -19,7 +21,7 @@ case "${1:-}" in
   '') ;;
   --gate) mode=gate; shift ;;
   --execute) mode=execute; shift ;;
-  -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
 esac
 if [[ $# -gt 0 ]]; then echo "unknown argument: $1" >&2; exit 2; fi
 
@@ -41,11 +43,8 @@ if [[ "$mode" != gate ]]; then
   if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
     refuse "the working tree is dirty; publish only a committed tree"
   fi
-  tree="$(git rev-parse 'HEAD^{tree}')"
-  evidence="$target_dir/gate-evidence/full"
-  if [[ ! -f "$evidence" || "$(cat "$evidence")" != "$tree" ]]; then
-    refuse "no passing \`just full\` evidence for tree $tree in $evidence"
-  fi
+  # Prints the evidence tree, HEAD's tree and any documentation-only delta.
+  python3 tools/release/gate_evidence.py verify --target-dir "$target_dir" || exit 1
 fi
 if [[ "$mode" == execute && -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
   refuse "--execute needs CARGO_REGISTRY_TOKEN"

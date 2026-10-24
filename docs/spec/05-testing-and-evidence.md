@@ -508,7 +508,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py` and `check_features.py` (fetch and structure checkers not in platform), then workspace clippy |
+| `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace clippy |
 | `builds` | Workspace default-feature build; Plak maintainer-feature build. Both deny rustc warnings |
 | `rustdoc` | Workspace all-features rustdoc, denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
@@ -533,7 +533,10 @@ platform-independent structure checkers and contracts. Full is their union
 plus rustdoc and the package dry run; a passing full run that started and ended
 on the same clean git tree writes that tree id to
 `$CARGO_TARGET_DIR/gate-evidence/full` (default `target/`), the evidence
-`scripts/publish.sh` requires. `--steps` runs exactly its named groups, in canonical order,
+`scripts/publish.sh` requires. Any passing run that includes the package group
+on a clean tree (full, or `--steps` naming `package`) writes its tree id to
+`gate-evidence/package` beside it. Chapter 06 §6.5 says which later trees that
+evidence still covers. `--steps` runs exactly its named groups, in canonical order,
 rejects unknown or empty groups, and implies no other group; test groups still
 prepare their real Monty-worker prerequisite. Independent runners must use
 separate checkout, target and temporary roots. Each group prints a

@@ -102,7 +102,9 @@ class PublishScriptTests(unittest.TestCase):
         self.log = base / "cargo.jsonl"
         for relative in ("scripts/publish.sh", "tools/release/publish_plan.py",
                          "tools/release/publish_shape.py", "tools/release/review_expiry.py",
-                         "tools/release/prefetch_packages.py", "tools/checks/vcs_listing.py"):
+                         "tools/release/prefetch_packages.py", "tools/release/gate_evidence.py",
+                         "tools/checks/vcs_listing.py", "tools/checks/check_workspace.py",
+                         "tools/checks/plakous_policy.py"):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.repo / relative)
         # Freeze only this copied fixture's invocation, never the maintainer CLI.
@@ -222,6 +224,75 @@ class PublishScriptTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(f"no passing `just full` evidence for tree {self.tree}", result.stderr)
                 self.assertEqual(calls, [])
+
+    def commit(self, files: dict[str, str]) -> str:
+        for relative, text in files.items():
+            path = self.repo / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "delta")
+        return self.git("rev-parse", "HEAD^{tree}")
+
+    def test_documentation_only_delta_keeps_full_evidence_and_is_audited(self) -> None:
+        self.record_evidence()
+        head = self.commit({
+            "docs/spec/01-plakous-library.md": "spec\n",
+            "docs/user-guide/cli.md": "guide\n",
+            "CHANGELOG.md": "changes\n",
+            "tests/live/STATUS.md": "status\n",
+        })
+        result, calls = self.publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertIn(f"publish: evidence: `just full` passed on tree {self.tree}; HEAD tree {head}",
+                      result.stdout)
+        for path in ("CHANGELOG.md", "docs/spec/01-plakous-library.md", "docs/user-guide/cli.md",
+                     "tests/live/STATUS.md"):
+            self.assertIn(f"publish:   delta docs: {path}", result.stdout)
+        self.assertIn("the delta is documentation only", result.stdout)
+
+    def test_packaged_documentation_delta_needs_package_evidence_for_head(self) -> None:
+        self.record_evidence()
+        head = self.commit({"README.md": "new readme\n", "CHANGELOG.md": "changes\n"})
+        result, calls = self.publish()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("publish:   delta package: README.md", result.stderr)
+        self.assertIn("rerun `just steps package` on this tree", result.stderr)
+        self.assertEqual(calls, [])
+        package = self.target / "gate-evidence" / "package"
+        package.write_text(f"{self.tree}\n")
+        result, calls = self.publish()
+        self.assertEqual(result.returncode, 1)
+        package.write_text(f"{head}\n")
+        result, calls = self.publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"package group passed on tree {head}", result.stdout)
+        self.assertEqual(len(calls), 1)
+
+    def test_any_other_delta_or_an_excluded_spec_invalidates_full_evidence(self) -> None:
+        for files in ({"crates/zeta/src/lib.rs": "// changed\n"},
+                      {"docs/spec/07-config-reference.md": "keys\n"},
+                      {"docs/local/notes.md": "private\n"},
+                      {"docs/spec/05.md": "spec\n", "scripts/extra.sh": "true\n"}):
+            with self.subTest(files=files):
+                self.record_evidence()
+                self.commit(files)
+                result, calls = self.publish()
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("changes gate inputs", result.stderr)
+                self.assertIn("rerun `just full`", result.stderr)
+                self.assertEqual(calls, [])
+
+    def test_documentation_delta_still_passes_tracked_file_hygiene(self) -> None:
+        self.record_evidence()
+        # Split so this file itself carries no home path.
+        self.commit({"docs/spec/01.md": "see /" + "Users/maintainer/notes\n"})
+        result, calls = self.publish()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("docs/spec/01.md:1: absolute home path", result.stderr)
+        self.assertIn("the delta fails hygiene", result.stderr)
+        self.assertEqual(calls, [])
 
     def test_dry_run_packages_the_published_shape_in_dependency_order(self) -> None:
         self.record_evidence()
