@@ -1,6 +1,6 @@
 """Which pseudomux commit the frozen pmux companions were built from.
 
-`just fetch-harbor-pmux` builds the Full-cell binaries with `docker buildx`
+`just harbor pmux` builds the Full-cell binaries with `docker buildx`
 from a pseudomux checkout passed as a *directory context*. A directory context
 carries no git history, so the artifacts that land in
 `.plak/installed/<arch>/pmux/` used to record nothing about their source: the
@@ -176,7 +176,7 @@ def read_manifest(pmux_root: Path) -> dict[str, Any]:
     if not path.is_file():
         raise PmuxProvenanceError(
             f"missing {path}; these pmux binaries record no pseudomux commit. "
-            "Run `just fetch-harbor-pmux` to rebuild and record one"
+            "Run `just harbor pmux` to rebuild and record one"
         )
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -216,7 +216,7 @@ def require_pinned_provenance(
             raise PmuxProvenanceError(
                 f"pmux binaries were built from pseudomux {commit[:7] or '?'}, "
                 f"but the eval plane pins {PSEUDOMUX_PIN_SHORT}; refetch with "
-                f"`just fetch-harbor-pmux`, or set {UNPINNED_OVERRIDE_ENV}=1 "
+                f"`just harbor pmux`, or set {UNPINNED_OVERRIDE_ENV}=1 "
                 "to run an explicitly off-pin lane"
             )
         if dirty:

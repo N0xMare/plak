@@ -751,9 +751,11 @@ Python host is unavailable: <error>; set PLAK_MONTY_WORKER or place monty beside
 `native-ptc` and `js-ptc` need `plakous-js-host`; `py-ptc` needs a `monty` worker.
 A missing sidecar fails closed rather than degrading to `direct`.
 
-`just build` and `just build-release` build and symlink `plakous-js-host` next to
-`plak`, so the usual cause is running a `plak` from somewhere else — a copy, or
-a stale `~/.cargo/bin/plak`. Rebuild, or point `PLAK_JS_HOST` at the sidecar.
+`just build debug` and `just build release` build `plakous-js-host` and `monty`
+into the same Cargo output directory as `plak`. `just install release` and
+`just install maintainer` install a snapshot with those workers beside `plak`.
+The usual cause is running a `plak` from somewhere else — a copy, or a stale
+`~/.cargo/bin/plak`. Rebuild and install, or point `PLAK_JS_HOST` at the sidecar.
 Build the parent with `cargo build --release --locked -p plak`, then both workers
 with `cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker`.
 Separate invocations keep Monty runtime features out of `plak`.
@@ -827,7 +829,7 @@ the child's copy intact. See
 ## The TUI will not start
 
 `plak` needs an interactive terminal and refuses a pipe. If it starts but feels
-sluggish, check you are running the release build: `just build` prints a
+sluggish, check you are running the release build: `just build debug` prints a
 warning for debug binaries precisely because their cold start is visible.
 
 ## Restored sessions with a paused queue

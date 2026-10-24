@@ -34,7 +34,7 @@ def require_tuple(account: str, model: str, effort: str) -> None:
 def require_js_host(path: Path) -> None:
     if not path.is_file():
         raise ArgumentError(
-            f"missing JavaScript host {path}; run `just build-harbor-agent`"
+            f"missing JavaScript host {path}; run `just harbor build-agent`"
         )
 
 

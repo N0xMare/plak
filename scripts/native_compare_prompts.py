@@ -76,7 +76,7 @@ CLAUDE_TUI_BLOCKER = (
     "claude: interactive Claude Code TUI only (never -p / --print). "
     "Print/SDK is cc_entrypoint=sdk-cli and a different identity/tool pack than "
     "Plak's Claude OAuth costume (cc_entrypoint=cli). "
-    "Use just native-compare-prompts claude for local capture. "
+    "Use just prompts native-compare claude for local capture. "
     "--from accepts an existing CLI request body log; ordinary debug logs "
     "may not contain request bodies."
 )

@@ -2,7 +2,7 @@
 # Install a Plak release from GitHub Releases into ~/.local without sudo:
 #   curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
 # PLAK_VERSION=0.0.2 selects a release (default: latest). The layout is the one
-# `just install` writes: an immutable snapshot under ~/.local/lib/plak/release,
+# `just install release` writes: an immutable snapshot under ~/.local/lib/plak/release,
 # content-addressed workers under ~/.local/lib/plak/sidecars, and links in
 # ~/.local/bin. PLAK_RELEASE_BASE replaces https://github.com/<repo> (mirrors,
 # tests). When `gh` is installed and signed in, the tarball's GitHub build

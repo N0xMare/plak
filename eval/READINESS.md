@@ -53,7 +53,7 @@ plumbing trial per selected arm), A/A (8 tasks x 3 blocks x 2 identical Plak
 labels = 48 trials), then the Codex pair (16 x 5 x 2 = 160 trials). A/A must
 retain all eight tasks, cover zero in the paired CI and have <5% infra per arm.
 The Codex recipe refuses a missing, changed, failed or mismatched A/A receipt.
-No subscription usage or other inference is part of `harbor-test`.
+No subscription usage or other inference is part of `just harbor test`.
 
 The recorder is an HTTP/1.1 CONNECT proxy, not a WebSocket recorder. A CLI that
 bypasses proxy variables or uses an unsupported transport must fail calibration;

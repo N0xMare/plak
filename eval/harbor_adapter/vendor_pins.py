@@ -134,7 +134,7 @@ def load_manifest(
     path = vendor_root(root, arch) / "manifest.json"
     if not path.is_file():
         raise VendorArtifactError(
-            f"missing {path}; run `just fetch-harbor-vendor-clis`"
+            f"missing {path}; run `just harbor vendor-clis`"
         )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -157,7 +157,7 @@ def require_frozen_artifacts(
     if recorded != selected:
         raise VendorArtifactError(
             f"vendor manifest in {base} is {recorded!r}, but the eval plane is "
-            f"{selected!r}; run `just fetch-harbor-vendor-clis` with "
+            f"{selected!r}; run `just harbor vendor-clis` with "
             f"HARBOR_ARCH={selected}"
         )
     tarball = node_tarball_name(selected)
@@ -180,7 +180,7 @@ def require_frozen_artifacts(
         node_file = base / str(node.get("file") or tarball)
         if not node_file.is_file():
             raise VendorArtifactError(
-                f"missing {node_file}; run `just fetch-harbor-vendor-clis`"
+                f"missing {node_file}; run `just harbor vendor-clis`"
             )
 
     clis = manifest.get("clis")
@@ -196,7 +196,7 @@ def require_frozen_artifacts(
     archive = base / str(entry.get("file") or cli_archive_name(cli))
     if not archive.is_file():
         raise VendorArtifactError(
-            f"missing {archive}; run `just fetch-harbor-vendor-clis`"
+            f"missing {archive}; run `just harbor vendor-clis`"
         )
     if cli == "grok":
         # The only vendor CLI shipped as a bare native binary; the npm

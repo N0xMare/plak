@@ -14,7 +14,7 @@ clone passes with no artifacts present.
 ## Render
 
 ```text
-just prompts
+just prompts render
 ```
 
 Equivalent: `PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_`.
@@ -34,7 +34,7 @@ writes nothing.
 | `target/prompt-renders/rendered/wire/<route>.request.json` | Strict, parseable first-turn body as the protocol kernel serializes it (Responses / Chat Completions / Messages) |
 | `target/prompt-renders/rendered/wire/<route>.headers.json` | Dialect-pinned headers and approximate body size |
 | `target/prompt-renders/rendered/lifecycle/*.md` | Post-first-turn surfaces: `tool-results`, `compaction`, `child-mail`, `mid-session` |
-| the gitignored local capture directory | Gitignored vendor CLI captures (`claude` / `codex` / `grok` / `opencode`) from `just native-compare-prompts`; witnesses for comparison, not Plak runtime |
+| the gitignored local capture directory | Gitignored vendor CLI captures (`claude` / `codex` / `grok` / `opencode`) from `just prompts native-compare`; witnesses for comparison, not Plak runtime |
 
 86 routes: 76 subscription and OpenRouter routes (providers × compositions ×
 topology, minus `native-ptc` where no native PTC is enrolled) and 10 direct API routes, rendered as
@@ -51,7 +51,7 @@ body; prefer the wire JSON when you need strict JSON.
 ## Diff a change
 
 ```text
-just prompts-diff
+just prompts diff
 ```
 
 That copies the current render to `target/prompt-renders.prev`, re-renders, and
@@ -65,7 +65,7 @@ moved. That failure is the point: model-visible text changes deliberately.
 After reviewing the diff, re-pin:
 
 ```text
-just prompts-pins
+just prompts pins
 ```
 
 That prints the new `PROMPT_RENDER_PINS` and `LIFECYCLE_RENDER_PINS` rows
@@ -75,7 +75,7 @@ That prints the new `PROMPT_RENDER_PINS` and `LIFECYCLE_RENDER_PINS` rows
 
 ## Where to change what the model sees
 
-Never edit a rendered artifact — `just prompts` overwrites it from Rust.
+Never edit a rendered artifact — `just prompts render` overwrites it from Rust.
 
 | What the model sees | Where to change it |
 | --- | --- |
@@ -105,21 +105,21 @@ Never edit a rendered artifact — `just prompts` overwrites it from Rust.
 ## Native CLI captures
 
 ```text
-just native-compare-prompts
+just prompts native-compare
 ```
 
 Captures all four installed clients into the gitignored local capture directory. Pass vendor
 names to select a subset, or `--output` to choose another local artifact directory:
 
 ```text
-just native-compare-prompts claude
-just native-compare-prompts codex grok
+just prompts native-compare claude
+just prompts native-compare codex grok
 ```
 
 Each vendor directory contains `hello.md`, the strict `hello.request.json`,
 redacted `hello.headers.json`, and `pin.json` identifying the installed binary
 version and capture conditions. Plak's matching render remains under
-`target/prompt-renders/rendered/`; run `just prompts` to regenerate it.
+`target/prompt-renders/rendered/`; run `just prompts render` to regenerate it.
 These are **private local request artifacts**, not shareable fixtures: even
 with secret and identifier redaction, they contain full prompt and tool content,
 local paths and host metadata. Never commit or attach them; manually review

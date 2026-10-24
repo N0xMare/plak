@@ -3056,7 +3056,7 @@ a 16-hex-digit prefix of the key generation digest. The provider facts digest
 binds the id, effort ladder and output limit only. The listing function has no
 dial-origin parameter; an installed exchange observer sees its request.
 
-A maintainer census (`scripts/api_model_census.py`, `just api-census`; opt-in,
+A maintainer census (`scripts/api_model_census.py`, `just live census`; opt-in,
 networked, not a gate) regenerates these bundled tables from each provider's
 model list and docs. It reports new, removed and changed windows, limits,
 efforts, thresholds, features and lifecycle. `--write` does not mark a model

@@ -1451,11 +1451,11 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertIn('--n-concurrent "$concurrent"', rung_a)
 
     def test_just_recipes_forward_to_eval_script(self) -> None:
-        justfile = (ROOT / "justfile").read_text()
+        harbor = (ROOT / "harbor.just").read_text()
         for command in ("rung-a.sh", "rung-b.sh", "smoke.sh", "harbor.sh"):
-            self.assertIn("eval/scripts/" + command, justfile)
-        self.assertIn("fetch-harbor-tools:", justfile)
-        self.assertIn("harbor-test:", justfile)
+            self.assertIn("eval/scripts/" + command, harbor)
+        self.assertIn("\ntools:\n", harbor)
+        self.assertIn("\ntest:\n", harbor)
         for name in ("rung-a.sh", "rung-b.sh", "smoke.sh", "harbor.sh"):
             script = (ROOT / "eval/scripts" / name).read_text()
             self.assertIn("harbor_adapter.campaign", script)
@@ -2185,7 +2185,7 @@ class FrozenPmuxContractTests(unittest.TestCase):
                 (root / name).write_bytes(_elf_header(0x3E) + b"\x00" * 64)
             with self.assertRaises(PmuxArtifactError) as caught:
                 require_frozen_pmux(root, "amd64")
-            self.assertIn("just fetch-harbor-pmux", str(caught.exception))
+            self.assertIn("just harbor pmux", str(caught.exception))
 
     def test_claude_file_store_fails_closed_without_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3044,9 +3044,9 @@ class TerminationSurfaceTests(unittest.TestCase):
         self.assertIn("--write", text)
         self.assertIn("--json", text)
         self.assertIn("termination-summary.json", text)
-        justfile = (ROOT / "Justfile").read_text()
-        self.assertIn("harbor-summarize", justfile)
-        self.assertIn("eval/scripts/summarize.py", justfile)
+        harbor = (ROOT / "harbor.just").read_text()
+        self.assertIn("\nsummarize *ARGS:", harbor)
+        self.assertIn("eval/scripts/summarize.py", harbor)
         rung_a = (ROOT / "eval" / "scripts" / "rung-a.sh").read_text()
         self.assertIn("summarize_jobs", rung_a)
 
@@ -3382,7 +3382,7 @@ class PmuxProvenanceTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             with self.assertRaises(PmuxProvenanceError) as caught:
                 read_manifest(root)
-            self.assertIn("just fetch-harbor-pmux", str(caught.exception))
+            self.assertIn("just harbor pmux", str(caught.exception))
             self.assertIn(MANIFEST_NAME, str(manifest_path(root)))
 
     def test_pinned_provenance_round_trips(self) -> None:

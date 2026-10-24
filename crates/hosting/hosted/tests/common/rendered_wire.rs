@@ -1294,7 +1294,7 @@ pub(crate) mod suite {
         }
         assert!(
             failures.is_empty(),
-            "rendered wire drift (inspect with `just prompts-diff`):\n\n{}",
+            "rendered wire drift (inspect with `just prompts diff`):\n\n{}",
             failures.join("\n\n")
         );
     }

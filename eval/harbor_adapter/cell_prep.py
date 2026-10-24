@@ -99,7 +99,7 @@ async def prepare_cell(agent: Any, environment: Any, arch: str) -> None:
     path = installed_root(arch) / "tools" / "rg"
     digest = digest_file(path)
     if digest is None or digest.sha256 != RG_PINS[arch][2]:
-        raise PreflightError("missing or unpinned cell rg; run just fetch-harbor-tools")
+        raise PreflightError("missing or unpinned cell rg; run just harbor tools")
     checked = await environment.exec(command=CELL_REQUIREMENTS)
     if checked.return_code:
         raise PreflightError("freeze a root cell with the shared packages before running any arm")

@@ -71,10 +71,10 @@ From the repository root, with Rust **1.99.0**, a platform C/C++ toolchain,
 available, build and install the full Plak product and both evaluator workers:
 
 ```sh
-just install
+just install release
 ```
 
-`just install` builds a plain release `plak`, `plakous-js-host`, and `monty`,
+`just install release` builds a plain release `plak`, `plakous-js-host`, and `monty`,
 checks their linkage, and installs them as an immutable snapshot under
 `~/.local/lib/plak/release` with links named `plak`, `plakous-js-host`, and
 `monty` in `~/.local/bin` (put that directory on your PATH). Existing non-Plak
@@ -93,14 +93,15 @@ Build the parent and workers in separate Cargo invocations to keep Monty runtime
 features out of `plak`. Bare `cargo build` selects only `plak`. The commands
 produce `plak`, `plakous-js-host`, and `monty` in
 `target/release/` (or the selected Cargo target directory). Run
-`target/release/plak` directly. Maintainer builds (`just build`,
-`just build-release`, `just build-maintainer`) add maintainer-only verbs and
-always-on file logging; they install snapshots under `~/.local/lib/plak/maintainer`
-with the same links. No separate JavaScript runtime or preinstalled Monty
+`target/release/plak` directly. `just build debug`, `just build release` and
+`just build maintainer` add maintainer-only verbs and always-on file logging,
+and they do not install. `just install maintainer` installs that dogfood build
+as a snapshot under `~/.local/lib/plak/maintainer` with the same links as
+`just install release`. No separate JavaScript runtime or preinstalled Monty
 worker is required. Plak discovers its workers beside the executable.
 
 To use the bare `plak` commands below after a Cargo build (not needed after
-`just install`), add that build directory to your current shell's PATH from the
+`just install release`), add that build directory to your current shell's PATH from the
 repository root:
 
 ```sh

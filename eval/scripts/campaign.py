@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in interleaved Rung A campaign. Never invoked by harbor-test."""
+"""Opt-in interleaved Rung A campaign. Never invoked by `just harbor test`."""
 
 from __future__ import annotations
 

@@ -24,28 +24,28 @@ They spend provider usage and never run in a gate. `STATUS.md` records what they
 last showed.
 
 ```sh
-just smoke            # grok (grok-4.7, low)
-just smoke claude     # Claude OAuth (claude-sonnet-5, low)
-just smoke claude-sonnet-medium
-just smoke claude-sonnet55-low --only cli_resume,jsonl_task,tui
-just smoke claude-sonnet55-medium --only cli_resume,jsonl_task,tui
-just smoke claude-haiku55-low    # claude-haiku-5-5
-just smoke claude-opus-low       # claude-opus-5-5
-just smoke claude-opus-medium
-just smoke deepseek-messages --only cli_task,cli_resume,fault_reset
-just smoke grok --only cancel,fault_reset
-just smoke grok --only wrap_up
-just smoke codex --only wrap_up
-just smoke grok --only py_ptc
-just smoke grok --only in_turn_compaction,overflow,kill_reopen,child_compaction
-just soak grok --long-session --only in_turn_compaction
-just soak grok --long-session --all
-PLAK_LIVE_GROWTH_PAGES=20 just smoke claude-haiku55-low --only in_turn_compaction
-just soak claude --hours 2
-just tui-soak claude-opus-medium --hours 4
+just live smoke            # grok (grok-4.7, low)
+just live smoke claude     # Claude OAuth (claude-sonnet-5, low)
+just live smoke claude-sonnet-medium
+just live smoke claude-sonnet55-low --only cli_resume,jsonl_task,tui
+just live smoke claude-sonnet55-medium --only cli_resume,jsonl_task,tui
+just live smoke claude-haiku55-low    # claude-haiku-5-5
+just live smoke claude-opus-low       # claude-opus-5-5
+just live smoke claude-opus-medium
+just live smoke deepseek-messages --only cli_task,cli_resume,fault_reset
+just live smoke grok --only cancel,fault_reset
+just live smoke grok --only wrap_up
+just live smoke codex --only wrap_up
+just live smoke grok --only py_ptc
+just live smoke grok --only in_turn_compaction,overflow,kill_reopen,child_compaction
+just live soak grok --long-session --only in_turn_compaction
+just live soak grok --long-session --all
+PLAK_LIVE_GROWTH_PAGES=20 just live smoke claude-haiku55-low --only in_turn_compaction
+just live soak claude --hours 2
+just live tui-soak claude-opus-medium --hours 4
 python3 tests/live/tui_soak.py claude-opus-medium --hours 1
-just jobs grok
-just jobs grok --only promotion_budget,steer_command,ctrl_b
+just live jobs grok
+just live jobs grok --only promotion_budget,steer_command,ctrl_b
 python3 tests/live/jobs.py grok --only crash_jobs
 ```
 
@@ -181,12 +181,12 @@ admission refusal of a route row (`<tool> is not yet qualified on <route>`,
 route row unsupported`, distinct from a failure; smoke exits 0 on it.
 
 ```sh
-just smoke claude-sonnet55-low --only image_input,fetch_url,mcp_stdio,mcp_http
-just smoke codex --only mcp_github_stdio,mcp_github_http
-just smoke api-anthropic --only web_search,web_fetch
-just smoke grok --only x_search
-just smoke claude --only profile_researcher,multi_roles,worker_spawns_researcher
-PLAK_LIVE_VISION_ROUTE=claude-haiku55-low just smoke api-openai --only image_gen_roundtrip
+just live smoke claude-sonnet55-low --only image_input,fetch_url,mcp_stdio,mcp_http
+just live smoke codex --only mcp_github_stdio,mcp_github_http
+just live smoke api-anthropic --only web_search,web_fetch
+just live smoke grok --only x_search
+just live smoke claude --only profile_researcher,multi_roles,worker_spawns_researcher
+PLAK_LIVE_VISION_ROUTE=claude-haiku55-low just live smoke api-openai --only image_gen_roundtrip
 ```
 
 | Scenario | Tools | Passes when |
@@ -216,9 +216,9 @@ home only; the token is never printed or written anywhere else. The server is
 read-only and allowlisted to read tools, so no write tool is ever offered.
 
 **Long session** (`long_session.py`) is opt-in and is not one of the twelve, and
-it is not the hour soak loop. `just smoke <route> --only <names>` and
-`just soak <route> --long-session --only <names>` run a named subset.
-`just soak <route> --long-session --all` runs exactly the four scenarios and
+it is not the hour soak loop. `just live smoke <route> --only <names>` and
+`just live soak <route> --long-session --only <names>` run a named subset.
+`just live soak <route> --long-session --all` runs exactly the four scenarios and
 is what fills a `full` cell (spec 05 §3.4). `--all` and `--only` are mutually
 exclusive. The direct script refuses a bare launch. Each scenario uses a
 private home copied from the scratch home. Spec 07's only compaction key is `[compaction] enabled`
@@ -556,19 +556,19 @@ per-row rerun rule.
 On Apple Silicon the full cell of a `full` row is:
 
 ```text
-just smoke <route>
-just soak <route> --long-session --all
-just jobs <route>
-just jobs <route> --only crash_jobs    # twice more: three crash_jobs runs
-just soak <route> --hours 1            # least-used full row only
+just live smoke <route>
+just live soak <route> --long-session --all
+just live jobs <route>
+just live jobs <route> --only crash_jobs    # twice more: three crash_jobs runs
+just live soak <route> --hours 1            # least-used full row only
 ```
 
 On `deepseek` and `deepseek-messages` the long-session line runs as
-`PLAK_LIVE_INPUT_CEILING=<N> just soak <route> --long-session --all`, with N
+`PLAK_LIVE_INPUT_CEILING=<N> just live soak <route> --long-session --all`, with N
 the `admitted_input_ceiling` that `plak usage --session <id>` prints for a short
 session on that row (Chat and Messages are read separately).
 
-Linux musl's cell is `just smoke <route>` on each `full` row and on the four
+Linux musl's cell is `just live smoke <route>` on each `full` row and on the four
 API rows. A refused crash reopen is still a blocking `harness` outcome;
 the diagnostic bucket above does not waive it.
 
@@ -615,12 +615,12 @@ command and maximum attempt count.
 ## Daily-driver evidence
 
 ```sh
-just daily-driver --since 2026-10-09
+just live daily-driver --since 2026-10-09
 python3 tests/live/daily_driver.py --since 2026-10-09
 ```
 
 This is read-only over `~/.plak/logs/plak.log`: no build, provider call, TUI
-launch or database mutation. `just daily-driver --since <date>` selects the
+launch or database mutation. `just live daily-driver --since <date>` selects the
 window.
 `--since YYYY-MM-DD` is inclusive; earlier
 reload/version markers still establish the first included build. `--log`
@@ -686,7 +686,7 @@ The warning does not drop cells and the exit status stays 0.
 ```sh
 python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek
 python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek --contingency 0.25 --openrouter-ceiling 40
-just estimate --rate-card rates.json --soak-row deepseek --tui-rows codex-sol,grok
+just live estimate --rate-card rates.json --soak-row deepseek --tui-rows codex-sol,grok
 ```
 
 Defaults are measured volumes where a trial recorded them, all overridable.
@@ -716,7 +716,7 @@ telemetry and the estimator are covered beside it.
 
 ## API model census
 
-`just api-census` (or `python3 scripts/api_model_census.py`) diffs the checked-in
+`just live census` (or `python3 scripts/api_model_census.py`) diffs the checked-in
 OpenAI, Anthropic and xAI tables against each provider's model list and docs.
 It is opt-in and networked, and it is not a gate. The key comes from the
 environment or `~/.plak/secrets/<account>.key` and is sent only as a header.
@@ -732,7 +732,7 @@ report-only cross-check. Offline: `--fixture tests/tooling/fixtures/api_model_ce
 
 ## MCP OAuth (No Accounts)
 
-`just mcp-oauth-e2e` runs the opt-in [MCP OAuth lane](mcp_oauth/README.md):
+`just live mcp-oauth` runs the opt-in [MCP OAuth lane](mcp_oauth/README.md):
 Keycloak, strict node-oidc-provider resource indicators, an official-SDK MCP
 server and Playwright login. It uses a private disposable home and Plak's
 scripted model, never a provider account or paid inference. It is separate

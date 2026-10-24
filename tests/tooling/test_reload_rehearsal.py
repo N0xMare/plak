@@ -284,7 +284,7 @@ class ReloadRehearsalTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(
             stderr.getvalue().strip(),
-            "usage: just reload-rehearsal <full-session-uuid>"
+            "usage: just dev reload-rehearsal <full-session-uuid>"
             " [--installed <path>] [--config-overlay <dir>]"
             " [--wait-idle [--timeout S] [--interval S]] [--detach --log <path>] [--install]",
         )
@@ -668,7 +668,7 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
             result = self.run_wrapper(repo, env, [*extra, "--wait-idle", "--timeout", "10", "--interval", "0.01", "--install"])
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual((base / "export-count").read_text(), "4")
-            self.assertEqual((base / "install-call").read_text().splitlines(), [str(repo), "build-maintainer"])
+            self.assertEqual((base / "install-call").read_text().splitlines(), [str(repo), "install maintainer"])
 
     def test_unknown_export_refusal_and_no_wait_fail_fast_without_install(self):
         for reason, wait in ((self.BEHIND, []), ("the session has no canonical runtime yet", ["--wait-idle"]),
@@ -780,7 +780,7 @@ class ReloadRehearsalWaitTests(unittest.TestCase):
                 result = MODULE.main(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "--install"])
             self.assertEqual(result, 7 if status == 0 else 1)
             if status == 0:
-                run.assert_called_once_with(["just", "build-maintainer"], cwd=repo, check=False)
+                run.assert_called_once_with(["just", "install", "maintainer"], cwd=repo, check=False)
             else:
                 run.assert_not_called()
 

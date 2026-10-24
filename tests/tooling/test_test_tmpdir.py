@@ -103,9 +103,12 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         for path in ("scripts/dev-check.sh", "scripts/perf-smoke.sh", "scripts/crash-sweep.py"):
             with self.subTest(path=path):
                 self.assertIn("test-tmpdir.sh", (ROOT / path).read_text())
-        justfile = (ROOT / "Justfile").read_text()
-        self.assertEqual(justfile.count('TMPDIR="$(bash scripts/test-tmpdir.sh)"'), 2)
+        dev = (ROOT / "dev.just").read_text()
+        self.assertEqual(dev.count('TMPDIR="$(bash scripts/test-tmpdir.sh)"'), 1)
+        self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', dev)
+        justfile = (ROOT / "justfile").read_text()
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)
+        self.assertNotIn("\ntest:\n", justfile)
 
 
 if __name__ == "__main__":

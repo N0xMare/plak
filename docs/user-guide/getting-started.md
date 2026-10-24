@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
 It downloads the latest release tarball and `SHA256SUMS` from GitHub Releases
 (set `PLAK_VERSION` to pick a release), refuses a checksum mismatch, and checks
 the build attestation when `gh` is installed and signed in. It installs `plak`,
-`plakous-js-host` and `monty` into the same snapshot layout as `just install`
+`plakous-js-host` and `monty` into the same snapshot layout as `just install release`
 below, with links in `~/.local/bin`, and never needs `sudo`. Any other platform
 is refused; build from source there.
 
@@ -31,11 +31,11 @@ cargo install --locked plak plakous-js-runtime plakous-py-worker
 
 - **Rust 1.99.0**, pinned by `rust-toolchain.toml`, so rustup installs it on the
   first build. That is also the MSRV.
-- **[`just`](https://github.com/casey/just)**, to run `just install` and the
+- **[`just`](https://github.com/casey/just)**, to run `just install release` and the
   other recipes in the `Justfile`. Without it, use the Cargo commands below.
 - A platform C/C++ compiler and linker for native dependencies such as SQLite
   and QuickJS. Cargo builds these dependencies; no Python interpreter is needed
-  for ordinary Cargo builds or to run Plak. `just install` and the maintainer
+  for ordinary Cargo builds or to run Plak. `just install release` and the maintainer
   build recipes additionally require Python 3.11+ and `nm` (or `llvm-nm`) for
   linkage checks.
 - Supported targets: `x86_64-unknown-linux-musl` and `aarch64-apple-darwin`.
@@ -57,10 +57,10 @@ cargo install --locked plak plakous-js-runtime plakous-py-worker
 ```sh
 git clone https://github.com/N0xMare/plak.git
 cd plak
-just install
+just install release
 ```
 
-`just install` builds a plain release `plak` with its `plakous-js-host` and
+`just install release` builds a plain release `plak` with its `plakous-js-host` and
 `monty` workers, checks their linkage, and installs them as an immutable
 snapshot under `~/.local/lib/plak/release` (workers under the shared
 `~/.local/lib/plak/sidecars`) with links `plak`, `plakous-js-host`, and `monty`
@@ -107,16 +107,18 @@ The three binaries are then under `target/x86_64-unknown-linux-musl/release/`.
 Use the corresponding compiler path if your musl toolchain has a different name.
 Rustc finds its own `rust-lld`; this links static PIE. Nix's `musl-gcc` wrapper
 is for C dependencies, not linking Rust static PIE (its specs inject a dynamic
-loader). For per-install build-and-test evidence, run `just musl-native`;
-`just musl-check` (maintainer-only: it needs the unpublished pinned container
+loader). For per-install build-and-test evidence, run `just musl native`;
+`just musl container` (maintainer-only: it needs the unpublished pinned container
 image, spec 06 §6.1) remains the full pinned-container qualification.
 
-For maintainer development, `just build-release` builds with the
-`maintainer` product feature: maintainer-only verbs, always-on file logging, and
-immutable snapshots under `~/.local/lib/plak/maintainer`. It installs the same
-three links in `~/.local/bin` as `just install`, with the same refusals.
-`just build` does the same into `target/debug/`; the debug binary is large and
-its cold start is visible in the TUI.
+For maintainer development, `just build release` and `just build debug` build
+with the `maintainer` product feature (maintainer-only verbs and always-on file
+logging) into `target/release/` and `target/debug/`. They do not install a
+snapshot or change PATH. `just install maintainer` builds the dogfood profile
+(release codegen, no LTO, incremental, line tables) and installs an immutable
+snapshot under `~/.local/lib/plak/maintainer`, with the same three links in
+`~/.local/bin` as `just install release` and the same refusals. The debug
+binary is large and its cold start is visible in the TUI.
 
 ```sh
 $ plak version
@@ -125,9 +127,9 @@ plak 0.0.2 (release; binary 0123456789ab)
 
 The binary ID is the executable identity used by `/reload` and handoffs.
 
-To update later, pull the source and repeat `just install` (or the Cargo
+To update later, pull the source and repeat `just install release` (or the Cargo
 commands). A running TUI shows `new build installed · /reload` once a new
-`just install` snapshot is in place. Default builds
+`just install release` snapshot is in place. Default builds
 include the Git CLI backend only; release tarballs also omit JJ. Add
 `--features plak/jj` to enable native JJ alongside Git (maintainer builds
 already enable it). To build only native JJ:

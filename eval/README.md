@@ -8,7 +8,7 @@ cost, tokens and wall time on the same model and effort.
 
 It is not product support and not qualification: a Terminal-Bench pass
 qualifies no tuple. Paid runs are opt-in and in no gate tier.
-`just harbor-test` runs the zero-inference adapter tests in `eval/tests/`;
+`just harbor test` runs the zero-inference adapter tests in `eval/tests/`;
 they are not in any gate tier either.
 
 ## Prerequisites
@@ -32,12 +32,12 @@ they are not in any gate tier either.
 ## Setup
 
 ```text
-just harbor-bootstrap          # uv sync --project eval
-just check-harbor              # zero-inference adapter tests (+ harbor --print-config)
-just build-harbor-agent        # Linux plak + js-host into .plak/installed/<arch>
-just fetch-harbor-vendor-clis  # versioned prefixes; review and freeze archive bytes below
-just fetch-harbor-tools        # pinned public ripgrep release for every arm
-just fetch-harbor-pmux         # Full-cell pmux companions from PMUX_SRC
+just harbor bootstrap    # uv sync --project eval
+just harbor check        # zero-inference adapter tests (+ harbor --print-config)
+just harbor build-agent  # Linux plak + js-host into .plak/installed/<arch>
+just harbor vendor-clis  # versioned prefixes; review and freeze archive bytes below
+just harbor tools        # pinned public ripgrep release for every arm
+just harbor pmux         # Full-cell pmux companions from PMUX_SRC
 ```
 
 `HARBOR_ARCH` is `amd64` or `arm64`; unset, it follows the Docker daemon's
@@ -55,7 +55,7 @@ them into the cell; they never `nvm install`, `npm i -g …@latest` or
 
 ### pmux companions
 
-`just fetch-harbor-pmux` builds `pmux`, `pmuxd`, `pmux-rmuxd`,
+`just harbor pmux` builds `pmux`, `pmuxd`, `pmux-rmuxd`,
 `pmux-launcher` and `pmux-hook` from the pseudomux checkout and writes
 `.plak/installed/<arch>/pmux/manifest.json` with the source commit and dirty
 state. The pinned commit is **`fc0e8cb`**; it is defined once, in
@@ -87,7 +87,7 @@ Prepare a private campaign JSON (schema in `harbor_adapter/campaign.py`):
    exact task names to `image` (`sha256:...`, not a tag), task `checksum`,
    `agent_timeout`, `verifier_timeout` and `cell_manifest_sha256`. Compose
    tasks with multiple images are not supported by this binding yet.
-3. Build Plak with `just build-harbor-agent`. Its `plak-build.json` binds the
+3. Build Plak with `just harbor build-agent`. Its `plak-build.json` binds the
    source commit/dirty state, maintainer feature, toolchain and binary hashes.
    Dirty or source-less builds are refused. This is a glibc, maintainer-featured
    eval build, not the supported musl release artifact.
@@ -148,7 +148,7 @@ After reviewing the private plan's SHA-256, run a vertical with:
 ```sh
 export HARBOR_CAMPAIGN=/absolute/private/campaign.json
 export HARBOR_CAMPAIGN_SHA256=<reviewed-file-sha256>
-just harbor-rung-a ab all
+just harbor rung-a ab all
 ```
 
 `all` uses alternating AB/BA replicate blocks, one attempt per task/arm slot,
@@ -195,14 +195,14 @@ An old Plak manifest, old CLI version, dirty source or replacement archive
 cannot be approved by editing its hash. Rebuild/refetch instead.
 
 ```sh
-just harbor-bootstrap
-PATH="$PWD/eval/.venv/bin:$PATH" just harbor-test
+just harbor bootstrap
+PATH="$PWD/eval/.venv/bin:$PATH" just harbor test
 export HARBOR_ARCH=amd64                 # arm64 only on a native arm64 daemon
-just build-harbor-agent                  # worker protocol: assigned Linux lane
-just fetch-harbor-vendor-clis
-just fetch-harbor-tools
+just harbor build-agent                  # worker protocol: assigned Linux lane
+just harbor vendor-clis
+just harbor tools
 # Claude only: pinned clean PMUX_SRC, plus a Linux OAuth file store
-just fetch-harbor-pmux
+just harbor pmux
 ```
 
 The preparation commands below export `terminal-bench/terminal-bench-2-1@6`
@@ -242,13 +242,13 @@ mkdir -m 700 "$PRIVATE"
 uv run --project eval harbor datasets download terminal-bench/terminal-bench-2-1@6 \
   --export --output-dir "$PRIVATE/tasks"
 export TB21="$PRIVATE/tasks"
-just harbor-inventory --arch "$HARBOR_ARCH" --slice plumbing \
+just harbor inventory --arch "$HARBOR_ARCH" --slice plumbing \
   --task-root "$PWD/eval/datasets/rung-a-plumbing" \
   --arms plak-codex codex pi-codex-oauth opencode-codex-oauth plak-grok grok-build plak-claude claude-code \
   --output "$PRIVATE/plumbing-inputs.json"
-just harbor-freeze --inventory "$PRIVATE/plumbing-inputs.json" \
+just harbor freeze --inventory "$PRIVATE/plumbing-inputs.json" \
   --output "$PRIVATE/plumbing-frozen.json"
-just harbor-campaign --inventory "$PRIVATE/plumbing-frozen.json" \
+just harbor campaign --inventory "$PRIVATE/plumbing-frozen.json" \
   --phase calibration --slice plumbing --blocks 1 --output "$PRIVATE/phase0.json"
 ```
 
@@ -262,7 +262,7 @@ one JSON and the printed SHA-256 before granting paid approval.
 ```sh
 export HARBOR_CAMPAIGN="$PRIVATE/phase0.json"
 export HARBOR_CAMPAIGN_SHA256=<reviewed-sha256>
-just harbor-phase0                       # PAID: 8 trials for the eight arms above
+just harbor phase0                       # PAID: 8 trials for the eight arms above
 ```
 
 The scheduler prints its output directory. Only reduced structural evidence
@@ -315,15 +315,15 @@ binary artifacts and source. Replace `TB21` and `CAL` with absolute paths.
 identical binaries, tuple, composition and calibration, not prompt ablations.
 
 ```sh
-just harbor-inventory --arch "$HARBOR_ARCH" --slice ab --task-root "$TB21" \
+just harbor inventory --arch "$HARBOR_ARCH" --slice ab --task-root "$TB21" \
   --arms plak-codex --calibrations "$CAL" --output "$PRIVATE/null-inputs.json"
-just harbor-freeze --inventory "$PRIVATE/null-inputs.json" --output "$PRIVATE/null-frozen.json"
-just harbor-campaign --inventory "$PRIVATE/null-frozen.json" --phase null --slice ab \
+just harbor freeze --inventory "$PRIVATE/null-inputs.json" --output "$PRIVATE/null-frozen.json"
+just harbor campaign --inventory "$PRIVATE/null-frozen.json" --phase null --slice ab \
   --blocks 3 --output "$PRIVATE/null.json"
 # Review null.json and its SHA-256, then obtain paid approval.
 export HARBOR_CAMPAIGN="$PRIVATE/null.json"
 export HARBOR_CAMPAIGN_SHA256=<reviewed-sha256>
-just harbor-null                         # PAID: 8 x 3 x 2 = 48 trials
+just harbor null                         # PAID: 8 x 3 x 2 = 48 trials
 ```
 
 `null-receipt.json` must say `passed: true`: all eight tasks retained with
@@ -341,14 +341,14 @@ recipe additionally checks its successful verdict, source, architecture and
 Plak binary hashes. Preparation itself does not authorize inference.
 
 ```sh
-just harbor-inventory --arch "$HARBOR_ARCH" --slice expanded --task-root "$TB21" \
+just harbor inventory --arch "$HARBOR_ARCH" --slice expanded --task-root "$TB21" \
   --arms plak-codex codex --calibrations "$CAL" --output "$PRIVATE/codex-inputs.json"
-just harbor-freeze --inventory "$PRIVATE/codex-inputs.json" --output "$PRIVATE/codex-frozen.json"
-just harbor-campaign --inventory "$PRIVATE/codex-frozen.json" --phase scored --slice expanded \
+just harbor freeze --inventory "$PRIVATE/codex-inputs.json" --output "$PRIVATE/codex-frozen.json"
+just harbor campaign --inventory "$PRIVATE/codex-frozen.json" --phase scored --slice expanded \
   --blocks 5 --null-receipt "$NULL" --output "$PRIVATE/codex.json"
 export HARBOR_CAMPAIGN="$PRIVATE/codex.json"
 export HARBOR_CAMPAIGN_SHA256=<reviewed-sha256>
-just harbor-codex                        # PAID: 16 x 5 x 2 = 160 trials
+just harbor codex                        # PAID: 16 x 5 x 2 = 160 trials
 ```
 
 All launches are serial. Alternating AB/BA blocks yield the preregistered
@@ -391,11 +391,11 @@ quota, and classify daemon/cleanup stalls as infrastructure.
 
 | Rung | Dataset | Recipe |
 | --- | --- | --- |
-| A plumbing | three local tasks in `datasets/rung-a-plumbing` (`write-hello`, `sum-file`, `fix-typo`) | `just harbor-rung-a plumbing <arm>\|all` |
-| A cheap A/B | eight TB 2.1 tasks from `terminal-bench/terminal-bench-2-1@6` | `just harbor-rung-a ab <arm>\|all` |
-| A expanded | those eight plus eight more TB 2.1 tasks (16) | `just harbor-rung-a expanded <arm>\|all` |
-| B wire | one task of `terminal-bench/terminal-bench@4.0.0` | `just harbor-rung-b wire [plak-codex\|codex] [terminal-bench/<task>]` |
-| Smoke | five hard TB 4.0 tasks, serial | `just harbor-smoke <arm>\|all` |
+| A plumbing | three local tasks in `datasets/rung-a-plumbing` (`write-hello`, `sum-file`, `fix-typo`) | `just harbor rung-a plumbing <arm>\|all` |
+| A cheap A/B | eight TB 2.1 tasks from `terminal-bench/terminal-bench-2-1@6` | `just harbor rung-a ab <arm>\|all` |
+| A expanded | those eight plus eight more TB 2.1 tasks (16) | `just harbor rung-a expanded <arm>\|all` |
+| B wire | one task of `terminal-bench/terminal-bench@4.0.0` | `just harbor rung-b wire [plak-codex\|codex] [terminal-bench/<task>]` |
+| Smoke | five hard TB 4.0 tasks, serial | `just harbor smoke <arm>\|all` |
 
 The task sets are frozen in `rung-a-*.yaml`, `harbor_adapter/tuples.py` and
 `harbor_adapter/verifier_evidence.py` (task refs and checksums). TB 2.1 and
@@ -406,7 +406,7 @@ image ID, never `--force-build`. All launches require a reviewed campaign.
 `rung-a.sh` refuses to launch unless the include list is
 exactly three plumbing directory names, eight prefixed A/B names, or 16
 prefixed expanded names. Rung B refuses a dataset-wide run.
-`just harbor-eval …` passes its arguments to `harbor run`; without
+`just harbor eval …` passes its arguments to `harbor run`; without
 `--include-task-name` it is the full 66-task TB 4.0 campaign and warns.
 
 Rung A arms:
@@ -474,9 +474,9 @@ provider evidence. A shared provider incident needs reviewed block evidence;
 the reporter does not infer one from tool chatter or two unrelated errors.
 
 ```text
-just harbor-summarize .plak/harbor/jobs/ab-plak-openrouter
-just harbor-summarize --json .plak/harbor/jobs
-just harbor-summarize --report target/eval-report .plak/harbor/jobs/ab-plak-codex
+just harbor summarize .plak/harbor/jobs/ab-plak-openrouter
+just harbor summarize --json .plak/harbor/jobs
+just harbor summarize --report target/eval-report .plak/harbor/jobs/ab-plak-codex
 ```
 
 `eval/scripts/summarize.py` reads only harvested files (no Docker, Harbor or

@@ -9,7 +9,7 @@ A cross-checkout file lock prevents concurrent runs. Do not expose the fixture
 ports: admin and test-user passwords are intentionally public test data.
 
 ```sh
-just mcp-oauth-e2e
+just live mcp-oauth
 python3 tests/live/mcp_oauth/run.py --list
 python3 tests/live/mcp_oauth/run.py --binary target/release/plak --only dcr_loopback_strict,forced_401
 python3 tests/live/mcp_oauth/run.py --previous-binary /path/to/other-state-key/plak

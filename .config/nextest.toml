@@ -1,6 +1,6 @@
 # nextest profiles for Plak / Plakous
 #
-# `just test` runs the offline, serial and durability profiles in turn:
+# `just steps tests-parallel,tests-serial,tests-durability` runs the offline, serial and durability profiles in turn:
 #   cargo nextest run --locked --workspace --all-features --profile <lane>
 
 [store]

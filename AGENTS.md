@@ -27,36 +27,38 @@ history, never prerequisite reading, and never cited as authority.
 MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest and cargo-deny. Run `just fast` while iterating and `just check`
-before each commit. Before installing a maintainer build, run `just full` and a
-strict crash sweep on Linux, plus `just platform` on macOS and `just musl-native`
+before each commit. Before `just install maintainer`, run `just full` and a
+strict crash sweep on Linux, plus `just platform` on macOS and `just musl native`
 on Linux. The full strict crash sweep runs at publication boundaries.
-`just musl-check` is a maintainer-only container gate: it needs the preloaded
+`just musl container` is a maintainer-only container gate: it needs the preloaded
 offline image `plak-qual-base:2f225fd7`, which is not published (spec 06).
 
 ```text
-just fast [PKG...]  # static checks + parallel lane over diff packages and dependents
-just steps GROUPS   # exactly the named comma-separated groups, in canonical order
-just check          # fmt/clippy, structure checks, feature builds, parallel+serial lanes, contracts, tooling
-just platform       # fmt/clippy, default/maintainer builds, parallel, serial and durability lanes
-just full           # every group: check + rustdoc, durability lane, publish dry run
-just musl-native    # platform tier for x86_64-unknown-linux-musl (static-PIE via rust-lld)
-just musl-check     # full tier in the pinned offline Alpine container (publication)
-just crash-sweep [--shapes SHAPES] [--jobs N] [--repeat R] [--strict] # opt-in commit cuts
-just test           # nextest profiles offline, serial, durability
-just fmt / clippy   # formatting; clippy -D warnings
-just build-release  # maintainer release binary, symlinked onto PATH as `plak`
-just density        # LOC report, informational, not a gate
-just perf-smoke     # offline performance smoke, informational, not a gate
-just deny           # cargo deny (when deps change)
-just prompts / prompts-diff / prompts-pins   # local prompt renders
-just smoke [route] / just soak [route] --hours N   # opt-in live runs (tests/live)
-just publish [--execute]   # crates.io cohort dry run; --execute uploads (maintainer)
+just fast [PKG...]        # static checks, then the parallel lane for the diff's packages and dependents
+just steps GROUPS         # exactly those comma-separated groups, in canonical order
+just check                # pre-commit: fmt, clippy, structure, builds, parallel+serial, contracts, tooling
+just platform             # per install: fmt, clippy, builds, parallel, serial, durability
+just full                 # every group: check, plus rustdoc, durability and the publish dry run
+just fmt                  # cargo fmt --all
+just clippy               # clippy -D warnings on all targets
+just publish [--execute]  # crates.io cohort dry run; --execute uploads
+just dev-tools ARGS       # pinned nextest and cargo-deny; `deny` is the dependency audit
+just build PROFILE        # debug, release, maintainer or profiling; no snapshot and no PATH change
+just install FLAVOR       # release (plain) or maintainer (dogfood) immutable snapshot on PATH
+just musl native          # Linux x86_64 musl platform tier, static PIE via rust-lld
+just musl container       # full tier in the pinned offline Alpine image; maintainer-only
+just live RECIPE          # smoke, soak, tui-soak, jobs, mcp-oauth, census, estimate, daily-driver
+just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density; not a gate
+just prompts RECIPE       # render, diff, pins, native-compare
+just tui RECIPE           # story, frames
+just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, crash-sweep, jj-compat
+just harbor RECIPE        # Harbor bakeoff, not a gate; `test` is the zero-inference adapter suite
 ```
 
 `eval/` is the opt-in Harbor bakeoff plane: Rung A uses selected
 Terminal-Bench 2.1 tasks; Rung B uses Terminal-Bench 4.0 (see
 `eval/README.md`). Neither paid Harbor runs nor its zero-inference
-adapter tests (`just harbor-test`) are in any gate tier. There is no second
+adapter tests (`just harbor test`) are in any gate tier. There is no second
 runtime. Vendor comparator arms upload pinned Linux CLI prefixes matching
 `HARBOR_ARCH` (`amd64` or `arm64`, defaulting to the Docker daemon's architecture);
 they do not nvm/`@latest`/`curl | bash` per trial. When a Claude native-home
@@ -150,7 +152,7 @@ in a change; amend the chapter that owns them.
 - Test externally meaningful behavior and failure modes, deterministically. The
   daily bar is unit → offline integration; live e2e is opt-in and paid.
 - The final handoff for product work is human TUI review through `plak`: verify
-  the changes, install the tested maintainer snapshot (`just build-maintainer`)
+  the changes, install the tested maintainer snapshot (`just install maintainer`)
   with matching sidecars, and report its binary ID. Do not interrupt a running
   session; a running TUI shows `new build installed · /reload`, and
   `/reload` resumes the session on the new build. Automated

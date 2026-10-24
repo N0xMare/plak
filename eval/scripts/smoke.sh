@@ -123,7 +123,7 @@ require_frozen_cli() {
 from harbor_adapter.vendor_pins import require_frozen_artifacts
 require_frozen_artifacts(sys.argv[1])
 ' "$cli" || {
-    echo "eval smoke: missing frozen $cli CLI; run \`just fetch-harbor-vendor-clis\`" >&2
+    echo "eval smoke: missing frozen $cli CLI; run \`just harbor vendor-clis\`" >&2
     exit 2
   }
 }

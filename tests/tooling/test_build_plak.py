@@ -594,9 +594,9 @@ done
                        PATH=str(fake) + os.pathsep + env["PATH"])
             lib = home / ".local/lib/plak"
 
-            def run(mode: str) -> subprocess.CompletedProcess[str]:
+            def run(*args: str) -> subprocess.CompletedProcess[str]:
                 log.write_text("")
-                return subprocess.run(["bash", str(repo / "tools/build/build-plak.sh"), mode],
+                return subprocess.run(["bash", str(repo / "tools/build/build-plak.sh"), *args],
                                       cwd=base, env=env, capture_output=True, text=True,
                                       check=False)
 
@@ -664,19 +664,49 @@ done
             self.assertEqual(result.returncode, 2)
             self.assertIn("--install", result.stderr)
 
-    def test_justfile_exposes_build_and_build_release(self) -> None:
-        justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
-        self.assertIn("\nbuild:\n", justfile)
-        self.assertIn("\nbuild-release:\n", justfile)
+            # Build-only leaves PATH and snapshots alone, including from a
+            # linked worktree. Install still refuses that layout.
+            result = run("--no-install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("cargo build --locked -p plak --features plak/maintainer\n", log.read_text())
+            self.assertNotIn("--profile", log.read_text())
+            self.assertNotIn("strip ", log.read_text())
+            self.assertEqual((home / ".local/bin/plak").read_text(), "foreign")
+            result = run("--release", "--no-install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--features plak/maintainer --profile release", log.read_text())
+            self.assertNotIn("strip ", log.read_text())
+            self.assertEqual((home / ".local/bin/plak").read_text(), "foreign")
+            result = run("--install", "--no-install")
+            self.assertEqual(result.returncode, 2)
+            (repo / ".git").rmdir()
+            (repo / ".git").write_text("gitdir: /unused\n")
+            result = run("--maintainer", "--no-install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--features plak/maintainer --profile maintainer", log.read_text())
+            self.assertEqual((home / ".local/bin/plak").read_text(), "foreign")
+            result = run("--maintainer")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("linked worktree", result.stderr)
+
+    def test_justfile_exposes_build_and_install(self) -> None:
+        justfile = (ROOT / "justfile").read_text(encoding="utf-8")
+        self.assertIn("\nbuild profile:", justfile)
+        self.assertIn("debug|release|maintainer|profiling", justfile)
+        self.assertIn("\ninstall flavor:", justfile)
+        self.assertIn("release|maintainer", justfile)
+        self.assertNotIn("\nbuild-release:", justfile)
+        self.assertNotIn("\nbuild-maintainer:", justfile)
         self.assertNotIn("\nproduct:\n", justfile)
         self.assertNotIn("\nplak:\n", justfile)
         self.assertNotIn("\nplak-dev:\n", justfile)
         self.assertNotIn("\nplak-minimal:\n", justfile)
-        self.assertIn("tools/build/build-plak.sh", justfile)
-        self.assertIn("tools/build/build-plak.sh --release", justfile)
-        self.assertIn("\nbuild-maintainer:\n", justfile)
-        self.assertIn("\ninstall:\n    tools/build/build-plak.sh --install\n", justfile)
-        self.assertIn("tools/build/build-plak.sh --maintainer", justfile)
+        self.assertIn("tools/build/build-plak.sh --no-install", justfile)
+        self.assertIn("tools/build/build-plak.sh --release --no-install", justfile)
+        self.assertIn("tools/build/build-plak.sh --maintainer --no-install", justfile)
+        self.assertIn("tools/build/build-plak.sh --install", justfile)
+        self.assertIn("tools/build/build-plak.sh --maintainer\n", justfile)
+        self.assertIn("--profile profiling", justfile)
 
     def test_maintainer_build_ships_js_host_without_official_v8(self) -> None:
         source = (ROOT / "tools/build/build-plak.sh").read_text(encoding="utf-8")

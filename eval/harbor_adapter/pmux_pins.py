@@ -60,7 +60,7 @@ def pmux_root(root: Path | None = None, arch: str | None = None) -> Path:
 def _require_linux_elf(path: Path, label: str, arch: str) -> None:
     if not path.is_file():
         raise PmuxArtifactError(
-            f"missing {path}; run `just fetch-harbor-pmux`"
+            f"missing {path}; run `just harbor pmux`"
         )
     try:
         require_elf_arch(path, arch, label)

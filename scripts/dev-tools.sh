@@ -53,7 +53,7 @@ case "${1:-check}" in
     CARGO_TARGET_DIR="$prefix/build" cargo install --locked --root "$prefix" --version "$deny_version" cargo-deny
     python3 tools/checks/check_public_compile.py --fetch
     python3 scripts/jj-tools.py install "$prefix"
-    printf 'Installed verification tools in %s/bin; just check and just deny use this prefix.\n' "$prefix"
+    printf 'Installed verification tools in %s/bin; just check and just dev-tools deny use this prefix.\n' "$prefix"
     ;;
   -h|--help)
     printf 'usage: dev-tools.sh check|install|deny\n'

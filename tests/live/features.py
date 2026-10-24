@@ -6,7 +6,7 @@ its own small git repo, with a private `PLAK_HOME` whose root template lists
 exactly the optional tools the scenario needs. Oracles read the session log
 through `plak session log <id> --json`, the repository, the raw exchange
 capture and the MCP servers' own records; the model's claims are never the
-oracle. Selected with `just smoke <route> --only <names>`; see README.md.
+oracle. Selected with `just live smoke <route> --only <names>`; see README.md.
 
 A route row that refuses a tool or image input at bind or admission is
 `refused`, distinct from a failure: it is the current product statement, not

@@ -29,7 +29,7 @@ COPY_NAMES = ("config.toml", "trusted-projects.toml", "agents", "profiles", "ref
 OVERLAY_NAMES = ("config.toml", "agents", "profiles")
 DATABASES = ("runtime.sqlite3", "product.sqlite3", "subagents.sqlite3")
 USAGE = (
-    "usage: just reload-rehearsal <full-session-uuid>"
+    "usage: just dev reload-rehearsal <full-session-uuid>"
     " [--installed <path>] [--config-overlay <dir>]"
     " [--wait-idle [--timeout S] [--interval S]] [--detach --log <path>] [--install]"
 )
@@ -671,7 +671,7 @@ def main(argv):
         return detach_rehearsal(options, home)
     status = rehearse(home, options)
     if status == 0 and options.install:
-        return subprocess.run(["just", "build-maintainer"], cwd=ROOT, check=False).returncode
+        return subprocess.run(["just", "install", "maintainer"], cwd=ROOT, check=False).returncode
     return status
 
 

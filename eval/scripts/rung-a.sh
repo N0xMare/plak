@@ -76,7 +76,7 @@ require_frozen_cli() {
 from harbor_adapter.vendor_pins import require_frozen_artifacts
 require_frozen_artifacts(sys.argv[1])
 ' "$cli" || {
-    echo "eval rung-a: missing frozen $cli CLI; run \`just fetch-harbor-vendor-clis\`" >&2
+    echo "eval rung-a: missing frozen $cli CLI; run \`just harbor vendor-clis\`" >&2
     exit 2
   }
 }
@@ -86,7 +86,7 @@ require_frozen_pmux() {
     'from harbor_adapter.pmux_pins import require_frozen_pmux
 require_frozen_pmux()
 ' || {
-    echo "eval rung-a: missing $platform pmux; run \`just fetch-harbor-pmux\` with HARBOR_ARCH=$arch" >&2
+    echo "eval rung-a: missing $platform pmux; run \`just harbor pmux\` with HARBOR_ARCH=$arch" >&2
     exit 2
   }
 }
@@ -420,7 +420,7 @@ All launches require a reviewed digest-bound campaign, serial single-attempt
 slots and locally frozen task image IDs. Use all for the campaign scheduler.
 
 Every arm writes termination-summary.json beside its trials; read it with
-eval/scripts/summarize.py (or `just harbor-summarize`) to see which reward-0
+eval/scripts/summarize.py (or `just harbor summarize`) to see which reward-0
 trials were harness deaths rather than model misses.
 
 HARBOR_N_ATTEMPTS and HARBOR_N_CONCURRENT must both be 1. Campaign blocks

@@ -28,7 +28,7 @@ fn durability_subset() {
 }
 
 #[test]
-#[ignore = "opt-in exhaustive sweep; just crash-sweep"]
+#[ignore = "opt-in exhaustive sweep; just dev crash-sweep"]
 fn full_sweep() {
     let selected =
         std::env::var("PLAK_CRASH_SWEEP_SHAPES").unwrap_or_else(|_| shapes::names(false).join(","));

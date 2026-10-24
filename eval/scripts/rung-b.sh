@@ -106,7 +106,7 @@ case "$arm" in
     PYTHONPATH="$root/eval" python3 -c \
       'from harbor_adapter.vendor_pins import require_frozen_artifacts
 require_frozen_artifacts("codex")' || {
-      echo "eval rung-b: missing frozen codex CLI; run \`just fetch-harbor-vendor-clis\`" >&2
+      echo "eval rung-b: missing frozen codex CLI; run \`just harbor vendor-clis\`" >&2
       exit 2
     }
     # Not `--ae CODEX_FORCE_AUTH_JSON=true`. Harbor treats every `--ae` value

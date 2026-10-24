@@ -3,11 +3,11 @@
 
 Usage: long_session.py [route] (--only NAME[,NAME...] | --all) [--binary PATH]
 
-Not part of the default smoke twelve or the hour soak. `just smoke <route>
---only <names>` and `just soak <route> --long-session --only <names>` select
+Not part of the default smoke twelve or the hour soak. `just live smoke <route>
+--only <names>` and `just live soak <route> --long-session --only <names>` select
 the same scenarios. `--all` runs exactly the four scenarios and is mutually
 exclusive with `--only`. A bare launch is refused. The pre-release bar's
-full-cell command is `just soak <route> --long-session --all` (spec 05 §3.4).
+full-cell command is `just live soak <route> --long-session --all` (spec 05 §3.4).
 Paid; never a gate.
 
 Spec 07 has no context-window or compaction-trigger key. A private home pins

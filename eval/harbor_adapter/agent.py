@@ -115,7 +115,7 @@ class PlakAgent(BaseInstalledAgent):
         if not self._binary_path.is_file():
             raise RuntimeError(
                 f"missing Harbor agent binary {self._binary_path}; "
-                f"run `just build-harbor-agent` with HARBOR_ARCH={self._arch}"
+                f"run `just harbor build-agent` with HARBOR_ARCH={self._arch}"
             )
         require_elf_arch(self._binary_path, self._arch, "frozen plak")
         provenance = require_plak_provenance(self._binary_path, self._js_host_path)

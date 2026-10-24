@@ -544,7 +544,7 @@ gate puts first on `PATH`. The prefix sits outside `target/` so `cargo clean`
 does not remove it; its install build artifacts go to `.dev-tools/build`.
 Installation also prefetches all locked public compile-contract fixture
 dependencies (chapter 05 §1.1), so subsequent contract gates can stay offline.
-Every `scripts/dev-check.sh` tier and `just deny` require at least those versions before they run
+Every `scripts/dev-check.sh` tier and `just dev-tools deny` require at least those versions before they run
 anything; a newer tool already on `PATH` is accepted.
 
 ### 6.1 Cargo-native product build
@@ -558,11 +558,11 @@ unknown and retain the export-then-refuse fallback.
 From the repository root, the newcomer path is:
 
 ```sh
-just install
+just install release
 ```
 
 `just` is then a prerequisite (the getting-started guide states it).
-`just install` runs `tools/build/build-plak.sh --install`: exactly the two
+`just install release` runs `tools/build/build-plak.sh --install`: exactly the two
 plain (non-`maintainer`) release Cargo invocations below, the artifact linkage
 check, and the snapshot install described after the maintainer recipes, under
 the release snapshot root `~/.local/lib/plak/release/<id>/` instead of the
@@ -595,8 +595,8 @@ For per-install native musl evidence on a Linux x86_64 host:
 
 ```sh
 rustup target add x86_64-unknown-linux-musl
-just musl-native          # defaults to --platform
-just musl-native --fast plak  # optional targeted iteration
+just musl native          # defaults to --platform
+just musl native --fast plak  # optional targeted iteration
 ```
 
 `scripts/musl-native.sh`, through `scripts/musl-toolchain.sh` (shared with
@@ -626,11 +626,11 @@ Before publication, run the full offline musl
 qualification on a Linux x86_64 Docker host:
 
 ```sh
-just musl-check          # full tier, including default/maintainer checks
-just musl-check --fast plak  # optional targeted iteration
+just musl container          # full tier, including default/maintainer checks
+just musl container --fast plak  # optional targeted iteration
 ```
 
-`just musl-check` is a maintainer-only gate. `scripts/musl-check.sh` uses the
+`just musl container` is a maintainer-only gate. `scripts/musl-check.sh` uses the
 preloaded image `plak-qual-base:2f225fd7` (image ID `2f225fd736bc`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
 run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.2,
@@ -690,10 +690,10 @@ For maintainer installation:
 Before asking an owner to `/reload`, run from the candidate checkout:
 
 ```sh
-just reload-rehearsal <full-session-uuid> [--installed <path>] [--config-overlay <dir>]
-PLAK_HOME=/absolute/home just reload-rehearsal <full-session-uuid> [--installed <path>] [--config-overlay <dir>]
+just dev reload-rehearsal <full-session-uuid> [--installed <path>] [--config-overlay <dir>]
+PLAK_HOME=/absolute/home just dev reload-rehearsal <full-session-uuid> [--installed <path>] [--config-overlay <dir>]
 # From a live turn, detach the wait and optionally install after a passing run:
-just reload-rehearsal <full-session-uuid> --wait-idle --timeout 300 --detach --log <new-log-path> --install
+just dev reload-rehearsal <full-session-uuid> --wait-idle --timeout 300 --detach --log <new-log-path> --install
 ```
 
 `scripts/reload-rehearsal.sh` builds the maintainer binary and both workers
@@ -704,7 +704,7 @@ and by default never invokes the installer or changes installed links. SQLite's 
 API reads committed WAL state through read-only source connections into a
 private temporary `PLAK_HOME`. The staged version/build ID is printed even if backup is refused; for the same
 source, toolchain, target, build environment and same checkout path it matches what
-`just build-maintainer` installs (`build-plak.sh` refuses linked worktrees).
+`just install maintainer` installs (`build-plak.sh` refuses linked worktrees).
 The requested session's source key is located
 by read-only sessions-table ID membership. When it matches the staged key, only
 that key's runtime, product and tree are backed up and `plak session rehearse`
@@ -756,7 +756,7 @@ Every other export refusal fails immediately, without import or installation.
 mode-0600 log outside the live home. Existing logs/links are refused rather than
 overwritten. The caller receives the child PID and may end its turn; the
 detached run retains the build checkout and absolute installed/overlay paths.
-`--install` runs `just build-maintainer` from that checkout only after a passing
+`--install` runs `just install maintainer` from that checkout only after a passing
 rehearsal, after disposable copies are removed; the installer's linked-worktree
 guard still applies. It never interrupts a running session; `/reload` remains
 the operator's action. The existing credential-unavailable import exception is still
@@ -771,15 +771,24 @@ includes paths, SQL, or config.
 Then, after the offline gate and ordinary checks:
 
 ```sh
-just build             # debug build + local symlinks
-just build-release     # release build + local symlinks
-just build-maintainer  # dogfood build: release codegen, no LTO, incremental
+just build debug        # maintainer features into target/debug; no install
+just build release      # maintainer features into target/release; no install
+just build maintainer   # dogfood profile into target/maintainer; no install
+just build profiling    # target/profiling/plak; no install
+just install release    # plain release snapshot under ~/.local/lib/plak/release
+just install maintainer # dogfood snapshot under ~/.local/lib/plak/maintainer
 ```
 
-These add `--features plak/maintainer` and copy `plak` into an immutable snapshot directory
-`~/.local/lib/plak/maintainer/<id>/` (`just install`: the same install without the
-feature, under `~/.local/lib/plak/release/<id>/`), where `<id>` is the SHA-256 of a
-manifest of all three executables' SHA-256 digests. Each worker is installed
+`just build` writes Cargo output only. It does not install a snapshot or change
+`PATH`, and it may run from a linked worktree. `just install release`
+(`build-plak.sh --install`) and `just install maintainer`
+(`build-plak.sh --maintainer`) copy `plak` into an immutable snapshot directory
+`~/.local/lib/plak/release/<id>/` or `~/.local/lib/plak/maintainer/<id>/`.
+`just build debug`, `just build release`, `just build maintainer` and
+`just install maintainer` pass `--features plak/maintainer`. `just install release`
+does not, and `just build profiling` builds only `plak` at its default features.
+`<id>` is the SHA-256 of a manifest of all three executables' SHA-256 digests.
+Each worker is installed
 independently at `~/.local/lib/plak/sidecars/<name>/<sha256>/<name>`; the
 snapshot contains symlinks to those immutable mode-0555 artifacts. Their
 canonical paths depend on their own bytes, not the parent Plak build, so an
@@ -950,7 +959,7 @@ extraction and patch application while preserving deterministic type-checker
 assets. The shared lock
 pins `salsa`, `salsa-macros` and `salsa-macro-rules` at 0.28.2 and the Ruff/ty
 crates at 0.0.14, the versions upstream Monty 1.2.0 locks: `salsa` 0.28.5 does
-not compile with `ruff_python_ast` 0.0.14. `just deny` audits the unified
+not compile with `ruff_python_ast` 0.0.14. `just dev-tools deny` audits the unified
 workspace and worker dependency graph.
 
 Three profiles beyond the Cargo defaults exist. `release` uses
@@ -961,10 +970,10 @@ lose symbol names and source-line resolution. Use the maintainer or profiling
 profile for symbolized backtraces. `maintainer` inherits
 release without LTO, with 16 codegen units, incremental compilation and line
 tables, so dogfood rebuilds are fast and backtraces name source lines;
-`just build-maintainer` builds it. `profiling` inherits
+`just build maintainer` builds it and `just install maintainer` installs it. `profiling` inherits
 release with full debug symbols, no stripping, and LTO off so frames stay
-attributable; `just build-profiling` produces `target/profiling/plak`, and
-`just samply`, `just flamegraph`, `just perf-stat`, and `just bloat` drive it.
+attributable; `just build profiling` produces `target/profiling/plak`, and
+`just perf samply`, `just perf flamegraph`, `just perf stat`, and `just perf bloat` drive it.
 
 #### Release size and speed qualification
 
@@ -1012,20 +1021,20 @@ fat-LTO offline-turn and session-show timings are not established by this table.
 ### 6.2 Isolated playground
 
 ```sh
-just build-release && just plak-dev-install
+just build release && just dev home-install
 ```
 
-`plak-dev-install` points `~/.local/bin/plak-dev` at `scripts/plak-dev.sh`,
+`just dev home-install` points `~/.local/bin/plak-dev` at `scripts/plak-dev.sh`,
 repairing a stale symlink from an earlier layout, and seeds
 `~/plak-dev-home/config.toml`. The wrapper pins the login user's `HOME`, uses
 the isolated `~/plak-dev-home`, and unsets provider API keys so they cannot
 displace OAuth. Run `plak-dev` from a scratch working directory, never from the
-git tree, and never point `PLAK_HOME` at the worktree. `just plak-dev-reset`
+git tree, and never point `PLAK_HOME` at the worktree. `just dev home-reset`
 wipes the `state/`, `telemetry/`, `logs/`, and `secrets/` roots in that home
 while keeping `config.toml` and `agents/`.
 
 The launcher defaults to `target/release/plak` (`PLAK_DEV_PROFILE=debug`
-selects debug, `maintainer` the `just build-maintainer` output) and clears `PLAK_TEST_EXCHANGE_CAPTURE_DIR`, so the binary
+selects debug, `maintainer` the `just build maintainer` output) and clears `PLAK_TEST_EXCHANGE_CAPTURE_DIR`, so the binary
 uses its own passive capture. It retains argv and cwd and uses `exec` so
 signals reach the binary directly. A `maintainer` binary captures inference
 passively into a fresh private run/process directory under
@@ -1046,10 +1055,10 @@ privacy and coverage limits.
 Rerun the release installer (§6.6), or pull the source and rebuild:
 
 ```sh
-git pull && just install
+git pull && just install release
 ```
 
-(Maintainers use `just build-release` or `just build-maintainer`.)
+(Maintainers install the dogfood snapshot with `just install maintainer`.)
 
 Either installs a new snapshot and moves the symlinks from §6.1 to it, so
 new launches use the new binary once the install succeeds; a running TUI shows
@@ -1139,7 +1148,7 @@ continues to clone plain Git.
 
 `tools/release/package-release.sh [--untagged | --tag TAG] [--out DIR]` builds a release
 on the host's supported target: `x86_64-unknown-linux-musl` on Linux x86_64,
-with the compiler, linker and prerequisite checks of `just musl-native`
+with the compiler, linker and prerequisite checks of `just musl native`
 (`scripts/musl-toolchain.sh`), and `aarch64-apple-darwin` on Apple Silicon. It
 refuses a dirty tree and, unless `--untagged` (a rehearsal), a `HEAD` without
 the tag `v<version>` of the workspace version, or without the tag `--tag`
@@ -1147,7 +1156,7 @@ names. `--tag` accepts `v<version>` or a release candidate `v<version>-rc.<n>`
 (`n` from 1); a candidate's tarball is named `plak-<version>-rc.<n>-<triple>`
 while its executables still report `<version>`, so the final tag can name the
 same qualified commit. The build is
-`tools/build/build-plak.sh --artifacts`: the `just install` Cargo invocations
+`tools/build/build-plak.sh --artifacts`: the `just install release` Cargo invocations
 and artifact linkage check, without installing. It maps the Cargo home, the
 checkout and the target directory to `/cargo`, `/plak` and `/target` with
 `--remap-path-prefix` in `CARGO_ENCODED_RUSTFLAGS` and `-ffile-prefix-map` in
@@ -1200,7 +1209,7 @@ restriction. The install is exactly the §6.1 layout: the snapshot
 `~/.local/lib/plak/sidecars/`, the same ownership and writability refusals for
 installation directories and their physical ancestors, and `~/.local/bin`
 links that replace only links already pointing into the maintainer, release
-or sidecar roots. A release install and a `just install` of the same bytes
+or sidecar roots. A release install and a `just install release` of the same bytes
 therefore share one snapshot, and `plak doctor`, carry discovery and `/reload`
 behave identically. `~/.cargo/bin` is not touched; the installer notes a `plak`
 earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
@@ -1227,7 +1236,7 @@ repository tests. The supported CLI range is the library minor and its two
 previous minors; a newer CLI is unsupported until the library is bumped.
 Each bump updates `JJ_LIB_VERSION`, `JJ_CLI_SUPPORTED`, the user guide and
 reruns JJ tests against the lowest and highest supported binaries. The opt-in
-`just jj-compat` lane (not a gate tier) tests all three pinned minors;
+`just dev jj-compat` lane (not a gate tier) tests all three pinned minors;
 `just dev-tools install` installs checksummed release archives under
 `.dev-tools/jj/<version>/jj`. Fixtures honor `PLAK_TEST_JJ`;
 this is not a promise of compatibility with arbitrary custom backends or
@@ -1303,7 +1312,7 @@ only allowed registry and no allowed Git source.
 Run it when dependencies change:
 
 ```sh
-just deny   # cargo deny check advisories bans licenses sources
+just dev-tools deny   # cargo deny check advisories bans licenses sources
 ```
 
 The maintenance advisory RUSTSEC-2023-0089 is excepted only for
@@ -1340,7 +1349,7 @@ Zlib at a 0.8 confidence threshold. The reviewed transitive allowances are:
 
 `winx` 0.36.4 has a package-and-version-specific allowance for
 `Apache-2.0 WITH LLVM-exception`, matching its bundled license. It is the
-Windows adapter in Monty's `cap-std` graph, audited by `just deny` even though
+Windows adapter in Monty's `cap-std` graph, audited by `just dev-tools deny` even though
 Windows is not a supported product platform.
 `ar_archive_writer` 0.5.3 has the same allowance: it is the build-time archive
 writer of `psm`, reached through Ruff's parser `stacker`. `minicbor` 2.3.0 and

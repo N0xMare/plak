@@ -358,7 +358,7 @@ retention across consumption, the pre-consumption callback without any product
 poll, and the five-minute expiry. These are offline evidence, not live provider
 qualification.
 
-`just tui-story` drives a versioned JSON story through the real Plak binary on
+`just tui story` drives a versioned JSON story through the real Plak binary on
 a PTY against the repository-only scripted model. A story contains exact input,
 deterministic waits and assertions, and hand-labeled choices over a closed
 action table. Its private trace records each normalized before/after screen,
@@ -451,7 +451,7 @@ scripted construction does not replace the real admission or publication path.
 `eval/` is a separate, opt-in and paid Harbor bakeoff plane that runs
 the same `plak run` binary against other coding CLIs. It is maintainer tooling,
 in no gate tier and not product qualification; its adapter tests run with
-`just harbor-test`, and `eval/README.md` owns its datasets, arms,
+`just harbor test`, and `eval/README.md` owns its datasets, arms,
 evidence rules and recipes.
 
 Scored Harbor comparisons are gated as defined in `eval/README.md`.
@@ -592,15 +592,15 @@ warning that exists only in a default or maintainer closure, and is hidden from
 Platform-independent structure checks, public contracts and Python tooling run
 once on Linux in check/full; rustdoc runs once on Linux in full. Each install
 additionally requires `just platform` on Apple Silicon macOS and
-`just musl-native` on Linux x86_64. The native musl lane defaults to
-`--platform`; `just musl-check` runs the full tier in the pinned offline musl
+`just musl native` on Linux x86_64. The native musl lane defaults to
+`--platform`; `just musl container` runs the full tier in the pinned offline musl
 container before publication (chapter 06 §6.1). Both musl scripts set
 `CARGO_BUILD_TARGET` to `x86_64-unknown-linux-musl`; the gate passes an
 explicit `--target` to every compile and nextest invocation, and subprocess
 Cargo checks inherit that target. A GNU-host gate does not qualify the
 supported musl platform.
 
-Every test entry point (`dev-check.sh`, `just test`, `just coverage`,
+Every test entry point (`dev-check.sh`, `just dev coverage`,
 `perf-smoke.sh` and `crash-sweep.py`) exports `TMPDIR` from one selector,
 `scripts/test-tmpdir.sh`, before anything runs. On Linux it is a per-checkout
 directory under `/dev/shm`; on macOS a per-checkout directory under
@@ -717,7 +717,8 @@ the durable owner so tests can inspect its nonce and compatibility state without
 exposing live fields. The full agent suite and real executor-stack witness remain
 required after runtime module moves.
 
-`just fmt`, `just clippy`, `just doc`, and `just test` run individual layers.
+`just fmt` and `just clippy` run individual layers. Rustdoc is `just steps rustdoc`.
+The three nextest lanes are `just steps tests-parallel,tests-serial,tests-durability`.
 `cargo-nextest` is required by every tier: if it is absent the gate exits 2 rather than falling back to `cargo test`, because a plain
 workspace `cargo test` would skip the serial budget lane and the nextest test groups.
 
@@ -939,23 +940,23 @@ correctness.
 
 | Not gated | Run it when |
 | --- | --- |
-| `cargo deny check advisories bans licenses sources` (`just deny`) | Dependencies change. It needs advisory acquisition, so it is not offline |
+| `cargo deny check advisories bans licenses sources` (`just dev-tools deny`) | Dependencies change. It needs advisory acquisition, so it is not offline |
 | `cargo check --workspace --all-features --all-targets --locked` as an MSRV probe | The MSRV is the toolchain pin, so the ordinary build already is the MSRV build |
-| `python3 tools/checks/check_prod_loc.py` (`just density`) | A density question is live. It always exits 0 |
-| `bash scripts/perf-smoke.sh --check` (`just perf-smoke`) | A performance question is live. Six offline measurements of the real binary against this machine's seed row (§2.7); informational |
+| `python3 tools/checks/check_prod_loc.py` (`just perf density`) | A density question is live. It always exits 0 |
+| `bash scripts/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline measurements of the real binary against this machine's seed row (§2.7); informational |
 | `cargo bench` for `perf_core`, `perf_project`, `perf_store`, and `tools/perf/perf_build.py` | A performance claim needs numbers. There is no portable numeric baseline; every claim carries its emitted host, feature, and toolchain metadata |
 | `cargo nextest run -p plakous-offline-crash-harness` | Process-crash matrices are wanted on demand. Unix only |
-| `just native-compare-prompts` | Comparing Plak's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
-| `eval/` Harbor two-rung bakeoff (Rung A weekly plumbing + TB 2.1 A/B; Rung B one-task TB 4.0 wire; `harbor-smoke` hard TB 4.0 slice) | Harness-comparison against vendor CLIs. Opt-in, paid, never a qualification row. `just harbor-test` runs its adapter tests. See `eval/README.md` |
+| `just prompts native-compare` | Comparing Plak's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
+| `eval/` Harbor two-rung bakeoff (Rung A weekly plumbing + TB 2.1 A/B; Rung B one-task TB 4.0 wire; `just harbor smoke` hard TB 4.0 slice) | Harness-comparison against vendor CLIs. Opt-in, paid, never a qualification row. `just harbor test` runs its adapter tests. See `eval/README.md` |
 | Live scenarios (§3.2); the pre-release bar (§3.4) | A claim needs live evidence. Paid and opt-in. The bar is not a gate tier |
-| `just api-census` (`scripts/api_model_census.py`) | Before an install, to diff the bundled API model tables against the providers' lists and docs. Opt-in, networked, never a gate tier. See spec 01 §6.3 |
+| `just live census` (`scripts/api_model_census.py`) | Before an install, to diff the bundled API model tables against the providers' lists and docs. Opt-in, networked, never a gate tier. See spec 01 §6.3 |
 
 Local verification is the authoritative gate for every layer above; chapter 06
 §8 owns the repository-settings rule.
 
 ### 1.3 Source-size reporting
 
-`just density` runs `tools/checks/check_prod_loc.py` as an informational
+`just perf density` runs `tools/checks/check_prod_loc.py` as an informational
 source-size report outside every gate tier. There is no historical growth baseline,
 strict density mode, or justification-file requirement.
 
@@ -1063,13 +1064,14 @@ membership (`default-filter`), thread count and slow timeout.
 | Profile | Membership | Use |
 | --- | --- | --- |
 | `default` | Everything nextest selects | Ad-hoc runs |
-| `offline` | Everything except the `serial` and `durability` members | The parallel lane: `tests-parallel`, `just fast`, `just test` |
-| `serial` | Wall-clock budget tests (§2.3) | The serial lane: `tests-serial`, `just test` |
-| `durability` | Crash matrices and the sqlite SIGKILL campaign (§2.3) | The durability lane: `tests-durability`, `just test` |
+| `offline` | Everything except the `serial` and `durability` members | The parallel lane: `tests-parallel`, `just fast`, `just steps tests-parallel` |
+| `serial` | Wall-clock budget tests (§2.3) | The serial lane: `tests-serial`, `just steps tests-serial` |
+| `durability` | Crash matrices and the sqlite SIGKILL campaign (§2.3) | The durability lane: `tests-durability`, `just steps tests-durability` |
 
 Every profile is hermetic: no test in the workspace reaches a network or reads a
-credential. `just check` runs `offline` and `serial`; `just test`, platform and
-full also run `durability`. A `-E` filterset on the command line narrows a
+credential. `just check` runs `offline` and `serial`; `just platform` and
+`just full` also run `durability`. All three lanes:
+`just steps tests-parallel,tests-serial,tests-durability`. A `-E` filterset on the command line narrows a
 profile's membership (nextest intersects them), so
 `--profile offline -E 'rdeps(=<pkg>)'` runs a package's parallel-lane tests and
 never its serial ones. `fail-fast` is off. The workspace slow timeout is 60
@@ -1264,9 +1266,9 @@ passes with no artifacts present.
 The human-readable render is a local review artifact:
 
 ```text
-just prompts        # PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_
-just prompts-diff   # copy the previous render aside, re-render, diff -ru
-just prompts-pins   # PLAK_PRINT_PROMPT_PINS=1: print the new pin tables
+just prompts render        # PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_
+just prompts diff   # copy the previous render aside, re-render, diff -ru
+just prompts pins   # PLAK_PRINT_PROMPT_PINS=1: print the new pin tables
 ```
 
 Output goes to the git-ignored `target/prompt-renders/`, overridable with
@@ -1299,12 +1301,12 @@ tool split, and prints a table of every route's footprint whether it passes or
 not, so the cost of a wording change is read rather than re-derived.
 
 A prompt change is meant to fail the test with the list of routes whose digest
-moved. The workflow is: `just prompts-diff` to read the model-visible sentence
-changes, then `just prompts-pins` and paste the new rows over the tables. A
-rendered artifact is never edited — `just prompts` overwrites it from Rust.
+moved. The workflow is: `just prompts diff` to read the model-visible sentence
+changes, then `just prompts pins` and paste the new rows over the tables. A
+rendered artifact is never edited — `just prompts render` overwrites it from Rust.
 
 Vendor CLI captures under a gitignored local capture directory come from
-`just native-compare-prompts`. Installed binaries run with isolated configuration
+`just prompts native-compare`. Installed binaries run with isolated configuration
 and synthetic credentials against local mock responders. Claude is driven
 through its interactive CLI, not the print/SDK entrypoint. Its synthetic OAuth
 request retains the original API origin through a local CONNECT recorder.
@@ -1483,7 +1485,7 @@ contain none of the selector's strings. The harness also carries
 `plakous-http/fault-injection` (§2.8) unconditionally, so `test-hooks` is the
 one product edge to transport fault injection as well.
 
-**Crash-point sweep.** `just crash-sweep [--shapes SHAPES] [--jobs N]
+**Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
 `promoted_background_job`, and `sealed_family_artifacts` with sixteen workers.
@@ -2083,7 +2085,7 @@ facts are consistent rather than contradictory.
 
 ### 2.7 The offline performance smoke
 
-`just perf-smoke` measures six things over the same scripted model and emits one
+`just perf smoke` measures six things over the same scripted model and emits one
 JSON line per metric:
 
 | metric | what it times | compared |
@@ -2133,7 +2135,7 @@ BSD `time -l` reports bytes, GNU `time -f %M` reports kilobytes, and some images
 carry neither, so the recipe probes for a usable one. Assuming BSD made a Linux
 run abort and the gate call it a slowdown.
 
-The smoke is in no gate tier; `just perf-smoke` runs it on demand. A
+The smoke is in no gate tier; `just perf smoke` runs it on demand. A
 measurement on a shared machine is evidence, not a gate, which is also why the
 named render benchmark asserts nothing itself. The restricted comparison refuses
 to call a swing in either noisy metric a regression.
@@ -2462,7 +2464,7 @@ and checks its result independently of a clean protocol terminal. It is opt-in,
 may spend provider usage, and never runs in any gate tier. Four commands exist
 in `tests/live/` (whose README lists every scenario and its oracle):
 
-- `just smoke <route>` runs twelve short scenarios in a few minutes across
+- `just live smoke <route>` runs twelve short scenarios in a few minutes across
   `plak run`, `plak agent` and the TUI on a pseudo-terminal: a coding task with
   a planted bug, resume, a manual compaction whose earlier fact must survive,
   cancel mid-tool, four transport faults injected with `PLAK_TEST_FAULTS`
@@ -2480,11 +2482,11 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   complete, and `ZEBRA-42` must survive without appearing in any repository
   file before the question. A ContextLimit without that committed capacity
   recovery remains `harness`.
-- `just soak <route> [--hours N]` keeps one session doing real tasks on a
+- `just live soak <route> [--hours N]` keeps one session doing real tasks on a
   pinned open-source checkout, reopening it in a new process per task, with
   faults, SIGSTOP/SIGCONT sleeps, manual compactions and one mid-run rebuild to
   a byte-distinct `plak`, and reports throughput, tokens, peak context,
-  compactions, errors and dead ends. It is headless. `just soak <route>
+  compactions, errors and dead ends. It is headless. `just live soak <route>
   --long-session --only <names>` does not run that hour loop; it selects the
   named long-session scenarios below. `--all` in place of `--only` selects
   exactly those four. The two flags are mutually exclusive, and a bare
@@ -2517,7 +2519,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   plus a few more. The overflow
   remedy is whichever the session log shows: an in-turn
   `scheduled` compact, a `context.placeholders` shrink, or a failed
-  `ContextLimit` turn followed by a `capacity` compact. `just smoke <route>
+  `ContextLimit` turn followed by a `capacity` compact. `just live smoke <route>
   --only <names>` selects them too. Oracles are session-log and file facts,
   not the model's own claims. A missing compact is `harness` only when
   `model.operation_usage` shows prepared input at the catalog window minus
@@ -2557,10 +2559,10 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   `PLAK_LIVE_INPUT_CEILING` (§3.4); without a valid value the driver starts no
   process and reports a `pre_attempt_error`. The long-session report records
   the window used and its source as `input_ceiling`.
-- `just tui-soak <route> [--hours N]` keeps one TUI session doing checked coding
+- `just live tui-soak <route> [--hours N]` keeps one TUI session doing checked coding
   tasks, simulates a sleep, quits and reopens, then checks a follow-up in the
   same session. It does not inject transport faults or rebuild the binary.
-- `just jobs <route> [--only NAME,...]` runs eleven bounded background-job
+- `just live jobs <route> [--only NAME,...]` runs eleven bounded background-job
   scenarios: promotion at `[jobs] foreground_seconds`, a steer during a
   foreground command and during an await, a completion notice while busy,
   `plak run` waiting for a promoted job, crash reopen as outcome-unknown, a
@@ -2952,10 +2954,10 @@ any paid attempt, recording the remedy as its one attempt's reason, and the
 cell binding and the long-session report record the value and its source.
 
 The qualification commands select the same oracles as the raw single-attempt
-diagnostics: `just smoke <route>` is the twelve scenarios; `just soak <route>
+diagnostics: `just live smoke <route>` is the twelve scenarios; `just live soak <route>
 --long-session --all` is exactly the four long-session scenarios. `--all` and
 `--only` are mutually exclusive, a bare long-session launch is refused, and
-`--only` does not fill the cell. `just jobs <route>` is all eleven scenarios.
+`--only` does not fill the cell. `just live jobs <route>` is all eleven scenarios.
 The headless soak is the driver default of one hour; a shorter soak does not
 fill the cell and a longer one does. Linux x86_64 musl's cell is
 `python3 tests/live/qualification.py smoke <route>` on each `full` row and on
@@ -2968,7 +2970,7 @@ class.
 
 **Maintainer sign-off.** A maintainer uses the candidate's maintainer build in
 the TUI on their own work and signs off when it is satisfactory.
-`just daily-driver --since <date>` summarises that use from the product log and
+`just live daily-driver --since <date>` summarises that use from the product log and
 telemetry, read-only, per installed build (active days, session bindings,
 warnings and errors by target, retries, reloads, carries, recovered or
 abandoned turns). It is a diagnostic, not a cell, and cannot stand in for a
@@ -3057,7 +3059,7 @@ matrix. Rows that share those pins and footprints move together. A pin or
 footprint outside that set does not move the row.
 
 Before a paid matrix or that re-confirmation, run
-`just estimate --rate-card PATH [--openrouter-ceiling N]`. It prices the
+`just live estimate --rate-card PATH [--openrouter-ceiling N]`. It prices the
 planned cells from a local rate card and does not fetch a price. The
 OpenRouter ceiling is an operator input. This chapter states no amount. The
 estimate warns when the OpenRouter cells, including the contingency, exceed
@@ -3126,7 +3128,7 @@ a disposable task and the client's real interactive route: Claude Code
 interactive (its `--debug api --debug-file` output may omit request bodies),
 Grok Build, or the official Codex CLI. `codex debug prompt-input` is
 zero-inference; an `exec` coding turn spends usage. A local TLS/CONNECT
-recorder or `just native-compare-prompts` observes structure with synthetic
+recorder or `just prompts native-compare` observes structure with synthetic
 credentials and mock responses; only a live request proves service acceptance,
 and neither is inferred from the other.
 
@@ -3782,7 +3784,7 @@ actual child recovery or paid execution. A production rehearsal is an explicit
 operator action against backups, not part of the fixture suite or permission
 to mutate a live home.
 
-`just coverage` runs the same two offline nextest lanes as `just check` under
+`just dev coverage` runs the same two offline nextest lanes as `just check` under
 `cargo-llvm-cov` in a separate target directory and writes an HTML report and a
 JSON summary under `target/llvm-cov/`. It is informational: it does not gate,
 and its purpose is to turn "paths the offline suite never executes" into a list
@@ -3822,7 +3824,7 @@ informational and never determines gate success.
 
 ### Opt-In MCP OAuth Interoperability
 
-`just mcp-oauth-e2e` (`tests/live/mcp_oauth/`) is a local, zero-inference
+`just live mcp-oauth` (`tests/live/mcp_oauth/`) is a local, zero-inference
 interoperability lane, not a gate or a substitute for owner-account/provider
 qualification. Digest-pinned Compose images run Keycloak 26, strict
 node-oidc-provider RFC 8707 resource indicators, an official-SDK streamable

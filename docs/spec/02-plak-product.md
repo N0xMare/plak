@@ -1094,7 +1094,7 @@ ambiguous or too-short id is this build's own refusal. The id must then match
 exactly one session across the other builds' logs. If that session was already
 carried forward into this workspace, the carried session is resumed with a
 note instead. Otherwise the newest kept installed snapshot (chapter 06 §6.1), searched
-across both the maintainer and the `just install` release snapshot roots,
+across both the maintainer and the `just install release` snapshot roots,
 whose `state-key` manifest names that key exports it, within 120 seconds, and
 this build imports it, deletes the carry file and opens the new session with
 the note. Only installed snapshot directories (64 hex digits) owned by this
@@ -1872,7 +1872,7 @@ feature and are absent from an ordinary build (chapter 06 §4.1). They are not
 hidden product verbs. `plak fork <session>` forks on the session's exact
 binding; there is no maintainer verb that rebinds a session.
 
-Maintainer `plak session rehearse` and `just reload-rehearsal` run what an open
+Maintainer `plak session rehearse` and `just dev reload-rehearsal` run what an open
 would run, read-only: the runtime's one recovery predicate over each exact head
 (chapter 01 §5.5) and this product's projector over the feed records after the
 stored cursor (read through `inspect_feed_sqlite` and the
@@ -5015,7 +5015,7 @@ The export document does not carry queued items' images (§2.5.1).
 Everything in this section is model-visible text: it is part of the product's
 behavior in the same way a screen is, and it changes only deliberately. The
 render pipeline that pins it — 86 routes, sha256 tables in code, and the
-`just prompts` review artifact — is described in chapter 05 §2.5.
+`just prompts render` review artifact — is described in chapter 05 §2.5.
 
 ### 6.1 The composition of a first turn
 
@@ -5639,7 +5639,7 @@ Four scenarios are rendered per route: a **single-agent root** with the coding
 catalog only, a **tree root** with spawn granted over a two-template working
 set, a **hub** (a spawn-capable child, which also carries `submit_result`), and
 a **leaf child**. The single-agent scenario sets `host_wakes`, so a root
-without spawn tools still renders the process wake paragraph. `just prompts`
+without spawn tools still renders the process wake paragraph. `just prompts render`
 prints the exact byte and approximate-token footprint per route and scenario;
 no table here restates numbers that move with every prompt edit.
 

@@ -73,7 +73,7 @@ case "$cmd" in
       source_dirty=true
     fi
     # Always bookworm. Host Ubuntu 24.04 bins need GLIBC 2.38/2.39; Harbor
-    # ubuntu cells do not have that. Same rule as just fetch-harbor-pmux.
+    # ubuntu cells do not have that. Same rule as just harbor pmux.
     docker buildx build \
       --platform "$platform" \
       -f eval/harbor_adapter/Dockerfile \
@@ -178,7 +178,7 @@ print("eval: frozen pmux for linux/" + bins.arch + " from pseudomux " + bins.com
     jobs_dir="$root/.plak/harbor/jobs${job_suffix:+/eval$job_suffix}"
     mkdir -p "$jobs_dir"
     # Without --include-task-name this is the full 66-task TB 4.0 campaign.
-    # Weekly signal is just harbor-rung-a; one-task wire is just harbor-rung-b.
+    # Weekly signal is just harbor rung-a; one-task wire is just harbor rung-b.
     has_include=0
     for arg in "$@"; do
       case "$arg" in

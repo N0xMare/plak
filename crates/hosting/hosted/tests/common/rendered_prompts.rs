@@ -2250,7 +2250,7 @@ pub(crate) mod suite {
         }
         assert!(
             failures.is_empty(),
-            "rendered prompt drift (inspect with `just prompts-diff`; re-pin with PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_):\n\n{}",
+            "rendered prompt drift (inspect with `just prompts diff`; re-pin with PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_):\n\n{}",
             failures.join("\n\n")
         );
     }

@@ -1980,7 +1980,7 @@ mod suite {
         }
         assert!(
             failures.is_empty(),
-            "lifecycle render drift (inspect with `just prompts-diff`; re-pin with PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_lifecycle):\n\n{}",
+            "lifecycle render drift (inspect with `just prompts diff`; re-pin with PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_lifecycle):\n\n{}",
             failures.join("\n\n")
         );
     }

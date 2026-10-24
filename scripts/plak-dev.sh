@@ -3,12 +3,12 @@
 # login-user OAuth (not PLAK_HOME). Does not touch ~/.plak.
 #
 # Usage:
-#   just build-release         # build release maintainer (target/release/plak)
-#   just build                 # debug maintainer (target/debug/plak)
+#   just build release         # build release maintainer (target/release/plak)
+#   just build debug           # debug maintainer (target/debug/plak)
 #   PLAK_DEV_PROFILE=debug     # use target/debug/plak instead
-#   PLAK_DEV_PROFILE=maintainer  # use target/maintainer/plak (just build-maintainer)
-#   just plak-dev-install      # symlink ~/.local/bin/plak-dev
-#   just plak-dev-reset        # wipe sqlite/sessions; keep config.toml
+#   PLAK_DEV_PROFILE=maintainer  # use target/maintainer/plak (just build maintainer)
+#   just dev home-install      # symlink ~/.local/bin/plak-dev
+#   just dev home-reset        # wipe sqlite/sessions; keep config.toml
 #   plak-dev …                 # run like plak (cwd is the session workspace)
 set -euo pipefail
 
@@ -115,7 +115,7 @@ install_shim() {
     exit 2
   fi
   # The playground home is part of the install, not a side effect of the first
-  # launch: `just plak-dev-install` must leave a usable PLAK_HOME behind.
+  # launch: `just dev home-install` must leave a usable PLAK_HOME behind.
   ensure_home
   echo "plak-dev: installed $shim -> $target"
   echo "plak-dev: PLAK_HOME is $product_home (config.toml seeded)"
@@ -139,7 +139,7 @@ fi
 ensure_home
 
 if [[ ! -x "$bin" ]]; then
-  echo "plak-dev: missing $bin — run \`just build\` or \`just build-release\` (profile=$profile) from the repo" >&2
+  echo "plak-dev: missing $bin — run \`just build debug\` or \`just build release\` (profile=$profile) from the repo" >&2
   exit 2
 fi
 

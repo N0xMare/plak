@@ -9,7 +9,7 @@ plak resume <uuid>
 ```
 
 `plak` needs an interactive terminal; in a pipe it refuses rather than degrading.
-Use a release build (`just install`; see [getting started](getting-started.md#build)) — the debug
+Use a release build (`just install release`; see [getting started](getting-started.md#build)) — the debug
 binary is large and visibly slow to start. An empty session shows a six-row pixel PLAK wordmark, with a double-line
 outline, at the top of the transcript (version, build, a short session id, and
 `powered by plakous` on the right) with the composer underneath. Conversation

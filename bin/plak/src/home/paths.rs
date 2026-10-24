@@ -567,7 +567,7 @@ pub fn application_state_home() -> Result<PathBuf, String> {
 
 /// Where `tools/build/build-plak.sh` keeps installed snapshots, each with a
 /// `state-key` manifest: `$HOME/.local/lib/plak/maintainer` for maintainer
-/// builds and `$HOME/.local/lib/plak/release` for `just install`.
+/// builds and `$HOME/.local/lib/plak/release` for `just install release`.
 #[must_use]
 pub fn installed_snapshot_roots() -> Vec<PathBuf> {
     std::env::var_os("HOME")
