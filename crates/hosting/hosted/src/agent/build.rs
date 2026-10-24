@@ -106,31 +106,6 @@ fn observation_budget_cap_bytes(effective_input_tokens: u64) -> Option<usize> {
     )
 }
 
-#[cfg(test)]
-mod observation_policy_tests {
-    use super::observation_budget_cap_bytes;
-
-    #[test]
-    fn hosted_observation_cap_tracks_the_effective_input_window_in_text_bytes() {
-        for (tokens, bytes) in [
-            (1, 32_768),
-            (100_000, 32_768),
-            (163_840, 52_428),
-            (256_000, 81_920),
-            (258_400, 82_688),
-            (500_000, 160_000),
-            (1_000_000, 262_144),
-            (u64::MAX, 262_144),
-        ] {
-            assert_eq!(
-                observation_budget_cap_bytes(tokens),
-                Some(bytes),
-                "{tokens}"
-            );
-        }
-    }
-}
-
 /// Upper bound on one response's output tokens on the subscription routes
 /// where Plak picks the request bound (SuperGrok). The direct API-key routes
 /// send each model's own limit instead. A model's own ceiling is held to it so one response stays
@@ -3931,3 +3906,7 @@ pub fn coding_session_target_binding(resolved: &ResolvedProvider) -> SessionTarg
         resolved.initial_authority().account_binding(),
     )
 }
+
+#[cfg(test)]
+#[path = "observation_policy_tests.rs"]
+mod observation_policy_tests;
