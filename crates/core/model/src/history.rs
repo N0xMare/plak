@@ -5065,13 +5065,25 @@ mod tests {
     }
 
     #[test]
-    fn canonical_media_refuses_noninteger_and_out_of_range_byte_numbers() {
+    fn canonical_media_refuses_noncanonical_base64_text() {
         let segment = media_segment(vec![1, 0, 255]);
         let canonical = std::str::from_utf8(segment.canonical_bytes()).expect("utf8");
-        for number in ["1.0", "1e0", "-0", "9007199254740993"] {
-            let alternative = canonical.replacen("[1,0,255]", &format!("[{number},0,255]"), 1);
+        assert!(canonical.contains(r#""Bytes":"AQD/""#), "{canonical}");
+        for encoded in [
+            "[1,0,255]",
+            r#""AQD_""#,
+            r#""AQD""#,
+            r#""AQD/=""#,
+            r#""AQD\/""#,
+            r#""AQD\u002f""#,
+            r#""AQD/\n""#,
+        ] {
+            let alternative = canonical.replacen(r#""AQD/""#, encoded, 1);
             assert_ne!(alternative, canonical);
-            assert!(HistorySegment::from_canonical(alternative.as_bytes()).is_err());
+            assert!(
+                HistorySegment::from_canonical(alternative.as_bytes()).is_err(),
+                "{encoded}"
+            );
         }
         let decoded =
             HistorySegment::from_canonical(segment.canonical_bytes()).expect("media decode");
@@ -5082,6 +5094,44 @@ mod tests {
         {
             assert_eq!(projection_item_identity(item).expect("identity"), *identity);
         }
+    }
+
+    #[test]
+    fn tiny_image_segment_canonical_bytes_and_identity_are_pinned() {
+        let segment = HistorySegment::new(
+            HistorySegmentKind::Conversation,
+            vec![entry(
+                1,
+                Actor::User,
+                ContentBlock::Image(
+                    crate::ImageBlock::new(
+                        "image/png",
+                        crate::MediaSource::bytes(b"\x89PNG\r\n\x1a\n".to_vec()).expect("media"),
+                    )
+                    .expect("image"),
+                ),
+            )],
+        )
+        .expect("image segment");
+        assert_eq!(
+            std::str::from_utf8(segment.canonical_bytes()).expect("utf8"),
+            concat!(
+                r#"{"items":[{"actor":"User","blocks":[{"Image":{"detail":null,"#,
+                r#""media_type":"image/png","source":{"kind":{"Bytes":"iVBORw0KGgo="}}}}],"#,
+                r#""id":"00000000-0000-0000-0000-000000000001","provenance":"UserInput"}],"#,
+                r#""kind":"Conversation"}"#
+            )
+        );
+        assert_eq!(
+            segment.identity().to_string(),
+            "62de671de0cf73ddb665577d9edd9a647023eb982eb3e50be92910638354444d"
+        );
+        assert_eq!(
+            HistorySegment::from_canonical(segment.canonical_bytes())
+                .expect("decode")
+                .identity(),
+            segment.identity()
+        );
     }
 
     #[test]

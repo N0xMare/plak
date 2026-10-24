@@ -4357,6 +4357,7 @@ dependencies = [
 name = "plakous-model"
 version = "0.0.2"
 dependencies = [
+ "base64 0.22.1",
  "futures",
  "futures-core",
  "futures-util",

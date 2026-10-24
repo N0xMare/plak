@@ -7,6 +7,14 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+### Persisted formats
+
+- Runtime format epoch 30: inline image bytes are stored as canonical padded
+  base64 instead of an array of JSON numbers, so a stored image is about 1.33
+  times its size instead of about 3.6. State key `r25.e30.p33.t8`: 0.0.2 state
+  is not opened or migrated; carry a session with `/reload` or export and
+  import. Export document version 8 is unchanged.
+
 ### Pins
 
 - Review windows. The subscription profiles (Codex, Grok, Claude) expire
@@ -56,6 +64,14 @@ one cross-build carrier (a build imports its own and the previous version).
   here. 0.0.2 still compares those dates, so it asks once to accept the notice
   again for a receipt this build wrote; the receipt it then writes stays
   current for this build, and the login is kept.
+
+### Known limitations
+
+- One message is capped at a 16 MiB per-message budget, encoded, and images
+  encode as base64: a prompt holds about 12 MiB of images, which is three
+  maximum-size (3.75 MiB) images or eight typical screenshots (up to about
+  1.4 MiB each). Up to 8 images are accepted; a fourth maximum-size image is
+  refused with a message naming the budget.
 
 ## 0.0.2
 

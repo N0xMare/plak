@@ -13,6 +13,15 @@ pub const MAX_USER_IMAGES: usize = 8;
 /// base64 form stays within the most restrictive provider bound of 5 MB.
 pub const MAX_USER_IMAGE_BYTES: usize = 3_932_160;
 
+/// Per-message budget: the largest canonical encoding of one user message's
+/// content, 16 MiB. Images encode as base64, so three maximum-size images
+/// fit and four do not.
+pub const MAX_USER_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+
+// The message, its item and segment identity and the binary framing fit one
+// runtime checkpoint.
+const _: () = assert!(MAX_USER_MESSAGE_BYTES + 1024 <= crate::MAX_RUNTIME_CHECKPOINT_BYTES);
+
 /// One ordered part of a user message.
 #[derive(Clone, Eq, PartialEq)]
 #[non_exhaustive]
@@ -150,12 +159,11 @@ impl UserInput {
     fn validate_encoded_size(&self, label: &str) -> Result<(), ControlError> {
         let encoded = serde_json::to_vec(&self.content_blocks()?)
             .map_err(|_| invalid("message cannot be encoded"))?;
-        // Reserve space for the item, segment identity and binary framing.
-        let limit = crate::MAX_RUNTIME_CHECKPOINT_BYTES - 1024;
         let encoded_bytes = encoded.len();
-        if encoded_bytes > limit {
+        if encoded_bytes > MAX_USER_MESSAGE_BYTES {
             return Err(invalid(&format!(
-                "{label} encoded message is {encoded_bytes} bytes; the limit is {limit} bytes; \
+                "{label} encoded message is {encoded_bytes} bytes; the per-message budget is \
+                 {MAX_USER_MESSAGE_BYTES} bytes (16 MiB; three maximum-size images fit); \
                  reduce the text or attach fewer or smaller images"
             )));
         }
@@ -230,6 +238,48 @@ mod tests {
         }
     }
 
+    /// A maximum-size PNG of incompressible bytes, so its base64 form is as
+    /// large as a real photograph's.
+    fn random_maximum_png(seed: u64) -> UserPart {
+        let mut state = seed | 1;
+        let mut bytes = png(0);
+        while bytes.len() < MAX_USER_IMAGE_BYTES {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            bytes.extend_from_slice(&state.to_le_bytes());
+        }
+        bytes.truncate(MAX_USER_IMAGE_BYTES);
+        image(bytes)
+    }
+
+    #[test]
+    fn three_maximum_random_images_fit_one_message_and_four_exceed_its_budget()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let images = |count: u64| {
+            let mut parts = vec![UserPart::Text("what is in these?".into())];
+            parts.extend((0..count).map(|seed| random_maximum_png(0x9e37_79b9_7f4a_7c15 ^ seed)));
+            UserInput::new(parts)
+        };
+        let three = images(3);
+        three.validate("prompt")?;
+        assert_eq!(three.content_blocks()?.len(), 4);
+
+        let error = images(4)
+            .validate("prompt")
+            .err()
+            .ok_or("four maximum-size images must exceed the per-message budget")?;
+        assert_eq!(error.kind(), ControlErrorKind::InvalidInput);
+        let message = error.to_string();
+        assert!(message.contains("per-message budget"), "{message}");
+        assert!(
+            message.contains(&MAX_USER_MESSAGE_BYTES.to_string()),
+            "{message}"
+        );
+        assert!(message.contains("three maximum-size images"), "{message}");
+        Ok(())
+    }
+
     #[test]
     fn admission_bounds_count_size_type_and_emptiness() {
         let ok = UserInput::new(vec![UserPart::Text("look".into()), image(png(0))]);
@@ -290,15 +340,13 @@ mod tests {
     #[test]
     fn oversized_encoded_message_is_refused_before_admission()
     -> Result<(), Box<dyn std::error::Error>> {
-        let input = UserInput::new(vec![UserPart::Text(
-            "x".repeat(crate::MAX_RUNTIME_CHECKPOINT_BYTES - 1024),
-        )]);
+        let input = UserInput::new(vec![UserPart::Text("x".repeat(MAX_USER_MESSAGE_BYTES))]);
         let error = input
             .validate("prompt")
             .err()
             .ok_or("message must exceed framing bound")?;
         assert_eq!(error.kind(), ControlErrorKind::InvalidInput);
-        assert!(error.to_string().contains("encoded message"));
+        assert!(error.to_string().contains("per-message budget"));
         assert!(error.to_string().contains("reduce the text"));
         Ok(())
     }

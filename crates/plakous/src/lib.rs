@@ -252,6 +252,7 @@ pub mod agent {
         JobTool,
         MAX_USER_IMAGE_BYTES,
         MAX_USER_IMAGES,
+        MAX_USER_MESSAGE_BYTES,
         ModelReresolutionError,
         ModelReresolutionOperation,
         ModelReresolver,

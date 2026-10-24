@@ -278,7 +278,64 @@ pub struct MediaSource {
 enum MediaSourceKind {
     Uri(String),
     DataUrl(String),
-    Bytes(Vec<u8>),
+    Bytes(#[serde(with = "canonical_base64")] Vec<u8>),
+}
+
+/// Inline media bytes as one padded standard base64 string.
+///
+/// Decoding accepts only the exact base64 text encoding would produce. JSON
+/// escapes inside the string are resolved before this sees it; canonical
+/// history refuses them because `HistorySegment::from_canonical` requires its
+/// input to equal the re-encoded bytes.
+mod canonical_base64 {
+    use std::fmt;
+
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserializer, Serializer, de};
+
+    use super::MAX_CANONICAL_BLOCK_BYTES;
+
+    const MAX_ENCODED_BYTES: usize = MAX_CANONICAL_BLOCK_BYTES.div_ceil(3) * 4;
+
+    #[allow(clippy::ptr_arg, reason = "serde `with` passes the field by reference")]
+    pub(super) fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl de::Visitor<'_> for Visitor {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("padded standard base64 media bytes")
+            }
+
+            fn visit_str<E>(self, encoded: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if encoded.len() > MAX_ENCODED_BYTES {
+                    return Err(E::custom("media bytes exceed the canonical block limit"));
+                }
+                // The STANDARD engine requires canonical padding and rejects
+                // nonzero trailing bits, whitespace and the URL-safe alphabet.
+                STANDARD
+                    .decode(encoded)
+                    .map_err(|_| E::custom("media bytes are not canonical padded base64"))
+            }
+        }
+
+        deserializer.deserialize_str(Visitor)
+    }
 }
 
 #[derive(Deserialize)]
@@ -2343,6 +2400,36 @@ mod tests {
 
     fn id(value: u128) -> Result<EntryId, crate::IdentityError> {
         EntryId::try_from(Uuid::from_u128(value))
+    }
+
+    #[test]
+    fn media_bytes_serialize_as_strict_canonical_base64() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = MediaSource::bytes(vec![0xfb, 0xff, 0x00, 0x3e])?;
+        let json = serde_json::to_string(&source)?;
+        assert_eq!(json, r#"{"kind":{"Bytes":"+/8APg=="}}"#);
+        assert_eq!(serde_json::from_str::<MediaSource>(&json)?, source);
+        for refused in [
+            r#"{"kind":{"Bytes":"+/8APg"}}"#,
+            r#"{"kind":{"Bytes":"-_8APg=="}}"#,
+            r#"{"kind":{"Bytes":"+/8A Pg=="}}"#,
+            r#"{"kind":{"Bytes":"+/8APg==\n"}}"#,
+            r#"{"kind":{"Bytes":"+/8APh=="}}"#,
+            r#"{"kind":{"Bytes":"+/8APg==="}}"#,
+            r#"{"kind":{"Bytes":""}}"#,
+            r#"{"kind":{"Bytes":[251,255,0,62]}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<MediaSource>(refused).is_err(),
+                "accepted {refused}"
+            );
+        }
+        let oversized = format!(
+            r#"{{"kind":{{"Bytes":"{}"}}}}"#,
+            "A".repeat(MAX_CANONICAL_BLOCK_BYTES.div_ceil(3) * 4 + 4)
+        );
+        assert!(serde_json::from_str::<MediaSource>(&oversized).is_err());
+        Ok(())
     }
 
     #[test]

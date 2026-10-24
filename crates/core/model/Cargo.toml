@@ -22,6 +22,7 @@ neutral = true
 default = []
 
 [dependencies]
+base64.workspace = true
 futures-core.workspace = true
 futures-util = { workspace = true, features = ["std"] }
 regex.workspace = true

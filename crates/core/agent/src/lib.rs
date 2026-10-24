@@ -130,7 +130,9 @@ pub mod internal {
         MAX_FEED_BYTES_PER_SESSION, MAX_FEED_PAGE_BYTES, MAX_FEED_RECORD_BYTES,
         MAX_FEED_RECORDS_PER_SESSION, MAX_FEED_TRIM_BATCH,
     };
-    pub use crate::input::{MAX_USER_IMAGE_BYTES, MAX_USER_IMAGES, UserInput, UserPart};
+    pub use crate::input::{
+        MAX_USER_IMAGE_BYTES, MAX_USER_IMAGES, MAX_USER_MESSAGE_BYTES, UserInput, UserPart,
+    };
     pub use crate::lease::{LeaseClock, LeaseDomain, LeaseInstant};
     pub use crate::local_composition::*;
     pub use crate::manifest::{
@@ -284,8 +286,8 @@ pub use internal::{
     HarnessCompilerInputs, HarnessProfileCompiler, HarnessProfileId, HarnessProfileProvenance,
     HarnessProfileSpec, HarnessProfileSpecBuilder, HttpStatusClass, IdGenerator,
     InstructionCompositionStrategy, JobHintSource, JobNoticeDelivery, JobPreemption, JobTool,
-    MAX_INSTRUCTION_BYTES, MAX_USER_IMAGE_BYTES, MAX_USER_IMAGES, MIN_EVENT_DEBT_BYTES,
-    ModelAdapterProfileId, ModelFamilyId, ModelId, ModelReresolutionError,
+    MAX_INSTRUCTION_BYTES, MAX_USER_IMAGE_BYTES, MAX_USER_IMAGES, MAX_USER_MESSAGE_BYTES,
+    MIN_EVENT_DEBT_BYTES, ModelAdapterProfileId, ModelFamilyId, ModelId, ModelReresolutionError,
     ModelReresolutionOperation, ModelReresolver, NamespaceId, NormalizedModelEventKind,
     PendingEffectDecisionView, ProfileError, ProfileSemanticVersion, ProtocolId, Provenance,
     RUNTIME_EXECUTOR_STACK_BYTES, ReasoningEffort, ReasoningPolicy, ReasoningPreferenceStrategy,

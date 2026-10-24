@@ -242,7 +242,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-eval": "d51b5da8bf3d468f9099f1bdd06fa9a9af1b5e24ee6497c491e136e1a97d122a",
     "plakous-mcp": "567ec57875dcd1f0b3b28325330bd3cd0e071a994088fb90b7445ae8f69ac166",
     "plakous-messages": "eae7f4a067455ca31bab364c39a597256a19c84e636a17af6b6012bba40284b1",
-    "plakous-model": "b292beea53bde3bb93436217d68d237e1341d72b5239eaa66cc5c6c996123a07",
+    "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
     "plakous-openai": "1db5bb6636c51ca8702ecd2cfbdaa34592c89b058df71d9a7194a4cfebb13197",
     "plakous-tool-files": "f91b59c3d65dff91d2fe462da36376abf3d82c44a5a86abf209d435cd046f759",
     "plakous-tool-plan": "7e57f5a8c4b1b39a7967fe97dbb83d7d78822878b40638d823e49c5a7d0b021c",

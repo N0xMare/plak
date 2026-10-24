@@ -288,13 +288,17 @@ input with no parts, a text part that is not canonical text, more than
 raw, so base64 stays within 5 MB; the message tells the user to downscale, and
 nothing is resized), bytes that `plakous_tools::sniff_image` does not
 recognize as PNG, JPEG, GIF or WebP, or a declared media type that differs
-from the sniffed one. Admission also checks the encoded message against the
-checkpoint segment byte budget, reserving 1 KiB for item/segment framing. An
-oversized message is `InvalidInput` before publication or provider dispatch;
-the refusal states its encoded size and limit and asks for less text or fewer
-or smaller images. An input with any image is also refused when the bound
-descriptor lacks a supported `Capability::ImageInput` fact; the refusal names
-the route and model, and nothing is dropped silently. An admitted input
+from the sniffed one. Admission also checks the message's canonical encoding
+against the per-message budget `MAX_USER_MESSAGE_BYTES` (16 MiB, which leaves
+1 KiB of the checkpoint segment budget for item/segment framing). Images
+encode as base64 (§4), so about 12 MiB of raw images fit one message: three
+maximum-size images or eight images of up to about 1.4 MiB each (typical
+screenshots) fit, and four maximum-size images do not. An oversized message
+is `InvalidInput` before publication or provider dispatch; the refusal states
+its encoded size and names the per-message budget, and asks for less text or
+fewer or smaller images. An input with any image is also refused when the
+bound descriptor lacks a supported `Capability::ImageInput` fact; the refusal
+names the route and model, and nothing is dropped silently. An admitted input
 becomes one `User` item whose blocks follow the parts in order, images as
 `ContentBlock::Image` with `MediaSource::Bytes`; steering is lowered the same
 way at its boundary. Context accounting counts each image at the image token
@@ -921,6 +925,18 @@ layout, debug text, derive output, and provider JSON are not durable formats.
 Only semantic state is durable: raw HTTP bodies, SSE chunks, decoder buffers,
 wall-clock timing, emitted events, and UI replay are excluded.
 
+Inline media bytes in canonical content (`MediaSource::Bytes` in image,
+document and audio blocks) encode as one string of canonical padded RFC 4648
+standard-alphabet base64. They are decoded only from that canonical text: the
+decoder refuses missing or extra padding, nonzero trailing bits, whitespace,
+the URL-safe alphabet and integer arrays. JSON escapes inside the string are
+resolved by the JSON parser before the decoder sees it; a canonical segment
+that spells the string with escapes is refused because decoding a segment
+requires its bytes to equal their re-encoding. Canonical segment bytes and
+identities are therefore a function of the media bytes alone. The encoded
+text is bounded before decoding, and inline media bytes are bounded at 16 MiB
+like every canonical block. This is runtime checkpoint format epoch 30.
+
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
 resource limit, not a promise that every model-valid request fits. Compaction
@@ -1446,7 +1462,7 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **25** and the checkpoint format epoch is **29**; the
+The runtime schema is **25** and the checkpoint format epoch is **30**; the
 feed record encoding (§5.11) is part of that epoch, which it shares with the
 decision-fact encodings of the same release. Only
 the current exact schema and format epoch are supported. Every other runtime
@@ -1721,7 +1737,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 29 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 30 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -4185,7 +4201,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 29.
+runtime checkpoint format epoch 30.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -4649,7 +4665,7 @@ fresh host authority, excluded from descriptor bytes and digests. The relative
 prefix and discovery ceiling are reconstructive policy: descriptor digest
 format 4 and host backend semantic revision 15 bind them, and exact reopen rejects
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
-the ceiling boolean, including when false. Runtime format epoch 29 isolates
+the ceiling boolean, including when false. The runtime format epoch isolates
 these bindings from earlier state. CarryBinding does not embed an environment
 descriptor; export remains v8 with its existing v7 importer.
 Unsupported descriptors have no compatibility path.
@@ -5605,7 +5621,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 29.
+runtime checkpoint format epoch 30.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
