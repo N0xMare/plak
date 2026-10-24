@@ -7,8 +7,9 @@
 //! apart for the same reason `plakous-store` sits beside `plakous-agent`: a
 //! tree is not a database, and the tree crate should not link one.
 //!
-//! [`database`] owns the file and its admission law, [`rows`] the codecs, and
-//! [`store`] the `TreeStore` port over both. The tree tables are separate from
+//! [`database`] owns the file and its admission law, [`rows`] the codecs,
+//! `image` the row-level diff against the last acknowledged save, and
+//! [`store`] the `TreeStore` port over them. The tree tables are separate from
 //! `product.sqlite3`: the two files carry their own schema
 //! versions; no transaction spans both.
 
@@ -19,6 +20,7 @@
 )]
 
 pub mod database;
+mod image;
 pub mod rows;
 pub mod store;
 

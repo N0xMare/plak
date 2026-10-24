@@ -31,6 +31,7 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 plakous.workspace = true
 plakous-workspace.workspace = true
+proptest = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 

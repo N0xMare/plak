@@ -2,8 +2,11 @@
 //!
 //! One connection, held for the life of the runtime that owns it, rather than
 //! reopened per save. Every publish is one `Immediate` transaction and a
-//! compare-and-swap on the tree revision.
+//! compare-and-swap on the tree revision. A save writes only the rows that
+//! differ from the tree this connection last committed; with no such image it
+//! replaces the tree's rows wholesale. Both leave the same rows.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -14,11 +17,20 @@ use rusqlite::{ErrorCode, OptionalExtension};
 
 use crate::database::{OpenError, SubagentsDatabase, TreeInspection};
 use crate::from_i64;
-use crate::rows::{delete_agent_tree_rows, insert_agent_tree_rows, load_agent_tree};
+use crate::image::TreeImage;
+use crate::rows::{
+    delete_agent_tree_rows, insert_agent_tree_rows, load_agent_tree, swap_agent_tree_header,
+};
 
 /// The tree's database as a [`TreeStore`].
 pub struct SqliteTreeStore {
-    database: Mutex<SubagentsDatabase>,
+    writer: Mutex<Writer>,
+}
+
+/// The connection and, per tree, the image of its last acknowledged save.
+struct Writer {
+    database: SubagentsDatabase,
+    images: BTreeMap<String, TreeImage>,
 }
 
 impl SqliteTreeStore {
@@ -31,7 +43,10 @@ impl SqliteTreeStore {
     /// Opens `database`, creating and versioning it when it is new.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
         Ok(Self {
-            database: Mutex::new(SubagentsDatabase::open(database)?),
+            writer: Mutex::new(Writer {
+                database: SubagentsDatabase::open(database)?,
+                images: BTreeMap::new(),
+            }),
         })
     }
 
@@ -44,20 +59,14 @@ impl SqliteTreeStore {
     /// Refuses a tree whose revision moved since it was inspected, and an
     /// unreachable store.
     pub fn delete(&self, tree_id: &str, expected_revision: u64) -> Result<(), TreeStoreError> {
-        self.with_database_mut(|database| {
-            let tx = database
+        self.with_writer(|writer| {
+            writer.images.remove(tree_id);
+            let tx = writer
+                .database
                 .connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|error| sqlite_unavailable("could not begin agent tree delete", &error))?;
-            let stored = tx
-                .query_row(
-                    "SELECT revision FROM agent_trees WHERE tree_id=?1",
-                    [tree_id],
-                    |row| from_i64(row.get(0)?),
-                )
-                .optional()
-                .map_err(|_| TreeStoreError::corrupt("agent tree revision is invalid"))?;
-            match stored {
+            match stored_revision(&tx, tree_id)? {
                 None => return Ok(()),
                 Some(stored) if stored != expected_revision => {
                     return Err(TreeStoreError::stale(stored, expected_revision));
@@ -74,27 +83,100 @@ impl SqliteTreeStore {
         &self,
         work: impl FnOnce(&SubagentsDatabase) -> Result<T, TreeStoreError>,
     ) -> Result<T, TreeStoreError> {
-        let database = self
-            .database
-            .lock()
-            .map_err(|_| TreeStoreError::unavailable("tree store lock is poisoned"))?;
-        #[cfg(feature = "commit-trace")]
-        let _settle = plakous_store::commit_trace::SettleGuard;
-        work(&database)
+        self.with_writer(|writer| work(&writer.database))
     }
 
+    #[cfg(all(test, feature = "commit-trace"))]
     fn with_database_mut<T>(
         &self,
         work: impl FnOnce(&mut SubagentsDatabase) -> Result<T, TreeStoreError>,
     ) -> Result<T, TreeStoreError> {
-        let mut database = self
-            .database
+        self.with_writer(|writer| work(&mut writer.database))
+    }
+
+    fn with_writer<T>(
+        &self,
+        work: impl FnOnce(&mut Writer) -> Result<T, TreeStoreError>,
+    ) -> Result<T, TreeStoreError> {
+        let mut writer = self
+            .writer
             .lock()
             .map_err(|_| TreeStoreError::unavailable("tree store lock is poisoned"))?;
         #[cfg(feature = "commit-trace")]
         let _settle = plakous_store::commit_trace::SettleGuard;
-        work(&mut database)
+        work(&mut writer)
     }
+}
+
+impl Writer {
+    /// One publish. The image is taken out for the whole save and put back
+    /// only by an acknowledged commit, so after any refused, failed or
+    /// ambiguous save the next one replaces the tree wholesale.
+    fn save(&mut self, tree: &ProductAgentTree) -> Result<(), TreeStoreError> {
+        let tree_id = tree.tree_id.as_str();
+        let image = self.images.remove(tree_id);
+        let tx = self
+            .database
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| sqlite_unavailable("could not begin agent tree save", &error))?;
+        // The `Immediate` transaction holds the write lock from here through
+        // the commit, so the version read, the compare and the swap are one
+        // step.
+        let data_version = tx
+            .query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+            .map_err(|error| {
+                sqlite_unavailable("could not read agent tree data version", &error)
+            })?;
+        let image = match image {
+            Some(mut image) if image.is_current(data_version) => {
+                let swapped =
+                    swap_agent_tree_header(&tx, tree).map_err(TreeStoreError::unavailable)?;
+                if swapped != 1 {
+                    let stored = stored_revision(&tx, tree_id)?;
+                    fence_revision(stored, tree.stored_revision, tree.revision)?;
+                    return Err(TreeStoreError::stale(stored.unwrap_or(0), tree.revision));
+                }
+                let delta = image
+                    .write_changes(&tx, tree)
+                    .map_err(TreeStoreError::unavailable)?;
+                commit(tx)?;
+                delta.fold_into(&mut image);
+                image
+            }
+            _ => {
+                fence_revision(
+                    stored_revision(&tx, tree_id)?,
+                    tree.stored_revision,
+                    tree.revision,
+                )?;
+                delete_agent_tree_rows(&tx, tree_id).map_err(TreeStoreError::unavailable)?;
+                insert_agent_tree_rows(&tx, tree).map_err(TreeStoreError::unavailable)?;
+                commit(tx)?;
+                TreeImage::of(tree, data_version)
+            }
+        };
+        self.images.insert(tree.tree_id.clone(), image);
+        Ok(())
+    }
+}
+
+fn stored_revision(
+    tx: &rusqlite::Transaction<'_>,
+    tree_id: &str,
+) -> Result<Option<u64>, TreeStoreError> {
+    tx.query_row(
+        "SELECT revision FROM agent_trees WHERE tree_id=?1",
+        [tree_id],
+        |row| from_i64(row.get(0)?),
+    )
+    .optional()
+    .map_err(|_| TreeStoreError::corrupt("agent tree revision is invalid"))
+}
+
+fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
+    tx.commit()
+        .map_err(|error| sqlite_unavailable("could not durably commit agent tree", &error))
 }
 
 impl TreeStore for SqliteTreeStore {
@@ -133,32 +215,8 @@ impl TreeStore for SqliteTreeStore {
     }
 
     fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
-        let tree_id = tree.tree_id.clone();
-        let stored_revision = tree.stored_revision;
-        let revision = tree.revision;
-        self.with_database_mut(|database| {
-            let tx = database
-                .connection
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(|error| sqlite_unavailable("could not begin agent tree save", &error))?;
-            let stored = tx
-                .query_row(
-                    "SELECT revision FROM agent_trees WHERE tree_id=?1",
-                    [tree_id.as_str()],
-                    |row| from_i64(row.get(0)?),
-                )
-                .optional()
-                .map_err(|_| TreeStoreError::corrupt("agent tree revision is invalid"))?;
-            fence_revision(stored, stored_revision, revision)?;
-            // The `Immediate` transaction holds the write lock from the SELECT
-            // above through the commit, so the compare and the swap are one
-            // step.
-            delete_agent_tree_rows(&tx, tree_id.as_str()).map_err(TreeStoreError::unavailable)?;
-            insert_agent_tree_rows(&tx, tree).map_err(TreeStoreError::unavailable)?;
-            tx.commit()
-                .map_err(|error| sqlite_unavailable("could not durably commit agent tree", &error))
-        })?;
-        Ok(Revision::published(revision))
+        self.with_writer(|writer| writer.save(tree))?;
+        Ok(Revision::published(tree.revision))
     }
 
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {

@@ -484,8 +484,8 @@ test-seam-ceiling = 41
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-recursive-subagents-store]
-feature-ceiling = 3
-test-seam-ceiling = 3
+feature-ceiling = 2
+test-seam-ceiling = 2
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-store]

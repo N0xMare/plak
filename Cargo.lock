@@ -4513,6 +4513,7 @@ dependencies = [
  "plakous-recursive-subagents",
  "plakous-store",
  "plakous-workspace",
+ "proptest",
  "rusqlite",
  "serde",
  "serde_json",

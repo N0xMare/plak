@@ -2387,6 +2387,19 @@ by `plakous-recursive-subagents-store`. Its ten domain tables are below; §14.3
 classifies every column family as an intent, a view of the feed, or an
 external-effect record.
 
+A tree save is one `Immediate` transaction under WAL and `synchronous=FULL`.
+It compare-and-swaps the `agent_trees` header with `UPDATE ... WHERE
+revision = ?` on the revision the handle last had acknowledged, requiring
+exactly one changed row, and then writes only the rows that differ from the
+tree the same connection last committed: in-place upserts for new or changed
+keys, nodes first, and keyed deletes for removed keys, nodes last. That image
+is trusted only while SQLite's `data_version` shows no commit by another
+connection. Without a current image (the first save after open, after another
+connection's commit, or after any refused or failed save) the save fences the
+revision, deletes the tree's rows and inserts them all. Both paths leave the
+same rows, and a revision mismatch on either is the same `StaleRevision`
+refusal. A save that changes no row or header column writes no WAL frame.
+
 Tree-store transaction begin and commit failures report the static phase and
 SQLite category, such as `disk_full` or `database_busy`, without backend text.
 A failed commit remains ambiguous until exact durable state is reconciled; an
