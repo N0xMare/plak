@@ -1294,7 +1294,14 @@ kind, item revision, exact bytes, target and send time. Withdrawal removes only
 the submission, never that binding; neither receipt cleanup nor view rebuilding
 permits changed content under the same command id.
 Loading a submission checks its immutable fields against that permanent binding;
-contradictory detail is refused rather than replayed.
+contradictory detail is refused rather than replayed. Command bindings never
+change once written, so a product-store connection checks each committed row
+once: it remembers the exact fields it verified and checks a row again only when
+it differs. A binding contradicted out of band after a connection verified its
+row is therefore refused from the next connection's first load, not by that
+connection. A new product-store connection checks every row on its first load,
+and a connection that discards a submission or deletes its session forgets what
+it verified for it.
 After a root or steer acknowledgement, the host grants the projector at most
 400 ms to refresh this join. A timeout or refusal leaves projection debt, not
 invented queue flags. Until the background projector supplies the missing

@@ -123,6 +123,8 @@ pub struct ProductStore {
     /// Whether the connection commits under `synchronous=FULL`. Projection-only
     /// commits relax it to `NORMAL`; every other commit restores it first.
     synchronous_full: bool,
+    /// The submissions this handle verified against their identity bindings.
+    verified_submissions: views::VerifiedSubmissions,
 }
 
 #[cfg(feature = "test-hooks")]
@@ -146,7 +148,10 @@ impl ProductStore {
             return Err(crate::home::state::incompatible_session_refusal(paths, id)
                 .unwrap_or_else(|| "session not found".to_owned()));
         }
-        Self::read_only_snapshot(paths, |snapshot| load_record(snapshot, id)).map_err(|error| {
+        Self::read_only_snapshot(paths, |snapshot| {
+            load_record(snapshot, &mut views::VerifiedSubmissions::default(), id)
+        })
+        .map_err(|error| {
             if error == "session not found" {
                 crate::home::state::incompatible_session_refusal(paths, id).unwrap_or(error)
             } else {
@@ -268,6 +273,7 @@ impl ProductStore {
             file_identity: (0, 0),
             baselines: HashMap::new(),
             synchronous_full: true,
+            verified_submissions: views::VerifiedSubmissions::default(),
         };
         store.admit_schema()?;
         #[cfg(unix)]
@@ -430,9 +436,15 @@ impl ProductStore {
             self.baselines.get(&session.id),
         )?;
         if let Some(submission) = submission {
-            views::insert_submission(&transaction, &session.id, submission)?;
+            views::insert_submission(
+                &transaction,
+                &mut self.verified_submissions,
+                &session.id,
+                submission,
+            )?;
         }
         if let Some(command_id) = discarded {
+            self.verified_submissions.forget(&session.id, command_id);
             transaction
                 .execute(
                     "DELETE FROM submissions WHERE session_id=?1 AND command_id=?2",
@@ -443,7 +455,8 @@ impl ProductStore {
         if let Some(cause) = pause_cause {
             views::insert_pause_cause(&transaction, &session.id, &cause)?;
         }
-        let queue_commands = views::queue_commands_of(&transaction, &session.id)?;
+        let queue_commands =
+            views::queue_commands_of(&transaction, &mut self.verified_submissions, &session.id)?;
         transaction
             .commit()
             .map_err(|_| "could not durably commit product session".to_owned())?;
@@ -494,7 +507,7 @@ impl ProductStore {
             .connection
             .unchecked_transaction()
             .map_err(|_| "could not start product store read".to_owned())?;
-        let session = load_record(&transaction, id)?;
+        let session = load_record(&transaction, &mut self.verified_submissions, id)?;
         let mut baseline = StoreBaseline::of(&session);
         // The joined read can omit consumed items still present in the intent table.
         baseline.pending_queue = load_queue(&transaction, id)?;
@@ -506,7 +519,11 @@ impl ProductStore {
     }
 }
 
-fn load_record(connection: &Connection, id: &str) -> Result<SessionRecord, String> {
+fn load_record(
+    connection: &Connection,
+    verified: &mut views::VerifiedSubmissions,
+    id: &str,
+) -> Result<SessionRecord, String> {
     let mut session = connection
             .query_row(
                 "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools FROM sessions WHERE id = ?1",
@@ -537,9 +554,9 @@ fn load_record(connection: &Connection, id: &str) -> Result<SessionRecord, Strin
             )
             .map_err(|error| if matches!(error, rusqlite::Error::QueryReturnedNoRows) { "session not found".to_owned() } else { "product session row is invalid".to_owned() })?;
     session.pending_queue = load_queue(connection, id)?;
-    let (transcript, views, queue_commands) = views::transcript_of(connection, id)?;
+    let (transcript, views, queue_commands) = views::transcript_of(connection, verified, id)?;
     session.transcript = transcript;
-    let intents = views::intents_of(connection, id)?;
+    let intents = views::intents_of(connection, verified, id)?;
     let empty = plakous_hosted::sessions::projector::SessionViews::empty();
     let joined = views.as_ref().unwrap_or(&empty);
     session.child_wake_suppressed = joined.wake_suppressed(&intents);
@@ -698,6 +715,7 @@ impl ProductStore {
             .commit()
             .map_err(|_| "could not durably delete the product session".to_owned())?;
         self.baselines.remove(id);
+        self.verified_submissions.forget_session(id);
         Ok(())
     }
 
@@ -1116,6 +1134,10 @@ fn delete_missing<'a>(
     Ok(())
 }
 
+/// Claims or terminalizes one permanent identity. No production path gives a
+/// `command` binding a terminal disposition; one that does must also forget
+/// the submission in [`views::VerifiedSubmissions`], which trusts a verified
+/// command binding for the connection's lifetime.
 fn bind_identity(
     tx: &Transaction<'_>,
     kind: &str,
@@ -2871,6 +2893,172 @@ mod tests {
         assert!(store.load(&session.id).is_err());
         assert!(store.load_intents(&session.id).is_err());
         assert!(store.commit_submission(&mut session, &request).is_err());
+    }
+
+    fn bound_submission(
+        root: &Path,
+        command: &str,
+    ) -> (PlakPaths, ProductStore, SessionRecord, Submission) {
+        let paths = PlakPaths::explicit(root.join("p"));
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut session = SessionRecord::new(root.to_path_buf());
+        let item = QueueItem::new("bound prompt");
+        session.pending_queue.push(item.clone());
+        let request = submission(&item, command);
+        store.commit_submission(&mut session, &request).unwrap();
+        assert_eq!(
+            store.load_intents(&session.id).unwrap().submissions,
+            vec![request.clone()]
+        );
+        (paths, store, session, request)
+    }
+
+    /// Writes a submission row without its identity binding.
+    fn insert_out_of_band(store: &ProductStore, session_id: &str, request: &Submission) {
+        store
+            .connection
+            .execute(
+                "INSERT INTO submissions(session_id,command_id,kind,queue_item_id,queue_revision,target_turn_id,canonical_command,submitted_at_ms,anchor) VALUES(?1,?2,?3,?4,?5,NULL,?6,?7,0)",
+                params![
+                    session_id,
+                    request.command_id,
+                    request.kind.as_str(),
+                    request.queue_item_id,
+                    to_i64(request.queue_item_revision).unwrap(),
+                    request.canonical_command,
+                    to_i64(request.submitted_at_ms).unwrap(),
+                ],
+            )
+            .unwrap();
+    }
+
+    fn contradict_binding(store: &ProductStore, request: &Submission) {
+        store
+            .connection
+            .execute(
+                "UPDATE identity_bindings SET binding_digest='contradiction' WHERE identity=?1",
+                [request.binding_identity()],
+            )
+            .unwrap();
+    }
+
+    /// Spec 02 §2.6: a store checks each submission against its binding once.
+    /// A row that differs from the one it verified is checked again and
+    /// refused; a contradicted binding is refused by the next process's first
+    /// load.
+    #[test]
+    fn a_submission_is_verified_once_per_store_and_tampering_is_still_refused() {
+        let root = tempdir().unwrap();
+        let (paths, mut store, session, request) = bound_submission(root.path(), "verified");
+        store
+            .connection
+            .execute(
+                "UPDATE submissions SET canonical_command='tampered' WHERE command_id=?1",
+                [&request.command_id],
+            )
+            .unwrap();
+        assert!(store.load_intents(&session.id).is_err());
+        assert!(store.load(&session.id).is_err());
+        store
+            .connection
+            .execute(
+                "UPDATE submissions SET canonical_command=?2 WHERE command_id=?1",
+                params![request.command_id, request.canonical_command],
+            )
+            .unwrap();
+        contradict_binding(&store, &request);
+        assert_eq!(
+            store.load_intents(&session.id).unwrap().submissions,
+            vec![request.clone()],
+            "this store already verified the unchanged row"
+        );
+        drop(store);
+        let mut store = ProductStore::open(&paths).unwrap();
+        assert!(store.load_intents(&session.id).is_err());
+        assert!(store.load(&session.id).is_err());
+    }
+
+    /// A submission verified inside a transaction that rolls back is not
+    /// remembered: the same row reappearing without its binding is refused.
+    #[test]
+    fn a_rolled_back_submission_is_not_remembered() {
+        let root = tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().join("p"));
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut session = SessionRecord::new(root.path().to_path_buf());
+        let item = QueueItem::new("bound prompt");
+        session.pending_queue.push(item.clone());
+        store.commit(&mut session).unwrap();
+        let request = submission(&item, "rolled-back");
+        store
+            .connection
+            .execute_batch("CREATE TEMP TRIGGER fail_pause BEFORE INSERT ON host_intents BEGIN SELECT RAISE(ABORT,'cut'); END;")
+            .unwrap();
+        let cause = plakous_hosted::sessions::projector::HostPauseCause::UnrecordedRefusal {
+            reason: "cut".to_owned(),
+        };
+        assert!(
+            store
+                .commit_with_submission(&mut session, Some(&request), None, Some(cause))
+                .is_err()
+        );
+        store
+            .connection
+            .execute_batch("DROP TRIGGER fail_pause;")
+            .unwrap();
+        let bindings: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM identity_bindings WHERE identity=?1",
+                [request.binding_identity()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(bindings, 0, "the binding rolled back with the row");
+        insert_out_of_band(&store, &session.id, &request);
+        assert!(store.load_intents(&session.id).is_err());
+    }
+
+    /// A discarded submission is forgotten: the same row reappearing under a
+    /// contradicted binding is checked again and refused.
+    #[test]
+    fn discarding_a_submission_forgets_its_verification() {
+        let root = tempdir().unwrap();
+        let (_paths, mut store, mut session, request) = bound_submission(root.path(), "discarded");
+        store
+            .discard_submission(&mut session, &request.command_id, None)
+            .unwrap();
+        contradict_binding(&store, &request);
+        insert_out_of_band(&store, &session.id, &request);
+        assert!(store.load_intents(&session.id).is_err());
+    }
+
+    /// A deleted session's submissions are forgotten: the same rows restored
+    /// under a contradicted binding are checked again and refused.
+    #[test]
+    fn deleting_a_session_forgets_its_verified_submissions() {
+        let root = tempdir().unwrap();
+        let (_paths, mut store, session, request) = bound_submission(root.path(), "deleted");
+        store
+            .connection
+            .execute_batch(&format!(
+                "CREATE TEMP TABLE saved_session AS SELECT * FROM sessions WHERE id='{0}';
+                 CREATE TEMP TABLE saved_submissions AS SELECT * FROM submissions WHERE session_id='{0}';",
+                session.id
+            ))
+            .unwrap();
+        store
+            .delete_session(&session.id, session.store_revision)
+            .unwrap();
+        contradict_binding(&store, &request);
+        store
+            .connection
+            .execute_batch(
+                "INSERT INTO sessions SELECT * FROM saved_session;
+                 INSERT INTO submissions SELECT * FROM saved_submissions;",
+            )
+            .unwrap();
+        assert!(store.load_intents(&session.id).is_err());
     }
 
     #[test]

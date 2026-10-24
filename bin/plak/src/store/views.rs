@@ -5,7 +5,7 @@
 //! run read, so a concurrent applier's transaction changes nothing. This is
 //! the only module that writes the projector view tables.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use plakous::sessions::SessionLocator;
 use plakous::sessions::feed::FeedSeq;
@@ -14,7 +14,7 @@ use plakous_hosted::sessions::projector::{
     SessionViewState, SessionViews, Submission, SubmissionKind, ViewWrites, WorkflowRequest,
 };
 use plakous_hosted::sessions::{TranscriptRow, encode_workflow_kind};
-use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, TransactionState, params};
 
 use super::{ProductStore, decode_workflow_kind, from_i64, to_i64};
 
@@ -39,12 +39,12 @@ fn projection_refusal(error: rusqlite::Error) -> Result<ProjectionCommit, String
 }
 
 impl ProductStore {
-    pub fn load_inherited_submissions(&self, id: &str) -> Result<Vec<Submission>, String> {
+    pub fn load_inherited_submissions(&mut self, id: &str) -> Result<Vec<Submission>, String> {
         let tx = self
             .connection
             .unchecked_transaction()
             .map_err(unavailable)?;
-        let submissions = inherited_submissions_of(&tx, id)?;
+        let submissions = inherited_submissions_of(&tx, &mut self.verified_submissions, id)?;
         tx.commit().map_err(unavailable)?;
         Ok(submissions)
     }
@@ -151,7 +151,8 @@ impl ProductStore {
                 .transpose()
                 .map_err(|_| "invalid construction binding".to_owned())?;
             let runtime = recorded.map(SessionLocator::session_id);
-            let mut intents = intents_of(snapshot, session_id)?;
+            let verified = &mut VerifiedSubmissions::default();
+            let mut intents = intents_of(snapshot, verified, session_id)?;
             let mut current = session_id.to_owned();
             let mut seen = std::collections::BTreeSet::new();
             loop {
@@ -188,7 +189,7 @@ impl ProductStore {
                 }
                 intents
                     .submissions
-                    .extend(intents_of(snapshot, &source)?.submissions);
+                    .extend(intents_of(snapshot, verified, &source)?.submissions);
                 current = source;
             }
             Ok((
@@ -212,7 +213,7 @@ impl ProductStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(unavailable)?;
-        insert_submission(&tx, session_id, submission)?;
+        insert_submission(&tx, &mut self.verified_submissions, session_id, submission)?;
         tx.commit().map_err(unavailable)
     }
 
@@ -272,7 +273,8 @@ impl ProductStore {
             params![session.id, request.operation_id, request.source_locator.to_string(), request.kind.as_str(), reason, selection],
         ).map_err(unavailable)?;
         if inserted == 0
-            && intents_of(&tx, &session.id)?.workflow_request(&request.operation_id)
+            && intents_of(&tx, &mut self.verified_submissions, &session.id)?
+                .workflow_request(&request.operation_id)
                 != Some(request)
         {
             return Err("workflow identity is bound to another request".to_owned());
@@ -297,7 +299,7 @@ impl ProductStore {
                 )
                 .map_err(unavailable)?;
             if exists {
-                let existing = super::load_record(&tx, &target.id)?;
+                let existing = super::load_record(&tx, &mut self.verified_submissions, &target.id)?;
                 if existing.create_operation_id != target.create_operation_id
                     || existing.source_product_session_id != target.source_product_session_id
                     || existing.source_workflow_operation_id != target.source_workflow_operation_id
@@ -327,7 +329,7 @@ impl ProductStore {
             .map_err(unavailable)?;
         let views = views_of(&tx, &session.id)?
             .ok_or_else(|| "workflow discard requires projected views".to_owned())?;
-        let intents = intents_of(&tx, &session.id)?;
+        let intents = intents_of(&tx, &mut self.verified_submissions, &session.id)?;
         let Some(request) = intents.workflow_request(operation_id) else {
             return Ok(());
         };
@@ -370,7 +372,7 @@ impl ProductStore {
             .map_err(unavailable)?;
         let views = views_of(&tx, &session.id)?
             .ok_or_else(|| "workflow withdrawal requires projected views".to_owned())?;
-        let intents = intents_of(&tx, &session.id)?;
+        let intents = intents_of(&tx, &mut self.verified_submissions, &session.id)?;
         let withdrawals =
             plakous_hosted::sessions::projector::workflow_withdrawals(&views, &intents);
         if withdrawals.is_empty() {
@@ -383,18 +385,20 @@ impl ProductStore {
                 && request.kind == plakous_hosted::sessions::SessionWorkflowKind::Clear
             {
                 let target_id = request.successor_product_id();
-                let target = match super::load_record(&tx, &target_id) {
-                    Ok(target) => Some(target),
-                    Err(error) if error == "session not found" => None,
-                    Err(error) => return Err(error),
-                };
+                let target =
+                    match super::load_record(&tx, &mut self.verified_submissions, &target_id) {
+                        Ok(target) => Some(target),
+                        Err(error) if error == "session not found" => None,
+                        Err(error) => return Err(error),
+                    };
                 if let Some(target) = target {
                     if views_of(&tx, &target_id)?.is_some()
                         || target.source_product_session_id.as_deref() != Some(session.id.as_str())
                         || target.source_workflow_operation_id.as_deref() != Some(id.as_str())
                         || !target.prompt_history.is_empty()
                         || !target.pending_queue.is_empty()
-                        || intents_of(&tx, &target_id)? != ProductIntents::default()
+                        || intents_of(&tx, &mut self.verified_submissions, &target_id)?
+                            != ProductIntents::default()
                     {
                         return Err(
                             "unadmitted clear successor is not an empty reservation".to_owned()
@@ -404,6 +408,7 @@ impl ProductStore {
                     // no runtime session. Identity bindings deliberately survive.
                     tx.execute("DELETE FROM sessions WHERE id=?1", [&target_id])
                         .map_err(unavailable)?;
+                    self.verified_submissions.forget_session(&target_id);
                 }
             }
             tx.execute(
@@ -472,7 +477,7 @@ impl ProductStore {
 
     /// Every intent of one session the projector reads.
     pub fn load_intents(&mut self, session_id: &str) -> Result<ProductIntents, String> {
-        intents_of(&self.connection, session_id)
+        intents_of(&self.connection, &mut self.verified_submissions, session_id)
     }
 
     /// The stored views of one session, or `None` before its first projector
@@ -501,7 +506,7 @@ impl ProductStore {
         // A target join changes source state without advancing its cursor.
         // Recompute it here so a racing source page cannot erase it.
         let mut joined = views.clone();
-        let intents = intents_of(&tx, session_id)?;
+        let intents = intents_of(&tx, &mut self.verified_submissions, session_id)?;
         for request in &intents.workflow_requests {
             if request.kind != plakous_hosted::sessions::SessionWorkflowKind::Clear
                 || intents.workflow_consumed(&request.operation_id, views.retained_from)
@@ -514,7 +519,7 @@ impl ProductStore {
             }
             let target_id = request.successor_product_id();
             if let Some(target_views) = views_of(&tx, &target_id)? {
-                let target = super::load_record(&tx, &target_id)?;
+                let target = super::load_record(&tx, &mut self.verified_submissions, &target_id)?;
                 if let Some(completion) = plakous_hosted::sessions::projector::clear_completion(
                     request,
                     &target,
@@ -536,12 +541,12 @@ impl ProductStore {
             .as_deref()
             .is_some_and(|operation| operation.ends_with(":create"))
         {
-            let target = super::load_record(&tx, session_id)?;
+            let target = super::load_record(&tx, &mut self.verified_submissions, session_id)?;
             if let (Some(source_id), Some(operation)) = (
                 target.source_product_session_id.as_deref(),
                 target.source_workflow_operation_id.as_deref(),
             ) {
-                let intents = intents_of(&tx, source_id)?;
+                let intents = intents_of(&tx, &mut self.verified_submissions, source_id)?;
                 if let Some(completion) = intents.workflow_request(operation).and_then(|request| {
                     plakous_hosted::sessions::projector::clear_completion(request, &target, views)
                 }) {
@@ -558,8 +563,8 @@ impl ProductStore {
             }
         }
         if !writes.successors.is_empty() {
-            let source = super::load_record(&tx, session_id)?;
-            let intents = intents_of(&tx, session_id)?;
+            let source = super::load_record(&tx, &mut self.verified_submissions, session_id)?;
+            let intents = intents_of(&tx, &mut self.verified_submissions, session_id)?;
             for successor in &writes.successors {
                 let Some(request) = successor
                     .operation_id
@@ -577,7 +582,8 @@ impl ProductStore {
                     )
                     .map_err(unavailable)?;
                 if exists {
-                    let existing = super::load_record(&tx, &target.id)?;
+                    let existing =
+                        super::load_record(&tx, &mut self.verified_submissions, &target.id)?;
                     if existing.create_operation_id != target.create_operation_id
                         || existing.source_product_session_id != target.source_product_session_id
                         || existing.source_workflow_operation_id
@@ -828,6 +834,7 @@ fn keyed_of<K: rusqlite::types::FromSql + Ord, V: serde::de::DeserializeOwned>(
 /// other row under its command id is refused.
 pub(super) fn insert_submission(
     tx: &rusqlite::Transaction<'_>,
+    verified: &mut VerifiedSubmissions,
     session_id: &str,
     submission: &Submission,
 ) -> Result<(), String> {
@@ -854,7 +861,7 @@ pub(super) fn insert_submission(
         ],
     )
     .map_err(unavailable)?;
-    let stored = load_submissions_where(tx, "command_id=?1", &submission.command_id)?;
+    let stored = load_submissions_where(tx, verified, "command_id=?1", &submission.command_id)?;
     if stored.first().map(|(owner, row)| (owner.as_str(), row)) != Some((session_id, submission)) {
         return Err(format!(
             "command id {} is already bound to another submission",
@@ -893,11 +900,12 @@ pub(super) fn insert_pause_cause(
 /// The queue command join needs no transcript or per-call bookkeeping reads.
 pub(super) fn queue_commands_of(
     connection: &Connection,
+    verified: &mut VerifiedSubmissions,
     session_id: &str,
 ) -> Result<plakous_hosted::sessions::QueueCommands, String> {
     let intents = ProductIntents {
         submission_anchors: intent_anchors(connection, session_id, "submissions", "command_id")?,
-        submissions: load_submissions_where(connection, "session_id=?1", session_id)?
+        submissions: load_submissions_where(connection, verified, "session_id=?1", session_id)?
             .into_iter()
             .map(|(_, submission)| submission)
             .collect(),
@@ -942,7 +950,11 @@ fn intent_anchors(
 }
 
 /// Every intent of one session the projector reads.
-fn inherited_submissions_of(connection: &Connection, id: &str) -> Result<Vec<Submission>, String> {
+fn inherited_submissions_of(
+    connection: &Connection,
+    verified: &mut VerifiedSubmissions,
+    id: &str,
+) -> Result<Vec<Submission>, String> {
     let metadata = |id: &str| -> Result<_, String> {
         connection
             .query_row(
@@ -987,7 +999,7 @@ fn inherited_submissions_of(connection: &Connection, id: &str) -> Result<Vec<Sub
             break;
         }
         submissions.extend(
-            load_submissions_where(connection, "session_id=?1", &source_id)?
+            load_submissions_where(connection, verified, "session_id=?1", &source_id)?
                 .into_iter()
                 .map(|(_, submission)| submission),
         );
@@ -999,9 +1011,10 @@ fn inherited_submissions_of(connection: &Connection, id: &str) -> Result<Vec<Sub
 
 pub(super) fn intents_of(
     connection: &Connection,
+    verified: &mut VerifiedSubmissions,
     session_id: &str,
 ) -> Result<ProductIntents, String> {
-    let submissions = load_submissions_where(connection, "session_id=?1", session_id)?
+    let submissions = load_submissions_where(connection, verified, "session_id=?1", session_id)?
         .into_iter()
         .map(|(_, submission)| submission)
         .collect();
@@ -1203,6 +1216,7 @@ pub(super) fn write_notices(
 /// notices and imported rows (spec 02 §2.6), and the views themselves.
 pub(super) fn transcript_of(
     connection: &Connection,
+    verified: &mut VerifiedSubmissions,
     session_id: &str,
 ) -> Result<
     (
@@ -1212,7 +1226,7 @@ pub(super) fn transcript_of(
     ),
     String,
 > {
-    let intents = intents_of(connection, session_id)?;
+    let intents = intents_of(connection, verified, session_id)?;
     let views = views_of(connection, session_id)?;
     let queue_commands =
         plakous_hosted::sessions::QueueCommands::from_join(&intents, views.as_ref());
@@ -1289,8 +1303,45 @@ fn insert_notice(
     Ok(())
 }
 
+/// The submissions one store verified against their permanent identity
+/// bindings (spec 02 §2.6), by owner session and command id, with the exact
+/// immutable fields that matched. A command binding is never removed and never
+/// changes once written, so a row equal to its verified fields needs no second
+/// check through this store; a changed row misses and is checked again, and a
+/// new process checks every row on its first load. It grows by one entry per
+/// verified submission until a discard, a session delete or the end of the
+/// connection.
+#[derive(Debug, Default)]
+pub(super) struct VerifiedSubmissions(HashMap<String, HashMap<String, Submission>>);
+
+impl VerifiedSubmissions {
+    fn contains(&self, owner: &str, submission: &Submission) -> bool {
+        self.0
+            .get(owner)
+            .and_then(|verified| verified.get(&submission.command_id))
+            == Some(submission)
+    }
+
+    /// Forgets a discarded submission.
+    pub(super) fn forget(&mut self, owner: &str, command_id: &str) {
+        if let Some(verified) = self.0.get_mut(owner) {
+            verified.remove(command_id);
+        }
+    }
+
+    /// Forgets every submission of a deleted session.
+    pub(super) fn forget_session(&mut self, owner: &str) {
+        self.0.remove(owner);
+    }
+}
+
+/// Loads submissions and checks each against its permanent identity binding,
+/// unless `verified` holds its exact fields. The unverified rows are checked in
+/// one query. Only rows read outside a write transaction are remembered: a
+/// write transaction's own rows and bindings are not durable until it commits.
 fn load_submissions_where(
     connection: &Connection,
+    verified: &mut VerifiedSubmissions,
     filter: &str,
     value: &str,
 ) -> Result<Vec<(String, Submission)>, String> {
@@ -1318,16 +1369,49 @@ fn load_submissions_where(
         .map_err(unavailable)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(invalid)?;
-    for (owner, submission) in &submissions {
-        let matches: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM identity_bindings WHERE identity=?1 AND kind='command' AND owner_session_id=?2 AND binding_digest=?3 AND terminal_disposition IS NULL AND terminal_outcome IS NULL)",
-                params![submission.binding_identity(), owner, submission.binding_digest(owner)],
-                |row| row.get(0),
-            )
-            .map_err(unavailable)?;
-        if !matches {
+    let unverified = submissions
+        .iter()
+        .filter(|(owner, submission)| !verified.contains(owner, submission))
+        .collect::<Vec<_>>();
+    if unverified.is_empty() {
+        return Ok(submissions);
+    }
+    let identities = serde_json::to_string(
+        &unverified
+            .iter()
+            .map(|(_, submission)| submission.binding_identity())
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|_| "submission identities are not encodable".to_owned())?;
+    let bindings = connection
+        .prepare(
+            "SELECT b.identity,b.owner_session_id,b.binding_digest FROM json_each(?1) AS wanted JOIN identity_bindings AS b ON b.identity=wanted.value WHERE b.kind='command' AND b.terminal_disposition IS NULL AND b.terminal_outcome IS NULL",
+        )
+        .map_err(unavailable)?
+        .query_map([identities], |row| {
+            Ok((row.get::<_, String>(0)?, (row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+        })
+        .map_err(unavailable)?
+        .collect::<Result<HashMap<_, _>, _>>()
+        .map_err(unavailable)?;
+    for (owner, submission) in &unverified {
+        let (bound_owner, digest) = bindings
+            .get(&submission.binding_identity())
+            .ok_or_else(|| "submission contradicts its permanent identity binding".to_owned())?;
+        if bound_owner != owner || *digest != submission.binding_digest(owner) {
             return Err("submission contradicts its permanent identity binding".to_owned());
+        }
+    }
+    if matches!(
+        connection.transaction_state(None::<&str>),
+        Ok(TransactionState::None | TransactionState::Read)
+    ) {
+        for (owner, submission) in unverified {
+            verified
+                .0
+                .entry(owner.clone())
+                .or_default()
+                .insert(submission.command_id.clone(), submission.clone());
         }
     }
     Ok(submissions)
