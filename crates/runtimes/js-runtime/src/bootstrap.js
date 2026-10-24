@@ -19,6 +19,7 @@
     "Tool call failed: invalid audio output. Pass a base64 data URI instead";
   const jsonParse = JSON.parse;
   const jsonStringify = JSON.stringify;
+  const objectKeys = Object.keys;
   const cloneValue = typeof globalThis.structuredClone === "function"
     ? globalThis.structuredClone
     : (value) => value === undefined
@@ -58,6 +59,15 @@
     }
   }
 
+  function checkStoredDepth(value, depth) {
+    if (value === null || typeof value !== "object") return;
+    if (depth >= 40) throw new Error("stored value nests deeper than 40 levels");
+    const keys = objectKeys(value);
+    for (let index = 0; index < keys.length; index++) {
+      checkStoredDepth(value[keys[index]], depth + 1);
+    }
+  }
+
   function storedValue(key, value) {
     let encoded;
     try {
@@ -68,7 +78,9 @@
     if (encoded === undefined) {
       throw `Unable to store ${jsonStringify(key)}. Only plain serializable objects can be stored.`;
     }
-    return jsonParse(encoded);
+    const normalized = jsonParse(encoded);
+    checkStoredDepth(normalized, 0);
+    return normalized;
   }
 
   return async function runCell(source, definitionsJson, initialStoredJson) {

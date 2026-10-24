@@ -72,7 +72,7 @@ else
   say "attestation not checked (needs a signed-in gh); checksum verified"
 fi
 tar -xzf "$work/$stem.tar.gz" -C "$work"
-for name in plak plakous-js-host monty; do
+for name in plak plakous-js-host plakous-py-host; do
   [ -f "$work/$stem/$name" ] && [ ! -L "$work/$stem/$name" ] || die "$stem.tar.gz lacks $name"
 done
 
@@ -124,18 +124,18 @@ install_sidecar() {
 }
 install_sidecar plakous-js-host
 installed_js="$dest/plakous-js-host"
-install_sidecar monty
-installed_monty="$dest/monty"
+install_sidecar plakous-py-host
+installed_py="$dest/plakous-py-host"
 
-snapshot_id="$(printf 'plak %s\nplakous-js-host %s\nmonty %s\n' "$(sha256_of "$work/$stem/plak")" \
-  "$(sha256_of "$work/$stem/plakous-js-host")" "$(sha256_of "$work/$stem/monty")" \
+snapshot_id="$(printf 'plak %s\nplakous-js-host %s\nplakous-py-host %s\n' "$(sha256_of "$work/$stem/plak")" \
+  "$(sha256_of "$work/$stem/plakous-js-host")" "$(sha256_of "$work/$stem/plakous-py-host")" \
   | { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; } | cut -d' ' -f1)"
 snapshot="$snapshot_root/$snapshot_id"
 if [ ! -d "$snapshot" ]; then
   staging="$(mktemp -d "$snapshot_root/.staging.XXXXXX")"
   cp "$work/$stem/plak" "$staging/plak" && chmod 0555 "$staging/plak"
   ln -s "$installed_js" "$staging/plakous-js-host"
-  ln -s "$installed_monty" "$staging/monty"
+  ln -s "$installed_py" "$staging/plakous-py-host"
   "$staging/plak" version --write-binary-manifest "$staging" 2>/dev/null \
     || rm -f "$staging/binary-id"
   "$staging/plak" version --state-key >"$staging/state-key" 2>/dev/null || rm -f "$staging/state-key"
@@ -158,9 +158,19 @@ link() {
   ln -sfn "$2" "$1"
 }
 make_dir "$HOME/.local/bin"
+remove_obsolete_worker_link() {
+  obsolete_worker="$HOME/.local/bin/monty"
+  [ -L "$obsolete_worker" ] || return 0
+  obsolete_target="$(readlink "$obsolete_worker")"
+  case "$obsolete_target" in
+    "$HOME/.local/lib/plak/sidecars/"*|"$HOME/.local/lib/plak/maintainer/"*|"$HOME/.local/lib/plak/release/"*)
+      rm "$obsolete_worker" ;;
+  esac
+}
+remove_obsolete_worker_link
 link "$HOME/.local/bin/plak" "$snapshot/plak"
 link "$HOME/.local/bin/plakous-js-host" "$installed_js"
-link "$HOME/.local/bin/monty" "$installed_monty"
+link "$HOME/.local/bin/plakous-py-host" "$installed_py"
 say "installed plak $version: $HOME/.local/bin/plak -> $snapshot/plak"
 case ":${PATH:-}:" in
   *":$HOME/.local/bin:"*) ;;

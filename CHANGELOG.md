@@ -25,6 +25,14 @@ one cross-build carrier (a build imports its own and the previous version).
   delivery verdicts. `SidecarHost` is replaced by `CellClient` and
   `CellSession`. The `plakous-js-host` worker speaks only the new protocol, so
   a stale worker is refused at its hello.
+- Python PTC runs on the same cell protocol. `plakous-py-eval` and the
+  `monty-pool` dependency are removed, and with them the WebSocket stack
+  (`tungstenite`, `tokio-tungstenite`, and the duplicate `webpki-roots` 0.26)
+  and the `cap-std`
+  graph. `plakous-py-worker` builds `plakous-py-host`, which drives the pinned
+  Monty 1.2.0 child state machine in process; the binary `monty` is gone, and
+  `PLAK_MONTY_WORKER` is replaced by `PLAK_PY_HOST` (else a sibling
+  `plakous-py-host`). The workspace has 39 packages.
 
 - The context meter counts each image on Claude routes at 4,784 tokens,
   Anthropic's current high-resolution maximum (`ceil(w/28) * ceil(h/28)`
@@ -43,6 +51,14 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Persisted formats
 
+- Runtime format epoch 32: Python PTC records the Monty cell-worker engine
+  contract and adapter `plakous.monty-python-adapter.v8` instead of the
+  monty-pool contract and adapter v7. Its worker artifact, host and containment
+  identities also change, so sessions created by an epoch-31 build are not
+  opened in place. The JavaScript adapter becomes
+  `plakous-js-host-bootstrap.v7`, binding the stored-value depth limit.
+  State key `r25.e32.p33.t8`; carry a session with `/reload`
+  or export and import. Export document version 8 is unchanged.
 - Runtime format epoch 31: the JavaScript worker speaks the cell protocol
   (`plakous-cell-protocol.v1`, length-prefixed frames checked in the worker's
   hello) instead of JSONL, and the recorded engine contract and Code Mode

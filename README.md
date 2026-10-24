@@ -54,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
 ```
 
 The installer downloads the latest GitHub Release (or `PLAK_VERSION`), verifies
-its SHA-256 checksum, and installs `plak`, `plakous-js-host` and `monty` under
+its SHA-256 checksum, and installs `plak`, `plakous-js-host` and `plakous-py-host` under
 `~/.local/lib/plak` with links in `~/.local/bin` (put that directory on your
 PATH). It needs no `sudo`. Alternatively, with Rust 1.99.0:
 
@@ -74,10 +74,10 @@ available, build and install the full Plak product and both evaluator workers:
 just install release
 ```
 
-`just install release` builds a plain release `plak`, `plakous-js-host`, and `monty`,
+`just install release` builds a plain release `plak`, `plakous-js-host`, and `plakous-py-host`,
 checks their linkage, and installs them as an immutable snapshot under
 `~/.local/lib/plak/release` with links named `plak`, `plakous-js-host`, and
-`monty` in `~/.local/bin` (put that directory on your PATH). Existing non-Plak
+`plakous-py-host` in `~/.local/bin` (put that directory on your PATH). Existing non-Plak
 files or links are refused, and it refuses to run from a linked Git worktree.
 Run it again after `git pull` to update; a running TUI then shows
 `new build installed · /reload`.
@@ -91,7 +91,7 @@ cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker
 
 Build the parent and workers in separate Cargo invocations to keep Monty runtime
 features out of `plak`. Bare `cargo build` selects only `plak`. The commands
-produce `plak`, `plakous-js-host`, and `monty` in
+produce `plak`, `plakous-js-host`, and `plakous-py-host` in
 `target/release/` (or the selected Cargo target directory). Run
 `target/release/plak` directly. `just build debug`, `just build release` and
 `just build maintainer` add maintainer-only verbs and always-on file logging,
@@ -167,7 +167,7 @@ From the project directory:
 plak run --account codex --model gpt-5.6-luna --effort low -- 'Summarize this repository without changing files.'
 ```
 
-Use an exact model ID from `plak models <account>`. The catalog determines which effort values and tool compositions are accepted. `js-ptc` uses the built JavaScript sidecar; `py-ptc` uses the built Monty worker. Both workers are discovered beside the binary; `PLAK_JS_HOST` and `PLAK_MONTY_WORKER` provide explicit path overrides.
+Use an exact model ID from `plak models <account>`. The catalog determines which effort values and tool compositions are accepted. `js-ptc` uses the built JavaScript sidecar; `py-ptc` uses the built Python cell worker (`plakous-py-host`). Both workers are discovered beside the binary; `PLAK_JS_HOST` and `PLAK_PY_HOST` provide explicit path overrides.
 
 ### Configuration
 

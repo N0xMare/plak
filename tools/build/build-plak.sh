@@ -92,13 +92,13 @@ target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 output_dir="$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}${profile}"
 bin="$output_dir/plak"
 js_host="$output_dir/plakous-js-host"
-monty="$output_dir/monty"
+py_host="$output_dir/plakous-py-host"
 if [[ ! -x "$bin" ]]; then
   echo "build-plak: cargo did not write $bin" >&2
   exit 2
 fi
-if [[ ! -x "$monty" ]]; then
-  echo "build-plak: cargo did not write $monty" >&2
+if [[ ! -x "$py_host" ]]; then
+  echo "build-plak: cargo did not write $py_host" >&2
   exit 2
 fi
 if [[ ! -x "$js_host" ]]; then
@@ -118,13 +118,13 @@ fi
 if [[ "$profile" == release ]]; then
   output_dir="$output_dir/stripped"
   mkdir -p "$output_dir"
-  for artifact in "$bin" "$js_host" "$monty"; do
+  for artifact in "$bin" "$js_host" "$py_host"; do
     cp "$artifact" "$output_dir/$(basename "$artifact")"
     strip "$output_dir/$(basename "$artifact")"
   done
   bin="$output_dir/plak"
   js_host="$output_dir/plakous-js-host"
-  monty="$output_dir/monty"
+  py_host="$output_dir/plakous-py-host"
 fi
 if [[ -n "$artifacts_only" ]]; then
   printf '%s\n' "$output_dir"
@@ -168,8 +168,8 @@ sha256_of() {
   fi
 }
 snapshot_root="${HOME}/.local/lib/plak/${snapshot_flavor}"
-snapshot_id="$(printf 'plak %s\nplakous-js-host %s\nmonty %s\n' \
-  "$(sha256_of "$bin")" "$(sha256_of "$js_host")" "$(sha256_of "$monty")" | sha256_of -)"
+snapshot_id="$(printf 'plak %s\nplakous-js-host %s\nplakous-py-host %s\n' \
+  "$(sha256_of "$bin")" "$(sha256_of "$js_host")" "$(sha256_of "$py_host")" | sha256_of -)"
 require_artifact_directory() {
   local facts mode
   [[ -d "$1" && ! -L "$1" ]] || { echo "build-plak: sidecar cache directory refused: $1" >&2; return 1; }
@@ -251,14 +251,14 @@ install_sidecar() {
   printf '%s\n' "$destination/$name"
 }
 installed_js="$(install_sidecar "$js_host" plakous-js-host)"
-installed_monty="$(install_sidecar "$monty" monty)"
+installed_py="$(install_sidecar "$py_host" plakous-py-host)"
 snapshot="$snapshot_root/$snapshot_id"
 if [[ ! -d "$snapshot" ]]; then
   staging="$(mktemp -d "$snapshot_root/.staging.XXXXXX")"
   cp "$bin" "$staging/"
   chmod 0555 "$staging/plak"
   ln -s "$installed_js" "$staging/plakous-js-host"
-  ln -s "$installed_monty" "$staging/monty"
+  ln -s "$installed_py" "$staging/plakous-py-host"
   "$staging/plak" version --write-binary-manifest "$staging" 2>/dev/null \
     || rm -f "$staging/binary-id"
   # The state key finds the snapshot that can export this build's sessions.
@@ -276,13 +276,23 @@ fi
 # pruning listing could otherwise delete a snapshot another installer reused.
 bin="$snapshot/plak"
 js_host="$installed_js"
-monty="$installed_monty"
+py_host="$installed_py"
 # END SNAPSHOT INSTALL
 
 
+remove_obsolete_worker_link() {
+  obsolete_worker="$HOME/.local/bin/monty"
+  [ -L "$obsolete_worker" ] || return 0
+  obsolete_target="$(readlink "$obsolete_worker")"
+  case "$obsolete_target" in
+    "$HOME/.local/lib/plak/sidecars/"*|"$HOME/.local/lib/plak/maintainer/"*|"$HOME/.local/lib/plak/release/"*)
+      rm "$obsolete_worker" ;;
+  esac
+}
+remove_obsolete_worker_link
 install_link "${HOME}/.local/bin/plak" "$bin"
 install_link "${HOME}/.local/bin/plakous-js-host" "$js_host"
-install_link "${HOME}/.local/bin/monty" "$monty"
+install_link "${HOME}/.local/bin/plakous-py-host" "$py_host"
 cargo_plak="${CARGO_HOME:-$HOME/.cargo}/bin/plak"
 if [[ -e "$cargo_plak" || -L "$cargo_plak" ]]; then
   install_link "$cargo_plak" "$bin"
@@ -291,7 +301,7 @@ cargo_js="${CARGO_HOME:-$HOME/.cargo}/bin/plakous-js-host"
 if [[ -e "$cargo_js" || -L "$cargo_js" ]]; then
   install_link "$cargo_js" "$js_host"
 fi
-cargo_monty="${CARGO_HOME:-$HOME/.cargo}/bin/monty"
-if [[ -e "$cargo_monty" || -L "$cargo_monty" ]]; then
-  install_link "$cargo_monty" "$monty"
+cargo_py="${CARGO_HOME:-$HOME/.cargo}/bin/plakous-py-host"
+if [[ -e "$cargo_py" || -L "$cargo_py" ]]; then
+  install_link "$cargo_py" "$py_host"
 fi

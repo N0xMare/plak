@@ -28,7 +28,14 @@ pub struct WorkerIdentity {
 pub const QUICKJS_WORKER: WorkerIdentity = WorkerIdentity {
     engine: "quickjs",
     version: "rquickjs-0.12",
-    adapter: "plakous-js-host-bootstrap.v6",
+    adapter: "plakous-js-host-bootstrap.v7",
+};
+
+/// The Monty worker, `plakous-py-host`.
+pub const MONTY_WORKER: WorkerIdentity = WorkerIdentity {
+    engine: "monty",
+    version: "1.2.0",
+    adapter: "plakous.monty-python-adapter.v8",
 };
 
 /// Parent to worker.
@@ -88,6 +95,8 @@ pub enum WorkerFrame {
         call: u64,
         verdict: DeliveryVerdict,
     },
+    /// The cell suspended on these nested calls and waits for their results.
+    Waiting { cell: u64, calls: Vec<u64> },
     /// The cell parked at a yield and waits for `Resume`.
     Yielded { cell: u64 },
     /// The cell's one terminal.
@@ -104,6 +113,8 @@ pub enum WorkerFrame {
 pub enum EngineConfig {
     /// The `QuickJS` worker.
     Quickjs { heap_bytes: u64, stack_bytes: u64 },
+    /// The Monty worker: the interpreter's soft memory limit.
+    Monty { memory_bytes: u64 },
 }
 
 impl EngineConfig {
@@ -111,6 +122,11 @@ impl EngineConfig {
     pub const QUICKJS: Self = Self::Quickjs {
         heap_bytes: 64 * 1024 * 1024,
         stack_bytes: 512 * 1024,
+    };
+
+    /// The Monty worker's exact limits.
+    pub const MONTY: Self = Self::Monty {
+        memory_bytes: 256 * 1024 * 1024,
     };
 }
 
@@ -123,6 +139,34 @@ pub enum CellPrelude {
         tools: Vec<Value>,
         stored: HashMap<String, Value>,
     },
+    /// Monty: the session's tool wrappers, on the session's first cell only.
+    Monty { bootstrap: Option<MontyBootstrap> },
+}
+
+/// The Python wrappers a Monty session installs before its first cell: the
+/// generated source and the private host functions it calls.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MontyBootstrap {
+    pub source: String,
+    pub bindings: Vec<MontyBinding>,
+}
+
+/// One private host function: the tool it calls and the argument it takes.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MontyBinding {
+    pub function: String,
+    pub tool: String,
+    pub input: BindingInput,
+}
+
+/// The single argument a bound Python tool takes.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BindingInput {
+    /// A structured tool receives a dictionary.
+    Dictionary,
+    /// A freeform tool receives its exact UTF-8 input string.
+    String,
 }
 
 /// One unit of cell output.
@@ -145,6 +189,9 @@ pub enum DeliveryVerdict {
     Refused(String),
     /// The result provably never reached the interpreter.
     NotDelivered(String),
+    /// The cell ended, or abandoned the batch carrying the result, before the
+    /// interpreter observed it.
+    NotObserved(String),
 }
 
 /// A cell's terminal.

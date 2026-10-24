@@ -161,7 +161,7 @@ class ResponsibilityReportTests(unittest.TestCase):
                     # or `#[cfg(all(test, unix))] mod tests;` (unix-only bodies).
                     parent = path.parent
                     # A crate root declares `mod tests;` too (e.g. a crate
-                    # whose whole body is one module: plakous-py-eval).
+                    # whose whole body is one module).
                     declarers = [
                         parent / "mod.rs",
                         parent / "lib.rs",

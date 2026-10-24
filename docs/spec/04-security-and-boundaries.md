@@ -1374,17 +1374,20 @@ bounded kill/reap escalation, so a worker that stops reading stdin cannot block
 shutdown on a synchronous write. Failed or interrupted reaping never counts as
 successful joined cleanup.
 
-The Python evaluator remains a worker process driven by `monty-pool`. Product
-builds produce `monty` from a thin local subprocess entry point over the pinned
-upstream interpreter, allocator and protocol state machine. The interpreter
+The Python evaluator remains a worker process, `plakous-py-host`, driven by
+Plak's cell client over the cell protocol. It runs the pinned upstream
+interpreter, allocator and child state machine in process; no pool library is
+linked. The interpreter
 and allocator are not linked into Plak. Cargo verifies registry dependencies
 against the shared workspace lock. The reviewed local interpreter and typeshed
 snapshots are part of the repository source closure.
 
-The worker holds no host authority. Only the local subprocess transport is
-configured; `monty-pool`'s remote WebSocket transport is never used, and no
-mounts or working directory are sent (`os.getcwd()` reports the virtual `/`).
-Every OS call the interpreter routes to the host is refused. Host `import`
+The worker holds no host authority. There is no remote transport, and no
+mounts are configured (`os.getcwd()` reports the virtual `/`). Every OS call
+the interpreter raises is refused inside the worker, which never forwards one
+to the host; nested tool calls are the only requests that leave it, and the
+host checks each against the allowlist and core admission. Both workers'
+path and SHA-256 are re-checked immediately before spawn. Host `import`
 raises `ModuleNotFoundError`. Production cells are not type-checked
 (`type_check: false`); a stub request (`import_stubs`), if any, receives no
 stubs. `Path.scan` (including `os.scandir`) raises `RuntimeError` explaining

@@ -28,7 +28,7 @@ prompts and session workflows (including the feed) are always available.
 | Feature | Adds |
 | --- | --- |
 | `composition` | JavaScript presentations and the sidecar client; no credentials, HTTP or Python |
-| `composition-python` | Monty-backed Python PTC; implies `composition` |
+| `composition-python` | Python PTC on the cell client (the Monty interpreter stays in `plakous-py-host`); implies `composition` |
 | `sessions-sqlite` | `SessionBackend::sqlite` |
 | `anthropic`, `openrouter` | Provider integrations and explicit credential/model inputs |
 | `openai`, `xai` | Provider integration exports; `OpenAiLanguageModel`/`XaiLanguageModel` also require `native-subscriptions` |
@@ -72,7 +72,7 @@ not a second runnable agent implementation.
 No facade feature selection needs a `[patch]` table, including those that reach
 the Python evaluator. The evaluators run as worker executables:
 `cargo install --locked plakous-js-runtime plakous-py-worker` installs
-`plakous-js-host` and `monty`.
+`plakous-js-host` and `plakous-py-host`.
 
 ## Examples
 

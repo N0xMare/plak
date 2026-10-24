@@ -598,7 +598,7 @@ pub(super) fn attach_repair_guidance(detail: &str) -> &'static str {
     } else if detail.contains("product Python host is unavailable")
         || detail.contains("Python host is unavailable")
     {
-        "fix: set PLAK_MONTY_WORKER or place monty beside plak, then /attach"
+        "fix: set PLAK_PY_HOST or place plakous-py-host beside plak, then /attach"
     } else {
         "fix: run plak login in a shell, then choose a profile with /agents; the agent attaches automatically"
     }

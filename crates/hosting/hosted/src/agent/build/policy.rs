@@ -220,7 +220,7 @@ pub(crate) fn product_python_attachment(
     configuration: &CompiledProviderConfiguration,
     presentation_kind: CodingPresentation,
 ) -> CliResult<plakous::agent::LocalCompositionAttachment> {
-    let artifact = plakous::agent::LocalCompositionEngineArtifact::monty_pool_v1(host_path)
+    let artifact = plakous::agent::LocalCompositionEngineArtifact::python_worker_v1(host_path)
         .map_err(|error| CliFailure::new(format!("Python host identity is invalid: {error}")))?;
     let profile = plakous::agent::LocalCompositionProfile::python_ptc_v1(descriptor)
         .map_err(|error| CliFailure::new(format!("Python profile identity is invalid: {error}")))?;

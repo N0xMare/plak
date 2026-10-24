@@ -5263,7 +5263,7 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
     let artifact = |path: &Path| {
         #[cfg(feature = "composition-python")]
         if kind == 2 {
-            return LocalCompositionEngineArtifact::monty_pool_v1(path);
+            return LocalCompositionEngineArtifact::python_worker_v1(path);
         }
         LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path)
     };

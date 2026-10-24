@@ -288,9 +288,10 @@ per-cell cap has an explicit truncation notice.
 Steers yield observation without killing the cell, and nested agent/process
 awaits are allowed.
 
-This build runs Monty 1.2.0 under adapter `plakous.monty-python-adapter.v7`. It
-refuses to reopen py-ptc roots and children recorded under the Monty 1.1.0
-engine contract, adapter v4 or v5 (Monty 0.0.21) or v6, profile
+This build runs Monty 1.2.0 in `plakous-py-host` on the cell protocol under
+adapter `plakous.monty-python-adapter.v8`. It refuses to reopen py-ptc roots
+and children recorded under an earlier engine contract (monty-pool with
+adapter v7, the Monty 1.1.0 contract, adapter v4 or v5 (Monty 0.0.21) or v6), profile
 `plakous.python-ptc-profile.v2`, or presentation
 `plakous.python-ptc-presentation.v3`. There is no migration; recover with
 `plak session export <id>` then `plak session import <file>`.
@@ -302,7 +303,7 @@ and an unsupported tuple fails before inference.
 
 Both `native-ptc` and `js-ptc` need the `plakous-js-host` sidecar — `PLAK_JS_HOST`
 or a `plakous-js-host` beside the `plak` binary, which the separate worker build
-produces beside `plak`. `py-ptc` needs `PLAK_MONTY_WORKER` or a sibling `monty` worker. The normal build
+produces beside `plak`. `py-ptc` needs `PLAK_PY_HOST` or a sibling `plakous-py-host`. The normal build
 produces both workers, including the pinned upstream Monty runtime. A missing
 sidecar fails closed.
 

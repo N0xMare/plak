@@ -955,7 +955,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 31.
+like every canonical block. This is runtime checkpoint format epoch 32.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -1114,7 +1114,7 @@ cancellation/deadline controls are revalidated before the permit's final
 synchronous store-time check and start observation. Refused executor admission
 emits no tool start. Evaluators carry the same admission control through
 session preparation to the last source-start boundary: after QuickJS locks and
-joins before `start_cell`, and after Monty checkout acquisition before `feed`.
+joins before `start_cell`, and after the Monty worker's spawn before its `StartCell`.
 Result delivery, wait, termination and shutdown continue joining already-owned
 work; they do not require a fresh source-start grant.
 
@@ -1512,7 +1512,7 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **25** and the checkpoint format epoch is **30**; the
+The runtime schema is **25** and the checkpoint format epoch is **32**; the
 feed record encoding (§5.11) is part of that epoch, which it shares with the
 decision-fact encodings of the same release. Only
 the current exact schema and format epoch are supported. Every other runtime
@@ -1787,7 +1787,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 31 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 32 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -2752,7 +2752,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 31.
+checkpoint format epoch 32.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
@@ -4294,7 +4294,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 31.
+runtime checkpoint format epoch 32.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -5726,7 +5726,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 31.
+runtime checkpoint format epoch 32.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -6213,25 +6213,30 @@ There are exactly three local PTC deployments plus `direct` (no PTC):
 | --- | --- | --- | --- |
 | `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the cell client that `composition` links |
 | `js-ptc` | Product | `exec_js`, `wait_js`, JSON field `source` | rquickjs in the sidecar `plakous-js-host`, one process per agent |
-| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.2.0` via monty-pool in `plakous-py-eval`, one checkout per agent incarnation |
+| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.2.0` in the cell worker `plakous-py-host`, one worker per agent incarnation |
 | `direct` | — | none | — |
 
 The host identity carries the deployment — `rquickjs-host/<digest>` or
-`monty-pool/<worker digest>` — and checkpoints do not resume across engines.
+`monty-host/<worker digest>` — and checkpoints do not resume across engines.
+Runtime epoch 32 separates Python cell-worker identities from the epoch-31
+Monty pool deployment: its engine contract, artifact, host and containment
+bindings differ. Carry an earlier session through export/import, not an
+in-place checkpoint reopen; the export document encoding is unchanged.
 The JavaScript engine contract is the five-part recipe
 `sha256(ExecutionEnvironment, 1, ["plakous.cell-engine-contract.v1", engine,
 engine version, cell protocol revision, adapter revision])`, today
 `quickjs`, `rquickjs-0.12`, `plakous-cell-protocol.v1` and
-`plakous-js-host-bootstrap.v6`. The official V8 `codex-code-mode-host` is **not
+`plakous-js-host-bootstrap.v7`. The official V8 `codex-code-mode-host` is **not
 an evaluator**, and no host is embedded by `include_bytes`.
 
 Hosted and Plak locate workers by environment variable or as a sibling of the
-running binary. The facade instead takes an explicit absolute canonical path:
+running binary. The facade instead takes an explicit absolute canonical path
+(`LocalCompositionEngineArtifact::python_worker_v1` for Python):
 attachment records a regular file's path and SHA-256, not its provenance, and
-the JavaScript client re-checks the path/hash immediately before spawning.
+both cell clients re-check the path/hash immediately before spawning.
 This is not an atomic guarantee against replacement between the re-check and
-OS execution. Hosted/product discovery uses `PLAK_JS_HOST` or a sibling `plakous-js-host`, and `PLAK_MONTY_WORKER` or
-a sibling `monty`. Discovery MUST NOT fetch the official Codex
+OS execution. Hosted/product discovery uses `PLAK_JS_HOST` or a sibling `plakous-js-host`, and `PLAK_PY_HOST` or
+a sibling `plakous-py-host`. Discovery MUST NOT fetch the official Codex
 `codex-code-mode-host`, MUST NOT read an `@openai/codex` npm layout, and MUST
 NOT admit `PLAK_CODE_MODE_HOST`. Intel macOS and every other unsupported target
 fail closed. The sidecar MUST NOT receive credentials, stores, executors, or
@@ -6253,7 +6258,12 @@ Rust payloads. Its event queue holds at most 256 items; saturation is terminal
 while a nested response or notification acknowledgement is pending. Cancellation
 and worker stop use independent atomic control and never block on queue sends.
 Terminal stored values and the facade's retained storage each have an 8 MiB
-encoded limit. The facade additionally caps collected content at 8 MiB and
+encoded limit. Each stored value nests at most 40 containers deep. The worker's
+`store` validates the normalized JSON value before changing its retained map or
+recording a write, so an over-deep value raises a catchable cell error instead of
+making `CellDone` undecodable. Earlier valid writes survive; later cells can
+still load them through `CellPrelude` without losing the worker.
+The facade additionally caps collected content at 8 MiB and
 4,096 items per cell; presentation truncation runs within these hard bounds.
 An empty text item is ordinary user output, not invalid output: it carries no
 model content and no canonical text block can hold it, so every projection
@@ -6266,9 +6276,10 @@ is a 4-byte big-endian length and one JSON value, capped at 8 MiB before any
 allocation, so a truncated length, an oversize length and an unterminated
 body are all loss. The worker opens with a `Hello` naming the protocol
 revision, engine and adapter; the client refuses any other worker before it
-sends its one `Configure` (the engine's heap and stack limits), and a worker
-that says nothing within 10 s is refused, killed and reaped within the
-two-second settle bound. A worker refuses a `Configure` naming other limits,
+sends its one `Configure` (the engine's heap and stack limits). Any refused
+worker — wrong or malformed `Hello`, no `Hello` within 10 s, or a failed
+`Configure` — is killed and reaped within the two-second settle bound, or is
+reported unreaped. A worker refuses a `Configure` naming other limits,
 and a repeated one, with `HostLost{ProtocolViolation}` and exits. Every later
 frame names its cell. A nested-call input or result nests at most 40
 containers deep, so its tagged frame stays within the JSON decoder's
@@ -6372,53 +6383,64 @@ no tool effect and consumes no admitted nested-call slot. Ordinary Python values
 functions and aliases persist across cells; creating a coroutine is not durable
 tool admission.
 
-The adapter installs these wrappers once per interpreter checkout over a Rust
-allowlist of private callbacks. Export names must be non-keyword ASCII Python
-identifiers outside the reserved `_plakous_host_` prefix. Bootstrap is bounded to
-64 bindings and 64 KiB, and must complete before the checkout is exposed.
+The host generates these wrappers over an allowlist of private callbacks, and
+the worker installs them once per interpreter, before the session's first cell
+runs. Export names must be non-keyword ASCII Python identifiers outside the
+reserved `_plakous_host_` prefix, checked at attachment. Bootstrap is bounded to
+64 bindings and 64 KiB; a bootstrap that fails is a failed first cell that
+costs the interpreter its generation.
 Invalid arguments are rejected before publishing a nested call. Monty values
-cross the worker boundary as a shared-node arena, so the host charges every
+reach the worker adapter as a shared-node arena, so the worker charges every
 byte of the argument's compact JSON encoding before building it and stops at
-1 MiB; nesting is bounded at 128 levels. `dict` keys must be `str`, and an
-`int` past CPython's 4300-digit string-conversion limit is refused rather than
-converted. An argument past any of these bounds raises `ValueError` in the cell
-and publishes nothing.
-A nested result nesting deeper than 128 levels is refused before its batch is
-sent, which is definite non-delivery. Private naming
+1 MiB; nesting is bounded at the cell protocol's 40 containers. `dict` keys
+must be `str`, and an `int` past CPython's 4300-digit string-conversion limit
+is refused rather than converted. An argument past any of these bounds raises
+`ValueError` in the cell and publishes nothing.
+A nested result nesting deeper than 40 containers reaches the cell as a raised
+`RuntimeError` instead of its value. Private naming
 is not an authority boundary: every callback still passes the same tool
 allowlist and core admission. There is no separate Python effect scheduler.
 
 Once a coroutine reaches its host callback, the existing nested-call and delivery
 contract applies. The pinned Monty scheduler requests all pending external
 futures when it needs host results. Acceptance proves correlated interpreter
-delivery, not that Python explicitly awaited or used each result. Cancellation
+delivery, not that Python explicitly awaited or used each result. A terminal
+that abandons held results emits `Delivery{NotObserved}` before `CellDone`
+for every result never handed to the interpreter. Cancellation
 or interpreter loss after admission does not roll back effects or authorize
-replay. The engine contract names Monty `1.2.0` and includes
-`plakous.monty-python-adapter.v7`. Exact reopen requires the current engine,
+replay. The engine contract is the cell recipe over `monty`, `1.2.0`,
+`plakous-cell-protocol.v1` and `plakous.monty-python-adapter.v8`. Exact reopen requires the current engine,
 adapter, profile and presentation identities. Cross-build session transfer
 uses export/carry; there is no migration. The library's incompatible evaluator
 refusal is product-neutral. Plak renders the recovery commands with the actual
 session id: `plak session export <id>` then `plak session import <file>`.
 
-Each nested result carries a per-call acceptance receipt. A feed-queue handoff
-is not acceptance: the exact batch must pass the pinned wire validators,
-including decoding the complete framed request with the worker's decoder, and
-receive its next correlated worker response. A normal Python exception in that
-response still acknowledges delivery; pre-send refusal, worker loss, timeout,
-and an unconsumed future do not. The driver commits each canonical child
+Each nested result carries a per-call acceptance receipt from the worker. The
+worker announces `Waiting` with the futures the interpreter suspended on,
+collects their results, validates the complete batch with the pinned
+converters and hands it to the interpreter in one resume; its first print,
+suspension or terminal event proves that resume ran, and only then does the
+worker send `Delivery{Accepted}` for each result, before forwarding that event.
+A batch it cannot convert is never
+handed over: every result it holds is `NotObserved` and the worker reports
+`HostLost{ProtocolViolation}`. A result for a cell that already ended, or whose
+worker was stopped, is `NotObserved`; one naming no pending call is `Refused`.
+Worker loss with a result handed over leaves acceptance unknown. The driver commits each canonical child
 outcome before sending its result and polls delivery receipts alongside the
 existing tool and interpreter event pump, so a batch never waits for its first
 receipt before sending its remaining results. Terminal publication requires
 all delivery obligations to settle; cancellation joins the host and bounds
 receipt cleanup. Unconfirmed delivery never authorizes tool or source replay.
-Monty retains the active feed and a cancellation-safe buffered terminal
-result until observation; its neutral `wait` drains unread output and retires
-observed terminal cells. Unknown or already-observed ids return Missing.
-Cancellation aborts and joins the feed task before checkout cleanup. A checkout without a diagnostic PID, an Unreaped child, or a failed
-reap-task join returns Lost, including on
-repeated shutdown, and never certifies Joined. Interrupted `waitpid` calls are
-retried within the same reap deadline; only a terminal wait status or ECHILD
-establishes reaping.
+A Python cell keeps running between observations: the session buffers its
+output and its terminal until observation, its neutral `wait` drains unread
+output and retires observed terminal cells, and unknown or already-observed
+ids return Missing. Terminating a running cell stops its worker and costs the
+generation; a buffered terminal is returned as it is. A worker that does not
+exit within two seconds of `Shutdown` is killed: that stop is joined with a
+`Killed` receipt, while a worker left unreaped after its kill, or one already
+killed by the request bound, returns Lost on every later shutdown and never
+certifies Joined. Repeated stops retain the original child receipt, including
+its forced-kill escalation; a later wait cannot relabel it as voluntary.
 Monty `execute` starts a cell and returns a terminal result or a yield within
 the requested observation window (§9.5). A completed result surfaces printed
 stdout when Monty's last expression is
@@ -6434,28 +6456,30 @@ suspension and turn end. The single-frame V1 profile caps both the final result 
 each nested result at 1 MiB so their worst-case JSON encoding fits one frame,
 with an aggregate nested-result quota of 16 MiB.
 
-A raised exception whose payload the worker protocol cannot decode is a
+A raised exception whose payload the upstream converters cannot decode is a
 **definite cell failure, never a host loss**: the error event itself proves the
-cell raised, so the host reports a failed cell carrying whatever the cell
+cell raised, so the worker reports a failed cell carrying whatever the cell
 printed and a statement that the traceback frame spans were undecodable, with
-the worker's own detail. The violating reply costs the interpreter its worker,
-so that generation is reaped, joined and reset under its typed reset reason
-before the next cell, which starts a fresh generation and never re-evaluates
-source. Every other protocol violation leaves the cell's outcome unknown and
-remains a host loss.
+the converter's own detail, and marks the generation lost. That generation is
+stopped, joined and reset under its typed reset reason before the next cell,
+which starts a fresh generation and never re-evaluates source. Every other
+protocol violation leaves the cell's outcome unknown and remains a host loss.
 
 The Python evaluator is a bounded worker, not an operating-system sandbox, and
-the host makes no OS-sandbox claim for it. One dedicated `monty` subprocess per
+the host makes no OS-sandbox claim for it. One dedicated `plakous-py-host` subprocess per
 session runs with a restricted inherited environment, a bounded framed protocol,
 bounded queues and bounded output, and a 256 MiB memory bound applied inside
 the engine, not across a process tree: past it the interpreter raises an
 ordinary, catchable `MemoryError` and the session survives, and an allocation
 past the allocator's hard ceiling (that limit plus Monty's 4 MiB headroom) ends
 the worker, which is host loss. Upstream's per-session suspension cap is set
-to its maximum, because `monty-pool` counts suspensions across the whole
-checkout and any finite value would be a cumulative lifetime expiry. Each uninterrupted compute
-request to that worker is bounded at 90 seconds. Time suspended on host calls does not spend
-that bound; resumption starts a new bounded compute segment. It is not a
+to its maximum, because the interpreter counts suspensions across its whole
+session and any finite value would be a cumulative lifetime expiry. Each
+uninterrupted stretch of computation — from a start, a nested call or submission
+of the complete pending result batch to the next nested call, wait or terminal — is bounded at 90
+seconds by the host session, which kills the worker at the bound; that is a
+host loss. Time suspended on host calls does not spend that bound; resumption
+starts a new bounded compute segment. It is not a
 per-cell or interpreter-lifetime budget: the interpreter carries no cumulative lifetime
 expiry, so values, functions and aliases persist across successful cells.
 Repeated short requests and external waits remain constrained by the ordinary
@@ -6465,8 +6489,8 @@ independent per-cell wall watchdog and no separate external-wait budget. The
 `PythonPtcLimitsV1` descriptor states only these enforced bounds; its limits
 revision is `plakous.python-ptc-limits.v2`. The worker's OS-call policy and
 authority boundary are chapter 04 §7. Cancellation and shutdown abort and
-join the feed, then kill and reap the worker inside the shutdown ladder; a
-generation that cannot be reaped reports Lost and never replays source.
+stop the worker inside the shutdown ladder; a generation that cannot be reaped
+reports Lost and never replays source.
 
 ### 9.5 Cell lifetime and the `CompositionChild` record
 
@@ -8163,9 +8187,10 @@ for offline protocol comparisons.
 `composition` is the evaluator capability on its own: the `plakous::agent`
 local composition attachment seam, the Code Mode presentation, and the cell client. It links
 `plakous-code-mode` and `plakous-cell` and no other optional Plakous crate,
-so it reaches neither `plakous-auth` nor `plakous-http` nor `plakous-py-eval`,
-and it does not link rquickjs. `composition-python` adds the Monty-backed Python PTC
-projection over that same attach path and implies `composition`.
+so it reaches neither `plakous-auth` nor `plakous-http`, and it links neither
+rquickjs nor any Monty crate. `composition-python` adds the Python PTC
+projection over that same attach path and cell client and implies
+`composition`; the Monty interpreter lives only in `plakous-py-host`.
 
 `native-subscriptions` adds the subscription tier —
 `subscriptions`, and the provider crates' native-auth facets — and implies both `composition`
@@ -8237,8 +8262,8 @@ composition-only closures reach neither `plakous-http` nor `htmd`.
 Evaluator deployment, subscription authentication, and durability are therefore
 independent choices. `tools/checks/check_features.py` pins this over the
 complete closure Cargo reports: a `composition` selection reaches no
-`htmd`, `plakous-auth`, `plakous-http`, `plakous-py-eval`, `rquickjs`, or
-`tungstenite`.
+`htmd`, `monty-proto`, `plakous-auth`, `plakous-http`, `plakous-py-worker`, or
+`rquickjs`, and no facade selection reaches `monty-proto`.
 
 Every feature combination preserves the facade boundary: a consumer never needs
 a component crate to complete a workflow.

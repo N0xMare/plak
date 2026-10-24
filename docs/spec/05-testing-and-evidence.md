@@ -261,7 +261,7 @@ keep the stop name process-allowlist gated without changing its effect tag.
 The job-ledger fixture carries a promoted row across later turns and their operation-only and
 terminal commits, copies terminal evidence in a history-unchanged Quiescent
 checkpoint, and proves repeated recording is a no-op. Manifest round trips pin
-the row/terminal bounds, same-batch consumption, clear counter and epoch 31.
+the row/terminal bounds, same-batch consumption, clear counter and epoch 32.
 Fresh-service reopen retains exit-code and output-tail answers until consumption;
 stop on an already terminal snapshot preserves its original outcome. Row-cap
 fixtures keep foreground retention separate from promoted, unconsumed jobs.
@@ -686,26 +686,43 @@ offline suite: frame round trips, lengths refused before allocation, truncated
 and unterminated frames, and scripted workers proving that every interleaving
 of nested calls, delivery verdicts, output and terminals ends a cell with
 exactly one terminal and reports `Accepted` only on the worker's own verdict.
+Both real-worker `CellSession` suites deliver a depth-40 nested result and turn
+depths 41 and 50 into catchable per-call rejections, then run another cell on
+the same session. The JavaScript suite carries a depth-40 stored value through
+the next prelude and refuses depths 41, 50 and 128 before terminal framing,
+preserving earlier valid writes after both caught and uncaught store errors.
 The private-driver scheduler additionally exercises failed read-only
 and partially effective mutating children, later successful mutation, rejected
 invalid arguments, finalized child records, and joined cancellation. Canonical
 projection tests distinguish ordinary tool failure from infrastructure failure.
-Every tier that runs Rust tests takes the `monty` binary from the workspace test
+Every tier that runs Rust tests takes the `plakous-py-host` binary from the workspace test
 build (`cargo test --no-run --workspace --all-features`) and obtains its
 executable path from Cargo's artifact record, respecting Cargo target-directory
-and build-target configuration. An explicit `PLAK_MONTY_WORKER` instead selects
+and build-target configuration. An explicit `PLAK_PY_HOST` instead selects
 an existing worker; missing, empty, directory, or non-executable paths fail the
 gate. Both offline nextest lanes receive its absolute path, so real Monty tests
 cannot silently take their missing-worker early return. A worker that cannot
 run or speak the protocol fails those tests. Manually invoked Rust tests
 without a worker retain their existing limited, potentially skipped coverage.
 
-Python regressions distinguish feed-queue handoff from correlated worker
-acceptance, lost receipts from successful delivery, and value-depth or full-frame
-decoder refusal from a delivered Python exception. The full-frame regression
-covers a nested null whose value depth is valid but protobuf recursion is not.
-Real worker cases exercise out-of-order
-`asyncio.gather` results and uncaught nested rejection. The private-driver
+Python regressions distinguish queue handoff from correlated worker
+acceptance, lost receipts from successful delivery, and bounded value conversion
+refusal from a delivered Python exception. The worker validates the complete
+upstream futures batch in process before handing it to the interpreter.
+Real worker cases exercise out-of-order `asyncio.gather` results, uncaught nested
+rejection, typed record/byte results, print ordering, persistent globals, soft
+memory errors, allocator-hard-ceiling loss before acceptance, and the compute
+watchdog. Shared-client tests preserve voluntary and forced reaping receipts,
+failed-wait loss, and cleanup after a definite failed cell costs its generation.
+Worker unit tests preserve the
+undecodable-traceback definite-failure distinction and the type-checker stubs.
+The durability profile's `cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance`
+kills the real Python worker at test-only boundaries before result handoff and
+after its acceptance receipt but before terminal publication. The first leaves
+delivery unknown, the second retains acceptance, neither produces a cell terminal
+or permits source/nested-call replay, and cleanup cannot relabel loss as joined.
+These hooks require the worker's `test-hooks` feature; ordinary worker builds
+do not read the cut environment or create sentinels. The private-driver
 scheduler also withholds its first delivery receipt until the second result
 arrives, while checking canonical child finalization and joined cancellation.
 Owner-transfer regressions cover a committed tool terminal followed by refused
@@ -982,7 +999,7 @@ correctness.
 | `cargo deny check advisories bans licenses sources` (`just dev-tools deny`) | Dependencies change. It needs advisory acquisition, so it is not offline |
 | `cargo check --workspace --all-features --all-targets --locked` as an MSRV probe | The MSRV is the toolchain pin, so the ordinary build already is the MSRV build |
 | `python3 tools/checks/check_prod_loc.py` (`just perf density`) | A density question is live. It always exits 0 |
-| `bash scripts/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline measurements of the real binary against this machine's seed row (§2.7); informational |
+| `bash scripts/perf-smoke.sh --check` (`just perf smoke`) | A performance question is live. Six offline product measurements and four worker timings against this machine's seed row (§2.7); informational |
 | `cargo bench` for `perf_core`, `perf_project`, `perf_store`, and `tools/perf/perf_build.py` | A performance claim needs numbers. There is no portable numeric baseline; every claim carries its emitted host, feature, and toolchain metadata |
 | `cargo nextest run -p plakous-offline-crash-harness` | Process-crash matrices are wanted on demand. Unix only |
 | `just prompts native-compare` | Comparing Plak's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
@@ -2166,7 +2183,8 @@ facts are consistent rather than contradictory.
 
 ### 2.7 The offline performance smoke
 
-`just perf smoke` measures six things over the same scripted model and emits one
+`just perf smoke` measures six product paths over the same scripted model plus
+four cell-worker timings, and emits one
 JSON line per metric:
 
 | metric | what it times | compared |
@@ -2177,6 +2195,8 @@ JSON line per metric:
 | `jsonl_bulk_throughput_mb_per_s` | ten prompts, each answered with 100 kB, over the whole batch | yes |
 | `tui_transcript_20k_layout_ms` | full layout of a 20,000-block transcript at 120x40 | yes |
 | `growth_turn_peak_rss_mb` | maximum resident set over a growth turn through the placeholder rung | yes |
+| `cell_quickjs_spawn_round_trip_ms`, `cell_monty_spawn_round_trip_ms` | worker spawn, checked hello/configure, one cell with a nested call and its acceptance, median of five | no |
+| `cell_quickjs_per_cell_ms`, `cell_monty_per_cell_ms` | the same nested-call cell on a warm worker, median of 80 cells | no |
 
 Volume comes from assistant text rather than from tool results, and that is a
 product fact rather than a convenience. One tool outcome is bounded at a
@@ -2924,7 +2944,7 @@ report was built from a clean checkout of one source revision, including the
 live drivers. The report names that revision, the host, and the target triple
 (`aarch64-apple-darwin` or `x86_64-unknown-linux-musl`). It names the SHA-256
 of that `plak` at the start of the run and at the end, and the SHA-256 of the
-`plakous-js-host` and `monty` workers from the same build. It names the
+`plakous-js-host` and `plakous-py-host` workers from the same build. It names the
 account, whether the account is a subscription login or an API key, and the
 exact model, effort, protocol and composition. The composition for this bar
 is `plakous-default`; the report names it as `composition_requested` and names

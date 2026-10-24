@@ -1,16 +1,16 @@
-//! Locate the `monty` worker for product py-ptc.
+//! Locate the `plakous-py-host` worker for product py-ptc.
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const EXPLICIT_ENV: &str = "PLAK_MONTY_WORKER";
+const EXPLICIT_ENV: &str = "PLAK_PY_HOST";
 #[cfg(windows)]
-const WORKER_FILE_NAME: &str = "monty.exe";
+const WORKER_FILE_NAME: &str = "plakous-py-host.exe";
 #[cfg(not(windows))]
-const WORKER_FILE_NAME: &str = "monty";
+const WORKER_FILE_NAME: &str = "plakous-py-host";
 
-/// Find a runnable `monty` worker. No PATH search.
+/// Find a runnable `plakous-py-host` worker. No PATH search.
 pub fn locate() -> Result<PathBuf, String> {
     if let Some(explicit) = env::var_os(EXPLICIT_ENV) {
         let path = PathBuf::from(explicit);
@@ -29,12 +29,12 @@ pub fn locate() -> Result<PathBuf, String> {
     ))
 }
 
-/// JSONL `hello` evidence: whether this process can locate a monty worker.
+/// JSONL `hello` evidence: whether this process can locate a Python worker.
 #[must_use]
 pub fn python_host_hello_status() -> (String, &'static str) {
     match locate() {
-        Ok(_) => ("discovered".to_owned(), "monty-pool-1.2.0"),
-        Err(_) => ("unavailable".to_owned(), "monty-pool-1.2.0"),
+        Ok(_) => ("discovered".to_owned(), "monty-1.2.0"),
+        Err(_) => ("unavailable".to_owned(), "monty-1.2.0"),
     }
 }
 
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn missing_explicit_worker_fails_closed() {
-        let error = require_file(Path::new("/nonexistent/plak-monty-worker-admission-test"))
+        let error = require_file(Path::new("/nonexistent/plak-py-host-admission-test"))
             .expect_err("missing worker must fail closed");
         assert!(error.contains("nonexistent"));
     }

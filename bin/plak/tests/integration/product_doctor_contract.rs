@@ -212,7 +212,7 @@ fn javascript_host_unavailable_fix_names_js_host_not_python() {
     assert_eq!(host.severity, Severity::Error);
     let fix = host.remediation.as_deref().unwrap();
     assert!(fix.contains("PLAK_JS_HOST"));
-    assert!(!fix.contains("PLAK_MONTY_WORKER"));
+    assert!(!fix.contains("PLAK_PY_HOST"));
 }
 
 #[test]
@@ -227,7 +227,7 @@ fn python_host_unavailable_fix_names_python_host() {
     let host = check(&report, CheckKind::CompositionHost);
     assert_eq!(host.severity, Severity::Error);
     let fix = host.remediation.as_deref().unwrap();
-    assert!(fix.contains("PLAK_MONTY_WORKER"));
+    assert!(fix.contains("PLAK_PY_HOST"));
 }
 
 #[test]

@@ -69,6 +69,7 @@ not (
   test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
   | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
   | test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
+  | test(a_stuck_worker_request_after_nested_reply_is_killed)
   | test(product_terminal_e2e_tests::)
   | test(real_composition_quit_releases_nested_process)
   | test(real_process_quit_releases_and_resumes_exact_session)
@@ -146,6 +147,7 @@ not (
   | test(the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one)
   | test(durability::)
   | test(crash_sweep::durability_subset)
+  | test(cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance)
   | test(actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers)
   | test(gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head)
   | test(sqlite_paid_compaction_sigkill_reopens_exactly_once)
@@ -164,6 +166,7 @@ default-filter = '''
   test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
   | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
   | test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
+  | test(a_stuck_worker_request_after_nested_reply_is_killed)
   | test(product_terminal_e2e_tests::)
   | test(real_composition_quit_releases_nested_process)
   | test(real_process_quit_releases_and_resumes_exact_session)
@@ -248,6 +251,7 @@ test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(crash_sweep::durability_subset)
+  | test(cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance)
   | test(actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers)
   | test(gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head)
   | test(sqlite_paid_compaction_sigkill_reopens_exactly_once)

@@ -227,9 +227,9 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 )
 # Exact reviewed dependency and feature surfaces; path changes require review too.
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
-    "plakous-py-worker": "8d89be2d61b38520db99c47b40eb2d2b57754595c5ae17d838c64a1015b61530",
+    "plakous-py-worker": "ebc6183bab0f1f33a2ee8f48c1ee83e5c0db9a33b04c0224d52aec3d1efecfbf",
     "plakous-js-runtime": "dd27d453673485150bacf272c75f6ee70b6993fc95d708ce5e3fadc1c8ac52cd",
-    "plakous": "951704f21818a84b752560f9888c84a8225121ad8b704d72a6c5a9b529468e6f",
+    "plakous": "8043cc39a7ba5e0f9c220d1ffd30b773ad06a8ee7e4f3e4b4922c4ef25591337",
     "plakous-agent": "e818ef48182ef75e455ed0af1d13c8aec12d9fa23c423db844f2557f2c62416f",
     "plakous-anthropic": "2b5706d014327cfb790b56a5aade9ecc92b4483dc411b54bbc8d71be161fb555",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
@@ -239,7 +239,6 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-exchange": "209703e22ea03737ebab1904ef0e5286f431a71ec59fe962342c976457902fc4",
     "plakous-http": "4ba11a284120802378d429ec77ea58c8a3f25663d1808a795974c297f934ede9",
     "plakous-cell": "9dec57ce162f3258e4145ec2702e3a1c333faa4c221fe67b9f73296affbea620",
-    "plakous-py-eval": "f69f6695ab93efddb3f7a89e485603436c8374243e515bfb1ab97180c529e797",
     "plakous-mcp": "567ec57875dcd1f0b3b28325330bd3cd0e071a994088fb90b7445ae8f69ac166",
     "plakous-messages": "eae7f4a067455ca31bab364c39a597256a19c84e636a17af6b6012bba40284b1",
     "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
@@ -261,34 +260,31 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 
 
 # Named feature profiles and the packages their complete closure must exclude.
-# `composition` is the JavaScript evaluator capability on its own: no
-# credential, HTTP, subscription, or Python machinery. `tungstenite` is reached
-# only through `plakous-py-eval` -> `monty-pool` -> `tokio-tungstenite`, so its
-# absence is the load-bearing evidence that a JavaScript-only embedder does not
-# pull in the Monty closure.
+# `composition` is the cell client on its own: no credential, HTTP,
+# subscription, interpreter, or Monty machinery. The host links no Python
+# engine at all, so even `composition-python` stays free of `monty-proto`.
 EXCLUDED_CLOSURE_PACKAGES = {
     ("plak", ("default",)): ("jj-lib", "gix", "pollster"),
     ("plak", ("git-cli",)): ("jj-lib", "gix", "pollster"),
     ("plakous", ("composition",)): (
         "htmd",
-        "monty-pool",
+        "monty-proto",
         "plakous-auth",
         "plakous-http",
         "plakous-js-runtime",
-        "plakous-py-eval",
+        "plakous-py-worker",
         "rquickjs",
-        "tokio-tungstenite",
-        "tungstenite",
     ),
     ("plakous", ("composition", "sessions-sqlite")): (
         "plakous-auth",
         "plakous-http",
-        "plakous-py-eval",
-        "tungstenite",
+        "monty-proto",
     ),
     ("plakous", ("composition-python",)): (
+        "monty-proto",
         "plakous-auth",
         "plakous-http",
+        "plakous-py-worker",
     ),
 }
 

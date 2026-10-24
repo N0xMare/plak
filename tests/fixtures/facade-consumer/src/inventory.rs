@@ -92,7 +92,7 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     fn verify_python_artifact(
         host: &std::path::Path,
     ) -> Result<LocalCompositionEngineArtifact, AgentError> {
-        LocalCompositionEngineArtifact::monty_pool_v1(host)
+        LocalCompositionEngineArtifact::python_worker_v1(host)
     }
     fn close_product_binding(
         profile: LocalCompositionProfile,

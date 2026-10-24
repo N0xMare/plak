@@ -171,14 +171,14 @@ fn tool_call(id: Uuid, name: &str, arguments: &serde_json::Value) -> TestResult<
 
 #[tokio::test]
 async fn real_monty_driver_yields_steers_and_waits_for_the_result() -> TestResult {
-    let worker = std::env::var_os("PLAK_MONTY_WORKER")
+    let worker = std::env::var_os("PLAK_PY_HOST")
         .map(PathBuf::from)
         .or_else(|| {
             std::env::current_exe()
                 .ok()?
                 .parent()?
                 .parent()
-                .map(|p| p.join("monty"))
+                .map(|p| p.join("plakous-py-host"))
         });
     let Some(worker) = worker.filter(|path| path.is_file()) else {
         eprintln!("skipping real Monty driver test: worker unavailable");
@@ -257,7 +257,7 @@ async fn real_monty_driver_yields_steers_and_waits_for_the_result() -> TestResul
         [ToolName::new("probe")?],
     )?;
     let profile = LocalCompositionProfile::python_ptc_v1(&exact)?;
-    let artifact = LocalCompositionEngineArtifact::monty_pool_v1(&worker)?;
+    let artifact = LocalCompositionEngineArtifact::python_worker_v1(&worker)?;
     let evidence = ProductExtensionEvidence::python_ptc_v1(
         &profile,
         &artifact,

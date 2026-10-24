@@ -187,7 +187,7 @@ pub(crate) fn runtime_binding(
             .map_err(|error| CliFailure::new(format!("Python composition is invalid: {error}")))?;
             let host = spec.sidecars.python_host().map_err(|error| {
                 CliFailure::new(format!(
-                    "Python host is unavailable: {error}; set PLAK_MONTY_WORKER or place monty beside plak"
+                    "Python host is unavailable: {error}; set PLAK_PY_HOST or place plakous-py-host beside plak"
                 ))
             })?;
             let attachment =

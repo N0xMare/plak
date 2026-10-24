@@ -1,6 +1,6 @@
 # plakous-py-worker
 
-Plak Monty subprocess worker using the pinned upstream interpreter and protocol.
+Plak Python cell worker: the pinned upstream Monty interpreter on the cell protocol.
 This crate is part of [Plak](https://github.com/N0xMare/plak), an embeddable
 single-agent multi-provider harness library (Plakous) and the command-line and
 terminal product built on it. It is a published-internal package: it releases in

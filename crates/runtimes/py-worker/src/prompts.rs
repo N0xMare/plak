@@ -1,19 +1,9 @@
-//! Model-visible local Python composition runtime messages (Monty backend).
+//! Model-visible messages the Python worker writes into cell results.
 
 #![allow(
     clippy::doc_markdown,
     reason = "doc comments name exact py-ptc tool identifiers"
 )]
-
-/// Python PTC exec_py cell, prefix before the active cell id in a concurrent-start refusal.
-pub(crate) const PLAKOUS_PY_PTC_ERROR_CONCURRENT_CELL_PREFIX: &str = "cell ";
-
-/// Python PTC exec_py cell, suffix after the active cell id in a concurrent-start refusal.
-pub(crate) const PLAKOUS_PY_PTC_ERROR_CONCURRENT_CELL_SUFFIX: &str =
-    " is still running; wait for it to finish before starting another cell";
-
-/// Python PTC wait path, returned when a non-numeric cell_id is supplied.
-pub(crate) const PLAKOUS_PY_PTC_ERROR_INVALID_CELL_ID: &str = "invalid cell id";
 
 /// Python PTC exec_py cell, prefix before the worker detail when a raised
 /// exception arrived with an undecodable traceback payload.
@@ -33,18 +23,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn composition_prompts_digest_is_stable() {
+    fn worker_prompts_digest_is_stable() {
         let combined = [
-            PLAKOUS_PY_PTC_ERROR_CONCURRENT_CELL_PREFIX,
-            PLAKOUS_PY_PTC_ERROR_CONCURRENT_CELL_SUFFIX,
-            PLAKOUS_PY_PTC_ERROR_INVALID_CELL_ID,
             PLAKOUS_PY_PTC_ERROR_UNDECODABLE_TRACEBACK_PREFIX,
             PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_PREFIX,
             PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_SUFFIX,
         ]
         .concat();
-        assert_eq!(combined.len(), 353);
-        assert!(combined.starts_with("cell "));
+        assert_eq!(combined.len(), 264);
+        assert!(combined.starts_with("Python cell failed"));
         assert!(!combined.contains("wait_py"));
     }
 }

@@ -75,13 +75,17 @@ mod integration;
 mod javascript;
 #[cfg(feature = "composition-python")]
 mod python;
+#[cfg(feature = "composition-python")]
+mod python_bindings;
+#[cfg(all(test, unix, feature = "composition-python"))]
+mod python_tests;
 mod session;
 mod validate;
 
 pub use artifact::*;
 pub use attach::*;
 pub use evidence::*;
-use integration::{JavaScriptCellIntegration, JavaScriptPresentation, ProductJavaScript};
+use integration::{CellIntegration, JavaScriptPresentation, ProductJavaScript};
 pub(crate) use javascript::*;
 #[cfg(feature = "composition-python")]
 use python::{attach_python, neutral_python_descriptor};
@@ -107,8 +111,8 @@ mod shutdown_tests {
     use super::{
         Digest, DigestDomain, LocalCompositionContentItem, LocalCompositionEngineArtifact,
         ProductExtensionLimits, attachment_binding_identity, cell_engine_contract_identity,
-        monty_engine_contract_identity, product_javascript_limits_are_exact,
-        python_extension_limits, validate_engine_contract_binding,
+        product_javascript_limits_are_exact, python_extension_limits,
+        validate_engine_contract_binding,
     };
 
     #[test]
@@ -139,7 +143,7 @@ mod shutdown_tests {
     fn python_and_javascript_engine_contracts_are_closed_cross_pairs()
     -> Result<(), Box<dyn std::error::Error>> {
         let codex = cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?;
-        let monty = monty_engine_contract_identity()?;
+        let monty = cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?;
         assert_ne!(codex, monty);
         assert!(validate_engine_contract_binding(monty, monty).is_ok());
         assert!(validate_engine_contract_binding(monty, codex).is_err());
@@ -156,23 +160,23 @@ mod shutdown_tests {
         let root = directory.path().canonicalize()?;
         let path = root.join("worker");
         std::fs::write(&path, b"original worker bytes")?;
-        let artifact = LocalCompositionEngineArtifact::monty_pool_v1(&path)?;
+        let artifact = LocalCompositionEngineArtifact::python_worker_v1(&path)?;
         assert_eq!(artifact.path(), path);
         assert_eq!(
             artifact.engine_contract_identity(),
-            monty_engine_contract_identity()?
+            cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?
         );
         assert_ne!(artifact.identity(), artifact.host_identity());
 
         let drifted_path = root.join("other-worker");
         std::fs::write(&drifted_path, b"different worker bytes")?;
-        let drifted = LocalCompositionEngineArtifact::monty_pool_v1(&drifted_path)?;
+        let drifted = LocalCompositionEngineArtifact::python_worker_v1(&drifted_path)?;
         assert_ne!(artifact.identity(), drifted.identity());
         assert_ne!(artifact.containment(), drifted.containment());
 
         // Content replacement at the same canonical path is also identity drift.
         std::fs::write(&path, b"replacement worker bytes")?;
-        let replaced = LocalCompositionEngineArtifact::monty_pool_v1(&path)?;
+        let replaced = LocalCompositionEngineArtifact::python_worker_v1(&path)?;
         assert_ne!(artifact.identity(), replaced.identity());
         assert_ne!(artifact.containment(), replaced.containment());
         Ok(())
@@ -322,7 +326,7 @@ mod shutdown_tests {
                 b"0.0.21",
             ],
         )?;
-        let current = monty_engine_contract_identity()?;
+        let current = cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?;
         assert_ne!(current, eager);
         assert!(validate_engine_contract_binding(current, eager).is_err());
         assert!(validate_engine_contract_binding(current, current).is_ok());

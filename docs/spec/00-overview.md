@@ -53,7 +53,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 40 packages: five supported, 32 published internal
+The workspace contains 39 packages: five supported, 31 published internal
 (the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
@@ -104,8 +104,7 @@ classes and directory policy.
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v1`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
-| `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | Thin `monty` subprocess entry point over the pinned upstream interpreter and wire state machine |
-| `plakous-py-eval` | `crates/runtimes/py-eval` | `engine` | monty-pool py-ptc session: cell lifecycle, nested-call delivery, JSON/Monty codec, py-ptc refusal strings |
+| `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |
 | `plakous-code-mode` | `crates/runtimes/code-mode` | `engine` | Parse/DTO helpers for the Code Mode presentation (source parsing, tool-description rendering, result truncation). Not an evaluator |
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family kernel: wire grammar, stream framing, limits, sequencing |
 | `plakous-responses-dialect` | `crates/protocols/responses-dialect` | `protocol` | Generic Responses dialect host shapes shared by the Responses commercial routes |
@@ -143,8 +142,10 @@ it is a `[[bin]]` of `plakous-js-runtime`, and it is the rquickjs worker for Cod
 The Monty interpreter and protocol remain external dependencies pinned at
 `=1.2.0`; only their `monty-typeshed` dependency resolves to a reviewed
 vendor snapshot (chapter 06 §7.3).
-`plakous-py-worker` supplies the process entry point;
-`plakous-py-eval` owns only the session that drives that worker.
+`plakous-py-worker` builds the `plakous-py-host` worker, which drives the
+upstream child state machine in process and speaks the cell protocol; the host
+side is the same `plakous-cell` client and session as for JavaScript, and no
+pool library or WebSocket transport is linked.
 
 `plakous-code-mode` consumes the reviewed vendor snapshot at
 `vendor/codex-code-mode-protocol`, packaged as
@@ -188,7 +189,7 @@ v7 document with 0.0.2 (§2.5.1 of chapter 02).
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **25** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **31** (cell-protocol engine contracts and the Code Mode descriptor identities that name the cell worker revision, inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **32** (the Python cell-worker engine, artifact and containment identities, cell-protocol engine contracts and the Code Mode descriptor identities that name the cell worker revision, inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **8** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
@@ -208,7 +209,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r25.e31.p33.t8`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r25.e32.p33.t8`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

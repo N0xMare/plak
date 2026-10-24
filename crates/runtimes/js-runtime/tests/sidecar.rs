@@ -103,7 +103,11 @@ impl Worker {
     }
 
     async fn read_event(&self) -> Result<RuntimeEvent, String> {
-        Ok(match self.0.read_event().await? {
+        let event = self.0.read_event().await?;
+        Ok(match event {
+            CellEvent::Waiting { .. } => {
+                return Err("QuickJS unexpectedly waited on a batch".into());
+            }
             CellEvent::NestedCall {
                 cell,
                 call,

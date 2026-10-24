@@ -68,12 +68,12 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
-        self.worker = self.root / "custom target" / "host-triple" / "debug" / "monty"
+        self.worker = self.root / "custom target" / "host-triple" / "debug" / "plakous-py-host"
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         GATE_CALLS=str(self.log), GATE_WORKER=str(self.worker),
                         CARGO_TARGET_DIR=str(self.root / 'custom target'),
                         CARGO_BUILD_TARGET='host-triple')
-        self.env.pop('PLAK_MONTY_WORKER', None)
+        self.env.pop('PLAK_PY_HOST', None)
         # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
@@ -90,7 +90,7 @@ args = sys.argv[1:]
 if args == ['nextest', '--version']:
     print('cargo-nextest 0.9.100')
 with open(os.environ['GATE_CALLS'], 'a') as log:
-    log.write(json.dumps(dict(args=args, worker=os.environ.get('PLAK_MONTY_WORKER'),
+    log.write(json.dumps(dict(args=args, worker=os.environ.get('PLAK_PY_HOST'),
                              target=os.environ.get('CARGO_BUILD_TARGET'),
                              target_dir=os.environ.get('CARGO_TARGET_DIR'),
                              plak_home=os.environ.get('PLAK_HOME'),
@@ -113,9 +113,9 @@ if args[0] == 'test':
     worker.write_text('#!/bin/sh\nexit 0\n')
     worker.chmod(0o700)
     print(json.dumps(dict(reason='compiler-artifact', executable=str(worker) + '-harness',
-                         target=dict(name='monty', kind=['bin']), profile=dict(test=True))))
+                         target=dict(name='plakous-py-host', kind=['bin']), profile=dict(test=True))))
     print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
-                         target=dict(name='monty', kind=['bin']), profile=dict(test=False))))
+                         target=dict(name='plakous-py-host', kind=['bin']), profile=dict(test=False))))
 ''')
         self.executable('python3', r'''import json, os, sys
 if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
@@ -239,7 +239,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.parent.mkdir(parents=True)
         self.worker.write_text('#!/bin/sh\nexit 0\n')
         self.worker.chmod(0o700)
-        self.env['PLAK_MONTY_WORKER'] = str(self.worker.relative_to(self.root))
+        self.env['PLAK_PY_HOST'] = str(self.worker.relative_to(self.root))
         result, calls, _ = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(c['args'][0] == 'test' for c in calls))
@@ -253,7 +253,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         ordinary.write_text('not executable')
         for value in ('', 'missing', str(directory), str(ordinary)):
             with self.subTest(value=value):
-                self.env['PLAK_MONTY_WORKER'] = value
+                self.env['PLAK_PY_HOST'] = value
                 self.log.unlink(missing_ok=True)
                 result, calls, _ = self.run_gate()
                 self.assertNotEqual(result.returncode, 0)
@@ -451,7 +451,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(self.filtersets(calls), [None])
 
     def test_fast_tier_without_rust_changes_still_runs_static(self):
-        self.env['PLAK_MONTY_WORKER'] = 'missing'
+        self.env['PLAK_PY_HOST'] = 'missing'
         result, calls, _ = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch', *CLIPPIES])

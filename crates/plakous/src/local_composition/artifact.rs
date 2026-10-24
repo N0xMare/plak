@@ -61,16 +61,16 @@ pub(super) enum LocalCompositionEngineArtifactKind {
 }
 
 impl LocalCompositionEngineArtifact {
-    /// Digest-pinned `monty` worker for product py-ptc.
+    /// Digest-pinned `plakous-py-host` worker for product py-ptc.
     ///
     /// # Errors
     ///
     /// Fails when the path is not a readable canonical regular file.
     #[cfg(feature = "composition-python")]
-    pub fn monty_pool_v1(worker_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
+    pub fn python_worker_v1(worker_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
         let (canonical, _dev, _ino, sha) = file_identity(&worker_path.into())?;
         let environment_identity = [
-            b"monty-pool".as_slice(),
+            b"monty-host".as_slice(),
             canonical.as_os_str().as_encoded_bytes(),
             &sha,
         ]
@@ -85,7 +85,7 @@ impl LocalCompositionEngineArtifact {
                 1,
                 &[
                     b"plakous.monty-containment.v1",
-                    b"sidecar-monty-pool",
+                    b"cell-monty-worker",
                     b"no-os-sandbox-claim",
                     &host_identity.identity_bytes(),
                 ],
@@ -98,7 +98,7 @@ impl LocalCompositionEngineArtifact {
                 environment_identity,
             },
             artifact_identity,
-            engine_contract_identity: monty_engine_contract_identity()?,
+            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?,
             host_identity,
             containment,
         })
@@ -246,9 +246,9 @@ pub(crate) fn restore_stored_artifact(
             b"rquickjs-host".as_slice(),
             b"plakous.local-composition.engine-artifact.v1".as_slice(),
         )
-    } else if stored.host.starts_with(b"monty-pool") {
+    } else if stored.host.starts_with(b"monty-host") {
         (
-            b"monty-pool".as_slice(),
+            b"monty-host".as_slice(),
             b"plakous.monty-engine-artifact.v1".as_slice(),
         )
     } else {
@@ -323,7 +323,7 @@ pub(crate) fn restore_stored_artifact(
     } else {
         #[cfg(feature = "composition-python")]
         {
-            LocalCompositionEngineArtifact::monty_pool_v1(&path).map_err(|_| refused())?
+            LocalCompositionEngineArtifact::python_worker_v1(&path).map_err(|_| refused())?
         }
         #[cfg(not(feature = "composition-python"))]
         {
@@ -338,19 +338,21 @@ pub(crate) fn restore_stored_artifact(
     Ok(artifact)
 }
 
+/// Refuses a Python worker whose bytes changed after attachment.
 #[cfg(feature = "composition-python")]
-pub(super) fn monty_engine_contract_identity() -> Result<Digest, AgentError> {
-    Digest::sha256(
-        DigestDomain::ExecutionEnvironment,
-        1,
-        &[
-            b"plakous.monty-python-engine-contract.v2",
-            b"monty-pool",
-            b"1.2.0",
-            crate::monty_python::ADAPTER_REVISION.as_bytes(),
-        ],
-    )
-    .map_err(identity_error)
+pub(crate) fn verify_python_worker_before_spawn(
+    path: &Path,
+    expected: &[u8],
+) -> Result<(), String> {
+    let artifact = LocalCompositionEngineArtifact::python_worker_v1(path)
+        .map_err(|error| error.to_string())?;
+    match artifact.kind {
+        LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
+            environment_identity,
+            ..
+        } if environment_identity == expected => Ok(()),
+        _ => Err("Python worker identity changed after attachment".to_owned()),
+    }
 }
 
 pub(crate) fn verify_sidecar_before_spawn(path: &Path, expected: &[u8]) -> Result<(), String> {
@@ -426,12 +428,12 @@ mod artifact_recovery_tests {
                 unreachable!("constructor always produces a JavaScript artifact")
             }
         };
-        let integration = JavaScriptCellIntegration {
+        let integration = CellIntegration {
             worker: path.clone(),
             identity,
-            presentation: JavaScriptPresentation::CodexMinimal {
+            presentation: Box::new(JavaScriptPresentation::CodexMinimal {
                 nested_catalog: Vec::new(),
-            },
+            }),
         };
         std::fs::write(path, b"changed sidecar bytes")?;
         let error = integration
@@ -550,7 +552,7 @@ mod artifact_recovery_tests {
         assert!(restore_stored_artifact(&noncanonical).is_err());
         #[cfg(feature = "composition-python")]
         {
-            let python = LocalCompositionEngineArtifact::monty_pool_v1(&path)?;
+            let python = LocalCompositionEngineArtifact::python_worker_v1(&path)?;
             assert_eq!(
                 restore_stored_artifact(&recorded(&python)?)?.identity(),
                 python.identity()
@@ -600,7 +602,7 @@ mod quickjs_upgrade_tests {
                 b"quickjs",
                 b"rquickjs-0.12",
                 b"plakous-cell-protocol.v1",
-                b"plakous-js-host-bootstrap.v6",
+                b"plakous-js-host-bootstrap.v7",
             ],
         )
         .map_err(identity_error)?;
@@ -662,29 +664,10 @@ mod quickjs_upgrade_tests {
 mod monty_upgrade_tests {
     use super::*;
 
-    /// The engine contract this build's predecessor recorded: Monty 1.1.0
-    /// under adapter revision v6.
+    /// The engine contract the previous build recorded: Monty 1.2.0 through
+    /// monty-pool under adapter revision v7, before the cell protocol.
     fn previous_monty_contract() -> Result<Digest, AgentError> {
         Digest::sha256(
-            DigestDomain::ExecutionEnvironment,
-            1,
-            &[
-                b"plakous.monty-python-engine-contract.v2",
-                b"monty-pool",
-                b"1.1.0",
-                b"plakous.monty-python-adapter.v6",
-            ],
-        )
-        .map_err(identity_error)
-    }
-
-    #[test]
-    fn the_contract_names_monty_1_2_0_and_adapter_v7() -> Result<(), AgentError> {
-        assert_eq!(
-            crate::monty_python::ADAPTER_REVISION,
-            "plakous.monty-python-adapter.v7"
-        );
-        let expected = Digest::sha256(
             DigestDomain::ExecutionEnvironment,
             1,
             &[
@@ -694,8 +677,27 @@ mod monty_upgrade_tests {
                 b"plakous.monty-python-adapter.v7",
             ],
         )
+        .map_err(identity_error)
+    }
+
+    #[test]
+    fn the_contract_names_monty_1_2_0_the_cell_protocol_and_adapter_v8() -> Result<(), AgentError> {
+        let expected = Digest::sha256(
+            DigestDomain::ExecutionEnvironment,
+            1,
+            &[
+                b"plakous.cell-engine-contract.v1",
+                b"monty",
+                b"1.2.0",
+                b"plakous-cell-protocol.v1",
+                b"plakous.monty-python-adapter.v8",
+            ],
+        )
         .map_err(identity_error)?;
-        assert_eq!(monty_engine_contract_identity()?, expected);
+        assert_eq!(
+            cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?,
+            expected
+        );
         Ok(())
     }
 
@@ -705,7 +707,7 @@ mod monty_upgrade_tests {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("monty");
         std::fs::write(&path, b"offline worker")?;
-        let artifact = LocalCompositionEngineArtifact::monty_pool_v1(path.canonicalize()?)?;
+        let artifact = LocalCompositionEngineArtifact::python_worker_v1(path.canonicalize()?)?;
         let LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
             environment_identity,
             ..

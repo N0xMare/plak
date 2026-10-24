@@ -57,8 +57,8 @@ NOTES:
 PROCESS-TOOL AUTHORITY:
   Model-launched process tools run with your full host authority on Linux and
   macOS; there is no OS sandbox. native-ptc and js-ptc use PLAK_JS_HOST or a
-  sibling plakous-js-host; py-ptc uses PLAK_MONTY_WORKER or a sibling monty
-  worker. That is worker isolation, not workspace isolation, and it does not
+  sibling plakous-js-host; py-ptc uses PLAK_PY_HOST or a sibling
+  plakous-py-host. That is worker isolation, not workspace isolation, and it does not
   isolate the Plak product itself: use a container or VM for that boundary.
   Unsupported process-tool targets, including Intel macOS, fail closed.
 

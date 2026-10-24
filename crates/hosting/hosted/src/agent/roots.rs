@@ -583,7 +583,7 @@ impl plakous::tools::SidecarLocator for RecordedSidecar {
     }
 
     fn python_host(&self) -> Result<PathBuf, String> {
-        self.host(plakous::agent::LocalCompositionEngineArtifact::monty_pool_v1)
+        self.host(plakous::agent::LocalCompositionEngineArtifact::python_worker_v1)
     }
 }
 

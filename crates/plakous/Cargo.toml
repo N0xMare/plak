@@ -49,7 +49,7 @@ composition = [
     "dep:sha2",
 ]
 # The Monty-backed Python PTC projection, layered on the same composition API.
-composition-python = ["composition", "dep:plakous-py-eval"]
+composition-python = ["composition"]
 full = [
     "anthropic",
     "auth",
@@ -93,7 +93,6 @@ plakous-anthropic = { workspace = true, optional = true }
 plakous-auth = { workspace = true, optional = true }
 plakous-code-mode = { workspace = true, optional = true }
 plakous-cell = { workspace = true, optional = true }
-plakous-py-eval = { workspace = true, optional = true }
 plakous-compose.workspace = true
 plakous-mcp = { workspace = true, optional = true }
 plakous-model.workspace = true

@@ -96,7 +96,7 @@ impl LocalCompositionProfile {
         Ok(Self {
             kind: LocalCompositionProfileKind::PythonPtcV1(descriptor.clone()),
             profile_identity: descriptor.identity(),
-            engine_contract_identity: monty_engine_contract_identity()?,
+            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?,
         })
     }
 
@@ -478,10 +478,10 @@ fn attach_codex_native_local_code_mode(
     sidecar: PathBuf,
     attachment: LocalCompositionAttachmentIdentity,
 ) -> Result<AgentBuilder, AgentError> {
-    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(JavaScriptCellIntegration {
+    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(CellIntegration {
         worker: sidecar,
         identity,
-        presentation: JavaScriptPresentation::CodexExact,
+        presentation: Box::new(JavaScriptPresentation::CodexExact),
     });
     let descriptor = neutral_descriptor(descriptor)
         .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
@@ -504,10 +504,10 @@ fn attach_codex_minimal_local_code_mode(
         .iter()
         .map(|tool| tool.exposed_name().clone())
         .collect();
-    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(JavaScriptCellIntegration {
+    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(CellIntegration {
         worker: sidecar,
         identity,
-        presentation: JavaScriptPresentation::CodexMinimal { nested_catalog },
+        presentation: Box::new(JavaScriptPresentation::CodexMinimal { nested_catalog }),
     });
     let descriptor = neutral_minimal_descriptor(descriptor)
         .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;

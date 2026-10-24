@@ -11,7 +11,7 @@ pub mod js_host;
 /// The Python evaluator worker's install layout.
 pub mod python_bundle;
 
-/// Plak's locator: `PLAK_JS_HOST` / `PLAK_MONTY_WORKER`, else a sibling.
+/// Plak's locator: `PLAK_JS_HOST` / `PLAK_PY_HOST`, else a sibling.
 pub(crate) struct ProductSidecarLocator;
 
 impl plakous::tools::SidecarLocator for ProductSidecarLocator {

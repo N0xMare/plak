@@ -1,30 +1,105 @@
+//! Real-worker tests of the Python presentation on the Monty cell worker,
+//! ported from the monty-pool session: each drives `plakous-py-host` through
+//! the facade's session seam.
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::panic,
-    clippy::too_many_lines,
-    reason = "integration tests against a live monty worker"
+    reason = "integration tests against a live Python worker"
 )]
 
-use super::{
-    ChildExitEscalation, ChildReapBounds, LocalCompositionEvent, LocalCompositionEventReceiver,
-    LocalCompositionNestedDelivery, LocalCompositionNestedResponder, LocalCompositionResponse,
-    codec, reap_child_exit_within, session_bundle,
-};
-use monty_pool::{Pool, PoolConfig, ReplConfig};
-use plakous_agent::internal::{
-    LocalCompositionContentItem, LocalCompositionExecuteRequest, LocalCompositionWaitOutcome,
-    LocalCompositionWaitRequest,
-};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use plakous_agent::internal::{
+    LocalCompositionContentItem, LocalCompositionEvent, LocalCompositionEventReceiver,
+    LocalCompositionExecuteRequest, LocalCompositionNestedDelivery,
+    LocalCompositionNestedResponder, LocalCompositionResponse, LocalCompositionSessionBundle,
+    LocalCompositionSessionLoss, LocalCompositionShutdownResult, LocalCompositionTerminateResult,
+    LocalCompositionWaitOutcome, LocalCompositionWaitRequest,
+};
+use plakous_cell::{BindingInput, CellClient, EngineConfig, MONTY_WORKER};
+
+use super::python::{Monty, PYTHON_WORKER_REQUEST_BOUND};
+use super::python_bindings::{PythonToolBinding, python_bootstrap};
+use super::session::session_bundle;
+
+const MAX_OUTSTANDING_NESTED: usize = 16;
+const MAX_PRINT_BYTES: usize = 1_048_576 - 64;
+
+/// The built `plakous-py-host`: `PLAK_PY_HOST`, else the test build's own.
+fn py_host() -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("PLAK_PY_HOST") {
+        let path = PathBuf::from(&explicit);
+        assert!(
+            path.is_file(),
+            "PLAK_PY_HOST is set to {} but the file is missing",
+            path.display()
+        );
+        return Some(path);
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.parent()
+                .and_then(Path::parent)
+                .map(|directory| directory.join("plakous-py-host"))
+        })
+        .filter(|path| path.is_file())
+}
+
+async fn python_session_within(
+    worker: &Path,
+    bindings: BTreeMap<String, PythonToolBinding>,
+    request_bound: Duration,
+) -> Result<LocalCompositionSessionBundle, String> {
+    let bootstrap = python_bootstrap(bindings)?;
+    let client = CellClient::spawn(worker, MONTY_WORKER, EngineConfig::MONTY).await?;
+    Ok(session_bundle(
+        Arc::new(client),
+        Box::new(Monty::new(bootstrap, request_bound)),
+    ))
+}
+
+async fn python_session(
+    worker: &Path,
+    bindings: BTreeMap<String, PythonToolBinding>,
+) -> Result<LocalCompositionSessionBundle, String> {
+    python_session_within(worker, bindings, PYTHON_WORKER_REQUEST_BOUND).await
+}
+
+#[test]
+fn the_python_request_bound_is_ninety_seconds() {
+    assert_eq!(PYTHON_WORKER_REQUEST_BOUND, Duration::from_secs(90));
+}
+
+#[tokio::test]
+async fn killing_the_python_worker_does_not_kill_parent() {
+    let Some(worker) = py_host() else { return };
+    let client = CellClient::spawn(&worker, MONTY_WORKER, EngineConfig::MONTY)
+        .await
+        .expect("worker");
+    let pid = client.child_id().expect("local worker has a pid");
+    let status = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .expect("kill worker");
+    assert!(status.success());
+    let marker =
+        std::env::temp_dir().join(format!("plak-py-host-parent-alive-{}", std::process::id()));
+    std::fs::write(&marker, b"alive").expect("parent still writes after worker kill");
+    assert_eq!(std::fs::read(&marker).expect("parent reads"), b"alive");
+    let _ = std::fs::remove_file(&marker);
+    let _ = client.wait_loss().await;
+}
 
 #[tokio::test]
 async fn yielded_cell_wait_resumes_after_host_wait_and_is_cancellation_safe() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = super::session_bundle_within(
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session_within(
         &worker,
         BTreeMap::from([("wait_agent".into(), dictionary_tool("wait_agent"))]),
         Duration::from_secs(1),
@@ -96,8 +171,8 @@ async fn yielded_cell_wait_resumes_after_host_wait_and_is_cancellation_safe() {
 
 #[tokio::test]
 async fn yielded_cell_termination_joins_and_unknown_id_does_not_stop_it() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("wait_agent".into(), dictionary_tool("wait_agent"))]),
     )
@@ -120,12 +195,10 @@ async fn yielded_cell_termination_joins_and_unknown_id_does_not_stop_it() {
     ));
     assert!(matches!(
         session.terminate("999".into()).await,
-        plakous_agent::internal::LocalCompositionTerminateResult::Joined(
-            LocalCompositionWaitOutcome::Missing(_)
-        )
+        LocalCompositionTerminateResult::Joined(LocalCompositionWaitOutcome::Missing(_))
     ));
     assert!(
-        matches!(session.terminate(id.clone()).await, plakous_agent::internal::LocalCompositionTerminateResult::Joined(LocalCompositionWaitOutcome::Live(LocalCompositionResponse::Terminated { cell_id, .. })) if cell_id == id)
+        matches!(session.terminate(id.clone()).await, LocalCompositionTerminateResult::Joined(LocalCompositionWaitOutcome::Live(LocalCompositionResponse::Terminated { cell_id, .. })) if cell_id == id)
     );
     assert!(matches!(
         responder
@@ -138,123 +211,19 @@ async fn yielded_cell_termination_joins_and_unknown_id_does_not_stop_it() {
     let _ = session.shutdown().await;
 }
 
-#[tokio::test]
-async fn terminating_a_buffered_result_preserves_persistent_globals() {
-    use plakous_agent::internal::LocalCompositionSession as _;
-    let Some(worker) = monty_worker() else { return };
-    let pool = Pool::new(super::pool_config(&worker, super::WORKER_REQUEST_TIMEOUT))
-        .await
-        .expect("pool");
-    let checkout = pool
-        .checkout(&super::repl_config())
-        .await
-        .expect("checkout");
-    let (events_tx, _events) = tokio::sync::mpsc::channel(1);
-    let session = super::MontySession {
-        checkout: std::sync::Arc::new(tokio::sync::Mutex::new(Some(checkout))),
-        feed_task: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
-        cells: std::sync::Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
-        events_tx,
-        next_cell: std::sync::atomic::AtomicU64::new(1),
-        bindings: std::sync::Arc::new(BTreeMap::new()),
-        last_child_exit: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
-        generation_lost: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    };
-    let started = session
-        .execute(blocking_cell("buffered", "counter = 41\ncounter"))
-        .await
-        .expect("execute");
-    let id = started.cell_id.clone();
-    drop(started.initial_response);
-    let mut completion = session.cells.lock().await[&id.parse::<u64>().expect("id")]
-        .completion
-        .clone();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        completion.wait_for(Option::is_some),
-    )
-    .await
-    .expect("completion bound")
-    .expect("completion");
-    let terminal = session.terminate(id).await;
-    assert!(
-        matches!(terminal, plakous_agent::internal::LocalCompositionTerminateResult::Joined(LocalCompositionWaitOutcome::Live(LocalCompositionResponse::Result { error: None, ref items, .. })) if items.iter().any(|item| matches!(item, LocalCompositionContentItem::Text(text) if text.contains("41"))))
-    );
-    assert!(!session.generation_lost());
-    let next = session
-        .execute(blocking_cell("next", "counter + 1"))
-        .await
-        .expect("next execute")
-        .initial_response
-        .await
-        .expect("next result");
-    assert!(
-        matches!(next, LocalCompositionResponse::Result { error: None, ref items, .. } if items.iter().any(|item| matches!(item, LocalCompositionContentItem::Text(text) if text.contains("42"))))
-    );
-    let _ = session.shutdown().await;
-}
-
-#[test]
-fn cumulative_print_cap_reports_truncation_once_on_a_char_boundary() {
-    let mut printed = super::Printed {
-        text: String::new(),
-        truncated: false,
-        output: std::sync::Arc::new(std::sync::Mutex::new(super::PrintObservation::default())),
-    };
-    super::append_print(&mut printed, &"é".repeat(super::MAX_PRINT_BYTES));
-    assert!(printed.text.len() <= super::MAX_PRINT_BYTES);
-    assert!(printed.text.contains("[Python output truncated at 1 MiB]"));
-    let header = "Python cell running with cell ID 18446744073709551615\nOutput:\n";
-    assert!(
-        header.len() + printed.text.len() <= 1_048_576,
-        "the truncation notice must survive status-inclusive projection"
-    );
-    let first = super::drain_print(&printed.output);
-    assert_ne!(first, [] as [LocalCompositionContentItem; 0]);
-    super::append_print(&mut printed, "more dropped output");
-    assert_eq!(
-        super::drain_print(&printed.output),
-        [] as [LocalCompositionContentItem; 0]
-    );
-}
-
-fn dictionary_tool(name: &str) -> super::PythonToolBinding {
-    super::PythonToolBinding {
+fn dictionary_tool(name: &str) -> PythonToolBinding {
+    PythonToolBinding {
         tool_name: name.into(),
-        input_kind: super::PythonToolInput::Dictionary,
+        input_kind: BindingInput::Dictionary,
     }
-}
-
-fn monty_worker() -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var("PLAK_MONTY_WORKER") {
-        let path = PathBuf::from(&explicit);
-        assert!(
-            path.is_file(),
-            "PLAK_MONTY_WORKER is set to {} but the file is missing",
-            path.display()
-        );
-        return Some(path);
-    }
-    if let Some(path) = std::env::current_exe()
-        .ok()
-        .and_then(|path| {
-            path.parent()
-                .and_then(Path::parent)
-                .map(|directory| directory.join("monty"))
-        })
-        .filter(|path| path.is_file())
-    {
-        return Some(path);
-    }
-    None
 }
 
 async fn run_source(
     worker: &Path,
-    bindings: BTreeMap<String, super::PythonToolBinding>,
+    bindings: BTreeMap<String, PythonToolBinding>,
     source: &str,
 ) -> LocalCompositionResponse {
-    let bundle = session_bundle(worker, bindings)
+    let bundle = python_session(worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -388,74 +357,17 @@ async fn join_deliveries(
     }
 }
 
-#[test]
-fn worker_limits_bound_requests_without_expiring_the_session() {
-    let pool = super::pool_config(Path::new("/unused-worker"), super::WORKER_REQUEST_TIMEOUT);
-    assert_eq!(pool.min_processes, 0);
-    assert_eq!(pool.max_processes, 1);
-    assert_eq!(super::WORKER_REQUEST_TIMEOUT, Duration::from_secs(90));
-    assert_eq!(pool.request_timeout, Some(Duration::from_secs(90)));
-
-    let limits = super::repl_config().limits.expect("resource limits");
-    assert_eq!(limits.max_memory, Some(256 * 1024 * 1024));
-    assert_eq!(limits.max_feed_duration, None);
-    assert_eq!(limits.max_turn_duration, None);
-}
-
-#[test]
-fn unsupported_json_number_becomes_protocol_error() {
-    let value = serde_json::Value::Number(serde_json::Number::from(i64::MAX as u64 + 1));
-    let err = codec::json_to_monty(&value).expect_err("integers above i64::MAX are not monty-safe");
-    assert!(err.contains("unsupported JSON integer magnitude"), "{err}");
-}
-
-#[tokio::test]
-async fn killing_monty_worker_does_not_kill_parent() {
-    let Some(worker) = monty_worker() else {
-        eprintln!(
-            "skipping killing_monty_worker_does_not_kill_parent: monty worker not available (set PLAK_MONTY_WORKER)"
-        );
-        return;
-    };
-    let pool = Pool::new(PoolConfig {
-        min_processes: 0,
-        max_processes: 1,
-        request_timeout: Some(Duration::from_secs(10)),
-        ..PoolConfig::subprocess(&worker)
-    })
-    .await
-    .expect("spawn monty pool");
-    let checkout = pool
-        .checkout(&ReplConfig::default())
-        .await
-        .expect("checkout monty worker");
-    let pid = checkout.pid().expect("local monty worker has a pid");
-    let status = Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .expect("kill worker");
-    assert!(status.success());
-    let marker =
-        std::env::temp_dir().join(format!("plak-monty-parent-alive-{}", std::process::id()));
-    std::fs::write(&marker, b"alive").expect("parent still writes after worker kill");
-    let body = std::fs::read(&marker).expect("parent still reads after worker kill");
-    assert_eq!(body, b"alive");
-    let _ = std::fs::remove_file(&marker);
-    drop(checkout);
-    drop(pool);
-}
-
 #[tokio::test]
 async fn nested_call_arrives_before_initial_response() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping nested_call_arrives_before_initial_response: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping nested_call_arrives_before_initial_response: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
     let mut bindings = BTreeMap::new();
     bindings.insert("fetch".into(), dictionary_tool("echo_tool"));
-    let bundle = session_bundle(&worker, bindings)
+    let bundle = python_session(&worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -514,15 +426,15 @@ async fn nested_call_arrives_before_initial_response() {
 
 #[tokio::test]
 async fn async_tool_call_returns_reply_text() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping async_tool_call_returns_reply_text: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping async_tool_call_returns_reply_text: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
     let mut bindings = BTreeMap::new();
     bindings.insert("fetch".into(), dictionary_tool("echo_tool"));
-    let bundle = session_bundle(&worker, bindings)
+    let bundle = python_session(&worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -567,16 +479,16 @@ async fn async_tool_call_returns_reply_text() {
 
 #[tokio::test]
 async fn asyncio_gather_resumes_in_program_order() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping asyncio_gather_resumes_in_program_order: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping asyncio_gather_resumes_in_program_order: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
     let mut bindings = BTreeMap::new();
     bindings.insert("a".into(), dictionary_tool("tool_a"));
     bindings.insert("b".into(), dictionary_tool("tool_b"));
-    let bundle = session_bundle(&worker, bindings)
+    let bundle = python_session(&worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -630,15 +542,15 @@ async fn asyncio_gather_resumes_in_program_order() {
 
 #[tokio::test]
 async fn asyncio_gather_same_tool_uses_distinct_runtime_call_ids() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping asyncio_gather_same_tool_uses_distinct_runtime_call_ids: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping asyncio_gather_same_tool_uses_distinct_runtime_call_ids: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
     let mut bindings = BTreeMap::new();
     bindings.insert("Read".into(), dictionary_tool("read_tool"));
-    let bundle = session_bundle(&worker, bindings)
+    let bundle = python_session(&worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -688,15 +600,15 @@ async fn asyncio_gather_same_tool_uses_distinct_runtime_call_ids() {
 
 #[tokio::test]
 async fn failing_nested_call_is_catchable_in_python() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping failing_nested_call_is_catchable_in_python: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping failing_nested_call_is_catchable_in_python: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
     let mut bindings = BTreeMap::new();
     bindings.insert("bad".into(), dictionary_tool("bad_tool"));
-    let bundle = session_bundle(&worker, bindings)
+    let bundle = python_session(&worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -744,9 +656,9 @@ async fn failing_nested_call_is_catchable_in_python() {
 
 #[tokio::test]
 async fn unbound_tool_name_fails_with_name_error() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping unbound_tool_name_fails_with_name_error: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping unbound_tool_name_fails_with_name_error: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
@@ -772,9 +684,9 @@ async fn unbound_tool_name_fails_with_name_error() {
 
 #[tokio::test]
 async fn uncaught_python_exception_surfaces_cell_error() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping uncaught_python_exception_surfaces_cell_error: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping uncaught_python_exception_surfaces_cell_error: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
@@ -805,15 +717,12 @@ async fn uncaught_python_exception_surfaces_cell_error() {
 
 #[tokio::test]
 async fn concurrent_execute_while_cell_running_is_rejected() {
-    let Some(worker) = monty_worker() else {
-        eprintln!(
-            "skipping concurrent_execute_while_cell_running_is_rejected: monty worker not available (set PLAK_MONTY_WORKER)"
-        );
+    let Some(worker) = py_host() else {
         return;
     };
     let mut bindings = BTreeMap::new();
     bindings.insert("fetch".into(), dictionary_tool("echo_tool"));
-    let bundle = session_bundle(&worker, bindings)
+    let bundle = python_session(&worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -908,126 +817,16 @@ async fn concurrent_execute_while_cell_running_is_rejected() {
     let _ = session.shutdown().await;
 }
 
-/// Bounds short enough to keep the escalation test fast; the shape is exactly
-/// the production [`ChildReapBounds::DEFAULT`] ladder.
-const TEST_REAP_BOUNDS: ChildReapBounds = ChildReapBounds {
-    voluntary: Duration::from_millis(200),
-    terminate: Duration::from_millis(200),
-    kill: Duration::from_secs(2),
-};
-
-#[tokio::test]
-async fn a_worker_that_ignores_sigterm_is_killed_inside_the_shutdown_bound() {
-    // A wedged monty worker used to hold shutdown open forever: the reap was an
-    // unbounded `waitpid`. Stand in a child that ignores SIGTERM and prove the
-    // reap still returns inside its own bound with the child gone.
-    // `exec` so the ignored SIGTERM disposition (which survives exec) belongs to
-    // the pid we reap, with no orphan grandchild left behind.
-    let mut stubborn = Command::new("sh")
-        .arg("-c")
-        .arg(r#"trap "" TERM; exec sleep 60"#)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn a child that ignores SIGTERM");
-    let pid = stubborn.id();
-    let started = Instant::now();
-    let exit = reap_child_exit_within(
-        pid,
-        plakous_cell::sample_children_rusage(),
-        TEST_REAP_BOUNDS,
-    )
-    .await;
-    let elapsed = started.elapsed();
-
-    assert_eq!(exit.escalation, ChildExitEscalation::Killed);
-    let bound = TEST_REAP_BOUNDS.voluntary + TEST_REAP_BOUNDS.terminate + TEST_REAP_BOUNDS.kill;
-    assert!(
-        elapsed < bound,
-        "shutdown took {elapsed:?}, past the {bound:?} bound"
-    );
-    // The pid is no longer a waitable child of ours: it was signalled and reaped.
-    assert!(
-        stubborn.try_wait().is_err(),
-        "the stubborn child was left unreaped"
-    );
-}
-
-#[tokio::test]
-async fn a_worker_that_exits_on_its_own_is_never_signalled() {
-    let mut cooperative = Command::new("sh")
-        .arg("-c")
-        .arg("exit 0")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn a cooperative child");
-    let pid = cooperative.id();
-    let exit = reap_child_exit_within(
-        pid,
-        plakous_cell::sample_children_rusage(),
-        TEST_REAP_BOUNDS,
-    )
-    .await;
-
-    assert_eq!(exit.escalation, ChildExitEscalation::Voluntary);
-    assert!(
-        cooperative.try_wait().is_err(),
-        "the cooperative child was left unreaped"
-    );
-}
-
-#[tokio::test]
-async fn unreaped_worker_never_certifies_joined_shutdown() {
-    use super::*;
-    let session = session_with_exit(ChildProcessExit {
-        child: ChildProcessKind::PythonWorker,
-        user_cpu: Duration::ZERO,
-        system_cpu: Duration::ZERO,
-        peak_rss_bytes: None,
-        escalation: ChildExitEscalation::Unreaped,
-    });
-    assert!(matches!(
-        session.shutdown().await,
-        LocalCompositionShutdownResult::Lost(_)
-    ));
-    assert!(matches!(
-        session.shutdown().await,
-        LocalCompositionShutdownResult::Lost(_)
-    ));
-    let (_sender, completion) = watch::channel(Some(Ok(LocalCompositionResponse::Result {
-        cell_id: "1".into(),
-        items: Vec::new(),
-        error: None,
-    })));
-    session.cells.lock().await.insert(
-        1,
-        CellObservation {
-            completion,
-            output: Arc::new(std::sync::Mutex::new(PrintObservation::default())),
-        },
-    );
-    assert!(
-        matches!(
-            session.terminate("1".into()).await,
-            LocalCompositionTerminateResult::Lost(_)
-        ),
-        "a buffered result cannot override unreaped cleanup evidence"
-    );
-}
-
 #[tokio::test]
 async fn successive_cells_retain_state_without_a_cumulative_duration_budget() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping successive_cells_retain_state_without_a_cumulative_duration_budget: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping successive_cells_retain_state_without_a_cumulative_duration_budget: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
     tokio::time::timeout(Duration::from_secs(30), async {
-        let bundle = session_bundle(&worker, BTreeMap::new())
+        let bundle = python_session(&worker, BTreeMap::new())
             .await
             .expect("monty session");
         let session = bundle.session;
@@ -1062,7 +861,7 @@ async fn successive_cells_retain_state_without_a_cumulative_duration_budget() {
         }
         assert!(matches!(
             session.shutdown().await,
-            super::LocalCompositionShutdownResult::Joined { .. }
+            LocalCompositionShutdownResult::Joined { .. }
         ));
     })
     .await
@@ -1070,7 +869,7 @@ async fn successive_cells_retain_state_without_a_cumulative_duration_budget() {
 }
 
 /// A request bound short enough to observe the kill-and-reap path without
-/// waiting out the production [`super::WORKER_REQUEST_TIMEOUT`]. Only the bound
+/// waiting out the production [`PYTHON_WORKER_REQUEST_BOUND`]. Only the bound
 /// differs; the session is built by the production code path.
 const TEST_WORKER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -1089,20 +888,19 @@ fn blocking_cell(tool_call_id: &str, source: &str) -> LocalCompositionExecuteReq
 
 #[tokio::test]
 async fn a_stuck_worker_request_is_killed_and_reported_as_session_loss() {
-    // A cell the worker never answers must not hold the parent open: the pool
-    // kills the worker at its request bound and the cell reports a session
+    // A cell the worker never answers must not hold the parent open: the
+    // session kills the worker at its request bound and the cell reports a session
     // loss, which is a strictly different outcome from a Python exception.
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         eprintln!(
-            "skipping a_stuck_worker_request_is_killed_and_reported_as_session_loss: monty worker not available (set PLAK_MONTY_WORKER)"
+            "skipping a_stuck_worker_request_is_killed_and_reported_as_session_loss: Python worker not available (set PLAK_PY_HOST)"
         );
         return;
     };
     tokio::time::timeout(Duration::from_secs(30), async {
-        let bundle =
-            super::session_bundle_within(&worker, BTreeMap::new(), TEST_WORKER_REQUEST_TIMEOUT)
-                .await
-                .expect("monty session");
+        let bundle = python_session_within(&worker, BTreeMap::new(), TEST_WORKER_REQUEST_TIMEOUT)
+            .await
+            .expect("monty session");
         let session = bundle.session;
 
         // Pin the contrasting classification on the same live session: a raised
@@ -1129,7 +927,7 @@ async fn a_stuck_worker_request_is_killed_and_reported_as_session_loss() {
             .initial_response
             .await
             .expect_err("a worker that never answers is a session loss");
-        let super::LocalCompositionSessionLoss::HostLost(detail) = loss else {
+        let LocalCompositionSessionLoss::HostLost(detail) = loss else {
             panic!("a stuck worker must be host loss, not a cell-level error");
         };
         assert!(
@@ -1138,14 +936,13 @@ async fn a_stuck_worker_request_is_killed_and_reported_as_session_loss() {
             "loss detail should name the expired request bound: {detail}"
         );
 
-        // The pool killed and discarded the worker itself, so the checkout no
-        // longer carries a diagnostic pid. An absent pid is never a receipt
-        // that the worker was reaped, so shutdown stays fail-closed on a
-        // session that was already lost rather than certifying a clean join.
+        // The request bound killed the worker; that kill is a sticky loss, so
+        // shutdown stays fail-closed on a session that was already lost
+        // rather than certifying a clean join.
         assert!(
             matches!(
                 session.shutdown().await,
-                super::LocalCompositionShutdownResult::Lost(_)
+                LocalCompositionShutdownResult::Lost(_)
             ),
             "a session lost to a request timeout must not certify a joined shutdown"
         );
@@ -1155,9 +952,99 @@ async fn a_stuck_worker_request_is_killed_and_reported_as_session_loss() {
 }
 
 #[tokio::test]
+async fn a_stuck_worker_request_after_nested_reply_is_killed() {
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session_within(
+        &worker,
+        BTreeMap::from([("fetch".into(), dictionary_tool("fetch"))]),
+        TEST_WORKER_REQUEST_TIMEOUT,
+    )
+    .await
+    .expect("session");
+    let mut events = bundle.events;
+    let session = bundle.session;
+    let started = session
+        .execute(blocking_cell(
+            "stuck-after-reply",
+            "await fetch({})\nwhile True:\n    pass",
+        ))
+        .await
+        .expect("start");
+    let LocalCompositionEvent::NestedCall { responder, .. } =
+        events.receive().await.expect("events").expect("call")
+    else {
+        panic!("nested call");
+    };
+    let delivery = tokio::spawn(responder.resolve(serde_json::json!(7)));
+    let loss = tokio::time::timeout(Duration::from_secs(15), started.initial_response)
+        .await
+        .expect("compute watchdog")
+        .expect_err("no cell result");
+    assert!(
+        matches!(loss, LocalCompositionSessionLoss::HostLost(ref detail) if detail.contains("timed out")),
+        "{loss:?}"
+    );
+    assert_eq!(
+        delivery.await.expect("delivery").expect("outcome"),
+        LocalCompositionNestedDelivery::HostLost,
+        "computation without an interpreter event provides no receipt"
+    );
+    assert!(matches!(
+        session.shutdown().await,
+        LocalCompositionShutdownResult::Lost(_)
+    ));
+}
+
+#[tokio::test]
+async fn allocator_exit_after_nested_result_is_not_acceptance() {
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(
+        &worker,
+        BTreeMap::from([("fetch".into(), dictionary_tool("fetch"))]),
+    )
+    .await
+    .expect("session");
+    let mut events = bundle.events;
+    let session = bundle.session;
+    // The value fits the interpreter's soft budget. Exporting it after the
+    // reply needs a second copy and crosses the allocator's hard ceiling.
+    let started = session
+        .execute(blocking_cell(
+            "hard-ceiling",
+            "x = 'a' * (240 * 1024 * 1024)\nawait fetch({})\nx",
+        ))
+        .await
+        .expect("start");
+    let LocalCompositionEvent::NestedCall { responder, .. } =
+        tokio::time::timeout(Duration::from_secs(15), events.receive())
+            .await
+            .expect("call bound")
+            .expect("events")
+            .expect("call")
+    else {
+        panic!("nested call");
+    };
+    assert_eq!(
+        tokio::time::timeout(
+            Duration::from_secs(15),
+            responder.resolve(serde_json::json!(7))
+        )
+        .await
+        .expect("delivery bound")
+        .expect("outcome"),
+        LocalCompositionNestedDelivery::HostLost
+    );
+    assert!(matches!(
+        started.initial_response.await,
+        Err(LocalCompositionSessionLoss::HostLost(_))
+    ));
+    let _ = session.shutdown().await;
+}
+
+#[tokio::test]
 async fn terminal_cells_retain_state_without_retaining_response_streams() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(&worker, BTreeMap::new())
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(&worker, BTreeMap::new())
         .await
         .expect("session");
     for n in 0..32 {
@@ -1199,164 +1086,8 @@ async fn terminal_cells_retain_state_without_retaining_response_streams() {
     }
     assert!(matches!(
         bundle.session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
-}
-
-fn session_with_exit(exit: super::ChildProcessExit) -> super::MontySession {
-    use super::*;
-    let (events_tx, _) = mpsc::channel(1);
-    MontySession {
-        cells: Arc::new(Mutex::new(BTreeMap::new())),
-        checkout: Arc::new(Mutex::new(None)),
-        feed_task: Arc::new(Mutex::new(None)),
-        events_tx,
-        next_cell: AtomicU64::new(1),
-        bindings: Arc::new(BTreeMap::new()),
-        last_child_exit: Arc::new(Mutex::new(Some(exit))),
-        generation_lost: Arc::new(AtomicBool::new(false)),
-    }
-}
-
-/// The exact monty-pool protocol context observed in the field (0.0.21) when a
-/// raised exception carried a traceback frame whose end column preceded its
-/// start column.
-const UNDECODABLE_TRACEBACK: &str = "invalid exception payload: invalid value for StackFrame.end.column: 5 is before start column 12";
-
-#[test]
-fn undecodable_traceback_is_a_cell_failure_and_loses_only_the_generation() {
-    use super::*;
-    let lost = AtomicBool::new(false);
-    let response = map_turn_error(
-        7,
-        "partial stdout\n",
-        PoolError::Protocol(UNDECODABLE_TRACEBACK.into()),
-        true,
-        &lost,
-    )
-    .expect("a raised exception is a definite cell outcome, not a host loss");
-    let LocalCompositionResponse::Result {
-        cell_id,
-        items,
-        error,
-    } = response
-    else {
-        panic!("expected a terminal cell result, got {response:?}");
-    };
-    assert_eq!(cell_id, "7");
-    assert_eq!(
-        items,
-        vec![LocalCompositionContentItem::Text(
-            "partial stdout\n".to_owned()
-        )]
-    );
-    let error = error.expect("a raised cell reports an error");
-    assert!(
-        error.starts_with("Python cell failed; its traceback frame spans were undecodable"),
-        "{error}"
-    );
-    assert!(error.ends_with(UNDECODABLE_TRACEBACK), "{error}");
-    assert!(
-        lost.load(Ordering::Acquire),
-        "the violating reply discarded the worker, so the generation is gone"
-    );
-}
-
-#[test]
-fn other_protocol_violations_remain_host_losses() {
-    use super::*;
-    for context in [
-        "unexpected event",
-        "worker sent an event with no kind",
-        "error event with no exception",
-    ] {
-        let discarded = AtomicBool::new(false);
-        let outcome = map_turn_error(1, "", PoolError::Protocol(context.into()), true, &discarded)
-            .expect_err("an unknown cell outcome is a host loss");
-        assert!(
-            matches!(outcome, LocalCompositionSessionLoss::HostLost(_)),
-            "{outcome:?}"
-        );
-        assert!(!discarded.load(Ordering::Acquire));
-    }
-}
-
-#[tokio::test]
-async fn a_lost_generation_still_certifies_its_reaped_worker() {
-    use super::*;
-    let session = session_with_exit(ChildProcessExit {
-        child: ChildProcessKind::PythonWorker,
-        user_cpu: Duration::ZERO,
-        system_cpu: Duration::ZERO,
-        peak_rss_bytes: None,
-        escalation: ChildExitEscalation::Voluntary,
-    });
-    session.generation_lost.store(true, Ordering::Release);
-    assert!(session.generation_lost());
-    assert!(matches!(
-        session.shutdown().await,
-        LocalCompositionShutdownResult::Joined {
-            child_exit: Some(_)
-        }
-    ));
-}
-
-#[tokio::test]
-async fn failed_reap_task_join_cannot_certify_joined_cleanup() {
-    use super::*;
-    let task = tokio::spawn(std::future::pending::<ChildReapEscalation>());
-    task.abort();
-    let exit = finish_reap(task, plakous_cell::sample_children_rusage()).await;
-    assert_eq!(exit.escalation, ChildExitEscalation::Unreaped);
-    let session = session_with_exit(exit);
-    assert!(matches!(
-        session.terminate("1".into()).await,
-        LocalCompositionTerminateResult::Lost(_)
-    ));
-    assert!(matches!(
-        session.shutdown().await,
-        LocalCompositionShutdownResult::Lost(_)
-    ));
-}
-
-#[tokio::test]
-async fn queued_monty_reply_waits_for_correlated_worker_receipt() {
-    let (nested_tx, mut nested_rx) = tokio::sync::mpsc::channel(1);
-    let responder = Box::new(super::MontyNestedResponder {
-        call_id: 7,
-        nested_tx,
-    });
-    let delivery = tokio::spawn(responder.resolve(serde_json::json!("result")));
-    let (call_id, reply) = nested_rx.recv().await.expect("queued reply");
-    assert_eq!(call_id, 7);
-    assert!(
-        !delivery.is_finished(),
-        "queue handoff must not certify acceptance"
-    );
-    reply
-        .accepted
-        .send(LocalCompositionNestedDelivery::Accepted)
-        .expect("receipt listener");
-    assert_eq!(
-        delivery.await.expect("delivery task").expect("delivery"),
-        LocalCompositionNestedDelivery::Accepted
-    );
-}
-
-#[tokio::test]
-async fn lost_monty_receipt_never_certifies_queued_delivery() {
-    let (nested_tx, mut nested_rx) = tokio::sync::mpsc::channel(1);
-    let responder = Box::new(super::MontyNestedResponder {
-        call_id: 9,
-        nested_tx,
-    });
-    let delivery = tokio::spawn(responder.reject("failure".into()));
-    let (_, reply) = nested_rx.recv().await.expect("queued reply");
-    drop(reply);
-    assert_eq!(
-        delivery.await.expect("delivery task").expect("delivery"),
-        LocalCompositionNestedDelivery::HostLost
-    );
 }
 
 async fn assert_real_worker_future_receipts(
@@ -1364,11 +1095,11 @@ async fn assert_real_worker_future_receipts(
     expected_inputs: &[serde_json::Value],
     expected_output: &str,
 ) {
-    let Some(worker) = monty_worker() else {
-        eprintln!("skipping future receipt regression: set PLAK_MONTY_WORKER");
+    let Some(worker) = py_host() else {
+        eprintln!("skipping future receipt regression: set PLAK_PY_HOST");
         return;
     };
-    let bundle = session_bundle(
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("fetch".into(), dictionary_tool("fetch_tool"))]),
     )
@@ -1378,16 +1109,7 @@ async fn assert_real_worker_future_receipts(
     let mut events = bundle.events;
     let outcome = tokio::time::timeout(Duration::from_secs(30), async {
         let started = session
-            .execute(LocalCompositionExecuteRequest {
-                start_admission: plakous_agent::internal::LocalCompositionStartAdmission::new(
-                    || Box::pin(async { Ok(()) }),
-                ),
-                tool_call_id: "future-receipts".into(),
-                enabled_tools: Vec::new(),
-                source: source.into(),
-                yield_time_ms: 90_000,
-                max_output_tokens: 10_000,
-            })
+            .execute(lazy_tool_request(source))
             .await
             .expect("execute");
         let mut calls = Vec::new();
@@ -1440,7 +1162,7 @@ async fn assert_real_worker_future_receipts(
     );
     assert!(matches!(
         shutdown,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
     let (calls, deliveries, terminal) =
         outcome.expect("future receipts must settle without deadlock");
@@ -1504,39 +1226,12 @@ async fn mixed_unused_and_awaited_bound_tools_dispatch_only_the_awaited_call() {
     .await;
 }
 
-#[test]
-fn futures_batch_validation_refuses_non_terminal_results() {
-    for value in [
-        monty_pool::ResumeValue::Future,
-        monty_pool::ResumeValue::NotFound,
-        monty_pool::ResumeValue::NotHandled,
-    ] {
-        assert!(super::validate_futures_batch(&[(1, value)]).is_err());
-    }
-}
-
-#[test]
-fn nested_results_are_bounded_in_depth_before_they_reach_the_wire() {
-    // Monty 1.x carries values as a flat node arena with no depth limit of its
-    // own, so the host bounds nesting where it converts JSON.
-    let nested = |depth| {
-        (0..depth).fold(serde_json::Value::Null, |value, _| {
-            serde_json::json!([value])
-        })
-    };
-    let value = codec::json_to_monty(&nested(128)).expect("JSON result at the bound");
-    super::validate_futures_batch(&[(1, monty_pool::ResumeValue::Return(value))])
-        .expect("a result at the depth bound fits the wire");
-    let error = codec::json_to_monty(&nested(129)).expect_err("one level past the bound");
-    assert!(error.contains("nests deeper than 128 levels"), "{error}");
-}
-
 #[tokio::test]
 async fn undecodable_nested_result_never_acknowledges_delivery() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         return;
     };
-    let bundle = session_bundle(
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("fetch".into(), dictionary_tool("fetch_tool"))]),
     )
@@ -1577,20 +1272,20 @@ async fn undecodable_nested_result_never_acknowledges_delivery() {
     );
     assert!(matches!(
         started.initial_response.await,
-        Err(super::LocalCompositionSessionLoss::ProtocolViolation(_))
+        Err(LocalCompositionSessionLoss::ProtocolViolation(_))
     ));
     assert!(matches!(
         session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
 }
 
 #[tokio::test]
 async fn uncaught_nested_rejection_is_accepted_and_preserves_python_exception() {
-    let Some(worker) = monty_worker() else {
+    let Some(worker) = py_host() else {
         return;
     };
-    let bundle = session_bundle(
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("bad".into(), dictionary_tool("bad_tool"))]),
     )
@@ -1605,7 +1300,7 @@ async fn uncaught_nested_rejection_is_accepted_and_preserves_python_exception() 
             }),
             tool_call_id: "uncaught-nested".into(),
             enabled_tools: Vec::new(),
-            source: "await bad({})".into(),
+            source: "await bad({\n    'patch': '''not a diff\nat all'''\n})".into(),
             yield_time_ms: 90_000,
             max_output_tokens: 10_000,
         })
@@ -1629,229 +1324,8 @@ async fn uncaught_nested_rejection_is_accepted_and_preserves_python_exception() 
     );
     assert!(matches!(
         session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
-}
-
-#[tokio::test]
-async fn allocator_exit_while_reading_nested_result_is_not_acceptance() {
-    let Some(worker) = monty_worker() else {
-        return;
-    };
-    let pool = Pool::new(PoolConfig {
-        min_processes: 0,
-        max_processes: 1,
-        request_timeout: Some(Duration::from_secs(10)),
-        ..PoolConfig::subprocess(&worker)
-    })
-    .await
-    .expect("pool");
-    let mut checkout = pool
-        .checkout(&ReplConfig {
-            limits: Some(monty_types::ResourceLimits {
-                max_memory: Some(1024 * 1024),
-                ..Default::default()
-            }),
-            ..ReplConfig::default()
-        })
-        .await
-        .expect("checkout");
-    let mut printed = super::Printed {
-        text: String::new(),
-        truncated: false,
-        output: std::sync::Arc::new(std::sync::Mutex::new(super::PrintObservation::default())),
-    };
-    let mut on_print = monty_pool::on_print_sync(|_, _: &str| {});
-    assert!(matches!(
-        checkout
-            .feed(
-                "await fetch({})",
-                monty_types::NamedValues::new(),
-                Vec::new(),
-                false,
-                &mut on_print
-            )
-            .await
-            .expect("feed"),
-        monty_pool::TurnEvent::FunctionCall { .. }
-    ));
-    let pending_call_ids = match checkout
-        .resume(monty_pool::ResumeValue::Future, &mut on_print)
-        .await
-        .expect("stash future")
-    {
-        monty_pool::TurnEvent::ResolveFutures {
-            pending_call_ids, ..
-        } => pending_call_ids,
-        other => panic!("unexpected suspension: {other:?}"),
-    };
-    let results = vec![(
-        pending_call_ids[0],
-        monty_pool::ResumeValue::Return(monty_types::MontyObject::string(
-            "x".repeat(16 * 1024 * 1024),
-        )),
-    )];
-    super::validate_futures_batch(&results)
-        .expect("valid protocol frame exceeds worker allocation budget");
-    let (accepted, receipt) = tokio::sync::oneshot::channel();
-    let result = super::resume_futures_batch(
-        &mut checkout,
-        &mut printed,
-        super::FuturesBatch {
-            results,
-            acceptances: vec![accepted],
-        },
-    )
-    .await;
-    assert!(
-        matches!(result, Err(monty_pool::PoolError::Runtime(ref error)) if error.exc_type() == monty_types::ExcType::MemoryError),
-        "{result:?}"
-    );
-    assert!(checkout.pid().is_none());
-    assert_eq!(
-        receipt.await.expect("loss receipt"),
-        LocalCompositionNestedDelivery::HostLost
-    );
-    pool.close().await;
-}
-
-/// A rejected nested call raised across a multi-line call expression is the
-/// `deepseek/deepseek-v4-flash` `py-ptc` exact-copy shape, whose JSONL position
-/// ended `recovery_required` with "nested local
-/// composition result receiver disappeared or could not prove acceptance"
-/// seventeen milliseconds after `apply_patch` reported a definite failure. The
-/// cell's `await apply_patch({...})` spanned several lines, so the raised
-/// traceback carried a frame whose end column preceded its start column,
-/// monty-proto 0.0.21 refused the payload, and the acknowledgement of a result
-/// the worker had provably consumed was reported as a loss.
-///
-/// The cell outcome must be a definite Python failure and the delivery must be
-/// an acceptance, because the worker could only raise by running the resumed
-/// cell. From 1.1.0 the traceback decodes, so the failure is ordinary.
-#[tokio::test]
-async fn nested_rejection_raised_across_a_multiline_call_is_an_ordinary_cell_failure() {
-    let Some(worker) = monty_worker() else {
-        eprintln!(
-            "skipping nested_rejection_raised_across_a_multiline_call_is_an_ordinary_cell_failure: monty worker not available (set PLAK_MONTY_WORKER)"
-        );
-        return;
-    };
-    let bundle = session_bundle(
-        &worker,
-        BTreeMap::from([("apply_patch".into(), dictionary_tool("apply_patch_tool"))]),
-    )
-    .await
-    .expect("session");
-    let mut events = bundle.events;
-    let session = bundle.session;
-    let started = session
-        .execute(LocalCompositionExecuteRequest {
-            start_admission: plakous_agent::internal::LocalCompositionStartAdmission::new(|| {
-                Box::pin(async { Ok(()) })
-            }),
-            tool_call_id: "multiline-nested".into(),
-            enabled_tools: Vec::new(),
-            source: "result = await apply_patch({\n    \"patch\": \"\"\"not a diff\nat all\"\"\"\n})\nprint(result)"
-                .into(),
-            yield_time_ms: 90_000,
-            max_output_tokens: 10_000,
-        })
-        .await
-        .expect("execute");
-    dispatch_nested_calls(
-        &mut events,
-        [(
-            "apply_patch_tool".into(),
-            NestedPlan::Reject("patch text is not a valid git-style unified diff".into()),
-        )],
-    )
-    .await;
-    let response = started
-        .initial_response
-        .await
-        .expect("a raised cell is a definite outcome, never a host loss");
-    let LocalCompositionResponse::Result { error, .. } = response else {
-        panic!("expected a terminal cell result");
-    };
-    let error = error.expect("the cell raised");
-    // Monty 1.1.0 renders multi-line call spans without caret math, so this
-    // former undecodable-traceback shape is an ordinary Python failure.
-    assert!(
-        !error.contains(super::MONTY_UNDECODABLE_EXCEPTION_CONTEXT),
-        "{error}"
-    );
-    assert!(
-        error.contains("patch text is not a valid git-style unified diff"),
-        "{error}"
-    );
-    assert!(matches!(
-        session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
-    ));
-}
-
-#[test]
-fn an_undecodable_traceback_acknowledges_the_result_the_worker_consumed() {
-    use super::{LocalCompositionNestedDelivery as Delivery, batch_acceptance};
-    use monty_pool::PoolError;
-    assert_eq!(
-        batch_acceptance(
-            &Err(PoolError::Protocol(UNDECODABLE_TRACEBACK.into())),
-            None
-        ),
-        Delivery::Accepted,
-        "only a worker that ran the resumed cell can raise, so it consumed the result"
-    );
-    for context in ["unexpected event", "worker sent an event with no kind"] {
-        assert_eq!(
-            batch_acceptance(&Err(PoolError::Protocol(context.into())), Some(99)),
-            Delivery::HostLost,
-            "{context} leaves acceptance undetermined"
-        );
-    }
-    assert_eq!(
-        batch_acceptance(
-            &Err(PoolError::Runtime(monty_types::MontyException::new(
-                monty_types::ExcType::MemoryError,
-                None
-            ))),
-            None
-        ),
-        Delivery::HostLost,
-        "a worker that is gone cannot prove it consumed the result"
-    );
-    assert_eq!(
-        batch_acceptance(
-            &Err(PoolError::Runtime(monty_types::MontyException::new(
-                monty_types::ExcType::RuntimeError,
-                None
-            ))),
-            Some(99)
-        ),
-        Delivery::Accepted,
-        "a surviving checkout answered this exact request"
-    );
-}
-
-#[tokio::test]
-async fn a_result_delivered_after_the_cell_ended_is_definite_non_delivery() {
-    // The feed loop owns the receiving half for exactly as long as the cell
-    // runs, so a closed channel is the host's proof that the cell already
-    // reached its own outcome and never saw this result.
-    let (nested_tx, nested_rx) = tokio::sync::mpsc::channel(1);
-    drop(nested_rx);
-    let responder = Box::new(super::MontyNestedResponder {
-        call_id: 11,
-        nested_tx,
-    });
-    let delivery = responder
-        .resolve(serde_json::json!("too late"))
-        .await
-        .expect("delivery");
-    assert!(
-        matches!(delivery, LocalCompositionNestedDelivery::NotObserved(_)),
-        "an ended cell provably never observed the result: {delivery:?}"
-    );
 }
 
 fn lazy_tool_request(source: impl Into<String>) -> LocalCompositionExecuteRequest {
@@ -1869,8 +1343,8 @@ fn lazy_tool_request(source: impl Into<String>) -> LocalCompositionExecuteReques
 
 #[tokio::test]
 async fn lazy_tool_aliases_user_functions_and_state_persist_across_cells() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("fetch".into(), dictionary_tool("fetch_tool"))]),
     )
@@ -1910,7 +1384,7 @@ async fn lazy_tool_aliases_user_functions_and_state_persist_across_cells() {
     }).await;
     assert!(matches!(
         session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
     drop(session);
     assert!(events.receive().await.expect("closed events").is_none());
@@ -1919,7 +1393,7 @@ async fn lazy_tool_aliases_user_functions_and_state_persist_across_cells() {
 
 #[tokio::test]
 async fn malformed_public_tool_names_cannot_enter_worker_bootstrap() {
-    let Some(worker) = monty_worker() else { return };
+    let Some(worker) = py_host() else { return };
     for name in [
         "",
         "await",
@@ -1928,7 +1402,7 @@ async fn malformed_public_tool_names_cannot_enter_worker_bootstrap() {
         "_plakous_host_0",
     ] {
         assert!(
-            session_bundle(
+            python_session(
                 &worker,
                 BTreeMap::from([(name.into(), dictionary_tool("fetch_tool"))])
             )
@@ -1941,8 +1415,8 @@ async fn malformed_public_tool_names_cannot_enter_worker_bootstrap() {
 
 #[tokio::test]
 async fn cancellation_joins_all_unfinished_awaited_tool_calls() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("fetch".into(), dictionary_tool("fetch_tool"))]),
     )
@@ -1952,14 +1426,13 @@ async fn cancellation_joins_all_unfinished_awaited_tool_calls() {
     let mut events = bundle.events;
     let started = session
         .execute(lazy_tool_request(format!(
-            "import asyncio\nawait asyncio.gather(*[fetch({{'index': n}}) for n in range({})])",
-            super::MAX_OUTSTANDING_NESTED
+            "import asyncio\nawait asyncio.gather(*[fetch({{'index': n}}) for n in range({MAX_OUTSTANDING_NESTED})])"
         )))
         .await
         .expect("execute bounded gather");
     let mut responders = Vec::new();
     let received = tokio::time::timeout(Duration::from_secs(30), async {
-        for index in 0..super::MAX_OUTSTANDING_NESTED {
+        for index in 0..MAX_OUTSTANDING_NESTED {
             let event = events
                 .receive()
                 .await
@@ -1978,11 +1451,11 @@ async fn cancellation_joins_all_unfinished_awaited_tool_calls() {
     received.expect("all bounded concurrent calls must be emitted before any reply");
     assert!(matches!(
         terminated,
-        super::LocalCompositionTerminateResult::Joined(_)
+        LocalCompositionTerminateResult::Joined(_)
     ));
     assert!(matches!(
         shutdown,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
     assert!(
         started.initial_response.await.is_err(),
@@ -2027,8 +1500,8 @@ async fn unused_tool_coroutines_do_not_consume_nested_call_capacity() {
 
 #[tokio::test]
 async fn gathered_tool_coroutines_refuse_dispatch_beyond_the_outstanding_limit() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("fetch".into(), dictionary_tool("fetch_tool"))]),
     )
@@ -2039,14 +1512,14 @@ async fn gathered_tool_coroutines_refuse_dispatch_beyond_the_outstanding_limit()
     let started = session
         .execute(lazy_tool_request(format!(
             "import asyncio\nawait asyncio.gather(*[fetch({{'index': n}}) for n in range({})])",
-            super::MAX_OUTSTANDING_NESTED + 1
+            MAX_OUTSTANDING_NESTED + 1
         )))
         .await
         .expect("execute oversized gather");
     let outcome = tokio::time::timeout(Duration::from_secs(30), started.initial_response).await;
     assert!(matches!(
         session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
     drop(session);
     let mut dispatched = 0;
@@ -2069,7 +1542,7 @@ async fn gathered_tool_coroutines_refuse_dispatch_beyond_the_outstanding_limit()
             "{delivery:?}"
         );
     }
-    assert_eq!(dispatched, super::MAX_OUTSTANDING_NESTED);
+    assert_eq!(dispatched, MAX_OUTSTANDING_NESTED);
     let LocalCompositionResponse::Result { error, .. } = outcome
         .expect("limit refusal must settle without replies")
         .expect("cell terminal")
@@ -2086,14 +1559,14 @@ async fn gathered_tool_coroutines_refuse_dispatch_beyond_the_outstanding_limit()
 
 #[tokio::test]
 async fn freeform_tool_preserves_string_input_and_rejects_dictionary_without_dispatch() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(
         &worker,
         BTreeMap::from([(
             "patch".into(),
-            super::PythonToolBinding {
+            PythonToolBinding {
                 tool_name: "patch_tool".into(),
-                input_kind: super::PythonToolInput::String,
+                input_kind: BindingInput::String,
             },
         )]),
     )
@@ -2115,7 +1588,7 @@ async fn freeform_tool_preserves_string_input_and_rejects_dictionary_without_dis
     }).await;
     assert!(matches!(
         session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
     drop(session);
     assert!(events.receive().await.expect("closed events").is_none());
@@ -2132,8 +1605,8 @@ async fn freeform_tool_preserves_string_input_and_rejects_dictionary_without_dis
 
 #[tokio::test]
 async fn cold_tool_coroutine_created_in_one_cell_can_be_awaited_in_the_next() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(
         &worker,
         BTreeMap::from([("fetch".into(), dictionary_tool("fetch_tool"))]),
     )
@@ -2178,7 +1651,7 @@ async fn cold_tool_coroutine_created_in_one_cell_can_be_awaited_in_the_next() {
     .await;
     assert!(matches!(
         session.shutdown().await,
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
     drop(session);
     assert!(events.receive().await.expect("closed events").is_none());
@@ -2193,10 +1666,10 @@ async fn cold_tool_coroutine_created_in_one_cell_can_be_awaited_in_the_next() {
 
 async fn run_cells(
     worker: &Path,
-    bindings: BTreeMap<String, super::PythonToolBinding>,
+    bindings: BTreeMap<String, PythonToolBinding>,
     sources: &[&str],
 ) -> Vec<LocalCompositionResponse> {
-    let bundle = session_bundle(worker, bindings)
+    let bundle = python_session(worker, bindings)
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -2235,57 +1708,9 @@ fn cell_outcome(response: &LocalCompositionResponse) -> (String, Option<String>)
     (text, error.clone())
 }
 
-#[test]
-fn repl_config_states_the_suspension_and_os_policy_explicitly() {
-    let config = super::repl_config();
-    let limits = config.limits.expect("resource limits");
-    assert_eq!(
-        limits.max_suspensions,
-        usize::MAX,
-        "monty-pool counts suspensions per checkout; a finite cap would expire the interpreter"
-    );
-    assert_eq!(limits.max_total_sleep, None);
-    assert_eq!(config.os_policy.sleep, monty_types::SleepMode::CallHost);
-    assert_eq!(
-        config.os_policy.datetime,
-        monty_types::DateTimeSource::System
-    );
-    assert_eq!(
-        config.os_policy.random_start,
-        monty_types::RandomStart::System
-    );
-    assert_eq!(
-        config.os_policy.timezone,
-        monty_types::SandboxTimeZone::utc()
-    );
-    assert!(!config.type_check);
-}
-
-#[test]
-fn a_live_worker_memory_error_is_a_cell_failure_and_a_dead_one_is_host_loss() {
-    use super::*;
-    let memory_error = || {
-        PoolError::Runtime(MontyException::new(
-            ExcType::MemoryError,
-            Some("memory limit exceeded".into()),
-        ))
-    };
-    let lost = AtomicBool::new(false);
-    let (_, error) = cell_outcome(
-        &map_turn_error(3, "", memory_error(), true, &lost)
-            .expect("the interpreter's own MemoryError leaves the worker alive"),
-    );
-    assert!(error.is_some_and(|error| error.contains("MemoryError")));
-    assert!(matches!(
-        map_turn_error(3, "", memory_error(), false, &lost),
-        Err(LocalCompositionSessionLoss::HostLost(_))
-    ));
-    assert!(!lost.load(Ordering::Acquire));
-}
-
 #[tokio::test]
 async fn os_calls_are_refused_and_clock_and_random_are_answered_in_the_worker() {
-    let Some(worker) = monty_worker() else { return };
+    let Some(worker) = py_host() else { return };
     let source = r"import os
 import time
 import random
@@ -2359,87 +1784,8 @@ probe('cwd', lambda: os.getcwd())
 }
 
 #[tokio::test]
-async fn new_builtin_modules_type_check_and_run_against_vendored_stubs() {
-    use monty_pool::TurnEvent;
-    use monty_types::NamedValues;
-
-    let Some(worker) = monty_worker() else { return };
-    let pool = Pool::new(super::pool_config(&worker, super::WORKER_REQUEST_TIMEOUT))
-        .await
-        .expect("pool");
-    let mut checkout = pool
-        .checkout(&ReplConfig {
-            type_check: true,
-            ..super::repl_config()
-        })
-        .await
-        .expect("checkout");
-    let mut on_print = monty_pool::on_print_sync(|_, _| {});
-    let source = r#"import csv
-import hashlib
-import tomllib
-import bisect
-import os.path
-assert list(csv.reader(["a,b", "1,2"])) == [["a", "b"], ["1", "2"]]
-assert hashlib.sha256(b"x").hexdigest() == "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
-assert tomllib.loads("x = 1")["x"] == 1
-assert bisect.bisect([1, 3, 5], 4) == 2
-assert os.path.join("/a", "b") == "/a/b"
-True"#;
-    let mut event = checkout
-        .feed(source, NamedValues::new(), Vec::new(), false, &mut on_print)
-        .await
-        .expect("type checked feed");
-    loop {
-        match event {
-            TurnEvent::Complete(value) => {
-                assert_eq!(codec::format_monty(&value, 1024), "True");
-                break;
-            }
-            TurnEvent::OsCall { function_name, .. } => {
-                assert_eq!(function_name, "import_stubs");
-                event = checkout
-                    .resume(super::os_call_refusal(&function_name), &mut on_print)
-                    .await
-                    .expect("built-in stubs suffice");
-            }
-            other => panic!("unexpected built-in host request: {other:?}"),
-        }
-    }
-    let event = checkout
-        .feed(
-            "import plak_host_module",
-            NamedValues::new(),
-            Vec::new(),
-            false,
-            &mut on_print,
-        )
-        .await
-        .expect("unknown import requests stubs");
-    let TurnEvent::OsCall {
-        function_name,
-        args,
-        ..
-    } = event
-    else {
-        panic!("expected import_stubs, got {event:?}");
-    };
-    assert_eq!(function_name, "import_stubs");
-    assert!(format!("{args:?}").contains("plak_host_module"));
-    let refusal = super::os_call_refusal(&function_name);
-    assert!(matches!(refusal, monty_pool::ResumeValue::NotHandled));
-    let error = checkout
-        .resume(refusal, &mut on_print)
-        .await
-        .expect_err("no host stubs");
-    assert!(matches!(error, monty_pool::PoolError::Typing(_)), "{error}");
-    assert!(error.to_string().contains("plak_host_module"), "{error}");
-    checkout.finish().await.expect("finish");
-}
-
-#[tokio::test]
 async fn the_session_outlives_upstreams_default_suspension_budget() {
-    let Some(worker) = monty_worker() else { return };
+    let Some(worker) = py_host() else { return };
     let refusals = r"import os
 refused = 0
 for _ in range(600):
@@ -2456,7 +1802,7 @@ refused";
 
 #[tokio::test]
 async fn final_values_render_as_python_str() {
-    let Some(worker) = monty_worker() else { return };
+    let Some(worker) = py_host() else { return };
     let responses = run_cells(
         &worker,
         BTreeMap::new(),
@@ -2487,7 +1833,7 @@ async fn final_values_render_as_python_str() {
 
 #[tokio::test]
 async fn shared_values_cannot_expand_past_the_host_bounds() {
-    let Some(worker) = monty_worker() else { return };
+    let Some(worker) = py_host() else { return };
     let shared = "a = [1]\nfor _ in range(40):\n    a = [a, a]\n";
     let responses = run_cells(
         &worker,
@@ -2502,7 +1848,7 @@ async fn shared_values_cannot_expand_past_the_host_bounds() {
     .await;
     let (text, error) = cell_outcome(&responses[0]);
     assert_eq!(error, None);
-    assert!(text.len() <= super::MAX_PRINT_BYTES, "{}", text.len());
+    assert!(text.len() <= MAX_PRINT_BYTES, "{}", text.len());
     assert!(text.ends_with("\n[Python result truncated at 1 MiB]"));
     assert_eq!(
         cell_outcome(&responses[1]),
@@ -2512,7 +1858,7 @@ async fn shared_values_cannot_expand_past_the_host_bounds() {
 
 #[tokio::test]
 async fn print_streams_keep_their_order_within_a_cell() {
-    let Some(worker) = monty_worker() else { return };
+    let Some(worker) = py_host() else { return };
     let responses = run_cells(
         &worker,
         BTreeMap::new(),
@@ -2527,7 +1873,7 @@ async fn print_streams_keep_their_order_within_a_cell() {
 
 #[tokio::test]
 async fn the_interpreter_memory_limit_fails_the_cell_and_keeps_the_session() {
-    let Some(worker) = monty_worker() else { return };
+    let Some(worker) = py_host() else { return };
     let responses = run_cells(
         &worker,
         BTreeMap::new(),
@@ -2544,130 +1890,10 @@ async fn the_interpreter_memory_limit_fails_the_cell_and_keeps_the_session() {
     assert_eq!(cell_outcome(&responses[1]), ("2".to_owned(), None));
 }
 
-/// Runs `work` on its own thread and fails if it does not return within `limit`.
-fn within<T: Send + 'static>(limit: Duration, work: impl FnOnce() -> T + Send + 'static) -> T {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(work());
-    });
-    rx.recv_timeout(limit)
-        .unwrap_or_else(|_| panic!("host-side conversion ran past {limit:?}"))
-}
-
-#[test]
-fn shared_dicts_cannot_make_argument_conversion_walk_unbounded_pairs() {
-    use monty_types::unstable::{MontyGraph, MontyNode, NodeId, object_from_graph};
-    // One arena of ~2 MB: 50k references to one dict of 100k keys would be
-    // 5e9 pairs if every reference were walked.
-    for string_keys in [false, true] {
-        let mut graph = MontyGraph::new();
-        let zero = graph.push(MontyNode::Int(0));
-        let pairs: Vec<(NodeId, NodeId)> = (0..100_000)
-            .map(|key| {
-                let key = if string_keys {
-                    MontyNode::String(key.to_string())
-                } else {
-                    MontyNode::Int(key)
-                };
-                (graph.push(key), zero)
-            })
-            .collect();
-        let shared = graph.push(MontyNode::Dict(pairs));
-        let references = graph.push(MontyNode::List(vec![shared; 50_000]));
-        let name = graph.push(MontyNode::String("x".into()));
-        let root = graph.push(MontyNode::Dict(vec![(name, references)]));
-        let argument = object_from_graph(graph, root).expect("valid graph");
-        let outcome = within(Duration::from_secs(10), move || {
-            codec::call_to_json(argument.as_ref()).map(|json| json.to_string().len())
-        });
-        let expected = if string_keys {
-            "Python tool argument exceeds 1 MiB"
-        } else {
-            "Python tool argument dict keys must be str"
-        };
-        assert_eq!(outcome, Err(expected.to_owned()));
-    }
-}
-
-#[test]
-fn the_argument_budget_is_the_compact_json_byte_count() {
-    use monty_types::MontyObject;
-    let exceeded = Err("Python tool argument exceeds 1 MiB".to_owned());
-    let ints = MontyObject::list((0..1_000_000).map(|_| MontyObject::int(i64::MIN)));
-    assert_eq!(
-        codec::call_to_json(ints.as_ref()).map(|json| json.to_string().len()),
-        exceeded
-    );
-    // A string's encoding is its text plus two quotes; a dict adds braces,
-    // the quoted key and a colon.
-    let fits = |text_bytes: usize| {
-        let argument = MontyObject::dict([(
-            MontyObject::string("k"),
-            MontyObject::string("x".repeat(text_bytes)),
-        )]);
-        codec::call_to_json(argument.as_ref()).map(|json| json.to_string().len())
-    };
-    let overhead = r#"{"k":""}"#.len();
-    assert_eq!(fits(1_048_576 - overhead), Ok(1_048_576));
-    assert_eq!(fits(1_048_576 - overhead + 1), exceeded);
-    let escaped = MontyObject::string("\n".repeat(600_000));
-    assert_eq!(
-        codec::call_to_json(escaped.as_ref()).map(|json| json.to_string().len()),
-        exceeded,
-        "escapes count as the bytes they encode to"
-    );
-}
-
-#[test]
-fn argument_ints_past_4300_digits_are_refused_like_cpython() {
-    use monty_types::unstable::{MontyNode, object_from_node};
-    let largest = (num_bigint::BigInt::from(1) << 14_284_u32) - num_bigint::BigInt::from(1);
-    let digits = largest.to_string();
-    let accepted = object_from_node(MontyNode::BigInt(largest));
-    assert_eq!(
-        codec::call_to_json(accepted.as_ref()),
-        Ok(serde_json::Value::String(digits))
-    );
-    let refused = object_from_node(MontyNode::BigInt(
-        num_bigint::BigInt::from(1) << 64_000_000_u32,
-    ));
-    let outcome = within(Duration::from_secs(10), move || {
-        codec::call_to_json(refused.as_ref())
-    });
-    assert_eq!(
-        outcome,
-        Err(
-            "Python tool argument int exceeds the limit (4300 digits) for integer string conversion"
-                .to_owned()
-        )
-    );
-}
-
-#[test]
-fn the_host_renders_a_large_int_value_in_bounded_time() {
-    use monty_types::unstable::{MontyGraph, MontyNode, object_from_graph, object_from_node};
-    for bits in [8_000_000_u32, 64_000_000] {
-        let value = object_from_node(MontyNode::BigInt(num_bigint::BigInt::from(1) << bits));
-        let rendered = within(Duration::from_secs(10), move || {
-            codec::format_monty(&value, super::MAX_PRINT_BYTES)
-        });
-        assert_eq!(rendered, format!("<int with {} bits>", bits + 1));
-    }
-    let mut graph = MontyGraph::new();
-    let big = graph.push(MontyNode::BigInt(num_bigint::BigInt::from(1) << 20_000_u32));
-    let small = graph.push(MontyNode::Int(7));
-    let root = graph.push(MontyNode::List(vec![big, small, big]));
-    let nested = object_from_graph(graph, root).expect("valid graph");
-    assert_eq!(
-        codec::format_monty(&nested, super::MAX_PRINT_BYTES),
-        "[<int with 20001 bits>, 7, <int with 20001 bits>]"
-    );
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_large_int_result_renders_in_bounded_host_time_and_tears_down() {
-    let Some(worker) = monty_worker() else { return };
-    let bundle = session_bundle(&worker, BTreeMap::new())
+    let Some(worker) = py_host() else { return };
+    let bundle = python_session(&worker, BTreeMap::new())
         .await
         .expect("monty session");
     let session = bundle.session;
@@ -2694,6 +1920,6 @@ async fn a_large_int_result_renders_in_bounded_host_time_and_tears_down() {
         tokio::time::timeout(Duration::from_secs(10), session.shutdown())
             .await
             .expect("teardown stays bounded"),
-        super::LocalCompositionShutdownResult::Joined { .. }
+        LocalCompositionShutdownResult::Joined { .. }
     ));
 }

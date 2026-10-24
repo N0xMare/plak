@@ -61,7 +61,7 @@ PYTHON_WORKER_SYMBOLS = """\
 """
 
 DISTINCT_DIGESTS = {
-    "monty": "a" * 64,
+    "plakous-py-host": "a" * 64,
     "plak": "b" * 64,
     "plakous-js-host": "c" * 64,
 }
@@ -78,22 +78,22 @@ class ArtifactLinkageFindings(unittest.TestCase):
                 findings = workspace_policy.artifact_linkage_findings(
                     {"plak": CLIENT_ONLY_SYMBOLS + marker,
                      "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-                     "monty": PYTHON_WORKER_SYMBOLS}, DISTINCT_DIGESTS)
+                     "plakous-py-host": PYTHON_WORKER_SYMBOLS}, DISTINCT_DIGESTS)
                 self.assertEqual(len(findings), 1, findings)
                 self.assertIn("plak links the Monty runtime", findings[0])
 
     def test_monty_worker_is_the_positive_control(self) -> None:
         findings = workspace_policy.artifact_linkage_findings(
             {"plak": CLIENT_ONLY_SYMBOLS, "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-             "monty": CLIENT_ONLY_SYMBOLS}, DISTINCT_DIGESTS)
+             "plakous-py-host": CLIENT_ONLY_SYMBOLS}, DISTINCT_DIGESTS)
         self.assertEqual(len(findings), 1, findings)
-        self.assertIn("monty does not link the Monty runtime", findings[0])
+        self.assertIn("plakous-py-host does not link the Monty runtime", findings[0])
 
     def test_monty_adapter_names_do_not_count_as_runtime(self) -> None:
         findings = workspace_policy.artifact_linkage_findings(
             {"plak": "__ZN13json_to_monty5applyE\n__ZN11monty_proto6client4sendE",
              "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-             "monty": PYTHON_WORKER_SYMBOLS}, DISTINCT_DIGESTS)
+             "plakous-py-host": PYTHON_WORKER_SYMBOLS}, DISTINCT_DIGESTS)
         self.assertEqual(findings, [])
 
     def test_a_clean_product_build_reports_no_finding(self) -> None:
@@ -106,7 +106,7 @@ class ArtifactLinkageFindings(unittest.TestCase):
                     {
                         "plak": CLIENT_ONLY_SYMBOLS,
                         "plakous-js-host": worker,
-                        "monty": PYTHON_WORKER_SYMBOLS,
+                        "plakous-py-host": PYTHON_WORKER_SYMBOLS,
                     },
                     DISTINCT_DIGESTS,
                 )
@@ -117,7 +117,7 @@ class ArtifactLinkageFindings(unittest.TestCase):
             {
                 "plak": CLIENT_ONLY_SYMBOLS + MACH_O_WORKER_SYMBOLS,
                 "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-                "monty": PYTHON_WORKER_SYMBOLS,
+                "plakous-py-host": PYTHON_WORKER_SYMBOLS,
             },
             DISTINCT_DIGESTS,
         )
@@ -129,7 +129,7 @@ class ArtifactLinkageFindings(unittest.TestCase):
             {
                 "plak": CLIENT_ONLY_SYMBOLS,
                 "plakous-js-host": CLIENT_ONLY_SYMBOLS,
-                "monty": PYTHON_WORKER_SYMBOLS,
+                "plakous-py-host": PYTHON_WORKER_SYMBOLS,
             },
             DISTINCT_DIGESTS,
         )
@@ -141,7 +141,7 @@ class ArtifactLinkageFindings(unittest.TestCase):
             {
                 "plak": CLIENT_ONLY_SYMBOLS,
                 "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-                "monty": PYTHON_WORKER_SYMBOLS,
+                "plakous-py-host": PYTHON_WORKER_SYMBOLS,
             },
             {name: "d" * 64 for name in DISTINCT_DIGESTS},
         )
@@ -153,7 +153,7 @@ class ArtifactLinkageFindings(unittest.TestCase):
             {
                 "plak": None,
                 "plakous-js-host": MACH_O_WORKER_SYMBOLS,
-                "monty": PYTHON_WORKER_SYMBOLS,
+                "plakous-py-host": PYTHON_WORKER_SYMBOLS,
             },
             DISTINCT_DIGESTS,
             "llvm-nm",
@@ -185,13 +185,13 @@ class StaleReleaseBuild(unittest.TestCase):
             artifacts = {
                 "plak": self.build(root, "plak", -10_000, newest),
                 "plakous-js-host": self.build(root, "plakous-js-host", 10, newest),
-                "monty": self.build(root, "monty", -1, newest),
+                "plakous-py-host": self.build(root, "plakous-py-host", -1, newest),
             }
             with patch.object(
                 workspace_policy, "newest_tracked_source_mtime", lambda _root: newest
             ):
                 stale = workspace_policy.stale_release_artifacts(root, artifacts)
-        self.assertEqual(stale, ["monty", "plak"])
+        self.assertEqual(stale, ["plak", "plakous-py-host"])
 
     def test_an_undecidable_source_stamp_calls_nothing_stale(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -237,7 +237,7 @@ class MandatoryArtifactLinkage(unittest.TestCase):
                 nm.write_text(
                     '#!/bin/sh\ncase "$1" in\n'
                     f' */plak) echo "{parent}"; exit {status} ;;\n'
-                    ' */monty) echo "__ZN5monty2vmE" ;;\n'
+                    ' */plakous-py-host) echo "__ZN5monty2vmE" ;;\n'
                     ' */plakous-js-host) echo "_JS_NewRuntime" ;;\nesac\n'
                 )
                 nm.chmod(0o700)
@@ -252,7 +252,7 @@ class MandatoryArtifactLinkage(unittest.TestCase):
 
     def test_missing_artifacts_fail_closed(self):
         errors, _ = workspace_policy.verify_artifact_linkage({})
-        self.assertEqual(errors, ["missing product artifacts: plak, plakous-js-host, monty"])
+        self.assertEqual(errors, ["missing product artifacts: plak, plakous-js-host, plakous-py-host"])
 
     def test_missing_symbol_tool_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

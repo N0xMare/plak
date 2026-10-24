@@ -22,7 +22,6 @@ SPEC.loader.exec_module(CHANGED)
 DIRS = {
     "bin/plak": "plak",
     "crates/core/model": "plakous-model",
-    "crates/runtimes/py-eval": "plakous-py-eval",
     "crates/runtimes/py-worker": "plakous-py-worker",
 }
 
@@ -59,7 +58,7 @@ class TouchedPackagesTests(unittest.TestCase):
         )
 
     def test_sibling_directory_prefixes_do_not_match(self):
-        self.assertEqual(self.touched("crates/runtimes/py-eval/src/lib.rs"), ["plakous-py-eval"])
+        self.assertEqual(self.touched("crates/runtimes/py-worker/src/cell.rs"), ["plakous-py-worker"])
         self.assertEqual(self.touched("crates/core/model-extra/src/lib.rs"), [])
 
     def test_files_outside_every_package_touch_nothing(self):

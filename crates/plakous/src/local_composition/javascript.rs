@@ -30,16 +30,18 @@ pub(super) fn attach_product_javascript(
         .collect::<Vec<_>>();
     let neutral = neutral_product_descriptor(descriptor)
         .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
-    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(JavaScriptCellIntegration {
+    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(CellIntegration {
         worker: host,
         identity,
-        presentation: JavaScriptPresentation::Product(Box::new(ProductJavaScript {
-            nested_names: nested_names.into(),
-            presentation_kind,
-            evidence,
-            limits,
-            max_output_tokens,
-        })),
+        presentation: Box::new(JavaScriptPresentation::Product(Box::new(
+            ProductJavaScript {
+                nested_names: nested_names.into(),
+                presentation_kind,
+                evidence,
+                limits,
+                max_output_tokens,
+            },
+        ))),
     });
     builder.local_programmatic_composition(LocalCompositionConstruction {
         descriptor: neutral,

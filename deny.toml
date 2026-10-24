@@ -29,13 +29,6 @@ allow = [
     "Zlib",
 ]
 
-# Monty cap-std includes this Windows-only adapter in the all-target audit.
-# Pin the allowance to the reviewed package and version.
-[[licenses.exceptions]]
-name = "winx"
-version = "=0.36.4"
-allow = ["Apache-2.0 WITH LLVM-exception"]
-
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

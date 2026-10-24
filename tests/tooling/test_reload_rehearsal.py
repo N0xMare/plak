@@ -175,7 +175,7 @@ class ReloadRehearsalTests(unittest.TestCase):
             (tools / "just").chmod(0o700)
             output = repo / "target/maintainer"
             output.mkdir(parents=True)
-            for name in ("plakous-js-host", "monty"):
+            for name in ("plakous-js-host", "plakous-py-host"):
                 (output / name).write_text("#!/bin/sh\nexit 0\n")
                 (output / name).chmod(0o700)
             (output / "plak").write_text("#!/usr/bin/env python3\nimport json,os,sys\n"

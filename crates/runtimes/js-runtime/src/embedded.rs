@@ -405,7 +405,10 @@ fn new_runtime(
     let plakous_cell::EngineConfig::Quickjs {
         heap_bytes,
         stack_bytes,
-    } = plakous_cell::EngineConfig::QUICKJS;
+    } = plakous_cell::EngineConfig::QUICKJS
+    else {
+        unreachable!("the QuickJS engine configuration names QuickJS limits")
+    };
     runtime.set_memory_limit(usize::try_from(heap_bytes).unwrap_or(usize::MAX));
     runtime.set_max_stack_size(usize::try_from(stack_bytes).unwrap_or(usize::MAX));
     let interrupt_signal = Arc::clone(interrupted);

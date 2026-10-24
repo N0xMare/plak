@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Offline performance smoke over the scripted model (`plak/test-hooks`).
 #
-# Six measurements of the real binary, each emitted as one JSON line carrying a
+# Six product measurements and four worker timings, each emitted as a JSON line carrying a
 # machine id, so a number from one machine is never compared with a number from
 # another. `tests/performance/baselines/offline-perf-smoke.json` holds the seed
 # values. `--check` compares four of them against the recorded tolerance:
@@ -344,6 +344,10 @@ if [[ -n "$rss_mb" ]]; then
 else
   echo "perf smoke: no measurement for growth_turn_peak_rss_mb (no usable /usr/bin/time)" >&2
 fi
+
+# Worker spawn plus one nested call, and warm per-cell cost on that same worker.
+"$PY" tools/perf/cell_round_trip.py \
+  "$cargo_target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" "$machine" >>"$measurements"
 
 if [[ -n "$out" ]]; then
   cp "$measurements" "$out"

@@ -2,7 +2,7 @@
 """Pack built release executables into `plak-<version>-<triple>.tar.gz`.
 
 The tarball holds one top-level directory `plak-<version>-<triple>/` with the
-three executables (`plak`, `plakous-js-host`, `monty`), the repository
+three executables (`plak`, `plakous-js-host`, `plakous-py-host`), the repository
 `LICENSE`, `THIRD-PARTY` (every package outside this repository that the three
 executables reach through normal dependency edges for the target), and
 `licenses/<name>-<version>/` with the license and NOTICE files those packages
@@ -39,7 +39,7 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-EXECUTABLES = ("plak", "plakous-js-host", "monty")
+EXECUTABLES = ("plak", "plakous-js-host", "plakous-py-host")
 ROOT_PACKAGES = ("plak", "plakous-js-runtime", "plakous-py-worker")
 # Two resolutions, matching `build-plak.sh --artifacts`: sidecar features are
 # not unified into plak, and neither resolution is the whole workspace.
@@ -179,7 +179,7 @@ def license_files(package: dict) -> list[Path]:
 
 def third_party_text(triple: str, packages: list[dict]) -> str:
     lines = [
-        f"Packages outside this repository linked into plak, plakous-js-host and monty for {triple}.",
+        f"Packages outside this repository linked into plak, plakous-js-host and plakous-py-host for {triple}.",
         "License and NOTICE files each package ships are under licenses/<name>-<version>/.",
         "",
     ]

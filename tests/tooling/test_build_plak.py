@@ -36,6 +36,40 @@ def snapshot_env(home: str) -> dict[str, str]:
 
 
 class BuildPlakTests(unittest.TestCase):
+    def test_installers_remove_only_owned_obsolete_worker_links(self) -> None:
+        for installer in ("install.sh", "tools/build/build-plak.sh"):
+            source = (ROOT / installer).read_text()
+            function = "remove_obsolete_worker_link() {" + source.split(
+                "remove_obsolete_worker_link() {", 1
+            )[1].split("\n}", 1)[0] + "\n}"
+            with tempfile.TemporaryDirectory() as directory:
+                home = pathlib.Path(directory).resolve()
+                worker = home / ".local/bin/monty"
+                worker.parent.mkdir(parents=True)
+                targets = [home / f".local/lib/plak/{root}/old/monty"
+                           for root in ("sidecars", "maintainer", "release")]
+                for target in targets + [home / "foreign/monty"]:
+                    with self.subTest(installer=installer, target=target):
+                        worker.symlink_to(target)
+                        result = subprocess.run(
+                            ["/bin/sh", "-c", function + "\nremove_obsolete_worker_link"],
+                            env={**os.environ, "HOME": str(home)},
+                            capture_output=True, text=True, check=False,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(worker.is_symlink(), target not in targets)
+                        if worker.is_symlink():
+                            self.assertEqual(worker.readlink(), target)
+                            worker.unlink()
+                worker.write_text("independent installation")
+                result = subprocess.run(
+                    ["/bin/sh", "-c", function + "\nremove_obsolete_worker_link"],
+                    env={**os.environ, "HOME": str(home)},
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(worker.read_text(), "independent installation")
+
     def test_install_link_refuses_foreign_destinations(self) -> None:
         source = (ROOT / "tools/build/build-plak.sh").read_text()
         function = "install_link() {" + source.split("install_link() {", 1)[1].split("\n}", 1)[0] + "\n}"
@@ -191,8 +225,8 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split(
             "# END SNAPSHOT INSTALL", 1
         )[0]
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; '
-                  + block + '\nprintf "%s\\n" "$bin" "$js_host" "$monty"')
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
+                  + block + '\nprintf "%s\\n" "$bin" "$js_host" "$py_host"')
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
             out = base / "target"
@@ -201,11 +235,11 @@ class BuildPlakTests(unittest.TestCase):
             root = base / "home/.local/lib/plak/maintainer"
 
             def install(content: str) -> list[str]:
-                for name in ("plak", "plakous-js-host", "monty"):
+                for name in ("plak", "plakous-js-host", "plakous-py-host"):
                     (out / name).write_text(executable_fixture(f"{name} {content}"))
                 result = subprocess.run(
                     ["bash", "-c", script, "snapshot", str(out / "plak"),
-                     str(out / "plakous-js-host"), str(out / "monty")],
+                     str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                     capture_output=True, text=True, check=False, env=env,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -216,15 +250,15 @@ class BuildPlakTests(unittest.TestCase):
 
             def snapshot_id(plak: str, js_host: str, monty: str) -> str:
                 manifest = (f"plak {digest(executable_fixture(plak))}\nplakous-js-host {digest(js_host)}\n"
-                            f"monty {digest(monty)}\n")
+                            f"plakous-py-host {digest(monty)}\n")
                 return digest(manifest)
 
             first = install("one")
-            first_id = snapshot_id("plak one", "plakous-js-host one", "monty one")
+            first_id = snapshot_id("plak one", "plakous-js-host one", "plakous-py-host one")
             artifacts = root.parent / "sidecars"
             self.assertEqual(first, [str(root / first_id / "plak"),
                                      str(artifacts / "plakous-js-host" / digest("plakous-js-host one") / "plakous-js-host"),
-                                     str(artifacts / "monty" / digest("monty one") / "monty")])
+                                     str(artifacts / "plakous-py-host" / digest("plakous-py-host one") / "plakous-py-host")])
             for path in first:
                 self.assertEqual(pathlib.Path(path).stat().st_mode & 0o777, 0o555)
             self.assertEqual(install("one"), first)  # same bytes, same snapshot
@@ -232,7 +266,7 @@ class BuildPlakTests(unittest.TestCase):
             (out / "plak").write_text(executable_fixture("plak parent-only rebuild"))
             result = subprocess.run(
                 ["bash", "-c", script, "snapshot", str(out / "plak"),
-                 str(out / "plakous-js-host"), str(out / "monty")],
+                 str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                 capture_output=True, text=True, check=False, env=env,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -246,11 +280,11 @@ class BuildPlakTests(unittest.TestCase):
             (out / "plakous-js-host").write_text("plakous-js-host two")
             result = subprocess.run(
                 ["bash", "-c", script, "snapshot", str(out / "plak"),
-                 str(out / "plakous-js-host"), str(out / "monty")],
+                 str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                 capture_output=True, text=True, check=False, env=env,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            sidecar_only = snapshot_id("plak one", "plakous-js-host two", "monty one")
+            sidecar_only = snapshot_id("plak one", "plakous-js-host two", "plakous-py-host one")
             self.assertEqual(result.stdout.split()[0], str(root / sidecar_only / "plak"))
             self.assertEqual(result.stdout.split()[1],
                              str(artifacts / "plakous-js-host" / digest("plakous-js-host two") / "plakous-js-host"))
@@ -260,21 +294,21 @@ class BuildPlakTests(unittest.TestCase):
                 install(f"build {index}")
             snapshots = [entry for entry in root.iterdir() if not entry.name.startswith(".")]
             self.assertEqual(len(snapshots), 13)
-            self.assertIn(snapshot_id("plak build 9", "plakous-js-host build 9", "monty build 9"),
+            self.assertIn(snapshot_id("plak build 9", "plakous-js-host build 9", "plakous-py-host build 9"),
                           {entry.name for entry in snapshots})
             self.assertEqual([entry.name for entry in root.iterdir() if entry.name.startswith(".")],
                              [".staging.abandoned"])
             self.assertEqual(pathlib.Path(first[0]).read_text(), executable_fixture("plak one"))
             self.assertTrue(all((entry / "plak").is_file() for entry in snapshots))
             self.assertEqual(pathlib.Path(first[1]).read_text(), "plakous-js-host one")
-            self.assertEqual(pathlib.Path(first[2]).read_text(), "monty one")
+            self.assertEqual(pathlib.Path(first[2]).read_text(), "plakous-py-host one")
             # Cache corruption must be refused, not overwritten or silently reused.
             current = artifacts / "plakous-js-host" / digest("plakous-js-host build 9") / "plakous-js-host"
             current.chmod(0o755)
             current.write_text("corrupt current")
             failed = subprocess.run(
                 ["bash", "-c", script, "snapshot", str(out / "plak"),
-                 str(out / "plakous-js-host"), str(out / "monty")],
+                 str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                 capture_output=True, text=True, check=False, env=env,
             )
             self.assertNotEqual(failed.returncode, 0)
@@ -286,7 +320,7 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split(
             "# END SNAPSHOT INSTALL", 1
         )[0]
-        script = ('set -euo pipefail; umask 002; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; '
+        script = ('set -euo pipefail; umask 002; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
                   + block + '\nprintf "%s\\n" "$js_host"')
         faults = ("root", "engine", "digest", "file", "non-executable", "writable")
         faults += tuple(f"{level}-{kind}-writable" for level in ("root", "engine", "digest")
@@ -296,11 +330,11 @@ class BuildPlakTests(unittest.TestCase):
                 base = pathlib.Path(directory).resolve()
                 out = base / "target"
                 out.mkdir()
-                for name in ("plak", "plakous-js-host", "monty"):
+                for name in ("plak", "plakous-js-host", "plakous-py-host"):
                     (out / name).write_text(executable_fixture(name))
                 env = snapshot_env(str(base / "home"))
                 command = ["bash", "-c", script, "snapshot", str(out / "plak"),
-                           str(out / "plakous-js-host"), str(out / "monty")]
+                           str(out / "plakous-js-host"), str(out / "plakous-py-host")]
                 installed = subprocess.run(command, capture_output=True, text=True, env=env)
                 self.assertEqual(installed.returncode, 0, installed.stderr)
                 worker = pathlib.Path(installed.stdout.strip())
@@ -331,7 +365,7 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split(
             "# END SNAPSHOT INSTALL", 1
         )[0]
-        script = 'set -euo pipefail; umask 002; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; ' + block
+        script = 'set -euo pipefail; umask 002; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; ' + block
         for relative in (".", ".local", ".local/lib", ".local/lib/plak",
                          ".local/lib/plak/maintainer"):
             for mode in (0o775, 0o757):
@@ -345,12 +379,12 @@ class BuildPlakTests(unittest.TestCase):
                     linked.symlink_to(home, target_is_directory=True)
                     out = base / "target"
                     out.mkdir()
-                    for name in ("plak", "plakous-js-host", "monty"):
+                    for name in ("plak", "plakous-js-host", "plakous-py-host"):
                         (out / name).write_text(executable_fixture(name))
                     env = snapshot_env(str(linked))
                     result = subprocess.run(
                         ["bash", "-c", script, "snapshot", str(out / "plak"),
-                         str(out / "plakous-js-host"), str(out / "monty")],
+                         str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                         capture_output=True, text=True, env=env,
                     )
                     self.assertNotEqual(result.returncode, 0)
@@ -363,17 +397,17 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split(
             "# END SNAPSHOT INSTALL", 1
         )[0]
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; '
-                  + block + '\nprintf "%s\\n" "$js_host" "$monty"')
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
+                  + block + '\nprintf "%s\\n" "$js_host" "$py_host"')
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
             out = base / "target"
             out.mkdir()
-            for name in ("plak", "plakous-js-host", "monty"):
+            for name in ("plak", "plakous-js-host", "plakous-py-host"):
                 (out / name).write_text(executable_fixture(name))
             env = snapshot_env(str(base / "home"))
             command = ["bash", "-c", script, "snapshot", str(out / "plak"),
-                       str(out / "plakous-js-host"), str(out / "monty")]
+                       str(out / "plakous-js-host"), str(out / "plakous-py-host")]
             processes = [subprocess.Popen(command, stdout=subprocess.PIPE,
                                           stderr=subprocess.PIPE, text=True, env=env)
                          for _ in range(4)]
@@ -403,13 +437,13 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split(
             "# END SNAPSHOT INSTALL", 1
         )[0]
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; ' + block)
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; ' + block)
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
             root = base / "home/.local/lib/plak/maintainer"
             legacy = root / ("a" * 64)
             legacy.mkdir(parents=True)
-            for name in ("plak", "plakous-js-host", "monty"):
+            for name in ("plak", "plakous-js-host", "plakous-py-host"):
                 (legacy / name).write_text(f"legacy {name}")
                 (legacy / name).chmod(0o555)
             os.utime(legacy, (0, 0))
@@ -417,15 +451,15 @@ class BuildPlakTests(unittest.TestCase):
             out.mkdir()
             env = snapshot_env(str(base / "home"))
             for index in range(10):
-                for name in ("plak", "plakous-js-host", "monty"):
+                for name in ("plak", "plakous-js-host", "plakous-py-host"):
                     (out / name).write_text(executable_fixture(f"{name} build {index}"))
                 result = subprocess.run(
                     ["bash", "-c", script, "snapshot", str(out / "plak"),
-                     str(out / "plakous-js-host"), str(out / "monty")],
+                     str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                     capture_output=True, text=True, check=False, env=env,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-            for name in ("plak", "plakous-js-host", "monty"):
+            for name in ("plak", "plakous-js-host", "plakous-py-host"):
                 self.assertEqual((legacy / name).read_text(), f"legacy {name}")
                 self.assertFalse((legacy / name).is_symlink())
             self.assertEqual(sum((entry / "plak").is_file() for entry in root.iterdir()), 11)
@@ -438,7 +472,7 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split(
             "# END SNAPSHOT INSTALL", 1
         )[0]
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; '
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
                   + link_function + block
                   + '\ninstall_link "${HOME}/.local/bin/plak" "$bin"'
                   + '\nprintf "%s\\n" "$bin"')
@@ -450,12 +484,12 @@ class BuildPlakTests(unittest.TestCase):
             linked.symlink_to(physical, target_is_directory=True)
             out = base / "target"
             out.mkdir()
-            for name in ("plak", "plakous-js-host", "monty"):
+            for name in ("plak", "plakous-js-host", "plakous-py-host"):
                 (out / name).write_text('#!/bin/sh\ncase "$2" in --state-key) echo r1.e1.p1.t1 ;; --write-binary-manifest) echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\n')
             env = snapshot_env(str(linked))
             result = subprocess.run(
                 ["bash", "-c", script, "snapshot", str(out / "plak"),
-                 str(out / "plakous-js-host"), str(out / "monty")],
+                 str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                 capture_output=True, text=True, check=False, env=env,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -467,16 +501,16 @@ class BuildPlakTests(unittest.TestCase):
     def test_snapshot_install_accepts_a_binary_without_the_manifest_probe(self) -> None:
         source = (ROOT / "tools/build/build-plak.sh").read_text()
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; '
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
                   + block + '\nprintf "%s\\n" "$bin"')
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
             binary = base / "plak"
             binary.write_text('#!/bin/sh\ncase "$2" in --write-binary-manifest) echo partial >"$3/binary-id"; exit 2 ;; --state-key) echo r1.e1.p1.t1 ;; esac\n')
-            for name in ("plakous-js-host", "monty"):
+            for name in ("plakous-js-host", "plakous-py-host"):
                 (base / name).write_text(name)
             result = subprocess.run(
-                ["bash", "-c", script, "snapshot", str(binary), str(base / "plakous-js-host"), str(base / "monty")],
+                ["bash", "-c", script, "snapshot", str(binary), str(base / "plakous-js-host"), str(base / "plakous-py-host")],
                 capture_output=True, text=True, env=snapshot_env(str(base / "home")), check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -490,7 +524,7 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split(
             "# END SNAPSHOT INSTALL", 1
         )[0]
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; '
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
                   + block + '\nprintf "%s\\n" "$bin"')
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
@@ -504,11 +538,11 @@ class BuildPlakTests(unittest.TestCase):
                     f'case "$1 $2" in\n"version --state-key") echo {key} ;;\n'
                     '"version --export-version") echo 4 ;;\n"version --write-binary-manifest") echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;;\nesac\n'
                 )
-                for name in ("plakous-js-host", "monty"):
+                for name in ("plakous-js-host", "plakous-py-host"):
                     (out / name).write_text(f"{name} {build}")
                 result = subprocess.run(
                     ["bash", "-c", script, "snapshot", str(out / "plak"),
-                     str(out / "plakous-js-host"), str(out / "monty")],
+                     str(out / "plakous-js-host"), str(out / "plakous-py-host")],
                     capture_output=True, text=True, check=False, env=env,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -574,7 +608,7 @@ for package in "${{packages[@]}}"; do
   case "$package" in
     plak) names=(plak) ;;
     plakous-js-runtime) names=(plakous-js-host) ;;
-    plakous-py-worker) names=(monty) ;;
+    plakous-py-worker) names=(plakous-py-host) ;;
   esac
   for name in "${{names[@]}}"; do
     printf '#!/bin/sh\\n# %s\\ncase "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\\n' "$*" >"$out/$name"
@@ -608,9 +642,9 @@ done
                 f"linkage {base / 'target/release'}",
                 f"strip {base / 'target/release/stripped/plak'}",
                 f"strip {base / 'target/release/stripped/plakous-js-host'}",
-                f"strip {base / 'target/release/stripped/monty'}",
+                f"strip {base / 'target/release/stripped/plakous-py-host'}",
             ])
-            for name in ("plak", "plakous-js-host", "monty"):
+            for name in ("plak", "plakous-js-host", "plakous-py-host"):
                 self.assertNotIn("# stripped", (base / "target/release" / name).read_text())
                 self.assertIn("# stripped", (base / "target/release/stripped" / name).read_text())
             installed = (home / ".local/bin/plak").resolve()
@@ -619,7 +653,7 @@ done
             self.assertEqual((installed.parent / "state-key").read_text().strip(), "r1.e1.p1.t1")
             self.assertEqual((installed.parent / "binary-id").read_text(), "fixture\n")
             self.assertFalse((lib / "maintainer").exists())
-            for name in ("plakous-js-host", "monty"):
+            for name in ("plakous-js-host", "plakous-py-host"):
                 worker = (home / ".local/bin" / name).resolve()
                 self.assertEqual(worker.parent.parent, lib / "sidecars" / name)
                 self.assertEqual((installed.parent / name).resolve(), worker)

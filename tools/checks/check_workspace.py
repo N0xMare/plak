@@ -3562,7 +3562,7 @@ RQUICKJS_ENGINE_SYMBOL_MARKERS = (
     "JS_FreeRuntime",
 )
 # The three executables Plak's Cargo-native build produces.
-PRODUCT_EXECUTABLES = ("plak", "plakous-js-host", "monty")
+PRODUCT_EXECUTABLES = ("plak", "plakous-js-host", "plakous-py-host")
 
 # Length-prefixed crate identifiers in legacy and v0 Rust symbols. Adapter
 # names (json_to_monty, monty_proto's client) are not interpreter code.
@@ -3618,10 +3618,12 @@ def artifact_linkage_findings(
             continue
         found = engine_symbol_markers(output)
         monty_runtime = MONTY_RUNTIME_SYMBOLS.search(output) is not None
-        if name != "monty" and monty_runtime:
+        if name != "plakous-py-host" and monty_runtime:
             errors.append(f"{name} links the Monty runtime; interpreter must remain in the worker")
-        if name == "monty" and not monty_runtime:
-            errors.append("monty does not link the Monty runtime; cannot verify isolation")
+        if name == "plakous-py-host" and not monty_runtime:
+            errors.append(
+                "plakous-py-host does not link the Monty runtime; cannot verify isolation"
+            )
         if name == "plak" and found:
             errors.append(
                 f"plak links the QuickJS engine ({sorted(found)!r}); the product "
@@ -3632,8 +3634,8 @@ def artifact_linkage_findings(
                 "plakous-js-host does not link the QuickJS engine; the worker is "
                 "the only place the product evaluates JavaScript"
             )
-        if name == "monty" and found:
-            errors.append(f"monty links the QuickJS engine ({sorted(found)!r})")
+        if name == "plakous-py-host" and found:
+            errors.append(f"plakous-py-host links the QuickJS engine ({sorted(found)!r})")
     if len(set(digests.values())) != len(digests):
         errors.append(
             f"the product executables are not separate artifacts: {digests!r}"

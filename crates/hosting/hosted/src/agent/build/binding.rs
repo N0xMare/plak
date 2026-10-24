@@ -840,7 +840,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         })?;
         let host_path = state_roots.sidecars().python_host().map_err(|error| {
             CliFailure::new(format!(
-                "product Python host is unavailable: {error}; set PLAK_MONTY_WORKER or place monty beside plak; no inference was dispatched"
+                "product Python host is unavailable: {error}; set PLAK_PY_HOST or place plakous-py-host beside plak; no inference was dispatched"
             ))
         })?;
         let attachment = product_python_attachment(

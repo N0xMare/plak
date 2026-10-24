@@ -663,7 +663,7 @@ never selects the current key. Startup never deletes legacy state.
 
 Each plak build keeps its state in `~/.plak/state/<format key>/`, where the
 key names the database schemas and runtime format it reads, for example
-`r25.e31.p33.t8`. When you run a build whose formats differ from the last one,
+`r25.e32.p33.t8`. When you run a build whose formats differ from the last one,
 it starts fresh in its own directory and prints this notice once, naming the
 state root it will not open as session authority. Size accounting is best-effort
 and cannot fail a command. Nothing was moved, upgraded or deleted: the old
@@ -749,13 +749,13 @@ it never runs inference.
 
 ```
 JavaScript host is unavailable: <error>; set PLAK_JS_HOST or place plakous-js-host beside plak
-Python host is unavailable: <error>; set PLAK_MONTY_WORKER or place monty beside plak
+Python host is unavailable: <error>; set PLAK_PY_HOST or place plakous-py-host beside plak
 ```
 
-`native-ptc` and `js-ptc` need `plakous-js-host`; `py-ptc` needs a `monty` worker.
+`native-ptc` and `js-ptc` need `plakous-js-host`; `py-ptc` needs the `plakous-py-host` worker.
 A missing sidecar fails closed rather than degrading to `direct`.
 
-`just build debug` and `just build release` build `plakous-js-host` and `monty`
+`just build debug` and `just build release` build `plakous-js-host` and `plakous-py-host`
 into the same Cargo output directory as `plak`. `just install release` and
 `just install maintainer` install a snapshot with those workers beside `plak`.
 The usual cause is running a `plak` from somewhere else — a copy, or a stale
@@ -763,7 +763,7 @@ The usual cause is running a `plak` from somewhere else — a copy, or a stale
 Build the parent with `cargo build --release --locked -p plak`, then both workers
 with `cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker`.
 Separate invocations keep Monty runtime features out of `plak`.
-Rebuild the complete product, or set `PLAK_MONTY_WORKER` to that `monty` binary.
+Rebuild the complete product, or set `PLAK_PY_HOST` to that `plakous-py-host` binary.
 
 ## A Python cell raises `PermissionError` or `RuntimeError` for host access
 

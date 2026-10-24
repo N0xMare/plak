@@ -47,5 +47,5 @@ NOTES:
   `--composition js-ptc|py-ptc` is one engine per agent; exec_js uses source
   (async module; text(...)), exec_py uses code. Same overlay as `plak run` on
   new sessions. native-ptc and js-ptc locate PLAK_JS_HOST or a sibling
-  plakous-js-host; py-ptc locates PLAK_MONTY_WORKER or a sibling monty worker.
+  plakous-js-host; py-ptc locates PLAK_PY_HOST or a sibling plakous-py-host.
   A missing Code Mode sidecar fails closed.

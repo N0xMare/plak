@@ -389,8 +389,8 @@ Model-launched process tools run with your full host authority on both
 Linux x86_64 musl and macOS; there is no OS sandbox. See
 [known limits and security model](known-limits-and-security-model.md).
 `native-ptc` and `js-ptc` locate `PLAK_JS_HOST` or a
-`plakous-js-host` beside the binary; `py-ptc` locates `PLAK_MONTY_WORKER` or a
-sibling `monty` worker. That is worker isolation, not workspace isolation, and
+`plakous-js-host` beside the binary; `py-ptc` locates `PLAK_PY_HOST` or a
+sibling `plakous-py-host` worker. That is worker isolation, not workspace isolation, and
 it does not isolate Plak itself. Unsupported process-tool targets, including
 Intel macOS, fail closed.
 
@@ -470,13 +470,13 @@ Version            OK       available · 0.0.2                             —
 Home               OK       available · /home/you/.plak                   —
 Home free space    OK       available · product home volume has at least 5120 MiB available   —
 Config             OK       valid · /home/you/.plak/config.toml           —
-Product db         OK       available · /home/you/.plak/state/r25.e31.p33.t8/product.sqlite3   —
-Runtime db         OK       available · /home/you/.plak/state/r25.e31.p33.t8/runtime.sqlite3   —
+Product db         OK       available · /home/you/.plak/state/r25.e32.p33.t8/product.sqlite3   —
+Runtime db         OK       available · /home/you/.plak/state/r25.e32.p33.t8/runtime.sqlite3   —
 Runtime store      OK       available · checkpoints 412/524288 (new work stops at 458752), …   —
-Subagents db       OK       available · /home/you/.plak/state/r25.e31.p33.t8/subagents.sqlite3   —
+Subagents db       OK       available · /home/you/.plak/state/r25.e32.p33.t8/subagents.sqlite3   —
 Telemetry db       OK       ok · 1189 rows                                —
 Secrets dir        OK       available · /home/you/.plak/secrets           —
-Sessions dir       OK       available · /home/you/.plak/state/r25.e31.p33.t8/sessions          —
+Sessions dir       OK       available · /home/you/.plak/state/r25.e32.p33.t8/sessions          —
 Carry files        OK       none · /home/you/.plak/carry                  —
 Cwd                OK       available · /home/you/project                 —
 Jj cli             OK       missing · native workspace operations need no jj CLI; library not built   —

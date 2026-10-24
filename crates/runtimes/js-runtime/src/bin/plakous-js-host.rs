@@ -70,6 +70,7 @@ async fn delivery_frame(
         NestedDeliveryOutcome::Accepted => DeliveryVerdict::Accepted,
         NestedDeliveryOutcome::Refused(message) => DeliveryVerdict::Refused(message),
         NestedDeliveryOutcome::NotDelivered(message) => DeliveryVerdict::NotDelivered(message),
+        NestedDeliveryOutcome::NotObserved(message) => DeliveryVerdict::NotObserved(message),
         NestedDeliveryOutcome::Lost(message) => {
             return WorkerFrame::HostLost {
                 class: LossClass::of(&message),
@@ -213,6 +214,19 @@ async fn command(
             tools,
             window.unwrap_or(DEFAULT_YIELD_TIME_MS),
         )?,
+        HostFrame::StartCell {
+            prelude: CellPrelude::Monty { .. },
+            ..
+        } => {
+            write(
+                stdout,
+                &WorkerFrame::HostLost {
+                    class: LossClass::ProtocolViolation,
+                    message: "a QuickJS cell needs a QuickJS prelude".into(),
+                },
+            )?;
+            return Ok(Step::Stop);
+        }
         HostFrame::NestedResult {
             cell,
             call,

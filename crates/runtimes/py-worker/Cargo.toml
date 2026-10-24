@@ -1,6 +1,6 @@
 [package]
 name = "plakous-py-worker"
-description = "Plak Monty subprocess worker using the pinned upstream interpreter and protocol"
+description = "Plak Python cell worker: the pinned upstream Monty interpreter on the cell protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,13 +18,23 @@ layer = "engine"
 class = "published-internal"
 
 [[bin]]
-name = "monty"
+name = "plakous-py-host"
 path = "src/main.rs"
+
+[features]
+test-hooks = []
 
 [dependencies]
 monty-proto = { version = "=1.2.0", features = ["worker"] }
 monty-alloc = { version = "=1.2.0", features = ["exit-code"] }
 monty-types = "=1.2.0"
+plakous-cell.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+num-bigint = "0.4"
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

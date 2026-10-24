@@ -1,148 +1,160 @@
-//! The product worker keeps upstream framing and exit behavior at its process boundary.
+//! The Python worker's process boundary: the cell protocol's hello, its
+//! checked configure, clean end of input and shutdown.
 
-#![allow(clippy::expect_used, reason = "process contract assertions")]
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "process contract assertions"
+)]
 
 use std::{
     io::Write,
-    process::{Command, Output, Stdio},
+    process::{Command, Stdio},
 };
 
-use monty_proto::{FrameReader, pb, write_frame};
+use plakous_cell::{
+    CELL_PROTOCOL_REVISION, EngineConfig, HostFrame, LossClass, MAX_FRAME_BYTES, MONTY_WORKER,
+    WorkerFrame, encode_frame, read_frame_blocking,
+};
 
-fn worker(input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_monty"))
-        .arg("subprocess")
+/// Writes `frames`, closes stdin, and returns every frame the worker wrote
+/// and whether it exited successfully.
+fn exchange(frames: &[HostFrame]) -> (Vec<WorkerFrame>, bool) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_plakous-py-host"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .expect("worker starts");
-    child
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(input)
-        .expect("request");
-    child.wait_with_output().expect("worker exits")
-}
-
-#[test]
-fn clean_eof_exits_without_a_frame() {
-    let output = worker(&[]);
-    assert!(output.status.success());
-    assert_eq!(output.stdout, [] as [u8; 0]);
-}
-
-#[test]
-fn shutdown_replies_then_exits() {
-    let mut request = Vec::new();
-    write_frame(
-        &mut request,
-        &pb::ParentRequest {
-            kind: Some(pb::parent_request::Kind::Shutdown(pb::Shutdown {})),
-            trace_parent: None,
-        },
-    )
-    .expect("frame");
-    let output = worker(&request);
-    assert!(output.status.success());
-    let mut reader = FrameReader::new(output.stdout.as_slice());
-    let event = reader
-        .read::<pb::ChildEvent>()
-        .expect("frame")
-        .expect("reply");
-    assert!(matches!(event.kind, Some(pb::child_event::Kind::Ok(_))));
-    assert!(reader.read::<pb::ChildEvent>().expect("EOF").is_none());
-}
-
-#[test]
-fn truncated_frame_is_fatal_and_exits_with_protocol_status() {
-    let output = worker(&[1]);
-    assert_eq!(output.status.code(), Some(76));
-    let mut reader = FrameReader::new(output.stdout.as_slice());
-    let event = reader
-        .read::<pb::ChildEvent>()
-        .expect("frame")
-        .expect("fatal reply");
-    assert!(matches!(
-        event.kind,
-        Some(pb::child_event::Kind::FatalError(_))
-    ));
-}
-
-#[test]
-fn version_reports_the_interpreter_pin() {
-    let output = Command::new(env!("CARGO_BIN_EXE_monty"))
-        .arg("--version")
-        .output()
-        .expect("worker version");
-    assert!(output.status.success());
-    assert_eq!(output.stdout, b"monty 1.2.0\n");
-}
-
-#[test]
-fn standalone_python_is_not_an_execution_entrypoint() {
-    let output = Command::new(env!("CARGO_BIN_EXE_monty"))
-        .args(["-c", "print('unexpected')"])
-        .output()
-        .expect("worker refusal");
-    assert!(!output.status.success());
-    assert_eq!(output.stdout, [] as [u8; 0]);
-}
-
-#[test]
-fn configured_memory_limit_applies_to_the_next_request_frame() {
-    let mut input = Vec::new();
-    for kind in [
-        pb::parent_request::Kind::Configure(pb::Configure {
-            script_name: "memory.py".into(),
-            limits: Some(pb::ResourceLimits {
-                max_memory_bytes: Some(64 * 1024),
-                ..Default::default()
-            }),
-            monty_version: "1.2.0".into(),
-            protocol_version: monty_proto::PROTOCOL_VERSION,
-            ..Default::default()
-        }),
-        pb::parent_request::Kind::Feed(pb::Feed {
-            code: " ".repeat(8 * 1024 * 1024),
-            ..Default::default()
-        }),
-    ] {
-        write_frame(
-            &mut input,
-            &pb::ParentRequest {
-                kind: Some(kind),
-                trace_parent: None,
-            },
-        )
-        .expect("frame");
+    let mut stdin = child.stdin.take().expect("stdin");
+    for frame in frames {
+        stdin
+            .write_all(&encode_frame(frame).expect("frame"))
+            .expect("write frame");
     }
-    let mut child = Command::new(env!("CARGO_BIN_EXE_monty"))
-        .arg("subprocess")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("worker starts");
-    // The allocator may exit before stdin finishes writing the oversized frame.
-    if let Err(error) = child.stdin.take().expect("stdin").write_all(&input) {
-        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    drop(stdin);
+    let mut stdout = child.stdout.take().expect("stdout");
+    let mut received = Vec::new();
+    while let Some(frame) = read_frame_blocking(&mut stdout, MAX_FRAME_BYTES).expect("frame") {
+        received.push(serde_json::from_slice(&frame).expect("worker frame"));
     }
-    let output = child.wait_with_output().expect("worker exits");
-    // Upstream monty-types 1.2.0 OOM_EXIT_CODE, part of the pool/process contract.
+    (received, child.wait().expect("worker exits").success())
+}
+
+fn configure(engine: EngineConfig) -> HostFrame {
+    HostFrame::Configure {
+        revision: CELL_PROTOCOL_REVISION.to_owned(),
+        engine,
+    }
+}
+
+#[test]
+fn the_worker_says_hello_and_ends_cleanly_with_its_input() {
+    let (received, success) = exchange(&[configure(EngineConfig::MONTY)]);
     assert_eq!(
-        output.status.code(),
-        Some(65),
-        "status={}, stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
+        received,
+        [WorkerFrame::Hello {
+            revision: CELL_PROTOCOL_REVISION.to_owned(),
+            engine: MONTY_WORKER.engine.to_owned(),
+            adapter: MONTY_WORKER.adapter.to_owned(),
+        }]
     );
-    let mut reader = FrameReader::new(output.stdout.as_slice());
-    let event = reader
-        .read::<pb::ChildEvent>()
-        .expect("frame")
-        .expect("configured");
-    assert!(matches!(event.kind, Some(pb::child_event::Kind::Ok(_))));
-    assert!(reader.read::<pb::ChildEvent>().expect("EOF").is_none());
+    assert!(success);
+}
+
+#[test]
+fn shutdown_reports_usage_then_exits() {
+    let (received, success) = exchange(&[configure(EngineConfig::MONTY), HostFrame::Shutdown]);
+    assert!(matches!(
+        received.as_slice(),
+        [
+            WorkerFrame::Hello { .. },
+            WorkerFrame::ResourceReport { .. }
+        ]
+    ));
+    assert!(success);
+}
+
+#[test]
+fn the_worker_refuses_other_limits_and_a_repeated_configure() {
+    let other = EngineConfig::Monty {
+        memory_bytes: 512 * 1024 * 1024,
+    };
+    for frames in [
+        vec![configure(other)],
+        vec![configure(EngineConfig::QUICKJS)],
+        vec![
+            configure(EngineConfig::MONTY),
+            configure(EngineConfig::MONTY),
+        ],
+    ] {
+        let (received, success) = exchange(&frames);
+        assert!(
+            matches!(
+                received.last(),
+                Some(WorkerFrame::HostLost {
+                    class: LossClass::ProtocolViolation,
+                    ..
+                })
+            ),
+            "{received:?}"
+        );
+        assert!(!success, "a refused configure ends the worker with failure");
+    }
+}
+
+#[tokio::test]
+async fn records_and_bytes_reach_the_interpreter_as_typed_values() {
+    use plakous_cell::{
+        BindingInput, CellClient, CellEvent, CellOutcome, CellPrelude, CellValue, MontyBinding,
+        MontyBootstrap, NestedDeliveryOutcome,
+    };
+    let client = CellClient::spawn(
+        std::path::Path::new(env!("CARGO_BIN_EXE_plakous-py-host")),
+        MONTY_WORKER,
+        EngineConfig::MONTY,
+    )
+    .await
+    .expect("worker");
+    client
+        .start_cell(
+            1,
+            "reply = await fetch({})\n(reply.label, reply.data)",
+            CellPrelude::Monty {
+                bootstrap: Some(MontyBootstrap {
+                    source: String::new(),
+                    bindings: vec![MontyBinding {
+                        function: "fetch".into(),
+                        tool: "fetch".into(),
+                        input: BindingInput::Dictionary,
+                    }],
+                }),
+            },
+            None,
+        )
+        .expect("start");
+    let CellEvent::NestedCall { call, .. } = client.read_event().await.expect("call") else {
+        panic!("nested call");
+    };
+    let record = CellValue::Record {
+        name: "Reply".into(),
+        fields: vec![
+            ("label".into(), CellValue::Str("value".into())),
+            ("data".into(), CellValue::Bytes(b"hi".to_vec())),
+        ],
+    };
+    assert_eq!(
+        client.deliver(1, call, Ok(record)).await,
+        NestedDeliveryOutcome::Accepted
+    );
+    loop {
+        if let CellEvent::Done { outcome, .. } = client.read_event().await.expect("event") {
+            assert!(
+                matches!(outcome, CellOutcome::Completed { value: Some(ref value), .. } if value == "('value', b'hi')"),
+                "{outcome:?}"
+            );
+            break;
+        }
+    }
+    client.terminate().await.expect("joined");
 }

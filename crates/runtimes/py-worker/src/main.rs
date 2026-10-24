@@ -1,21 +1,59 @@
-//! Process-only Monty entry point. The interpreter and wire state machine are upstream.
+//! `plakous-py-host`: the Monty cell worker. It speaks the cell protocol on
+//! stdin and stdout and drives the pinned upstream `monty_proto` child state
+//! machine in process. Diagnostics go to stderr; stdout carries only frames.
 
-use std::process::ExitCode;
+use std::{io, panic, process::ExitCode, thread};
 
-mod subprocess;
+use plakous_cell::{LossClass, WorkerFrame, write_frame_blocking};
+
+mod cell;
+mod codec;
+mod prompts;
+#[cfg(feature = "test-hooks")]
+mod test_hooks;
+#[cfg(not(feature = "test-hooks"))]
+mod test_hooks {
+    pub(super) fn boundary(_name: &str) {}
+}
 
 #[global_allocator]
 static ALLOC: monty_alloc::LimitedAllocator = monty_alloc::LimitedAllocator;
 
+/// Native stack for the worker thread. The interpreter's container `repr` and
+/// `==` and the value exporter recurse once per nesting level, up to the
+/// 1000-frame recursion limit. The memory is reserved, not committed.
+const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+
 fn main() -> ExitCode {
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() == 1 && args[0] == "--version" {
-        println!("monty 1.2.0");
-        ExitCode::SUCCESS
-    } else if args.len() == 1 && args[0] == "subprocess" {
-        subprocess::run()
-    } else {
-        eprintln!("usage: monty subprocess | --version");
-        ExitCode::FAILURE
+    install_panic_hook();
+    match thread::Builder::new()
+        .name("plakous-py-host".to_owned())
+        .stack_size(WORKER_STACK_SIZE)
+        .spawn(cell::serve)
+    {
+        // A panic has already written its loss frame in the hook.
+        Ok(worker) => worker.join().unwrap_or(ExitCode::from(101)),
+        Err(error) => {
+            eprintln!("plakous-py-host: failed to spawn the worker thread: {error}");
+            ExitCode::FAILURE
+        }
     }
+}
+
+/// Writes a best-effort `HostLost` frame before the default unwind, so the
+/// parent gets a parseable last gasp for ordinary panics. Hard crashes (stack
+/// overflow, allocator abort) bypass this: the parent treats a stream that
+/// ends without a terminal as loss.
+fn install_panic_hook() {
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        let _ = write_frame_blocking(
+            &mut io::stdout(),
+            &WorkerFrame::HostLost {
+                class: LossClass::EngineFailure,
+                message: format!("Python worker panicked: {info}"),
+            },
+        );
+        default_hook(info);
+    }));
 }

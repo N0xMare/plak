@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
 It downloads the latest release tarball and `SHA256SUMS` from GitHub Releases
 (set `PLAK_VERSION` to pick a release), refuses a checksum mismatch, and checks
 the build attestation when `gh` is installed and signed in. It installs `plak`,
-`plakous-js-host` and `monty` into the same snapshot layout as `just install release`
+`plakous-js-host` and `plakous-py-host` into the same snapshot layout as `just install release`
 below, with links in `~/.local/bin`, and never needs `sudo`. Any other platform
 is refused; build from source there.
 
@@ -61,9 +61,9 @@ just install release
 ```
 
 `just install release` builds a plain release `plak` with its `plakous-js-host` and
-`monty` workers, checks their linkage, and installs them as an immutable
+`plakous-py-host` workers, checks their linkage, and installs them as an immutable
 snapshot under `~/.local/lib/plak/release` (workers under the shared
-`~/.local/lib/plak/sidecars`) with links `plak`, `plakous-js-host`, and `monty`
+`~/.local/lib/plak/sidecars`) with links `plak`, `plakous-js-host`, and `plakous-py-host`
 in `~/.local/bin`. Put `~/.local/bin` on your PATH. It refuses to replace
 non-Plak files or links there, and refuses to run from a linked Git worktree.
 Rebuilding never rewrites an executable a running session uses.
@@ -76,7 +76,7 @@ cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker
 ```
 
 These separate Cargo resolutions produce `plak`, `plakous-js-host`, and the
-`monty` Python worker in `target/release/`. Bare `cargo build` selects only
+`plakous-py-host` Python worker in `target/release/`. Bare `cargo build` selects only
 `plak`; do not build it and the Python worker in one invocation, because Cargo
 unifies interpreter features into the parent. Run `target/release/plak` directly.
 Keep the workers beside `plak` when copying the executables to another directory.
@@ -206,7 +206,7 @@ CHECK              RESULT   DETAIL                                       FIX
 Version            OK       available · 0.0.2                            —
 Home               OK       available · /home/you/.plak                  —
 Config             OK       valid · /home/you/.plak/config.toml          —
-Product db         OK       available · /home/you/.plak/state/r25.e31.p33.t8/product.sqlite3 —
+Product db         OK       available · /home/you/.plak/state/r25.e32.p33.t8/product.sqlite3 —
 Composition host   OK       included · not required by the selected …    —
 Oauth codex        OK       ready · generation 13 · record 22h old …     —
 

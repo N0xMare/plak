@@ -1,5 +1,8 @@
-//! The one integration for JavaScript presentations on the `QuickJS` cell
-//! worker: Codex Code Mode (exact and minimal) and product JavaScript.
+//! The one integration for every cell presentation. A presentation decides
+//! what the model sees (parsing, limits, descriptor, evidence) and which
+//! worker runs it; the integration, the cell client and the session seam are
+//! the same for all of them: Codex Code Mode (exact and minimal) and product
+//! JavaScript on the `QuickJS` worker, and Python PTC on the Monty worker.
 
 #![allow(
     clippy::wildcard_imports,
@@ -8,22 +11,169 @@
 
 use super::*;
 
-use super::session::session_bundle;
-use plakous_cell::{CellClient, EngineConfig, QUICKJS_WORKER};
+use super::session::{Quickjs, SessionEngine, session_bundle};
+use plakous_cell::{CellClient, EngineConfig, QUICKJS_WORKER, WorkerIdentity};
 use plakous_compose::{
     CodexMinimalLocalCodeModeV1, CodexNativeLocalCodeModeV1,
     validate_codex_minimal_local_code_mode_candidate_v1,
     validate_codex_native_local_code_mode_candidate_v1,
 };
 
-pub(super) struct JavaScriptCellIntegration {
+pub(super) struct CellIntegration {
     pub(super) worker: PathBuf,
     pub(super) identity: Vec<u8>,
-    pub(super) presentation: JavaScriptPresentation,
+    pub(super) presentation: Box<dyn Presentation>,
 }
 
-/// What the model sees: the presentation decides parsing, limits and the
-/// descriptor; the worker and session are the same for all of them.
+/// One cell presentation: its model-visible contract and its worker.
+pub(super) trait Presentation: Send + Sync {
+    fn runtime_contract(&self) -> LocalCompositionRuntimeContract;
+    fn lifecycle(&self) -> LocalCompositionLifecycle;
+    fn result_projection(&self) -> LocalCompositionResultProjection;
+    /// Evidence whose identity the environment identity carries.
+    fn evidence(&self) -> Option<&ProductExtensionEvidence>;
+    fn parse_execute(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionExecuteInput, String>;
+    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String>;
+    fn rebuild_descriptor(
+        &self,
+        job_config: plakous_tools::JobConfig,
+        registry: FrozenToolRegistry,
+        target: ProviderModelProjectionIdentityV2,
+    ) -> Result<LocalCompositionDescriptor, String>;
+    fn validate_configuration(
+        &self,
+        job_config: plakous_tools::JobConfig,
+        descriptor: &LocalCompositionDescriptor,
+        projection: &ToolProjectionMap,
+        registry: FrozenToolRegistry,
+        configuration: &CompiledProviderConfiguration,
+    ) -> Result<(), String>;
+    fn truncate_items(
+        &self,
+        items: Vec<LocalCompositionContentItem>,
+        max_output_tokens: usize,
+    ) -> Vec<LocalCompositionContentItem>;
+    fn max_yield_time_ms(&self) -> u64;
+    fn max_output_tokens(&self) -> usize;
+    fn max_outstanding_nested_calls(&self) -> usize {
+        16
+    }
+    /// The worker build and limits this presentation runs on.
+    fn worker(&self) -> (WorkerIdentity, EngineConfig);
+    /// Refuses a worker whose bytes changed since attachment.
+    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), String>;
+    /// The engine state of a fresh session.
+    fn session_engine(&self) -> Box<dyn SessionEngine>;
+}
+
+impl LocalCompositionIntegration for CellIntegration {
+    fn runtime_contract(&self) -> LocalCompositionRuntimeContract {
+        self.presentation.runtime_contract()
+    }
+
+    fn lifecycle(&self) -> LocalCompositionLifecycle {
+        self.presentation.lifecycle()
+    }
+
+    fn result_projection(&self) -> LocalCompositionResultProjection {
+        self.presentation.result_projection()
+    }
+
+    fn environment_identity(&self) -> Vec<u8> {
+        let mut identity = self.identity.clone();
+        if let Some(evidence) = self.presentation.evidence() {
+            identity.extend_from_slice(&evidence.identity().identity_bytes());
+        }
+        identity
+    }
+
+    fn parse_execute(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<LocalCompositionExecuteInput, String> {
+        self.presentation.parse_execute(input)
+    }
+
+    fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
+        self.presentation.parse_wait(input)
+    }
+
+    fn create_session(
+        &self,
+        _generation: u64,
+        _max_yield_time_ms: u64,
+        _max_output_tokens: usize,
+    ) -> LocalCompositionFuture<'_, LocalCompositionSessionBundle> {
+        Box::pin(async move {
+            self.presentation
+                .verify_worker(&self.worker, &self.identity)?;
+            let (expected, config) = self.presentation.worker();
+            let client = CellClient::spawn(&self.worker, expected, config).await?;
+            Ok(session_bundle(
+                Arc::new(client),
+                self.presentation.session_engine(),
+            ))
+        })
+    }
+
+    fn shutdown(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = LocalCompositionShutdownResult> + Send + '_>> {
+        Box::pin(async move { LocalCompositionShutdownResult::Joined { child_exit: None } })
+    }
+
+    fn rebuild_descriptor(
+        &self,
+        job_config: plakous_tools::JobConfig,
+        registry: FrozenToolRegistry,
+        target: ProviderModelProjectionIdentityV2,
+    ) -> Result<LocalCompositionDescriptor, String> {
+        self.presentation
+            .rebuild_descriptor(job_config, registry, target)
+    }
+
+    fn validate_configuration(
+        &self,
+        job_config: plakous_tools::JobConfig,
+        descriptor: &LocalCompositionDescriptor,
+        projection: &ToolProjectionMap,
+        registry: FrozenToolRegistry,
+        configuration: &CompiledProviderConfiguration,
+    ) -> Result<(), String> {
+        self.presentation.validate_configuration(
+            job_config,
+            descriptor,
+            projection,
+            registry,
+            configuration,
+        )
+    }
+
+    fn truncate_items(
+        &self,
+        items: Vec<LocalCompositionContentItem>,
+        max_output_tokens: usize,
+    ) -> Vec<LocalCompositionContentItem> {
+        self.presentation.truncate_items(items, max_output_tokens)
+    }
+
+    fn max_yield_time_ms(&self) -> u64 {
+        self.presentation.max_yield_time_ms()
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        self.presentation.max_output_tokens()
+    }
+
+    fn max_outstanding_nested_calls(&self) -> usize {
+        self.presentation.max_outstanding_nested_calls()
+    }
+}
+
+/// The JavaScript presentations on the `QuickJS` worker.
 pub(super) enum JavaScriptPresentation {
     CodexExact,
     CodexMinimal { nested_catalog: Vec<ToolName> },
@@ -46,7 +196,7 @@ struct ProductRunWireInput {
     max_output_tokens: Option<u64>,
 }
 
-impl LocalCompositionIntegration for JavaScriptCellIntegration {
+impl Presentation for JavaScriptPresentation {
     fn runtime_contract(&self) -> LocalCompositionRuntimeContract {
         LocalCompositionRuntimeContract::JAVASCRIPT
     }
@@ -59,19 +209,18 @@ impl LocalCompositionIntegration for JavaScriptCellIntegration {
         LocalCompositionResultProjection::TokensScriptV1
     }
 
-    fn environment_identity(&self) -> Vec<u8> {
-        let mut identity = self.identity.clone();
-        if let JavaScriptPresentation::Product(product) = &self.presentation {
-            identity.extend_from_slice(&product.evidence.identity().identity_bytes());
+    fn evidence(&self) -> Option<&ProductExtensionEvidence> {
+        match self {
+            Self::Product(product) => Some(&product.evidence),
+            Self::CodexExact | Self::CodexMinimal { .. } => None,
         }
-        identity
     }
 
     fn parse_execute(
         &self,
         input: serde_json::Value,
     ) -> Result<LocalCompositionExecuteInput, String> {
-        match &self.presentation {
+        match self {
             JavaScriptPresentation::CodexExact | JavaScriptPresentation::CodexMinimal { .. } => {
                 let serde_json::Value::String(raw) = input else {
                     return Err("Code Mode exec input is not a custom UTF-8 string".to_owned());
@@ -88,7 +237,7 @@ impl LocalCompositionIntegration for JavaScriptCellIntegration {
     }
 
     fn parse_wait(&self, input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
-        match &self.presentation {
+        match self {
             JavaScriptPresentation::CodexExact | JavaScriptPresentation::CodexMinimal { .. } => {
                 let input: WaitWireInput = serde_json::from_value(input)
                     .map_err(|_| "invalid Code Mode wait input".to_owned())?;
@@ -113,25 +262,16 @@ impl LocalCompositionIntegration for JavaScriptCellIntegration {
         }
     }
 
-    fn create_session(
-        &self,
-        _generation: u64,
-        _max_yield_time_ms: u64,
-        _max_output_tokens: usize,
-    ) -> LocalCompositionFuture<'_, LocalCompositionSessionBundle> {
-        let worker = self.worker.clone();
-        let identity = self.identity.clone();
-        Box::pin(async move {
-            verify_sidecar_before_spawn(&worker, &identity)?;
-            let client = CellClient::spawn(&worker, QUICKJS_WORKER, EngineConfig::QUICKJS).await?;
-            Ok(session_bundle(Arc::new(client)))
-        })
+    fn worker(&self) -> (WorkerIdentity, EngineConfig) {
+        (QUICKJS_WORKER, EngineConfig::QUICKJS)
     }
 
-    fn shutdown(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = LocalCompositionShutdownResult> + Send + '_>> {
-        Box::pin(async move { LocalCompositionShutdownResult::Joined { child_exit: None } })
+    fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), String> {
+        verify_sidecar_before_spawn(path, identity)
+    }
+
+    fn session_engine(&self) -> Box<dyn SessionEngine> {
+        Box::new(Quickjs)
     }
 
     fn rebuild_descriptor(
@@ -140,7 +280,7 @@ impl LocalCompositionIntegration for JavaScriptCellIntegration {
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
     ) -> Result<LocalCompositionDescriptor, String> {
-        match &self.presentation {
+        match self {
             JavaScriptPresentation::CodexExact => {
                 CodexNativeLocalCodeModeV1::compile(job_config, registry, target)
                     .map_err(|error| error.to_string())
@@ -178,7 +318,7 @@ impl LocalCompositionIntegration for JavaScriptCellIntegration {
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<(), String> {
-        match &self.presentation {
+        match self {
             JavaScriptPresentation::CodexExact => {
                 let exact = CodexNativeLocalCodeModeV1::compile(
                     job_config,
@@ -248,7 +388,7 @@ impl LocalCompositionIntegration for JavaScriptCellIntegration {
     }
 
     fn max_yield_time_ms(&self) -> u64 {
-        match &self.presentation {
+        match self {
             JavaScriptPresentation::Product(product) => product.limits.max_yield_time_ms,
             JavaScriptPresentation::CodexExact | JavaScriptPresentation::CodexMinimal { .. } => {
                 native::MAX_YIELD_TIME_MS
@@ -257,7 +397,7 @@ impl LocalCompositionIntegration for JavaScriptCellIntegration {
     }
 
     fn max_output_tokens(&self) -> usize {
-        match &self.presentation {
+        match self {
             JavaScriptPresentation::Product(product) => product.max_output_tokens,
             JavaScriptPresentation::CodexExact | JavaScriptPresentation::CodexMinimal { .. } => {
                 native::MAX_OUTPUT_TOKENS
@@ -389,12 +529,12 @@ mod tests {
             &catalog,
         )
         .expect("descriptor");
-        let integration = JavaScriptCellIntegration {
+        let integration = CellIntegration {
             worker: "unused".into(),
             identity: Vec::new(),
-            presentation: JavaScriptPresentation::CodexMinimal {
+            presentation: Box::new(JavaScriptPresentation::CodexMinimal {
                 nested_catalog: catalog,
-            },
+            }),
         };
         let rebuilt = integration
             .rebuild_descriptor(plakous_tools::JobConfig::default(), registry, target)
@@ -415,10 +555,10 @@ mod tests {
 
     #[test]
     fn code_mode_wait_clamps_to_ten_minutes_and_keeps_its_default() {
-        let integration = JavaScriptCellIntegration {
+        let integration = CellIntegration {
             worker: "unused-test-worker".into(),
             identity: Vec::new(),
-            presentation: JavaScriptPresentation::CodexExact,
+            presentation: Box::new(JavaScriptPresentation::CodexExact),
         };
         assert_eq!(
             integration

@@ -628,7 +628,7 @@ class FeatureGateTests(unittest.TestCase):
             "plakous", ("native-subscriptions",), False, manifests
         )
         self.assertIn("plakous-code-mode", closure)
-        self.assertIn("plakous-py-eval", closure)
+        self.assertIn("plakous-cell", closure)
         self.assertNotIn("plak-compose-protocol", closure)
 
     def test_feature_profiles_are_per_package_and_capped(self) -> None:

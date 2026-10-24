@@ -12,7 +12,7 @@ use tokio::{
 use crate::frame::{MAX_FRAME_BYTES, encode_frame, read_frame};
 use crate::protocol::{
     CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict, EngineConfig,
-    HostFrame, OutputItem, WorkerFrame, WorkerIdentity,
+    HostFrame, LossClass, OutputItem, WorkerFrame, WorkerIdentity,
 };
 
 /// Content-free child-process usage returned when a worker exits.
@@ -29,6 +29,13 @@ impl ChildProcessUsage {
     pub fn is_meaningful(self) -> bool {
         !self.user_cpu.is_zero() || !self.system_cpu.is_zero() || self.peak_rss_bytes.is_some()
     }
+}
+
+/// How a worker stopped: its usage, and whether it had to be killed.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorkerStop {
+    pub usage: Option<ChildProcessUsage>,
+    pub forced: bool,
 }
 
 /// Byte budget for queued worker events.
@@ -62,6 +69,10 @@ pub enum CellEvent {
         cell: u64,
         item: OutputItem,
     },
+    Waiting {
+        cell: u64,
+        calls: Vec<u64>,
+    },
     Yielded {
         cell: u64,
     },
@@ -78,6 +89,7 @@ impl CellEvent {
         match self {
             Self::NestedCall { cell, .. }
             | Self::Output { cell, .. }
+            | Self::Waiting { cell, .. }
             | Self::Yielded { cell }
             | Self::Done { cell, .. } => *cell,
         }
@@ -89,6 +101,7 @@ struct QueuedEvent {
     _bytes: OwnedSemaphorePermit,
 }
 
+type LossClasses = Arc<std::sync::Mutex<Option<LossClass>>>;
 type ResultAcks = Arc<Mutex<HashMap<(u64, u64), oneshot::Sender<NestedDeliveryOutcome>>>>;
 
 /// What one nested result delivery proved about the evaluator.
@@ -110,6 +123,9 @@ pub enum NestedDeliveryOutcome {
     /// The result was refused or failed before it was handed over, so the
     /// evaluator never saw it and cannot have acted on it.
     NotDelivered(String),
+    /// The cell ended, or abandoned the batch carrying the result, before the
+    /// evaluator observed it; nothing is unknown.
+    NotObserved(String),
     /// The evaluator or its transport was lost with the result already handed
     /// over, so acceptance can be neither proved nor ruled out.
     Lost(String),
@@ -121,9 +137,10 @@ impl NestedDeliveryOutcome {
     pub fn message(&self) -> Option<&str> {
         match self {
             Self::Accepted => None,
-            Self::Refused(message) | Self::NotDelivered(message) | Self::Lost(message) => {
-                Some(message)
-            }
+            Self::Refused(message)
+            | Self::NotDelivered(message)
+            | Self::NotObserved(message)
+            | Self::Lost(message) => Some(message),
         }
     }
 }
@@ -134,6 +151,7 @@ impl From<DeliveryVerdict> for NestedDeliveryOutcome {
             DeliveryVerdict::Accepted => Self::Accepted,
             DeliveryVerdict::Refused(message) => Self::Refused(message),
             DeliveryVerdict::NotDelivered(message) => Self::NotDelivered(message),
+            DeliveryVerdict::NotObserved(message) => Self::NotObserved(message),
         }
     }
 }
@@ -142,6 +160,7 @@ impl From<DeliveryVerdict> for NestedDeliveryOutcome {
 pub struct CellClient {
     child: Mutex<Child>,
     termination_loss: Mutex<Option<String>>,
+    stopped_receipt: Mutex<Option<WorkerStop>>,
     pid: u32,
     commands: mpsc::Sender<Vec<u8>>,
     events: Mutex<mpsc::Receiver<QueuedEvent>>,
@@ -150,6 +169,7 @@ pub struct CellClient {
     tasks: Mutex<Vec<JoinHandle<()>>>,
     exit_usage: Arc<Mutex<Option<ChildProcessUsage>>>,
     result_acks: ResultAcks,
+    loss_class: LossClasses,
 }
 
 impl CellClient {
@@ -237,6 +257,7 @@ impl CellClient {
             }
         });
         let result_acks = Arc::new(Mutex::new(HashMap::new()));
+        let loss_class = LossClasses::default();
         let reader = runtime.spawn(read_worker(
             stdout,
             reader_stop,
@@ -244,6 +265,7 @@ impl CellClient {
             event_tx,
             captured_usage,
             Arc::clone(&result_acks),
+            Arc::clone(&loss_class),
         ));
         Ok(Self {
             child: Mutex::new(child),
@@ -256,6 +278,8 @@ impl CellClient {
             exit_usage,
             result_acks,
             termination_loss: Mutex::new(None),
+            stopped_receipt: Mutex::new(None),
+            loss_class,
         })
     }
 
@@ -348,6 +372,21 @@ impl CellClient {
         let _ = self.send(&HostFrame::Cancel { cell });
     }
 
+    /// The class the worker named in its `HostLost`, if it sent one.
+    #[must_use]
+    pub fn loss_class(&self) -> Option<LossClass> {
+        *self
+            .loss_class
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Whether the worker was stopped or killed.
+    #[must_use]
+    pub fn is_stopped(&self) -> bool {
+        *self.stop.borrow()
+    }
+
     /// Whether the worker is already lost.
     #[must_use]
     pub fn is_lost(&self) -> bool {
@@ -387,6 +426,21 @@ impl CellClient {
     /// A worker that did not acknowledge shutdown, or stayed unreaped after
     /// its kill, is a sticky loss.
     pub async fn terminate(&self) -> Result<Option<ChildProcessUsage>, String> {
+        let stopped = self.stop().await?;
+        if stopped.forced {
+            let loss = "cell worker did not acknowledge shutdown within 2s; killed".to_owned();
+            *self.termination_loss.lock().await = Some(loss.clone());
+            return Err(loss);
+        }
+        Ok(stopped.usage)
+    }
+
+    /// Shuts the worker down like [`Self::terminate`], but reports a worker
+    /// killed after the voluntary bound as a forced stop instead of a loss.
+    ///
+    /// # Errors
+    /// A worker that stayed unreaped after its kill, or an earlier sticky loss.
+    pub async fn stop(&self) -> Result<WorkerStop, String> {
         self.result_acks.lock().await.clear();
         let before = crate::sample_children_rusage();
         let mut child = self.child.lock().await;
@@ -394,15 +448,18 @@ impl CellClient {
         if let Some(loss) = previous_loss.as_ref() {
             return Err(loss.clone());
         }
+        if let Some(receipt) = *self.stopped_receipt.lock().await {
+            return Ok(receipt);
+        }
         let _ = self.send(&HostFrame::Shutdown);
         let voluntary = tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await;
-        let mut loss = match voluntary {
-            Ok(Ok(_)) => None,
-            Ok(Err(error)) => Some(format!("cell worker wait failed: {error}")),
-            Err(_) => Some("cell worker did not acknowledge shutdown within 2s; killed".into()),
+        let (forced, mut loss) = match voluntary {
+            Ok(Ok(_)) => (false, None),
+            Ok(Err(error)) => (true, Some(format!("cell worker wait failed: {error}"))),
+            Err(_) => (true, None),
         };
         self.stop.send_replace(true);
-        if loss.is_some() {
+        if forced {
             let _ = child.start_kill();
             if !matches!(
                 tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await,
@@ -422,14 +479,43 @@ impl CellClient {
         }
         let reported = self.exit_usage.lock().await.take();
         let delta = crate::children_rusage_delta(before, crate::sample_children_rusage());
-        Ok(reported.or_else(|| {
+        let usage = reported.or_else(|| {
             let usage = ChildProcessUsage {
                 user_cpu: Duration::from_nanos(delta.user_cpu_ns),
                 system_cpu: Duration::from_nanos(delta.system_cpu_ns),
                 peak_rss_bytes: delta.peak_rss_bytes,
             };
             usage.is_meaningful().then_some(usage)
-        }))
+        });
+        let receipt = WorkerStop { usage, forced };
+        *self.stopped_receipt.lock().await = Some(receipt);
+        Ok(receipt)
+    }
+
+    /// Kills the worker without asking it to stop and records `reason` as
+    /// its sticky loss; a later [`Self::terminate`] reports it.
+    pub async fn kill(&self, reason: &str) {
+        self.result_acks.lock().await.clear();
+        let mut child = self.child.lock().await;
+        let mut previous_loss = self.termination_loss.lock().await;
+        if previous_loss.is_some() {
+            return;
+        }
+        let _ = child.start_kill();
+        let reaped = matches!(
+            tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await,
+            Ok(Ok(_))
+        );
+        self.stop.send_replace(true);
+        for task in self.tasks.lock().await.drain(..) {
+            task.abort();
+            let _ = task.await;
+        }
+        *previous_loss = Some(if reaped {
+            reason.to_owned()
+        } else {
+            format!("{reason}; cell worker remained unreaped after kill deadline")
+        });
     }
 
     fn send(&self, frame: &HostFrame) -> Result<(), String> {
@@ -497,6 +583,7 @@ async fn read_worker(
     event_tx: mpsc::Sender<QueuedEvent>,
     captured_usage: Arc<Mutex<Option<ChildProcessUsage>>>,
     result_acks: ResultAcks,
+    loss_class: LossClasses,
 ) {
     let bytes = Arc::new(Semaphore::new(MAX_QUEUED_BYTES));
     loop {
@@ -539,7 +626,10 @@ async fn read_worker(
                 loss_tx.send_replace(Some("cell worker unexpected delivery verdict".into()));
                 return;
             }
-            WorkerFrame::HostLost { message, .. } => {
+            WorkerFrame::HostLost { class, message } => {
+                *loss_class
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(class);
                 loss_tx.send_replace(Some(message));
                 return;
             }
@@ -567,6 +657,7 @@ async fn read_worker(
                 input,
             },
             WorkerFrame::Output { cell, item } => CellEvent::Output { cell, item },
+            WorkerFrame::Waiting { cell, calls } => CellEvent::Waiting { cell, calls },
             WorkerFrame::Yielded { cell } => CellEvent::Yielded { cell },
             WorkerFrame::CellDone { cell, outcome } => CellEvent::Done { cell, outcome },
         };
@@ -674,5 +765,82 @@ mod tests {
     async fn a_late_hello_is_refused_at_its_bound() {
         let error = refusal(&[], Duration::from_millis(300)).await;
         assert!(error.contains("did not say hello in time"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_worker_that_ignores_sigterm_is_killed_inside_the_shutdown_bound() {
+        let directory = tempfile::tempdir().expect("directory");
+        let opening = hello(
+            CELL_PROTOCOL_REVISION,
+            QUICKJS_WORKER.engine,
+            QUICKJS_WORKER.adapter,
+        );
+        let program = worker(directory.path(), &opening);
+        let source = std::fs::read_to_string(&program).expect("program");
+        std::fs::write(
+            &program,
+            source.replace("exec sleep 30", "trap '' TERM; exec sleep 30"),
+        )
+        .expect("ignore TERM");
+        let client = CellClient::spawn(&program, QUICKJS_WORKER, EngineConfig::QUICKJS)
+            .await
+            .expect("worker");
+        let began = std::time::Instant::now();
+        let first = client.stop().await.expect("reaped after forced stop");
+        assert!(first.forced);
+        assert!(began.elapsed() < WORKER_SHUTDOWN_SETTLE_TIMEOUT * 2 + Duration::from_secs(2));
+        assert_eq!(
+            client.stop().await.expect("same receipt"),
+            first,
+            "a later wait cannot relabel a kill as voluntary"
+        );
+        assert!(client.terminate().await.is_err());
+        assert!(client.stop().await.is_err(), "a loss stays a loss");
+    }
+
+    #[tokio::test]
+    async fn a_worker_that_exits_on_its_own_is_never_signalled() {
+        let directory = tempfile::tempdir().expect("directory");
+        let opening = hello(
+            CELL_PROTOCOL_REVISION,
+            QUICKJS_WORKER.engine,
+            QUICKJS_WORKER.adapter,
+        );
+        let program = worker(directory.path(), &opening);
+        let source = std::fs::read_to_string(&program).expect("program");
+        std::fs::write(&program, source.replace("exec sleep 30", "exit 0"))
+            .expect("voluntary exit");
+        let client = CellClient::spawn(&program, QUICKJS_WORKER, EngineConfig::QUICKJS)
+            .await
+            .expect("worker");
+        let first = client.stop().await.expect("voluntary receipt");
+        assert!(!first.forced);
+        assert_eq!(client.stop().await.expect("same receipt"), first);
+    }
+
+    #[tokio::test]
+    async fn unreaped_worker_never_certifies_joined_shutdown() {
+        let directory = tempfile::tempdir().expect("directory");
+        let opening = hello(
+            CELL_PROTOCOL_REVISION,
+            QUICKJS_WORKER.engine,
+            QUICKJS_WORKER.adapter,
+        );
+        let program = worker(directory.path(), &opening);
+        let client = CellClient::spawn(&program, QUICKJS_WORKER, EngineConfig::QUICKJS)
+            .await
+            .expect("worker");
+        // Consume the OS status outside the supervisor, so its wait cannot
+        // establish a receipt. No successful join may be invented from ECHILD.
+        client
+            .child
+            .lock()
+            .await
+            .start_kill()
+            .expect("kill owned worker");
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(client.pid).expect("pid"));
+        nix::sys::wait::waitpid(pid, None).expect("consume status");
+        assert!(client.stop().await.is_err());
+        assert!(client.terminate().await.is_err());
     }
 }

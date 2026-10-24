@@ -76,7 +76,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely and never published |
 
-The workspace holds 40 packages: five supported, 32 published internal, three
+The workspace holds 39 packages: five supported, 31 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -88,7 +88,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (32)**
+**Published internal (31)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
@@ -96,7 +96,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 `plakous-chat-completions`, `plakous-code-mode`, `plakous-codex-code-mode-protocol`,
 `plakous-compose`, `plakous-exchange`,
 `plakous-http`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
-`plakous-openrouter`, `plakous-prompts`, `plakous-py-eval`,
+`plakous-openrouter`, `plakous-prompts`,
 `plakous-responses`, `plakous-responses-dialect`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
 `plakous-tool-search`, `plakous-tool-web`, `plakous-xai`.
@@ -120,7 +120,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
 | `crates/common/` | attempt, http, auth | common |
-| `crates/runtimes/` | cell, js-runtime, py-eval, py-worker, code-mode | engine |
+| `crates/runtimes/` | cell, js-runtime, py-worker, code-mode | engine |
 | `crates/protocols/` | Responses, its shared dialect, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
 | `crates/store/` | session-store implementations | store |
@@ -331,9 +331,10 @@ called out explicitly.
 | `plak` | `otel` | OTLP export and the typed telemetry bridge. Default builds carry no `opentelemetry` dependency |
 | `plak` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
 | `plakous` | `composition` | Code Mode presentation and JavaScript evaluation through the `plakous-js-host` sidecar. This is the whole evaluator capability; it links no credential, HTTP, subscription, or Python machinery |
-| `plakous` | `composition-python` | The Monty-backed Python PTC projection over the same attach path; implies `composition` |
+| `plakous` | `composition-python` | The Python PTC projection over the same attach path and cell client, linking no Monty crate; implies `composition` |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
 | `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 §2.8). Enabled only by the repository harness crate, so `plak/test-hooks` is its one product edge; `check_features.py` refuses it in a default `plak` |
+| `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
 | `plakous-store` | `commit-trace` | Repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 §2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by Plak through the offline-crash harness under `test-hooks` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` for all three stores. |
 | `plakous-recursive-subagents-store` | `commit-trace` | Optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plak/test-hooks` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release Plak closures. |
 | `plakous-openai` | `test-support` | Implies `native-auth`; exposes the doc-hidden builder that binds Codex browser-login callbacks on an ephemeral port instead of the pinned redirect ports. A dev-dependency of `plakous`, never a production edge |
@@ -407,8 +408,9 @@ affected crates. `--build` checks every subset and skips this step.
 
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no
-`plakous-auth`, `plakous-http`, `plakous-py-eval`, `monty-pool`, `rquickjs`, or
-`tungstenite`. That is what makes the decoupling provable rather than asserted.
+`monty-proto`, `plakous-auth`, `plakous-http`, `plakous-py-worker`, or
+`rquickjs`, and `composition-python` reaches no `monty-proto` either. That is
+what makes the decoupling provable rather than asserted.
 
 `cargo tree` proves the closure, not that the crate compiles under those gates.
 So `check_public_compile.py` also type-checks the two documented consumer
@@ -421,7 +423,7 @@ so without these two neither documented manifest would ever be compiled.
 
 `tools/checks/check_workspace.py` checks the same split at the artifact level,
 not only in the manifests. It lists the symbols of the `plak`,
-`plakous-js-host`, and `monty` executables and requires that only the
+`plakous-js-host`, and `plakous-py-host` executables and requires that only the
 JavaScript worker contains QuickJS engine symbols, only the Python worker
 contains Monty interpreter or type-checking symbols, and that the three are
 separate files by digest.
@@ -611,7 +613,7 @@ MUST be built in separate Cargo invocations: Cargo's stable resolver unifies
 `monty-proto/worker` features when the Python worker is selected alongside the
 parent, linking interpreter/type-checking code into `plak`. Per-package feature
 unification remains an unstable Cargo option on the pinned toolchain. The two
-commands produce `plak`, `plakous-js-host`, and `monty` in the same directory.
+commands produce `plak`, `plakous-js-host`, and `plakous-py-host` in the same directory.
 Apply the same profile, target selection and target-directory settings to both
 invocations; apply product features only to the parent. Bare `cargo build`
 produces only the parent, not a complete install. The locked dependency graph
@@ -711,12 +713,13 @@ with the result; the image name alone is not evidence for the current tree.
 `plakous-cell` contains only the cell protocol, worker client and session.
 `plakous-js-runtime` owns QuickJS and the JavaScript worker. Selecting that
 package alongside Plak cannot enable an in-process runtime feature in Plak.
-The Monty worker is a thin Rust process entry point over `monty-proto`'s
-upstream `Child`, framing, interpreter and type checker, pinned at `1.2.0`
-together with `monty-pool`, `monty-types`, and `monty-alloc`. Its shell follows
-upstream `monty-runtime` 1.2.0: a 16 MiB worker thread stack, the allocator's
-hard ceiling at the interpreter's soft memory limit plus upstream headroom,
-fatal frames, panic handling, EOF and shutdown behavior. Only `monty subprocess` and `monty --version` are accepted.
+The Python worker `plakous-py-host` speaks the cell protocol and drives
+`monty-proto`'s upstream `Child` (interpreter and type checker) in process,
+pinned at `1.2.0` together with `monty-types` and `monty-alloc`; no pool
+library or WebSocket transport is linked. Its shell keeps upstream
+`monty-runtime` 1.2.0's 16 MiB worker thread stack, the allocator's hard
+ceiling at the interpreter's soft memory limit plus upstream headroom, and a
+best-effort loss frame on panic. It takes no arguments.
 
 For maintainer installation:
 
@@ -843,7 +846,7 @@ linked home ancestors preserve canonical executable paths. A
 rebuild that changes only a sidecar is a new snapshot (staged then renamed into
 place; a concurrent build of the same bytes keeps one copy). The
 `~/.local/bin/plak` symlink points at the snapshot, while
-`~/.local/bin/plakous-js-host` and `~/.local/bin/monty` point at the worker artifacts;
+`~/.local/bin/plakous-js-host` and `~/.local/bin/plakous-py-host` point at the worker artifacts;
 corresponding existing paths under `~/.cargo/bin` are repaired. An existing
 link is replaced only when it already resolves under the maintainer or release
 snapshot root, the shared sidecar cache, or the Cargo target directory; any
@@ -887,7 +890,7 @@ or maintainer build for daily work because debug binaries are large and slow
 to start.
 
 At run time, js-ptc and Codex native-ptc locate `PLAK_JS_HOST` or a sibling
-`plakous-js-host`, and py-ptc locates `PLAK_MONTY_WORKER` or a sibling `monty`.
+`plakous-js-host`, and py-ptc locates `PLAK_PY_HOST` or a sibling `plakous-py-host`.
 Keep all three executables together when installing manually. Missing workers
 fail closed and `plak doctor` names the missing configuration. Official V8
 and `@openai/codex` are not fetched and are not evaluators.
@@ -928,7 +931,7 @@ option.
 Cargo does not inherit `[patch]` tables from a path dependency, so a downstream
 source consumer repeats in its own root manifest whatever its selection needs.
 No facade selection needs one, including those that reach the Python
-evaluator. Only building the Monty worker package itself selects the reviewed
+evaluator. Only building the Python worker package itself selects the reviewed
 `monty-typeshed` snapshot (§7.3), and a consumer that omits it builds the
 upstream crate, whose type-checker archive is not byte-reproducible.
 
@@ -1027,7 +1030,7 @@ all symbols stripped. The tarball includes all three executables and licenses.
 | --- | ---: | ---: | ---: | ---: |
 | `plak` | 81,903,112 | 67,232,472 | 71,031,984 | 61,277,272 |
 | `plakous-js-host` | 2,500,000 | 2,080,016 | 2,298,784 | 1,988,720 |
-| `monty` | 35,642,912 | 28,802,632 | 32,455,792 | 27,440,648 |
+| `plakous-py-host` (measured as `monty`, before the cell protocol) | 35,642,912 | 28,802,632 | 32,455,792 | 27,440,648 |
 | GNU rehearsal `.tar.gz` | - | 41,632,982 | - | 40,392,040 |
 
 | Wall time | Thin | Fat |
@@ -1102,6 +1105,8 @@ git pull && just install release
 Either installs a new snapshot and moves the symlinks from §6.1 to it, so
 new launches use the new binary once the install succeeds; a running TUI shows
 `new build installed · /reload`. There is no in-product updater.
+Installation removes an obsolete `monty` launch symlink only when it points
+into the Plak sidecar or snapshot roots; independent files and links remain.
 
 ### 6.4 Linkers
 
@@ -1255,7 +1260,7 @@ it. `tools/release/release_tarball.py` then writes
 `plak-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
 tarball in the output directory (default `<target dir>/release-dist`). The
 tarball holds one directory `plak-<version>-<triple>/` with `plak`,
-`plakous-js-host`, `monty`, the repository `LICENSE`, `THIRD-PARTY` (each
+`plakous-js-host`, `plakous-py-host`, the repository `LICENSE`, `THIRD-PARTY` (each
 package outside this repository, vendored ones included, that the three
 executables reach through normal dependency edges for the target, with its
 `cargo metadata` license and repository) and `licenses/<name>-<version>/`
@@ -1435,11 +1440,8 @@ Zlib at a 0.8 confidence threshold. The reviewed transitive allowances are:
   `foldhash` through `hashbrown`.
 - **MPL-2.0** is an allowance with no current consumer in the lock graph.
 
-`winx` 0.36.4 has a package-and-version-specific allowance for
-`Apache-2.0 WITH LLVM-exception`, matching its bundled license. It is the
-Windows adapter in Monty's `cap-std` graph, audited by `just dev-tools deny` even though
-Windows is not a supported product platform.
-`ar_archive_writer` 0.5.3 has the same allowance: it is the build-time archive
+`ar_archive_writer` 0.5.3 has a package-and-version-specific allowance for
+`Apache-2.0 WITH LLVM-exception`, matching its bundled license: it is the build-time archive
 writer of `psm`, reached through Ruff's parser `stacker`. `minicbor` 2.3.0 and
 `minicbor-serde` 0.7.1 have package-and-version-specific allowances for the
 permissive `BlueOak-1.0.0`: Monty 1.x serializes session dumps through them,
@@ -1482,7 +1484,7 @@ client or official native host binary is part of this execution path.
 Exact pins (`=`) are used where a version is a reviewed artifact rather than a
 range: `filedescriptor`, `jsonwebtoken`, `nix`, `portable-pty`, `rusqlite`,
 `serde_json_canonicalizer`, `tracing`, `vt100`, the OpenTelemetry family, and
-the external `monty-pool` / `monty-proto` / `monty-types` / `monty-alloc` at
+the external `monty-proto` / `monty-types` / `monty-alloc` at
 `=1.2.0`.
 
 ## 8. Repository settings

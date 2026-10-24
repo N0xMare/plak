@@ -92,14 +92,14 @@ case "$target_dir" in
   /*) ;;
   *) target_dir="$PWD/$target_dir" ;;
 esac
-monty_worker=''
+py_host=''
 prepare_tests() {
-  if [[ -n "$monty_worker" ]]; then return; fi
+  if [[ -n "$py_host" ]]; then return; fi
   worker_manifest="$(mktemp "$TMPDIR/plak-worker-build.XXXXXX")"
   trap 'rm -f "$worker_manifest"' EXIT
-  if [[ "${PLAK_MONTY_WORKER+x}" == x ]]; then
+  if [[ "${PLAK_PY_HOST+x}" == x ]]; then
     worker_mode=explicit
-    worker_input="$PLAK_MONTY_WORKER"
+    worker_input="$PLAK_PY_HOST"
   else
     worker_mode=built
     # The worker comes out of the test build itself. A `cargo build` would leave
@@ -108,7 +108,7 @@ prepare_tests() {
     cargo test --no-run --locked --workspace --all-features --message-format=json ${target_args[@]+"${target_args[@]}"} >"$worker_manifest"
     worker_input="$worker_manifest"
   fi
-  monty_worker="$(python3 - "$worker_mode" "$worker_input" <<'PY_WORKER'
+  py_host="$(python3 - "$worker_mode" "$worker_input" <<'PY_WORKER'
 import json
 import os
 from pathlib import Path
@@ -119,17 +119,17 @@ if mode == "built":
     records = [json.loads(line) for line in Path(value).read_text().splitlines() if line.strip()]
     paths = {row["executable"] for row in records
              if row.get("reason") == "compiler-artifact"
-             and row.get("target", {}).get("name") == "monty"
+             and row.get("target", {}).get("name") == "plakous-py-host"
              and "bin" in row.get("target", {}).get("kind", []) and row.get("executable")
              and not row.get("profile", {}).get("test")}
     if len(paths) != 1:
-        raise SystemExit("gate requires exactly one built monty executable")
+        raise SystemExit("gate requires exactly one built plakous-py-host executable")
     value = paths.pop()
 if not value:
-    raise SystemExit("PLAK_MONTY_WORKER must name an executable file")
+    raise SystemExit("PLAK_PY_HOST must name an executable file")
 path = Path(value).resolve(strict=True)
 if not path.is_file() or not os.access(path, os.X_OK):
-    raise SystemExit("gate requires an executable Monty worker")
+    raise SystemExit("gate requires an executable Python cell worker")
 print(path)
 PY_WORKER
   )"
@@ -169,7 +169,7 @@ run_lane() {
   local profile=$1
   shift
   prepare_tests
-  PLAK_HOME="$isolated_home" PLAK_MONTY_WORKER="$monty_worker" cargo nextest run --locked --workspace --all-features \
+  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" cargo nextest run --locked --workspace --all-features \
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
 
@@ -268,21 +268,21 @@ run_timed() {
   echo "== group: $group =="
   started=$SECONDS
   # A subshell keeps set -e fail-fast inside the group; the parent records the
-  # status and goes on to the next group. A prepared monty_worker survives a
+  # status and goes on to the next group. A prepared py_host survives a
   # failed lane so later lanes reuse the same build.
   worker_state="$(mktemp)"
-  printf '%s\n' "$monty_worker" >"$worker_state"
+  printf '%s\n' "$py_host" >"$worker_state"
   set +e
   (
     set -Ee
-    monty_worker="$(head -n 1 "$worker_state")"
-    trap 'printf "%s\n" "$monty_worker" >"$worker_state"' ERR
+    py_host="$(head -n 1 "$worker_state")"
+    trap 'printf "%s\n" "$py_host" >"$worker_state"' ERR
     run_group "$group"
-    printf '%s\n' "$monty_worker" >"$worker_state"
+    printf '%s\n' "$py_host" >"$worker_state"
   )
   status=$?
   set -e
-  monty_worker="$(head -n 1 "$worker_state")"
+  py_host="$(head -n 1 "$worker_state")"
   rm -f "$worker_state"
   echo "== time: $group $((SECONDS - started)) s =="
   if [[ "$status" -ne 0 ]]; then

@@ -704,7 +704,7 @@ def rehearse(home, options):
             raise ValueError("disposable_home")
         stage = temporary / "stage"
         stage.mkdir(mode=0o700)
-        for name in ("plak", "plakous-js-host", "monty"):
+        for name in ("plak", "plakous-js-host", "plakous-py-host"):
             shutil.copyfile(output / name, stage / name)
             (stage / name).chmod(0o755)
         empty = temporary / "empty"

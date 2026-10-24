@@ -32,7 +32,7 @@ import release_tarball  # noqa: E402
 VERSION = "0.0.2"
 LINUX = "x86_64-unknown-linux-musl"
 DARWIN = "aarch64-apple-darwin"
-EXECUTABLES = ("plak", "plakous-js-host", "monty")
+EXECUTABLES = ("plak", "plakous-js-host", "plakous-py-host")
 
 
 def sha(data: bytes) -> str:
@@ -157,7 +157,7 @@ class ReleaseTarballTests(unittest.TestCase):
         with tarfile.open(tarball) as archive:
             members = {member.name: member for member in archive.getmembers()}
             self.assertEqual(sorted(members), sorted([
-                stem, f"{stem}/LICENSE", f"{stem}/THIRD-PARTY", f"{stem}/monty", f"{stem}/plak",
+                stem, f"{stem}/LICENSE", f"{stem}/THIRD-PARTY", f"{stem}/plakous-py-host", f"{stem}/plak",
                 f"{stem}/plakous-js-host", f"{stem}/licenses",
                 f"{stem}/licenses/deep-1.0.0", f"{stem}/licenses/deep-1.0.0/COPYING",
                 f"{stem}/licenses/left-1.0.0", f"{stem}/licenses/left-1.0.0/LICENSE-APACHE",
@@ -200,10 +200,10 @@ class ReleaseTarballTests(unittest.TestCase):
         artifacts = self.base / "artifacts"
         write_executables(artifacts)
         metadata = fake_metadata(self.base / "meta")
-        (artifacts / "monty").write_bytes(elf(False))
+        (artifacts / "plakous-py-host").write_bytes(elf(False))
         release_tarball.pack(VERSION, LINUX, artifacts, self.base / "ok", 0, metadata, static=True)
-        (artifacts / "monty").write_bytes(elf(True))
-        with self.assertRaisesRegex(release_tarball.ReleaseError, "monty: dynamically linked"):
+        (artifacts / "plakous-py-host").write_bytes(elf(True))
+        with self.assertRaisesRegex(release_tarball.ReleaseError, "plakous-py-host: dynamically linked"):
             release_tarball.pack(VERSION, LINUX, artifacts, self.base / "no", 0, metadata,
                                  static=True)
         self.assertFalse((self.base / "no").exists())
@@ -370,7 +370,7 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual((snapshot / "export-version").read_text(), "7\n")
         self.assertEqual((snapshot / "binary-id").read_text(), "fixture\n")
         self.assertEqual((snapshot / "binary-id").stat().st_mode & 0o777, 0o444)
-        for name in ("plakous-js-host", "monty"):
+        for name in ("plakous-js-host", "plakous-py-host"):
             worker = self.lib / "sidecars" / name / sha(executable_bytes(name)) / name
             self.assertEqual(os.readlink(snapshot / name), str(worker))
             self.assertEqual(os.readlink(self.home / ".local/bin" / name), str(worker))
@@ -388,8 +388,8 @@ class InstallScriptTests(unittest.TestCase):
         block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
         artifacts = self.base / "built"
         write_executables(artifacts)
-        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=release; '
-                  + block + '\nprintf "%s\\n" "$bin" "$js_host" "$monty"')
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=release; '
+                  + block + '\nprintf "%s\\n" "$bin" "$js_host" "$py_host"')
         built = subprocess.run(["bash", "-c", script, "snapshot",
                                 *(str(artifacts / name) for name in EXECUTABLES)],
                                env=self.env, capture_output=True, text=True, check=False)
