@@ -97,6 +97,9 @@ struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
     quit_join_deadline: Option<Instant>,
     cancel_unsettled: Option<String>,
     cancel_pending: bool,
+    /// The runtime accepted a cancel for this turn, or reported the turn
+    /// already ended; a refused request leaves this unset.
+    cancel_accepted: bool,
     cancel_settle_deadline: Option<Instant>,
     interrupted_status_pending: bool,
     abandoned_by_quit: bool,
@@ -136,6 +139,8 @@ mod delivery;
 mod finish;
 mod queue_projection;
 #[cfg(test)]
+pub(in crate::runtime) mod quit_trace;
+#[cfg(test)]
 pub(in crate::runtime) mod wake_trace;
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
@@ -158,6 +163,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             quit_join_deadline: None,
             cancel_unsettled: None,
             cancel_pending: false,
+            cancel_accepted: false,
             cancel_settle_deadline: None,
             interrupted_status_pending: false,
             abandoned_by_quit: false,

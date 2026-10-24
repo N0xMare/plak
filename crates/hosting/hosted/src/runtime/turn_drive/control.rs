@@ -30,6 +30,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         let _ = self.host.events.notice(row);
     }
 
+    async fn request_cancel(&self) -> Result<CancellationStatus, plakous::agent::ControlError> {
+        #[cfg(test)]
+        if let Some(error) = super::quit_trace::take_cancel_refusal(&self.host.session.id) {
+            return Err(error);
+        }
+        self.control.request_cancel().await
+    }
+
     /// Whether [`Self::poll_actions`] takes an action: after a quit it no
     /// longer reads the mailbox, so readiness must not wake the loop.
     pub(super) const fn takes_actions(&self) -> bool {
@@ -106,8 +114,29 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     // Spec 02 §5.3 ladder step 3: quit escalates a stuck cancel.
                     // The quit intent is honoured even when the runtime never
                     // joins; the turn is abandoned without a synthesised
-                    // terminal rather than the host hanging on one.
-                    let settlement = settle_cancel(self.control.cancel(), QUIT_CANCEL_GRACE).await;
+                    // terminal rather than the host hanging on one. A cancel
+                    // the runtime already accepted (a busy quit sends
+                    // Interrupt first) is the request: quit only bounds its
+                    // settlement and never issues a second cancel command,
+                    // whose durable acceptance would race the abandonment. A
+                    // refused interrupt accepted nothing, so quit requests.
+                    let settlement = if self.turn_result.is_some() {
+                        #[cfg(test)]
+                        super::quit_trace::step(&self.host.session.id, "terminal");
+                        CancelSettlement::Settled
+                    } else if self.cancel_accepted {
+                        #[cfg(test)]
+                        super::quit_trace::step(&self.host.session.id, "bounded");
+                        let settled = async {
+                            self.control.wait_until_settled().await;
+                            Ok::<(), plakous::agent::ControlError>(())
+                        };
+                        settle_cancel(settled, QUIT_CANCEL_GRACE).await
+                    } else {
+                        #[cfg(test)]
+                        super::quit_trace::step(&self.host.session.id, "requested");
+                        settle_cancel(self.control.cancel(), QUIT_CANCEL_GRACE).await
+                    };
                     self.cancel_unsettled = None;
                     if let CancelSettlement::Unsettled(detail) = &settlement {
                         self.cancel_unsettled = Some(detail.clone());
@@ -115,6 +144,23 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             NoticeScope::Host,
                             format!("quit escalated a cancel that did not settle: {detail}"),
                         ));
+                        // Persist the escalation notice here, before the
+                        // queue write, rather than at whichever loop pass the
+                        // 100 ms join leaves: the product commit sequence of a
+                        // quit must not depend on whether an event arrives.
+                        #[cfg(test)]
+                        let revision = self.host.session.store_revision;
+                        crate::runtime::events::commit_notice_intents(
+                            self.host.events,
+                            self.host.store,
+                            self.host.home,
+                            self.host.log,
+                            self.host.session,
+                        );
+                        #[cfg(test)]
+                        if self.host.session.store_revision != revision {
+                            super::quit_trace::step(&self.host.session.id, "notice committed");
+                        }
                     }
                     if self.host.session.store_revision != 0 {
                         let _ = commit_session_update(
@@ -127,6 +173,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                                 true
                             },
                         );
+                        #[cfg(test)]
+                        super::quit_trace::step(&self.host.session.id, "queue paused");
                     }
                     self.quit_after_terminal = true;
                     self.quit_join_deadline = Some(Instant::now() + QUIT_RESULT_JOIN);
@@ -261,12 +309,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         detail: Some(detail),
                     });
                 }
-                Ok(UserAction::Interrupt) => match self.control.request_cancel().await {
-                    Ok(CancellationStatus::AlreadyTerminal) => {}
+                Ok(UserAction::Interrupt) => match self.request_cancel().await {
+                    Ok(CancellationStatus::AlreadyTerminal) => self.cancel_accepted = true,
                     Ok(
                         status @ (CancellationStatus::AlreadyRequested
                         | CancellationStatus::Requested),
                     ) => {
+                        self.cancel_accepted = true;
                         self.cancel_pending = true;
                         self.projection.cancel_requested = true;
                         if matches!(status, CancellationStatus::Requested)
@@ -287,7 +336,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     // runtime drops a turn from its admitted set only after
                     // publishing that turn's terminal. The host waits for that
                     // terminal instead of latching an unsettled cancel.
-                    Err(error) if error.turn_is_no_longer_admitted() => {}
+                    Err(error) if error.turn_is_no_longer_admitted() => {
+                        self.cancel_accepted = true;
+                    }
                     Err(error) => {
                         let detail = format!(
                             "cancel was refused by the runtime ({error}); the turn is still running"

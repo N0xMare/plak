@@ -236,6 +236,155 @@ fn disconnected_control_plane_abandons_unsettled_cancel_within_quit_budget() {
     quit_grace_fixture(true, QuitIntent::Disconnected, false);
 }
 
+/// A busy stop sends `Interrupt` and then `Quit`. Quit bounds the settlement
+/// of the one cancel the interrupt requested and records no second cancel
+/// command, whose durable acceptance before the abandonment would depend on
+/// timing and make the runtime's commit sequence differ between runs.
+#[test]
+fn a_quit_after_an_interrupt_records_exactly_one_cancel_command() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = serde_json::json!({
+        "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+        "stall_ignores_cancellation": true,
+        "steps": [{"stream": [{"text": "interrupt then quit"}, {"stall": 30000}]}]
+    });
+    let plan: Arc<plakous_offline_crash_harness::script::ScriptPlan> =
+        Arc::new(serde_json::from_value(plan).unwrap());
+    let (config, _) = scripted_host_with(root.path(), plan);
+    let session_id = config.session.id.clone();
+    let store = Arc::clone(&config.store);
+    let sessions = config.state_roots.runtime_sessions().unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("start".into()));
+    wait_for(
+        &events,
+        &mut seen,
+        "assistant prefix",
+        |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("interrupt then quit")),
+    );
+    send_attached_action(&actions, UserAction::Interrupt);
+    wait_for(
+        &events,
+        &mut seen,
+        "interrupting",
+        |event| matches!(event, HostEvent::Status { phase, .. } if phase == "interrupting"),
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let record = store.load(&session_id).unwrap();
+    let page = executor
+        .block_on(sessions.feed_page(FeedPageRequest::after(FeedCursor::start(
+            record.plakous_locator.unwrap().session_id(),
+        ))))
+        .unwrap()
+        .unwrap();
+    let FeedPage::Records { records, .. } = page else {
+        panic!("the whole feed is retained");
+    };
+    let cancels = records
+        .iter()
+        .flat_map(plakous::sessions::feed::FeedRecord::facts)
+        .filter(|fact| {
+            matches!(
+                fact,
+                plakous::sessions::feed::FeedFact::CommandAccepted {
+                    kind: plakous::sessions::feed::FeedCommandKind::Cancel,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(cancels, 1, "{records:#?}");
+    assert_eq!(
+        crate::runtime::turn_drive::quit_trace::steps(&session_id),
+        ["bounded", "notice committed", "queue paused"],
+        "quit must bound the accepted cancel and commit its notice before the queue write"
+    );
+    assert!(
+        record
+            .transcript
+            .rows()
+            .iter()
+            .any(|(line, _)| line.is_error()
+                && line.text().is_some_and(|text| {
+                    text.contains("quit escalated a cancel that did not settle")
+                        && text.contains("300ms")
+                })),
+        "the escalation notice is stored"
+    );
+}
+
+/// An interrupt the runtime refuses at ingress accepted no cancel, so the
+/// quit that follows requests one instead of bounding a cancel nobody
+/// requested and abandoning the turn.
+#[test]
+fn a_quit_after_a_refused_interrupt_requests_the_cancel() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = serde_json::json!({
+        "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+        "steps": [{"stream": [{"text": "refused interrupt then quit"}, {"stall": 30000}]}]
+    });
+    let plan: Arc<plakous_offline_crash_harness::script::ScriptPlan> =
+        Arc::new(serde_json::from_value(plan).unwrap());
+    let (config, _) = scripted_host_with(root.path(), plan);
+    let session_id = config.session.id.clone();
+    let store = Arc::clone(&config.store);
+    let sessions = config.state_roots.runtime_sessions().unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    crate::runtime::turn_drive::quit_trace::refuse_next_cancel(
+        &session_id,
+        crate::runtime::test_support::actual_ingress_backpressure(),
+    );
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("start".into()));
+    wait_for(
+        &events,
+        &mut seen,
+        "assistant prefix",
+        |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("refused interrupt then quit")),
+    );
+    send_attached_action(&actions, UserAction::Interrupt);
+    wait_for(
+        &events,
+        &mut seen,
+        "refused cancel notice",
+        |event| matches!(event, HostEvent::Status { detail: Some(detail), .. } if detail.contains("cancel was refused by the runtime")),
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    assert_eq!(
+        crate::runtime::turn_drive::quit_trace::steps(&session_id).first(),
+        Some(&"requested")
+    );
+    let record = store.load(&session_id).unwrap();
+    let page = executor
+        .block_on(sessions.feed_page(FeedPageRequest::after(FeedCursor::start(
+            record.plakous_locator.unwrap().session_id(),
+        ))))
+        .unwrap()
+        .unwrap();
+    let FeedPage::Records { records, .. } = page else {
+        panic!("the whole feed is retained");
+    };
+    let cancels = records
+        .iter()
+        .flat_map(plakous::sessions::feed::FeedRecord::facts)
+        .filter(|fact| {
+            matches!(
+                fact,
+                plakous::sessions::feed::FeedFact::CommandAccepted {
+                    kind: plakous::sessions::feed::FeedCommandKind::Cancel,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(cancels, 1, "{records:#?}");
+}
+
 #[derive(Debug)]
 enum QuitIntent {
     Explicit,

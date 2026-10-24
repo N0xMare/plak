@@ -3380,7 +3380,12 @@ its own.
 
 **Quit restores the terminal and abandons runtime ownership.** The cooked
 terminal prints a resume hint only for a published session, then requests
-bounded cancellation of the root, giving it up to 300 ms to settle. A quick
+bounded cancellation of the root, giving it up to 300 ms to settle. A cancel
+the runtime already accepted for the turn (a busy stop sends an interrupt
+before its quit) is not requested again, even when it has already settled:
+quit bounds the settlement of that one request. An interrupt the runtime
+refused at ingress accepted no cancel, so quit requests one; a turn whose
+terminal the host already holds needs none. A quick
 local cancel retains its ordinary interrupted terminal and transcript. After
 settlement, quit gives the terminal result another 100 ms to become observable;
 if it remains late, the host abandons without synthesizing an interrupted

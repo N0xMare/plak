@@ -73,64 +73,9 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
 
 use super::*;
 use crate::runtime::test_kit::TestExtension;
-use crate::runtime::test_support::fresh_injected_attached_host;
+use crate::runtime::test_support::{actual_ingress_backpressure, fresh_injected_attached_host};
 use crate::sessions::SessionRecord;
 use std::sync::{Arc, Mutex};
-
-fn actual_ingress_backpressure() -> plakous::agent::ControlError {
-    use plakous::sessions::{
-        AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend,
-        SessionOperationId,
-    };
-    use std::future::Future;
-    let root = tempfile::tempdir().unwrap();
-    let controller = plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
-        plakous_offline_crash_harness::protocol::CrashBoundary::None,
-        root.path().join("ingress.jsonl"),
-    )
-    .unwrap();
-    let binding = plakous_offline_crash_harness::runtime_binding(root.path(), controller).unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        let sessions = AgentSessions::new(
-            SessionBackend::sqlite(root.path().join("ingress.sqlite3")).unwrap(),
-        )
-        .unwrap();
-        let CreateSessionOutcome::Created { session, .. } = sessions
-            .create(CreateSessionRequest::new(
-                SessionOperationId::new("create:ingress-probe").unwrap(),
-                binding,
-            ))
-            .await
-            .unwrap()
-        else {
-            panic!("ingress probe session")
-        };
-        // Synchronous polls prevent the actor from consuming ingress between them.
-        std::future::poll_fn(|cx| {
-            for index in 0..=8_192 {
-                let mut dispatch =
-                    Box::pin(session.agent().command(plakous::agent::TurnCommand::Start {
-                        command_id:
-                            plakous::agent::CommandId::new(format!("ingress:{index}")).unwrap(),
-                        input: String::new().into(),
-                    }));
-                if let std::task::Poll::Ready(result) = dispatch.as_mut().poll(cx) {
-                    let Err(error) = result else {
-                        panic!("actor cannot classify without a yield")
-                    };
-                    assert_eq!(error.kind(), plakous::agent::ControlErrorKind::Backpressure);
-                    return std::task::Poll::Ready(error);
-                }
-            }
-            panic!("bounded ingress did not fill")
-        })
-        .await
-    })
-}
 
 struct SubmissionFailure {
     fail_prepare: bool,

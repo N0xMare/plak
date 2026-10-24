@@ -449,3 +449,58 @@ impl fault_store::StoreFaults for SlowProjection {
         Ok(())
     }
 }
+
+/// A real ingress backpressure refusal from a filled actor mailbox.
+pub(super) fn actual_ingress_backpressure() -> plakous::agent::ControlError {
+    use plakous::sessions::{
+        AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend,
+        SessionOperationId,
+    };
+    use std::future::Future;
+    let root = tempfile::tempdir().unwrap();
+    let controller = BoundaryController::quiet_from_evidence_path(
+        CrashBoundary::None,
+        root.path().join("ingress.jsonl"),
+    )
+    .unwrap();
+    let binding = runtime_binding(root.path(), controller).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let sessions = AgentSessions::new(
+            SessionBackend::sqlite(root.path().join("ingress.sqlite3")).unwrap(),
+        )
+        .unwrap();
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new("create:ingress-probe").unwrap(),
+                binding,
+            ))
+            .await
+            .unwrap()
+        else {
+            panic!("ingress probe session")
+        };
+        // Synchronous polls prevent the actor from consuming ingress between them.
+        std::future::poll_fn(|cx| {
+            for index in 0..=8_192 {
+                let mut dispatch =
+                    Box::pin(session.agent().command(plakous::agent::TurnCommand::Start {
+                        command_id: CommandId::new(format!("ingress:{index}")).unwrap(),
+                        input: String::new().into(),
+                    }));
+                if let std::task::Poll::Ready(result) = dispatch.as_mut().poll(cx) {
+                    let Err(error) = result else {
+                        panic!("actor cannot classify without a yield")
+                    };
+                    assert_eq!(error.kind(), plakous::agent::ControlErrorKind::Backpressure);
+                    return std::task::Poll::Ready(error);
+                }
+            }
+            panic!("bounded ingress did not fill")
+        })
+        .await
+    })
+}
