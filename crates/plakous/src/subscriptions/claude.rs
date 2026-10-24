@@ -1,9 +1,10 @@
 //! The Claude OAuth subscription manager behind native operations.
 
 use super::{
-    Arc, LoadedAcceptance, NativeProvider, NativeSubscriptionError, NativeSubscriptions,
-    PRIMARY_SLOT, SubscriptionRequestGate, Timestamp, credential_refresh_observer,
-    map_claude_error, map_claude_offline_status, run_blocking,
+    Arc, LoadedAcceptance, NativeModelSummary, NativeModelVisibility, NativeProvider,
+    NativeSubscriptionError, NativeSubscriptions, PRIMARY_SLOT, SubscriptionRequestClass,
+    SubscriptionRequestGate, Timestamp, credential_refresh_observer, map_claude_error,
+    map_claude_offline_status, run_blocking,
 };
 
 pub(super) struct ClaudeOnline {
@@ -110,5 +111,44 @@ impl NativeSubscriptions {
             })
         })
         .await?
+    }
+
+    /// The enrolled Claude OAuth models, behind one catalog permit.
+    pub(super) async fn claude_catalog_models(
+        &self,
+        gate: Arc<dyn SubscriptionRequestGate>,
+    ) -> Result<Vec<NativeModelSummary>, NativeSubscriptionError> {
+        let online = self
+            .claude_online_with_gate(Some(gate.clone()), true)
+            .await?;
+        let mut permit = gate
+            .acquire(SubscriptionRequestClass::Catalog)
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        permit
+            .authorize_dispatch()
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        Ok(online
+            .manager
+            .enrolled_catalog()
+            .map_err(map_claude_error)?
+            .into_iter()
+            .map(|entry| NativeModelSummary {
+                exact_id: entry.exact_id().to_owned(),
+                visibility: NativeModelVisibility::List,
+                native_tool_mode: None,
+                streaming: true,
+                tools: true,
+                reasoning_efforts: plakous_anthropic::claude_oauth_reasoning_effort_options(
+                    entry.exact_id(),
+                )
+                .to_vec(),
+                default_reasoning_effort: None,
+                service_tiers: Vec::new(),
+                default_service_tier: None,
+                // Claude publishes no OAuth catalog window; this is
+                // the enrolled row's window, the one the session runs at.
+                reported_context_length: Some(entry.input_tokens()),
+            })
+            .collect())
     }
 }

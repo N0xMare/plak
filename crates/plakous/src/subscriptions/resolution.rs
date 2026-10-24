@@ -71,6 +71,10 @@ impl ResolvedProvider {
 
     /// Returns a one-way binding to the exact selected login epoch. A fresh
     /// credential generation preserves this value; relogin does not.
+    ///
+    /// # Errors
+    ///
+    /// Returns the digest error if the binding input cannot be hashed.
     pub fn credential_selection_binding(&self) -> Result<Digest, DigestError> {
         Digest::sha256(
             DigestDomain::ModelBinding,

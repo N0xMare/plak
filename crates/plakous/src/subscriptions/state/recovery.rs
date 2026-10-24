@@ -273,16 +273,13 @@ pub(super) fn login_recovery_required_for_status(
             (current_generation, marker.credential_generation),
             (Some(current), Some(pinned)) if current > pinned
         )
+        && let Some(current) = current_generation
     {
-        if let Some(current) = current_generation {
-            match repin_cleared_login_recovery(paths, provider, &marker, current) {
-                Ok(()) => return Ok(false),
-                Err(_) => {
-                    quarantine(&LOGIN_RECOVERY_QUARANTINE, key)?;
-                    return Ok(true);
-                }
-            }
+        if repin_cleared_login_recovery(paths, provider, &marker, current).is_ok() {
+            return Ok(false);
         }
+        quarantine(&LOGIN_RECOVERY_QUARANTINE, key)?;
+        return Ok(true);
     }
     // A durable Unknown under the login this marker cleared is the record's
     // own lifecycle, not a recovery-state mismatch, so it never sets the

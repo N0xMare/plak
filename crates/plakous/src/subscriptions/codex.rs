@@ -1,9 +1,11 @@
 //! The Codex subscription manager behind native operations.
 
 use super::{
-    Arc, LoadedAcceptance, NATIVE_INFERENCE_OPERATION_TIMEOUT, NativeProvider,
-    NativeSubscriptionError, NativeSubscriptions, SubscriptionRequestGate, Timestamp,
-    credential_refresh_observer, map_codex_error, map_codex_status, run_blocking,
+    Arc, LoadedAcceptance, NATIVE_INFERENCE_OPERATION_TIMEOUT, NativeModelSummary,
+    NativeModelVisibility, NativeProvider, NativeServiceTierSummary, NativeSubscriptionError,
+    NativeSubscriptions, SubscriptionRequestGate, Timestamp, credential_refresh_observer,
+    facade_codex_visibility, facade_native_tool_mode, map_codex_error, map_codex_status,
+    run_blocking,
 };
 
 pub(super) fn codex_native_http_config()
@@ -130,5 +132,55 @@ impl NativeSubscriptions {
             })
         })
         .await?
+    }
+
+    /// The account-admitted text models of a fresh Codex catalog.
+    pub(super) async fn codex_catalog_models(
+        &self,
+        gate: Arc<dyn SubscriptionRequestGate>,
+    ) -> Result<Vec<NativeModelSummary>, NativeSubscriptionError> {
+        let online = self.codex_online_with_gate(Some(gate), true).await?;
+        let resolver = plakous_openai::CodexModelResolver::new(
+            Arc::clone(&online.manager),
+            online.client.with_observer(self.exchange_observer.clone()),
+            codex_native_http_config()?,
+        )
+        .map_err(map_codex_error)?;
+        let resolver = if self.catalog_retries {
+            resolver
+        } else {
+            resolver.without_catalog_retries()
+        };
+        let catalog = resolver.refresh_catalog().await.map_err(map_codex_error)?;
+        Ok(catalog
+            .entries()
+            .iter()
+            .filter(|entry| entry.supports_text())
+            .map(|entry| NativeModelSummary {
+                exact_id: entry.model_id().to_owned(),
+                visibility: entry
+                    .visibility()
+                    .map_or(NativeModelVisibility::None, facade_codex_visibility),
+                native_tool_mode: facade_native_tool_mode(entry.tool_mode()),
+                streaming: true,
+                tools: entry.supports_tools(),
+                reasoning_efforts: entry.reasoning_effort_options().to_vec(),
+                default_reasoning_effort: entry.default_reasoning_effort(),
+                service_tiers: entry
+                    .service_tiers()
+                    .iter()
+                    .map(|tier| NativeServiceTierSummary {
+                        id: tier.id().to_owned(),
+                        name: tier.name().to_owned(),
+                        description: tier.description().to_owned(),
+                    })
+                    .collect(),
+                default_service_tier: entry.default_service_tier().map(str::to_owned),
+                reported_context_length: entry
+                    .capacity_facts()
+                    .context_window()
+                    .map(|window| u64::from(window.get())),
+            })
+            .collect())
     }
 }

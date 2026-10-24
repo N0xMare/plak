@@ -1,9 +1,10 @@
 //! The SuperGrok subscription manager behind native operations.
 
 use super::{
-    Arc, LoadedAcceptance, NATIVE_INFERENCE_OPERATION_TIMEOUT, NativeProvider,
-    NativeSubscriptionError, NativeSubscriptions, PRIMARY_SLOT, SubscriptionRequestGate, Timestamp,
-    credential_refresh_observer, map_xai_error, map_xai_offline_status, run_blocking,
+    Arc, LoadedAcceptance, NATIVE_INFERENCE_OPERATION_TIMEOUT, NativeModelSummary,
+    NativeModelVisibility, NativeProvider, NativeSubscriptionError, NativeSubscriptions,
+    PRIMARY_SLOT, SubscriptionRequestGate, Timestamp, credential_refresh_observer,
+    facade_xai_model_is_selectable, map_xai_error, map_xai_offline_status, run_blocking,
 };
 
 pub(super) fn xai_native_http_config()
@@ -140,5 +141,48 @@ impl NativeSubscriptions {
             })
         })
         .await?
+    }
+
+    /// The selectable models of a fresh SuperGrok catalog.
+    pub(super) async fn xai_catalog_models(
+        &self,
+        gate: Arc<dyn SubscriptionRequestGate>,
+    ) -> Result<Vec<NativeModelSummary>, NativeSubscriptionError> {
+        {
+            let online = self.xai_online_with_gate(None, true).await?;
+            online
+                .manager
+                .refresh_if_needed()
+                .await
+                .map_err(map_xai_error)?;
+        }
+        let online = self.xai_online_with_gate(Some(gate), true).await?;
+        let receipt = online
+            .manager
+            .refresh_catalog()
+            .await
+            .map_err(map_xai_error)?;
+        Ok(receipt
+            .entries()
+            .iter()
+            .filter(|entry| facade_xai_model_is_selectable(entry.model().as_str()))
+            .map(|entry| NativeModelSummary {
+                exact_id: entry.model().as_str().to_owned(),
+                visibility: NativeModelVisibility::List,
+                native_tool_mode: None,
+                streaming: true,
+                tools: true,
+                reasoning_efforts: plakous_xai::subscription_model_reasoning_effort_options(
+                    entry.model().as_str(),
+                )
+                .to_vec(),
+                default_reasoning_effort: None,
+                service_tiers: Vec::new(),
+                default_service_tier: None,
+                reported_context_length: Some(u64::from(
+                    entry.diagnostics().reported_context_length().get(),
+                )),
+            })
+            .collect())
     }
 }

@@ -102,20 +102,19 @@ impl LanguageModel for TurnScopedNativeModel {
             .bind_scope(native_inference_scope(plan.request().metadata().root())?)
             .ok();
         let prepared = Arc::clone(&self.inner).prepare_call(plan, context)?;
-        Ok(match inference_scope {
-            Some(scope) => scope_native_prepared_call(prepared, scope),
-            None => {
-                let record = prepared.record().clone();
-                drop(prepared);
-                PreparedModelCall::new(record, |_| {
-                    Box::pin(async {
-                        Err(ModelError::new(
-                            ModelErrorKind::ResourceLimit,
-                            "native subscription inference root is unavailable",
-                        ))
-                    })
+        Ok(if let Some(scope) = inference_scope {
+            scope_native_prepared_call(prepared, scope)
+        } else {
+            let record = prepared.record().clone();
+            drop(prepared);
+            PreparedModelCall::new(record, |_| {
+                Box::pin(async {
+                    Err(ModelError::new(
+                        ModelErrorKind::ResourceLimit,
+                        "native subscription inference root is unavailable",
+                    ))
                 })
-            }
+            })
         })
     }
 }

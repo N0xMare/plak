@@ -3,12 +3,10 @@
 use super::{
     Arc, CompatibilityStatus, Future, InMemorySubscriptionRequestGate, MODEL_CATALOG_DEADLINE,
     ModelId, NativeAuthStatus, NativeModelCatalog, NativeModelResolutionError, NativeModelSummary,
-    NativeModelVisibility, NativeProvider, NativeServiceTierSummary, NativeSubscriptionError,
-    NativeSubscriptionStatus, NativeSubscriptions, ResolvedModelDescriptor, RuntimeModelAuthority,
-    SubscriptionLimitSnapshot, SubscriptionRequestClass, SubscriptionRequestGate,
-    SubscriptionRequestLimits, SystemSubscriptionGateClock, codex_native_http_config,
-    dispatch_credential_admitted, facade_codex_visibility, facade_native_tool_mode,
-    facade_xai_model_is_selectable, map_claude_error, map_codex_error, map_xai_error, run_blocking,
+    NativeProvider, NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions,
+    ResolvedModelDescriptor, RuntimeModelAuthority, SubscriptionLimitSnapshot,
+    SubscriptionRequestClass, SubscriptionRequestGate, SubscriptionRequestLimits,
+    SystemSubscriptionGateClock, dispatch_credential_admitted, run_blocking,
 };
 
 #[cfg(test)]
@@ -154,127 +152,9 @@ impl NativeSubscriptions {
         let models =
             run_classified_model_catalog_with_gate(provider, status, gate, |gate| async move {
                 match provider {
-                    NativeProvider::Codex => {
-                        let online = self.codex_online_with_gate(Some(gate), true).await?;
-                        let resolver = plakous_openai::CodexModelResolver::new(
-                            Arc::clone(&online.manager),
-                            online.client.with_observer(self.exchange_observer.clone()),
-                            codex_native_http_config()?,
-                        )
-                        .map_err(map_codex_error)?;
-                        let resolver = if self.catalog_retries {
-                            resolver
-                        } else {
-                            resolver.without_catalog_retries()
-                        };
-                        let catalog = resolver.refresh_catalog().await.map_err(map_codex_error)?;
-                        Ok(catalog
-                            .entries()
-                            .iter()
-                            .filter(|entry| entry.supports_text())
-                            .map(|entry| NativeModelSummary {
-                                exact_id: entry.model_id().to_owned(),
-                                visibility: entry
-                                    .visibility()
-                                    .map_or(NativeModelVisibility::None, facade_codex_visibility),
-                                native_tool_mode: facade_native_tool_mode(entry.tool_mode()),
-                                streaming: true,
-                                tools: entry.supports_tools(),
-                                reasoning_efforts: entry.reasoning_effort_options().to_vec(),
-                                default_reasoning_effort: entry.default_reasoning_effort(),
-                                service_tiers: entry
-                                    .service_tiers()
-                                    .iter()
-                                    .map(|tier| NativeServiceTierSummary {
-                                        id: tier.id().to_owned(),
-                                        name: tier.name().to_owned(),
-                                        description: tier.description().to_owned(),
-                                    })
-                                    .collect(),
-                                default_service_tier: entry
-                                    .default_service_tier()
-                                    .map(str::to_owned),
-                                reported_context_length: entry
-                                    .capacity_facts()
-                                    .context_window()
-                                    .map(|window| u64::from(window.get())),
-                            })
-                            .collect())
-                    }
-                    NativeProvider::Xai => {
-                        {
-                            let online = self.xai_online_with_gate(None, true).await?;
-                            online
-                                .manager
-                                .refresh_if_needed()
-                                .await
-                                .map_err(map_xai_error)?;
-                        }
-                        let online = self.xai_online_with_gate(Some(gate), true).await?;
-                        let receipt = online
-                            .manager
-                            .refresh_catalog()
-                            .await
-                            .map_err(map_xai_error)?;
-                        Ok(receipt
-                            .entries()
-                            .iter()
-                            .filter(|entry| facade_xai_model_is_selectable(entry.model().as_str()))
-                            .map(|entry| NativeModelSummary {
-                                exact_id: entry.model().as_str().to_owned(),
-                                visibility: NativeModelVisibility::List,
-                                native_tool_mode: None,
-                                streaming: true,
-                                tools: true,
-                                reasoning_efforts:
-                                    plakous_xai::subscription_model_reasoning_effort_options(
-                                        entry.model().as_str(),
-                                    )
-                                    .to_vec(),
-                                default_reasoning_effort: None,
-                                service_tiers: Vec::new(),
-                                default_service_tier: None,
-                                reported_context_length: Some(u64::from(
-                                    entry.diagnostics().reported_context_length().get(),
-                                )),
-                            })
-                            .collect())
-                    }
-                    NativeProvider::Claude => {
-                        let online = self
-                            .claude_online_with_gate(Some(gate.clone()), true)
-                            .await?;
-                        let mut permit = gate
-                            .acquire(SubscriptionRequestClass::Catalog)
-                            .map_err(|_| NativeSubscriptionError::Internal)?;
-                        permit
-                            .authorize_dispatch()
-                            .map_err(|_| NativeSubscriptionError::Internal)?;
-                        Ok(online
-                            .manager
-                            .enrolled_catalog()
-                            .map_err(map_claude_error)?
-                            .into_iter()
-                            .map(|entry| NativeModelSummary {
-                                exact_id: entry.exact_id().to_owned(),
-                                visibility: NativeModelVisibility::List,
-                                native_tool_mode: None,
-                                streaming: true,
-                                tools: true,
-                                reasoning_efforts:
-                                    plakous_anthropic::claude_oauth_reasoning_effort_options(
-                                        entry.exact_id(),
-                                    )
-                                    .to_vec(),
-                                default_reasoning_effort: None,
-                                service_tiers: Vec::new(),
-                                default_service_tier: None,
-                                // Claude publishes no OAuth catalog window; this is
-                                // the enrolled row's window, the one the session runs at.
-                                reported_context_length: Some(entry.input_tokens()),
-                            })
-                            .collect())
-                    }
+                    NativeProvider::Codex => self.codex_catalog_models(gate).await,
+                    NativeProvider::Xai => self.xai_catalog_models(gate).await,
+                    NativeProvider::Claude => self.claude_catalog_models(gate).await,
                 }
             })
             .await?;

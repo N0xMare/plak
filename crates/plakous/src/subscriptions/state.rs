@@ -700,7 +700,8 @@ impl SubscriptionState {
 #[allow(
     clippy::expect_used,
     clippy::unwrap_used,
-    reason = "unit tests may assert with expect/unwrap"
+    clippy::too_many_lines,
+    reason = "unit tests may assert with expect/unwrap; scenario tests keep their steps in order"
 )]
 mod tests;
 

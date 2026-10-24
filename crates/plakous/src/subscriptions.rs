@@ -9,16 +9,6 @@
 //! Library-owned admission is the typed gate for catalog resolution and
 //! revalidation before an ordinary run.
 
-#![allow(
-    clippy::doc_markdown,
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    clippy::too_many_lines,
-    clippy::collapsible_if,
-    clippy::single_match_else,
-    reason = "SuperGrok/Codex product names; admit Result surface; status helpers"
-)]
-
 mod catalog;
 mod claude;
 mod codex;

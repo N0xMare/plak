@@ -2,9 +2,9 @@
 
 use super::{
     Arc, Duration, Future, Instant, LoginRecoveryOperation, NativeAuthStatus, NativeProvider,
-    NativeSubscriptionError, NativeSubscriptions, SubscriptionState, fmt, map_claude_error,
-    map_codex_error, map_codex_status, map_credential_status, map_xai_error, run_blocking,
-    unix_now,
+    NativeSubscriptionError, NativeSubscriptions, PrivateFilesystemLock, SubscriptionState, fmt,
+    map_claude_error, map_codex_error, map_codex_status, map_credential_status, map_xai_error,
+    run_blocking, unix_now,
 };
 
 /// Supported native login interaction modes.
@@ -522,38 +522,7 @@ impl NativeSubscriptions {
         mode: NativeLoginMode,
     ) -> Result<PendingNativeLogin, NativeSubscriptionError> {
         let lock = self.acquire_compatibility_lock(provider).await?;
-        // Login must open even when a prior credential is quarantined / recovery
-        // is armed — the operator's explicit login is how they heal that state.
-        // Retire only a quarantined slot or a record this build cannot use (a
-        // retired payload format or another profile); the latter is announced
-        // through `replaced_unusable_record`. A healthy credential remains in
-        // place until the new login commits.
-        let retire = match self.status_unlocked(provider).await {
-            Ok(status) => match status.credential() {
-                // Only the operator's confirmed replacement may retire it.
-                NativeAuthStatus::WrittenByNewerBuild => {
-                    return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
-                }
-                NativeAuthStatus::Quarantined => Some(false),
-                NativeAuthStatus::LoginRequired => Some(true),
-                _ => None,
-            },
-            Err(NativeSubscriptionError::CredentialProfileChanged) => Some(true),
-            Err(error) => return Err(error),
-        };
-        let replaced_unusable = retire == Some(true);
-        if retire.is_some() {
-            let status = self.logout_local_unlocked(provider).await?;
-            if !matches!(
-                status,
-                NativeAuthStatus::Revoked | NativeAuthStatus::SignedOut
-            ) {
-                return Err(NativeSubscriptionError::CredentialUnavailable);
-            }
-            let paths = self.state.clone();
-            run_blocking(move || paths.retire_login_recovery(provider)).await??;
-            lock.verify()?;
-        }
+        let replaced_unusable = self.retire_unusable_login(provider, &lock).await?;
         let pending = match provider {
             NativeProvider::Codex => {
                 let online = self.codex_online_for_login().await?;
@@ -631,5 +600,45 @@ impl NativeSubscriptions {
         }?;
         lock.verify()?;
         Ok(pending)
+    }
+
+    /// Login must open even when a prior credential is quarantined / recovery is
+    /// armed — the operator's explicit login is how they heal that state. Retire
+    /// only a quarantined slot or a record this build cannot use (a retired
+    /// payload format or another profile); the latter is announced through
+    /// `replaced_unusable_record`. A healthy credential remains in place until
+    /// the new login commits. Returns whether an unusable record was replaced.
+    async fn retire_unusable_login(
+        &self,
+        provider: NativeProvider,
+        lock: &PrivateFilesystemLock,
+    ) -> Result<bool, NativeSubscriptionError> {
+        let retire = match self.status_unlocked(provider).await {
+            Ok(status) => match status.credential() {
+                // Only the operator's confirmed replacement may retire it.
+                NativeAuthStatus::WrittenByNewerBuild => {
+                    return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
+                }
+                NativeAuthStatus::Quarantined => Some(false),
+                NativeAuthStatus::LoginRequired => Some(true),
+                _ => None,
+            },
+            Err(NativeSubscriptionError::CredentialProfileChanged) => Some(true),
+            Err(error) => return Err(error),
+        };
+        let replaced_unusable = retire == Some(true);
+        if retire.is_some() {
+            let status = self.logout_local_unlocked(provider).await?;
+            if !matches!(
+                status,
+                NativeAuthStatus::Revoked | NativeAuthStatus::SignedOut
+            ) {
+                return Err(NativeSubscriptionError::CredentialUnavailable);
+            }
+            let paths = self.state.clone();
+            run_blocking(move || paths.retire_login_recovery(provider)).await??;
+            lock.verify()?;
+        }
+        Ok(replaced_unusable)
     }
 }

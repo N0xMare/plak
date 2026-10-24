@@ -76,6 +76,11 @@ impl NativeProvider {
 /// immutable integration facts needed to construct a complete
 /// [`SelectedProviderConfiguration`](super::SelectedProviderConfiguration)
 /// without duplicating provider pins in an application.
+///
+/// # Errors
+///
+/// Returns [`NativeSubscriptionError::Internal`] if a pinned identifier does
+/// not validate.
 pub fn native_provider_route_selection(
     provider: NativeProvider,
     requested_model: ModelId,

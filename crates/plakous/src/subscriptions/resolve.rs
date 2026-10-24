@@ -652,6 +652,11 @@ impl NativeSubscriptions {
     /// Skips attach-time `revalidate_runtime_authority` and Claude OAuth
     /// `refresh_if_needed`. Codex and Grok still perform authenticated catalog
     /// discovery. First dispatch still revalidates.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same typed native resolution failures as
+    /// [`Self::resolve_gated_provider`], except authority revalidation.
     pub async fn resolve_gated_provider_for_attach(
         &self,
         selected: SelectedProviderConfiguration,
@@ -671,6 +676,11 @@ impl NativeSubscriptions {
     /// limits. Every root turn or session workflow receives an isolated copy of
     /// the inference allowance and retains it until the runtime publishes that
     /// root's terminal result.
+    ///
+    /// # Errors
+    ///
+    /// Returns the typed native resolution failures of
+    /// [`Self::resolve_gated_provider`].
     pub async fn resolve_turn_scoped_provider(
         &self,
         selected: SelectedProviderConfiguration,
@@ -702,6 +712,11 @@ impl NativeSubscriptions {
     /// Same turn gate and signature as dispatch resolution. Attach skips Claude
     /// `refresh_if_needed` and runtime authority revalidation; Codex/Grok catalog
     /// HTTP may still run. First dispatch still revalidates.
+    ///
+    /// # Errors
+    ///
+    /// Returns the typed native resolution failures of
+    /// [`Self::resolve_gated_provider_for_attach`].
     pub async fn resolve_turn_scoped_provider_for_attach(
         &self,
         selected: SelectedProviderConfiguration,
