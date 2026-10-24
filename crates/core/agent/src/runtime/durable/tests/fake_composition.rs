@@ -548,6 +548,61 @@ impl LocalCompositionSession for FakeSession {
                                 error: Some("cell raised".to_owned()),
                             }
                         }
+                        "emit many text items" => LocalCompositionResponse::Result {
+                            cell_id: "C".to_owned(),
+                            items: (0..300)
+                                .map(|line| {
+                                    LocalCompositionContentItem::Text(format!("line {line}"))
+                                })
+                                .collect(),
+                            error: None,
+                        },
+                        "yield many text items" => LocalCompositionResponse::Yielded {
+                            cell_id: "C".to_owned(),
+                            items: (0..300)
+                                .map(|line| {
+                                    LocalCompositionContentItem::Text(format!("line {line}"))
+                                })
+                                .collect(),
+                        },
+                        "emit large images" => LocalCompositionResponse::Result {
+                            cell_id: "C".to_owned(),
+                            items: (0..4)
+                                .map(|_| LocalCompositionContentItem::Image {
+                                    // Each inspect_image result can contain 196,608
+                                    // decoded bytes: four re-emissions exceed 1 MiB.
+                                    url: format!("data:image/png;base64,{}", "AAAA".repeat(65_536)),
+                                    detail: None,
+                                })
+                                .collect(),
+                            error: Some("cell raised after images".to_owned()),
+                        },
+                        "emit large text" => LocalCompositionResponse::Result {
+                            cell_id: "C".to_owned(),
+                            items: vec![LocalCompositionContentItem::Text(format!(
+                                "first{}last",
+                                "\u{0}\"\\é".repeat(400_000)
+                            ))],
+                            error: None,
+                        },
+                        "emit invalid image" => LocalCompositionResponse::Result {
+                            cell_id: "C".to_owned(),
+                            items: vec![
+                                LocalCompositionContentItem::Text("kept output".to_owned()),
+                                LocalCompositionContentItem::Image {
+                                    url: "https://example.invalid/image.png".to_owned(),
+                                    detail: None,
+                                },
+                            ],
+                            error: Some("cell raised".to_owned()),
+                        },
+                        "yield invalid image" => LocalCompositionResponse::Yielded {
+                            cell_id: "C".to_owned(),
+                            items: vec![LocalCompositionContentItem::Image {
+                                url: "https://example.invalid/image.png".to_owned(),
+                                detail: None,
+                            }],
+                        },
                         "emit empty text" => LocalCompositionResponse::Result {
                             cell_id: "C".to_owned(),
                             items: vec![

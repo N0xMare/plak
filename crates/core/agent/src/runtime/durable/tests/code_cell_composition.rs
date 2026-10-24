@@ -1109,6 +1109,257 @@ async fn empty_text_item_is_dropped_and_never_fails_the_cell() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+async fn a_cell_with_more_output_items_than_a_result_holds_completes_the_turn() -> TestResult {
+    // A cell that calls `text()` once per line can emit more items than one
+    // tool result holds. The projection joins them; the model reads every
+    // line and the turn completes instead of failing on the part limit.
+    let parts = fitted_composition_cell("emit many text items", None).await?;
+    let [ToolResultPart::Text(header), ToolResultPart::Text(joined)] = parts.as_slice() else {
+        panic!("expected exactly [header, joined] for this call")
+    };
+    assert!(header.text().starts_with("Script completed"));
+    let lines = (0..300)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>();
+    assert_eq!(joined.text(), lines.join("\n"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_cell_with_more_media_bytes_than_a_result_holds_completes_the_turn() -> TestResult {
+    let parts = fitted_composition_cell("emit large images", None).await?;
+    let [
+        ToolResultPart::Text(_),
+        ToolResultPart::Image(_),
+        ToolResultPart::Image(_),
+        ToolResultPart::Image(_),
+        ToolResultPart::Text(error),
+        ToolResultPart::Text(notice),
+    ] = parts.as_slice()
+    else {
+        panic!("expected header, three images, script error and counted notice")
+    };
+    assert_eq!(error.text(), "Script error:\ncell raised after images");
+    assert_eq!(
+        notice.text(),
+        "Warning: 1 images/audio omitted; one tool result holds at most 1048576 JSON-encoded bytes"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_cell_with_excessive_text_bytes_completes_the_turn() -> TestResult {
+    let parts = fitted_composition_cell("emit large text", None).await?;
+    let [ToolResultPart::Text(_), ToolResultPart::Text(text)] = parts.as_slice() else {
+        panic!("expected header and middle-cut text")
+    };
+    assert!(text.text().starts_with("first"));
+    assert!(text.text().ends_with("last"));
+    assert!(text.text().contains("bytes omitted"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_unrepresentable_media_item_preserves_status_text_and_script_error() -> TestResult {
+    let parts = fitted_composition_cell("emit invalid image", None).await?;
+    let [
+        ToolResultPart::Text(header),
+        ToolResultPart::Text(kept),
+        ToolResultPart::Text(notice),
+        ToolResultPart::Text(error),
+    ] = parts.as_slice()
+    else {
+        panic!("expected header, valid text, media refusal notice and script error")
+    };
+    assert!(header.text().starts_with("Script failed"));
+    assert_eq!(kept.text(), "kept output");
+    assert_eq!(
+        notice.text(),
+        "Warning: media output omitted: local composition media output is not a data URL"
+    );
+    assert_eq!(error.text(), "Script error:\ncell raised");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_yielded_invalid_image_keeps_the_cell_id_for_wait() -> TestResult {
+    let parts = fitted_composition_cell("yield invalid image", None).await?;
+    let [ToolResultPart::Text(header), ToolResultPart::Text(notice)] = parts.as_slice() else {
+        panic!("header and media notice")
+    };
+    assert!(header.text().starts_with("Script running with cell ID C"));
+    assert!(notice.text().contains("media output omitted"));
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupted_completed_cell_rebuilds_the_same_single_observation_cut() -> TestResult {
+    assert_interrupted_cell_observation("emit many text items").await
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupted_locator_bound_cell_rebuilds_the_same_single_observation_cut() -> TestResult {
+    assert_interrupted_cell_observation("yield many text items").await
+}
+
+async fn assert_interrupted_cell_observation(source: &str) -> TestResult {
+    let uninterrupted = composition_cell_observation(source, Some(512), false).await?;
+    let promoted = composition_cell_observation(source, Some(512), true).await?;
+    assert_eq!(promoted, uninterrupted);
+    let text = promoted
+        .iter()
+        .filter_map(|part| match part {
+            ToolResultPart::Text(text) => Some(text.text()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(text.matches("bytes omitted").count(), 1);
+    assert!(text.ends_with("line 299"));
+    Ok(())
+}
+
+async fn fitted_composition_cell(
+    source: &str,
+    cap: Option<usize>,
+) -> TestResult<Vec<ToolResultPart>> {
+    composition_cell_observation(source, cap, false).await
+}
+
+async fn composition_cell_observation(
+    source: &str,
+    cap: Option<usize>,
+    interrupt: bool,
+) -> TestResult<Vec<ToolResultPart>> {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let registry = neutral_composition_test_registry()?;
+    let descriptor = neutral_composition_test_descriptor()?;
+    let authority = artifact_authority(&descriptor, 1)?;
+    let mut model =
+        ArtifactModel::new(descriptor.clone(), authority.clone(), 0, 0xc0de_5301, false)
+            .with_scripted_tool_calls([(0, "exec", serde_json::to_string(source)?)]);
+    if interrupt {
+        model = model.with_second_direct_tool_named("missing_tool")?;
+    }
+    let model = Arc::new(model);
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
+    let evidence = Arc::new(FakeCompositionEvidence::default());
+    let builder = composition_test_builder(
+        Arc::clone(&workspace),
+        registry.clone(),
+        &model,
+        descriptor.clone(),
+        authority.clone(),
+        composition_descriptor,
+        (
+            Arc::clone(&evidence),
+            LocalCompositionLifecycle::RootTurnJoined,
+        ),
+    )?
+    .config(AgentConfig::default().with_observation_budget_cap_bytes(cap));
+    let store = Arc::new(TestCreateStore::default());
+    store
+        .fail_second_effect_preparation
+        .store(interrupt, Ordering::Release);
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let agent = sessions
+        .create("create:many-composition-items", builder)
+        .await?;
+    let result = agent.prompt("emit the cell output").await?.result().await?;
+    if interrupt {
+        assert!(
+            matches!(result.outcome(), TurnResultOutcome::Failed(error) if error.kind() == AgentErrorKind::Session),
+            "{:?}",
+            result.outcome()
+        );
+        assert!(matches!(
+            result.checkpoint().manifest().lifecycle(),
+            RuntimeLifecycle::Quiescent
+        ));
+    } else {
+        assert!(
+            matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+            "{:?}",
+            result.outcome()
+        );
+    }
+    let tool_results = result
+        .checkpoint()
+        .manifest()
+        .canonical()
+        .history()
+        .segments()
+        .iter()
+        .flat_map(HistorySegment::items)
+        .flat_map(ConversationItem::blocks)
+        .filter_map(|block| match block {
+            ContentBlock::ToolResult(result) => Some(result),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tool_results.len(), if interrupt { 2 } else { 1 });
+    let tool_result = tool_results[0];
+    assert_eq!(tool_result.kind(), ToolResultKind::Success);
+    let parts = tool_result.parts().to_vec();
+    ToolOutcome::success(parts.clone())?;
+    let operations = result.checkpoint().manifest().ledger().operations();
+    let evaluations = operations
+        .iter()
+        .filter(|record| {
+            matches!(
+                record.kind(),
+                DurableOperationKind::CompositionEvaluation { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    let [evaluation] = evaluations.as_slice() else {
+        panic!("one evaluation")
+    };
+    let observations = evaluation
+        .transitions()
+        .iter()
+        .filter_map(|transition| match transition.state() {
+            DurableOperationState::Completed(evidence)
+            | DurableOperationState::LocatorBound(evidence) => {
+                let value: serde_json::Value = serde_json::from_slice(evidence.bytes()).ok()?;
+                (value[0] == "plakous-local-composition-cell-v2")
+                    .then_some((transition.state(), value))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [(state, evidence)] = observations.as_slice() else {
+        panic!("one cell observation transition")
+    };
+    assert_eq!(
+        matches!(state, DurableOperationState::LocatorBound(_)),
+        source.starts_with("yield")
+    );
+    let retained: Vec<ToolResultPart> = serde_json::from_value(evidence[7].clone())?;
+    ToolOutcome::success(retained.clone())?;
+    if cap.is_some() {
+        assert!(
+            matches!(&retained[1], ToolResultPart::Text(text) if !text.text().contains("bytes omitted") && text.text().ends_with("line 299"))
+        );
+        assert_ne!(retained, parts);
+    } else if source == "emit large text" {
+        assert_ne!(
+            retained, parts,
+            "the canonical observation cap still cuts large text"
+        );
+    } else {
+        assert_eq!(retained, parts);
+    }
+    let _ = agent.shutdown().await;
+    Ok(parts)
+}
+
 #[tokio::test(start_paused = true)]
 async fn successive_composition_resumes_are_bounded_by_the_round_cap() -> TestResult {
     // A composition cell that answers every resume successfully has no budget

@@ -178,10 +178,6 @@ pub(in crate::runtime) fn local_composition_response_parts(
         | LocalCompositionResponse::Terminated { items, .. } => (items, None),
         LocalCompositionResponse::Result { items, error, .. } => (items, error.as_deref()),
     };
-    let status = local_composition_projection_status(
-        LocalCompositionResultProjection::TokensScriptV1,
-        response,
-    );
     let mut items = items.clone();
     if let Some(error) = error {
         items.push(LocalCompositionContentItem::Text(format!(
@@ -189,13 +185,216 @@ pub(in crate::runtime) fn local_composition_response_parts(
         )));
     }
     let items = integration.truncate_items(items, max_output_tokens);
+    fit_response_parts(local_composition_script_header(response, wall_time)?, items)
+}
+
+fn local_composition_script_header(
+    response: &LocalCompositionResponse,
+    wall_time: Duration,
+) -> Result<TextBlock, AgentError> {
+    let status = local_composition_projection_status(
+        LocalCompositionResultProjection::TokensScriptV1,
+        response,
+    );
     let wall_time_seconds = ((wall_time.as_secs_f32()) * 10.0).round() / 10.0;
-    let header = TextBlock::new(
+    TextBlock::new(
         format!("{status}\nWall time {wall_time_seconds:.1} seconds\nOutput:\n"),
         None,
     )
-    .map_err(|_| AgentError::new(AgentErrorKind::Tool, "local composition status is invalid"))?;
-    local_composition_items_to_parts(header, &items)
+    .map_err(|_| AgentError::new(AgentErrorKind::Tool, "local composition status is invalid"))
+}
+
+pub(in crate::runtime) fn local_composition_refusal_parts(
+    response: &LocalCompositionResponse,
+    wall_time: Duration,
+    projection: LocalCompositionResultProjection,
+    error: &AgentError,
+) -> Result<Vec<ToolResultPart>, AgentError> {
+    let notice = format!("Warning: cell output omitted: {}", error.message());
+    if projection == LocalCompositionResultProjection::BytesPythonPtcV1 {
+        let status = local_composition_projection_status(projection, response);
+        return Ok(vec![fit_text_bytes(
+            &format!("{status}\nOutput:\n{notice}"),
+            1024,
+        )?]);
+    }
+    Ok(vec![
+        ToolResultPart::Text(local_composition_script_header(response, wall_time)?),
+        fit_text_bytes(&notice, 512)?,
+    ])
+}
+
+/// After `max_output_tokens` truncation, fit the status and output in one
+/// outcome. Within both limits the projection is unchanged. Over the part
+/// limit, nonempty adjacent text items join with a newline; only media are
+/// omitted, counted as original items rather than joined runs. Over the byte
+/// limit, media give way to a counted notice and text is cut in the middle.
+fn fit_response_parts(
+    header: TextBlock,
+    items: Vec<LocalCompositionContentItem>,
+) -> Result<Vec<ToolResultPart>, AgentError> {
+    use plakous_tools::{MAX_TOOL_OUTCOME_BYTES, MAX_TOOL_OUTCOME_PARTS};
+
+    let count_limit = items
+        .iter()
+        .filter(|item| !matches!(item, LocalCompositionContentItem::Text(text) if text.is_empty()))
+        .count()
+        >= MAX_TOOL_OUTCOME_PARTS;
+    let (items, mut omitted) = fit_item_count(items, MAX_TOOL_OUTCOME_PARTS - 1);
+    let mut parts = local_composition_items_to_parts(header, &items)?;
+    let mut sizes = parts
+        .iter()
+        .map(part_bytes)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut bytes = sizes.iter().sum::<usize>();
+    let mut byte_limit = false;
+    loop {
+        let notice = omission_notice(omitted, count_limit, byte_limit)?;
+        let notice_bytes = notice.as_ref().map_or(Ok(0), part_bytes)?;
+        if bytes + notice_bytes <= MAX_TOOL_OUTCOME_BYTES {
+            parts.extend(notice);
+            return Ok(parts);
+        }
+        byte_limit = true;
+        // Keep every text run, including the final script error. Removing a
+        // media part also makes room for the one omission notice's array slot.
+        if let Some(index) = parts
+            .iter()
+            .rposition(|part| matches!(part, ToolResultPart::Image(_) | ToolResultPart::Audio(_)))
+        {
+            parts.remove(index);
+            bytes -= sizes.remove(index);
+            omitted += 1;
+            continue;
+        }
+        let notice = omission_notice(omitted, count_limit, true)?;
+        let notice_bytes = notice.as_ref().map_or(Ok(0), part_bytes)?;
+        let available = MAX_TOOL_OUTCOME_BYTES
+            .checked_sub(sizes[0] + notice_bytes)
+            .ok_or_else(|| {
+                AgentError::new(AgentErrorKind::Tool, "cell status exceeds its byte bound")
+            })?;
+        let share = available.checked_div(parts.len() - 1).ok_or_else(|| {
+            AgentError::new(AgentErrorKind::Tool, "cell status exceeds its byte bound")
+        })?;
+        for part in &mut parts[1..] {
+            if let ToolResultPart::Text(text) = part {
+                *part = fit_text_bytes(text.text(), share)?;
+            }
+        }
+        parts.extend(notice);
+        return Ok(parts);
+    }
+}
+
+fn part_bytes(part: &ToolResultPart) -> Result<usize, AgentError> {
+    serde_json::to_vec(part)
+        .map(|bytes| bytes.len())
+        .map_err(|_| AgentError::new(AgentErrorKind::Tool, "cell output could not be measured"))
+}
+
+fn omission_notice(
+    omitted: usize,
+    count_limit: bool,
+    byte_limit: bool,
+) -> Result<Option<ToolResultPart>, AgentError> {
+    if omitted == 0 {
+        return Ok(None);
+    }
+    let limit = match (count_limit, byte_limit) {
+        (true, true) => format!(
+            "{} parts and {} JSON-encoded bytes",
+            plakous_tools::MAX_TOOL_OUTCOME_PARTS,
+            plakous_tools::MAX_TOOL_OUTCOME_BYTES
+        ),
+        (_, true) => format!(
+            "{} JSON-encoded bytes",
+            plakous_tools::MAX_TOOL_OUTCOME_BYTES
+        ),
+        (_, false) => format!("{} parts", plakous_tools::MAX_TOOL_OUTCOME_PARTS),
+    };
+    let text =
+        format!("Warning: {omitted} images/audio omitted; one tool result holds at most {limit}");
+    Ok(Some(fit_text_bytes(
+        &text,
+        plakous_tools::MAX_TOOL_OUTCOME_BYTES,
+    )?))
+}
+
+fn fit_text_bytes(text: &str, max_bytes: usize) -> Result<ToolResultPart, AgentError> {
+    let mut keep = text.len().min(max_bytes);
+    loop {
+        let fitted = if keep == text.len() {
+            text.to_owned()
+        } else {
+            crate::runtime::observation::clip_head_tail(text, keep)
+        };
+        let part = ToolResultPart::Text(TextBlock::new(fitted, None).map_err(|_| {
+            AgentError::new(
+                AgentErrorKind::Tool,
+                "local composition text output is invalid",
+            )
+        })?);
+        let encoded_bytes = part_bytes(&part)?;
+        if encoded_bytes <= max_bytes {
+            return Ok(part);
+        }
+        if keep == 0 {
+            return Err(AgentError::new(
+                AgentErrorKind::Tool,
+                "cell text notice exceeds its byte bound",
+            ));
+        }
+        // JSON escaping can cost up to six bytes per input byte. Always
+        // measure the canonical part, including the middle-cut marker.
+        keep = keep.saturating_mul(max_bytes) / encoded_bytes;
+    }
+}
+
+fn fit_item_count(
+    items: Vec<LocalCompositionContentItem>,
+    max_items: usize,
+) -> (Vec<LocalCompositionContentItem>, usize) {
+    let items = items
+        .into_iter()
+        .filter(|item| !matches!(item, LocalCompositionContentItem::Text(text) if text.is_empty()))
+        .collect::<Vec<_>>();
+    if items.len() <= max_items {
+        return (items, 0);
+    }
+    let mut fitted = join_text_items(items);
+    let mut omitted = 0;
+    if fitted.len() > max_items {
+        while fitted.len() + 1 > max_items {
+            let Some(index) = fitted
+                .iter()
+                .rposition(|item| !matches!(item, LocalCompositionContentItem::Text(_)))
+            else {
+                break;
+            };
+            fitted.remove(index);
+            omitted += 1;
+            fitted = join_text_items(fitted);
+        }
+    }
+    (fitted, omitted)
+}
+
+fn join_text_items(items: Vec<LocalCompositionContentItem>) -> Vec<LocalCompositionContentItem> {
+    let mut fitted = Vec::<LocalCompositionContentItem>::new();
+    for item in items {
+        match (fitted.last_mut(), item) {
+            (
+                Some(LocalCompositionContentItem::Text(last)),
+                LocalCompositionContentItem::Text(text),
+            ) => {
+                last.push('\n');
+                last.push_str(&text);
+            }
+            (_, item) => fitted.push(item),
+        }
+    }
+    fitted
 }
 
 fn local_composition_items_to_parts(
@@ -204,63 +403,79 @@ fn local_composition_items_to_parts(
 ) -> Result<Vec<ToolResultPart>, AgentError> {
     let mut parts = vec![ToolResultPart::Text(header)];
     for item in items {
-        match item {
-            // An empty text item is ordinary user output: `text("")` in a JS
-            // cell, or a Python cell whose value is the empty string. It
-            // carries no model content and a canonical text block cannot hold
-            // it, so it is dropped rather than failing the cell. Text that is
-            // genuinely unrepresentable — over the canonical block bound —
-            // still fails here.
-            LocalCompositionContentItem::Text(text) if text.is_empty() => {}
-            LocalCompositionContentItem::Text(text) => parts.push(ToolResultPart::Text(
-                TextBlock::new(text.clone(), None).map_err(|_| {
-                    AgentError::new(
-                        AgentErrorKind::Tool,
-                        "local composition text output is invalid",
-                    )
-                })?,
-            )),
-            LocalCompositionContentItem::Image { url, detail } => {
-                let media_type = data_url_media_type(url, "image/png")?;
-                let source = MediaSource::data_url(url.clone()).map_err(|_| {
-                    AgentError::new(
-                        AgentErrorKind::Tool,
-                        "local composition image URL is invalid",
-                    )
-                })?;
-                let detail = detail.map(|detail| match detail {
-                    LocalCompositionImageDetail::Auto => ImageDetailHint::Auto,
-                    LocalCompositionImageDetail::Low => ImageDetailHint::Low,
-                    LocalCompositionImageDetail::High => ImageDetailHint::High,
-                    LocalCompositionImageDetail::Original => ImageDetailHint::Original,
-                });
-                let image = ImageBlock::with_detail(media_type, source, detail).map_err(|_| {
-                    AgentError::new(
-                        AgentErrorKind::Tool,
-                        "local composition image output is invalid",
-                    )
-                })?;
-                parts.push(ToolResultPart::Image(image));
+        match local_composition_item_part(item) {
+            Ok(Some(part)) => parts.push(part),
+            Ok(None) => {}
+            Err(error) if !matches!(item, LocalCompositionContentItem::Text(_)) => {
+                parts.push(fit_text_bytes(
+                    &format!("Warning: media output omitted: {}", error.message()),
+                    512,
+                )?);
             }
-            LocalCompositionContentItem::Audio(url) => {
-                let media_type = data_url_media_type(url, "audio/wav")?;
-                let source = MediaSource::data_url(url.clone()).map_err(|_| {
-                    AgentError::new(
-                        AgentErrorKind::Tool,
-                        "local composition audio URL is invalid",
-                    )
-                })?;
-                let audio = AudioBlock::new(media_type, source).map_err(|_| {
-                    AgentError::new(
-                        AgentErrorKind::Tool,
-                        "local composition audio output is invalid",
-                    )
-                })?;
-                parts.push(ToolResultPart::Audio(audio));
-            }
+            Err(error) => return Err(error),
         }
     }
     Ok(parts)
+}
+
+fn local_composition_item_part(
+    item: &LocalCompositionContentItem,
+) -> Result<Option<ToolResultPart>, AgentError> {
+    let part = match item {
+        // An empty text item is ordinary user output: `text("")` in a JS
+        // cell, or a Python cell whose value is the empty string. It
+        // carries no model content and a canonical text block cannot hold
+        // it, so it is dropped rather than failing the cell. Text that is
+        // unrepresentable is reported by the outer call's bounded notice.
+        LocalCompositionContentItem::Text(text) if text.is_empty() => return Ok(None),
+        LocalCompositionContentItem::Text(text) => {
+            ToolResultPart::Text(TextBlock::new(text.clone(), None).map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::Tool,
+                    "local composition text output is invalid",
+                )
+            })?)
+        }
+        LocalCompositionContentItem::Image { url, detail } => {
+            let media_type = data_url_media_type(url, "image/png")?;
+            let source = MediaSource::data_url(url.clone()).map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::Tool,
+                    "local composition image URL is invalid",
+                )
+            })?;
+            let detail = detail.map(|detail| match detail {
+                LocalCompositionImageDetail::Auto => ImageDetailHint::Auto,
+                LocalCompositionImageDetail::Low => ImageDetailHint::Low,
+                LocalCompositionImageDetail::High => ImageDetailHint::High,
+                LocalCompositionImageDetail::Original => ImageDetailHint::Original,
+            });
+            let image = ImageBlock::with_detail(media_type, source, detail).map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::Tool,
+                    "local composition image output is invalid",
+                )
+            })?;
+            ToolResultPart::Image(image)
+        }
+        LocalCompositionContentItem::Audio(url) => {
+            let media_type = data_url_media_type(url, "audio/wav")?;
+            let source = MediaSource::data_url(url.clone()).map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::Tool,
+                    "local composition audio URL is invalid",
+                )
+            })?;
+            let audio = AudioBlock::new(media_type, source).map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::Tool,
+                    "local composition audio output is invalid",
+                )
+            })?;
+            ToolResultPart::Audio(audio)
+        }
+    };
+    Ok(Some(part))
 }
 
 fn local_composition_python_response_parts(
@@ -591,6 +806,187 @@ mod python_tests {
         };
         assert_eq!(text.text().len(), max - 1);
         assert!(text.text().ends_with("a\n"));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod item_count_tests {
+    use super::{LocalCompositionContentItem as Item, fit_item_count, fit_response_parts};
+    use plakous_model::{TextBlock, ToolResultPart};
+    use plakous_tools::{MAX_TOOL_OUTCOME_BYTES, ToolOutcome};
+
+    fn text(value: &str) -> Item {
+        Item::Text(value.to_owned())
+    }
+
+    fn image(index: usize) -> Item {
+        Item::Image {
+            url: format!("data:image/png;base64,{index}"),
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn refusal_keeps_the_running_cell_id_and_presentation_failure_reason()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let response = super::LocalCompositionResponse::Yielded {
+            cell_id: "C".to_owned(),
+            items: Vec::new(),
+        };
+        let error = super::AgentError::new(super::AgentErrorKind::Tool, "presentation refused");
+        let parts = super::local_composition_refusal_parts(
+            &response,
+            std::time::Duration::ZERO,
+            super::LocalCompositionResultProjection::TokensScriptV1,
+            &error,
+        )?;
+        let outcome = ToolOutcome::success(parts)?;
+        let [ToolResultPart::Text(header), ToolResultPart::Text(notice)] = outcome.parts() else {
+            panic!("header and notice")
+        };
+        assert!(header.text().starts_with("Script running with cell ID C"));
+        assert_eq!(
+            notice.text(),
+            "Warning: cell output omitted: presentation refused"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn output_within_the_bound_keeps_one_item_per_text_call() {
+        let items = vec![text("a"), text(""), text("b"), image(0), text("c")];
+        assert_eq!(
+            fit_item_count(items, 4),
+            (vec![text("a"), text("b"), image(0), text("c")], 0)
+        );
+    }
+
+    #[test]
+    fn output_over_the_bound_joins_adjacent_text_around_media() {
+        let items = vec![
+            text("a"),
+            text("b"),
+            image(0),
+            text("c"),
+            text(""),
+            text("d"),
+        ];
+        assert_eq!(
+            fit_item_count(items, 3),
+            (vec![text("a\nb"), image(0), text("c\nd")], 0)
+        );
+    }
+
+    #[test]
+    fn media_beyond_the_bound_give_way_to_one_counted_notice() {
+        let items = (0..6).map(image).collect::<Vec<_>>();
+        let (fitted, omitted) = fit_item_count(items, 4);
+        assert_eq!(fitted, vec![image(0), image(1), image(2)]);
+        assert_eq!(omitted, 3);
+    }
+
+    #[test]
+    fn media_omission_keeps_text_runs_and_the_final_script_error() {
+        let items = vec![
+            text("a"),
+            text("b"),
+            image(0),
+            text("c"),
+            image(1),
+            image(2),
+            image(3),
+            image(4),
+            text("Script error:\nfailed"),
+        ];
+        assert_eq!(
+            fit_item_count(items, 4),
+            (
+                vec![text("a\nb"), image(0), text("c\nScript error:\nfailed")],
+                4
+            )
+        );
+    }
+
+    #[test]
+    fn within_both_limits_the_canonical_parts_are_byte_identical()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let header = TextBlock::new("status", None)?;
+        let items = vec![
+            text("a\n\"b"),
+            text(""),
+            text("é"),
+            Item::Image {
+                url: "data:image/png;base64,AA==".to_owned(),
+                detail: None,
+            },
+        ];
+        let original = super::local_composition_items_to_parts(header.clone(), &items)?;
+        let fitted = fit_response_parts(header, items)?;
+        assert_eq!(serde_json::to_vec(&fitted)?, serde_json::to_vec(&original)?);
+        Ok(())
+    }
+
+    #[test]
+    fn exact_byte_limit_keeps_the_original_text_and_one_byte_over_cuts_it()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let header = TextBlock::new("status", None)?;
+        let overhead = super::part_bytes(&ToolResultPart::Text(header.clone()))?
+            + super::part_bytes(&ToolResultPart::Text(TextBlock::new("a", None)?))?
+            - 1;
+        let text = "a".repeat(MAX_TOOL_OUTCOME_BYTES - overhead);
+        let parts = fit_response_parts(header.clone(), vec![Item::Text(text.clone())])?;
+        let outcome = ToolOutcome::success(parts)?;
+        assert_eq!(outcome.retained_bytes(), MAX_TOOL_OUTCOME_BYTES);
+        assert!(matches!(&outcome.parts()[1], ToolResultPart::Text(part) if part.text() == text));
+
+        let parts = fit_response_parts(header, vec![Item::Text(format!("{text}a"))])?;
+        let outcome = ToolOutcome::success(parts)?;
+        assert!(outcome.retained_bytes() <= MAX_TOOL_OUTCOME_BYTES);
+        assert!(
+            matches!(&outcome.parts()[1], ToolResultPart::Text(part) if part.text().contains("bytes omitted"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn escaped_multibyte_text_is_cut_in_the_middle_to_fit_encoded_bytes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let text = format!(
+            "first{}last",
+            "\u{0}\"\\é".repeat(MAX_TOOL_OUTCOME_BYTES / 3)
+        );
+        let parts = fit_response_parts(TextBlock::new("status", None)?, vec![Item::Text(text)])?;
+        let outcome = ToolOutcome::success(parts)?;
+        assert!(outcome.retained_bytes() <= MAX_TOOL_OUTCOME_BYTES);
+        let [_, ToolResultPart::Text(text)] = outcome.parts() else {
+            panic!("header and text")
+        };
+        assert!(text.text().starts_with("first"));
+        assert!(text.text().ends_with("last"));
+        assert!(text.text().contains("bytes omitted"));
+        Ok(())
+    }
+
+    #[test]
+    fn count_and_byte_fitting_keep_the_error_and_count_original_media()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut items = (0..130)
+            .map(|_| Item::Image {
+                url: format!("data:image/png;base64,{}", "AAAA".repeat(65_536)),
+                detail: None,
+            })
+            .collect::<Vec<_>>();
+        items.push(text("Script error:\nfailed"));
+        let parts = fit_response_parts(TextBlock::new("status", None)?, items)?;
+        let outcome = ToolOutcome::success(parts)?;
+        assert_eq!(outcome.parts().len(), 6);
+        assert!(
+            matches!(&outcome.parts()[4], ToolResultPart::Text(text) if text.text() == "Script error:\nfailed")
+        );
+        assert!(
+            matches!(&outcome.parts()[5], ToolResultPart::Text(text) if text.text() == "Warning: 127 images/audio omitted; one tool result holds at most 128 parts and 1048576 JSON-encoded bytes")
+        );
         Ok(())
     }
 }

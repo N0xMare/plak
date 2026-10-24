@@ -21,6 +21,16 @@ one cross-build carrier (a build imports its own and the previous version).
   after resizing), instead of 3,279 from the retired `w * h / 750` rule.
   Requests are unchanged.
 
+- JavaScript cell output fits one tool result's 128 parts and 1 MiB of
+  JSON-encoded parts: over the limits, nonempty adjacent text items join with
+  newlines, media give way to a counted notice, and oversized text is cut in
+  the middle. Script errors survive media omission. The driver validates the
+  outcome before committing the bounded, presented parts as cell evidence;
+  live delivery and interrupted-batch recovery apply the same observation cut
+  once. Invalid media become per-item notices without losing status or valid
+  text; projection and presentation refusals retain the status header. Within
+  both limits output bytes and request pins are unchanged.
+
 ### Persisted formats
 
 - Runtime format epoch 31: the JavaScript worker speaks the cell protocol

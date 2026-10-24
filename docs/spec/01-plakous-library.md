@@ -6257,9 +6257,9 @@ encoded limit. The facade additionally caps collected content at 8 MiB and
 4,096 items per cell; presentation truncation runs within these hard bounds.
 An empty text item is ordinary user output, not invalid output: it carries no
 model content and no canonical text block can hold it, so every projection
-drops it and the cell completes with its remaining output. Only genuinely
-unrepresentable content — an over-bound block, an undecodable media URL —
-fails the projection.
+drops it and the cell completes with its remaining output. Genuinely
+unrepresentable content, such as an undecodable media URL, is answered with
+a bounded model-visible notice rather than failing the turn.
 
 The sidecar speaks the cell protocol (`plakous-cell-protocol.v1`): each frame
 is a 4-byte big-endian length and one JSON value, capped at 8 MiB before any
@@ -6328,6 +6328,32 @@ terminal. It keeps no record of its own. A refusal is not a failure and is not
 a loss, so it is neither a telemetry observation nor an agent event: the
 `TelemetrySink` is lifecycle-only and content-incapable and could not carry the
 call id or the reason, and this crate takes no `tracing` or `log` dependency.
+
+JavaScript cell observations are a status part followed by one part per
+nonempty output item, after `max_output_tokens` truncation. A tool result holds
+at most 128 parts (`MAX_TOOL_OUTCOME_PARTS`) and 1 MiB of JSON-encoded parts
+(`MAX_TOOL_OUTCOME_BYTES`), including status and notices. Over the part limit,
+nonempty adjacent text items join with a newline; this is distinct from
+Codex's token truncation, which joins all-text output only when over its token
+budget and keeps an empty middle item as a blank line. If the part count still
+exceeds the limit, media are omitted from the end, never text runs or the final
+script error, with one notice counting original images/audio omitted. Over the
+byte limit, media give way to that counted notice and oversized text is cut
+in the middle with an omitted-byte marker, measuring the JSON encoding after
+each cut. Neither limit fails the turn. Within both limits the projection is
+byte-identical; past them it deliberately diverges from native Codex, which
+sends one `input_text` per `text()` call.
+
+The driver constructs the bounded tool outcome, applies presentation, and
+only then commits Completed or LocatorBound cell evidence. Evidence holds
+the bounded, presented parts before observation clipping. Live delivery cuts
+these parts once; interrupted-batch recovery restores the pre-batch observation
+budget and applies that same cut once, reproducing the live view rather than
+clipping an already-cut result. Unrepresentable media are replaced per item
+by a short reason-bearing notice, preserving the status, valid text and script
+error. A projection, outcome or presentation refusal becomes a bounded text
+notice with the status header (including a yielded cell's id), not an unresolved
+marker or failed turn.
 
 Python cell observations are one UTF-8 text part (status plus unread output),
 bounded by the marker's 1 MiB output contract, including status, header and

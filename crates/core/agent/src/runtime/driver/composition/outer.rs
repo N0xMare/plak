@@ -252,12 +252,36 @@ impl Driver {
                 "local composition owner disappeared",
             )
         })?;
-        let response_parts = local_composition_response_parts(
+        let result = local_composition_response_parts(
             &response,
             max_output_tokens,
             wall_time,
             integration.integration().as_ref(),
-        )?;
+        )
+        .and_then(|parts| {
+            ToolOutcome::success(parts).map_err(|error| AgentError::from_tool(&error))
+        })
+        .and_then(|outcome| {
+            self.tool_presentation
+                .raise(projection_receipt.as_ref(), outcome)
+                .and_then(|outcome| outcome.to_model_result(&invocation))
+                .map_err(|error| AgentError::from_tool(&error))
+        })
+        .or_else(|error| {
+            let parts = local_composition_refusal_parts(
+                &response,
+                wall_time,
+                integration.integration().result_projection(),
+                &error,
+            )?;
+            // Presentation itself may have refused the result. Its fallback
+            // is already model-visible text, not another raising attempt.
+            ToolOutcome::success(parts)
+                .and_then(|outcome| outcome.to_model_result(&invocation))
+                .map_err(|error| AgentError::from_tool(&error))
+        })?;
+        // Recovery restores the pre-batch observation budget and cuts once.
+        // Retain the bounded, presented parts, never an already-cut view.
         let evidence = runtime_component(
             RuntimeComponentKind::Operation,
             serde_json::to_vec(&(
@@ -279,7 +303,7 @@ impl Driver {
                     "active"
                 },
                 &updates,
-                &response_parts,
+                result.parts(),
             ))
             .map_err(|_| {
                 AgentError::new(
@@ -309,15 +333,6 @@ impl Driver {
         {
             state.clear_evaluation();
         }
-        let outcome =
-            ToolOutcome::success(response_parts).map_err(|error| AgentError::from_tool(&error))?;
-        let result = self
-            .tool_presentation
-            .raise(projection_receipt.as_ref(), outcome)
-            .and_then(|outcome| outcome.to_model_result(&invocation))
-            .map_err(|error| AgentError::from_tool(&error))?;
-        // Code Mode cuts here too, and its results are the largest in the
-        // product: a composition answer carries every nested call's output.
         let (result, clip) = clip_tool_result(result, &mut self.observation_budget)?;
         publish_observation_clip(
             &command.shared.events,

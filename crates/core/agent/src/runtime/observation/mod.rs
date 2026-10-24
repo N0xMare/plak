@@ -931,7 +931,7 @@ fn longest_string(value: &mut serde_json::Value) -> Option<&mut String> {
 
 /// A third of `keep` from the head and the rest from the tail, cut on
 /// character boundaries around one marker.
-fn clip_head_tail(text: &str, keep: usize) -> String {
+pub(in crate::runtime) fn clip_head_tail(text: &str, keep: usize) -> String {
     let mut head = keep / 3;
     while head > 0 && !text.is_char_boundary(head) {
         head -= 1;

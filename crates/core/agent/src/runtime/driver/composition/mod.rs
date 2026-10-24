@@ -16,9 +16,9 @@ use crate::runtime::composition::projection::{
     local_composition_nested_call_arguments, local_composition_nested_decision_unsupported,
     local_composition_nested_execution_owner, local_composition_nested_result_value,
     local_composition_prestart_error, local_composition_recovery_authoritative,
-    local_composition_response_cell, local_composition_response_parts,
-    local_composition_response_terminal, local_composition_started_error,
-    local_composition_wait_response,
+    local_composition_refusal_parts, local_composition_response_cell,
+    local_composition_response_parts, local_composition_response_terminal,
+    local_composition_started_error, local_composition_wait_response,
 };
 use crate::runtime::composition::record::{
     DurableLocalCompositionContinuationRequestV1, DurableLocalCompositionEvaluationRequestV2,
