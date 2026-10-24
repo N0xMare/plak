@@ -201,11 +201,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             },
                         ) {
                             Ok(true) => queued.map(|item| {
+                                let capacity = self.config.store.storage_admission();
+                                let echo = !matches!(
+                                    capacity,
+                                    crate::session_store::StorageAdmission::Refused(_)
+                                );
+                                self.pending_storage_admission = Some(capacity);
                                 admit_idle_immediate_prompt(
                                     &self.events,
                                     &self.config.session,
                                     action,
                                     item,
+                                    echo,
                                 )
                             }),
                             Ok(false) => {

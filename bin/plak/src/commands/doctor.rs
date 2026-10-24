@@ -153,6 +153,7 @@ pub(crate) fn run_doctor(
         Err(failure) => Err(failure.message().to_owned()),
     };
     let report = product_doctor::diagnose(product_doctor::DoctorInputs {
+        storage_admission: crate::storage_space::admission(paths.home()),
         version: plakous::VERSION.to_owned(),
         jj_cli: product_doctor::jj_cli::probe(
             env::var_os("PATH").as_deref(),

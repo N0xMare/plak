@@ -22,6 +22,10 @@ pub(crate) enum StoreCall {
 }
 
 pub(crate) trait StoreFaults: Send + Sync {
+    fn storage_admission(&self) -> Option<crate::session_store::StorageAdmission> {
+        None
+    }
+
     fn before(&self, call: StoreCall, session: Option<&SessionRecord>) -> Result<(), String>;
 
     /// A transient refusal for the calls whose port error carries one.
@@ -56,6 +60,12 @@ impl FaultStore<RefuseAll> {
 }
 
 impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
+    fn storage_admission(&self) -> crate::session_store::StorageAdmission {
+        self.faults
+            .storage_admission()
+            .unwrap_or_else(|| self.inner.storage_admission())
+    }
+
     fn emit_projected_turn_usages(&self, usages: &[sessions::projector::ProjectedTurnUsage]) {
         self.inner.emit_projected_turn_usages(usages);
     }

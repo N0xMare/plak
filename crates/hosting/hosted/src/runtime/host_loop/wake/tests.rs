@@ -2193,6 +2193,65 @@ fn a_transient_tree_feed_refusal_retries_and_wakes_exactly_once() {
     }
 }
 
+#[test]
+fn low_storage_defers_child_wake_without_suppression_or_a_submission() {
+    struct LowStorage;
+    impl crate::runtime::fault_store::StoreFaults for LowStorage {
+        fn storage_admission(&self) -> Option<crate::session_store::StorageAdmission> {
+            Some(crate::session_store::StorageAdmission::Refused(
+                "private volume".into(),
+            ))
+        }
+        fn before(
+            &self,
+            _: crate::runtime::fault_store::StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    with_host(1, |host, runtime, _, observed| {
+        let durable = host.config.store.clone();
+        host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+            durable.clone(),
+            LowStorage,
+        ));
+        let now = Instant::now();
+        assert!(matches!(
+            host.child_wake_prompt(now).unwrap(),
+            HostStep::Continue
+        ));
+        assert!(!host.config.session.child_wake_suppressed);
+        assert_eq!(
+            submissions(host),
+            [] as [crate::sessions::projector::Submission; 0]
+        );
+        assert!(matches!(
+            host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+            HostStep::Continue
+        ));
+        assert_eq!(
+            runtime
+                .read(|tree| tree.pending_mail("root").len())
+                .unwrap(),
+            1
+        );
+        assert_eq!(notice_texts(observed), [] as [String; 0]);
+        host.config.store = durable;
+        let retry = now + QUIET_WINDOW + TRANSIENT_FIRST_DELAY;
+        assert!(matches!(
+            host.child_wake_prompt(now + QUIET_WINDOW + TRANSIENT_FIRST_DELAY / 2)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        let (text, item, echoed) = take_prompt(host.child_wake_prompt(retry).unwrap());
+        assert!(!host.config.session.child_wake_suppressed);
+        host.run_prompt(text, item, echoed, None).unwrap();
+        assert_eq!(submissions(host).len(), 1);
+        assert!(accepted(host, &submissions(host)[0]));
+    });
+}
+
 /// Refuses as many submissions as it counts, as a product store another
 /// writer holds would.
 struct BusySubmissions(std::sync::atomic::AtomicUsize);

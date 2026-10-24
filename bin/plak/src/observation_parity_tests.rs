@@ -961,9 +961,12 @@ impl Fixture {
             topology_admission: None,
             state_roots: crate::shell::host::product_state_roots(&paths),
             home: paths.session_home(),
-            store: Arc::new(crate::store::session_records::SqliteSessionStore::new(
-                paths.clone(),
-            )),
+            store: Arc::new(
+                crate::store::session_records::SqliteSessionStore::new(paths.clone())
+                    .with_storage_admission(
+                        plakous_hosted::session_store::StorageAdmission::Available,
+                    ),
+            ),
             topology_enabled: crate::product_config::SessionPolicy::load(&paths)
                 .unwrap()
                 .topology_enabled,
@@ -1469,6 +1472,63 @@ fn jsonl_projection_matches_production(events: &[HostEvent], root: &Path) {
 
 fn prompt_step(text: &'static str) -> Step {
     step(UserAction::Prompt(text.into()), after_turn())
+}
+
+#[test]
+fn injected_product_capacity_controls_real_store_admission_without_persisting_paths() {
+    use plakous_host_protocol::views::presentation::StorageLevel;
+    use plakous_hosted::session_store::{SessionRecordStore as _, StorageAdmission};
+    for (admission, level, admitted) in [
+        (StorageAdmission::Available, StorageLevel::Available, true),
+        (
+            StorageAdmission::Warning("/operator-private: 1024 MiB".into()),
+            StorageLevel::Warning,
+            true,
+        ),
+        (
+            StorageAdmission::Refused("/operator-private: 0 MiB".into()),
+            StorageLevel::Refused,
+            false,
+        ),
+    ] {
+        let fixture = Fixture::new(Script::Effect);
+        let mut config = fixture.host_config();
+        let store = Arc::new(
+            crate::store::session_records::SqliteSessionStore::new(PlakPaths::explicit(
+                config.product_home.clone(),
+            ))
+            .with_storage_admission(admission),
+        );
+        config.store = store.clone();
+        let id = config.session.id.clone();
+        let mut events = Vec::new();
+        let result =
+            plakous_hosted::runtime::OneShot::run(config, "capacity probe".into(), |event, _| {
+                if let Some(event) = event {
+                    events.push(event.clone());
+                }
+            });
+        assert_eq!(result.is_ok(), admitted, "{result:?}");
+        assert!(
+            events.iter().any(|event| matches!(event,
+            HostEvent::SessionInfo(info) if info.storage_level == level)),
+            "expected {level:?}, events: {events:?}"
+        );
+        assert_eq!(
+            events.iter().any(|event| matches!(event,
+            HostEvent::TurnLifecycle(turn) if turn.phase == TurnPhase::Admitted)),
+            admitted
+        );
+        assert_eq!(
+            events
+                .iter()
+                .any(|event| matches!(event, HostEvent::PromptStarted(_))),
+            admitted
+        );
+        let record = store.load(&id).unwrap();
+        assert!(!format!("{:?}", record.transcript).contains("/operator-private"));
+        assert!(!format!("{events:?}").contains("/operator-private"));
+    }
 }
 
 #[test]

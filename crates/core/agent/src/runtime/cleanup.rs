@@ -39,19 +39,35 @@ pub(super) fn error_with_cleanup_disposition(
     if cleanup.is_empty() {
         return primary;
     }
-    AgentError::new(
-        AgentErrorKind::OutcomeUnknown,
+    let mut distinct = Vec::new();
+    for error in cleanup {
+        let message = error.message();
+        let already_reported = message == primary.message()
+            || primary.message().split("; ").any(|clause| {
+                message == clause
+                    || message == clause.rsplit_once(": ").map_or(clause, |(_, leaf)| leaf)
+            });
+        if !already_reported && !distinct.contains(&message) {
+            distinct.push(message);
+        }
+    }
+    // Cleanup can report the same failed release through several ownership
+    // layers. Keep OutcomeUnknown, but never recursively wrap that evidence.
+    let initiating = if primary.kind() == AgentErrorKind::OutcomeUnknown {
+        primary.message().to_owned()
+    } else {
         format!(
-            "initiating {:?} failure: {}; cleanup disposition: {}",
+            "initiating {:?} failure: {}",
             primary.kind(),
-            primary.message(),
-            cleanup
-                .iter()
-                .map(AgentError::message)
-                .collect::<Vec<_>>()
-                .join("; ")
-        ),
-    )
+            primary.message()
+        )
+    };
+    let message = if distinct.is_empty() {
+        initiating
+    } else {
+        format!("{initiating}; cleanup disposition: {}", distinct.join("; "))
+    };
+    AgentError::new(AgentErrorKind::OutcomeUnknown, message)
 }
 
 pub(super) fn local_composition_shutdown_result(
@@ -106,4 +122,46 @@ pub(super) fn combine_cleanup_results(
     };
     let cleanup = errors.collect::<Vec<_>>();
     Err(error_with_cleanup_disposition(primary, &cleanup))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cleanup_substring_is_not_the_same_cause() {
+        let primary = AgentError::new(AgentErrorKind::Session, "database disk is full");
+        let cleanup = AgentError::new(AgentErrorKind::Internal, "disk is full");
+        let combined = error_with_cleanup_disposition(primary, &[cleanup]);
+        assert_eq!(
+            combined.message(),
+            "initiating Session failure: database disk is full; cleanup disposition: disk is full"
+        );
+    }
+
+    #[test]
+    fn repeated_full_release_cleanup_retains_uncertainty_without_recursive_causes() {
+        let full = AgentError::new(AgentErrorKind::Session, "session store disk is full");
+        let first = error_with_cleanup_disposition(full.clone(), &[full.clone(), full.clone()]);
+        let second = error_with_cleanup_disposition(first.clone(), &[full, first.clone()]);
+        assert_eq!(first, second);
+        assert_eq!(second.kind(), AgentErrorKind::OutcomeUnknown);
+        assert_eq!(
+            second
+                .message()
+                .matches("session store disk is full")
+                .count(),
+            1
+        );
+        let different = AgentError::new(AgentErrorKind::Internal, "worker did not stop");
+        let combined = error_with_cleanup_disposition(second, &[different.clone(), different]);
+        assert_eq!(combined.message().matches("worker did not stop").count(), 1);
+        assert_eq!(
+            combined
+                .message()
+                .matches("session store disk is full")
+                .count(),
+            1
+        );
+    }
 }

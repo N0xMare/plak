@@ -436,6 +436,7 @@ pub(super) fn usage_fixture() -> App {
         stale_age_seconds: None,
     };
     app.session_info = SessionInfoView {
+        storage_level: plakous_host_protocol::views::presentation::StorageLevel::Available,
         host_version: "0.1.0".into(),
         session_id: "sid-123abc".into(),
         working_dir: "/home/user/project".into(),

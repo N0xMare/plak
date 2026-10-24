@@ -1480,6 +1480,15 @@ and no network.
 The model is selected by two environment variables the binary reads only under
 the `test-hooks` feature: `PLAK_TEST_MODEL`, which must name
 `offline-loopback-v1`, and `PLAK_TEST_SCRIPT`, which names a JSON document.
+With that exact offline model selected, capacity is injected as Available,
+independent of the fixture volume. A `test-hooks` build also accepts the exact
+`PLAK_TEST_STORAGE_CAPACITY=available|warning|refused` override, independently
+of model selection, so binary doctor tests never depend on actual free space.
+An invalid override refuses admission. Ordinary builds use the filesystem
+probe. Real product-store capacity tests inject Warning
+and Refused through the in-process store constructor seam.
+In-process unit tests use an injected Available value by default, and the
+product-store unit-test builder can override it to any admission value.
 A hook that is requested and unusable refuses the launch; it never falls through
 to a provider, because a gate run that silently tested nothing is worse than a
 failing one.

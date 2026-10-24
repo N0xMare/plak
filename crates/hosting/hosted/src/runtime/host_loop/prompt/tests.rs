@@ -77,6 +77,82 @@ use crate::runtime::test_support::{actual_ingress_backpressure, fresh_injected_a
 use crate::sessions::SessionRecord;
 use std::sync::{Arc, Mutex};
 
+struct CapacityProbe(Arc<Mutex<crate::session_store::StorageAdmission>>);
+
+impl crate::runtime::fault_store::StoreFaults for CapacityProbe {
+    fn storage_admission(&self) -> Option<crate::session_store::StorageAdmission> {
+        Some(self.0.lock().unwrap().clone())
+    }
+
+    fn before(
+        &self,
+        _: crate::runtime::fault_store::StoreCall,
+        _: Option<&SessionRecord>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[test]
+fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry() {
+    use crate::session_store::StorageAdmission;
+    let root = tempfile::tempdir().unwrap();
+    let plan = crate::runtime::recover_tests::script(serde_json::json!([
+        {"output": {"text": "only response"}}
+    ]));
+    let (config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
+    let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (event_tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = HostLoop::open(
+        config,
+        &action_rx,
+        crate::runtime::Sender::over(event_tx),
+        None,
+    )
+    .unwrap();
+    let capacity = Arc::new(Mutex::new(StorageAdmission::Refused(
+        "test volume: 0 MiB free".into(),
+    )));
+    host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+        host.config.store.clone(),
+        CapacityProbe(capacity.clone()),
+    ));
+    actions
+        .send(crate::surface_protocol::UserAction::Prompt(
+            "retained prompt".into(),
+        ))
+        .unwrap();
+    let HostStep::Prompt {
+        text,
+        queued_delivery,
+        user_echoed,
+    } = host.next_prompt(None).unwrap()
+    else {
+        panic!("prompt");
+    };
+    let _ = events.try_iter().collect::<Vec<_>>();
+    host.transient_resumes_used = 2;
+    host.run_prompt(text.clone(), queued_delivery.clone(), false, None)
+        .unwrap();
+    assert_eq!(host.config.session.pending_queue.len(), 1);
+    assert_eq!(
+        host.config.session.queue_drain_state,
+        SessionQueueDrainState::RestoredPaused
+    );
+    assert!(!host.config.session.queue_commands.has_pending());
+    assert_eq!(host.transient_resumes_used, 2);
+    assert!(!events.try_iter().any(|event| matches!(
+        event,
+        HostEvent::PromptStarted(_) | HostEvent::TurnLifecycle(_)
+    )));
+    *capacity.lock().unwrap() = StorageAdmission::Available;
+    host.run_prompt(text, queued_delivery, user_echoed, None)
+        .unwrap();
+    assert!(events.try_iter().any(|event| matches!(event,
+        HostEvent::TurnLifecycle(lifecycle) if lifecycle.phase == plakous_host_protocol::TurnPhase::Admitted)));
+    host.release().unwrap();
+}
+
 struct SubmissionFailure {
     fail_prepare: bool,
     fail_discard: bool,
@@ -85,6 +161,95 @@ struct SubmissionFailure {
     hold_join: Option<Arc<std::sync::atomic::AtomicBool>>,
     reason: &'static str,
     attempted_revision: Mutex<Option<u64>>,
+}
+
+struct CapacityWriteFault(Arc<std::sync::atomic::AtomicBool>);
+
+impl crate::runtime::fault_store::StoreFaults for CapacityWriteFault {
+    fn before(
+        &self,
+        call: crate::runtime::fault_store::StoreCall,
+        _: Option<&SessionRecord>,
+    ) -> Result<(), String> {
+        if call == crate::runtime::fault_store::StoreCall::Save
+            && self.0.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(std::io::Error::from_raw_os_error(28).to_string());
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn enospc_during_busy_follow_up_preserves_the_committed_queue_and_rejects_only_the_new_draft() {
+    use crate::surface_protocol::UserAction;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let root = tempfile::tempdir().unwrap();
+    let gate = plakous_offline_crash_harness::gate::GateHandle::new();
+    let plan = crate::runtime::recover_tests::script(serde_json::json!([
+        {"stream": [{"gate": gate.script()}], "output": {"text": "root response"}},
+        {"output": {"text": "queued response"}}
+    ]));
+    let (mut config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
+    let durable = config.store.clone();
+    let id = config.session.id.clone();
+    let armed = Arc::new(AtomicBool::new(false));
+    config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+        durable.clone(),
+        CapacityWriteFault(armed.clone()),
+    ));
+    let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    actions
+        .send(UserAction::Prompt("root prompt".into()))
+        .unwrap();
+    crate::runtime::recover_tests::wait_for(&events, &mut seen, "busy root", |event| {
+        matches!(event,
+        HostEvent::TurnLifecycle(lifecycle) if lifecycle.phase == plakous_host_protocol::TurnPhase::Admitted)
+    });
+    actions
+        .send(UserAction::FollowUp("committed follow-up".into()))
+        .unwrap();
+    crate::runtime::recover_tests::wait_for(&events, &mut seen, "durable follow-up", |event| {
+        matches!(event,
+        HostEvent::QueueSnapshot { items, .. } if items.iter().any(|item| item.text == "committed follow-up"))
+    });
+    let before = durable.load(&id).unwrap();
+    let queued = before
+        .pending_queue
+        .iter()
+        .find(|item| item.text == "committed follow-up")
+        .unwrap()
+        .clone();
+    armed.store(true, Ordering::SeqCst);
+    actions
+        .send(UserAction::FollowUp("refused follow-up".into()))
+        .unwrap();
+    crate::runtime::recover_tests::wait_for(&events, &mut seen, "capacity rejection", |event| {
+        matches!(event,
+        HostEvent::DraftRejected(UserAction::FollowUp(draft)) if draft.text == "refused follow-up")
+    });
+    let after = durable.load(&id).unwrap();
+    assert!(after.pending_queue.contains(&queued));
+    assert!(
+        !after
+            .pending_queue
+            .iter()
+            .any(|item| item.text == "refused follow-up")
+    );
+    armed.store(false, Ordering::SeqCst);
+    gate.release();
+    crate::runtime::recover_tests::wait_for(&events, &mut seen, "queued delivery", |event| {
+        matches!(event,
+        HostEvent::UserMessage { text, .. } if text == "committed follow-up")
+    });
+    crate::runtime::recover_tests::wait_for(&events, &mut seen, "queued terminal", |event| {
+        matches!(event, HostEvent::SetBusy(false))
+    });
+    assert!(!seen.iter().any(|event| matches!(event,
+        HostEvent::UserMessage { text, .. } if text.contains("refused follow-up"))));
+    actions.send(UserAction::Quit).unwrap();
+    worker.join().unwrap().unwrap();
 }
 
 #[test]

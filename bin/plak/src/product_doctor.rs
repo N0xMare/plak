@@ -5,6 +5,7 @@
 //! create, migrate, publish, or extract state.
 
 pub mod jj_cli;
+mod storage_space;
 
 use std::fs;
 use std::io::IsTerminal as _;
@@ -23,6 +24,7 @@ pub enum CheckKind {
     Version,
     JjCli,
     Home,
+    HomeFreeSpace,
     Config,
     ProductDatabase,
     RuntimeDatabase,
@@ -50,6 +52,7 @@ impl CheckKind {
             Self::Version => "version",
             Self::JjCli => "jj_cli",
             Self::Home => "home",
+            Self::HomeFreeSpace => "home_free_space",
             Self::Config => "config",
             Self::ProductDatabase => "product_db",
             Self::SubagentsDatabase => "subagents_db",
@@ -251,6 +254,8 @@ pub struct DoctorInputs {
     pub jj_cli: DoctorCheck,
     pub version: String,
     pub paths: DoctorPaths,
+    /// Product-volume capacity observed by the read-only input collector.
+    pub storage_admission: plakous_hosted::session_store::StorageAdmission,
     pub config: ConfigStatus,
     pub product_database: DatabaseStatus,
     pub runtime_database: DatabaseStatus,
@@ -885,6 +890,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         DirectoryPolicy::Private,
         false,
     ));
+    checks.push(storage_space::check(input.storage_admission));
     checks.push(config_check(&input.paths.config, input.config));
     checks.push(database_check(
         CheckKind::ProductDatabase,

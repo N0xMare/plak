@@ -91,6 +91,7 @@ pub mod roster_input;
 #[doc(hidden)]
 pub mod sidecars;
 pub mod signals;
+mod storage_space;
 #[doc(hidden)]
 pub mod store;
 /// Product telemetry: where it is written, what emits it, and the topology

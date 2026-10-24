@@ -265,6 +265,39 @@ worktrees and jj workspaces live under the launch checkout, not the home
 
 ### 2.2 The four databases
 
+New-work capacity is checked on the volume containing the product home, not
+the current workspace. Below 5 GiB available to the current user,
+doctor reports the home-volume location and free MiB; prompt preflight projects
+the typed capacity level to idle HUD chrome. Warnings show
+`storage warning · plak doctor`; refusal shows `storage low · new turns refused`.
+Pending-continuation indicators outrank both labels. The level is probed at
+attach and rebind, root preflight, turn end, and ready child-wake attempts,
+once at each point. Immediate echo and preflight share the same sample;
+a healthy projection clears it. There is no background filesystem poll. Below
+512 MiB, a typed `StorageAdmission::Refused` blocks new root-turn admissions
+before refresh, compaction or inference, and new child spawns. The host retains
+queued prompts with drain paused; an unqueued draft is returned. The capacity
+refusal carries `StoreRefusal::LowSpace`; spawn reports `storage_low` with a
+path-free instruction not to delete files or retry. Existing
+turns, jobs, retirement and stores are not cancelled or disabled. A new prompt,
+explicit queue retry or spawn rechecks space, without a sticky refusal. An
+unreadable capacity probe warns but does not pretend the volume is full. A
+missing home uses its nearest existing ancestor without creating it. These
+checks reserve no disk space and do not recover an in-flight write failure.
+Root refusal precedes `PromptStarted` and continuation resets. Child wakes
+check before compaction or preparing their immutable receipt; refusal follows
+the transient store-read backoff and never writes suppression or consumes mail.
+Capacity health is not a transcript fact: warning levels remain in live chrome,
+and refusal feedback uses the non-persisted operator-settings notice scope.
+Neither operator paths nor a warning row per prompt enter exports or models.
+
+When composing cleanup or release failures, CLI rendering prints an identical
+semicolon-separated leaf cause once and uses `[same cause]` at later stages.
+Ordinary value-shaped diagnostics, such as expected and actual revisions,
+are unchanged. Stage labels, distinct causes, typed
+sources, shutdown evidence and exit categories are retained. This is display
+compression, not classification by prose or a change to recovery authority.
+
 | File | Owner | Authority |
 | --- | --- | --- |
 | `runtime.sqlite3` | Plakous | checkpoints, canonical history and the change feed (chapter 01 §5.11) — the only recovery authority, and the source every view below is derived from |
@@ -4057,6 +4090,8 @@ bottom border is a plain line. HUD vocabulary, highest priority first:
 | Session opening | `starting…` |
 | An approval is pending (dormant in ordinary Plak) | pulsing `◆ approval needed` |
 | Idle, with pending continuation (yields to a problem label) | steady `◆` plus the pending parts joined by ` · `: `1 result pending` / `N results pending`, `1 question pending` / `N questions pending`, `1 process exited` / `N processes exited`, `auto-continue paused`, and `agents paused · /tree resume` |
+| Idle, no pending indicator, product-home capacity refused (§2.2) | `storage low · new turns refused` |
+| Idle, no pending indicator, product-home capacity warning (§2.2) | `storage warning · plak doctor` |
 | Stop in progress | `cancelling…` |
 | Compaction | spinner + `compacting` + elapsed |
 | Provider retry | spinner + `retrying Xs (n/N)`; cause in the transcript |
@@ -6257,9 +6292,10 @@ scans. Doctor uses a bounded busy timeout; only SQLite corruption and
 not-a-database errors are `corrupt`, while other query failures are
 `unavailable`. Runtime writer admission still validates its accounting counters.
 
-Twenty-two checks are always emitted, in a fixed order, grouped as product,
+Twenty-three checks are always emitted, in a fixed order, grouped as product,
 storage, config, environment, terminal, composition, provider, and OAuth:
-version; the home; the config file; the product and runtime databases; the
+version; the home; its volume's free space (`home_free_space`, §2.2); the config
+file; the product and runtime databases; the
 runtime store's retained usage (`runtime_store`: per aggregate bound used/limit
 and where new work stops, read-only against the default limits from the
 store's recorded counters in one row read, never a scan of retained history; `full` is an

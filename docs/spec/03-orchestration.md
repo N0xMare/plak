@@ -446,6 +446,15 @@ The message is truncated at 512 bytes with no continuation marker.
 
 ### 4.1 `spawn_agent`
 
+Before template admission, binding, minting or tree writes, the hosted binder
+asks the product store's capacity probe. A product-home volume below the
+512 MiB admission floor refuses with `storage_low` and a path-free storage reason
+(chapter 02 §2.2). No child or attempt is created. This affects only new
+spawns, not running children, mail, retirement or recovery.
+The model-facing refusal says the operator's storage is below the admission
+floor and instructs the agent not to delete files or retry; only operator
+doctor output names the volume. `capacity` retains its running-set meaning.
+
 Arguments — required `template`, `prompt`, `output_schema_json`, `tier`:
 
 | Field | Type | Notes |
@@ -479,7 +488,7 @@ Settled children release their direct-child slots once their results have been
 delivered and no turn is active; candidates remain adoptable. The running
 agent cap is tree-wide, excluding the root.
 
-Typed refusals: `capacity` (carrying the running set), `spawn_budget`,
+Typed refusals: `capacity` (carrying the running set), `storage_low`, `spawn_budget`,
 `depth_exhausted`, `template_not_spawnable`, `template_unknown`,
 `input_not_sealed`, `request_key_conflict`, `mint_unavailable`,
 `mint_hook_failed`, `model_not_admitted`, `schema_mismatch`.
@@ -1033,7 +1042,7 @@ The complete `TopologyErrorCode` set, in wire spelling:
 `unknown_field`, `schema_mismatch`, `bound_exceeded`, `grant_denied`,
 `self_send`, `recipient_closed`, `recipient_attempt_terminal`,
 `recipient_recovery_required`, `reply_invalid`, `mailbox_full`,
-`spawn_budget`, `capacity`, `request_key_conflict`, `depth_exhausted`,
+`spawn_budget`, `capacity`, `storage_low`, `request_key_conflict`, `depth_exhausted`,
 `template_not_spawnable`, `template_unknown`, `mint_unavailable`,
 `mint_hook_failed`, `input_not_sealed`, `workspace_identity_mismatch`,
 `workspace_recovery_required`, `workspace_not_owned`, `workspace_referenced`,
@@ -2109,6 +2118,10 @@ turn is free — and because `MAX_DIRECT_CHILDREN` and `MAX_RUNNING_CHILDREN` ar
 both 64, `capacity` is reachable only across several hubs, never from one
 parent alone. What paces a wide tree is the per-account request budget
 (§10.4), which delays model requests and never refuses a spawn.
+
+The separate `storage_low` refusal is the product-home admission floor
+(chapter 02 §2.2), not running saturation. It carries no running set and is not
+remedied by interrupting children, deleting files or repeated model-side retries.
 
 | Bound | Value | Configurable |
 | --- | --- | --- |

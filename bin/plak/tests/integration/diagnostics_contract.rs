@@ -16,6 +16,7 @@ fn plak_bin() -> std::path::PathBuf {
 fn plak_command(home: &std::path::Path) -> Command {
     let mut command = Command::new(plak_bin());
     command
+        .env("PLAK_TEST_STORAGE_CAPACITY", "available")
         .env("PLAK_HOME", home)
         .env("HOME", home)
         .current_dir(home)

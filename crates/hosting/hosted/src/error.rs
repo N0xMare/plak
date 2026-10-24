@@ -57,6 +57,8 @@ pub enum StoreRefusal {
     Busy,
     /// The store could not be reached or was shutting down.
     Unavailable,
+    /// The product volume is below its new-work admission floor.
+    LowSpace,
 }
 
 impl StoreRefusal {
@@ -76,6 +78,7 @@ impl StoreRefusal {
         match self {
             Self::Busy => "busy",
             Self::Unavailable => "unavailable",
+            Self::LowSpace => "low-space",
         }
     }
 }
@@ -242,15 +245,15 @@ impl CliFailure {
     }
 
     pub(crate) fn with_cleanup_failure(mut self, cleanup: impl std::fmt::Display) -> Self {
-        self.message = format!("{}; {cleanup}", self.message);
+        self.message = collapse_repeated_causes(&format!("{}; {cleanup}", self.message));
         self
     }
 
     pub(crate) fn with_release_failure(mut self, release: Self) -> Self {
-        self.message = format!(
+        self.message = collapse_repeated_causes(&format!(
             "{}; canonical session release also failed: {}",
             self.message, release.message
-        );
+        ));
         self.shutdown = release.shutdown.or_else(|| {
             Some(Box::new(ShutdownFailures {
                 release: Some(Self::classified(release.kind, release.message)),
@@ -288,7 +291,7 @@ impl CliFailure {
         if message.is_empty() {
             return Ok(());
         }
-        let mut failure = Self::new(message);
+        let mut failure = Self::new(collapse_repeated_causes(&message));
         failure.shutdown = Some(Box::new(failures));
         Err(failure)
     }
@@ -298,6 +301,30 @@ impl CliFailure {
     pub const fn exit_code(&self) -> u8 {
         self.kind.exit_code()
     }
+}
+
+/// Keep every stage, but print an identical leaf cause only once. This is
+/// presentation only: the failure kind, typed source and shutdown parts stay intact.
+fn collapse_repeated_causes(message: &str) -> String {
+    let mut causes = Vec::new();
+    message
+        .split("; ")
+        .map(|clause| {
+            let (stage, cause) = clause
+                .rsplit_once(": ")
+                .map_or((None, clause), |(stage, cause)| (Some(stage), cause));
+            if !cause.is_empty() && causes.contains(&cause) {
+                stage.map_or_else(
+                    || "[same cause]".to_owned(),
+                    |stage| format!("{stage}: [same cause]"),
+                )
+            } else {
+                causes.push(cause);
+                clause.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 impl From<&'static str> for CliFailure {
@@ -339,6 +366,7 @@ pub(crate) mod read_faults {
         let label = match refusal {
             Some(StoreRefusal::Busy) => "storage busy",
             Some(StoreRefusal::Unavailable) => "storage unavailable",
+            Some(StoreRefusal::LowSpace) => "storage low space",
             None => "integrity",
         };
         Some(ReadFailure {
@@ -351,6 +379,40 @@ pub(crate) mod read_faults {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_causes_keep_all_stages_and_the_failure_category() {
+        let failure = CliFailure::classified(
+            CliFailureKind::RecoveryRequired,
+            "session could not be reopened: session store disk is full",
+        ).with_cleanup_failure("cleanup disposition: initiating Session failure: session store disk is full; cleanup disposition: session store disk is full; telemetry: writer stopped");
+        assert_eq!(
+            failure
+                .message()
+                .matches("session store disk is full")
+                .count(),
+            1
+        );
+        assert_eq!(failure.message().matches("[same cause]").count(), 2);
+        assert!(failure.message().contains("initiating Session failure:"));
+        assert!(failure.message().contains("telemetry: writer stopped"));
+        assert_eq!(failure.kind, CliFailureKind::RecoveryRequired);
+        assert_eq!(failure.exit_code(), 5);
+    }
+
+    #[test]
+    fn distinct_causes_and_nested_context_are_not_dropped() {
+        let values = "expected revision: 3; actual revision: 3";
+        assert_eq!(CliFailure::new(values).message(), values);
+        let message = "open: database full; cleanup: permission denied; release: lease lost";
+        assert_eq!(CliFailure::new(message).message(), message);
+        let failure =
+            CliFailure::new("open: database full").with_cleanup_failure("release: database full");
+        assert_eq!(
+            failure.message(),
+            "open: database full; release: [same cause]"
+        );
+    }
 
     #[test]
     fn shutdown_keeps_release_and_cleanup_failures_typed() {

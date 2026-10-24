@@ -1036,6 +1036,7 @@ fn a_stale_limits_projection_states_its_age() {
 
 fn session_fixture() -> SessionInfoView {
     SessionInfoView {
+        storage_level: plakous_host_protocol::views::presentation::StorageLevel::Available,
         host_version: "0.1.0".to_owned(),
         session_id: "sid-123abc".to_owned(),
         working_dir: "/home/user/project".to_owned(),

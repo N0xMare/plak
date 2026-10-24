@@ -179,7 +179,7 @@ impl App {
         true
     }
 
-    /// The §5.4 HUD state, or `None` when the root is idle.
+    /// The §5.4 HUD state, including idle warnings and pending work.
     ///
     /// Every value is host-observed: the running tool's own §5.2 header, the
     /// host phase, or the startup row. Nothing is invented.
@@ -222,7 +222,12 @@ impl App {
             return Some(label);
         }
         if !self.busy {
-            return None;
+            use plakous_host_protocol::views::presentation::StorageLevel;
+            return match self.session_info.storage_level {
+                StorageLevel::Available => None,
+                StorageLevel::Warning => Some("storage warning · plak doctor".to_owned()),
+                StorageLevel::Refused => Some("storage low · new turns refused".to_owned()),
+            };
         }
         if self.phase == "interrupting" {
             return Some("cancelling…".to_owned());

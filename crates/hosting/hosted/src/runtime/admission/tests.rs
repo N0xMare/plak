@@ -110,6 +110,7 @@ fn idle_immediate_prompt_emits_user_message_without_one_item_queue_chip() {
         &session,
         UserAction::Prompt("hello world".into()),
         item,
+        true,
     );
     assert_eq!(text, "hello world");
     assert!(queued.is_some());
@@ -138,8 +139,13 @@ fn idle_prompt_with_existing_queue_projects_remaining_chip() {
     session.record_prompt(item.text.clone());
     let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(tx);
-    let _ =
-        admit_idle_immediate_prompt(&events, &session, UserAction::Prompt("newer".into()), item);
+    let _ = admit_idle_immediate_prompt(
+        &events,
+        &session,
+        UserAction::Prompt("newer".into()),
+        item,
+        true,
+    );
     let observed = rx.try_iter().collect::<Vec<_>>();
     assert!(
         observed.iter().any(|event| matches!(

@@ -23,6 +23,17 @@ impl ProductChildSessionBinder {
         &self,
         request: &crate::agent_tree_protocol::SpawnAgentRequest,
     ) -> Result<(), crate::agent_tree::TopologyError> {
+        if let crate::session_store::StorageAdmission::Refused(_) = self
+            .parent
+            .state_roots()
+            .session_records()
+            .storage_admission()
+        {
+            return Err(crate::agent_tree::TopologyError::new(
+                crate::agent_tree_protocol::TopologyErrorCode::StorageLow,
+                "spawning is unavailable: the operator's storage is below the admission floor; do not delete files or retry",
+            ));
+        }
         let tree_id = spawn_parent_tree_id(&self.parent);
         let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
             return Ok(());

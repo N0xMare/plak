@@ -73,6 +73,62 @@ fn a_rejected_prompt_drops_its_row_and_restores_the_draft() {
     assert_eq!(app.input, "refuse me");
 }
 
+#[test]
+fn a_refused_busy_draft_merges_with_new_typing_without_changing_the_committed_queue() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    let committed = queue_item("committed", 1, "committed follow-up");
+    app.apply_host_event(HostEvent::QueueSnapshot {
+        items: vec![committed],
+        drain: QueueDrainState::LiveAutoDrain,
+    });
+    app.set_input("refused follow-up".into());
+    let action = app.submit_line(false).expect("follow-up");
+    dispatch_action(&mut app, &action, Some(&sender));
+    app.set_input("new typing".into());
+    app.apply_host_event(HostEvent::DraftRejected(action));
+    assert_eq!(app.input, "refused follow-up\n\nnew typing");
+    assert_eq!(app.local_queue.len(), 1);
+    assert_eq!(app.local_queue[0].id, "committed");
+    assert_eq!(app.local_queue[0].text, "committed follow-up");
+}
+
+#[test]
+fn storage_warning_is_idle_chrome_and_clears_with_a_healthy_projection() {
+    let mut app = App::new(launch_basic(), true);
+    let mut info = plakous_host_protocol::views::presentation::SessionInfoView {
+        storage_level: plakous_host_protocol::views::presentation::StorageLevel::Warning,
+        ..Default::default()
+    };
+    app.apply_host_event(HostEvent::SessionInfo(info.clone()));
+    assert_eq!(
+        app.turn_status_label().as_deref(),
+        Some("storage warning · plak doctor")
+    );
+    app.apply_host_event(HostEvent::SetBusy(true));
+    assert_ne!(
+        app.turn_status_label().as_deref(),
+        Some("storage warning · plak doctor")
+    );
+    app.apply_host_event(HostEvent::SetBusy(false));
+    info.storage_level = plakous_host_protocol::views::presentation::StorageLevel::Refused;
+    app.apply_host_event(HostEvent::SessionInfo(info.clone()));
+    assert_eq!(
+        app.turn_status_label().as_deref(),
+        Some("storage low · new turns refused")
+    );
+    app.tree_restored_paused = true;
+    assert!(
+        app.turn_status_label()
+            .is_some_and(|label| label.contains("agents paused"))
+    );
+    app.tree_restored_paused = false;
+    info.storage_level = plakous_host_protocol::views::presentation::StorageLevel::Available;
+    app.apply_host_event(HostEvent::SessionInfo(info));
+    assert_eq!(app.turn_status_label(), None);
+}
+
 /// A follow-up typed during a turn is a numberless queue row until the
 /// host's queue snapshot numbers it; the queue panel's `#N` rows are the
 /// host's alone.

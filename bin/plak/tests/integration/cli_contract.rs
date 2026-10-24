@@ -26,6 +26,7 @@ fn publication_command(root: &std::path::Path, args: &[&str]) -> Command {
     command
         .current_dir(root)
         .env("PLAK_HOME", root.join("home"))
+        .env("PLAK_TEST_STORAGE_CAPACITY", "available")
         .env("HOME", root)
         .env("XDG_STATE_HOME", root.join("xdg"))
         .env_remove("PLAK_LOG")
@@ -89,6 +90,34 @@ fn publication_doctor_missing_optional_state_is_normal_first_run() {
             .find(|line| line.starts_with(&format!("{label}\t")))
             .unwrap();
         assert_eq!(row.split('\t').nth(1), Some("OK"), "{row}");
+    }
+}
+
+#[test]
+fn doctor_capacity_override_is_independent_of_the_model_and_test_volume() {
+    for (capacity, severity, exit) in [
+        ("available", "OK", 0),
+        ("warning", "WARNING", 0),
+        ("refused", "ERROR", 5),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let out = publication_command(root.path(), &["doctor"])
+            .env_remove("PLAK_TEST_MODEL")
+            .env("PLAK_TEST_STORAGE_CAPACITY", capacity)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(exit),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let row = stdout
+            .lines()
+            .find(|row| row.starts_with("Home free space\t"))
+            .unwrap();
+        assert_eq!(row.split('\t').nth(1), Some(severity), "{row}");
     }
 }
 
@@ -374,6 +403,7 @@ fn make_private_home(home: &std::path::Path) {
 fn run_plak(home: &std::path::Path, args: &[&str]) -> std::process::Output {
     make_private_home(home);
     Command::new(plak_bin())
+        .env("PLAK_TEST_STORAGE_CAPACITY", "available")
         .env("PLAK_HOME", home)
         .env("HOME", home) // some paths fall back to HOME
         .current_dir(home)
@@ -1809,6 +1839,7 @@ fn a_non_private_home_is_refused_with_its_fix_and_never_repaired() {
     std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let plak = |args: &[&str]| {
         Command::new(plak_bin())
+            .env("PLAK_TEST_STORAGE_CAPACITY", "available")
             .env("PLAK_HOME", &home)
             .env("HOME", dir.path())
             .current_dir(dir.path())

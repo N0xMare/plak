@@ -42,6 +42,22 @@ use crate::{product_agent, product_config, product_host, product_paths, product_
 /// The exact model id this hook answers to.
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
 
+pub(crate) fn storage_capacity_override() -> Option<plakous_hosted::session_store::StorageAdmission>
+{
+    use plakous_hosted::session_store::StorageAdmission;
+    match std::env::var_os("PLAK_TEST_STORAGE_CAPACITY").as_deref() {
+        Some(value) if value == "available" => Some(StorageAdmission::Available),
+        Some(value) if value == "warning" => {
+            Some(StorageAdmission::Warning("injected low capacity".into()))
+        }
+        Some(_) => Some(StorageAdmission::Refused(
+            "injected capacity refusal".into(),
+        )),
+        None => (selector().as_deref() == Some(std::ffi::OsStr::new(SELECTOR)))
+            .then_some(StorageAdmission::Available),
+    }
+}
+
 pub(crate) fn assistant_done_release() -> Option<PathBuf> {
     if std::env::var("PLAK_TEST_MODEL").as_deref() != Ok(SELECTOR) {
         return None;

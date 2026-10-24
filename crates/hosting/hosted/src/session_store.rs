@@ -84,8 +84,24 @@ pub struct SessionQueueHead {
     pub recorded_locator: Option<plakous::sessions::SessionLocator>,
 }
 
+/// Product-volume capacity at a new-work boundary. This is advisory about
+/// existing work, not a store-write result or recovery authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StorageAdmission {
+    /// Capacity is above the warning threshold, or no volume limit applies.
+    Available,
+    /// New work remains admitted; show this product-authored warning.
+    Warning(String),
+    /// Capacity is below the admission floor; retain input without dispatch.
+    Refused(String),
+}
+
 /// Durable product session records with compare-and-swap commits.
 pub trait SessionRecordStore: Send + Sync {
+    /// Probe product-owned capacity before admitting a new turn or spawn.
+    /// In-memory and non-filesystem stores have no product-volume limit.
+    fn storage_admission(&self) -> StorageAdmission;
+
     /// Load one record by its exact id. Queue items and unresolved delivery or
     /// workflow journals project as paused; loading never writes that projection
     /// or advances the durable revision.
@@ -235,7 +251,7 @@ mod memory {
     use std::path::Path;
     use std::sync::Mutex;
 
-    use super::{RecordStoreError, SessionRecordStore};
+    use super::{RecordStoreError, SessionRecordStore, StorageAdmission};
     use crate::sessions::projector::{
         ProductIntents, ProjectionCommit, SessionViews, Submission, ViewWrites,
     };
@@ -630,6 +646,10 @@ mod memory {
     }
 
     impl SessionRecordStore for MemoryStore {
+        fn storage_admission(&self) -> StorageAdmission {
+            StorageAdmission::Available
+        }
+
         fn emit_projected_turn_usages(
             &self,
             usages: &[crate::sessions::projector::ProjectedTurnUsage],

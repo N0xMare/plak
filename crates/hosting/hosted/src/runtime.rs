@@ -128,7 +128,7 @@ mod projection;
 pub(crate) use projection::probe::view_write as observe_projector_view_write;
 mod factory;
 #[cfg(test)]
-mod fault_store;
+pub(crate) mod fault_store;
 #[cfg(test)]
 mod intent_wake_tests;
 mod rebind;

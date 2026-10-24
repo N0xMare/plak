@@ -95,6 +95,8 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     stderr_buf: Vec<u8>,
     interrupt_state: RefCell<InterruptWatchState<P>>,
     pending_start: Option<SessionQueueItem>,
+    /// The idle prompt's one capacity sample, shared by echo and admission.
+    pending_storage_admission: Option<crate::session_store::StorageAdmission>,
     pending_resume: Option<transient::PendingResume>,
     transient_resumes_used: u8,
     last_tree_revision: TreeSnapshotPush,

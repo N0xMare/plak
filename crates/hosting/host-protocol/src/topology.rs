@@ -421,6 +421,8 @@ pub enum TopologyErrorCode {
     SpawnBudget,
     /// Running-node saturation; carries the running set in the message.
     Capacity,
+    /// Operator storage is below the new-work floor; never a running-set refusal.
+    StorageLow,
     /// A `request_key` was reused for a different brief.
     RequestKeyConflict,
     /// The spawn would pass the tree's depth bound.
@@ -1580,6 +1582,7 @@ mod tests {
                 "workspace_recovery_required",
             ),
             (TopologyErrorCode::Capacity, "capacity"),
+            (TopologyErrorCode::StorageLow, "storage_low"),
             (TopologyErrorCode::DepthExhausted, "depth_exhausted"),
             (TopologyErrorCode::AttemptMismatch, "attempt_mismatch"),
             (TopologyErrorCode::NoPendingChildren, "no_pending_children"),

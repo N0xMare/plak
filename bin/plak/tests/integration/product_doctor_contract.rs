@@ -49,6 +49,7 @@ fn input(temp: &TempDir) -> DoctorInputs {
     private_directory(&paths.state_dir());
     private_directory(&paths.sessions_dir());
     DoctorInputs {
+        storage_admission: plakous_hosted::session_store::StorageAdmission::Available,
         jj_cli: product_doctor::jj_cli::probe(None, temp.path()),
         version: "0.1.0-test".to_owned(),
         paths: DoctorPaths::under(home),

@@ -98,6 +98,13 @@ has scrolled out of view; a plain click only moves the caret.
 Opening Menu, Activity or another overlay, or switching panes, also stops the
 drag without losing the selected text.
 
+When idle with no pending-work indicator, low product-home capacity shows
+`storage warning · plak doctor` below 5 GiB, or
+`storage low · new turns refused` below 512 MiB. Doctor names the volume and
+available space. New prompts and spawns recheck capacity; current work is not
+cancelled, and the warning is not saved in the transcript. Pending work stays
+more prominent than either storage label.
+
 While the root is idle and work is waiting, that HUD shows a steady `◆` and
 what is pending, joined by ` · `: unread child results and questions, process
 exits the next turn has not seen, `auto-continue paused`, and

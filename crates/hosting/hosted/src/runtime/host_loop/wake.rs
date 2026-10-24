@@ -208,21 +208,29 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// retries are spent, which is when the pause is reported.
     fn defer_child_wake(&mut self, refusal: crate::error::StoreRefusal, now: Instant) {
         let (failures, delay) = self.child_wake.defer(&self.config.session.id, now);
+        let storage_low = refusal == crate::error::StoreRefusal::LowSpace;
+        let message = if storage_low {
+            "sub-agent auto-continue waiting: product storage is below the admission floor"
+        } else {
+            "the session store refused a sub-agent wake read; retrying"
+        };
         tracing::warn!(
             target: "plak.wake",
             cause = refusal.as_str(),
             failures,
             retry_in_secs = delay.as_secs(),
-            "the session store refused a sub-agent wake read; retrying"
+            "{message}"
         );
         if failures == TRANSIENT_RETRIES + 1 {
             let _ = self.events.notice(TranscriptRow::warning(
                 NoticeScope::Tree,
-                format!(
+                if storage_low {
+                    format!("Sub-agent auto-continue waiting: product storage is below the admission floor; rechecks every {} s", TRANSIENT_REARM.as_secs())
+                } else { format!(
                     "Sub-agent auto-continue paused: the session store is {}; it retries every {} s",
                     refusal.as_str(),
                     TRANSIENT_REARM.as_secs()
-                ),
+                ) },
             ));
         }
     }
@@ -316,6 +324,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         watch.poll();
         if self.interrupt_state.borrow().has_deferred() || watch.interrupted() {
             return Ok(HostStep::Continue);
+        }
+        let admission = self.config.store.storage_admission();
+        super::super::info::send_session_info_with_storage(&self.events, &self.config, &admission);
+        if matches!(
+            admission,
+            crate::session_store::StorageAdmission::Refused(_)
+        ) {
+            return Err(CliFailure::from(
+                crate::session_store::RecordStoreError::refused(
+                    crate::error::StoreRefusal::LowSpace,
+                    "operator storage is below the admission floor",
+                ),
+            ));
         }
         let (command, batch) = super::super::result_mail::select(&rows, session, WAKE_PROMPT)
             .map_err(CliFailure::new)?;

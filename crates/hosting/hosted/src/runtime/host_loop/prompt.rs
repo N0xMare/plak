@@ -41,6 +41,40 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .and_then(|item| self.config.session.queue_commands.pending_for(item))
             .filter(|submission| submission.kind == sessions::projector::SubmissionKind::HostWake)
             .cloned();
+        // A child wake already passed the capacity check before its immutable
+        // receipt was recorded. Do not turn that receipt into suppression here.
+        if wake.is_none() {
+            let admission = self
+                .pending_storage_admission
+                .take()
+                .unwrap_or_else(|| self.config.store.storage_admission());
+            super::super::info::send_session_info_with_storage(
+                &self.events,
+                &self.config,
+                &admission,
+            );
+            if let crate::session_store::StorageAdmission::Refused(_) = admission {
+                let reason = "new turns refused: operator storage is below the admission floor; input remains queued; check `plak doctor`";
+                if let Some(state) = one_shot {
+                    state.result = Some(Err(CliFailure::from(
+                        crate::session_store::RecordStoreError::refused(
+                            crate::error::StoreRefusal::LowSpace,
+                            reason,
+                        ),
+                    )));
+                }
+                self.config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
+                emit_queue_snapshot(&self.events, &self.config.session);
+                if queued_delivery.is_none() {
+                    reject_draft(&self.events, super::UserAction::Prompt(raw_text.into()));
+                }
+                // Operator-only feedback never enters the transcript/export.
+                let _ = self
+                    .events
+                    .notice(TranscriptRow::warning(NoticeScope::Settings, reason));
+                return Ok(HostStep::Continue);
+            }
+        }
         let before_recovery = self.recovery_blocked;
         let before_drain = self.config.session.queue_drain_state;
         let outcome = self.run_prompt_inner(raw_text, queued_delivery, user_echoed, one_shot);

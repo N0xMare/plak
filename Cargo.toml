@@ -421,10 +421,10 @@ lto = false
 [workspace.metadata.plakous.cfg.plak]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs"]
-feature-ceiling = 131
-test-seam-ceiling = 75
-env-ceiling = 28
-reason = "Capability registry entry sites; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
+feature-ceiling = 132
+test-seam-ceiling = 76
+env-ceiling = 29
+reason = "Capability registry entry sites and the explicit capacity-probe test hook; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous]
 feature-ceiling = 92

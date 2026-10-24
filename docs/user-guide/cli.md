@@ -468,6 +468,7 @@ Plak doctor
 CHECK              RESULT   DETAIL                                        FIX
 Version            OK       available · 0.0.2                             —
 Home               OK       available · /home/you/.plak                   —
+Home free space    OK       available · product home volume has at least 5120 MiB available   —
 Config             OK       valid · /home/you/.plak/config.toml           —
 Product db         OK       available · /home/you/.plak/state/r25.e31.p33.t8/product.sqlite3   —
 Runtime db         OK       available · /home/you/.plak/state/r25.e31.p33.t8/runtime.sqlite3   —
@@ -489,11 +490,11 @@ OAuth codex        OK       ready · record ready · generation 13 · 22h old �
 OAuth grok         OK       signed_out · no record · no refresh telemetry   —
 OAuth claude       OK       signed_out · no record · no refresh telemetry   —
 
-Result: 22 passed · 0 warnings · 0 failures
+Result: 23 passed · 0 warnings · 0 failures
 Provider credentials: run `plak status`
 ```
 
-The same 22 checks are always emitted. Every failing row carries its own FIX
+The same 23 checks are always emitted. Every failing row carries its own FIX
 column. `Runtime store` is an ERROR (`full`) once new work is refused for lack
 of space and a WARNING (`nearly_full`) shortly before; its fix is
 `plak session gc --all`, then `plak session delete <id>`. The row also shows
@@ -501,6 +502,12 @@ the database file size with its free bytes, and the change feed's retained
 rows and their bytes (informational: feed rows never count toward the store
 being full). `doctor` exits 5 when any row is ERROR; warnings alone do not
 fail it.
+
+`Home free space` checks the volume containing the product home, not the
+workspace. It warns below 5 GiB and reports an error below 512 MiB, where new
+turns and spawns are refused. Existing work is not cancelled. The operator can
+inspect the volume and free space, then retry; Plak never deletes files to
+make space. An unreadable probe warns without assuming zero free space.
 
 ### `plak usage [--account codex|grok|claude|openrouter|supergrok] [--session <uuid>]`
 

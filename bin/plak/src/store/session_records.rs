@@ -22,6 +22,7 @@ use crate::store::sessions::SessionRecord;
 pub struct SqliteSessionStore {
     paths: PlakPaths,
     connection: Arc<Mutex<Option<crate::store::ProductStore>>>,
+    storage_override: Option<plakous_hosted::session_store::StorageAdmission>,
     #[cfg(test)]
     opens: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -34,8 +35,23 @@ impl SqliteSessionStore {
             paths,
             connection: Arc::new(Mutex::new(None)),
             #[cfg(test)]
+            storage_override: Some(plakous_hosted::session_store::StorageAdmission::Available),
+            #[cfg(not(test))]
+            storage_override: None,
+            #[cfg(test)]
             opens: Arc::default(),
         }
+    }
+
+    /// Inject capacity independently of the fixture's filesystem.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_storage_admission(
+        mut self,
+        admission: plakous_hosted::session_store::StorageAdmission,
+    ) -> Self {
+        self.storage_override = Some(admission);
+        self
     }
 
     #[cfg(test)]
@@ -77,6 +93,13 @@ impl SqliteSessionStore {
 }
 
 impl SessionRecordStore for SqliteSessionStore {
+    fn storage_admission(&self) -> plakous_hosted::session_store::StorageAdmission {
+        if let Some(admission) = &self.storage_override {
+            return admission.clone();
+        }
+        crate::storage_space::admission(self.paths.home())
+    }
+
     fn emit_projected_turn_usages(
         &self,
         terminals: &[plakous_hosted::sessions::projector::ProjectedTurnUsage],

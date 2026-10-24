@@ -618,6 +618,46 @@ mod tests {
 
     use super::ProductStateRoots;
 
+    struct LowStorage;
+
+    impl crate::runtime::fault_store::StoreFaults for LowStorage {
+        fn storage_admission(&self) -> Option<crate::session_store::StorageAdmission> {
+            Some(crate::session_store::StorageAdmission::Refused(
+                "product volume: 0 MiB free".into(),
+            ))
+        }
+
+        fn before(
+            &self,
+            _: crate::runtime::fault_store::StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            Err("capacity refusal must precede store access".into())
+        }
+    }
+
+    #[test]
+    fn low_storage_refuses_spawn_before_template_or_store_access() {
+        let mut parent = crate::agent::tests::openrouter_test_parent();
+        parent.state_roots.session_records =
+            Arc::new(crate::runtime::fault_store::FaultStore::new(
+                parent.state_roots.session_records(),
+                LowStorage,
+            ));
+        let binder = crate::agent::children::ProductChildSessionBinder {
+            parent: crate::agent::SpawnParent::Api(parent),
+        };
+        let refusal = binder
+            .admit_spawn(&crate::agent_tree_protocol::SpawnAgentRequest::test_review())
+            .unwrap_err();
+        assert_eq!(
+            refusal.code,
+            crate::agent_tree_protocol::TopologyErrorCode::StorageLow
+        );
+        assert!(refusal.message.contains("do not delete files or retry"));
+        assert!(!refusal.message.contains("0 MiB"));
+    }
+
     struct UnreadableRoster;
 
     impl super::RosterSource for UnreadableRoster {

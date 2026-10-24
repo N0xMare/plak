@@ -125,9 +125,26 @@ pub(super) fn send_session_info<P: plakous_host_protocol::ProtocolExtension>(
     let _ = events.send(HostEvent::SessionInfo(session_info_view(config)));
 }
 
+pub(super) fn send_session_info_with_storage<P: plakous_host_protocol::ProtocolExtension>(
+    events: &Sender<P>,
+    config: &HostConfig<P>,
+    storage: &crate::session_store::StorageAdmission,
+) {
+    let _ = events.send(HostEvent::SessionInfo(session_info_view_with_storage(
+        config, storage,
+    )));
+}
+
 /// Builds the Session projection from the bound session (spec 02 §5.5).
 pub(super) fn session_info_view<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
+) -> plakous_host_protocol::views::presentation::SessionInfoView {
+    session_info_view_with_storage(config, &config.store.storage_admission())
+}
+
+fn session_info_view_with_storage<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    storage: &crate::session_store::StorageAdmission,
 ) -> plakous_host_protocol::views::presentation::SessionInfoView {
     let facts = session_info_facts(
         &config.session.target_selection,
@@ -166,6 +183,17 @@ pub(super) fn session_info_view<P: plakous_host_protocol::ProtocolExtension>(
         HostTargetAuthority::Registered { .. } => None,
     };
     plakous_host_protocol::views::presentation::SessionInfoView {
+        storage_level: match storage {
+            crate::session_store::StorageAdmission::Available => {
+                plakous_host_protocol::views::presentation::StorageLevel::Available
+            }
+            crate::session_store::StorageAdmission::Warning(_) => {
+                plakous_host_protocol::views::presentation::StorageLevel::Warning
+            }
+            crate::session_store::StorageAdmission::Refused(_) => {
+                plakous_host_protocol::views::presentation::StorageLevel::Refused
+            }
+        },
         host_version: plakous::VERSION.to_owned(),
         session_id: config.session.id.clone(),
         working_dir: config.cwd.display().to_string(),

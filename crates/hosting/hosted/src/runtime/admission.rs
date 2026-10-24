@@ -120,23 +120,26 @@ pub(super) fn admit_idle_immediate_prompt<P: plakous_host_protocol::ProtocolExte
     session: &SessionRecord,
     action: UserAction<P>,
     item: SessionQueueItem,
+    echo: bool,
 ) -> (String, Option<SessionQueueItem>, bool) {
-    if session.pending_queue.len() > 1 {
+    if session.pending_queue.len() > 1 || !echo {
         emit_queue_snapshot(events, session);
     }
     emit_prompt_history(events, session);
     accept_draft(events, action);
     let identity = item.protocol(false);
     let _ = events.send(HostEvent::PromptAdmitted(identity.clone()));
-    let _ = events.send(HostEvent::PromptStarted(Some(identity)));
-    let _ = events.send(HostEvent::UserMessage {
-        text: crate::sessions::with_image_chips(
-            &item.text,
-            item.images.iter().map(crate::sessions::draft_image_chip),
-        ),
-        sent_at_ms: Some(item.submitted_at_ms),
-    });
-    (item.text.clone(), Some(item), true)
+    if echo {
+        let _ = events.send(HostEvent::PromptStarted(Some(identity)));
+        let _ = events.send(HostEvent::UserMessage {
+            text: crate::sessions::with_image_chips(
+                &item.text,
+                item.images.iter().map(crate::sessions::draft_image_chip),
+            ),
+            sent_at_ms: Some(item.submitted_at_ms),
+        });
+    }
+    (item.text.clone(), Some(item), echo)
 }
 
 pub(super) fn reject_stale_queue_action<P: plakous_host_protocol::ProtocolExtension>(

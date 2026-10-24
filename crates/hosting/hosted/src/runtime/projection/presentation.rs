@@ -23,6 +23,10 @@ pub(crate) struct PresentingStore {
 }
 
 impl SessionRecordStore for PresentingStore {
+    fn storage_admission(&self) -> crate::session_store::StorageAdmission {
+        self.inner.storage_admission()
+    }
+
     fn load(&self, id: &str) -> Result<SessionRecord, String> {
         self.inner.load(id)
     }

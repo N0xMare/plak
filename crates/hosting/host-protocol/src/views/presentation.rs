@@ -619,12 +619,27 @@ impl Default for UsageLimitsView {
     }
 }
 
-/// Host-owned typed session facts for the Usage Session section (spec 02 §5.5).
+/// Product-volume health for idle chrome, never recovery authority.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StorageLevel {
+    /// No capacity warning.
+    #[default]
+    Available,
+    /// New work is admitted, but capacity is low or unknown.
+    Warning,
+    /// New turns and spawns are refused until capacity recovers.
+    Refused,
+}
+
+/// Host-owned session facts for inspectors and idle chrome (spec 02 §5.4–5.5).
 ///
 /// Each field is typed host data. The renderer formats it; it never re-parses
 /// a rendered string, and an absent field prints `not reported`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SessionInfoView {
+    /// Product-home capacity level, with no operator paths or rendered prose.
+    /// In-process chrome only; not persisted or projected on JSONL v1.
+    pub storage_level: StorageLevel,
     /// Host binary version.
     pub host_version: String,
     /// Product session id.

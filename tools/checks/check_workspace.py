@@ -377,6 +377,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
     # repository gate's offline model selector. Naming the model rather than a
     # bare flag keeps the selection an explicit binding fact.
     ("plak", "src/test_hooks.rs"): [
+        ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
         ("var", (("string", "PLAK_TEST_MODEL"),)),
         ("var_os", (("string", "PLAK_TEST_ASSISTANT_DONE_RELEASE"),)),
         ("var_os", (("string", "PLAK_TEST_MODEL"),)),

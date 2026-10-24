@@ -205,8 +205,13 @@ tasks, joined lease heartbeat, lease release, store flush, and event close.
 A persistent in-memory terminal installation failure reaches the explicit
 result failure channel and cannot skip later roots or cleanup; an ordinary
 store refusal alone does not imply this failure. Cleanup failures remain
-aggregated with the initiating failure. Within turn cleanup, local composition
-and joined process lifetime retirement are independently panic-contained; a
+aggregated with the initiating failure. Cleanup aggregation retains
+`OutcomeUnknown` when cleanup repeats the initiating failure, but prints
+each identical cause only once. An already nested cause is not appended again
+through release/retirement; distinct cleanup failures remain visible. This
+changes diagnostic rendering, not the terminal or recovery disposition.
+Within turn cleanup, local composition and joined process lifetime retirement
+are independently panic-contained; a
 local failure cannot skip process joining. Within an extracted composition
 owner, active-cell termination and session shutdown are independently attempted,
 retaining their failures alongside the initiating error.
