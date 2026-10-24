@@ -2205,8 +2205,9 @@ fn an_idle_send_paints_the_host_row_without_waiting_out_a_poll() {
     terminal.quit();
 }
 
-/// The UI loop's main-thread counters from `/proc`: context switches and
-/// user CPU ticks. The loop runs on the main thread, whose task id is the pid.
+/// The UI loop's main-thread counters from `/proc`: voluntary context
+/// switches (its wakeups; preemption under host load is not one) and user
+/// CPU ticks. The loop runs on the main thread, whose task id is the pid.
 #[cfg(target_os = "linux")]
 fn ui_thread_counters(terminal: &Terminal) -> (u64, u64) {
     let pid = terminal.pid();
@@ -2214,9 +2215,9 @@ fn ui_thread_counters(terminal: &Terminal) -> (u64, u64) {
         .expect("main thread status");
     let switches = status
         .lines()
-        .filter(|line| line.contains("ctxt_switches:"))
-        .filter_map(|line| line.split_whitespace().last()?.parse::<u64>().ok())
-        .sum();
+        .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:"))
+        .and_then(|count| count.trim().parse::<u64>().ok())
+        .expect("voluntary context switches");
     let stat =
         std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/stat")).expect("main thread stat");
     // Fields after the parenthesised command: state is field 3, utime 14.
@@ -2227,19 +2228,55 @@ fn ui_thread_counters(terminal: &Terminal) -> (u64, u64) {
     (switches, utime)
 }
 
+/// Blocks until the UI thread's wakeup count holds still for
+/// `quiet`: the one-shot work after a launch and a turn (the background
+/// binary hash, the workspace and profile re-reads) has landed and painted.
+#[cfg(target_os = "linux")]
+fn wait_until_ui_thread_quiet(terminal: &Terminal, quiet: Duration) {
+    let deadline = Instant::now() + WAIT;
+    let mut last = ui_thread_counters(terminal).0;
+    let mut still_since = Instant::now();
+    while still_since.elapsed() < quiet {
+        assert!(
+            Instant::now() < deadline,
+            "the UI thread never held still for {quiet:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+        let now = ui_thread_counters(terminal).0;
+        if now != last {
+            last = now;
+            still_since = Instant::now();
+        }
+    }
+}
+
 /// Spec 02 §5.8's true idle: a parked shell's UI thread sleeps until
 /// something wakes it, and its only timer is the installed-build check,
 /// re-armed every five seconds. A 250 ms poll ceiling woke it eight times in
 /// this two-second window; the build check may land inside it once.
+///
+/// The window opens only once the shell has settled. Under host load the
+/// background binary hash (the banner's `binary calculating` fact) and the
+/// turn-end workspace re-read land seconds late, and each repaint that
+/// blocks on the pseudoterminal counts several switches, so a fixed settle
+/// delay could put them inside the window. The banner is waited for at
+/// launch, while it is still on screen. The turn-end workspace and profile
+/// re-read has no on-screen fact the test can wait for, so the quiet wait is
+/// the only guard for it.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_parked_shell_wakes_only_for_its_five_second_build_check() {
     let fixture = Fixture::new(&recovery_answer_script());
     let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.wait_where("the banner's settled binary identity", |frame| {
+        frame.lines().any(|line| {
+            let mut fact = line.split_whitespace().skip_while(|word| *word != "binary");
+            fact.next().is_some() && fact.next().is_some_and(|id| id != "calculating")
+        })
+    });
     terminal.send(b"settle before parking\r");
     terminal.wait_screen("recovered and answered");
-    // The turn's tail, the build identity and the chrome reads settle.
-    std::thread::sleep(Duration::from_millis(1_500));
+    wait_until_ui_thread_quiet(&terminal, Duration::from_secs(1));
     let (before, _) = ui_thread_counters(&terminal);
     std::thread::sleep(Duration::from_secs(2));
     let woken = ui_thread_counters(&terminal).0 - before;
