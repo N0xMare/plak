@@ -70,7 +70,7 @@ mod schema;
 mod tests;
 
 use super::MemoryStoreLimits;
-use super::{expired, expiry, require_lease_domain, sample_clock};
+use super::memory::{expired, expiry, require_lease_domain, sample_clock};
 use actor::*;
 use authority::*;
 use checkpoint_cache::CheckpointCache;
