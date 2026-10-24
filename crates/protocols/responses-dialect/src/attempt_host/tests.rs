@@ -1,4 +1,5 @@
 use super::*;
+use plakous_attempt::RetryClass;
 
 #[test]
 fn replay_required_history_refusals_preserve_the_protected_history_remedy() {
