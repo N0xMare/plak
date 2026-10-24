@@ -122,7 +122,7 @@ impl ResolvedProvider {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::collections::BTreeMap;
     use std::error::Error;
     use std::num::NonZeroU32;
@@ -141,7 +141,7 @@ mod tests {
 
     type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
-    struct Fixture {
+    pub(in crate::subscriptions) struct Fixture {
         observed: u64,
         epoch: &'static str,
         route: &'static str,
@@ -150,7 +150,7 @@ mod tests {
         tool_mode: NativeToolMode,
     }
 
-    const BASE: Fixture = Fixture {
+    pub(in crate::subscriptions) const BASE: Fixture = Fixture {
         observed: 1,
         epoch: "login-epoch-a",
         route: "route-fingerprint-a",
@@ -159,7 +159,7 @@ mod tests {
         tool_mode: NativeToolMode::Direct,
     };
 
-    fn resolved(fixture: &Fixture) -> TestResult<ResolvedProvider> {
+    pub(in crate::subscriptions) fn resolved(fixture: &Fixture) -> TestResult<ResolvedProvider> {
         let observed = Timestamp::new(fixture.observed, 0)?;
         let expires = Timestamp::new(fixture.observed + 21_600, 0)?;
         let mut features = BTreeMap::new();

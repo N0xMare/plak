@@ -79,19 +79,10 @@ fn configure_gated_provider(
         }
     }
     .map_err(|error| {
-        let error = match error {
-            plakous_openai::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
-                NativeSubscriptionError::ProviderConfigurationPolicyMismatch(field)
-            }
-            plakous_openai::ResponsesProviderConfigurationError::Identity => {
-                NativeSubscriptionError::ProviderConfigurationIdentityRejected
-            }
-            plakous_openai::ResponsesProviderConfigurationError::ProviderConfiguration(error) => {
-                NativeSubscriptionError::ProviderConfigurationCompileRejected(error)
-            }
-            _ => NativeSubscriptionError::ProviderConfigurationRejected,
-        };
-        NativeModelResolutionError::after_selection(requested_model, error)
+        NativeModelResolutionError::after_selection(
+            requested_model,
+            responses_configuration_error(error),
+        )
     })?;
     let configured = ConfiguredLanguageModel::new(
         &plakous_model::StandardIntegrationAuthority::release_owned(),
@@ -148,16 +139,10 @@ fn configure_claude_provider(
         beta,
     )
     .map_err(|error| {
-        let error = match error {
-            plakous_anthropic::MessagesProviderConfigurationError::Identity => {
-                NativeSubscriptionError::ProviderConfigurationIdentityRejected
-            }
-            plakous_anthropic::MessagesProviderConfigurationError::PolicyMismatch
-            | plakous_anthropic::MessagesProviderConfigurationError::Provider(_) => {
-                NativeSubscriptionError::ProviderConfigurationRejected
-            }
-        };
-        NativeModelResolutionError::after_selection(requested_model.clone(), error)
+        NativeModelResolutionError::after_selection(
+            requested_model.clone(),
+            messages_configuration_error(error),
+        )
     })?;
     let configured = ConfiguredLanguageModel::new(
         &plakous_model::StandardIntegrationAuthority::release_owned(),
@@ -177,6 +162,41 @@ fn configure_claude_provider(
         native_tool_mode,
         reresolution: None,
     })
+}
+
+/// The resolution failure a Responses (Codex, SuperGrok) policy compilation
+/// error reports.
+fn responses_configuration_error(
+    error: plakous_openai::ResponsesProviderConfigurationError,
+) -> NativeSubscriptionError {
+    match error {
+        plakous_openai::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
+            NativeSubscriptionError::ProviderConfigurationPolicyMismatch(field)
+        }
+        plakous_openai::ResponsesProviderConfigurationError::Identity => {
+            NativeSubscriptionError::ProviderConfigurationIdentityRejected
+        }
+        plakous_openai::ResponsesProviderConfigurationError::ProviderConfiguration(error) => {
+            NativeSubscriptionError::ProviderConfigurationCompileRejected(error)
+        }
+        _ => NativeSubscriptionError::ProviderConfigurationRejected,
+    }
+}
+
+/// The resolution failure a Claude OAuth Messages policy compilation error
+/// reports.
+fn messages_configuration_error(
+    error: plakous_anthropic::MessagesProviderConfigurationError,
+) -> NativeSubscriptionError {
+    match error {
+        plakous_anthropic::MessagesProviderConfigurationError::Identity => {
+            NativeSubscriptionError::ProviderConfigurationIdentityRejected
+        }
+        plakous_anthropic::MessagesProviderConfigurationError::PolicyMismatch
+        | plakous_anthropic::MessagesProviderConfigurationError::Provider(_) => {
+            NativeSubscriptionError::ProviderConfigurationRejected
+        }
+    }
 }
 
 impl NativeSubscriptions {
@@ -607,20 +627,18 @@ impl NativeSubscriptions {
         }
     }
 
-    /// Resolves one complete explicit native provider configuration.
+    /// Resolves one complete explicit native provider configuration under the
+    /// supplied gate: the dispatch path of [`Self::resolve_turn_scoped_provider`]
+    /// and of a windowed re-resolution.
     ///
     /// The literal provider route, model, credential selection, behavior, and
     /// product policy are supplied by the caller. Resolution accepts only an
     /// exact pinned native route, obtains fresh authority from the same model
     /// object that will execute, and compiles through that provider's actual
-    /// Responses policy table.
-    ///
-    /// # Errors
-    ///
-    /// Returns a typed native resolution failure when the selected route is not
-    /// exact, live authority cannot be revalidated, catalog facts reject the
-    /// requested behavior, or family compilation fails.
-    pub async fn resolve_gated_provider(
+    /// Responses policy table. It fails when the selected route is not exact,
+    /// live authority cannot be revalidated, catalog facts reject the requested
+    /// behavior, or family compilation fails.
+    pub(super) async fn resolve_gated_provider(
         &self,
         selected: SelectedProviderConfiguration,
         gate: Arc<dyn SubscriptionRequestGate>,
@@ -647,17 +665,13 @@ impl NativeSubscriptions {
         configure_gated_provider(&selected, provider, resolved, authority)
     }
 
-    /// Local-first attach variant of [`Self::resolve_gated_provider`].
+    /// Local-first attach variant of [`Self::resolve_gated_provider`], behind
+    /// [`Self::resolve_turn_scoped_provider_for_attach`].
     ///
     /// Skips attach-time `revalidate_runtime_authority` and Claude OAuth
     /// `refresh_if_needed`. Codex and Grok still perform authenticated catalog
     /// discovery. First dispatch still revalidates.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same typed native resolution failures as
-    /// [`Self::resolve_gated_provider`], except authority revalidation.
-    pub async fn resolve_gated_provider_for_attach(
+    async fn resolve_gated_provider_for_attach(
         &self,
         selected: SelectedProviderConfiguration,
         gate: Arc<dyn SubscriptionRequestGate>,
@@ -679,8 +693,10 @@ impl NativeSubscriptions {
     ///
     /// # Errors
     ///
-    /// Returns the typed native resolution failures of
-    /// [`Self::resolve_gated_provider`].
+    /// Returns a typed native resolution failure when the selected route is not
+    /// exact, live authority cannot be revalidated, catalog facts reject the
+    /// requested behavior, family compilation fails, or the catalog deadline
+    /// passes.
     pub async fn resolve_turn_scoped_provider(
         &self,
         selected: SelectedProviderConfiguration,
@@ -715,8 +731,8 @@ impl NativeSubscriptions {
     ///
     /// # Errors
     ///
-    /// Returns the typed native resolution failures of
-    /// [`Self::resolve_gated_provider_for_attach`].
+    /// Returns the same typed native resolution failures as
+    /// [`Self::resolve_turn_scoped_provider`], except authority revalidation.
     pub async fn resolve_turn_scoped_provider_for_attach(
         &self,
         selected: SelectedProviderConfiguration,
@@ -740,5 +756,99 @@ impl NativeSubscriptions {
         })??;
         let resolved = apply_turn_scoped_provider_gate(resolved, Arc::clone(&turn_gate))?;
         Ok(self.with_reresolution(resolved, selected, SessionLineage::Root, turn_gate))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::NativeProvider;
+    use super::super::reresolve::tests::{BASE, resolved};
+    use super::*;
+
+    type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+    /// A scripted resolution and the selection it was configured under, with
+    /// no Codex or SuperGrok catalog evidence.
+    fn inputs() -> TestResult<(
+        SelectedProviderConfiguration,
+        ResolvedNativeModel,
+        RuntimeModelAuthority,
+    )> {
+        let provider = resolved(&BASE)?;
+        let selected = provider.configured.configuration().selected().clone();
+        let authority = provider.configured.initial_authority().clone();
+        Ok((selected, provider.model, authority))
+    }
+
+    #[test]
+    fn missing_catalog_evidence_is_internal_for_each_responses_provider() -> TestResult {
+        for provider in [NativeProvider::Codex, NativeProvider::Xai] {
+            let (selected, resolved, authority) = inputs()?;
+            let requested = selected.route().requested_model().clone();
+            let error = configure_gated_provider(&selected, provider, resolved, authority)
+                .err()
+                .ok_or("configuration without catalog evidence")?;
+            assert_eq!(
+                error.kind(),
+                NativeSubscriptionError::Internal,
+                "{provider:?}"
+            );
+            assert_eq!(error.selected_model, Some(requested));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_claude_selection_outside_the_messages_policy_is_rejected() -> TestResult {
+        // The scripted selection disables replay, which the Claude OAuth
+        // Messages policy requires: a policy mismatch, not an identity error.
+        let (selected, resolved, authority) = inputs()?;
+        let requested = selected.route().requested_model().clone();
+        let error =
+            configure_gated_provider(&selected, NativeProvider::Claude, resolved, authority)
+                .err()
+                .ok_or("Claude configuration outside the Messages policy")?;
+        assert_eq!(
+            error.kind(),
+            NativeSubscriptionError::ProviderConfigurationRejected
+        );
+        assert_eq!(error.selected_model, Some(requested));
+        Ok(())
+    }
+
+    #[test]
+    fn policy_compilation_errors_map_to_their_resolution_failures() {
+        use plakous_anthropic::MessagesProviderConfigurationError as Messages;
+        use plakous_model::ProviderConfigurationError;
+        use plakous_openai::ResponsesProviderConfigurationError as Responses;
+        assert_eq!(
+            responses_configuration_error(Responses::PolicyMismatch("cache")),
+            NativeSubscriptionError::ProviderConfigurationPolicyMismatch("cache")
+        );
+        assert_eq!(
+            responses_configuration_error(Responses::Identity),
+            NativeSubscriptionError::ProviderConfigurationIdentityRejected
+        );
+        assert_eq!(
+            responses_configuration_error(Responses::ProviderConfiguration(
+                ProviderConfigurationError::ForeignTarget
+            )),
+            NativeSubscriptionError::ProviderConfigurationCompileRejected(
+                ProviderConfigurationError::ForeignTarget
+            )
+        );
+        assert_eq!(
+            messages_configuration_error(Messages::Identity),
+            NativeSubscriptionError::ProviderConfigurationIdentityRejected
+        );
+        for error in [
+            Messages::PolicyMismatch,
+            Messages::Provider(ProviderConfigurationError::ForeignTarget),
+        ] {
+            assert_eq!(
+                messages_configuration_error(error),
+                NativeSubscriptionError::ProviderConfigurationRejected
+            );
+        }
     }
 }
