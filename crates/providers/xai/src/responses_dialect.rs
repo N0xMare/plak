@@ -614,6 +614,7 @@ mod tests {
             SUPERGROK_SUBSCRIPTION_BASE_URL,
             format!("{SUPERGROK_RESPONSES_ORIGIN}/v1")
         );
+        #[cfg(feature = "native-auth")]
         assert_eq!(SUPERGROK_MODELS_PATH, "/v1/models");
         assert_eq!(SUPERGROK_RESPONSES_PATH, "/v1/responses");
     }

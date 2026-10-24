@@ -752,6 +752,7 @@ mod tests {
         assert!(!CLAUDE_OAUTH_BASELINE_BETAS.contains("context-1m"));
         assert!(!CLAUDE_OAUTH_BASELINE_BETAS.contains("per-turn-control"));
         assert_eq!(CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION, "0.128.0");
+        #[cfg(feature = "native-auth")]
         assert!(CLAUDE_OAUTH_USER_AGENT.starts_with("plak/"));
         assert_eq!(
             CLAUDE_OAUTH_MESSAGES_USER_AGENT,

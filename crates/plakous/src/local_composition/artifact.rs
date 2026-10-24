@@ -356,12 +356,17 @@ pub(super) fn monty_engine_contract_identity() -> Result<Digest, AgentError> {
 pub(crate) fn verify_sidecar_before_spawn(path: &Path, expected: &[u8]) -> Result<(), String> {
     let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path)
         .map_err(|error| error.to_string())?;
-    match artifact.kind {
+    let unchanged = matches!(
+        &artifact.kind,
         LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
             environment_identity,
             ..
-        } if environment_identity == expected => Ok(()),
-        _ => Err("JavaScript sidecar identity changed after attachment".to_owned()),
+        } if environment_identity.as_slice() == expected
+    );
+    if unchanged {
+        Ok(())
+    } else {
+        Err("JavaScript sidecar identity changed after attachment".to_owned())
     }
 }
 

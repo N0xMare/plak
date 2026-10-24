@@ -1367,3 +1367,51 @@ async fn abandonment_terminal_report_survives_parent_pruning_and_sqlite_inspecti
     assert_report(sessions.feed_terminal(request).await?)?;
     Ok(())
 }
+
+fn blocked_runtime_binding(
+    workspace: Arc<WorkspacePolicy>,
+    descriptor: ResolvedModelDescriptor,
+    account: &[u8],
+    local_durability: LocalDurabilityDisposition,
+) -> TestResult<SessionRuntimeBinding> {
+    let authority = RuntimeModelAuthority::new(
+        &descriptor,
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[account])?,
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"credential", account])?,
+        1,
+        timestamp()?,
+        None,
+    )?;
+    let scenario = plakous_test_support::ModelScenario::new(
+        plakous_test_support::ExpectedRequest::Any,
+        plakous_test_support::ScenarioStart::AwaitCancellation,
+        Vec::new(),
+    );
+    let model = Arc::new(
+        plakous_test_support::ScriptedModel::new(descriptor.clone(), [scenario])
+            .with_runtime_authority(authority.clone())
+            .with_context_observation(crate::test_model::context_observation()?),
+    );
+    let registry = ToolRegistryBuilder::default().freeze();
+    let configured = crate::test_model::configured_model(
+        model,
+        descriptor,
+        authority,
+        registry.definitions().iter().cloned(),
+        local_durability,
+        OutputBoundDisposition::Enforced(
+            NonZeroU32::new(128).ok_or("nonzero session output bound")?,
+        ),
+    )?;
+    Ok(SessionRuntimeBinding::new(
+        AgentBuilder::new(configured, registry, workspace)
+            .request_policy(AgentRequestPolicy::new(
+                GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
+                ReasoningPolicy::default(),
+            ))
+            .identity_sources(
+                Arc::new(FixedClock::new(timestamp()?)),
+                Arc::new(SystemIdGenerator),
+            ),
+    ))
+}
