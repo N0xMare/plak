@@ -57,6 +57,9 @@ impl Services {
     /// entry, so a command that opens no state root pays nothing for it.
     pub(crate) fn from_env(telemetry_sink_factory: Option<TelemetrySinkFactory>) -> Self {
         let home = Home::from_env();
+        if let Some(paths) = home.paths_if_resolved() {
+            crate::build_identity::install_identity_cache_home(paths.home().to_path_buf());
+        }
         if let Ok(state) = home.state() {
             crate::product_doctor::install_credential_state_home(state.to_path_buf());
         }

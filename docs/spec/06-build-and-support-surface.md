@@ -858,7 +858,11 @@ fields; a matching manifest avoids hashing on startup (chapter 02 §1). This
 manifest is trusted like the private installation directory, not as a signature.
 It is generated at installation, not shipped in the release tarball. If the
 probe fails (including a release without that flag), the manifest is absent
-and installation continues; that binary hashes its executable as before.
+and installation continues; that binary hashes its executable as before. A
+development or test build, which has no manifest, records its hash in the
+product home's `binary-ids` identity cache keyed by the same fields plus the
+inode-change time, so later processes of the same build skip the hash; only
+commands that use product state write it (chapter 02 §1).
 Each snapshot also holds a `state-key` manifest, the output of the snapshot's
 own hidden `plak version --state-key` (absent if that fails), which is how a later build
 finds the build that can export an old key's sessions (chapter 02 §2.5.1).

@@ -51,8 +51,23 @@ installer layout: `.local/lib/plak/{maintainer,release}/<64-lowercase-hex>/`.
 The manifest must be a regular file owned by the effective user, opened without
 following links or blocking, with neither it nor its parent directory writable
 by group or others. Outside that layout (including development builds), or
-without a usable matching manifest, identity is computed once per process
-with bounded-memory file reads.
+without a usable matching manifest, identity comes from the product home's
+identity cache, `<home>/binary-ids`, when an entry's device, inode, size and
+nanosecond modification and inode-change times all match the running image;
+otherwise it is computed once per process with bounded-memory file reads. The
+inode-change time, which userspace cannot set, makes a copy that preserves the
+modification time miss. Only a command that uses product state (`run`, `agent`,
+the TUI, `resume` and the `session` commands that open the stores) records a
+fresh hash there; inspection commands (`version`, help, `status`, `doctor`,
+`session rehearse`) read a matching entry and never write the cache. The cache
+is read and written only when the home already exists as a mode-0700 directory
+the effective user owns, and only through a regular mode-0600 file that user
+owns, opened without following links or blocking; it never creates the home. It
+holds at most 16 `id dev ino size mtime_ns ctime_ns` lines, newest first,
+replaced atomically from a uniquely named staged file, and a hash is recorded
+only if the image's fields did not change while it was read. Any mismatch,
+unsafe file or write failure falls back to hashing. Like the manifest, the
+cache is trusted like the private home, not as a signature.
 Unreadable executable identity is shown as `unavailable`, never invented from
 the current checkout. Maintainer installations use immutable executable/sidecar
 snapshots. Replacing the installed command affects new launches, not already
@@ -213,6 +228,7 @@ launch directory — the cwd of the process, resolved once.
   references/<id>.json        imported archives, 0600 in 0700 (§2.5.1)
   telemetry/telemetry-v19.sqlite3 disposable analytics, schema 19
   logs/plak.log               PLAK_LOG boundary spans
+  binary-ids                  development-build identity cache, 0600 (§1), disposable
 ```
 
 `state/<key>/` is the durable root of one build: its three authorities and

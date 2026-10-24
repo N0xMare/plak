@@ -328,6 +328,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(Some(otel_extra_telemetry_sink));
     #[cfg(not(feature = "otel"))]
     let services = Services::from_env(None);
+    // Only a command that uses product state records a fresh binary id in the
+    // home; inspection commands read the identity cache and never write it.
+    if command_needs_product_state(&command)
+        || matches!(command, Command::Tui { .. } | Command::Resume { .. })
+    {
+        build_identity::allow_identity_cache_writes();
+    }
 
     if let Command::SessionShow { id } = &command {
         return show_session_read_only(services.paths()?, id, &mut io::stdout().lock());
