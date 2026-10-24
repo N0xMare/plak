@@ -184,6 +184,8 @@ mod tests {
         )?;
         let owner = "src/runtime/durable/turn_recovery.rs";
         let verdict = "src/runtime/durable/turn_recovery/verdict.rs";
+        let terminal = "src/runtime/durable/turn_recovery/terminal.rs";
+        let abandonment = "src/runtime/durable/turn_recovery/abandonment.rs";
         let rules: &[(&str, &[&str])] = &[
             ("newest_root_turn_closure(", &[owner, verdict]),
             ("recovery_verdict(", &[owner, verdict]),
@@ -191,9 +193,9 @@ mod tests {
                 "workflow_compaction_closure(",
                 &[verdict, "src/runtime/durable/workflow_closure.rs"],
             ),
-            ("terminal_evidence_fold(", &[owner, verdict]),
-            ("abandonment_evidence_fold(", &[owner, verdict]),
-            ("local_terminal_from_ledger(", &[owner, verdict]),
+            ("terminal_evidence_fold(", &[owner, verdict, terminal]),
+            ("abandonment_evidence_fold(", &[owner, verdict, abandonment]),
+            ("local_terminal_from_ledger(", &[owner, verdict, terminal]),
         ];
         for (needle, allowed) in rules {
             for (path, text) in &files {

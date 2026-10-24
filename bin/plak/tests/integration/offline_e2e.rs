@@ -1064,8 +1064,9 @@ const RECOVERY_NOTE: &str = "recovered an interrupted turn";
 /// this is what a user reads. The two address different readers on purpose: the
 /// canonical note goes into history and is read by the model next turn, so it
 /// says what is and is not part of that history; the face note goes to an
-/// operator, so it says what to do. The canonical wordings and their unit pins
-/// live in `runtime/durable/turn_recovery.rs`
+/// operator, so it says what to do. The canonical wordings live in
+/// `runtime/durable/turn_recovery/abandonment.rs`; their unit pins are in
+/// `runtime/durable/turn_recovery/abandoned_turn_note_tests.rs`
 /// (`each_abandonment_claim_says_only_what_is_true_of_it`); the face strings
 /// are in `hosted/src/runtime/host_loop/open.rs`.
 ///

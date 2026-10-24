@@ -10,12 +10,15 @@
     reason = "the closed error enum documents shared failures"
 )]
 
+mod bindings;
 mod codec;
 mod context_state;
 mod encoding;
 mod jobs;
 mod ledger;
 mod lifecycle;
+mod operations;
+mod state;
 pub use context_state::{
     CompactionInvalidation, CompactionProvenance, ContextEvaluationAudit,
     RuntimeCompactionStrategy, RuntimeContextState, RuntimeContextTransition,
@@ -38,6 +41,8 @@ pub(crate) use encoding::{
 };
 pub(crate) use jobs::MAX_JOB_ROWS;
 pub use jobs::{JobLedger, JobRow, JobTerminal, JobTerminalStatus};
+use operations::validate_composition_graph;
+
 pub(crate) use ledger::OperationLedgerMutationRef;
 pub use ledger::RuntimeOperationLedger;
 #[allow(
@@ -144,53 +149,6 @@ pub struct ProducerProvenance {
     features: String,
 }
 
-impl ProducerProvenance {
-    /// Creates bounded diagnostic provenance. These fields never gate reopen.
-    pub fn new(
-        producer: impl Into<String>,
-        build: impl Into<String>,
-        features: impl Into<String>,
-    ) -> Result<Self, RuntimeManifestError> {
-        let producer = bounded_text(producer.into(), MAX_PROVENANCE_BYTES, "producer")?;
-        let build = bounded_text(build.into(), MAX_PROVENANCE_BYTES, "build")?;
-        let features = bounded_text(features.into(), MAX_PROVENANCE_BYTES, "features")?;
-        Ok(Self {
-            producer,
-            build,
-            features,
-        })
-    }
-
-    /// Returns the producing component identity.
-    #[must_use]
-    pub fn producer(&self) -> &str {
-        &self.producer
-    }
-
-    /// Returns the diagnostic build identity.
-    #[must_use]
-    pub fn build(&self) -> &str {
-        &self.build
-    }
-
-    /// Returns the diagnostic feature-closure identity.
-    #[must_use]
-    pub fn features(&self) -> &str {
-        &self.features
-    }
-}
-
-impl fmt::Debug for ProducerProvenance {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ProducerProvenance")
-            .field("producer", &self.producer)
-            .field("build", &self.build)
-            .field("features", &self.features)
-            .finish()
-    }
-}
-
 /// Closed meaning of an embedded canonical component.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(u8)]
@@ -221,36 +179,6 @@ pub enum RuntimeComponentKind {
     FamilyBinding = 12,
 }
 
-impl RuntimeComponentKind {
-    const fn max_bytes(self) -> usize {
-        match self {
-            Self::Operation => MAX_RUNTIME_OPERATION_COMPONENT_BYTES,
-            _ => MAX_RUNTIME_COMPONENT_BYTES,
-        }
-    }
-
-    fn from_tag(tag: u8) -> Result<Self, RuntimeManifestError> {
-        match tag {
-            1 => Ok(Self::HarnessPlan),
-            2 => Ok(Self::ContextState),
-            3 => Ok(Self::ModelDescriptor),
-            4 => Ok(Self::AdmissionEvidence),
-            5 => Ok(Self::ProfileBinding),
-            6 => Ok(Self::ToolRegistry),
-            7 => Ok(Self::ToolExposure),
-            8 => Ok(Self::ExecutionEnvironment),
-            9 => Ok(Self::EffectPolicy),
-            10 => Ok(Self::Command),
-            11 => Ok(Self::Operation),
-            12 => Ok(Self::FamilyBinding),
-            _ => Err(RuntimeManifestError::UnknownTag {
-                field: "runtime component",
-                tag,
-            }),
-        }
-    }
-}
-
 /// Exact bounded bytes from one named, revisioned canonical sub-codec.
 #[derive(Clone, Eq, PartialEq)]
 pub struct ReconstructiveComponent {
@@ -258,79 +186,6 @@ pub struct ReconstructiveComponent {
     codec_revision: u32,
     bytes: Arc<[u8]>,
     integrity: Digest,
-}
-
-impl ReconstructiveComponent {
-    /// Captures mandatory reconstruction bytes and their integrity identity.
-    pub fn new(
-        kind: RuntimeComponentKind,
-        codec_revision: u32,
-        bytes: impl Into<Arc<[u8]>>,
-    ) -> Result<Self, RuntimeManifestError> {
-        if codec_revision == 0 {
-            return Err(RuntimeManifestError::ZeroRevision);
-        }
-        let bytes = bytes.into();
-        if bytes.is_empty() || bytes.len() > kind.max_bytes() {
-            return Err(RuntimeManifestError::ComponentSize);
-        }
-        let integrity = component_integrity(kind, codec_revision, &bytes)?;
-        Ok(Self {
-            kind,
-            codec_revision,
-            bytes,
-            integrity,
-        })
-    }
-
-    fn from_recorded(
-        kind: RuntimeComponentKind,
-        codec_revision: u32,
-        bytes: Arc<[u8]>,
-        integrity: Digest,
-    ) -> Result<Self, RuntimeManifestError> {
-        let component = Self::new(kind, codec_revision, bytes)?;
-        if component.integrity != integrity {
-            return Err(RuntimeManifestError::IntegrityMismatch);
-        }
-        Ok(component)
-    }
-
-    /// Returns the closed component meaning.
-    #[must_use]
-    pub const fn kind(&self) -> RuntimeComponentKind {
-        self.kind
-    }
-
-    /// Returns the exact component codec revision.
-    #[must_use]
-    pub const fn codec_revision(&self) -> u32 {
-        self.codec_revision
-    }
-
-    /// Returns the mandatory exact reconstruction bytes.
-    #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// Returns integrity evidence without substituting for [`Self::bytes`].
-    #[must_use]
-    pub const fn integrity(&self) -> Digest {
-        self.integrity
-    }
-}
-
-impl fmt::Debug for ReconstructiveComponent {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ReconstructiveComponent")
-            .field("kind", &self.kind)
-            .field("codec_revision", &self.codec_revision)
-            .field("bytes", &format_args!("<{} bytes>", self.bytes.len()))
-            .field("integrity", &self.integrity)
-            .finish()
-    }
 }
 
 /// Stable non-secret reference whose authority owner must revalidate it.
@@ -341,53 +196,6 @@ pub struct BindingReference {
     revision: u64,
 }
 
-impl BindingReference {
-    /// Creates a bounded reference. It carries no credential or capability.
-    pub fn new(
-        authority: impl Into<String>,
-        subject: impl Into<String>,
-        revision: u64,
-    ) -> Result<Self, RuntimeManifestError> {
-        if revision == 0 {
-            return Err(RuntimeManifestError::ZeroRevision);
-        }
-        Ok(Self {
-            authority: portable_id(authority.into(), "binding authority")?,
-            subject: portable_id(subject.into(), "binding subject")?,
-            revision,
-        })
-    }
-
-    /// Returns the owning revalidation authority.
-    #[must_use]
-    pub fn authority(&self) -> &str {
-        &self.authority
-    }
-
-    /// Returns the non-secret subject reference.
-    #[must_use]
-    pub fn subject(&self) -> &str {
-        &self.subject
-    }
-
-    /// Returns the exact reference semantics revision.
-    #[must_use]
-    pub const fn revision(&self) -> u64 {
-        self.revision
-    }
-}
-
-impl fmt::Debug for BindingReference {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("BindingReference")
-            .field("authority", &self.authority)
-            .field("subject", &"<redacted>")
-            .field("revision", &self.revision)
-            .finish()
-    }
-}
-
 /// Historical admission/revalidation fact retained without credential material.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RevalidationFact {
@@ -395,51 +203,6 @@ pub struct RevalidationFact {
     observed_at: Timestamp,
     valid_until: Option<Timestamp>,
     evidence: ReconstructiveComponent,
-}
-
-impl RevalidationFact {
-    /// Creates a bounded historical fact. Reopen still requires a fresh witness.
-    pub fn new(
-        reference: BindingReference,
-        observed_at: Timestamp,
-        valid_until: Option<Timestamp>,
-        evidence: ReconstructiveComponent,
-    ) -> Result<Self, RuntimeManifestError> {
-        expect_component(&evidence, RuntimeComponentKind::AdmissionEvidence)?;
-        if valid_until.is_some_and(|until| until <= observed_at) {
-            return Err(RuntimeManifestError::InvalidRevalidation);
-        }
-        Ok(Self {
-            reference,
-            observed_at,
-            valid_until,
-            evidence,
-        })
-    }
-
-    /// Returns the stable external reference.
-    #[must_use]
-    pub const fn reference(&self) -> &BindingReference {
-        &self.reference
-    }
-
-    /// Returns when this evidence was observed.
-    #[must_use]
-    pub const fn observed_at(&self) -> Timestamp {
-        self.observed_at
-    }
-
-    /// Returns the historical expiry, if any.
-    #[must_use]
-    pub const fn valid_until(&self) -> Option<Timestamp> {
-        self.valid_until
-    }
-
-    /// Returns exact evidence bytes.
-    #[must_use]
-    pub const fn evidence(&self) -> &ReconstructiveComponent {
-        &self.evidence
-    }
 }
 
 /// Complete non-secret model, route, account, and profile binding.
@@ -458,123 +221,6 @@ pub struct ModelRouteBinding {
     admission: RevalidationFact,
 }
 
-impl ModelRouteBinding {
-    /// Creates the exact binding selected before dispatch.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are the closed provider binding"
-    )]
-    pub fn new(
-        protocol: ProtocolId,
-        route: RouteId,
-        requested_model: ModelId,
-        reported_model: Option<ModelId>,
-        model_family: Option<ModelFamilyId>,
-        adapter: ModelAdapterProfileId,
-        account: BindingReference,
-        profile: BindingReference,
-        model_binding: Digest,
-        descriptor: ReconstructiveComponent,
-        admission: RevalidationFact,
-    ) -> Result<Self, RuntimeManifestError> {
-        validate_digest(model_binding, DigestDomain::ModelBinding)?;
-        expect_component(&descriptor, RuntimeComponentKind::ModelDescriptor)?;
-        Ok(Self {
-            protocol,
-            route,
-            requested_model,
-            reported_model,
-            model_family,
-            adapter,
-            account,
-            profile,
-            model_binding,
-            descriptor,
-            admission,
-        })
-    }
-
-    /// Returns the exact descriptor binding identity.
-    #[must_use]
-    pub const fn model_binding(&self) -> Digest {
-        self.model_binding
-    }
-
-    /// Returns the exact selected route/account/profile/admission binding.
-    pub fn route_binding_identity(&self) -> Result<Digest, RuntimeManifestError> {
-        let group = binding_group_integrity(self)?;
-        Digest::sha256(
-            DigestDomain::ModelBinding,
-            1,
-            &[
-                b"plakous-agent/model-route-binding-v1",
-                &group.identity_bytes(),
-            ],
-        )
-        .map_err(|_| RuntimeManifestError::InvalidDigest)
-    }
-
-    /// Returns the account authority reference.
-    #[must_use]
-    pub const fn account(&self) -> &BindingReference {
-        &self.account
-    }
-
-    /// Returns the profile authority reference.
-    #[must_use]
-    pub const fn profile(&self) -> &BindingReference {
-        &self.profile
-    }
-
-    /// Returns the exact descriptor reconstruction component.
-    #[must_use]
-    pub const fn descriptor(&self) -> &ReconstructiveComponent {
-        &self.descriptor
-    }
-
-    /// Returns the historical admission/revalidation evidence.
-    #[must_use]
-    pub const fn admission(&self) -> &RevalidationFact {
-        &self.admission
-    }
-
-    /// Returns the exact protocol dialect.
-    #[must_use]
-    pub const fn protocol(&self) -> &ProtocolId {
-        &self.protocol
-    }
-
-    /// Returns the exact route.
-    #[must_use]
-    pub const fn route(&self) -> &RouteId {
-        &self.route
-    }
-
-    /// Returns the exact requested model.
-    #[must_use]
-    pub const fn requested_model(&self) -> &ModelId {
-        &self.requested_model
-    }
-
-    /// Returns the provider-reported model identity, when recorded.
-    #[must_use]
-    pub const fn reported_model(&self) -> Option<&ModelId> {
-        self.reported_model.as_ref()
-    }
-
-    /// Returns the resolved model family, when recorded.
-    #[must_use]
-    pub const fn model_family(&self) -> Option<&ModelFamilyId> {
-        self.model_family.as_ref()
-    }
-
-    /// Returns the exact selected model-adapter profile.
-    #[must_use]
-    pub const fn adapter(&self) -> &ModelAdapterProfileId {
-        &self.adapter
-    }
-}
-
 /// Exact tool registry/exposure/environment/effect-policy reconstruction data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolRuntimeManifest {
@@ -583,59 +229,6 @@ pub struct ToolRuntimeManifest {
     environment: ReconstructiveComponent,
     effect_policy: ReconstructiveComponent,
     policy: BindingReference,
-}
-
-impl ToolRuntimeManifest {
-    /// Creates a complete non-secret tool/host binding.
-    pub fn new(
-        registry: ReconstructiveComponent,
-        exposure: ReconstructiveComponent,
-        environment: ReconstructiveComponent,
-        effect_policy: ReconstructiveComponent,
-        policy: BindingReference,
-    ) -> Result<Self, RuntimeManifestError> {
-        expect_component(&registry, RuntimeComponentKind::ToolRegistry)?;
-        expect_component(&exposure, RuntimeComponentKind::ToolExposure)?;
-        expect_component(&environment, RuntimeComponentKind::ExecutionEnvironment)?;
-        expect_component(&effect_policy, RuntimeComponentKind::EffectPolicy)?;
-        Ok(Self {
-            registry,
-            exposure,
-            environment,
-            effect_policy,
-            policy,
-        })
-    }
-
-    /// Returns the exact frozen registry component.
-    #[must_use]
-    pub const fn registry(&self) -> &ReconstructiveComponent {
-        &self.registry
-    }
-
-    /// Returns the exact frozen exposure component.
-    #[must_use]
-    pub const fn exposure(&self) -> &ReconstructiveComponent {
-        &self.exposure
-    }
-
-    /// Returns the exact environment facts.
-    #[must_use]
-    pub const fn environment(&self) -> &ReconstructiveComponent {
-        &self.environment
-    }
-
-    /// Returns the exact effect policy facts.
-    #[must_use]
-    pub const fn effect_policy(&self) -> &ReconstructiveComponent {
-        &self.effect_policy
-    }
-
-    /// Returns the live policy revalidation reference.
-    #[must_use]
-    pub const fn policy(&self) -> &BindingReference {
-        &self.policy
-    }
 }
 
 /// Exact root-command acknowledgement retained for idempotent retry.
@@ -659,83 +252,6 @@ pub struct DurableCommandRecord {
     rejection_code: Option<String>,
 }
 
-impl DurableCommandRecord {
-    /// Creates one exact command/idempotency record.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the fields are one exact command receipt"
-    )]
-    pub fn new(
-        command_id: impl Into<String>,
-        sequence: u64,
-        turn_id: Option<TurnId>,
-        binding: Digest,
-        command: ReconstructiveComponent,
-        disposition: DurableCommandDisposition,
-        rejection_code: Option<String>,
-    ) -> Result<Self, RuntimeManifestError> {
-        if sequence == 0 {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        expect_component(&command, RuntimeComponentKind::Command)?;
-        let rejection_code = rejection_code
-            .map(|code| portable_id(code, "command rejection code"))
-            .transpose()?;
-        if matches!(disposition, DurableCommandDisposition::Accepted) != rejection_code.is_none() {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        Ok(Self {
-            command_id: portable_id(command_id.into(), "command identity")?,
-            sequence,
-            turn_id,
-            binding,
-            command,
-            disposition,
-            rejection_code,
-        })
-    }
-
-    /// Returns the stable command identity.
-    #[must_use]
-    pub fn command_id(&self) -> &str {
-        &self.command_id
-    }
-
-    /// Returns the deterministic driver sequence.
-    #[must_use]
-    pub const fn sequence(&self) -> u64 {
-        self.sequence
-    }
-
-    /// Returns the bound root turn, when this command has one.
-    #[must_use]
-    pub const fn turn_id(&self) -> Option<TurnId> {
-        self.turn_id
-    }
-
-    /// Returns the exact canonical command binding.
-    #[must_use]
-    pub const fn binding(&self) -> Digest {
-        self.binding
-    }
-
-    /// Returns the durable command disposition.
-    #[must_use]
-    pub const fn disposition(&self) -> DurableCommandDisposition {
-        self.disposition
-    }
-
-    /// Returns the stable rejection code, when rejected.
-    #[must_use]
-    pub fn rejection_code(&self) -> Option<&str> {
-        self.rejection_code.as_deref()
-    }
-
-    pub(crate) const fn command_component(&self) -> &ReconstructiveComponent {
-        &self.command
-    }
-}
-
 /// Exact stable root shared by model requests and durable runtime operations.
 pub type RuntimeOperationRoot = ModelOperationRoot;
 
@@ -746,46 +262,9 @@ pub type RuntimeOperationRoot = ModelOperationRoot;
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ProcessSessionId([u8; PROCESS_SESSION_ID_BYTES]);
 
-impl ProcessSessionId {
-    /// Creates one nonzero opaque identity.
-    pub fn new(bytes: [u8; PROCESS_SESSION_ID_BYTES]) -> Result<Self, RuntimeManifestError> {
-        if bytes == [0; PROCESS_SESSION_ID_BYTES] {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        Ok(Self(bytes))
-    }
-
-    /// Returns the exact canonical bytes.
-    #[must_use]
-    pub const fn as_bytes(self) -> [u8; PROCESS_SESSION_ID_BYTES] {
-        self.0
-    }
-}
-
-impl fmt::Debug for ProcessSessionId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ProcessSessionId(<opaque>)")
-    }
-}
-
 /// Nonzero generation of the process-local owner that minted a session.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ProcessSessionOwnerGeneration(NonZeroU64);
-
-impl ProcessSessionOwnerGeneration {
-    /// Creates one nonzero owner generation.
-    pub fn new(value: u64) -> Result<Self, RuntimeManifestError> {
-        NonZeroU64::new(value)
-            .map(Self)
-            .ok_or(RuntimeManifestError::InvalidLedger)
-    }
-
-    /// Returns the exact canonical generation.
-    #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0.get()
-    }
-}
 
 /// Root-owned progress retained only by a recovery-only Working lifecycle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -799,28 +278,6 @@ pub enum RuntimeWorkingRoot {
     },
     /// One high-level session workflow with no fabricated turn or round.
     SessionWorkflow(SessionWorkflowRootId),
-}
-
-impl RuntimeWorkingRoot {
-    /// Returns the stable root independent of mutable round progress.
-    #[must_use]
-    pub const fn operation_root(self) -> RuntimeOperationRoot {
-        match self {
-            Self::Turn { turn_id, .. } => RuntimeOperationRoot::Turn(turn_id),
-            Self::SessionWorkflow(workflow_id) => {
-                RuntimeOperationRoot::SessionWorkflow(workflow_id)
-            }
-        }
-    }
-
-    /// Returns next-round progress only for an ordinary turn root.
-    #[must_use]
-    pub const fn next_round(self) -> Option<u32> {
-        match self {
-            Self::Turn { next_round, .. } => Some(next_round),
-            Self::SessionWorkflow(_) => None,
-        }
-    }
 }
 
 /// Closed durable operation kind.
@@ -934,44 +391,6 @@ pub enum DurableOperationKind {
     },
 }
 
-impl DurableOperationKind {
-    fn operation_root(&self) -> Option<RuntimeOperationRoot> {
-        match self {
-            Self::Command { turn_id } => turn_id.map(RuntimeOperationRoot::Turn),
-            Self::Provider { root, .. } | Self::Commit { root } => Some(*root),
-            Self::EffectDecision { turn_id, .. }
-            | Self::Effect { turn_id, .. }
-            | Self::ToolBatchContinuation { turn_id, .. }
-            | Self::ServerPauseContinuation { turn_id, .. }
-            | Self::CompositionEvaluation { turn_id, .. }
-            | Self::CompositionContinuation { turn_id, .. }
-            | Self::CompositionChild { turn_id, .. }
-            | Self::ProcessSession { turn_id, .. } => Some(RuntimeOperationRoot::Turn(*turn_id)),
-            Self::Compaction { workflow_id } => {
-                Some(RuntimeOperationRoot::SessionWorkflow(*workflow_id))
-            }
-        }
-    }
-
-    fn obligation_kind(&self) -> RecoveryObligationKind {
-        match self {
-            Self::Command { .. } => RecoveryObligationKind::Command,
-            Self::Provider { .. } => RecoveryObligationKind::ProviderAttempt,
-            Self::EffectDecision { .. } => RecoveryObligationKind::EffectDecision,
-            Self::Effect { .. } => RecoveryObligationKind::Effect,
-            Self::ToolBatchContinuation { .. } | Self::ServerPauseContinuation { .. } => {
-                RecoveryObligationKind::HostedContinuation
-            }
-            Self::CompositionEvaluation { .. }
-            | Self::CompositionContinuation { .. }
-            | Self::CompositionChild { .. } => RecoveryObligationKind::CodeCell,
-            Self::ProcessSession { .. } => RecoveryObligationKind::ProcessSession,
-            Self::Commit { .. } => RecoveryObligationKind::Commit,
-            Self::Compaction { .. } => RecoveryObligationKind::Compaction,
-        }
-    }
-}
-
 /// One exact operation transition, including all terminal evidence bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DurableOperationState {
@@ -1014,23 +433,6 @@ pub enum DurableOperationState {
     Finalized(ReconstructiveComponent),
 }
 
-impl DurableOperationState {
-    fn class(&self) -> OperationStateClass {
-        match self {
-            Self::Prepared => OperationStateClass::Prepared,
-            Self::DecisionRequired(_) => OperationStateClass::DecisionRequired,
-            Self::ContinuationRequired(_) => OperationStateClass::ContinuationRequired,
-            Self::Claimed(_) => OperationStateClass::Claimed,
-            Self::Dispatched => OperationStateClass::Dispatched,
-            Self::LocatorBound(_) => OperationStateClass::LocatorBound,
-            Self::Completed(_) => OperationStateClass::Completed,
-            Self::ProvenNotDispatched(_) => OperationStateClass::ProvenNotDispatched,
-            Self::OutcomeUnknown(_) => OperationStateClass::OutcomeUnknown,
-            Self::Finalized(_) => OperationStateClass::Finalized,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OperationStateClass {
     Prepared,
@@ -1052,57 +454,11 @@ pub struct PendingEffectDecisionState {
     dispatch_capability_minted: bool,
 }
 
-impl PendingEffectDecisionState {
-    /// Captures one exact request while proving that no dispatch capability exists.
-    pub fn new(request: ReconstructiveComponent) -> Result<Self, RuntimeManifestError> {
-        if request.kind() != RuntimeComponentKind::Operation {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        Ok(Self {
-            request,
-            dispatch_capability_minted: false,
-        })
-    }
-
-    /// Returns the complete bounded authorization request.
-    #[must_use]
-    pub const fn request(&self) -> &ReconstructiveComponent {
-        &self.request
-    }
-
-    /// Reports the durable negative dispatch-capability fence.
-    #[must_use]
-    pub const fn dispatch_capability_minted(&self) -> bool {
-        self.dispatch_capability_minted
-    }
-}
-
 /// State transition committed at one immutable checkpoint boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DurableOperationTransition {
     checkpoint_id: CheckpointId,
     state: DurableOperationState,
-}
-
-impl DurableOperationTransition {
-    /// Creates an exact operation transition.
-    #[must_use]
-    pub const fn new(checkpoint_id: CheckpointId, state: DurableOperationState) -> Self {
-        Self {
-            checkpoint_id,
-            state,
-        }
-    }
-
-    /// Returns the committed state.
-    #[must_use]
-    pub const fn state(&self) -> &DurableOperationState {
-        &self.state
-    }
-
-    pub(crate) const fn checkpoint_id(&self) -> CheckpointId {
-        self.checkpoint_id
-    }
 }
 
 /// Reconstruction-complete provider/tool/commit operation record.
@@ -1112,158 +468,6 @@ pub struct DurableOperationRecord {
     kind: DurableOperationKind,
     request: ReconstructiveComponent,
     transitions: Vec<DurableOperationTransition>,
-}
-
-impl DurableOperationRecord {
-    /// Creates and validates one closed operation history.
-    pub fn new(
-        operation_id: u64,
-        kind: DurableOperationKind,
-        request: ReconstructiveComponent,
-        transitions: Vec<DurableOperationTransition>,
-    ) -> Result<Self, RuntimeManifestError> {
-        if operation_id == 0
-            || transitions.is_empty()
-            || transitions.len() > MAX_DURABLE_OPERATION_TRANSITIONS
-        {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        expect_component(&request, RuntimeComponentKind::Operation)?;
-        validate_operation_kind(&kind)?;
-        validate_operation_transitions(&kind, &transitions)?;
-        if transitions.iter().any(|transition| {
-            matches!(
-                &transition.state,
-                DurableOperationState::DecisionRequired(pending)
-                    if pending.request() != &request
-            )
-        }) {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        if transitions
-            .iter()
-            .any(|transition| matches!(transition.state, DurableOperationState::LocatorBound(_)))
-            && !matches!(
-                &kind,
-                DurableOperationKind::Provider { .. }
-                    | DurableOperationKind::Compaction { .. }
-                    | DurableOperationKind::CompositionEvaluation { .. }
-            )
-        {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        Ok(Self {
-            operation_id,
-            kind,
-            request,
-            transitions,
-        })
-    }
-
-    /// Returns a new record with several transitions appended, validated once.
-    pub fn append_transitions(
-        &self,
-        appended: impl IntoIterator<Item = DurableOperationTransition>,
-    ) -> Result<Self, RuntimeManifestError> {
-        let mut transitions = self.transitions.clone();
-        transitions.extend(appended);
-        Self::new(
-            self.operation_id,
-            self.kind.clone(),
-            self.request.clone(),
-            transitions,
-        )
-    }
-
-    /// Returns a new record with one validated transition appended.
-    pub fn append_transition(
-        &self,
-        transition: DurableOperationTransition,
-    ) -> Result<Self, RuntimeManifestError> {
-        let mut transitions = self.transitions.clone();
-        transitions.push(transition);
-        Self::new(
-            self.operation_id,
-            self.kind.clone(),
-            self.request.clone(),
-            transitions,
-        )
-    }
-
-    /// Returns the exact operation identity.
-    #[must_use]
-    pub const fn operation_id(&self) -> u64 {
-        self.operation_id
-    }
-
-    /// Returns the operation kind.
-    #[must_use]
-    pub const fn kind(&self) -> &DurableOperationKind {
-        &self.kind
-    }
-
-    /// Returns its current state.
-    #[must_use]
-    #[allow(
-        clippy::expect_used,
-        clippy::missing_panics_doc,
-        reason = "construction proves the private transition vector is nonempty"
-    )]
-    pub fn state(&self) -> &DurableOperationState {
-        &self
-            .transitions
-            .last()
-            .expect("validated operation transitions are nonempty")
-            .state
-    }
-
-    /// Returns the latest persisted locator component, if any.
-    ///
-    /// Reverse traversal makes a post-dispatch locator supersede an optional
-    /// prepared locator without retaining a competing authority field.
-    #[must_use]
-    pub fn latest_locator(&self) -> Option<&ReconstructiveComponent> {
-        self.transitions
-            .iter()
-            .rev()
-            .find_map(|transition| match &transition.state {
-                DurableOperationState::LocatorBound(locator) => Some(locator),
-                _ => None,
-            })
-    }
-
-    /// Returns the exact canonical request identity without exposing request bytes.
-    #[must_use]
-    pub const fn request_identity(&self) -> Digest {
-        self.request.integrity()
-    }
-
-    pub(crate) const fn request(&self) -> &ReconstructiveComponent {
-        &self.request
-    }
-
-    pub(crate) fn transitions(&self) -> &[DurableOperationTransition] {
-        &self.transitions
-    }
-}
-
-fn validate_operation_kind(kind: &DurableOperationKind) -> Result<(), RuntimeManifestError> {
-    if let DurableOperationKind::CompositionChild {
-        evaluation_operation_id,
-        interpreter_generation,
-        cell_id,
-        request_sequence,
-        ..
-    } = kind
-        && (*evaluation_operation_id == 0
-            || *interpreter_generation == 0
-            || cell_id.is_empty()
-            || cell_id.len() > MAX_ID_BYTES
-            || *request_sequence == 0)
-    {
-        return Err(RuntimeManifestError::InvalidLedger);
-    }
-    Ok(())
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -1290,6 +494,14 @@ struct CompositionContinuationRequest {
     result_entry_id: EntryId,
 }
 
+fn composition_child_call_id(binding: Digest) -> Result<CallId, RuntimeManifestError> {
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&binding.bytes()[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    CallId::try_from(uuid::Uuid::from_bytes(bytes)).map_err(|_| RuntimeManifestError::InvalidLedger)
+}
+
 fn decode_exact_composition_request<T>(
     bytes: &[u8],
     expected_tag: &str,
@@ -1307,189 +519,6 @@ where
         return Err(RuntimeManifestError::InvalidLedger);
     }
     Ok(request)
-}
-
-fn composition_child_call_id(binding: Digest) -> Result<CallId, RuntimeManifestError> {
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&binding.bytes()[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    CallId::try_from(uuid::Uuid::from_bytes(bytes)).map_err(|_| RuntimeManifestError::InvalidLedger)
-}
-
-fn validate_composition_graph(ledger: &RuntimeOperationLedger) -> Result<(), RuntimeManifestError> {
-    struct Evaluation {
-        turn_id: TurnId,
-        descriptor_identity: Digest,
-        host_identity: Vec<u8>,
-    }
-
-    let operations = ledger.operations();
-    let mut evaluations = BTreeMap::new();
-    for record in &operations {
-        let DurableOperationKind::CompositionEvaluation {
-            turn_id, call_id, ..
-        } = record.kind()
-        else {
-            continue;
-        };
-        let request: CompositionEvaluationRequest = decode_exact_composition_request(
-            record.request().bytes(),
-            "plakous-local-composition-evaluation-v2",
-        )?;
-        if request.version != 2 || request.call.call_id() != *call_id {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        evaluations.insert(
-            record.operation_id(),
-            Evaluation {
-                turn_id: *turn_id,
-                descriptor_identity: request.descriptor_identity,
-                host_identity: request.host_identity,
-            },
-        );
-    }
-
-    let mut evaluation_attempts = evaluations
-        .keys()
-        .map(|operation_id| (*operation_id, BTreeSet::new()))
-        .collect::<BTreeMap<_, _>>();
-    for record in &operations {
-        match record.kind() {
-            DurableOperationKind::CompositionEvaluation { attempt_id, .. } => {
-                evaluation_attempts
-                    .get_mut(&record.operation_id())
-                    .ok_or(RuntimeManifestError::InvalidLedger)?
-                    .insert(*attempt_id);
-            }
-            DurableOperationKind::CompositionContinuation {
-                attempt_id,
-                evaluation_operation_id,
-                ..
-            } if evaluations.contains_key(evaluation_operation_id) => {
-                evaluation_attempts
-                    .get_mut(evaluation_operation_id)
-                    .ok_or(RuntimeManifestError::InvalidLedger)?
-                    .insert(*attempt_id);
-            }
-            _ => {}
-        }
-    }
-
-    let mut child_lineage = BTreeMap::<u64, (u64, String, BTreeSet<u32>)>::new();
-    for record in operations {
-        match record.kind() {
-            DurableOperationKind::CompositionContinuation {
-                turn_id,
-                call_id,
-                evaluation_operation_id,
-                ..
-            } => {
-                let parent = evaluations
-                    .get(evaluation_operation_id)
-                    .ok_or(RuntimeManifestError::InvalidLedger)?;
-                let request: CompositionContinuationRequest = decode_exact_composition_request(
-                    record.request().bytes(),
-                    "plakous-local-composition-continuation-v1",
-                )?;
-                if request.version != 1
-                    || request.evaluation_operation_id != *evaluation_operation_id
-                    || request.call.call_id() != *call_id
-                    || parent.turn_id != *turn_id
-                    || request.descriptor_identity != parent.descriptor_identity
-                    || request.host_identity != parent.host_identity
-                {
-                    return Err(RuntimeManifestError::InvalidLedger);
-                }
-            }
-            DurableOperationKind::CompositionChild {
-                turn_id,
-                attempt_id,
-                call_id,
-                evaluation_operation_id,
-                interpreter_generation,
-                cell_id,
-                request_sequence,
-            } => {
-                let parent = evaluations
-                    .get(evaluation_operation_id)
-                    .ok_or(RuntimeManifestError::InvalidLedger)?;
-                let edge: (String, u64, u64, String, u32, Digest, Vec<u8>) =
-                    serde_json::from_slice(record.request().bytes())
-                        .map_err(|_| RuntimeManifestError::InvalidLedger)?;
-                let canonical = serde_json::to_vec(&(
-                    edge.0.as_str(),
-                    edge.1,
-                    edge.2,
-                    edge.3.as_str(),
-                    edge.4,
-                    edge.5,
-                    &edge.6,
-                ))
-                .map_err(|_| RuntimeManifestError::InvalidLedger)?;
-                let request_digest = Digest::sha256(
-                    DigestDomain::ProviderOperation,
-                    3,
-                    &[b"plakous-agent/local-composition-child-request-v1", &edge.6],
-                )
-                .map_err(|_| RuntimeManifestError::InvalidLedger)?;
-                let binding = Digest::sha256(
-                    DigestDomain::ProviderOperation,
-                    4,
-                    &[b"plakous-agent/local-composition-child-edge-v2", &canonical],
-                )
-                .map_err(|_| RuntimeManifestError::InvalidLedger)?;
-                let nested: (String, String, String, String, Option<serde_json::Value>) =
-                    serde_json::from_slice(&edge.6)
-                        .map_err(|_| RuntimeManifestError::InvalidLedger)?;
-                if canonical != record.request().bytes()
-                    || edge.0 != "plakous-local-composition-child-edge-v2"
-                    || edge.1 != *evaluation_operation_id
-                    || edge.2 != *interpreter_generation
-                    || edge.3 != *cell_id
-                    || edge.4 != *request_sequence
-                    || edge.5 != request_digest
-                    || nested.0 != "plakous-local-composition-child-request-v1"
-                    || nested.1 != *cell_id
-                    || serde_json::to_vec(&(
-                        nested.0.as_str(),
-                        nested.1.as_str(),
-                        nested.2.as_str(),
-                        nested.3.as_str(),
-                        &nested.4,
-                    ))
-                    .map_err(|_| RuntimeManifestError::InvalidLedger)?
-                        != edge.6
-                    || composition_child_call_id(binding)? != *call_id
-                    || parent.turn_id != *turn_id
-                    || !evaluation_attempts
-                        .get(evaluation_operation_id)
-                        .is_some_and(|attempts| attempts.contains(attempt_id))
-                {
-                    return Err(RuntimeManifestError::InvalidLedger);
-                }
-                let lineage = child_lineage
-                    .entry(*evaluation_operation_id)
-                    .or_insert_with(|| (*interpreter_generation, cell_id.clone(), BTreeSet::new()));
-                if lineage.0 != *interpreter_generation
-                    || lineage.1 != *cell_id
-                    || !lineage.2.insert(*request_sequence)
-                {
-                    return Err(RuntimeManifestError::InvalidLedger);
-                }
-            }
-            _ => {}
-        }
-    }
-    if child_lineage.values().any(|(_, _, sequences)| {
-        sequences
-            .iter()
-            .copied()
-            .ne(1..=u32::try_from(sequences.len()).unwrap_or(u32::MAX))
-    }) {
-        return Err(RuntimeManifestError::InvalidLedger);
-    }
-    Ok(())
 }
 
 /// Exact branch source recorded for a forked checkpoint lineage.
@@ -1526,23 +555,6 @@ pub struct RuntimeTopology {
     pub commit_identity: Digest,
 }
 
-impl RuntimeTopology {
-    fn validate(self) -> Result<Self, RuntimeManifestError> {
-        if self.lease_fence == 0
-            || self.parent_checkpoint_id == Some(self.checkpoint_id)
-            || self.fork.is_some_and(|fork| {
-                fork.session_id == self.session_id
-                    && fork.branch_id == self.branch_id
-                    && fork.checkpoint_id == self.checkpoint_id
-            })
-        {
-            return Err(RuntimeManifestError::InvalidTopology);
-        }
-        validate_digest(self.commit_identity, DigestDomain::ProviderOperation)?;
-        Ok(self)
-    }
-}
-
 /// Stable prefix, canonical history, bounded working projection, and context state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeCanonicalState {
@@ -1550,54 +562,6 @@ pub struct RuntimeCanonicalState {
     history: CanonicalHistory,
     working: WorkingProjection,
     context: RuntimeContextState,
-}
-
-impl RuntimeCanonicalState {
-    /// Captures exact canonical/model-visible reconstruction data.
-    pub fn new(
-        stable_prefix: StableRequestPrefix,
-        history: CanonicalHistory,
-        working: WorkingProjection,
-        context: RuntimeContextState,
-    ) -> Result<Self, RuntimeManifestError> {
-        context.validate_history(&history)?;
-        Ok(Self {
-            stable_prefix,
-            history,
-            working,
-            context,
-        })
-    }
-
-    /// Returns the exact stable request prefix.
-    #[must_use]
-    pub const fn stable_prefix(&self) -> &StableRequestPrefix {
-        &self.stable_prefix
-    }
-
-    /// Returns committed canonical history.
-    #[must_use]
-    pub const fn history(&self) -> &CanonicalHistory {
-        &self.history
-    }
-
-    /// Returns the bounded working projection.
-    #[must_use]
-    pub const fn working(&self) -> &WorkingProjection {
-        &self.working
-    }
-
-    /// Returns exact context/compaction facts.
-    #[must_use]
-    pub const fn context(&self) -> &RuntimeContextState {
-        &self.context
-    }
-
-    /// Returns the exact committed-plus-working model-visible projection.
-    #[must_use]
-    pub fn projection(&self) -> ConversationView {
-        ConversationView::from_shared(self.history.clone(), self.working.clone())
-    }
 }
 
 /// Exact optional native family artifact retained as mandatory bytes.
@@ -1610,144 +574,6 @@ pub struct FamilyArtifact {
     binding_component: ReconstructiveComponent,
     bytes: Arc<[u8]>,
     integrity: Digest,
-}
-
-impl FamilyArtifact {
-    /// Captures exact family-native bytes. The family kernel remains their validator.
-    pub fn new(
-        family: impl Into<String>,
-        schema_revision: u32,
-        codec_revision: u32,
-        binding: Digest,
-        bytes: impl Into<Arc<[u8]>>,
-    ) -> Result<Self, RuntimeManifestError> {
-        if schema_revision == 0 || codec_revision == 0 {
-            return Err(RuntimeManifestError::ZeroRevision);
-        }
-        validate_digest(binding, DigestDomain::ModelBinding)?;
-        let family = portable_id(family.into(), "protocol family")?;
-        if !supported_family_artifact_revision(&family, schema_revision, codec_revision) {
-            return Err(RuntimeManifestError::RevisionDisagreement);
-        }
-        let bytes = bytes.into();
-        if bytes.is_empty() || bytes.len() > MAX_RUNTIME_COMPONENT_BYTES {
-            return Err(RuntimeManifestError::ComponentSize);
-        }
-        let binding_component = family_binding_component(binding)?;
-        let integrity = family_artifact_integrity(
-            &family,
-            schema_revision,
-            codec_revision,
-            &binding_component,
-            &bytes,
-        )?;
-        Ok(Self {
-            family,
-            schema_revision,
-            codec_revision,
-            binding,
-            binding_component,
-            bytes,
-            integrity,
-        })
-    }
-
-    fn from_recorded(
-        family: String,
-        schema_revision: u32,
-        codec_revision: u32,
-        binding_component: &ReconstructiveComponent,
-        bytes: Arc<[u8]>,
-        integrity: Digest,
-    ) -> Result<Self, RuntimeManifestError> {
-        let binding = family_binding_digest(binding_component)?;
-        let artifact = Self::new(family, schema_revision, codec_revision, binding, bytes)?;
-        if artifact.binding_component != *binding_component {
-            return Err(RuntimeManifestError::Malformed);
-        }
-        if artifact.integrity != integrity {
-            return Err(RuntimeManifestError::IntegrityMismatch);
-        }
-        Ok(artifact)
-    }
-
-    /// Converts one fully sealed terminal candidate without decoding family bytes.
-    pub fn from_candidate(
-        candidate: &SealedFamilyArtifactCandidate,
-    ) -> Result<Self, RuntimeManifestError> {
-        Self::new(
-            candidate.family(),
-            candidate.schema_revision(),
-            candidate.codec_revision(),
-            candidate.binding(),
-            candidate.bytes(),
-        )
-    }
-
-    /// Converts the durable envelope into preparation-independent model-call state.
-    pub fn to_active(&self) -> Result<ActiveFamilyArtifact, RuntimeManifestError> {
-        ActiveFamilyArtifact::new(
-            self.family.clone(),
-            self.schema_revision,
-            self.codec_revision,
-            self.binding,
-            Arc::clone(&self.bytes),
-        )
-        .map_err(|_| RuntimeManifestError::Malformed)
-    }
-
-    /// Returns the family identity (for example `responses`).
-    #[must_use]
-    pub fn family(&self) -> &str {
-        &self.family
-    }
-
-    /// Returns the exact artifact bytes.
-    #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// Returns the exact producing artifact binding.
-    #[must_use]
-    pub const fn binding(&self) -> Digest {
-        self.binding
-    }
-
-    pub(crate) const fn binding_component(&self) -> &ReconstructiveComponent {
-        &self.binding_component
-    }
-
-    /// Returns the behavior-bearing family schema revision.
-    #[must_use]
-    pub const fn schema_revision(&self) -> u32 {
-        self.schema_revision
-    }
-
-    /// Returns the exact family codec revision.
-    #[must_use]
-    pub const fn codec_revision(&self) -> u32 {
-        self.codec_revision
-    }
-
-    pub(crate) const fn integrity(&self) -> Digest {
-        self.integrity
-    }
-}
-
-impl fmt::Debug for FamilyArtifact {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("FamilyArtifact")
-            .field("family", &self.family)
-            .field("schema_revision", &self.schema_revision)
-            .field("codec_revision", &self.codec_revision)
-            .field("binding", &self.binding)
-            .field("binding_component", &"<redacted binding component>")
-            .field("bytes", &format_args!("<{} bytes>", self.bytes.len()))
-            .field("integrity", &self.integrity)
-            .finish()
-    }
 }
 
 /// Durability contract selected for the checkpoint.
@@ -1814,72 +640,6 @@ pub struct InterpreterObservation {
     last_acknowledged: Option<InterpreterAcknowledgedBoundary>,
 }
 
-impl InterpreterObservation {
-    /// Creates one validated closed observation.
-    pub fn new(
-        generation: u64,
-        availability: InterpreterAvailability,
-        reset_reason: Option<InterpreterResetReason>,
-        affected_cell: Option<String>,
-        last_acknowledged: Option<InterpreterAcknowledgedBoundary>,
-    ) -> Result<Self, RuntimeManifestError> {
-        if generation == 0
-            || matches!(availability, InterpreterAvailability::Available) != reset_reason.is_none()
-        {
-            return Err(RuntimeManifestError::InvalidInterpreterObservation);
-        }
-        let affected_cell = affected_cell
-            .map(|cell| bounded_text(cell, MAX_ID_BYTES, "interpreter affected cell"))
-            .transpose()?;
-        let cell_boundary = matches!(
-            last_acknowledged,
-            Some(
-                InterpreterAcknowledgedBoundary::SourceAccepted
-                    | InterpreterAcknowledgedBoundary::ChildResultAccepted
-            )
-        );
-        let cell_consistent = cell_boundary == affected_cell.is_some()
-            || matches!(availability, InterpreterAvailability::Reset)
-                && last_acknowledged.is_none();
-        let availability_consistent = match availability {
-            InterpreterAvailability::Available => last_acknowledged
-                .is_some_and(|boundary| !matches!(boundary, InterpreterAcknowledgedBoundary::Join)),
-            InterpreterAvailability::Reset => true,
-        };
-        if !cell_consistent || !availability_consistent {
-            return Err(RuntimeManifestError::InvalidInterpreterObservation);
-        }
-        Ok(Self {
-            generation,
-            availability,
-            reset_reason,
-            affected_cell,
-            last_acknowledged,
-        })
-    }
-
-    #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation
-    }
-    #[must_use]
-    pub const fn availability(&self) -> InterpreterAvailability {
-        self.availability
-    }
-    #[must_use]
-    pub const fn reset_reason(&self) -> Option<InterpreterResetReason> {
-        self.reset_reason
-    }
-    #[must_use]
-    pub fn affected_cell(&self) -> Option<&str> {
-        self.affected_cell.as_deref()
-    }
-    #[must_use]
-    pub const fn last_acknowledged(&self) -> Option<InterpreterAcknowledgedBoundary> {
-        self.last_acknowledged
-    }
-}
-
 /// One reopen that applied a freshly derived output bound in place of the one
 /// the session was created under.
 ///
@@ -1891,20 +651,6 @@ impl InterpreterObservation {
 pub struct OutputBoundRederived {
     previous: Option<std::num::NonZeroU32>,
     current: Option<std::num::NonZeroU32>,
-}
-
-impl OutputBoundRederived {
-    /// The bound the session was created under.
-    #[must_use]
-    pub const fn previous(self) -> Option<std::num::NonZeroU32> {
-        self.previous
-    }
-
-    /// The bound this reopen derived and will use.
-    #[must_use]
-    pub const fn current(self) -> Option<std::num::NonZeroU32> {
-        self.current
-    }
 }
 
 /// Reconstruction-complete runtime manifest.
