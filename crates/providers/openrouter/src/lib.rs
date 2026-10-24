@@ -64,6 +64,7 @@ mod messages;
 mod model;
 mod retrieval;
 mod route;
+mod wire;
 
 pub use chat::{
     CHAT_COMPLETIONS_FAMILY_ID, OPENROUTER_CHAT_COMPLETIONS_PATH, OPENROUTER_CHAT_PROTOCOL_ID,

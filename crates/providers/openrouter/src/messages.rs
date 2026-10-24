@@ -6,10 +6,8 @@ use std::future::Future;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures_util::Stream;
 use plakous_attempt::PhysicalRequestBinding;
 use plakous_http::{
     Client, Failure as HttpFailure, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
@@ -25,14 +23,12 @@ use plakous_messages::{
 };
 use plakous_model::{
     Capability, CapabilityConstraints, CapabilitySet, Clock, CompiledProviderConfiguration,
-    ConfiguredLanguageModel, ContextContract, ContextEvidenceClass, CountObservation,
-    CredentialSelectionId, Digest, DigestDomain, EffectiveProviderConfiguration, FactProvenance,
-    FactSource, FamilyPolicyEnvelope, FeatureSupport, LanguageModel, ModelAdapterProfileId,
-    ModelDiagnostic, ModelError, ModelErrorKind, ModelEvent, ModelFamilyId,
-    ModelImplementationIdentity, ModelPreparationContext, ModelPreparationError,
-    ModelPreparationErrorKind, NamespaceId, PreparedCacheUse, PreparedCallRecord,
-    PreparedModelCall, PreparedModelProjection, PreparedOutputLimit, PreparedTokenProjection,
-    ProtocolId, ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
+    ConfiguredLanguageModel, ContextContract, ContextEvidenceClass, CredentialSelectionId, Digest,
+    DigestDomain, EffectiveProviderConfiguration, FactProvenance, FactSource, FamilyPolicyEnvelope,
+    FeatureSupport, LanguageModel, ModelAdapterProfileId, ModelDiagnostic, ModelError,
+    ModelErrorKind, ModelFamilyId, ModelImplementationIdentity, ModelPreparationContext,
+    ModelPreparationError, ModelPreparationErrorKind, NamespaceId, PreparedModelCall, ProtocolId,
+    ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
     ProviderRouteSelection, ProviderSemanticEvidence, ResolvedModelDescriptor,
     ResolvedProviderAuthorityBinding, RuntimeModelAuthority, RuntimeModelAuthorityError,
     RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Support, SystemIdGenerator,
@@ -40,6 +36,12 @@ use plakous_model::{
 };
 use thiserror::Error;
 
+use crate::wire::{
+    AttemptWire, JoinedStream, WireProjection, body_reports_context_overflow,
+    context_overflow_kind, generation_number, inferred_failure_kind, insert_attribution,
+    is_sse_content_type, named_refusal_kind, operation_error, post_send_status_outcome, rejection,
+    usage_limit_kind,
+};
 use crate::{
     OpenRouterApiKeyGenerationGrant, OpenRouterChatModelEvidence, OpenRouterChatRoute,
     OpenRouterRetentionPolicy,
@@ -367,44 +369,10 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
         let descriptor = self.target.descriptor();
-        descriptor.validate_plan_binding(&plan)?;
-        if plan.request().selected_provider_configuration_id()
-            != self.configuration.selected_identity()
-            || plan.request().effective_provider_configuration_id()
-                != self.configuration.effective_identity()
-            || !crate::execution::request_matches_configuration(
-                plan.request(),
-                self.configuration.selected().behavior(),
-            )
-        {
-            return Err(rejection(
-                ModelPreparationErrorKind::InvalidConfiguration,
-                "OpenRouter Messages request configuration is foreign",
-            ));
-        }
-        descriptor.validate_plan_admission(plan.request(), &plan)?;
-        context
-            .authority()
-            .validate(descriptor, context.prepared_at())?;
+        OPENROUTER_MESSAGES_WIRE.admit_plan(descriptor, &self.configuration, &plan, &context)?;
         let identity = self.target.route.identity();
-        if context.authority().account_binding() != identity.account_binding()
-            || context.authority().credential_authority_binding()
-                != identity.credential_authority_binding()
-        {
-            return Err(RuntimeModelAuthorityError::ForeignAuthority.into());
-        }
-        let output_bound = self
-            .configuration
-            .selected()
-            .behavior()
-            .output_bound
-            .bound()
-            .ok_or_else(|| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "OpenRouter Messages requires an enforced output bound",
-                )
-            })?;
+        let output_bound =
+            OPENROUTER_MESSAGES_WIRE.admit_route(identity, &self.configuration, &context)?;
         let retention = identity.retention_policy();
         let router = MessagesRouterPolicy::gateway_managed(
             retention
@@ -474,81 +442,13 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
             .iter()
             .map(ModelDiagnostic::new)
             .collect::<VecDeque<_>>();
-        let wire_digest = Digest::sha256(
-            DigestDomain::Blob,
-            1,
-            &[b"plakous-openrouter/messages-wire-v1", lowered.body()],
-        )
-        .map_err(|_| {
-            rejection(
-                ModelPreparationErrorKind::InvalidConfiguration,
-                "OpenRouter Messages wire identity failed",
-            )
-        })?;
-        let wire_size = u64::try_from(lowered.body().len()).map_err(|_| {
-            rejection(
-                ModelPreparationErrorKind::ResourceLimit,
-                "OpenRouter Messages request is too large",
-            )
-        })?;
-        let observation = descriptor
-            .context_contract()
-            .and_then(|contract| contract.measurements().first())
-            .map(|certificate| {
-                CountObservation::new(
-                    certificate.certificate_id(),
-                    certificate.revision(),
-                    wire_size,
-                )
-            })
-            .transpose()
-            .map_err(|_| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "OpenRouter Messages context observation is invalid",
-                )
-            })?;
-        let token_projection = PreparedTokenProjection::new(wire_digest, wire_size, observation)?
-            .with_input_parts(plakous_model::ContextInputParts::measure_wire(
-                lowered.body(),
-            ))
-            .with_wire_input(
-                lowered.body(),
-                Some(plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS),
-                &context,
-            )?;
-        let output_limit = PreparedOutputLimit::enforced_wire_maximum(
-            output_bound,
-            "max_tokens",
-            wire_digest,
-            LOWERING_REVISION,
-        )?;
-        let projection = PreparedModelProjection::new(
+        let record = OPENROUTER_MESSAGES_WIRE.prepare_record(
             descriptor,
             &plan,
             &context,
-            ProtocolId::new(MESSAGES_FAMILY_ID).map_err(|_| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "Messages family identity is invalid",
-                )
-            })?,
-            LOWERING_REVISION,
-            PROJECTION_REVISION,
-            ACCOUNTING_REVISION,
-            wire_digest,
-            wire_size,
-            token_projection,
-            context
-                .cache_affinity()
-                .map_or(PreparedCacheUse::None, |affinity| {
-                    PreparedCacheUse::RuntimeAffinity {
-                        affinity: affinity.identity(),
-                    }
-                }),
-            Some(output_limit),
+            lowered.body(),
+            output_bound,
         )?;
-        let record = PreparedCallRecord::for_prepared(descriptor, &plan, projection, &context)?;
         let stream = PreparedMessagesStreamBinding::new(
             policy,
             plan.digest(),
@@ -616,16 +516,12 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
                 .with_retry(revalidate_hooks);
                 let operation =
                     Box::pin(async move { call_messages_operation(&mut service, attempt).await });
-                Ok(Box::pin(JoinedMessagesStream {
+                Ok(Box::pin(JoinedStream::<MessagesWire, _>::new(
                     descriptor,
-                    pre_dispatch_diagnostics: replay_diagnostics,
+                    replay_diagnostics,
                     operation,
                     receiver,
-                    operation_done: false,
-                    finished: false,
-                    terminal_error: None,
-                    observation_error: None,
-                }) as plakous_model::ModelStream)
+                )) as plakous_model::ModelStream)
             })
         }))
     }
@@ -679,20 +575,7 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
             HeaderValue::from_static("application/json"),
         );
         headers.insert(HeaderName::from_static("authorization"), authorization);
-        if let Some(attribution) = self.target.route.identity().attribution() {
-            headers.insert(
-                HeaderName::from_static("http-referer"),
-                HeaderValue::from_static(attribution.referer()),
-            );
-            headers.insert(
-                HeaderName::from_static("x-openrouter-title"),
-                HeaderValue::from_static(attribution.title()),
-            );
-            headers.insert(
-                HeaderName::from_static("x-openrouter-categories"),
-                HeaderValue::from_static(crate::OpenRouterAttribution::CATEGORY),
-            );
-        }
+        insert_attribution(self.target.route.identity(), &mut headers);
         Request::new(
             dial_origin,
             Method::POST,
@@ -721,7 +604,7 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
                         .and_then(|value| value.to_str().ok())
                         .and_then(plakous_attempt::retry_after_seconds),
                 },
-                outcome: crate::chat::post_send_status_outcome(status),
+                outcome: post_send_status_outcome(status),
                 provider_accepted: false,
             }));
         }
@@ -730,11 +613,7 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
             .get(&HeaderName::from_static("content-type"))
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
-        if !content_type
-            .split(';')
-            .next()
-            .is_some_and(|media| media.trim().eq_ignore_ascii_case("text/event-stream"))
-        {
+        if !is_sse_content_type(content_type) {
             return Err(MessagesAttemptProtocolError::new(
                 "OpenRouter Messages success was not an SSE response",
             ));
@@ -773,7 +652,7 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
             Some(advice) => error.with_retry_after(advice),
             None => error,
         };
-        let error = if crate::chat::body_reports_context_overflow(body) {
+        let error = if body_reports_context_overflow(body) {
             error.with_context_overflow()
         } else {
             error
@@ -853,74 +732,40 @@ fn revalidate_messages_authority(
     Ok(())
 }
 
-type MessagesOperation = Pin<
-    Box<
-        dyn Future<Output = Result<plakous_messages::MessagesAttemptResponse, MessagesAttemptError>>
-            + Send,
-    >,
->;
+/// The Messages wire of the shared OpenRouter target skeleton.
+enum MessagesWire {}
 
-struct JoinedMessagesStream {
-    descriptor: ResolvedModelDescriptor,
-    pre_dispatch_diagnostics: VecDeque<ModelDiagnostic>,
-    operation: MessagesOperation,
-    receiver: plakous_messages::MessagesAttemptEventReceiver,
-    operation_done: bool,
-    finished: bool,
-    terminal_error: Option<ModelError>,
-    observation_error: Option<MessagesAttemptProtocolError>,
-}
+impl AttemptWire for MessagesWire {
+    type Response = plakous_messages::MessagesAttemptResponse;
+    type AttemptError = MessagesAttemptError;
+    type ProtocolError = MessagesAttemptProtocolError;
 
-impl Stream for JoinedMessagesStream {
-    type Item = Result<ModelEvent, ModelError>;
+    fn model_error(
+        descriptor: &ResolvedModelDescriptor,
+        error: &MessagesAttemptError,
+    ) -> ModelError {
+        messages_model_error(descriptor, error)
+    }
 
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.finished {
-            return Poll::Ready(None);
-        }
-        if let Some(diagnostic) = self.pre_dispatch_diagnostics.pop_front() {
-            return Poll::Ready(Some(Ok(ModelEvent::Diagnostic(diagnostic))));
-        }
-        match Pin::new(&mut self.receiver).poll_next(context) {
-            Poll::Ready(Some(Ok(event))) => return Poll::Ready(Some(Ok(event))),
-            Poll::Ready(Some(Err(error))) => self.observation_error = Some(error),
-            Poll::Ready(None) | Poll::Pending => {}
-        }
-        if !self.operation_done {
-            match self.operation.as_mut().poll(context) {
-                Poll::Pending => {}
-                Poll::Ready(result) => {
-                    self.operation_done = true;
-                    self.terminal_error = result
-                        .err()
-                        .map(|error| messages_model_error(&self.descriptor, &error));
-                }
-            }
-        }
-        // Polling the operation can enqueue a successful prefix and its error
-        // together. Drain that prefix before publishing the joined terminal.
-        loop {
-            match Pin::new(&mut self.receiver).poll_next(context) {
-                Poll::Ready(Some(Ok(event))) => return Poll::Ready(Some(Ok(event))),
-                Poll::Ready(Some(Err(error))) => self.observation_error = Some(error),
-                Poll::Ready(None) | Poll::Pending => break,
-            }
-        }
-        if !self.operation_done {
-            return Poll::Pending;
-        }
-        self.finished = true;
-        let error = self.terminal_error.take().or_else(|| {
-            self.observation_error.take().map(|error| {
-                ModelError::new(
-                    crate::chat::inferred_failure_kind(None, error.exchange_break()),
-                    format!("OpenRouter Messages protocol failed: {error}"),
-                )
-            })
-        });
-        Poll::Ready(error.map(Err))
+    fn observation_error(
+        _descriptor: &ResolvedModelDescriptor,
+        error: &MessagesAttemptProtocolError,
+    ) -> ModelError {
+        ModelError::new(
+            inferred_failure_kind(None, error.exchange_break()),
+            format!("OpenRouter Messages protocol failed: {error}"),
+        )
     }
 }
+
+const OPENROUTER_MESSAGES_WIRE: WireProjection = WireProjection {
+    label: "Messages",
+    wire_domain: b"plakous-openrouter/messages-wire-v1",
+    family_id: MESSAGES_FAMILY_ID,
+    lowering_revision: LOWERING_REVISION,
+    projection_revision: PROJECTION_REVISION,
+    accounting_revision: ACCOUNTING_REVISION,
+};
 
 fn messages_model_error(
     descriptor: &ResolvedModelDescriptor,
@@ -933,25 +778,16 @@ fn messages_model_error(
     // Streamed text that was abandoned is discarded with the turn and leaves
     // nothing to reconcile; a hosted effect is the one thing that would.
     let facts = error.facts();
-    let hosted = facts.is_some_and(plakous_messages::TerminalFacts::hosted_effects_possible);
-    let named =
-        (!hosted)
-            .then(|| error.provider_refusal())
-            .flatten()
-            .map(|refusal| match refusal {
-                plakous_attempt::ProviderRefusal::RateLimit => ModelErrorKind::RateLimited,
-                plakous_attempt::ProviderRefusal::Overloaded => ModelErrorKind::Unavailable,
-                plakous_attempt::ProviderRefusal::Deadline => ModelErrorKind::Timeout,
-            });
+    let named = named_refusal_kind(error.provider_refusal(), facts);
     let kind = match error {
         MessagesAttemptError::Cancelled { .. } => ModelErrorKind::Cancelled,
         MessagesAttemptError::Unavailable => ModelErrorKind::Unavailable,
-        _ => crate::chat::usage_limit_kind(error.usage_limit(), facts)
-            .or_else(|| crate::chat::context_overflow_kind(error.context_overflow(), facts))
+        _ => usage_limit_kind(error.usage_limit(), facts)
+            .or_else(|| context_overflow_kind(error.context_overflow(), facts))
             .or(named)
-            .unwrap_or_else(|| crate::chat::inferred_failure_kind(facts, error.exchange_break())),
+            .unwrap_or_else(|| inferred_failure_kind(facts, error.exchange_break())),
     };
-    let model_error = crate::chat::operation_error(
+    let model_error = operation_error(
         descriptor,
         kind,
         facts,
@@ -1081,16 +917,6 @@ fn messages_capabilities(
         features.insert(Capability::ImageInput, image);
     }
     Ok(CapabilitySet::new(features, BTreeMap::new()))
-}
-
-fn generation_number(grant: OpenRouterApiKeyGenerationGrant) -> u64 {
-    let fingerprint = grant.fingerprint();
-    let bytes = fingerprint.as_bytes();
-    u64::from_be_bytes(bytes[..8].try_into().unwrap_or([0; 8])).max(1)
-}
-
-fn rejection(kind: ModelPreparationErrorKind, message: &'static str) -> ModelPreparationError {
-    ModelPreparationError::rejected(kind, message)
 }
 
 /// Safe OpenRouter Messages construction failure.
@@ -1265,16 +1091,18 @@ mod tests {
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+    use std::task::Poll;
 
     use futures_util::{FutureExt, StreamExt};
     use plakous_attempt::{ObservationSnapshot, TerminalFacts};
     use plakous_model::{
         AttemptId, CancellationToken, CapacityCertificate, CapacityRule, ContextEvidenceSource,
         CountCertificateKind, EvidenceFreshness, IntegrationClass, MeasurementCertificate,
-        ModelCallContext, RuntimeModelAuthority,
+        ModelCallContext, ModelEvent, RuntimeModelAuthority,
     };
 
     use super::*;
+    use crate::wire::WireOperation;
     use crate::{
         OpenRouterApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin,
         OpenRouterToolChoiceModes, StaticOpenRouterApiKeySource,
@@ -1509,19 +1337,15 @@ mod tests {
             hosted_effects_possible: false,
             logical_success: false,
         });
-        let operation: MessagesOperation = Box::pin(futures_util::future::ready(Err(
+        let operation: WireOperation<MessagesWire> = Box::pin(futures_util::future::ready(Err(
             MessagesAttemptError::protocol(observation, facts),
         )));
-        let mut stream = JoinedMessagesStream {
-            descriptor: crate::chat::test_descriptor(),
-            pre_dispatch_diagnostics: VecDeque::new(),
+        let mut stream = JoinedStream::<MessagesWire, _>::new(
+            crate::chat::test_descriptor(),
+            VecDeque::new(),
             operation,
             receiver,
-            operation_done: false,
-            finished: false,
-            terminal_error: None,
-            observation_error: None,
-        };
+        );
 
         let Some(Err(error)) = stream.next().await else {
             return Err("missing terminal error".into());
@@ -1571,16 +1395,12 @@ mod tests {
             operation_completed.fetch_add(1, Ordering::SeqCst);
             Err(MessagesAttemptError::protocol(observation, facts))
         });
-        let mut stream = JoinedMessagesStream {
-            descriptor: crate::chat::test_descriptor(),
-            pre_dispatch_diagnostics: VecDeque::new(),
+        let mut stream = JoinedStream::<MessagesWire, _>::new(
+            crate::chat::test_descriptor(),
+            VecDeque::new(),
             operation,
             receiver,
-            operation_done: false,
-            finished: false,
-            terminal_error: None,
-            observation_error: None,
-        };
+        );
         assert!(matches!(
             stream.next().await,
             Some(Ok(ModelEvent::ResponseStarted(_)))
@@ -1622,22 +1442,18 @@ mod tests {
         );
         let polled = Arc::new(AtomicBool::new(false));
         let operation_polled = Arc::clone(&polled);
-        let operation: MessagesOperation = Box::pin(std::future::poll_fn(move |_| {
+        let operation: WireOperation<MessagesWire> = Box::pin(std::future::poll_fn(move |_| {
             operation_polled.store(true, Ordering::SeqCst);
             Poll::Pending
         }));
-        let mut stream = JoinedMessagesStream {
-            descriptor: crate::chat::test_descriptor(),
-            pre_dispatch_diagnostics: VecDeque::from([ModelDiagnostic::new(
+        let mut stream = JoinedStream::<MessagesWire, _>::new(
+            crate::chat::test_descriptor(),
+            VecDeque::from([ModelDiagnostic::new(
                 "incompatible Messages thinking replay was stripped",
             )]),
             operation,
             receiver,
-            operation_done: false,
-            finished: false,
-            terminal_error: None,
-            observation_error: None,
-        };
+        );
 
         let Some(Ok(ModelEvent::Diagnostic(diagnostic))) = stream.next().await else {
             return Err("missing replay-strip diagnostic".into());

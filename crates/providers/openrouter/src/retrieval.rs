@@ -21,7 +21,8 @@ use plakous_http::{
 };
 use plakous_model::{CancellationToken, Clock, Digest, DigestDomain};
 
-use crate::chat::{OPENROUTER_CHAT_COMPLETIONS_PATH, insert_attribution};
+use crate::chat::OPENROUTER_CHAT_COMPLETIONS_PATH;
+use crate::wire::insert_attribution;
 use crate::{
     OpenRouterApiKeyGenerationGrant, OpenRouterChatBuildError, OpenRouterChatModelEvidence,
     OpenRouterChatRoute, OpenRouterReasoningFacts, OpenRouterRetentionPolicy,
