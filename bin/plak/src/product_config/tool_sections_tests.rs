@@ -3,10 +3,11 @@
 
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
-use std::fs;
-
 use super::*;
 use crate::home::paths::PlakPaths;
+use plakous_hosted::agent_tree_protocol::{Tier, WorkingSet};
+use std::collections::BTreeMap;
+use std::fs;
 
 const FULL_SECTIONS: &str = r#"[tools.fetch_url]
 max_bytes = 4096

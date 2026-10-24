@@ -2,8 +2,9 @@
 
 Every key `plak` reads from disk, its type, its default, its constraint, and
 what it does. Code is the authority: the tables below are transcribed from
-`CONFIG_KEYS`, `CONFIG_SECTION_DOCS`, and `TEMPLATE_FIELD_DOCS` in
-`bin/plak/src/product_config.rs`, the same tables that render
+`CONFIG_KEYS` and `CONFIG_SECTION_DOCS` in
+`bin/plak/src/product_config/keys.rs`, and `TEMPLATE_FIELD_DOCS` in
+`bin/plak/src/product_config/templates.rs`, the same tables that render
 `configs/reference/**` and the commentary in a saved `config.toml`. A key that
 is not in that table does not exist.
 

@@ -217,7 +217,7 @@ fn trusted_project() -> (tempfile::TempDir, tempfile::TempDir, PlakPaths) {
     let paths = PlakPaths::explicit(temp.path().join("home"))
         .with_project_root(project.path().to_path_buf());
     paths.ensure_layout().unwrap();
-    super::super::project_trust::trust(&paths, project.path()).unwrap();
+    crate::product_config::project_trust::trust(&paths, project.path()).unwrap();
     (temp, project, paths)
 }
 

@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 
 use crate::home::paths::PlakPaths;
 
-use super::{AtomicStage, ConfigSaveError, atomic_file};
+use super::atomic::{AtomicStage, atomic_file};
+use super::load::ConfigSaveError;
 
 /// Whether `root`'s `.plak` may contribute configuration. A root that cannot
 /// be canonicalized, or a registry that cannot be read, is untrusted: the

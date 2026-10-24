@@ -46,9 +46,10 @@ if [[ "$product_home" != /* ]]; then
 fi
 
 # Seed the playground config from the annotated reference preset; there is
-# no second copy of the schema here. `bin/plak/src/product_config.rs`
-# (`ProductConfig::parse` and `parse_template`) is the schema authority and
-# `configs/reference/` loads under it in tests.
+# no second copy of the schema here. `bin/plak/src/product_config/load.rs`
+# (`ProductConfig::parse`) and `bin/plak/src/product_config/templates.rs`
+# (`parse_template`) are the schema authority, and `configs/reference/` loads
+# under them in tests.
 seed_config() {
   local dest="$1"
   cp "$repo_root/configs/reference/config.toml" "$dest"

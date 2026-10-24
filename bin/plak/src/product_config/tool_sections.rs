@@ -9,24 +9,26 @@
 //! stored with `plak secret set`, and an OAuth login lives in the home's
 //! secrets, never in a table.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::ops::{Range, RangeInclusive};
-
+use super::templates::{toml_key, toml_text};
+use super::toml_file::{Entry, located, table_header};
 use plakous_hosted::tool_plan::{OptionalTool, SelectedTool, TemplateToolSelection};
 use serde::Deserialize;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::{Range, RangeInclusive};
 use toml::Spanned;
-
-use super::toml_file::{Entry, located, table_header};
-use super::{toml_key, toml_text};
 
 /// `[tools.fetch_url]` default response-body cap, in bytes.
 pub const DEFAULT_FETCH_URL_MAX_BYTES: u32 = 2_097_152;
+
 /// `[tools.fetch_url]` default whole-fetch timeout, in seconds.
 pub const DEFAULT_FETCH_URL_TIMEOUT_SECONDS: u16 = 30;
+
 /// `[tools.web_search]` default searches per call.
 pub const DEFAULT_WEB_SEARCH_MAX_USES: u8 = 5;
+
 /// `[mcp_servers.<id>]` default `initialize` + `tools/list` budget, in seconds.
 pub const DEFAULT_MCP_STARTUP_SECONDS: u16 = 20;
+
 /// `[mcp_servers.<id>]` default hard per-call ceiling, in seconds.
 pub const DEFAULT_MCP_CALL_SECONDS: u16 = 120;
 

@@ -19,21 +19,18 @@
 //! changed, so comments, key order and spacing on every other line survive a
 //! `plak config set` byte for byte.
 
+use super::keys::{CONFIG_KEYS, ConfigKey, FieldValue, removed_or_unknown_section, unknown_key};
+use super::load::ProductConfig;
+use super::policy::AgentTemplate;
+use super::tool_sections::{self, McpServerSection, ToolsSection};
+use super::{ProductCompositionSelection, ProductProtocolSelection};
+use plakous_hosted::agent_tree_protocol::{Delegation, TemplateName, Tier};
+use plakous_hosted::tool_plan::TemplateToolSelection;
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Range;
-
-use serde::Deserialize;
 use toml::Spanned;
 use toml_edit::{DocumentMut, Item, Table, TableLike, Value};
-
-use plakous_hosted::tool_plan::TemplateToolSelection;
-
-use super::tool_sections::{self, McpServerSection, ToolsSection};
-use super::{
-    AgentTemplate, CONFIG_KEYS, ConfigKey, Delegation, FieldValue, ProductCompositionSelection,
-    ProductConfig, ProductProtocolSelection, TemplateName, Tier, removed_or_unknown_section,
-    unknown_key,
-};
 
 /// `config.toml`: twelve sections, each optional, nothing else. `[tools]` and
 /// `[mcp_servers]` hold one named table per entry.
