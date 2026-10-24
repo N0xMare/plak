@@ -454,4 +454,6 @@ pub(crate) const RECOVERY_PENDING_NOTE: &str = "the turn's outcome is uncertain;
 mod tests;
 
 #[cfg(test)]
+mod running_tree_tests;
+#[cfg(test)]
 mod wait_settlement_tests;

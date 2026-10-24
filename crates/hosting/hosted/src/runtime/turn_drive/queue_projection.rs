@@ -43,6 +43,47 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         }
     }
 
+    /// Applies the root's feed to the in-process tree while the turn runs,
+    /// once per model round, inline so tree saves stay ordered with the
+    /// tree's own writes and follow the feed deterministically. The round
+    /// starts after the previous round's tool results committed, so a wait
+    /// that history now holds retires its receipt (spec 03 §4.4). The pass
+    /// costs one feed read past the cursor and, for a round that committed
+    /// anything, one tree save, concurrent with the model stream; it never
+    /// refolds (see [`TreePass::RunningTurn`]). A refused or deferred pass is
+    /// projection debt the next round or the next prompt's admission pass
+    /// applies, logged once per distinct cause in a turn.
+    ///
+    /// [`TreePass::RunningTurn`]: super::super::projection::TreePass::RunningTurn
+    pub(super) async fn project_running_root_tree(&mut self) {
+        if self.host.session.store_revision == 0 {
+            return;
+        }
+        let target = &self.host.live_target;
+        let debt = match super::super::projection::project_tree_as(
+            &target.sessions,
+            self.host.rows,
+            &target.tree_id,
+            target.followed.session_id(),
+            super::super::projection::TreePass::RunningTurn,
+        )
+        .await
+        {
+            Ok(super::super::projection::TreePassOutcome::Deferred(reason)) => reason,
+            Ok(_) => return,
+            Err(error) => String::from(error),
+        };
+        if self.tree_debt_logged.as_deref() == Some(debt.as_str()) {
+            return;
+        }
+        super::super::logging::log_event(
+            self.host.log,
+            &self.host.session.id,
+            crate::session_log::SessionEvent::new("projector.deferred").str("error", &debt),
+        );
+        self.tree_debt_logged = Some(debt);
+    }
+
     fn poll_mail_notice(&mut self) {
         if !self.host.host_wakes || self.host.session.child_wake_suppressed {
             self.host.job_agent.set_unread_mail_pending(false);

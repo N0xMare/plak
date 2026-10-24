@@ -688,29 +688,92 @@ pub(crate) async fn project_tree(
     tree_id: &str,
     runtime_session: SessionId,
 ) -> Result<(), ReadFailure> {
+    project_tree_as(
+        sessions,
+        rows,
+        tree_id,
+        runtime_session,
+        TreePass::BetweenTurns,
+    )
+    .await
+    .map(|_| ())
+}
+
+/// When a tree pass runs, which decides how much work it may do.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TreePass {
+    /// Between root turns (open, wake, prompt admission and the host loop's
+    /// tick): a page that needs a refold rereads the feed from its start.
+    BetweenTurns,
+    /// Inside a running root turn, once per model round: only the in-process
+    /// tree, only the records past the cursor, and never a refold.
+    RunningTurn,
+}
+
+/// What one tree pass did.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TreePassOutcome {
+    /// Nothing to apply: no tree, or (running turn) no record past the cursor.
+    /// Nothing was published.
+    Idle,
+    /// The records past the cursor were applied and the tree published.
+    Applied,
+    /// The page needs a refold or has a gap. A running turn leaves it, cursor
+    /// and receipts untouched, for the next prompt's admission pass.
+    Deferred(String),
+}
+
+/// [`project_tree`], told whether a root turn is running.
+///
+/// While the root's turn runs ([`TreePass::RunningTurn`]) settlement is still
+/// a projection of the caller's feed (spec 03 §4.4): a wait whose call the
+/// root's history committed retires its receipt within that round instead
+/// of at the turn's terminal. The pass is bounded by the records the root
+/// committed since the previous pass. It costs one feed read past the cursor
+/// per round and one tree save per round that committed anything, inline in
+/// the turn's drive loop while the model streams, under the runtime's mutex,
+/// which orders it with the turn's own tree writes. A page that would need a
+/// refold (a reread from the feed's start and two tree clones) is deferred
+/// instead, so the drive loop never waits on one.
+///
+/// # Errors
+///
+/// A refused feed read, a refused page (between turns) or a refused tree
+/// save; the tree's cursor stays and a later pass applies the same records.
+pub(crate) async fn project_tree_as(
+    sessions: &AgentSessions,
+    rows: &(dyn TopologyRows + Sync),
+    tree_id: &str,
+    runtime_session: SessionId,
+    pass: TreePass,
+) -> Result<TreePassOutcome, ReadFailure> {
     let session_key = runtime_session.to_string();
     let runtime = crate::topology_runtime::lookup(tree_id);
     let read = |tree: &crate::agent_tree::ProductAgentTree| {
         (tree.root_agent_id.clone(), tree.feed_cursor(&session_key))
     };
-    let (root, cursor) = match &runtime {
-        Some(runtime) => runtime.read(read).map_err(|error| error.message)?,
-        None => match rows.tree(tree_id)? {
+    let (root, cursor) = match (&runtime, pass) {
+        (Some(runtime), _) => runtime.read(read).map_err(|error| error.message)?,
+        (None, TreePass::RunningTurn) => return Ok(TreePassOutcome::Idle),
+        (None, TreePass::BetweenTurns) => match rows.tree(tree_id)? {
             Some(tree) => read(&tree),
-            None => return Ok(()),
+            None => return Ok(TreePassOutcome::Idle),
         },
     };
     let feed = crate::agent::read_tree_feed(sessions, runtime_session, cursor).await?;
     if let Some(runtime) = runtime {
+        if pass == TreePass::RunningTurn {
+            return Ok(apply_running_root_feed(&runtime, &feed, &root)?);
+        }
         crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
             crate::agent::feed_projection::apply_on_runtime(&runtime, feed, &root)
         })
         .await
         .map_err(|error| error.message)?;
-        return Ok(());
+        return Ok(TreePassOutcome::Applied);
     }
     let Some(mut tree) = rows.tree(tree_id)? else {
-        return Ok(());
+        return Ok(TreePassOutcome::Idle);
     };
     let before = tree.feed_cursor(&session_key);
     crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
@@ -719,9 +782,43 @@ pub(crate) async fn project_tree(
     .await
     .map_err(|error| error.message)?;
     if tree.feed_cursor(&session_key) == before {
-        return Ok(());
+        return Ok(TreePassOutcome::Applied);
     }
-    Ok(rows.save_tree(&mut tree)?)
+    rows.save_tree(&mut tree)?;
+    Ok(TreePassOutcome::Applied)
+}
+
+/// The running-turn half of [`project_tree_as`] over a page already read:
+/// no record past the cursor publishes nothing, and a page that needs a
+/// refold or has a gap is deferred rather than reread.
+///
+/// # Errors
+///
+/// Any other projector refusal or a refused tree save, with nothing applied.
+pub(crate) fn apply_running_root_feed(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    feed: &crate::agent_tree::TreeFeed,
+    root: &str,
+) -> Result<TreePassOutcome, String> {
+    if feed.records.is_empty() {
+        return Ok(TreePassOutcome::Idle);
+    }
+    running_pass_outcome(crate::agent::feed_projection::apply_on_runtime(
+        runtime, feed, root,
+    ))
+}
+
+pub(in crate::runtime) fn running_pass_outcome(
+    applied: Result<crate::agent_tree::TreeProjection, crate::agent_tree::TreeProjectorError>,
+) -> Result<TreePassOutcome, String> {
+    use crate::agent_tree::TreeProjectorError;
+    match applied {
+        Ok(_) => Ok(TreePassOutcome::Applied),
+        Err(error @ (TreeProjectorError::RefoldRequired | TreeProjectorError::Gap { .. })) => {
+            Ok(TreePassOutcome::Deferred(error.to_string()))
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 pub(super) mod live;

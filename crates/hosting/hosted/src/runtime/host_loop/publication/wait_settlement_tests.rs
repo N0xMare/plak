@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// One host over a tree whose root holds one unread Result envelope.
-fn with_unread_result(
+pub(super) fn with_unread_result(
     test: impl FnOnce(&mut HostLoop<'_, TestExtension>, &Arc<ProductTopologyRuntime>),
 ) {
     let dir = tempfile::tempdir().unwrap();
@@ -59,7 +59,10 @@ fn with_unread_result(
 
 /// A bare wait under a fresh call id, which canonical history never
 /// holds: it acknowledges the unread envelope and keeps one receipt.
-fn wait_outside_history(host: &HostLoop<'_, TestExtension>, runtime: &Arc<ProductTopologyRuntime>) {
+pub(super) fn wait_outside_history(
+    host: &HostLoop<'_, TestExtension>,
+    runtime: &Arc<ProductTopologyRuntime>,
+) {
     let tree_id = runtime.read(|tree| tree.tree_id.clone()).unwrap();
     let receipt = host
         .executor
@@ -76,7 +79,7 @@ fn wait_outside_history(host: &HostLoop<'_, TestExtension>, runtime: &Arc<Produc
     assert_eq!(receipts_and_unread(runtime), (1, 0));
 }
 
-fn receipts_and_unread(runtime: &Arc<ProductTopologyRuntime>) -> (usize, usize) {
+pub(super) fn receipts_and_unread(runtime: &Arc<ProductTopologyRuntime>) -> (usize, usize) {
     runtime
         .read(|tree| {
             (

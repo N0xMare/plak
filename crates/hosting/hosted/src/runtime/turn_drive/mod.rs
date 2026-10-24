@@ -113,6 +113,10 @@ struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
     request_tool_names: Vec<String>,
     queue_refresh_at: Instant,
     queue_refresh: Option<queue_projection::QueueRefresh>,
+    /// A model round started since the last running-turn tree pass.
+    root_tree_pass_due: bool,
+    /// The last running-turn tree debt this turn logged.
+    tree_debt_logged: Option<String>,
     queue_wait_noted: bool,
     mail_batch_notified: bool,
     mail_repeat_notified: bool,
@@ -167,6 +171,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             request_tool_names: Vec::new(),
             queue_refresh_at: Instant::now(),
             queue_refresh: None,
+            root_tree_pass_due: false,
+            tree_debt_logged: None,
             queue_wait_noted: false,
             mail_batch_notified: false,
             mail_repeat_notified: false,
@@ -185,6 +191,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
 
         loop {
             self.poll_queue_projection().await;
+            if std::mem::take(&mut self.root_tree_pass_due) {
+                self.project_running_root_tree().await;
+            }
             super::events::commit_notice_intents(
                 self.host.events,
                 self.host.store,
@@ -260,6 +269,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                                     true
                                 }
                                 AgentEventKind::ModelStarted => {
+                                    self.root_tree_pass_due = true;
                                     self.live_occupancy.round_started();
                                     self.last_context_refresh_bytes = 0;
                                     true

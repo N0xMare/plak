@@ -790,7 +790,15 @@ acknowledgements stand, and the clipped mail bodies remain readable through
 
 **Settlement is a projection of the caller's feed.** The tree projector (§14.3)
 applies each caller session's feed records in order and settles that caller's
-receipts by these rules, live and on every open alike:
+receipts by these rules, live and on every open alike. Live means while the
+caller's turn runs too: a child's feed is applied as its records arrive, and
+the root host applies the root's feed inline once per model round of a running
+root turn (a round starts after the previous round's tool results committed),
+besides its passes between turns. A root wait in model history therefore
+retires by the next round; a nested wait (from a Code Mode cell) and an
+operator `invoke_tool` await hold their receipts until the caller's terminal.
+That running-turn pass applies only the records past the cursor; a page that
+would need a refold is left for the next prompt's admission pass. The rules:
 
 - A `HistoryAppended` fact whose committed call ids include a receipt's call id
   retires that receipt; its acknowledgements stand. What a later compaction
