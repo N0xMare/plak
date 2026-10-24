@@ -241,7 +241,7 @@ impl ProductTranscript {
     /// [`SessionViews::transcript`](super::projector::SessionViews::transcript)
     /// merges it, with nothing pending. It equals [`Self::from_lines`] of the
     /// same rows without bounding each projector row again: the projector
-    /// stored each one through [`bound_row`], which is the identity on its
+    /// stored each one through `bound_row`, which is the identity on its
     /// output. Notices and imported rows (the product lane) are bounded as an
     /// append bounds them.
     #[must_use]
