@@ -87,8 +87,7 @@ done
 # Resolve the actual archive graphs, which do not inherit workspace patches.
 # Preparation never compiles or uploads; verification below stays offline.
 echo "== package verification inputs (offline first) =="
-cargo package --locked --offline --no-verify "${selection[@]}" \
-  || cargo package --locked --no-verify "${selection[@]}"
+python3 "$root/tools/release/offline_first.py" cargo package --locked --no-verify "${selection[@]}"
 archives=()
 for entry in "${order[@]}"; do
   archives+=("$CARGO_TARGET_DIR/package/${entry%% *}-${entry#* }.crate")

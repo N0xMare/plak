@@ -50,8 +50,21 @@ with open(os.environ["FAKE_CARGO_LOG"], "a") as log:
         token=os.environ.get("CARGO_REGISTRY_TOKEN"),
         test_hooks="test-hooks" in manifest.read_text() if manifest.exists() else None,
     )) + "\n")
+offline = "--offline" in args or os.environ.get("CARGO_NET_OFFLINE") == "true"
+refreshed = Path(os.environ["FAKE_CARGO_LOG"] + ".refreshed")
+if args[:1] == ["info"]:
+    assert not any((parent / "Cargo.toml").exists() for parent in (Path.cwd(), *Path.cwd().parents)), \
+        "the index refresh ran inside a workspace"
+    if offline:
+        sys.exit(101)
+    refreshed.write_text(args[-1])
+    sys.exit(0)
+if os.environ.get("FAKE_STALE_INDEX") == args[0] and offline and not refreshed.exists():
+    print('error: failed to select a version for the requirement `monty-typeshed = "^1.2.0"`\n'
+          'candidate versions found which didn\'t match: 1.1.0', file=sys.stderr)
+    sys.exit(101)
 if args[:1] == ["package"] and "--no-verify" in args:
-    if os.environ.get("FAKE_PACKAGE_COLD") == "1" and ("--offline" in args or os.environ.get("CARGO_NET_OFFLINE") == "true"):
+    if os.environ.get("FAKE_PACKAGE_COLD") == "1" and offline:
         sys.exit(1)
     directory = Path(os.environ["CARGO_TARGET_DIR"]) / "package"
     directory.mkdir(parents=True, exist_ok=True)
@@ -103,6 +116,7 @@ class PublishScriptTests(unittest.TestCase):
         for relative in ("scripts/publish.sh", "tools/release/publish_plan.py",
                          "tools/release/publish_shape.py", "tools/release/review_expiry.py",
                          "tools/release/prefetch_packages.py", "tools/release/gate_evidence.py",
+                         "tools/release/offline_first.py",
                          "tools/checks/vcs_listing.py", "tools/checks/check_workspace.py",
                          "tools/checks/plakous_policy.py"):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
@@ -189,8 +203,9 @@ class PublishScriptTests(unittest.TestCase):
         lines = self.log.read_text().splitlines() if self.log.exists() else []
         self.log.unlink(missing_ok=True)
         all_calls = [json.loads(line) for line in lines]
-        self.prefetch_calls = [call for call in all_calls if call["args"][0] == "fetch"
+        self.prefetch_calls = [call for call in all_calls if call["args"][0] in ("fetch", "info")
                                or (call["args"][0] == "package" and "--no-verify" in call["args"])]
+        Path(str(self.log) + ".refreshed").unlink(missing_ok=True)
         return result, [call for call in all_calls if call not in self.prefetch_calls]
 
     def index_entry(self, name: str) -> None:
@@ -349,6 +364,27 @@ class PublishScriptTests(unittest.TestCase):
             self.assertTrue("--offline" in offline["args"] or offline["offline"] == "true")
             self.assertIsNone(online["offline"])
         self.assertEqual(calls[0]["offline"], "true")
+
+    def test_a_stale_index_entry_is_refreshed_and_the_offline_step_retried(self) -> None:
+        for step in ("package", "fetch"):
+            with self.subTest(step=step):
+                self.env["FAKE_STALE_INDEX"] = step
+                result, calls = self.publish("--gate")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                stale = [call for call in self.prefetch_calls if call["args"][0] == step][:3]
+                info = [call for call in self.prefetch_calls if call["args"][0] == "info"]
+                # Offline, refresh the one named crate online, offline again: no
+                # online run of the step itself.
+                self.assertEqual([call["args"][-1] for call in info], ["monty-typeshed"])
+                self.assertIsNone(info[0]["offline"])
+                self.assertFalse(info[0]["cwd"].startswith(str(self.repo)))
+                self.assertNotIn("plak-publish", info[0]["cwd"])
+                self.assertTrue(all("--offline" in call["args"] for call in stale[:2]))
+                self.assertTrue(all("--offline" in call["args"] or call["offline"] == "true"
+                                    for call in self.prefetch_calls if call["args"][0] != "info"))
+                self.assertIn("refreshing monty-typeshed", result.stderr)
+                self.assertIn("offline retry succeeded after the index refresh", result.stderr)
+                self.assertEqual(calls[0]["offline"], "true")
 
     def test_explicit_offline_mode_does_not_get_overridden_by_prefetch(self) -> None:
         self.env.update(FAKE_FETCH_COLD="1", CARGO_NET_OFFLINE="true")

@@ -10,6 +10,9 @@ import sys
 import tarfile
 import tomllib
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import offline_first  # noqa: E402
+
 
 def prefetch(destination: Path, archives: list[Path]) -> None:
     members = {}
@@ -30,9 +33,8 @@ def prefetch(destination: Path, archives: list[Path]) -> None:
         with manifest.open("a") as stream:
             stream.write(patches)
         command = ["cargo", "fetch", "--manifest-path", str(manifest)]
-        offline = subprocess.run([*command, "--offline"])
-        if offline.returncode:
-            subprocess.run(command, check=True)
+        if offline_first.run(command):
+            raise subprocess.CalledProcessError(1, command)
 
 
 if __name__ == "__main__":
