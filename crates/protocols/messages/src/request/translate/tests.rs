@@ -812,6 +812,320 @@ fn replay_ignores_freshness_binding_but_requires_semantic_descriptor() -> TestRe
 }
 
 #[test]
+fn replay_refusals_name_only_the_failing_binding_fact() -> TestResult {
+    let original = policy()?;
+    let replay = bind_replay_payload(
+        &original,
+        ModelId::new("claude-exact")?,
+        SIGNATURE_REPLAY_KIND,
+        raw("\"synthetic-private-signature\"")?,
+    )?;
+    for category in [
+        "requested model",
+        "reported model",
+        "semantic descriptor",
+        "account",
+        "selected configuration",
+        "effective configuration",
+        "API version",
+        "beta set",
+    ] {
+        let mut target = original.clone();
+        match category {
+            "requested model" => target.requested_model = ModelId::new("different")?,
+            "reported model" => target.expected_reported_model = Some(ModelId::new("different")?),
+            "semantic descriptor" => {
+                target.semantic_descriptor_binding =
+                    Digest::sha256(DigestDomain::ModelBinding, 1, &[b"different"])?;
+            }
+            "account" => {
+                target.account_binding =
+                    Digest::sha256(DigestDomain::ModelBinding, 1, &[b"different"])?;
+            }
+            "selected configuration" => {
+                target.selected_provider_configuration = selected_id(b"different")?;
+            }
+            "effective configuration" => {
+                target.effective_provider_configuration = effective_id(b"different")?;
+            }
+            "API version" => target.api_version = "different".into(),
+            "beta set" => target.beta_header = "different".into(),
+            _ => unreachable!(),
+        }
+        let error = replay_payload(&replay, &target, SIGNATURE_REPLAY_KIND)
+            .err()
+            .ok_or("unexpected replay admission")?;
+        assert_eq!(
+            error.message(),
+            format!("opaque replay target binding mismatch: {category}")
+        );
+        assert!(!error.message().contains("synthetic-private-signature"));
+        assert!(!error.message().contains("different"));
+    }
+    Ok(())
+}
+
+#[test]
+fn replay_refusal_names_mismatched_inner_schema() -> TestResult {
+    let policy = policy()?;
+    let replay = bind_replay_payload(
+        &policy,
+        ModelId::new("claude-exact")?,
+        SIGNATURE_REPLAY_KIND,
+        raw("\"synthetic-private-signature\"")?,
+    )?;
+    let mut payload: Value = serde_json::from_str(replay.payload().get())?;
+    payload["replay_schema_revision"] = serde_json::json!(MESSAGES_REPLAY_SCHEMA_REVISION + 1);
+    let changed = ReplayEnvelope::new(
+        replay.protocol().clone(),
+        None,
+        replay.scope().clone(),
+        replay.kind().clone(),
+        replay.version(),
+        replay.classification(),
+        raw(&serde_json::to_string(&payload)?)?,
+    )?;
+    let error = replay_payload(&changed, &policy, SIGNATURE_REPLAY_KIND)
+        .err()
+        .ok_or("unexpected replay admission")?;
+    assert_eq!(
+        error.message(),
+        "opaque replay target binding mismatch: replay schema"
+    );
+    assert!(!error.message().contains("synthetic-private-signature"));
+    Ok(())
+}
+
+#[test]
+fn unsigned_completed_history_has_one_stable_projection_and_unchanged_wire() -> TestResult {
+    let mut identities = std::collections::HashSet::new();
+    for count in 1..=3_u128 {
+        let mut items = Vec::new();
+        for index in 0..count {
+            items.push(ConversationItem::new(
+                TestEntryId::try_from(TestUuid::from_u128(index + 1))?,
+                Actor::Assistant,
+                vec![
+                    ContentBlock::Reasoning(plakous_model::ReasoningBlock::new(
+                        ReasoningVisibility::Visible,
+                        Some(format!("synthetic thought {index}")),
+                        None,
+                    )?),
+                    ContentBlock::Text(TestTextBlock::new("answer", None)?),
+                ],
+                Provenance::ModelOutput,
+            )?);
+        }
+        let history = ConversationView::from_items(items)?;
+        let policy = policy()?
+            .with_strict_thinking_replay(true)
+            .with_completed_history_prefix(Some(history.semantic_prefix_identity(count as usize)?));
+        let mut live = Vec::new();
+        let (messages, _, projections) = translate_history(
+            &history,
+            &policy,
+            &ToolOwnership::default(),
+            false,
+            true,
+            &mut live,
+        )?;
+        assert_eq!(live, [] as [String; 0]);
+        assert_eq!(projections.len(), 1);
+        assert!(
+            projections[0]
+                .message()
+                .as_str()
+                .starts_with("Completed historical thinking without replay was omitted;")
+        );
+        let (without_proof, _, _) = translate_history(
+            &history,
+            &policy.clone().with_completed_history_prefix(None),
+            &ToolOwnership::default(),
+            false,
+            true,
+            &mut Vec::new(),
+        )?;
+        assert_eq!(
+            serde_json::to_value(&messages)?,
+            serde_json::to_value(&without_proof)?
+        );
+        identities.insert(
+            projections[0]
+                .history_projection_identity()
+                .ok_or("identity")?,
+        );
+        assert_eq!(
+            serde_json::to_value(&messages)?,
+            serde_json::json!([{"role":"assistant", "content": (0..count)
+                .map(|_| serde_json::json!({"type":"text", "text":"answer"}))
+                .collect::<Vec<_>>()}])
+        );
+        assert!(
+            !projections[0]
+                .message()
+                .as_str()
+                .contains("synthetic thought")
+        );
+        let mut changed = policy;
+        changed.beta_header = "changed-beta".into();
+        assert!(!identities.contains(&unsigned_historical_projection_identity(&changed)?));
+    }
+    assert_eq!(identities.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn disabled_thinking_omits_unsigned_and_signed_historical_projection_diagnostics() -> TestResult {
+    let source = policy()?.with_strict_thinking_replay(true);
+    let mut target = source.clone();
+    target.effective_provider_configuration = effective_id(b"new-effort")?;
+    for replay in [
+        None,
+        Some(bind_replay_payload(
+            &source,
+            ModelId::new("claude-exact")?,
+            SIGNATURE_REPLAY_KIND,
+            raw("\"synthetic-signature\"")?,
+        )?),
+    ] {
+        let signed = replay.is_some();
+        let history = ConversationView::from_items(vec![batch_item(
+            1,
+            Actor::Assistant,
+            vec![
+                ContentBlock::Reasoning(plakous_model::ReasoningBlock::new(
+                    ReasoningVisibility::Visible,
+                    Some("synthetic thought".into()),
+                    replay,
+                )?),
+                ContentBlock::Text(TestTextBlock::new("answer", None)?),
+            ],
+        )?])?;
+        let policy = target
+            .clone()
+            .with_completed_history_prefix(Some(history.semantic_prefix_identity(1)?));
+        let mut live = Vec::new();
+        let (enabled, _, projections) = translate_history(
+            &history,
+            &policy,
+            &ToolOwnership::default(),
+            false,
+            true,
+            &mut live,
+        )?;
+        assert_eq!(projections.len(), 1);
+        assert_eq!(live, [] as [String; 0]);
+        let (disabled, _, projections) = translate_history(
+            &history,
+            &policy,
+            &ToolOwnership::default(),
+            false,
+            false,
+            &mut live,
+        )?;
+        assert_eq!(projections.len(), 0);
+        assert_eq!(live, [] as [String; 0]);
+        assert_eq!(
+            serde_json::to_vec(&disabled)?,
+            serde_json::to_vec(&enabled)?
+        );
+        if signed {
+            assert!(
+                translate_history(
+                    &history,
+                    &target,
+                    &ToolOwnership::default(),
+                    false,
+                    false,
+                    &mut live,
+                )
+                .is_err(),
+                "disabled thinking cannot authorize unproven incompatible replay"
+            );
+            assert_eq!(live, [] as [String; 0]);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn unsigned_current_reasoning_stays_live_and_lenient_projection_stays_portable() -> TestResult {
+    let history = ConversationView::from_items(vec![ConversationItem::new(
+        TestEntryId::try_from(TestUuid::from_u128(1))?,
+        Actor::Assistant,
+        vec![ContentBlock::Reasoning(plakous_model::ReasoningBlock::new(
+            ReasoningVisibility::Visible,
+            Some("synthetic thought".into()),
+            None,
+        )?)],
+        Provenance::ModelOutput,
+    )?])?;
+    for completed in [false, true] {
+        for strict in [false, true] {
+            let policy = policy()?
+                .with_strict_thinking_replay(strict)
+                .with_completed_history_prefix(
+                    completed
+                        .then(|| history.semantic_prefix_identity(1))
+                        .transpose()?,
+                );
+            let mut live = Vec::new();
+            let (messages, _, projections) = translate_history(
+                &history,
+                &policy,
+                &ToolOwnership::default(),
+                false,
+                true,
+                &mut live,
+            )?;
+            assert_eq!(projections.len(), usize::from(strict && completed));
+            assert_eq!(live.len(), usize::from(strict && !completed));
+            if strict {
+                assert!(messages.is_empty());
+                if !completed {
+                    assert_eq!(
+                        live[0],
+                        "Messages thinking carried no replay signature; the block was dropped, never sent as text"
+                    );
+                }
+            } else {
+                assert!(
+                    matches!(&messages[0].content[0], MessageBlock::Text { text, .. } if text == "synthetic thought")
+                );
+            }
+        }
+    }
+    let mixed = ConversationView::from_items(vec![
+        history.items()[0].clone(),
+        ConversationItem::new(
+            TestEntryId::try_from(TestUuid::from_u128(2))?,
+            Actor::Assistant,
+            history.items()[0].blocks().to_vec(),
+            Provenance::ModelOutput,
+        )?,
+    ])?;
+    let mut live = Vec::new();
+    let (messages, _, projections) = translate_history(
+        &mixed,
+        &policy()?
+            .with_strict_thinking_replay(true)
+            .with_completed_history_prefix(Some(mixed.semantic_prefix_identity(1)?)),
+        &ToolOwnership::default(),
+        false,
+        true,
+        &mut live,
+    )?;
+    assert!(messages.is_empty());
+    assert_eq!(
+        live.len(),
+        1,
+        "a historical projection cannot hide a current anomaly"
+    );
+    assert_eq!(projections.len(), 1);
+    Ok(())
+}
+
+#[test]
 #[allow(
     clippy::too_many_lines,
     reason = "one replay fixture exercises completed and active history boundaries"
@@ -1086,19 +1400,21 @@ fn historical_projection_still_rejects_malformed_and_unfinished_history() -> Tes
         let closed = target
             .clone()
             .with_completed_history_prefix(Some(history.semantic_prefix_identity(1)?));
-        let mut diagnostics = Vec::new();
-        let Err(error) = translate_history(
-            &history,
-            &closed,
-            &ToolOwnership::default(),
-            false,
-            true,
-            &mut diagnostics,
-        ) else {
-            return Err("malformed or unfinished history was accepted".into());
-        };
-        assert_eq!(error.kind(), MessagesRequestErrorKind::InvalidRequest);
-        assert_eq!(diagnostics, [] as [String; 0]);
+        for include_native_thinking in [false, true] {
+            let mut diagnostics = Vec::new();
+            let Err(error) = translate_history(
+                &history,
+                &closed,
+                &ToolOwnership::default(),
+                false,
+                include_native_thinking,
+                &mut diagnostics,
+            ) else {
+                return Err("malformed or unfinished history was accepted".into());
+            };
+            assert_eq!(error.kind(), MessagesRequestErrorKind::InvalidRequest);
+            assert_eq!(diagnostics, [] as [String; 0]);
+        }
     }
     Ok(())
 }

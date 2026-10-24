@@ -186,7 +186,9 @@ async fn invalid_local_native_replay_creates_a_stripped_successor_instead_of_ref
                 .with_history(history),
         )
         .await?;
-    assert!(session.replay_stripped());
+    let refusal = session.replay_validation_error().ok_or("missing refusal")?;
+    assert_eq!(refusal.kind(), AgentErrorKind::InvalidInput);
+    assert!(!refusal.message().contains("synthetic-ciphertext"));
     assert!(
         agent_checkpoint(session.agent())
             .manifest()
@@ -279,7 +281,7 @@ async fn unsupported_nested_opaque_result_successfully_carries_with_stripping() 
             .with_history(history),
         )
         .await?;
-    assert!(session.replay_stripped());
+    assert!(session.replay_validation_error().is_some());
     let checkpoint = agent_checkpoint(session.agent());
     let result = checkpoint
         .manifest()
@@ -360,7 +362,7 @@ async fn responses_account_scope_survives_import_rebind_and_fork() -> TestResult
             ),
         )
         .await?;
-    assert!(!session.replay_stripped());
+    assert!(session.replay_validation_error().is_none());
     let source = session.release().await?;
     let runtime_b =
         SessionRuntimeBinding::new(builder(configured_b.clone(), Arc::clone(&workspace))?);

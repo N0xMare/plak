@@ -9,15 +9,29 @@ type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 fn replay_fallback_authors_one_persistable_notice_only_when_needed() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
-    record_replay_fallback_notice(&mut config.session, false);
+    record_replay_fallback(&config.home, &mut config.session, None);
     assert_eq!(config.session.transcript.pending_notices().len(), 0);
-    record_replay_fallback_notice(&mut config.session, true);
+    let error = AgentError::new(
+        AgentErrorKind::InvalidInput,
+        "opaque replay target binding mismatch: selected configuration",
+    );
+    record_replay_fallback(&config.home, &mut config.session, Some(&error));
+    let logged = session_log::read_tail_for_kind(
+        &config.home,
+        &config.session.id,
+        4,
+        Some("session.replay_stripped"),
+    )
+    .unwrap();
+    assert_eq!(logged.len(), 1);
+    assert!(logged[0].contains("selected configuration"));
     let notices = config.session.transcript.pending_notices();
     assert_eq!(notices.len(), 1);
     let TranscriptRow::Notice(notice) = &notices[0] else {
         panic!("not a notice");
     };
     assert!(notice.text.contains("conversation was carried"));
+    assert!(!notice.text.contains("selected configuration"));
     assert!(!notice.text.contains('\n'));
     config.store.save(&mut config.session).unwrap();
     let loaded = config.store.load(&config.session.id).unwrap();

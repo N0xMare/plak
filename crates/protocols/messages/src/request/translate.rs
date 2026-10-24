@@ -424,20 +424,14 @@ fn translate_assistant_with_history(
         match block {
             ContentBlock::Text(text) => output.push(text_block(text.text().to_owned())),
             ContentBlock::Reasoning(reasoning) => {
-                if policy.strict_thinking_replay
-                    && let Some(replay) = reasoning.replay()
-                {
-                    let kind = if reasoning.visibility() == ReasoningVisibility::Redacted {
-                        REDACTED_REPLAY_KIND
-                    } else {
-                        SIGNATURE_REPLAY_KIND
-                    };
-                    if completed_turn && projectable_historical_thinking(replay, policy, kind) {
-                        let identity = historical_projection_identity(replay, policy)?;
-                        record_historical_projection(identity, historical_projection_diagnostics);
-                        continue;
-                    }
-                    replay_payload(replay, policy, kind)?;
+                if project_completed_thinking(
+                    reasoning,
+                    policy,
+                    completed_turn,
+                    include_native_thinking,
+                    historical_projection_diagnostics,
+                )? {
+                    continue;
                 }
                 if include_native_thinking
                     && let Some(block) =
@@ -517,6 +511,48 @@ fn translate_assistant_with_history(
         }
     }
     Ok((output, pending))
+}
+
+fn project_completed_thinking(
+    reasoning: &plakous_model::ReasoningBlock,
+    policy: &MessagesRequestPolicy,
+    completed_turn: bool,
+    include_native_thinking: bool,
+    diagnostics: &mut Vec<ModelDiagnostic>,
+) -> Result<bool, MessagesRequestError> {
+    if !policy.strict_thinking_replay {
+        return Ok(false);
+    }
+    let Some(replay) = reasoning.replay() else {
+        if !include_native_thinking {
+            return Ok(false);
+        }
+        if completed_turn {
+            record_historical_projection(
+                unsigned_historical_projection_identity(policy)?,
+                "Completed historical thinking without replay was omitted; conversation content was retained. No private thinking or signatures were sent as text.",
+                diagnostics,
+            );
+        }
+        return Ok(completed_turn);
+    };
+    let kind = if reasoning.visibility() == ReasoningVisibility::Redacted {
+        REDACTED_REPLAY_KIND
+    } else {
+        SIGNATURE_REPLAY_KIND
+    };
+    if completed_turn && projectable_historical_thinking(replay, policy, kind) {
+        if include_native_thinking {
+            record_historical_projection(
+                historical_projection_identity(replay, policy)?,
+                "Configuration transition: completed historical thinking was omitted; conversation content was retained. No private thinking or signatures were sent as text.",
+                diagnostics,
+            );
+        }
+        return Ok(true);
+    }
+    replay_payload(replay, policy, kind)?;
+    Ok(false)
 }
 
 fn translate_assistant_tool_call(
@@ -807,21 +843,51 @@ fn projectable_historical_thinking(
                 .is_some_and(|expected| expected != source_model))
 }
 
-fn record_historical_projection(identity: Digest, diagnostics: &mut Vec<ModelDiagnostic>) {
+fn record_historical_projection(
+    identity: Digest,
+    message: &str,
+    diagnostics: &mut Vec<ModelDiagnostic>,
+) {
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.history_projection_identity() == Some(identity))
     {
         return;
     }
-    diagnostics.push(ModelDiagnostic::historical_projection(
-        identity,
-        "Configuration transition: completed historical thinking was omitted; conversation content was retained. No private thinking or signatures were sent as text.",
-    ));
+    diagnostics.push(ModelDiagnostic::historical_projection(identity, message));
 }
 
 // Only compatibility facts identify the transition. In particular, signatures,
 // reasoning, freshness bindings and the growing request projection do not.
+fn unsigned_historical_projection_identity(
+    policy: &MessagesRequestPolicy,
+) -> Result<Digest, MessagesRequestError> {
+    let facts = serde_json::to_value((
+        &policy.protocol,
+        &policy.requested_model,
+        &policy.expected_reported_model,
+        policy.semantic_descriptor_binding,
+        policy.account_binding,
+        policy.selected_provider_configuration,
+        policy.effective_provider_configuration,
+        MESSAGES_REPLAY_SCHEMA_REVISION,
+        &policy.api_version,
+        &policy.beta_header,
+    ))
+    .map_err(|_| invalid("failed to encode historical projection transition"))?;
+    let canonical = SemanticJsonV1::from_value(facts)
+        .map_err(|_| invalid("failed to canonicalize historical projection transition"))?;
+    Digest::sha256(
+        DigestDomain::HistoryProjection,
+        1,
+        &[
+            b"messages-historical-thinking-without-replay",
+            canonical.canonical_bytes(),
+        ],
+    )
+    .map_err(|_| invalid("failed to digest historical projection transition"))
+}
+
 fn historical_projection_identity(
     replay: &ReplayEnvelope,
     policy: &MessagesRequestPolicy,
@@ -893,23 +959,10 @@ fn replay_payload(
         MESSAGES_REPLAY_SCHEMA_REVISION => {
             let bound: BoundReplayPayload = serde_json::from_str(replay.payload().get())
                 .map_err(|_| invalid("opaque replay binding was malformed"))?;
-            if bound.requested_model != policy.requested_model
-                || &bound.actual_model != source_model
-                || bound.semantic_descriptor_binding != policy.semantic_descriptor_binding
-                || bound.account_binding != policy.account_binding
-                || bound.selected_provider_configuration != policy.selected_provider_configuration
-                || bound.effective_provider_configuration != policy.effective_provider_configuration
-                || bound.replay_schema_revision != MESSAGES_REPLAY_SCHEMA_REVISION
-                || bound.api_version != policy.api_version
-                || bound.beta_header != policy.beta_header
-                || policy
-                    .expected_reported_model
-                    .as_ref()
-                    .is_some_and(|expected| expected != source_model)
-            {
-                return Err(invalid(
-                    "opaque replay does not match the exact target binding",
-                ));
+            if let Some(category) = replay_binding_mismatch(&bound, source_model, policy) {
+                return Err(invalid(format!(
+                    "opaque replay target binding mismatch: {category}"
+                )));
             }
             bound.value
         }
@@ -939,6 +992,49 @@ struct BoundReplayPayload {
     api_version: String,
     beta_header: String,
     value: Box<RawValue>,
+}
+
+fn replay_binding_mismatch(
+    bound: &BoundReplayPayload,
+    source_model: &ModelId,
+    policy: &MessagesRequestPolicy,
+) -> Option<&'static str> {
+    // Categories only: never include the rejected value or envelope.
+    [
+        (
+            bound.requested_model != policy.requested_model,
+            "requested model",
+        ),
+        (
+            &bound.actual_model != source_model
+                || policy
+                    .expected_reported_model
+                    .as_ref()
+                    .is_some_and(|expected| expected != source_model),
+            "reported model",
+        ),
+        (
+            bound.semantic_descriptor_binding != policy.semantic_descriptor_binding,
+            "semantic descriptor",
+        ),
+        (bound.account_binding != policy.account_binding, "account"),
+        (
+            bound.selected_provider_configuration != policy.selected_provider_configuration,
+            "selected configuration",
+        ),
+        (
+            bound.effective_provider_configuration != policy.effective_provider_configuration,
+            "effective configuration",
+        ),
+        (
+            bound.replay_schema_revision != MESSAGES_REPLAY_SCHEMA_REVISION,
+            "replay schema",
+        ),
+        (bound.api_version != policy.api_version, "API version"),
+        (bound.beta_header != policy.beta_header, "beta set"),
+    ]
+    .into_iter()
+    .find_map(|(mismatch, category)| mismatch.then_some(category))
 }
 
 /// Binds one decoded opaque replay value to the exact Messages target.

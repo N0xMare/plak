@@ -6,18 +6,18 @@ use std::fmt;
 
 /// An attached exact session runtime.
 pub struct OpenedSession {
-    pub(super) replay_stripped: bool,
+    pub(super) replay_validation_error: Option<plakous_agent::AgentError>,
     agent: Agent,
     binding: SessionBindingReport,
     _registration: DriverRegistration,
 }
 
 impl OpenedSession {
-    /// Whether this creation fell back to stripped history after replay validation.
-    /// False on an ordinary create or reopen; the host can persist a carry notice.
+    /// Destination validation refusal that caused replay stripping, if any.
+    /// This transient, redaction-safe diagnostic is not session authority.
     #[must_use]
-    pub const fn replay_stripped(&self) -> bool {
-        self.replay_stripped
+    pub const fn replay_validation_error(&self) -> Option<&plakous_agent::AgentError> {
+        self.replay_validation_error.as_ref()
     }
 
     pub(super) fn new(
@@ -26,7 +26,7 @@ impl OpenedSession {
         registration: DriverRegistration,
     ) -> Self {
         Self {
-            replay_stripped: false,
+            replay_validation_error: None,
             agent,
             binding,
             _registration: registration,

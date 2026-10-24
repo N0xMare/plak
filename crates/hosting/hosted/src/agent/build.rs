@@ -1949,10 +1949,10 @@ pub struct AttachedCodingSession {
 }
 
 impl AttachedCodingSession {
-    pub(crate) fn replay_stripped(&self) -> bool {
+    pub(crate) fn replay_validation_error(&self) -> Option<&plakous::agent::AgentError> {
         self.opened
             .as_ref()
-            .is_some_and(OpenedSession::replay_stripped)
+            .and_then(OpenedSession::replay_validation_error)
     }
 
     pub(crate) fn reachability_probe(&self) -> Option<plakous::model::ReachabilityProbe> {

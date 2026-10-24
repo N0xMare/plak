@@ -61,7 +61,7 @@ impl PortableSessionHistory {
 
     /// Checks retained replay with the destination's offline dialect decoder.
     /// A refusal creates with stripped history, reported by
-    /// [`super::OpenedSession::replay_stripped`]. Use only for a locally attested handoff.
+    /// [`super::OpenedSession::replay_validation_error`]. Use only for a locally attested handoff.
     #[must_use]
     pub fn with_replay_validation(mut self) -> Self {
         self.validate_replay = true;

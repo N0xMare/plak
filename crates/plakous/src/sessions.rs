@@ -692,21 +692,21 @@ impl AgentSessions {
             runtime,
             history,
         } = request;
-        let mut replay_stripped = false;
+        let mut replay_validation_error = None;
         let history = match history {
             Some(history) => {
                 let mut retain_replay = history.retains_replay_for(&runtime);
                 if retain_replay
                     && history.validate_replay
-                    && plakous_agent::internal::facade_support::validate_seed_replay(
-                        &runtime.builder,
-                        history.segments(),
-                    )
-                    .await
-                    .is_err()
+                    && let Err(error) =
+                        plakous_agent::internal::facade_support::validate_seed_replay(
+                            &runtime.builder,
+                            history.segments(),
+                        )
+                        .await
                 {
                     retain_replay = false;
-                    replay_stripped = true;
+                    replay_validation_error = Some(error);
                 }
                 history.into_canonical(retain_replay)?
             }
@@ -721,7 +721,7 @@ impl AgentSessions {
         {
             Ok(agent) => {
                 let mut session = self.attach(operation_id.clone(), agent).await?;
-                session.replay_stripped = replay_stripped;
+                session.replay_validation_error = replay_validation_error;
                 Ok(CreateSessionOutcome::Created {
                     operation_id,
                     session,

@@ -2132,8 +2132,11 @@ reuses its actual runtime binding.
 from external documents regardless of account/model equality.
 `with_replay_validation` requests offline destination-dialect validation before
 creation of same-binding seeds. A validation refusal falls back to the stripping
-path without dispatch and exposes `OpenedSession::replay_stripped() == true` on the created handle;
-the host records a one-line notice in the new session. Product handoff authentication is a separate host concern, not a
+path without dispatch. `OpenedSession::replay_validation_error()` retains the
+transient, redaction-safe refusal on the created handle, or returns `None` when
+creation did not fall back after replay validation.
+Messages binding refusals identify the failing fact category without its value.
+The host logs that reason and records a one-line notice in the new session. Product handoff authentication is a separate host concern, not a
 property of a declared replay binding. Seed-only occupancy scheduling applies
 to nonempty root genesis checkpoints, never fork/rebind/clear successors.
 
@@ -2587,14 +2590,27 @@ projection, including tool-body elision, and Messages rejects a mismatched proof
 For a well-formed thinking envelope in that proven completed-history prefix,
 an incompatible binding is an explicit historical projection transition, not
 a new current-turn replay failure. The maintained Anthropic routes omit the
-block and emit a typed, content-free transition notice. Its identity binds
+block and emit a typed, content-free historical projection diagnostic. Its identity binds
 source and target replay-compatibility facts, excluding signatures, thinking
 text, request timing and the growing history. Same-binding replay remains
 native; malformed or unfinished incompatible replay remains a preparation
 error. The transition classification never changes canonical history or grants
-permission to replay incompatible material. The notice identity is transient
+permission to replay incompatible material. The diagnostic identity is transient
 diagnostic metadata and does not change serialized diagnostic or history
 encodings.
+
+Reasoning without replay in the same proven completed-history prefix (including
+history seeded after carry stripped replay) is also a historical projection on
+the exact-replay routes: omit it without changing wire bytes and emit one typed,
+content-free diagnostic per compatibility identity per request. Its identity binds
+the missing-replay reason and target replay-compatibility facts, never thinking
+text, signatures, timing or the growing history.
+Unsigned reasoning outside that prefix retains the live missing-replay diagnostic.
+When native thinking is disabled, neither historical case emits a projection
+diagnostic. This never bypasses replay validation: malformed or unproven
+incompatible signed replay still refuses preparation, regardless of that policy.
+The lenient OpenRouter Messages projection remains unchanged: unsigned visible
+reasoning takes its portable text path without a missing-signature diagnostic.
 
 A cancelled provider batch records each tool call as its own assistant item,
 with the tool results after all of them. Messages and Chat Completions fold

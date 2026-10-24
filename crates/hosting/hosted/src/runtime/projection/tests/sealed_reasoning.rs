@@ -68,8 +68,8 @@ fn sse(provider: PlatformProvider, model: &str) -> String {
         .collect()
 }
 
-/// A loopback TLS endpoint answering every request with `body`.
-async fn endpoint(body: String) -> (Client, Origin, tokio::task::JoinHandle<()>) {
+/// A loopback TLS endpoint answering requests with the scripted bodies in order.
+async fn endpoint(bodies: Vec<String>) -> (Client, Origin, tokio::task::JoinHandle<Vec<String>>) {
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let crypto = Arc::new(rustls::crypto::ring::default_provider());
@@ -97,13 +97,10 @@ async fn endpoint(body: String) -> (Client, Origin, tokio::task::JoinHandle<()>)
     .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = Origin::parse(&format!("https://{}", listener.local_addr().unwrap())).unwrap();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nrequest-id: req_fixture\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    );
     let peer = tokio::spawn(async move {
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
-        loop {
+        let mut requests = Vec::new();
+        for body in bodies {
             let (socket, _) = listener.accept().await.unwrap();
             let mut stream = acceptor.accept(socket).await.unwrap();
             let mut bytes = Vec::new();
@@ -129,8 +126,14 @@ async fn endpoint(body: String) -> (Client, Origin, tokio::task::JoinHandle<()>)
                 assert_ne!(count, 0);
                 bytes.extend_from_slice(&buffer[..count]);
             }
+            requests.push(String::from_utf8(bytes[end..end + size].to_vec()).unwrap());
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nrequest-id: req_fixture\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
             stream.write_all(response.as_bytes()).await.unwrap();
         }
+        requests
     });
     (client, origin, peer)
 }
@@ -216,7 +219,7 @@ fn a_sealed_reasoning_final_answer_rebuilds_to_its_live_thinking_and_assistant_r
         (PlatformProvider::Anthropic, "claude-sonnet-5"),
         (PlatformProvider::OpenAi, "gpt-5.6-luna"),
     ] {
-        let (client, origin, peer) = server.block_on(endpoint(sse(provider, model)));
+        let (client, origin, peer) = server.block_on(endpoint(vec![sse(provider, model)]));
         let root = tempfile::tempdir().unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
         let store = Arc::new(MemoryStore::new());
@@ -285,4 +288,141 @@ fn a_sealed_reasoning_final_answer_rebuilds_to_its_live_thinking_and_assistant_r
         );
         peer.abort();
     }
+}
+
+fn read_tool_sse(model: &str) -> String {
+    [
+        serde_json::json!({"type":"message_start","message":{"id":"msg_tool","type":"message","role":"assistant","model":model,"content":[],"stop_reason":null,"usage":{"input_tokens":8,"output_tokens":0}}}),
+        serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_fixture","name":"Read","input":{}}}),
+        serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"fixture.txt\"}"}}),
+        serde_json::json!({"type":"content_block_stop","index":0}),
+        serde_json::json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":12}}),
+        serde_json::json!({"type":"message_stop"}),
+    ]
+    .into_iter()
+    .map(|event| format!("event: {}\ndata: {event}\n\n", event["type"].as_str().unwrap()))
+    .collect()
+}
+
+#[test]
+fn carry_stripped_thinking_stays_log_only_across_a_messages_tool_round() {
+    use plakous::model::{
+        Actor, ContentBlock, ConversationItem, EntryId, HistorySegment, HistorySegmentKind,
+        ModelId, Provenance, ReasoningBlock, ReasoningVisibility, TextBlock,
+    };
+    use plakous::sessions::PortableSessionHistory;
+
+    let server = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let provider = PlatformProvider::Anthropic;
+    let model = "claude-sonnet-5";
+    let (client, origin, peer) =
+        server.block_on(endpoint(vec![read_tool_sse(model), sse(provider, model)]));
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    std::fs::write(config.cwd.join("fixture.txt"), "synthetic tool result").unwrap();
+    let items = (100..103)
+        .map(|id| {
+            ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(id)).unwrap(),
+                Actor::Assistant,
+                vec![
+                    ContentBlock::Reasoning(
+                        ReasoningBlock::new(
+                            ReasoningVisibility::Visible,
+                            Some("synthetic carried thought".into()),
+                            None,
+                        )
+                        .unwrap(),
+                    ),
+                    ContentBlock::Text(TextBlock::new("carried answer", None).unwrap()),
+                ],
+                Provenance::ModelOutput,
+            )
+            .unwrap()
+        })
+        .collect();
+    config.seed_history = Some(
+        PortableSessionHistory::new(
+            vec![HistorySegment::new(HistorySegmentKind::ReasoningReplay, items).unwrap()],
+            String::new(),
+            ModelId::new(model).unwrap(),
+        )
+        .without_replay()
+        .unwrap(),
+    );
+    inject(
+        &mut config,
+        server.handle(),
+        provider,
+        model,
+        false,
+        &client,
+        &origin,
+    );
+    let home = config.home.clone();
+    let id = config.session.id.clone();
+    let store = config.store.clone();
+    let seen = run_prompt(config, "read the fixture then answer");
+    let requests = server.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .unwrap()
+            .unwrap()
+    });
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests
+            .iter()
+            .all(|body| !body.contains("synthetic carried thought"))
+    );
+
+    assert!(
+        seen.iter()
+            .any(|event| matches!(event, HostEvent::TurnLifecycle(lifecycle)
+        if lifecycle.phase == plakous_host_protocol::TurnPhase::Completed))
+    );
+    assert!(
+        seen.iter().any(
+            |event| matches!(event, HostEvent::Row(TranscriptRow::Tool(tool))
+            if tool.name == "read_file" && tool.state == "succeeded")
+        ),
+        "a successful Read tool round: {seen:#?}"
+    );
+    assert!(
+        !seen
+            .iter()
+            .any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(_))))
+    );
+    assert!(
+        !store
+            .load(&id)
+            .unwrap()
+            .transcript
+            .iter()
+            .any(|row| matches!(row, TranscriptRow::Notice(_)))
+    );
+    let logged =
+        crate::session_log::read_tail_for_kind(&home, &id, 4, Some("model.history_projection"))
+            .unwrap();
+    assert_eq!(
+        logged.len(),
+        2,
+        "one log entry for each of the two scripted requests"
+    );
+    let identities = logged
+        .iter()
+        .map(|line| {
+            let event: serde_json::Value = serde_json::from_str(line).unwrap();
+            event["identity"].as_str().unwrap().to_owned()
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        identities.len(),
+        1,
+        "the tool round cannot rotate the identity"
+    );
 }

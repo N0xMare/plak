@@ -301,7 +301,11 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
     let opened = executor
         .block_on(create_session(&mut config, Some(seed), &mut stderr_buf))
         .map_err(|e| CliFailure::new(e.to_string()))??;
-    record_replay_fallback_notice(&mut config.session, opened.replay_stripped());
+    record_replay_fallback(
+        &config.home,
+        &mut config.session,
+        opened.replay_validation_error(),
+    );
     let locator = executor
         .block_on(opened.release())
         .map_err(|e| CliFailure::new(e.to_string()))?
@@ -319,10 +323,19 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
     Ok((config.session, notes))
 }
 
-fn record_replay_fallback_notice(session: &mut SessionRecord, stripped: bool) {
-    if stripped {
-        session.record_notice(TranscriptRow::warning(NoticeScope::Settings,"Provider replay was incompatible with this build and was stripped; the conversation was carried without it."));
-    }
+fn record_replay_fallback(
+    home: &crate::session_home::SessionHome,
+    session: &mut SessionRecord,
+    error: Option<&plakous::agent::AgentError>,
+) {
+    let Some(error) = error else { return };
+    crate::session_log::emit(
+        home,
+        &session.id,
+        crate::session_log::SessionEvent::new("session.replay_stripped")
+            .str("reason", error.message()),
+    );
+    session.record_notice(TranscriptRow::warning(NoticeScope::Settings,"Provider replay was incompatible with this build and was stripped; the conversation was carried without it."));
 }
 
 pub(super) async fn build_session_from_config<P: plakous_host_protocol::ProtocolExtension>(

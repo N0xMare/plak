@@ -212,7 +212,7 @@ pub(super) fn commit_notice_intents<P: plakous_host_protocol::ProtocolExtension>
     let _ = commit_session_update(store, home, session, |_| true);
 }
 
-/// Retain historical projection notices as bounded presentation acknowledgements.
+/// Log historical projections without creating transcript rows or acknowledgements.
 /// This never authorizes replay; ordinary diagnostics remain live and unsuppressed.
 fn publish_model_diagnostic<P: plakous_host_protocol::ProtocolExtension>(
     diagnostic: &plakous::model::ModelDiagnostic,
@@ -1371,8 +1371,7 @@ pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
                     });
                     let _ = events.send(HostEvent::Row(row));
                 }
-                // Projection acknowledgements are presentation only, never
-                // canonical history or provider replay authority.
+                // Diagnostics never authorize replay or change canonical history.
                 ModelEvent::Diagnostic(diagnostic) => {
                     flush_assistant_delta(delta_buf, last_flush, events, true);
                     publish_model_diagnostic(diagnostic, log, &session.id, events);

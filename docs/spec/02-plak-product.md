@@ -343,16 +343,14 @@ power loss is a cursor behind the feed, applied again on the next open; it can
 never be lost out of order with an intent. A process crash loses nothing that
 committed.
 
-Typed historical replay-transition notices are retained as ordinary explanatory
-transcript lines containing the complete content-free transition identity.
-The host shows a notice only when that identity has no retained acknowledgement;
-repeated tool rounds, exact reopen and copied fork transcripts reuse the line.
-A fork's first affected request explains the transition and records the
-acknowledgement. Other model diagnostics are not
-suppressed. This is bounded presentation bookkeeping, never canonical history
-or replay authorization: transcript eviction or an uncommitted acknowledgement
-lost on restart can cause one explanatory notice to appear again. No additional
-transcript encoding, export format or state-key version is introduced.
+Typed historical projection diagnostics are log-only: the host records each
+as a `model.history_projection` session-log event with its content-free identity
+and message. They are never rendered as transcript notices or persisted as
+transcript rows, and there is no acknowledgement or transcript deduplication
+state. Repeated requests may log the same identity without interrupting tool
+grouping. Other model diagnostics remain live turn notices. These observations
+never authorize replay or change canonical history, transcript encoding, export
+format or the state-key version.
 
 When a projector transaction is refused, nothing of it is kept in memory: the
 cursor stays where it was, and the next tick, action or open applies the same
@@ -992,7 +990,10 @@ The receipt is not part of the export or a cross-machine carrier. Even then,
 replay segment must pass the destination route's offline dialect decoding before
 seed creation. If the new build cannot validate retained replay, carry continues
 with the ordinary stripping path and records a one-line notice in the new
-session; replay incompatibility never fails the handoff. Nested opaque tool-result
+session, plus a log-only `session.replay_stripped` record whose `reason` field
+identifies the destination validation refusal (binding fact categories,
+never rejected thinking, signatures or credentials); replay incompatibility never
+fails the handoff. Nested opaque tool-result
 parts never survive a carry because no production dialect accepts them; they
 follow this stripping fallback even on an identical binding. Config, terminal and
 workspace preconditions run before consuming the receipt. A failed exec removes
@@ -1276,13 +1277,13 @@ view, and nothing is both.
 | Prompt history | intent | position | appended when the composer action is durably accepted |
 | Transcript rows | view, intent or live-only, per field | the row provenance table below | each field has exactly one source |
 | Imported transcript | intent | the import's create operation id; anchor 0, lane 1 | written once by import (§2.5.1); a seeded `Created` record derives no rows |
-| Operator notices: product-authored rows no feed fact implies (settings and configuration notes, plan notes, replay-transition explanations, unrecorded refusals, withdrawn requests, `queued prompt already ran`, and the retry, milestone and tree rows the provenance table names) | intent | notice id; anchor | written with its anchor (below) |
+| Operator notices: product-authored rows no feed fact implies (settings and configuration notes, plan notes, carry replay-stripping notices, unrecorded refusals, withdrawn requests, `queued prompt already ran`, and the retry, milestone and tree rows the provenance table names) | intent | notice id; anchor | written with its anchor (below) |
 | Workflow requests: compact (with reason), fork, rebind (with selection), clear | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (§4.2 step 3) |
 | Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for clear, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
 | Pause causes | intent-backed view | the facts that pause (a context-capacity or `RecoveryRequired` `TurnTerminal`, a session-wide `CommandRejected`, a `WorkflowSettled` of a scheduled pass that did not compact) and `pause_cause` intents the host writes for causes no fact carries (an unrecorded session-wide refusal, a failed wake preflight); a workflow fact joins its request by the request's operation id, never by the derived workflow identity | the newest applied cause, by anchor, for the restored note; drain itself is process-local and never stored |
 | Counters: root turns, tool calls, compactions | view | root `CommandAccepted`; the distinct call ids of effect `OperationAdvanced` facts and of the tool results `HistoryAppended` commits (so a call rejected before preparation counts once); each `WorkflowSettled { Compacted }` once, whatever its reason (endpoint or turn fence) | monotonic over the applied records; a successor starts from its source's values at the `Branched` record; after a `BehindRetention` rebuild they restart from zero |
 | Child-wake suppression | intent-backed view | `wake_suppression` intents the host writes on an idle interrupt and on a failed or discarded wake; the cancel of a running `HostWake` turn (`CommandAccepted` of a cancel naming it) and a context-capacity `TurnTerminal` of a `HostWake` root | suppressed from the newest such intent or fact until a `CommandAccepted` of a `UserPrompt` root anchored after it |
-| Replay-transition acknowledgements, agent attention acknowledgements | intent | transition identity; `(tree, agent, attempt, attention)` | operator- or host-authored presentation bookkeeping |
+| Agent attention acknowledgements | intent | `(tree, agent, attempt, attention)` | operator-authored presentation bookkeeping |
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
 
