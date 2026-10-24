@@ -302,8 +302,8 @@ only re-reviews the profile does not ask again:
 ```
 codex uses an experimental revision-pinned compatibility integration.
 profile: <profile id>
-reviewed: 2026-10-22 UTC
-expires: 2027-01-20 UTC; after that this build refuses codex until a newer build replaces the profile
+reviewed: 2026-10-24 UTC
+expires: 2027-01-22 UTC; after that this build refuses codex until a newer build replaces the profile
 Continue? [y/N]
 ```
 

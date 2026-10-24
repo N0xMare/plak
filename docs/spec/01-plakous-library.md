@@ -2791,13 +2791,16 @@ The Codex OAuth reference client is `0.162.1`; the authenticated catalog request
 sends `client_version=0.162.1`. Its catalog contract is the `rust-v0.162.1`
 source revision's `models.json`, which is unchanged from `rust-v0.160.0` in
 every field Plak pins (tool mode, reasoning levels, windows, truncation,
-Responses Lite, parallel calls, service tiers). The 2026-10-22
-release-candidate re-review against stable `rust-v0.163.0` (revision
-`83086188ae0614bd882818ff1aa23f3194962012`) found no change to pinned facts;
-`rust-v0.164.0-alpha.9` was spot-checked. The reviewed `models.json` SHA-256 is
-`943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b`.
-OAuth client, scopes, endpoints, callback and originator/header contract are
-unchanged; the release-candidate review changes only the review window.
+Responses Lite, parallel calls, service tiers). The 2026-10-24 review against
+stable `rust-v0.164.0` (revision `6aaac694803004a63c6f393d153c96d22521a6b9`),
+after the 2026-10-22 review against `rust-v0.163.0`
+(`83086188ae0614bd882818ff1aa23f3194962012`), found no change to pinned facts;
+upstream `minimal_client_version` is also unchanged (not yet consumed). The
+reviewed `models.json` SHA-256 is
+`943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b`,
+byte-identical at both revisions. OAuth client, scopes, endpoints, callback and
+originator/header contract are unchanged; the review changes only the review
+date.
 Plak retains its pinned reference version and truthful identity. The reference
 client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
@@ -2808,7 +2811,7 @@ dispatch. The backend keys prompt caching on this header, not the body field.
 A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
 does not borrow client identity: `originator=plak` and the truthful Plak user
 agent remain unchanged. Its compiled compatibility
-profile was reviewed on 2026-10-22 and expires at 2027-01-20T00:00:00Z, 90 days
+profile was reviewed on 2026-10-24 and expires at 2027-01-22T00:00:00Z, 90 days
 after the review (§7.1); a re-review that changes no contract keeps every
 earlier acceptance current (§7.2).
 The hidden, non-default `test-clock` feature alone exposes the Codex manager
@@ -2985,11 +2988,13 @@ whole listing (`accept_anthropic_listed_models`, which a cached list also
 passes); unknown fields are ignored. The listing function has no dial-origin
 parameter; an installed exchange observer sees its requests (empty bodies, the
 key header sensitive). The bundled reviewed table (`api_models.json` in the crate, revision
-`anthropic.api-models.2026-10-09.v1`) carries, per id, the published window,
+`anthropic.api-models.2026-10-24.v1`) carries, per id, the published window,
 output limit, effort levels and adaptive-thinking support, the published
-lifecycle with its `deprecated_at` and `retires_at` times (which the bundled
-fallback listing passes to classification like a live list's), the input price
-threshold where the pricing page publishes one (Haiku 5.5: 100,000 tokens) and
+lifecycle with its `deprecated_at` and `retires_at` times (Sonnet 4.5,
+`claude-sonnet-4-5-20250929`, is deprecated from 2026-09-30 and retires
+2026-11-30; Anthropic names `claude-sonnet-5-5` as its replacement, which the
+table does not record), the input price threshold where the pricing page
+publishes one (Haiku 5.5: 100,000 tokens, rechecked on 2026-10-24) and
 the hosted features its docs list (`featureMetadata.supportedModels`:
 compaction, hosted programmatic tool calling, tool search, web search, web
 fetch, code execution; recorded, not yet used). Classification
@@ -3018,10 +3023,11 @@ domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
 
 The OpenAI Platform manifest and xAI Platform binding were re-reviewed on
-2026-10-22 against their official model, Responses, tool-calling, reasoning and
-storage documentation. The release-candidate re-review found no change to
-pinned facts on either surface. They are documented public APIs, so their
-reviews are due again at 2027-01-20T00:00:00Z (90 days after the review) but
+2026-10-24 against their official model, Responses, tool-calling, reasoning and
+storage documentation. The review found no change to pinned facts on either
+surface; `gpt-6.1-sol` exists and is not admitted. They are documented public
+APIs, so their reviews are due again at 2027-01-22T00:00:00Z (90 days after the
+review) but
 never refuse on the calendar: construction, preparation and runtime
 revalidation ignore the review date, built-in facts carry no expiry, and a
 skewed clock before the review date refuses nothing. The review-due date drives
@@ -3282,8 +3288,8 @@ final usage chunk that repeats `finish_reason`, `reasoning` and
 `reasoning_details`, tool calls, and the pre-commit JSON and mid-stream
 `error` shapes were last reviewed against the public
 [OpenRouter docs](https://openrouter.ai/docs/api_reference/streaming) on
-2026-10-22, with no change to pinned facts. The review is due again at
-2027-01-20T00:00:00Z, 90 days later. OpenRouter is a documented public API, so
+2026-10-24, with no change to pinned facts. The review is due again at
+2027-01-22T00:00:00Z, 90 days later. OpenRouter is a documented public API, so
 the review-due date never refuses the route: an authority's validity is the
 discovery evidence's expiry alone, and the built-in dialect facts carry no
 expiry. The test-only `test-clock` feature permits a route clock shared by
@@ -3616,11 +3622,15 @@ never a borrowed CLI identity) and is pinned to HTTP/1.1.
 
 SuperGrok's `x-grok-client-version` is `1.0.46`, the value native Grok Build
 1.0.46 sends. Native Grok derives this proxy version-gate value from its CLI
-version, not a fixed protocol version.
+version, not a fixed protocol version. At the 2026-10-24 review the latest Grok
+Build was 1.0.67; the reference lags it until a native 1.0.67 request capture
+is reviewed, and the OIDC discovery document at `auth.x.ai` matched every pin.
 
 Claude OAuth Messages inference uses the pinned Claude Code 2.1.295 gateway
 costume — HTTP attribution plus `system[0]`/`system[1]`, with native `cch` body
-attestation. The inference costume revision does not alter the OAuth client,
+attestation. At the 2026-10-24 review the latest Claude Code was 2.1.310; the
+reference lags it until a native 2.1.310 Messages request capture (beta order,
+`cc_version`, `cch`) is reviewed. The inference costume revision does not alter the OAuth client,
 credential slot, token exchange, or compatibility acceptance/source revision
 and must not require a fresh login or consent. Billing attribution carries the
 entry UUID of the direct user prompt that opened the turn (§10.6), fixed across

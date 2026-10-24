@@ -226,7 +226,7 @@ pub(crate) const CLAUDE_OAUTH_NOTICE_REVISION: &str = "anthropic.claude.oauth.no
 pub const CLAUDE_OAUTH_KILL_SWITCH_REVISION: &str = "anthropic.claude.oauth.kill.2026-08-20.r1";
 /// UTC review time for the Claude OAuth pin table.
 #[cfg(feature = "native-auth")]
-pub(crate) const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_790_035_200;
+pub(crate) const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_792_800_000;
 /// Exclusive expiry for the Claude OAuth pin table, 00:00Z.
 #[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 =

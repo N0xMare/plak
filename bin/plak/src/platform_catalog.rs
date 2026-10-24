@@ -563,7 +563,7 @@ mod tests {
             "claude-sonnet-5-5\tusable\tefforts=low,medium,high,xhigh,max\twindow=1000000\tfull_window=1000000\tmax_output=128000\t"
         ), "{anthropic}");
         assert!(anthropic.contains(
-            "claude-sonnet-4-5-20250929\tneeds review\tefforts=\twindow=200000\tfull_window=200000\tmax_output=64000\treason=Claude 4.5 takes manual thinking budgets"
+            "claude-opus-4-5-20251101\tneeds review\tefforts=low,medium,high\twindow=200000\tfull_window=200000\tmax_output=64000\treason=Claude 4.5 takes manual thinking budgets"
         ), "{anthropic}");
         let openai = listing(PlatformProvider::OpenAi);
         assert!(

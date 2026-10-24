@@ -42,11 +42,12 @@ fn live_fixture_lists_every_id_and_classifies_each_by_family_rule() -> TestResul
             "claude-opus-4-6",
         ]
     );
-    for id in [
-        "claude-opus-4-5-20251101",
-        "claude-haiku-4-5-20251001",
-        "claude-sonnet-4-5-20250929",
-    ] {
+    // Sonnet 4.5 retires 2026-11-30, before this listing's clock.
+    assert!(matches!(
+        find(&models, "claude-sonnet-4-5-20250929").status(),
+        AnthropicApiModelStatus::Retired(_)
+    ));
+    for id in ["claude-opus-4-5-20251101", "claude-haiku-4-5-20251001"] {
         let model = find(&models, id);
         let AnthropicApiModelStatus::NeedsReview(reason) = model.status() else {
             panic!("{id} must need review");
@@ -112,9 +113,38 @@ fn hosted_feature_flags_follow_the_reviewed_docs() -> TestResult {
 
 #[test]
 fn bundled_table_agrees_with_the_live_fixture() -> TestResult {
-    let bundled = anthropic_api_models(&anthropic_api_bundled_listing()?, 0)?;
+    let bundled = anthropic_api_models(&anthropic_api_bundled_listing()?, 1_800_000_000)?;
     let live = live()?;
     assert_eq!(bundled, live);
+    Ok(())
+}
+
+#[test]
+fn bundled_sonnet_4_5_is_deprecated_until_its_retirement() -> TestResult {
+    let listed = anthropic_api_bundled_listing()?;
+    let row = listed
+        .iter()
+        .find(|row| row.id == "claude-sonnet-4-5-20250929")
+        .ok_or("Sonnet 4.5 is bundled")?;
+    assert_eq!(row.lifecycle.as_deref(), Some("deprecated"));
+    assert_eq!(row.deprecated_at.as_deref(), Some("2026-09-30T00:00:00Z"));
+    assert_eq!(row.retires_at.as_deref(), Some("2026-11-30T00:00:00Z"));
+    let retires = 1_795_996_800;
+    let before = anthropic_api_models(&listed, retires - 1)?;
+    let sonnet = find(&before, "claude-sonnet-4-5-20250929");
+    assert!(matches!(
+        sonnet.status(),
+        AnthropicApiModelStatus::NeedsReview(_)
+    ));
+    assert_eq!(
+        sonnet.deprecation(),
+        Some("deprecated by Anthropic; retires 2026-11-30T00:00:00Z")
+    );
+    let after = anthropic_api_models(&listed, retires)?;
+    assert!(matches!(
+        find(&after, "claude-sonnet-4-5-20250929").status(),
+        AnthropicApiModelStatus::Retired(_)
+    ));
     Ok(())
 }
 

@@ -24,9 +24,9 @@ pub const XAI_PLATFORM_GROK_46_PROFILE: &str = "xai.platform.grok-4.6.custom-env
 pub const XAI_PLATFORM_EXECUTION_REVISION: &str = "xai-platform-responses-2026-09-14-v1";
 pub(crate) const PROJECTION: &str = "responses-canonical-xai-platform-v1";
 pub(crate) const ACCOUNTING: &str = "responses-wire-bytes-xai-platform-v1";
-// Reviewed 2026-10-22: docs.x.ai/developers/models/grok-4.6,
+// Reviewed 2026-10-24: docs.x.ai/developers/models/grok-4.6,
 // developers/model-capabilities/text/generate-text and developers/tools/function-calling.
-pub(crate) const REVIEWED: u64 = 1_792_627_200;
+pub(crate) const REVIEWED: u64 = 1_792_800_000;
 // Drives only doctor and status notes and the publish floor; the route never
 // refuses on the calendar.
 pub(crate) const REVIEW_DUE: u64 = REVIEWED + 90 * 86_400;

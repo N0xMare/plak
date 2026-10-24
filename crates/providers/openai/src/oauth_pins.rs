@@ -3,7 +3,7 @@ use plakous_auth::oauth_pins::{
 };
 
 // Review date is the single release-cut input; the compatibility contract is unchanged.
-const CODEX_REVIEWED_AT_UNIX: u64 = 1_792_627_200;
+const CODEX_REVIEWED_AT_UNIX: u64 = 1_792_800_000;
 
 const CODEX_LOOPBACK_PORTS: &[u16] = &[1455, 1457];
 

@@ -67,7 +67,7 @@ const OPENROUTER_CHAT_AUTH_PROFILE: &str = "openrouter.platform-api-key";
 const OPENROUTER_CHAT_AUTH_REVISION: &str = "openrouter-platform-api-key-v1";
 const OPENROUTER_CHAT_AUTHORITY_CLASS: &str = "platform-api-key";
 const OPENROUTER_CHAT_CREDENTIAL_SELECTION: &str = "openrouter-product-key-generation";
-pub(crate) const OPENROUTER_CHAT_REVIEWED_AT: u64 = 1_792_627_200;
+pub(crate) const OPENROUTER_CHAT_REVIEWED_AT: u64 = 1_792_800_000;
 /// When the reviewed Chat Completions facts are due for re-review. It drives
 /// only doctor and status notes and the publish floor; the route never
 /// refuses on the calendar.

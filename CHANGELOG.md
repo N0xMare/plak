@@ -11,14 +11,11 @@ one cross-build carrier (a build imports its own and the previous version).
 
 - Review windows. The subscription profiles (Codex, Grok, Claude) expire
   exactly 90 days after their review, at 00:00 UTC; Claude moves from 365
-  days to 90 and Codex drops its end-of-day expiry. This build's expiries
-  (UTC): Codex 2027-01-20T00:00:00Z, Grok 2026-10-29T00:00:00Z, Claude
-  2026-12-21T00:00:00Z.
+  days to 90 and Codex drops its end-of-day expiry.
 - The documented API routes (OpenRouter Chat, OpenAI Platform, xAI Platform,
   Anthropic API) never refuse on the calendar. Each keeps a review-due date 90
   days after its review that only drives `plak doctor` and `plak status`
-  notes: OpenRouter Chat, OpenAI and xAI 2027-01-20T00:00:00Z, Anthropic
-  2026-12-21T00:00:00Z. The facade constants are renamed to
+  notes. The facade constants are renamed to
   `*_REVIEW_DUE_AT*`, and `OpenRouterChatBuildError::ProfileNotCurrent`,
   `XaiPlatformBuildError::Stale` and the OpenAI
   `ConfigError::PlatformManifestEvidenceExpired` are removed.
@@ -36,6 +33,20 @@ one cross-build carrier (a build imports its own and the previous version).
   days of their review-due date, or past either.
 - Publication dry runs and uploads require more than a third of every review
   window remaining (more than 30 days of 90) instead of more than 21 days.
+- Fresh review dated 2026-10-24 on all seven surfaces; no pinned contract
+  changed. Subscription expiries (Codex, Grok, Claude) and API review-due
+  dates (OpenRouter Chat, OpenAI, xAI, Anthropic) are all
+  2027-01-22T00:00:00Z. Codex was reviewed against stable `rust-v0.164.0`
+  (its `models.json` is unchanged) and keeps reference client 0.162.1. Grok
+  keeps `x-grok-client-version` 1.0.46 (latest Grok Build 1.0.67) and Claude
+  keeps the Claude Code 2.1.295 identity (latest 2.1.310) until native
+  captures of the newer clients are reviewed.
+- Anthropic API model table `anthropic.api-models.2026-10-24.v1`: Claude
+  Sonnet 4.5 (`claude-sonnet-4-5-20250929`) is deprecated and retires
+  2026-11-30 (replacement `claude-sonnet-5-5`); the bundled table now records
+  each row's `deprecated_at` and `retires_at`, so the offline fallback lists
+  it as retired from that date. The Haiku 5.5 100,000-token price threshold
+  is unchanged.
 
 ### Compatibility
 
