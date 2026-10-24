@@ -2425,16 +2425,23 @@ status appears on the other.
 **There is no migration.** A schema change moves the product's state directory
 (chapter 02 §2.5); an older store stays in its own directory and is never read. The store fails closed on a **DDL
 fingerprint**, not the version integer alone, so a store written by an earlier
-build of the same version number is refused too. The refusal message still
-reads as an ordinary version mismatch rather than naming the fingerprint drift.
+build of the same version number is refused too. At the current version, a
+shape that differs from the descriptors is refused as
+`tree store schema shape does not match its exact revision`, a recorded
+fingerprint that differs as
+`tree store schema fingerprint does not match its exact revision`, and a
+missing one as `tree store schema fingerprint is missing`, each followed by
+`; current-schema tree state is not authoritative`. Another version is refused
+as unsupported persistence (`subagents schema <n>, expected <current>: ...`).
 
 Ordinary tree-store open validates version, exact shape and DDL
 fingerprint, without scanning page integrity or foreign keys. Plak doctor owns
 the read-only integrity and foreign-key diagnostics (chapter 02 §7.3); writes
 still enforce foreign keys. The tree and product stores run the same writer
 configuration and admission steps from `plakous-recursive-subagents-store`'s
-`admission` module, each over its own descriptors, version, file and refusal
-text; the product store already depends on that crate.
+`admission` module, each over its own descriptors (noun, file stem, archive
+hint, version and objects); the refusal templates are shared. The product store
+already depends on that crate.
 
 ### 14.1 Reopen
 

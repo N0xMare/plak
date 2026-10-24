@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use plakous_recursive_subagents::tree::PersistedTree;
 use rusqlite::{Connection, OpenFlags};
 
-use crate::admission::{AdmissionError, BUSY_TIMEOUT, Schema, fingerprint, open_writer};
+use crate::admission::{AdmissionError, BUSY_TIMEOUT, Schema, open_writer};
 use crate::rows::load_agent_tree;
 
 /// `subagents.sqlite3` starts at schema version 1. It is not the
@@ -81,7 +81,7 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
 /// The DDL fingerprint this cohort pins.
 #[must_use]
 pub fn expected_schema_fingerprint() -> String {
-    fingerprint(SCHEMA_OBJECTS)
+    SCHEMA.fingerprint()
 }
 
 /// The tree file's admission descriptors.
@@ -224,9 +224,7 @@ impl SubagentsDatabase {
         connection
             .execute_batch("PRAGMA foreign_keys=ON;")
             .map_err(|_| OpenError::unavailable("could not configure tree inspection"))?;
-        let store = Self { connection };
-        let tx = store
-            .connection
+        let tx = connection
             .unchecked_transaction()
             .map_err(|_| OpenError::unavailable("could not start tree inspection"))?;
         let version: i64 = tx
@@ -340,6 +338,7 @@ mod tests {
             let damage_sql = match damage {
                 "unversioned" | "shape" => "CREATE TABLE stray(x)",
                 "fingerprint" => "UPDATE subagents_schema SET fingerprint='drift'",
+                "missing" => "DELETE FROM subagents_schema",
                 _ => "PRAGMA user_version=99",
             };
             connection.execute_batch(damage_sql).unwrap();
@@ -369,6 +368,13 @@ mod tests {
             (
                 unavailable,
                 "tree store schema fingerprint does not match its exact revision; current-schema tree state is not authoritative".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("missing"),
+            (
+                unavailable,
+                "tree store schema fingerprint is missing; current-schema tree state is not authoritative".to_owned()
             )
         );
         assert_eq!(

@@ -39,24 +39,15 @@ pub enum AdmissionError {
     Unsupported(String),
 }
 
-/// The DDL fingerprint of `objects`: SHA-256 over each name and statement,
-/// each prefixed by its big-endian `u64` length, as lowercase hex.
-#[must_use]
-pub fn fingerprint(objects: &[(&str, &str)]) -> String {
-    let mut digest = Sha256::new();
-    for (name, sql) in objects {
-        for part in [name, sql] {
-            digest.update((part.len() as u64).to_be_bytes());
-            digest.update(part.as_bytes());
+impl std::fmt::Display for AdmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(message) | Self::Unsupported(message) => formatter.write_str(message),
         }
     }
-    let mut hex = String::with_capacity(64);
-    for byte in digest.finalize() {
-        use std::fmt::Write as _;
-        let _ = write!(hex, "{byte:02x}");
-    }
-    hex
 }
+
+impl std::error::Error for AdmissionError {}
 
 /// Opens `path` read-write, creating it, without following a final symlink,
 /// and configures it as a durable writer: busy timeout, WAL,
@@ -96,10 +87,24 @@ pub fn open_writer(path: &Path, noun: &str) -> Result<Connection, String> {
 }
 
 impl Schema {
-    /// This schema's DDL fingerprint.
+    /// This schema's DDL fingerprint: SHA-256 over each object's name and
+    /// statement, each prefixed by its big-endian `u64` length, as lowercase
+    /// hex.
     #[must_use]
     pub fn fingerprint(&self) -> String {
-        fingerprint(self.objects)
+        let mut digest = Sha256::new();
+        for (name, sql) in self.objects {
+            for part in [name, sql] {
+                digest.update((part.len() as u64).to_be_bytes());
+                digest.update(part.as_bytes());
+            }
+        }
+        let mut hex = String::with_capacity(64);
+        for byte in digest.finalize() {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{byte:02x}");
+        }
+        hex
     }
 
     /// Admits the file behind `connection`: creates and versions an empty

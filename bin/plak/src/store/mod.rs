@@ -210,7 +210,7 @@ impl ProductStore {
         if version != SCHEMA_VERSION {
             return Err("product store schema is unavailable or unsupported".to_owned());
         }
-        validate_schema_shape(&snapshot)?;
+        SCHEMA.validate(&snapshot)?;
         read(&snapshot)
     }
 
@@ -256,7 +256,7 @@ impl ProductStore {
             .unwrap_or(false)
     }
 
-    fn admit_schema(&mut self) -> Result<(), ProductStoreOpenError> {
+    fn admit_schema(&self) -> Result<(), ProductStoreOpenError> {
         #[cfg(feature = "test-hooks")]
         let _settle = SettleCommitTrace;
         SCHEMA.admit(&self.connection).map_err(|error| match error {
@@ -1279,10 +1279,6 @@ pub mod tree;
 /// Schema 31 intents and the projector's views.
 pub mod views;
 
-fn validate_schema_shape(connection: &Connection) -> Result<(), String> {
-    SCHEMA.validate(connection)
-}
-
 /// One row of every type the product transcript stores, each with its
 /// optional facts populated: a tool item with wait facts, every milestone
 /// event, every notice tone. The session header is derived, never stored, and
@@ -1764,7 +1760,7 @@ mod tests {
 
     fn assert_exact_schema(paths: &PlakPaths) {
         let connection = Connection::open(paths.product_database()).unwrap();
-        validate_schema_shape(&connection).unwrap();
+        SCHEMA.validate(&connection).unwrap();
         assert_eq!(
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -2094,6 +2090,7 @@ mod tests {
             let damage_sql = match damage {
                 "unversioned" | "shape" => "CREATE TABLE stray(x)",
                 "fingerprint" => "UPDATE product_schema SET fingerprint='drift'",
+                "missing" => "DELETE FROM product_schema",
                 _ => "PRAGMA user_version=99",
             };
             connection.execute_batch(damage_sql).unwrap();
@@ -2120,6 +2117,13 @@ mod tests {
             (
                 ProductStoreOpenErrorKind::Unavailable,
                 "product store schema fingerprint does not match its exact revision; current-schema product state is not authoritative".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("missing"),
+            (
+                ProductStoreOpenErrorKind::Unavailable,
+                "product store schema fingerprint is missing; current-schema product state is not authoritative".to_owned()
             )
         );
         assert_eq!(
