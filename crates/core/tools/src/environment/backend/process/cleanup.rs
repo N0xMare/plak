@@ -326,6 +326,11 @@ fn live_group_members(group: rustix::process::Pid) -> usize {
 #[cfg(target_os = "linux")]
 fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
     let mut count = 0;
+    // `/proc/<pid>/stat` is a single_open record: a successful read is the
+    // whole line, never a truncated prefix. A directory-entry error ends
+    // `ReadDir`, so the scan is unknown rather than a short count callers
+    // would trust as empty. An unreadable field is the same. A missing stat
+    // is a pid reaped between readdir and the read; that member is gone.
     for entry in std::fs::read_dir("/proc").ok()? {
         let entry = entry.ok()?;
         if !entry
@@ -336,10 +341,11 @@ fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
         {
             continue;
         }
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+        let Ok(stat) = std::fs::read(entry.path().join("stat")) else {
             continue;
         };
-        let (_, fields) = stat.rsplit_once(')')?;
+        let split = stat.iter().rposition(|byte| *byte == b')')?;
+        let fields = std::str::from_utf8(&stat[split + 1..]).ok()?;
         let mut fields = fields.split_whitespace();
         let state = fields.next()?;
         let _parent = fields.next()?;
@@ -349,6 +355,69 @@ fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
         }
     }
     Some(count)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[allow(
+    clippy::expect_used,
+    reason = "the non-UTF-8 comm fixture fails the test rather than the scan"
+)]
+mod tests {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
+
+    struct Reap(Option<Child>);
+
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            if let Some(child) = self.0.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
+    /// A comm that is not UTF-8 is still a live member. `read_to_string` used
+    /// to skip that stat, so the group looked empty while the process lived.
+    #[test]
+    fn non_utf8_comm_is_counted_as_a_live_member() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        // Linux truncates comm to 15 bytes, splitting the last character of
+        // this valid 16-byte UTF-8 executable name.
+        let program = directory.path().join("é".repeat(8));
+        let source = ["/bin/sleep", "/usr/bin/sleep"]
+            .into_iter()
+            .find(|candidate| std::path::Path::new(candidate).is_file())
+            .expect("sleep");
+        std::fs::copy(source, &program).expect("copy sleep");
+        let child = Command::new(&program)
+            .arg("60")
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+        let mut reap = Reap(Some(child));
+        let id = reap.0.as_ref().expect("child").id();
+        let pid = i32::try_from(id)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .expect("pid");
+        let stat = std::fs::read(format!("/proc/{id}/stat")).expect("stat");
+        let split = stat
+            .iter()
+            .rposition(|byte| *byte == b')')
+            .expect("comm closer");
+        let comm_at = stat.iter().position(|byte| *byte == b'(').expect("comm");
+        assert!(std::str::from_utf8(&stat[comm_at + 1..split]).is_err());
+        assert_eq!(super::live_group_members(pid), 1);
+        if let Some(mut child) = reap.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert_eq!(super::live_group_members(pid), 0);
+    }
 }
 
 #[cfg(target_os = "macos")]

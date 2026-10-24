@@ -331,9 +331,13 @@ cleanup attempt.
 Joined shell leader exit does not terminate still-live group members: they
 remain owned and killable as a leftover background job (chapter 01 §8.5),
 including `&` and `nohup ... &`. Completion means the live group is empty,
-not merely that the shell exited; zombies are not running work. Explicit stop,
-session release, attempt end and the hard cap terminate the group. Escaping the
-group with `setsid` or double-forking remains outside this ownership boundary.
+not merely that the shell exited; zombies are not running work. On Linux,
+member scans read process names as bytes, so a non-UTF-8 name does not hide a
+live member. An incomplete directory scan or malformed status leaves group
+membership unknown and is treated as live, not as proof of completion.
+Explicit stop, session release, attempt end and the hard cap terminate the
+group. Escaping the group with `setsid` or double-forking remains outside this
+ownership boundary.
 PTY shell commands retain their controlling terminal but inherit ignored
 SIGHUP, like `nohup`, so leftover PTY children survive shell-leader hangup.
 Stops, attempt end and session release use TERM then KILL, never HUP.

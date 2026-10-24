@@ -271,6 +271,31 @@ mod process_policy_tests {
 #[cfg(test)]
 mod job_tests;
 
+/// Retries `join_all` for a few of this service's cleanup windows.
+///
+/// Joins run concurrently under one window. A busy operation stays active and
+/// the drain reports `CleanupUnresolved`; that is a retry, not one window per
+/// admitted session.
+#[cfg(test)]
+pub(super) fn join_until_drained(
+    sessions: &JoinedProcessSessions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let deadline = Instant::now() + sessions.cleanup_duration().saturating_mul(3);
+    loop {
+        match sessions.join_all() {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == ExecutionBackendErrorKind::CleanupUnresolved => {
+                assert!(!sessions.is_drained());
+                if Instant::now() >= deadline {
+                    break;
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err("process cleanup did not converge across bounded retries".into())
+}
+
 #[cfg(test)]
 mod supervision_poll_tests {
     use super::{supervision_poll_interval, supervision_sleep};

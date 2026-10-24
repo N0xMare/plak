@@ -5157,7 +5157,11 @@ delivered and still requires `OutcomeUnknown`.
 
 The joined-session limit bounds **running** children: 64 per runtime and 128
 per shared host registry. The next start is refused before spawn, naming the
-running jobs; running jobs are never pruned. The service joins exactly the
+running jobs; running jobs are never pruned. `join_all` stops and joins every
+active session concurrently under one cleanup bound. A session whose operation
+is still in progress is left active and the drain reports `CleanupUnresolved`,
+so a later drain can join it; one slow schedule does not consume the bound
+before the other sessions are asked to stop. The service joins exactly the
 exited id, frees its slot and retains its terminal snapshot until consumption.
 Polls, reads and stops for a promoted id answer from that snapshot rather than
 a stale-session error, including after a fresh-process reopen. Reopen hydrates

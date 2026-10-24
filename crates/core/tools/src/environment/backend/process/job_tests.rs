@@ -15,6 +15,10 @@ fn sessions(root: &Path) -> TestResult<JoinedProcessSessions> {
     .joined_process_sessions()?)
 }
 
+fn join_until_drained(sessions: &JoinedProcessSessions) -> TestResult {
+    super::join_until_drained(sessions)
+}
+
 fn request(command: &str, stdin: bool) -> TestResult<JoinedProcessStartRequest> {
     Ok(JoinedProcessStartRequest::new(
         JoinedProcessCommand::shell(
@@ -380,7 +384,7 @@ fn sixty_fifth_running_start_is_refused_before_spawn() -> TestResult {
         request("printf bad > marker", false)?,
         ExecutionOperationControl::new(CancellationToken::new()),
     );
-    sessions.join_all()?;
+    join_until_drained(&sessions)?;
     let error = refused.err().ok_or("65th start was admitted")?;
     assert!(error.to_string().contains("p64"), "{error}");
     assert!(!directory.path().join("marker").exists());
@@ -410,7 +414,7 @@ fn host_capacity_refuses_the_129th_start_across_services_before_spawn() -> TestR
         ExecutionOperationControl::new(CancellationToken::new()),
     );
     for service in &services {
-        service.join_all()?;
+        join_until_drained(service)?;
     }
     assert!(refused.is_err());
     assert!(!directory.path().join("marker").exists());

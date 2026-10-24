@@ -501,10 +501,10 @@ impl Driver {
             .into_iter()
             .filter(|id| !cleanup_sessions.is_promoted(*id))
             .collect::<Vec<_>>();
-        // `join_all` enforces the same backend cleanup deadline itself.  Do not
-        // wrap its blocking owner in an async timeout: dropping a timed-out
-        // `JoinHandle` detaches the cleanup, allowing it to retire children
-        // after this driver has stopped correlating their durable lifetimes.
+        // Each `terminate` enforces the backend cleanup deadline itself. Do not
+        // wrap this owner in an async timeout: dropping a timed-out `JoinHandle`
+        // detaches the cleanup, allowing it to retire children after this driver
+        // has stopped correlating their durable lifetimes.
         let cleanup = tokio::task::spawn_blocking(move || {
             let mut failure = None;
             for id in cleanup_ids {

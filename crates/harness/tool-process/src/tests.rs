@@ -2573,8 +2573,33 @@ async fn a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure()
             .starts_with("running process limit (64) was reached:")
     );
     assert!(text.text().contains("p64"));
-    sessions.join_all()?;
+    join_until_drained(&sessions)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn join_until_drained(sessions: &JoinedProcessSessions) -> Result<(), Box<dyn Error>> {
+    use std::time::Instant;
+
+    // Joins run concurrently under one cleanup window. A busy operation stays
+    // active for a retry. Bound the drain by a few whole windows, not one
+    // window per admitted session. Same bound as the tools-crate helper.
+    let window = plakous_tools::ExecutionEnvironmentLimits::default().cleanup_duration();
+    let deadline = Instant::now() + window.saturating_mul(3);
+    loop {
+        match sessions.join_all() {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if error.kind() == plakous_tools::ExecutionBackendErrorKind::CleanupUnresolved =>
+            {
+                if Instant::now() >= deadline {
+                    break;
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err("process cleanup did not converge across bounded retries".into())
 }
 
 /// A sequential program runs as many commands as it likes through the real

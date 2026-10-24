@@ -1546,6 +1546,11 @@ impl JoinedProcessSessions {
         state.active.is_empty() && state.starting == 0
     }
 
+    #[cfg(test)]
+    pub(super) fn cleanup_duration(&self) -> Duration {
+        self.inner.limits.cleanup_duration()
+    }
+
     /// Starts one pipes- or Unix-PTY-mode process and returns a non-PID opaque identity.
     ///
     /// # Errors
@@ -1984,9 +1989,18 @@ impl JoinedProcessSessions {
 
     /// Terminates and joins every active session owned by this service.
     ///
+    /// The joins run concurrently under one cleanup deadline. Walking the
+    /// sessions serially charges every supervisor's scheduling delay against
+    /// that same window, so a full running set returns `CleanupUnresolved`
+    /// under load even though each group would have joined on its own. Stop is
+    /// still requested only after that session's operation lock is held, so a
+    /// busy session stays active for a retry.
+    ///
     /// # Errors
     ///
     /// Returns the first join failure after attempting every active session.
+    /// A worker panic is resumed after the others have been joined; it is not
+    /// a retryable `CleanupUnresolved`.
     pub fn join_all(&self) -> Result<(), ExecutionBackendError> {
         let ids = lock(&self.inner.state)
             .active
@@ -1994,15 +2008,43 @@ impl JoinedProcessSessions {
             .copied()
             .collect::<Vec<_>>();
         let deadline = Instant::now() + self.inner.limits.cleanup_duration();
+        // `retire` releases job outputs on the caller's runtime. These workers
+        // are fresh threads, so enter that runtime and the sweep matches the
+        // serial path instead of always running inline.
+        let runtime = tokio::runtime::Handle::try_current().ok();
+        let mut workers = Vec::with_capacity(ids.len());
         let mut failure = None;
         for id in ids {
-            if Instant::now() >= deadline {
-                failure.get_or_insert_with(cleanup_unresolved_error);
-                break;
+            let sessions = self.clone();
+            let runtime = runtime.clone();
+            match std::thread::Builder::new()
+                .name("plak-join".to_owned())
+                .spawn(move || {
+                    let _entered = runtime.as_ref().map(|handle| handle.enter());
+                    sessions.terminate_until(id, deadline)
+                }) {
+                Ok(worker) => workers.push(worker),
+                Err(_) => {
+                    if let Err(error) = self.terminate_until(id, deadline) {
+                        failure.get_or_insert(error);
+                    }
+                }
             }
-            if let Err(error) = self.terminate_until(id, deadline) {
-                failure.get_or_insert(error);
+        }
+        let mut panicked = None;
+        for worker in workers {
+            match worker.join() {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    failure.get_or_insert(error);
+                }
+                Err(payload) => {
+                    panicked.get_or_insert(payload);
+                }
             }
+        }
+        if let Some(payload) = panicked {
+            std::panic::resume_unwind(payload);
         }
         failure.map_or(Ok(()), Err)
     }
