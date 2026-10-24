@@ -353,7 +353,21 @@ def validate_test_only_dependency_features() -> list[str]:
         for profile in ((), ("full",)) if package == "plakous" else ((),):
             if "test-clock" in resolved_dependency_features(package, profile, package):
                 errors.append(f"{package} [{','.join(profile) or 'default'}]: test-clock is test-only")
+    # The Grok and Claude review-anchored clocks reach only offline test
+    # builds (facade dev-dependencies): no plak build, `test-hooks` live
+    # smoke builds included, may resolve them.
+    for profile in PLAK_PROFILES_WITHOUT_ANCHORED_CLOCKS:
+        for dependency in ANCHORED_CLOCK_PROVIDERS:
+            if "test-clock" in resolved_dependency_features("plak", profile, dependency):
+                errors.append(
+                    f"plak [{','.join(profile) or 'default'}]: enables {dependency}/test-clock, "
+                    "which only offline test builds may enable"
+                )
     return errors
+
+
+ANCHORED_CLOCK_PROVIDERS = ("plakous-anthropic", "plakous-xai")
+PLAK_PROFILES_WITHOUT_ANCHORED_CLOCKS = ((), ("maintainer",), ("test-hooks",), ("test-hooks", "maintainer"))
 
 
 def full_closure(package: str, selected: tuple[str, ...]) -> set[str]:

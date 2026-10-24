@@ -137,7 +137,7 @@ impl ManagerCore {
         })
     }
 
-    async fn validate_id_token(
+    pub(super) async fn validate_id_token(
         &self,
         token: &str,
         nonce: Option<&str>,
@@ -175,16 +175,18 @@ impl ManagerCore {
         validation.set_issuer(&[XAI_ISSUER]);
         validation.set_audience(&[XAI_PUBLIC_CLIENT_ID]);
         validation.set_required_spec_claims(&["iss", "aud", "sub", "exp"]);
-        validation.leeway = TOKEN_CLOCK_LEEWAY_SECONDS;
-        validation.reject_tokens_expiring_in_less_than = 0;
-        // Expiry is checked below against the subscription clock, not
-        // jsonwebtoken's wall clock.
+        // exp, iat and nbf are checked below against the subscription clock
+        // with TOKEN_CLOCK_LEEWAY_SECONDS, never against jsonwebtoken's wall
+        // clock, so its own leeway would be inert.
         validation.validate_exp = false;
         let data = decode::<IdClaims>(token, &key, &validation)
             .map_err(|error| invalid(jwt_failure_reason(&error)))?;
         let mut claims = data.claims;
         let leeway_now = now.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS);
-        let failed = if claims.exp.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS) < now {
+        let failed = if claims
+            .exp
+            .is_none_or(|exp| exp.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS) < now)
+        {
             Some(CredentialRefreshFailureReason::IdTokenExp)
         } else if claims.iss != XAI_ISSUER {
             Some(CredentialRefreshFailureReason::IdTokenIss)
@@ -295,7 +297,9 @@ struct IdClaims {
     aud: Audience,
     azp: Option<String>,
     sub: String,
-    exp: u64,
+    // Optional here so a missing `exp` reaches jsonwebtoken's required-claim
+    // check (IdTokenExp) instead of failing deserialization as a token shape.
+    exp: Option<u64>,
     iat: u64,
     nbf: Option<u64>,
     nonce: Option<String>,

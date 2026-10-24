@@ -1498,6 +1498,7 @@ it took with the lease, and the clock domain is unchanged; a reboot, any
 intervening acquire, or a store reopened since refuses (chapter 01 §5.1).
 
 Compiled subscription expiry and credential time checks always use the system
-clock in supported builds; documented API review dates never refuse a route. Hidden clock injection is restricted to the non-default
-`test-clock` feature for offline fixtures; default, maintainer and release
-closures must not enable it. It is not an embedder-supported authority override.
+clock in supported builds; documented API review dates never refuse a route.
+Hidden clock injection is restricted to the non-default `test-clock` feature
+for offline fixtures; default, maintainer and release closures must not enable
+it. It is not an embedder-supported authority override.

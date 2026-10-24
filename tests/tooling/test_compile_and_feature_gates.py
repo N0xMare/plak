@@ -570,6 +570,30 @@ class FeatureGateTests(unittest.TestCase):
             self.assertIn(f"{name} [default]: test-clock is test-only", errors)
         self.assertNotIn("test-clock", feature_gate.optional_features({"features": {"test-clock": [], "auth": []}}))
 
+    def test_no_plak_build_resolves_the_anchored_provider_clocks(self) -> None:
+        def features(package, profile, dependency):
+            if package == "plak" and profile == ("test-hooks",) and dependency == "plakous-xai":
+                return {"native-auth", "test-clock"}
+            return {"test-clock"} if (package, profile, dependency) in pinned else set()
+
+        pinned = {
+            ("plak", ("test-hooks",), "plakous-http"),
+            ("plak", ("test-hooks",), "plakous"),
+            ("plak", ("test-hooks",), "plakous-openai"),
+            ("plak", ("test-hooks",), "plakous-openrouter"),
+        }
+        with mock.patch.object(feature_gate, "resolved_dependency_features", side_effect=features):
+            errors = feature_gate.validate_test_only_dependency_features()
+        self.assertIn(
+            "plak [test-hooks]: enables plakous-xai/test-clock, which only offline test builds may enable",
+            errors,
+        )
+        self.assertFalse(any("plakous-anthropic/test-clock" in error for error in errors))
+        self.assertEqual(
+            feature_gate.PLAK_PROFILES_WITHOUT_ANCHORED_CLOCKS,
+            ((), ("maintainer",), ("test-hooks",), ("test-hooks", "maintainer")),
+        )
+
     def test_the_real_plak_gates_fault_injection_behind_test_hooks(self) -> None:
         self.assertEqual(feature_gate.validate_test_only_dependency_features(), [])
 

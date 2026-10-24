@@ -998,7 +998,10 @@ crate-private subscription clock: the system clock in supported builds, and
 in their own unit tests and `test-clock` builds a clock that starts one minute
 after that crate's compiled review and advances with elapsed monotonic time.
 The facade enables `plakous-xai/test-clock` and `plakous-anthropic/test-clock`
-only as dev-dependencies, so no supported or `test-hooks` build enables them.
+only as dev-dependencies. The feature checker proves that neither provider's
+default build enables its own `test-clock` and that no `plak` build (default,
+`maintainer`, `test-hooks`, or `test-hooks` with `maintainer`) resolves either
+one; an offline test build that unifies the facade's dev-dependencies does.
 SuperGrok id-token expiry is checked against that clock, not the JWT
 library's wall clock. A facade test that hands its fixed-clock acceptance to
 the Grok or Claude manager assumes those subscriptions share their latest

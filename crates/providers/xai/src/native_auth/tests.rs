@@ -2396,6 +2396,60 @@ async fn refresh_accepts_id_token_within_clock_leeway_not_refresh_lead() -> Test
     Ok(())
 }
 
+/// The id-token expiry check runs against the subscription clock with the
+/// pinned 60 s leeway: an `exp` exactly 60 s in the past still verifies, 61 s
+/// does not, and a token without `exp` is refused for its expiry.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn id_token_expiry_edges_use_the_subscription_clock_and_leeway() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let peer = mock_peer().await?;
+    let manager = manager(&temp, &peer)?;
+    peer.responses.send(response(&jwks(TEST_KID))).await?;
+    let now = system_unix_seconds()?;
+    let at_leeway = id_token_with_exp("edge-subject", None, now - TOKEN_CLOCK_LEEWAY_SECONDS)?;
+    manager
+        .core
+        .validate_id_token(&at_leeway, None, now, None)
+        .await?;
+    let past_leeway =
+        id_token_with_exp("edge-subject", None, now - TOKEN_CLOCK_LEEWAY_SECONDS - 1)?;
+    assert!(matches!(
+        manager
+            .core
+            .validate_id_token(&past_leeway, None, now, None)
+            .await,
+        Err(XaiNativeAuthError::InvalidIdToken(
+            CredentialRefreshFailureReason::IdTokenExp
+        ))
+    ));
+    let private = STANDARD.decode(PRIVATE_DER_B64.replace('-', "+").replace('_', "/"))?;
+    let mut header = Header::new(Algorithm::ES256);
+    header.kid = Some(TEST_KID.to_owned());
+    let without_exp = encode(
+        &header,
+        &json!({
+            "iss": XAI_ISSUER,
+            "aud": XAI_PUBLIC_CLIENT_ID,
+            "azp": XAI_PUBLIC_CLIENT_ID,
+            "sub": "edge-subject",
+            "iat": now,
+        }),
+        &EncodingKey::from_ec_der(&private),
+    )?;
+    assert!(matches!(
+        manager
+            .core
+            .validate_id_token(&without_exp, None, now, None)
+            .await,
+        Err(XaiNativeAuthError::InvalidIdToken(
+            CredentialRefreshFailureReason::IdTokenExp
+        ))
+    ));
+    peer.shutdown().await?;
+    Ok(())
+}
+
 #[derive(Default)]
 struct RecordingRefreshObserver {
     events: std::sync::Mutex<Vec<CredentialRefreshEvent>>,

@@ -3602,8 +3602,9 @@ together with the profile id, notice and kill-switch revisions, so an edit to
 those facts fails until the revisions are bumped. What a pin change requires
 follows from that:
 
-- An OAuth client id, scope, endpoint, callback, grant or originator/identity
-  contract change is a new profile id (the new contract pin date, or `r<N+1>`
+- A change to any fingerprinted OAuth fact (client id, scopes, origins,
+  endpoint paths, callback, redirect and loopback ports, authorize-URL query
+  pairs, the Codex `originator`) is a new profile id (the new contract pin date, or `r<N+1>`
   on the same date) with new notice and kill-switch revisions. The stored login
   was written under another profile, so it needs a new login, which replaces
   it, and the notice is accepted again (chapter 04 §3.3).
