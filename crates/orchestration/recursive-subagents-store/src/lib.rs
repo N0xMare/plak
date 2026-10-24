@@ -7,11 +7,12 @@
 //! apart for the same reason `plakous-store` sits beside `plakous-agent`: a
 //! tree is not a database, and the tree crate should not link one.
 //!
-//! [`database`] owns the file and its admission law, [`rows`] the codecs,
-//! `image` the row-level diff against the last acknowledged save, and
-//! [`store`] the `TreeStore` port over them. The tree tables are separate from
-//! `product.sqlite3`: the two files carry their own schema
-//! versions; no transaction spans both.
+//! [`admission`] holds the single-file `SQLite` admission steps this store
+//! shares with the product store, [`database`] owns the file and its
+//! descriptors, [`rows`] the codecs, `image` the row-level diff against the
+//! last acknowledged save, and [`store`] the `TreeStore` port over them. The
+//! tree tables are separate from `product.sqlite3`: the two files carry their
+//! own schema versions; no transaction spans both.
 
 #![allow(
     clippy::missing_errors_doc,
@@ -19,6 +20,7 @@
     reason = "the set this crate actually trips"
 )]
 
+pub mod admission;
 pub mod database;
 mod image;
 pub mod rows;

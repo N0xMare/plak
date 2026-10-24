@@ -5,12 +5,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use plakous::sessions::SessionLocator;
 use plakous_hosted::error::StoreRefusal;
 use plakous_hosted::session_store::RecordStoreError;
 use plakous_hosted::sessions::TranscriptRow;
+use plakous_recursive_subagents_store::admission::{self, AdmissionError, BUSY_TIMEOUT, Schema};
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, params};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt as _;
@@ -25,7 +25,6 @@ use sessions::{
 };
 
 pub(crate) const SCHEMA_VERSION: i64 = 33;
-const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -226,44 +225,8 @@ impl ProductStore {
             .ensure_layout()
             .map_err(ProductStoreOpenError::unavailable)?;
         let database = product_sqlite_path(paths)?;
-        let connection = Connection::open_with_flags(
-            &database,
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )
-        .map_err(|error| {
-            ProductStoreOpenError::unavailable(format!("could not open product store: {error}"))
-        })?;
-        connection.busy_timeout(BUSY_TIMEOUT).map_err(|_| {
-            ProductStoreOpenError::unavailable("could not configure product store timeout")
-        })?;
-        let mode: String = connection
-            .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
-            .map_err(|_| {
-                ProductStoreOpenError::unavailable("could not enable product store WAL")
-            })?;
-        if mode != "wal" {
-            return Err(ProductStoreOpenError::unavailable(
-                "product store refused WAL mode",
-            ));
-        }
-        connection
-            .execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")
-            .map_err(|_| {
-                ProductStoreOpenError::unavailable("could not configure product store durability")
-            })?;
-        let foreign_keys: i64 = connection
-            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
-            .map_err(|_| ProductStoreOpenError::unavailable("could not inspect product store"))?;
-        let synchronous: i64 = connection
-            .query_row("PRAGMA synchronous", [], |row| row.get(0))
-            .map_err(|_| ProductStoreOpenError::unavailable("could not inspect product store"))?;
-        if foreign_keys != 1 || synchronous != 2 {
-            return Err(ProductStoreOpenError::unavailable(
-                "product store durability configuration was not retained",
-            ));
-        }
+        let connection = admission::open_writer(&database, SCHEMA.noun)
+            .map_err(ProductStoreOpenError::unavailable)?;
         #[cfg(feature = "test-hooks")]
         plakous_offline_crash_harness::commit_trace::install(&connection, "product")
             .map_err(|_| ProductStoreOpenError::unavailable("could not install commit trace"))?;
@@ -296,75 +259,10 @@ impl ProductStore {
     fn admit_schema(&mut self) -> Result<(), ProductStoreOpenError> {
         #[cfg(feature = "test-hooks")]
         let _settle = SettleCommitTrace;
-        let version: i64 = self
-            .connection
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|_| {
-                ProductStoreOpenError::unavailable("could not inspect product store schema")
-            })?;
-        let has_schema: bool = self
-            .connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| {
-                ProductStoreOpenError::unavailable("could not inspect product store schema")
-            })?;
-        if version == 0 && has_schema {
-            return Err(ProductStoreOpenError::unavailable(
-                "unversioned product store contains unrecognized state; archive product.sqlite3 and runtime.sqlite3 together, then retry",
-            ));
-        }
-        if version == 0 {
-            let transaction = self.connection.transaction().map_err(|_| {
-                ProductStoreOpenError::unavailable("could not initialize product store")
-            })?;
-            for (_, sql) in SCHEMA_OBJECTS {
-                transaction.execute_batch(sql).map_err(|_| {
-                    ProductStoreOpenError::unavailable("could not initialize product store schema")
-                })?;
-            }
-            let changed = transaction
-                .execute(
-                    "INSERT INTO product_schema(singleton,instance_id,fingerprint) VALUES(1,?1,?2)",
-                    params![
-                        uuid::Uuid::new_v4().to_string(),
-                        expected_schema_fingerprint()
-                    ],
-                )
-                .map_err(|_| {
-                    ProductStoreOpenError::unavailable(
-                        "could not initialize product store identity",
-                    )
-                })?;
-            if changed != 1 {
-                return Err(ProductStoreOpenError::unavailable(
-                    "could not initialize exact product store identity",
-                ));
-            }
-            transaction
-                .pragma_update(None, "user_version", SCHEMA_VERSION)
-                .map_err(|_| {
-                    ProductStoreOpenError::unavailable("could not version product store schema")
-                })?;
-            transaction.commit().map_err(|_| {
-                ProductStoreOpenError::unavailable("could not commit product store schema")
-            })?;
-            return Ok(());
-        }
-        if version != SCHEMA_VERSION {
-            return Err(ProductStoreOpenError::unsupported(format!(
-                "product schema {version}, expected {SCHEMA_VERSION}: this product.sqlite3 was created by an incompatible plak build; move it aside to start fresh"
-            )));
-        }
-        validate_schema_shape(&self.connection).map_err(|error| {
-            ProductStoreOpenError::unavailable(format!(
-                "{error}; current-schema product state is not authoritative"
-            ))
-        })?;
-        Ok(())
+        SCHEMA.admit(&self.connection).map_err(|error| match error {
+            AdmissionError::Unavailable(message) => ProductStoreOpenError::unavailable(message),
+            AdmissionError::Unsupported(message) => ProductStoreOpenError::unsupported(message),
+        })
     }
 
     /// Remember the collections just loaded or committed for `session`.
@@ -1358,18 +1256,14 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
 ];
 
-fn expected_schema_fingerprint() -> String {
-    schema_fingerprint(SCHEMA_OBJECTS)
-}
-
-fn schema_fingerprint(objects: &[(&str, &str)]) -> String {
-    digest_parts(
-        &objects
-            .iter()
-            .flat_map(|(name, sql)| [*name, *sql])
-            .collect::<Vec<_>>(),
-    )
-}
+/// The product file's admission descriptors.
+const SCHEMA: Schema = Schema {
+    noun: "product",
+    stem: "product",
+    archive: "product.sqlite3 and runtime.sqlite3 together",
+    version: SCHEMA_VERSION,
+    objects: SCHEMA_OBJECTS,
+};
 
 /// Operator acknowledgements of one attention occurrence.
 pub mod acknowledgements;
@@ -1386,44 +1280,7 @@ pub mod tree;
 pub mod views;
 
 fn validate_schema_shape(connection: &Connection) -> Result<(), String> {
-    validate_schema_revision(connection, SCHEMA_OBJECTS)
-}
-
-fn validate_schema_revision(
-    connection: &Connection,
-    objects: &[(&str, &str)],
-) -> Result<(), String> {
-    let mut statement = connection.prepare(
-        "SELECT name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY name",
-    ).map_err(|_| "could not inspect product store shape".to_owned())?;
-    let actual = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|_| "could not inspect product store shape".to_owned())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "product store shape is invalid".to_owned())?;
-    let mut expected = objects
-        .iter()
-        .map(|(name, sql)| ((*name).to_owned(), (*sql).to_owned()))
-        .collect::<Vec<_>>();
-    expected.sort_by(|left, right| left.0.cmp(&right.0));
-    if actual != expected {
-        return Err("product store schema shape does not match its exact revision".to_owned());
-    }
-    let fingerprint: String = connection
-        .query_row(
-            "SELECT fingerprint FROM product_schema WHERE singleton=1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| "product store schema fingerprint is missing".to_owned())?;
-    if fingerprint != schema_fingerprint(objects) {
-        return Err(
-            "product store schema fingerprint does not match its exact revision".to_owned(),
-        );
-    }
-    Ok(())
+    SCHEMA.validate(connection)
 }
 
 /// One row of every type the product transcript stores, each with its
@@ -1538,6 +1395,7 @@ mod tests {
     use plakous_hosted::sessions::projector::{
         Delivery, SessionViews, Submission, SubmissionKind, ViewWrites,
     };
+    use std::time::Duration;
     use tempfile::tempdir;
 
     #[test]
@@ -1906,7 +1764,7 @@ mod tests {
 
     fn assert_exact_schema(paths: &PlakPaths) {
         let connection = Connection::open(paths.product_database()).unwrap();
-        validate_schema_revision(&connection, SCHEMA_OBJECTS).unwrap();
+        validate_schema_shape(&connection).unwrap();
         assert_eq!(
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -2212,6 +2070,69 @@ mod tests {
             (1, 1)
         );
     }
+    /// The admission steps are shared with the tree store; the product's
+    /// refusals keep their exact text and its fingerprint keeps its algorithm.
+    #[test]
+    fn product_admission_refusals_and_fingerprint_are_exact() {
+        assert_eq!(
+            SCHEMA.fingerprint(),
+            digest_parts(
+                &SCHEMA_OBJECTS
+                    .iter()
+                    .flat_map(|(name, sql)| [*name, *sql])
+                    .collect::<Vec<_>>()
+            )
+        );
+        let refusal = |damage: &str| {
+            let root = tempdir().unwrap();
+            let paths = PlakPaths::explicit(root.path().join("p"));
+            paths.ensure_layout().unwrap();
+            if damage != "unversioned" {
+                drop(ProductStore::open(&paths).unwrap());
+            }
+            let connection = Connection::open(paths.product_database()).unwrap();
+            let damage_sql = match damage {
+                "unversioned" | "shape" => "CREATE TABLE stray(x)",
+                "fingerprint" => "UPDATE product_schema SET fingerprint='drift'",
+                _ => "PRAGMA user_version=99",
+            };
+            connection.execute_batch(damage_sql).unwrap();
+            drop(connection);
+            let error = ProductStore::open(&paths).unwrap_err();
+            (error.kind(), error.to_string())
+        };
+        assert_eq!(
+            refusal("unversioned"),
+            (
+                ProductStoreOpenErrorKind::Unavailable,
+                "unversioned product store contains unrecognized state; archive product.sqlite3 and runtime.sqlite3 together, then retry".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("shape"),
+            (
+                ProductStoreOpenErrorKind::Unavailable,
+                "product store schema shape does not match its exact revision; current-schema product state is not authoritative".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("fingerprint"),
+            (
+                ProductStoreOpenErrorKind::Unavailable,
+                "product store schema fingerprint does not match its exact revision; current-schema product state is not authoritative".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("version"),
+            (
+                ProductStoreOpenErrorKind::UnsupportedPersistence,
+                format!(
+                    "product schema 99, expected {SCHEMA_VERSION}: this product.sqlite3 was created by an incompatible plak build; move it aside to start fresh"
+                )
+            )
+        );
+    }
+
     #[test]
     fn unknown_schema_is_refused() {
         let root = tempdir().unwrap();

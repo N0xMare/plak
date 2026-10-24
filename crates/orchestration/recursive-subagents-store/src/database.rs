@@ -11,16 +11,14 @@ use std::path::{Path, PathBuf};
 
 use plakous_recursive_subagents::tree::PersistedTree;
 use rusqlite::{Connection, OpenFlags};
-use sha2::{Digest, Sha256};
 
+use crate::admission::{AdmissionError, BUSY_TIMEOUT, Schema, fingerprint, open_writer};
 use crate::rows::load_agent_tree;
 
 /// `subagents.sqlite3` starts at schema version 1. It is not the
 /// product schema's number and never follows it; both name the state
 /// directory.
 pub const SCHEMA_VERSION: i64 = 8;
-
-const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Every object the tree's database holds, name and exact DDL. The
 /// fingerprint is taken over this list, so a changed byte here needs a new
@@ -83,20 +81,17 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
 /// The DDL fingerprint this cohort pins.
 #[must_use]
 pub fn expected_schema_fingerprint() -> String {
-    let mut digest = Sha256::new();
-    for (name, sql) in SCHEMA_OBJECTS {
-        for part in [name, sql] {
-            digest.update((part.len() as u64).to_be_bytes());
-            digest.update(part.as_bytes());
-        }
-    }
-    let mut hex = String::with_capacity(64);
-    for byte in digest.finalize() {
-        use std::fmt::Write as _;
-        let _ = write!(hex, "{byte:02x}");
-    }
-    hex
+    fingerprint(SCHEMA_OBJECTS)
 }
+
+/// The tree file's admission descriptors.
+const SCHEMA: Schema = Schema {
+    noun: "tree",
+    stem: "subagents",
+    archive: "subagents.sqlite3",
+    version: SCHEMA_VERSION,
+    objects: SCHEMA_OBJECTS,
+};
 
 /// Why the tree database could not be admitted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -242,7 +237,7 @@ impl SubagentsDatabase {
                 "subagents schema {version}, expected {SCHEMA_VERSION}: created by an incompatible plak build"
             )));
         }
-        store.validate_shape().map_err(|error| {
+        SCHEMA.validate(&tx).map_err(|error| {
             OpenError::unavailable(format!("{error}; tree inspection has no authority"))
         })?;
         load_agent_tree(&tx, tree_id)
@@ -258,139 +253,15 @@ impl SubagentsDatabase {
     /// refusing it when it belongs to any other cohort.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
         let database = resolved_path(database)?;
-        let connection = Connection::open_with_flags(
-            &database,
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )
-        .map_err(|error| OpenError::unavailable(format!("could not open tree store: {error}")))?;
-        connection
-            .busy_timeout(BUSY_TIMEOUT)
-            .map_err(|_| OpenError::unavailable("could not configure tree store timeout"))?;
-        let mode: String = connection
-            .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
-            .map_err(|_| OpenError::unavailable("could not enable tree store WAL"))?;
-        if mode != "wal" {
-            return Err(OpenError::unavailable("tree store refused WAL mode"));
-        }
-        connection
-            .execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")
-            .map_err(|_| OpenError::unavailable("could not configure tree store durability"))?;
-        let foreign_keys: i64 = connection
-            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
-            .map_err(|_| OpenError::unavailable("could not inspect tree store"))?;
-        let synchronous: i64 = connection
-            .query_row("PRAGMA synchronous", [], |row| row.get(0))
-            .map_err(|_| OpenError::unavailable("could not inspect tree store"))?;
-        if foreign_keys != 1 || synchronous != 2 {
-            return Err(OpenError::unavailable(
-                "tree store durability configuration was not retained",
-            ));
-        }
+        let connection = open_writer(&database, SCHEMA.noun).map_err(OpenError::unavailable)?;
         #[cfg(feature = "commit-trace")]
         plakous_store::commit_trace::install(&connection, "tree")
             .map_err(|_| OpenError::unavailable("could not install commit trace"))?;
-        let store = Self { connection };
-        store.admit_schema()?;
-        Ok(store)
-    }
-
-    fn admit_schema(&self) -> Result<(), OpenError> {
-        let version: i64 = self
-            .connection
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|_| OpenError::unavailable("could not inspect tree store schema"))?;
-        let has_schema: bool = self
-            .connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| OpenError::unavailable("could not inspect tree store schema"))?;
-        if version == 0 && has_schema {
-            return Err(OpenError::unavailable(
-                "unversioned tree store contains unrecognized state; archive subagents.sqlite3, then retry",
-            ));
-        }
-        if version == 0 {
-            return self.initialize();
-        }
-        if version != SCHEMA_VERSION {
-            return Err(OpenError::unsupported(format!(
-                "subagents schema {version}, expected {SCHEMA_VERSION}: this subagents.sqlite3 was created by an incompatible plak build; move it aside to start fresh"
-            )));
-        }
-        self.validate_shape().map_err(|error| {
-            OpenError::unavailable(format!(
-                "{error}; current-schema tree state is not authoritative"
-            ))
-        })
-    }
-
-    fn initialize(&self) -> Result<(), OpenError> {
-        let transaction = self
-            .connection
-            .unchecked_transaction()
-            .map_err(|_| OpenError::unavailable("could not initialize tree store"))?;
-        for (_, sql) in SCHEMA_OBJECTS {
-            transaction
-                .execute_batch(sql)
-                .map_err(|_| OpenError::unavailable("could not initialize tree store schema"))?;
-        }
-        let changed = transaction
-            .execute(
-                "INSERT INTO subagents_schema(singleton,instance_id,fingerprint) VALUES(1,?1,?2)",
-                rusqlite::params![new_instance_id(), expected_schema_fingerprint()],
-            )
-            .map_err(|_| OpenError::unavailable("could not initialize tree store identity"))?;
-        if changed != 1 {
-            return Err(OpenError::unavailable(
-                "could not initialize exact tree store identity",
-            ));
-        }
-        transaction
-            .pragma_update(None, "user_version", SCHEMA_VERSION)
-            .map_err(|_| OpenError::unavailable("could not version tree store schema"))?;
-        transaction
-            .commit()
-            .map_err(|_| OpenError::unavailable("could not commit tree store schema"))
-    }
-
-    fn validate_shape(&self) -> Result<(), String> {
-        let mut statement = self.connection.prepare(
-            "SELECT name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY name",
-        ).map_err(|_| "could not inspect tree store shape".to_owned())?;
-        let actual = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|_| "could not inspect tree store shape".to_owned())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "tree store shape is invalid".to_owned())?;
-        let mut expected = SCHEMA_OBJECTS
-            .iter()
-            .map(|(name, sql)| ((*name).to_owned(), (*sql).to_owned()))
-            .collect::<Vec<_>>();
-        expected.sort_by(|left, right| left.0.cmp(&right.0));
-        if actual != expected {
-            return Err("tree store schema shape does not match its exact revision".to_owned());
-        }
-        let fingerprint: String = self
-            .connection
-            .query_row(
-                "SELECT fingerprint FROM subagents_schema WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| "tree store schema fingerprint is missing".to_owned())?;
-        if fingerprint != expected_schema_fingerprint() {
-            return Err(
-                "tree store schema fingerprint does not match its exact revision".to_owned(),
-            );
-        }
-        Ok(())
+        SCHEMA.admit(&connection).map_err(|error| match error {
+            AdmissionError::Unavailable(message) => OpenError::unavailable(message),
+            AdmissionError::Unsupported(message) => OpenError::unsupported(message),
+        })?;
+        Ok(Self { connection })
     }
 }
 
@@ -411,10 +282,6 @@ fn resolved_path(database: &Path) -> Result<PathBuf, OpenError> {
             .file_name()
             .ok_or_else(|| OpenError::unavailable("tree store file name is missing"))?,
     ))
-}
-
-fn new_instance_id() -> String {
-    uuid::Uuid::new_v4().to_string()
 }
 
 #[cfg(test)]
@@ -457,6 +324,60 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         drop(store);
         SubagentsDatabase::open(&database).expect("a current file reopens");
+    }
+
+    /// The admission steps are shared with the product store; the tree's
+    /// refusals keep their exact text.
+    #[test]
+    fn tree_admission_refusals_are_exact() {
+        let refusal = |damage: &str| {
+            let root = tempfile::tempdir().unwrap();
+            let database = root.path().join("subagents.sqlite3");
+            if damage != "unversioned" {
+                drop(SubagentsDatabase::open(&database).unwrap());
+            }
+            let connection = rusqlite::Connection::open(&database).unwrap();
+            let damage_sql = match damage {
+                "unversioned" | "shape" => "CREATE TABLE stray(x)",
+                "fingerprint" => "UPDATE subagents_schema SET fingerprint='drift'",
+                _ => "PRAGMA user_version=99",
+            };
+            connection.execute_batch(damage_sql).unwrap();
+            drop(connection);
+            let Err(error) = SubagentsDatabase::open(&database) else {
+                panic!("a damaged file must be refused");
+            };
+            (error.kind(), error.message().to_owned())
+        };
+        let unavailable = super::OpenErrorKind::Unavailable;
+        assert_eq!(
+            refusal("unversioned"),
+            (
+                unavailable,
+                "unversioned tree store contains unrecognized state; archive subagents.sqlite3, then retry".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("shape"),
+            (
+                unavailable,
+                "tree store schema shape does not match its exact revision; current-schema tree state is not authoritative".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("fingerprint"),
+            (
+                unavailable,
+                "tree store schema fingerprint does not match its exact revision; current-schema tree state is not authoritative".to_owned()
+            )
+        );
+        assert_eq!(
+            refusal("version"),
+            (
+                super::OpenErrorKind::UnsupportedPersistence,
+                "subagents schema 99, expected 8: this subagents.sqlite3 was created by an incompatible plak build; move it aside to start fresh".to_owned()
+            )
+        );
     }
 
     /// A file at any other version is refused as unsupported, never migrated.

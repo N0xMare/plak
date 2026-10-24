@@ -2431,7 +2431,10 @@ reads as an ordinary version mismatch rather than naming the fingerprint drift.
 Ordinary tree-store open validates version, exact shape and DDL
 fingerprint, without scanning page integrity or foreign keys. Plak doctor owns
 the read-only integrity and foreign-key diagnostics (chapter 02 §7.3); writes
-still enforce foreign keys.
+still enforce foreign keys. The tree and product stores run the same writer
+configuration and admission steps from `plakous-recursive-subagents-store`'s
+`admission` module, each over its own descriptors, version, file and refusal
+text; the product store already depends on that crate.
 
 ### 14.1 Reopen
 
