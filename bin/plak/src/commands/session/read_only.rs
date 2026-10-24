@@ -1,8 +1,7 @@
 //! Product child addresses and read-only child inspection.
 
-use std::collections::VecDeque;
-use std::io;
-
+use crate::home::paths::PlakPaths;
+use crate::store::sessions::SessionRecord;
 use plakous::sessions::{
     AgentSessions, SESSION_HISTORY_VISIBILITY_REVISION, SessionHistoryDirection,
     SessionHistoryItem, SessionHistoryPageOutcome, SessionHistoryPageRequest,
@@ -11,9 +10,8 @@ use plakous::sessions::{
 use plakous_hosted::agent_tree::NodeRecord;
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_recursive_subagents_store::TreeInspection;
-
-use crate::home::paths::PlakPaths;
-use crate::store::sessions::SessionRecord;
+use std::collections::VecDeque;
+use std::io;
 
 /// Splits `<id>[.cN]` and resolves `<id>` (a full id or an unambiguous prefix
 /// among this workspace's sessions) without opening a writable store.
@@ -94,7 +92,7 @@ pub(crate) fn show_selected_child(
     };
     writeln!(stdout, "  Recorded head  {recorded}")
         .map_err(|_| CliFailure::new("stdout failed"))?;
-    let (current, recovery) = super::inspect_locator(paths, recorded)?;
+    let (current, recovery) = super::recovery::inspect_locator(paths, recorded)?;
     if current != recorded {
         writeln!(
             stdout,
@@ -103,7 +101,7 @@ pub(crate) fn show_selected_child(
         .map_err(|_| CliFailure::new("stdout failed"))?;
     }
     if let Some(report) = recovery {
-        super::write_recovery_report(paths, stdout, &report)
+        super::recovery::write_recovery_report(paths, stdout, &report)
     } else {
         writeln!(
             stdout,
@@ -127,7 +125,7 @@ pub(crate) fn log_child_read_only(
         .map_err(CliFailure::from)?;
     let (node, _) = selected_child(paths, &record, child)?;
     let recorded = child_locator(&node)?;
-    let (current, recovery) = super::inspect_locator(paths, recorded)?;
+    let (current, recovery) = super::recovery::inspect_locator(paths, recorded)?;
     let entries = child_history_tail(paths, current, kind, tail)?;
     if let Some(report) = recovery {
         let disclaimer = "items after the last commit are not shown";
