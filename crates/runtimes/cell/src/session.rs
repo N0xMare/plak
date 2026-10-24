@@ -412,7 +412,9 @@ impl Pump {
         }
         let loss = tokio::select! {
             result = answered => result.err().map(|_| "cell request answer closed".into()),
-            loss = self.client.wait_loss() => Some(loss),
+            // Loss can arrive before the responder wakes us for a delivered
+            // result. Let read_event drain any queued terminal before loss.
+            _ = self.client.wait_loss() => None,
         };
         if let Some(loss) = loss {
             self.lose(loss).await;
@@ -664,6 +666,62 @@ mod tests {
         steps: Vec<Step>,
         accepted: bool,
         completed: bool,
+    }
+
+    #[tokio::test]
+    async fn worker_eof_drains_a_terminal_while_the_nested_responder_is_pending() {
+        for completed in [true, false] {
+            let directory = tempfile::tempdir().expect("directory");
+            let mut final_frames = vec![WorkerFrame::Delivery {
+                cell: 1,
+                call: 1,
+                verdict: DeliveryVerdict::Accepted,
+            }];
+            if completed {
+                final_frames.push(done(1));
+            }
+            let program = scripted_worker(
+                directory.path(),
+                &[
+                    Step::Read(vec![configure(), start(1)]),
+                    Step::Write(vec![nested_call(1, 1)]),
+                    Step::Read(vec![nested_result(1)]),
+                    Step::Write(final_frames),
+                ],
+            );
+            let (client, session, mut events) = session(&program).await;
+            let started = execute(&session).await;
+            let Some(CellSessionEvent::NestedCall { responder, .. }) = events.receive().await
+            else {
+                panic!("nested call");
+            };
+            // Model the responder being descheduled after the worker accepts
+            // its result, before it wakes the pump with its local reply.
+            assert_eq!(
+                client
+                    .deliver(1, 1, Ok(CellValue::from(serde_json::json!(7))))
+                    .await,
+                NestedDeliveryOutcome::Accepted
+            );
+            let _ = client.wait_loss().await;
+            let terminal = tokio::time::timeout(std::time::Duration::from_secs(5), started.initial)
+                .await
+                .expect("terminal despite the pending responder");
+            assert_eq!(
+                matches!(terminal, Ok(CellResponse::Result { error: None, .. })),
+                completed,
+                "completed={completed}: {terminal:?}"
+            );
+            if !completed {
+                assert!(matches!(terminal, Err(ref loss) if loss == "cell worker closed"));
+            }
+            assert_eq!(
+                session.wait("1", WINDOW).await,
+                WaitOutcome::Missing { error: None }
+            );
+            drop(responder);
+            let _ = session.shutdown().await;
+        }
     }
 
     /// Interleavings of nested calls, verdicts, output and terminals.

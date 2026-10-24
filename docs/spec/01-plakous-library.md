@@ -6278,8 +6278,12 @@ Nested-result delivery is Accepted only after the owning interpreter resolves
 the exact call; the worker answers each `NestedResult` with a correlated
 `Delivery` frame, `Accepted`, `Refused` when the result named no pending
 request, or `NotDelivered` when the evaluator never received it. Enqueuing a command or writing it to a pipe does not prove acceptance.
-EOF, malformed frames and the explicit `HostLost` frame resolve the
-cell completion as loss; the facade retains and joins its cell pump.
+EOF, malformed frames and the explicit `HostLost` frame resolve an unfinished
+cell as loss after previously received frames have been drained. A queued
+`CellDone` remains authoritative even if loss arrives while the host awaits a
+local nested responder or notification acknowledgement; loss cannot replace
+that terminal. This does not prove nested-result acceptance without its
+correlated `Delivery` verdict. The facade retains and joins its cell pump.
 Forced or unreaped sidecar cleanup remains Lost on repeated termination and
 shutdown; a later wait cannot relabel that observation as voluntary.
 No uncertain start or resource loss authorizes source replay. This resource, control and
