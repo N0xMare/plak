@@ -81,7 +81,19 @@ pub(super) struct ArtifactModel {
     pub(super) refuse_scheduling_measurement: AtomicBool,
     pub(super) operation_roots: Mutex<Vec<ModelOperationRoot>>,
     pub(super) prepares: AtomicUsize,
-    pub(super) prepared_attempts: Mutex<BTreeSet<AttemptId>>,
+    /// One lowering per attempt and credential generation: a round that
+    /// prepares afresh under refreshed authority keeps its attempt.
+    pub(super) prepared_attempts: Mutex<BTreeSet<(AttemptId, u64)>>,
+    /// Attempts of the turn-root preparations that are neither a scheduling
+    /// measurement nor a paid compaction's: rounds and round admissions.
+    /// Compaction workflows prepare under their own roots.
+    pub(super) round_prepares: Mutex<Vec<AttemptId>>,
+    /// Installed as `refreshed_authority` by the first scheduling measurement
+    /// after a model call, as fence (b)'s measurement may refresh a token.
+    pub(super) refresh_at_tool_group_measurement: Mutex<Option<RuntimeModelAuthority>>,
+    /// Supersedes `authority` once set: what revalidation returns and what
+    /// preparation accepts.
+    pub(super) refreshed_authority: Mutex<Option<RuntimeModelAuthority>>,
     pub(super) prepared_records: Mutex<Vec<PreparedCallRecord>>,
     pub(super) calls: AtomicUsize,
     pub(super) observed: Mutex<Vec<Option<ActiveFamilyArtifact>>>,
@@ -210,6 +222,9 @@ impl ArtifactModel {
             operation_roots: Mutex::new(Vec::new()),
             prepares: AtomicUsize::new(0),
             prepared_attempts: Mutex::new(BTreeSet::new()),
+            round_prepares: Mutex::new(Vec::new()),
+            refresh_at_tool_group_measurement: Mutex::new(None),
+            refreshed_authority: Mutex::new(None),
             prepared_records: Mutex::new(Vec::new()),
             calls: AtomicUsize::new(0),
             observed: Mutex::new(Vec::new()),
@@ -545,7 +560,10 @@ impl LanguageModel for ArtifactModel {
         checked_at: Timestamp,
     ) -> RuntimeModelAuthorityOperation {
         let check = self.authority_checks.fetch_add(1, Ordering::AcqRel);
-        let authority = if check >= 2 {
+        let refreshed = lock_mutex(&self.refreshed_authority).clone();
+        let authority = if let Some(refreshed) = refreshed.as_ref() {
+            refreshed
+        } else if check >= 2 {
             self.dispatch_authority.as_ref().unwrap_or(&self.authority)
         } else {
             &self.authority
@@ -562,13 +580,12 @@ impl LanguageModel for ArtifactModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
-        if self.refuse_scheduling_measurement.load(Ordering::Acquire)
-            && matches!(
-                plan.request().metadata().root(),
-                ModelOperationRoot::Turn(_)
-            )
-            && !lock_mutex(&self.operation_roots).contains(&plan.request().metadata().root())
-        {
+        let scheduling_measurement = matches!(
+            plan.request().metadata().root(),
+            ModelOperationRoot::Turn(_)
+        ) && !lock_mutex(&self.operation_roots)
+            .contains(&plan.request().metadata().root());
+        if self.refuse_scheduling_measurement.load(Ordering::Acquire) && scheduling_measurement {
             return Err(ModelPreparationError::rejected(
                 ModelPreparationErrorKind::ResourceLimit,
                 "optional scheduling measurement unavailable",
@@ -578,8 +595,17 @@ impl LanguageModel for ArtifactModel {
         context
             .authority()
             .validate(&self.descriptor, context.prepared_at())?;
-        if !self.authority.same_selected_authority(context.authority()) {
+        let expected = lock_mutex(&self.refreshed_authority)
+            .clone()
+            .unwrap_or_else(|| self.authority.clone());
+        if !expected.same_selected_authority(context.authority()) {
             return Err(plakous_model::RuntimeModelAuthorityError::ForeignAuthority.into());
+        }
+        if scheduling_measurement
+            && self.calls.load(Ordering::Acquire) > 0
+            && let Some(refreshed) = lock_mutex(&self.refresh_at_tool_group_measurement).take()
+        {
+            *lock_mutex(&self.refreshed_authority) = Some(refreshed);
         }
         lock_mutex(&self.observed_request_texts).push(
             plan.request()
@@ -666,7 +692,18 @@ impl LanguageModel for ArtifactModel {
             ));
         }
         let prepare = self.prepares.fetch_add(1, Ordering::AcqRel);
-        if !lock_mutex(&self.prepared_attempts).insert(plan.request().metadata().attempt_id()) {
+        if matches!(
+            plan.request().metadata().root(),
+            ModelOperationRoot::Turn(_)
+        ) && !scheduling_measurement
+            && !paid_compaction_request
+        {
+            lock_mutex(&self.round_prepares).push(plan.request().metadata().attempt_id());
+        }
+        if !lock_mutex(&self.prepared_attempts).insert((
+            plan.request().metadata().attempt_id(),
+            context.authority().credential_generation(),
+        )) {
             return Err(ModelPreparationError::rejected(
                 ModelPreparationErrorKind::InvalidConfiguration,
                 "artifact fixture poisoned a duplicate lowering for one attempt",

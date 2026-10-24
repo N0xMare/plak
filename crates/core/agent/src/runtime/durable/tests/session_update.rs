@@ -92,6 +92,9 @@ pub(in crate::runtime::durable) enum SessionUpdateFixtureMode {
 
 pub(super) struct SessionUpdateTool {
     pub(super) await_promoted_terminal: AtomicBool,
+    /// With `await_promoted_terminal`, leaves the terminal job unjoined, so
+    /// the next boundary delivers its notice.
+    pub(super) leave_terminal_unjoined: AtomicBool,
     pub(super) mode: SessionUpdateFixtureMode,
     pub(super) wait_for_preempt: AtomicBool,
     pub(super) preempt_ready: Notify,
@@ -106,6 +109,7 @@ impl SessionUpdateTool {
     pub(super) fn new(mode: SessionUpdateFixtureMode) -> Self {
         Self {
             await_promoted_terminal: AtomicBool::new(false),
+            leave_terminal_unjoined: AtomicBool::new(false),
             mode,
             wait_for_preempt: AtomicBool::new(false),
             preempt_ready: Notify::new(),
@@ -167,6 +171,9 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
                 if self.await_promoted_terminal.load(Ordering::Acquire) {
                     while sessions.joined_terminal_status(id).is_none() {
                         tokio::task::yield_now().await;
+                    }
+                    if self.leave_terminal_unjoined.load(Ordering::Acquire) {
+                        return ToolOutcome::success_text("job ended");
                     }
                 }
                 let status = sessions

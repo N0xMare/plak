@@ -23,11 +23,12 @@ use crate::{
     StoreAdmission, SubscriptionLimits, TelemetryContext, TelemetryEmitter, ToolAuditIdentity,
     ToolCallAttemptIdentity, ToolCallObservation, ToolCallerLineageView,
 };
+use admitted_round::AdmittedRound;
 use futures_util::FutureExt;
 use plakous_model::{
     AgentId, AttemptId, CancellationToken, Clock, CompiledProviderConfiguration, ConversationItem,
     ConversationView, Digest, EntryId, IdGenerator, LanguageModel, ModelError, ModelErrorPhase,
-    ModelErrorTarget, ModelOperationRoot, ModelOperationScope, ModelResponse, RunId,
+    ModelErrorTarget, ModelOperationRoot, ModelOperationScope, ModelRequest, ModelResponse, RunId,
     StableRequestPrefix, ToolCallBlock, ToolEffect, ToolResultBlock, TurnId, Usage,
     ValidatedRequestPlan,
 };
@@ -40,6 +41,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
+mod admitted_round;
 mod cleanup;
 mod commands;
 mod compaction;
@@ -174,6 +176,10 @@ struct Driver {
     /// The turn the segment limit refused (spec 01 §10.3). Its prompt is never
     /// withheld: a note in the prompt's place keeps the segment count.
     segment_refused_turn: Option<TurnId>,
+    /// The next round's request as the tool exchange's capacity admission
+    /// prepared it, kept so the round dispatches it instead of preparing the
+    /// same request again.
+    admitted_round: Option<Box<AdmittedRound>>,
 }
 
 impl Driver {
@@ -514,6 +520,14 @@ pub(in crate::runtime) struct LocalCompositionCallResponse {
 pub(in crate::runtime) enum ModelStartAdmission {
     Pending(plakous_model::StartModelCallWithControl),
     Ready(Result<plakous_model::ModelControlStream, ModelError>),
+}
+
+/// What one model round dispatches.
+enum RoundRequest {
+    /// A request the round validates and prepares itself.
+    Fresh(Box<ModelRequest>),
+    /// The request the tool exchange's admission prepared.
+    Admitted(Box<AdmittedRound>),
 }
 
 pub(in crate::runtime) struct ModelOperationResult {

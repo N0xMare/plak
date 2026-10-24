@@ -1296,30 +1296,25 @@ async fn candidate_tool_round_admits_then_promotes_before_one_continuation_dispa
         result.outcome()
     );
     assert_eq!(result.tool_calls(), 1);
-    // The pending exchange is lowered once for exact next-round capacity
-    // admission before its atomic promotion, then lowered once more at the
-    // physical continuation fence. Only the latter is dispatched.
-    assert_eq!(model.prepares.load(Ordering::Acquire), 3);
+    // The pending exchange is lowered once, for exact next-round capacity
+    // admission before its atomic promotion, and the physical continuation
+    // dispatches that lowering.
+    assert_eq!(model.prepares.load(Ordering::Acquire), 2);
     assert_eq!(model.calls.load(Ordering::Acquire), 2);
     let observed = model.observed();
-    assert_eq!(observed.len(), 3);
+    assert_eq!(observed.len(), 2);
     assert!(observed[0].is_none());
     let affinities = model.observed_affinities();
-    assert_eq!(affinities.len(), 3);
+    assert_eq!(affinities.len(), 2);
     let first_affinity = affinities[0]
         .as_ref()
         .ok_or("first ordinary prepare omitted runtime cache affinity")?;
     assert_eq!(affinities[1].as_ref(), Some(first_affinity));
-    assert_eq!(affinities[2].as_ref(), Some(first_affinity));
     let admitted = observed[1]
         .as_ref()
         .ok_or("pending tool-exchange admission omitted the candidate artifact")?;
-    let promoted = observed[2]
-        .as_ref()
-        .ok_or("tool continuation prepare omitted the promoted artifact")?;
-    assert_eq!(promoted, admitted);
     let records = model.prepared_records();
-    assert_eq!(records.len(), 3);
+    assert_eq!(records.len(), 2);
     assert_eq!(
         records[0].projection().cache_affinity(),
         Some(first_affinity.identity())
@@ -1329,16 +1324,8 @@ async fn candidate_tool_round_admits_then_promotes_before_one_continuation_dispa
         Some(first_affinity.identity())
     );
     assert_eq!(
-        records[2].projection().cache_affinity(),
-        Some(first_affinity.identity())
-    );
-    assert_eq!(
         records[1].projection().active_artifact(),
         Some(admitted.integrity())
-    );
-    assert_eq!(
-        records[2].projection().active_artifact(),
-        Some(promoted.integrity())
     );
     agent.shutdown().await?;
     Ok(())

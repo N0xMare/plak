@@ -104,9 +104,13 @@ async fn clipped_read_fits_next_dispatch(durability: LocalDurabilityDisposition)
     assert_eq!(bounds.len(), 2);
     assert!(bounds.iter().all(|bound| *bound <= 32_768), "{bounds:?}");
     let records = model.prepared_records();
-    assert_eq!(records.len(), 3, "admission probe and two provider rounds");
+    assert_eq!(
+        records.len(),
+        2,
+        "two provider rounds; the second dispatches its admission's preparation"
+    );
     assert!(
-        records[2]
+        records[1]
             .projection()
             .token_projection()
             .request_anchor()
@@ -114,7 +118,7 @@ async fn clipped_read_fits_next_dispatch(durability: LocalDurabilityDisposition)
     );
     // Whole-wire size is not the gate when a matching item-delta anchor fits.
     let input = serde_json::to_value(
-        records[2]
+        records[1]
             .projection()
             .token_projection()
             .wire_input()

@@ -172,6 +172,49 @@ async fn process_notice_terminal_tool_result_consumes_before_boundary_delivery()
     Ok(())
 }
 
+/// A job notice appended after a tool exchange's admission changes the
+/// conversation the next round reads, so the round prepares afresh under its
+/// own attempt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_job_notice_after_the_admission_prepares_the_round_afresh() -> TestResult {
+    let fixture = NoticeFixture::with_terminal_poll(usize::MAX, &[], true).await?;
+    fixture
+        .tool
+        .leave_terminal_unjoined
+        .store(true, Ordering::Release);
+    let turn = fixture.agent.prompt("start then wait on the job").await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while fixture.tool.dispatches.load(Ordering::Acquire) < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    let service = lock_mutex(&fixture.tool.sessions)
+        .clone()
+        .ok_or("service")?;
+    let id = service.session_for_number(1).ok_or("handle")?;
+    service.write_stdin(
+        id,
+        b"finish\n",
+        plakous_tools::JoinedProcessInputDisposition::KeepOpen,
+    )?;
+    let result = turn.result().await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    assert_eq!(notice_count(&fixture.agent), 1);
+    assert_eq!(fixture.model.calls.load(Ordering::Acquire), 3);
+    // Round one; the first exchange's admission, which round two dispatches;
+    // the second exchange's admission; round three after the notice.
+    let rounds = lock_mutex(&fixture.model.round_prepares).clone();
+    assert_eq!(rounds.len(), 4, "{rounds:?}");
+    assert_ne!(rounds[2], rounds[3]);
+    fixture.agent.shutdown().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn process_notice_capacity_refusal_defers_to_next_boundary() -> TestResult {
     let fixture = NoticeFixture::new(1, &[1, 2]).await?;

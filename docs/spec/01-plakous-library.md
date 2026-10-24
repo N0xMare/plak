@@ -833,6 +833,21 @@ replacement. This second-stage count is distinct from raw-result
 `ObservationClipped` bytes and is never added to them. A failed publication
 emits no replacement event; the event log remains observational rather than a
 durable receipt, and reopening a committed head does not replay it.
+Next-round admission validates and prepares the request the next round would
+send over the exchange it admits. The round dispatches that preparation instead
+of preparing again when nothing it read has changed: the same turn and stable
+prefix (no wrap-up round), the same conversation (no fold, steer, notice or note
+since), the same provider configuration, ledger length and request anchor, and
+the same family artifact and cache affinity. Such a round dispatches under the
+admission's attempt id and preparation time, once it holds its request slot
+and the runtime authority revalidated then still authorizes the preparation;
+the dispatch-time revalidation is unchanged. A refreshed credential, another
+account or an expired authority window since the admission prepares the round
+afresh under the current authority, keeping the admission's attempt id, which
+nothing durable has recorded. Any other change prepares the round afresh under
+a new attempt id. The retained preparation never outlives its turn. Either way
+the round's request, sent status and context measure are the ones a fresh
+preparation of that history produces (§10.3).
 
 Exactly one immutable `RuntimeCheckpoint` is authority at each recorded commit
 fence, and its `RuntimeCheckpointKind` is one of two:

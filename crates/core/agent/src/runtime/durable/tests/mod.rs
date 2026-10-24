@@ -6,6 +6,7 @@
 mod fake_composition;
 
 mod admission_occupancy;
+mod admitted_round;
 #[path = "../artifact_prefix_tests.rs"]
 mod artifact_prefix_tests;
 #[path = "../atomic_transition_tests.rs"]

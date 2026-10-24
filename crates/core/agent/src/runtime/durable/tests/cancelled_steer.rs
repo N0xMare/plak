@@ -2,10 +2,11 @@
 use super::*;
 use crate::feed::FeedFact;
 
+/// A read-only `probe` that runs until released.
 #[derive(Default)]
-struct HeldTool {
-    started: AtomicBool,
-    release: AtomicBool,
+pub(super) struct HeldTool {
+    pub(super) started: AtomicBool,
+    pub(super) release: AtomicBool,
 }
 
 impl plakous_tools::ToolExecutor for HeldTool {
@@ -40,29 +41,7 @@ async fn live_cancel_settles_a_queued_steer_as_unapplied() -> TestResult {
         .with_tool_first(),
     );
     let tool = Arc::new(HeldTool::default());
-    let mut registry = ToolRegistryBuilder::default();
-    registry.register(ToolRegistration::new(
-        RegisteredToolId::new("probe.registration")?,
-        ToolExecutorId::new("probe.executor")?,
-        plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"probe.executor"])?,
-        ToolDefinition::new(
-            ToolName::new("probe")?,
-            "1.0.0",
-            "Held probe.",
-            ToolInputContract::structured(json!({
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {},
-                "required": [],
-                "additionalProperties": false
-            }))?,
-            ToolOutputContract::model_content(128, 1_048_576)?,
-            ToolConcurrency::Serial,
-            ToolEffect::ReadOnly,
-        )?,
-        tool.clone(),
-    ))?;
-    let registry = registry.freeze();
+    let registry = held_probe_registry(tool.clone())?;
     let store = Arc::new(TestCreateStore::default());
     let runtime = DurableSessionRuntime::current(
         store.clone(),
@@ -107,4 +86,31 @@ async fn live_cancel_settles_a_queued_steer_as_unapplied() -> TestResult {
     assert_eq!(settlements, vec![true]);
     agent.shutdown().await?;
     Ok(())
+}
+
+/// A registry holding only [`HeldTool`] as `probe`.
+pub(super) fn held_probe_registry(tool: Arc<HeldTool>) -> TestResult<FrozenToolRegistry> {
+    let mut registry = ToolRegistryBuilder::default();
+    registry.register(ToolRegistration::new(
+        RegisteredToolId::new("probe.registration")?,
+        ToolExecutorId::new("probe.executor")?,
+        plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"probe.executor"])?,
+        ToolDefinition::new(
+            ToolName::new("probe")?,
+            "1.0.0",
+            "Held probe.",
+            ToolInputContract::structured(json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }))?,
+            ToolOutputContract::model_content(128, 1_048_576)?,
+            ToolConcurrency::Serial,
+            ToolEffect::ReadOnly,
+        )?,
+        tool,
+    ))?;
+    Ok(registry.freeze())
 }

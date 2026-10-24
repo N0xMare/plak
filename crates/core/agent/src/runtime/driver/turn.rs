@@ -19,7 +19,7 @@ use crate::runtime::driver::model_cleanup::resolve_model_operation;
 use crate::runtime::driver::operations::{CommitPlan, TurnConsequence};
 use crate::runtime::driver::{
     AdmittedToolCall, AdmittedToolExecution, AuthorizationOutcome, Driver,
-    DurableEffectIntentEnvelope, ToolAdmission, ToolBatchResult,
+    DurableEffectIntentEnvelope, RoundRequest, ToolAdmission, ToolBatchResult,
 };
 use crate::runtime::operation_record::{
     DecidedRemedy, FailTurnShape, ProviderAttemptResult, ProviderOutcome, RoundDecision,
@@ -412,6 +412,7 @@ impl Driver {
                 operation_id: steering.operation_id,
             })
             .collect();
+        self.admitted_round = None;
         self.noticed_job_terminals.clear();
         self.observed_job_terminals.clear();
         self.set_tool_preempt(if self.steering.is_empty() {
@@ -515,6 +516,7 @@ impl Driver {
         reason = "fenced refresh, ambiguous-commit recovery, and receipt hydration form one ordered recovery transaction"
     )]
     async fn run_turn(&mut self, command: &PromptCommand) -> Result<TurnResult, AgentError> {
+        self.admitted_round = None;
         self.noticed_job_terminals.clear();
         self.observed_job_terminals.clear();
         self.run_in_memory_turn(command).await
@@ -807,6 +809,22 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
         append_user: bool,
+        tool_calls: usize,
+        continuation_baton: Option<OperationId>,
+    ) -> Result<TurnResult, AgentError> {
+        let result = self
+            .run_turn_rounds(command, append_user, tool_calls, continuation_baton)
+            .await;
+        // A retained preparation of this turn's next round never outlives the
+        // turn, however the turn ends.
+        self.admitted_round = None;
+        result
+    }
+
+    async fn run_turn_rounds(
+        &mut self,
+        command: &PromptCommand,
+        append_user: bool,
         mut tool_calls: usize,
         mut continuation_baton: Option<OperationId>,
     ) -> Result<TurnResult, AgentError> {
@@ -866,8 +884,14 @@ impl Driver {
                     wrap_up_note_appended = true;
                 }
             }
-            let attempt_id = self.attempt_id()?;
-            let request = self.model_request(command, attempt_id, over_budget)?;
+            let (attempt_id, request) =
+                if let Some(admitted) = self.take_admitted_round(command.turn_id, over_budget)? {
+                    (admitted.attempt_id, RoundRequest::Admitted(admitted))
+                } else {
+                    let attempt_id = self.attempt_id()?;
+                    let request = self.model_request(command, attempt_id, over_budget)?;
+                    (attempt_id, RoundRequest::Fresh(Box::new(request)))
+                };
             let operation = self.run_model(command, attempt_id, request).await;
             let last_round_usage = operation.usage;
             let usage_result = command.shared.record_model_operation(last_round_usage);

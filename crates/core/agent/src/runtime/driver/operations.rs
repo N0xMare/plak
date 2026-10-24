@@ -1,7 +1,6 @@
 //! Canonical checkpoint publication and operation transitions.
 
 use crate::manifest::RuntimeContextState;
-use crate::runtime::admission::validate_configuration_runtime_authority;
 use crate::runtime::checkpoint::candidate::SuccessorFacts;
 use crate::runtime::checkpoint::identity::history_segment_kind;
 use crate::runtime::checkpoint::io::DurabilityCommitTelemetry;
@@ -10,6 +9,7 @@ use crate::runtime::control::{
     durable_command_effect, durable_control_error_kind, durable_rejection, effect_intent_bytes,
 };
 use crate::runtime::driver::Driver;
+use crate::runtime::driver::admitted_round::AdmittedRound;
 use crate::runtime::observation::{
     retained_tool_exchange_failure, shrink_tool_exchange_observations, tool_exchange_shrink_budget,
 };
@@ -41,8 +41,7 @@ use plakous_model::{
     ActiveFamilyArtifact, Actor, AttemptId, CanonicalHistory, ContentBlock, ContextStatusKind,
     ConversationItem, ConversationView, Digest, EntryId, HistorySegment, HistorySegmentKind,
     ModelCacheAffinity, ModelError, ModelErrorKind, ModelErrorPhase, ModelOperationRoot,
-    ModelPreparationContext, ModelPreparationError, ModelRequest, ModelResponse,
-    PreparedCallRecord, Provenance, RequestMetadata, TurnId, ValidationMode,
+    ModelRequest, ModelResponse, PreparedCallRecord, Provenance, RequestMetadata, TurnId,
 };
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -1247,41 +1246,37 @@ impl Driver {
             )
         })?;
         let descriptor = self.provider_configuration.effective().descriptor().clone();
-        let plan = descriptor
-            .validate_request(request, ValidationMode::Strict)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
-        descriptor
-            .preflight_context_admission_requirement(plan.request().context_admission_requirement())
-            .map_err(ModelPreparationError::from)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
-        let authority = Arc::clone(&self.model)
-            .revalidate_runtime_authority(prepared_at)
-            .await
-            .map_err(ModelPreparationError::from)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
-        validate_configuration_runtime_authority(
-            &self.provider_configuration,
-            &descriptor,
-            &authority,
-            prepared_at,
-        )
-        .map_err(ModelError::from)
-        .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        let plan = self.validate_round_request(&descriptor, request)?;
         let (active_family_artifact, cache_affinity) =
             self.pending_model_preparation_state(artifact_transition)?;
-        let mut preparation_context = ModelPreparationContext::new(authority, prepared_at)
-            .with_cache_affinity(cache_affinity);
-        preparation_context = self.with_previous_response_metadata(&plan, preparation_context)?;
-        if let Some(artifact) = active_family_artifact {
-            preparation_context = preparation_context.with_active_family_artifact(artifact);
-        }
-        Arc::clone(&self.model)
-            .prepare_call(plan, preparation_context)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        let prepared = self
+            .prepare_round_call(
+                &descriptor,
+                &plan,
+                prepared_at,
+                active_family_artifact.clone(),
+                cache_affinity.clone(),
+            )
+            .await?;
+        // The next round reads the same history, artifact and ledger once the
+        // exchange is promoted; it dispatches this request unless one changed.
+        self.admitted_round = Some(Box::new(AdmittedRound {
+            turn_id: command.turn_id,
+            attempt_id,
+            plan,
+            prepared: std::sync::Mutex::new(prepared),
+            prepared_at,
+            provider_configuration: Arc::clone(&self.provider_configuration),
+            operation_count: self
+                .authority
+                .checkpoint()
+                .manifest()
+                .ledger()
+                .operation_count(),
+            request_anchor: self.request_anchor.clone(),
+            family_artifact: active_family_artifact,
+            cache_affinity,
+        }));
         Ok(())
     }
 

@@ -7,7 +7,7 @@ use crate::runtime::driver::model_cleanup::{
     ModelCleanupOutcome, agent_model_timeout, ambiguous_compaction_error,
     join_cancelled_control_start, join_cancelled_control_stream,
 };
-use crate::runtime::driver::{Driver, ModelOperationResult, ModelStartAdmission};
+use crate::runtime::driver::{Driver, ModelOperationResult, ModelStartAdmission, RoundRequest};
 use crate::runtime::observation::budget::observation_bytes_for_sent_status;
 use crate::runtime::observation::model_event_stamps_ttft;
 use crate::runtime::request_slots::RequestSlot;
@@ -23,8 +23,9 @@ use plakous_model::{
     ActiveFamilyArtifact, AttemptId, ContextStatus, ContextStatusKind, ConversationView,
     ModelCacheAffinity, ModelCallContext, ModelError, ModelErrorKind, ModelErrorPhase, ModelEvent,
     ModelOperationRoot, ModelPreparationContext, ModelPreparationError, ModelRequest,
-    ModelResponse, ModelStreamItem, ProviderCallRecoveryLocatorStage, RequestMetadata,
-    StableRequestPrefix, ToolChoice, Usage, ValidatedRequestPlan, ValidationMode,
+    ModelResponse, ModelStreamItem, PreparedModelCall, ProviderCallRecoveryLocatorStage,
+    RequestMetadata, ResolvedModelDescriptor, StableRequestPrefix, Timestamp, ToolChoice, Usage,
+    ValidatedRequestPlan, ValidationMode,
 };
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -211,7 +212,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
         attempt_id: AttemptId,
-        request: ModelRequest,
+        request: RoundRequest,
     ) -> ModelOperationResult {
         let _slot = match self.take_request_slot(command).await {
             Ok(slot) => slot,
@@ -341,7 +342,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
         attempt_id: AttemptId,
-        request: ModelRequest,
+        request: RoundRequest,
         started: tokio::time::Instant,
         operation_deadline: tokio::time::Instant,
         observed_usage: &mut Option<Usage>,
@@ -354,56 +355,43 @@ impl Driver {
         output_deltas: &mut u64,
     ) -> Result<ModelResponse, AgentError> {
         let descriptor = self.provider_configuration.effective().descriptor().clone();
-        let plan = descriptor
-            .validate_request(request, ValidationMode::Strict)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
-        descriptor
-            .preflight_context_admission_requirement(plan.request().context_admission_requirement())
-            .map_err(ModelPreparationError::from)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        let (plan, prepared, prepared_at) = match request {
+            RoundRequest::Fresh(request) => {
+                Box::pin(self.prepare_round(command, attempt_id, &descriptor, *request)).await?
+            }
+            RoundRequest::Admitted(admitted)
+                if !self.admitted_round_authorized(&descriptor, &admitted).await =>
+            {
+                // The runtime authority changed since the admission (a
+                // refreshed credential, another account or an expired
+                // window): the round prepares afresh under the current one.
+                let request = self.model_request(command, attempt_id, false)?;
+                Box::pin(self.prepare_round(command, attempt_id, &descriptor, request)).await?
+            }
+            RoundRequest::Admitted(admitted) => {
+                let _ = command.shared.events.publish(
+                    EventContext::attempt(command.turn_id, attempt_id),
+                    AgentEventKind::ModelStarted,
+                );
+                if let Some(fields) = self.artifact_prefix_drift(
+                    admitted.family_artifact.as_ref(),
+                    admitted.plan.request(),
+                ) {
+                    self.emit_telemetry(
+                        self.telemetry_context
+                            .with_turn(command.turn_id)
+                            .with_attempt(attempt_id),
+                        TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
+                    );
+                }
+                let prepared = admitted
+                    .prepared
+                    .into_inner()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                (admitted.plan, prepared, admitted.prepared_at)
+            }
+        };
         *validated_plan = Some(plan.clone());
-        let _ = command.shared.events.publish(
-            EventContext::attempt(command.turn_id, attempt_id),
-            AgentEventKind::ModelStarted,
-        );
-        let prepared_at = self.clock.now();
-        let authority = Arc::clone(&self.model)
-            .revalidate_runtime_authority(prepared_at)
-            .await
-            .map_err(ModelPreparationError::from)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
-        validate_configuration_runtime_authority(
-            &self.provider_configuration,
-            &descriptor,
-            &authority,
-            prepared_at,
-        )
-        .map_err(ModelError::from)
-        .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
-        let (active_family_artifact, cache_affinity) = self.active_model_preparation_state()?;
-        if let Some(fields) =
-            self.artifact_prefix_drift(active_family_artifact.as_ref(), plan.request())
-        {
-            self.emit_telemetry(
-                self.telemetry_context
-                    .with_turn(command.turn_id)
-                    .with_attempt(attempt_id),
-                TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
-            );
-        }
-        let mut preparation_context = ModelPreparationContext::new(authority, prepared_at)
-            .with_cache_affinity(cache_affinity);
-        preparation_context = self.with_previous_response_metadata(&plan, preparation_context)?;
-        if let Some(artifact) = active_family_artifact {
-            preparation_context = preparation_context.with_active_family_artifact(artifact);
-        }
-        let prepared = Arc::clone(&self.model)
-            .prepare_call(plan.clone(), preparation_context)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
         *prepared_wire_output_limit = prepared
             .record()
             .projection()
@@ -836,6 +824,102 @@ impl Driver {
                 ModelErrorPhase::Terminal,
             )
         })
+    }
+
+    /// Validates and prepares a round request under the current artifact and
+    /// cache affinity.
+    async fn prepare_round(
+        &mut self,
+        command: &PromptCommand,
+        attempt_id: AttemptId,
+        descriptor: &ResolvedModelDescriptor,
+        request: ModelRequest,
+    ) -> Result<(ValidatedRequestPlan, PreparedModelCall, Timestamp), AgentError> {
+        let plan = self.validate_round_request(descriptor, request)?;
+        let _ = command.shared.events.publish(
+            EventContext::attempt(command.turn_id, attempt_id),
+            AgentEventKind::ModelStarted,
+        );
+        let prepared_at = self.clock.now();
+        let (active_family_artifact, cache_affinity) = self.active_model_preparation_state()?;
+        if let Some(fields) =
+            self.artifact_prefix_drift(active_family_artifact.as_ref(), plan.request())
+        {
+            self.emit_telemetry(
+                self.telemetry_context
+                    .with_turn(command.turn_id)
+                    .with_attempt(attempt_id),
+                TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
+            );
+        }
+        let prepared = self
+            .prepare_round_call(
+                descriptor,
+                &plan,
+                prepared_at,
+                active_family_artifact,
+                cache_affinity,
+            )
+            .await?;
+        Ok((plan, prepared, prepared_at))
+    }
+
+    /// The strict plan of a round request, admitted by its context
+    /// requirement. A round and a tool exchange's admission of the next round
+    /// both validate here.
+    pub(super) fn validate_round_request(
+        &self,
+        descriptor: &ResolvedModelDescriptor,
+        request: ModelRequest,
+    ) -> Result<ValidatedRequestPlan, AgentError> {
+        let plan = descriptor
+            .validate_request(request, ValidationMode::Strict)
+            .map_err(ModelError::from)
+            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        descriptor
+            .preflight_context_admission_requirement(plan.request().context_admission_requirement())
+            .map_err(ModelPreparationError::from)
+            .map_err(ModelError::from)
+            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        Ok(plan)
+    }
+
+    /// Prepares a validated round plan under freshly revalidated runtime
+    /// authority, with the family artifact and cache affinity the round reads.
+    /// A round and a tool exchange's admission of the next round both prepare
+    /// here.
+    pub(super) async fn prepare_round_call(
+        &mut self,
+        descriptor: &ResolvedModelDescriptor,
+        plan: &ValidatedRequestPlan,
+        prepared_at: Timestamp,
+        family_artifact: Option<ActiveFamilyArtifact>,
+        cache_affinity: ModelCacheAffinity,
+    ) -> Result<PreparedModelCall, AgentError> {
+        let authority = Arc::clone(&self.model)
+            .revalidate_runtime_authority(prepared_at)
+            .await
+            .map_err(ModelPreparationError::from)
+            .map_err(ModelError::from)
+            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        validate_configuration_runtime_authority(
+            &self.provider_configuration,
+            descriptor,
+            &authority,
+            prepared_at,
+        )
+        .map_err(ModelError::from)
+        .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        let mut preparation_context = ModelPreparationContext::new(authority, prepared_at)
+            .with_cache_affinity(cache_affinity);
+        preparation_context = self.with_previous_response_metadata(plan, preparation_context)?;
+        if let Some(artifact) = family_artifact {
+            preparation_context = preparation_context.with_active_family_artifact(artifact);
+        }
+        Arc::clone(&self.model)
+            .prepare_call(plan.clone(), preparation_context)
+            .map_err(ModelError::from)
+            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))
     }
 
     pub(super) fn project_model_error(

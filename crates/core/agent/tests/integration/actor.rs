@@ -694,7 +694,9 @@ fn tool_batch_fixture() -> TestResult<ToolBatchFixture> {
     let second_request = segmented_request(
         &descriptor,
         5,
-        11,
+        // The exchange's admission takes attempt 10 and the round sends its
+        // preparation.
+        10,
         vec![
             (HistorySegmentKind::RecentIntent, vec![user_item()?]),
             (

@@ -222,6 +222,7 @@ impl PreparedAgent {
             prompt_in_history: None,
             appended_prompt: None,
             segment_refused_turn: None,
+            admitted_round: None,
             effect_decision_tombstones: VecDeque::new(),
             command_ledger,
             next_command_sequence: self.next_command_sequence,
