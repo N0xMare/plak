@@ -3493,9 +3493,15 @@ paid compaction merely because its byte upper bound is large.
 
 Image payload/base64 bytes **never** become image token counts. The dialect
 supplies a documented dimension bound, or its documented per-image maximum when
-dimensions are unavailable. Claude Messages currently uses the documented
-1568-by-1568 resized bound, `ceil(width * height / 750)`, at most 3279 tokens per
-image. Codex, OpenAI Platform, xAI subscription/API and all three OpenRouter dialects
+dimensions are unavailable. Claude Messages (API key and subscription) uses
+Anthropic's documented rule: an image costs
+`ceil(width / 28) * ceil(height / 28)` visual tokens after it is resized to
+the model's resolution tier, the standard tier with a 1568 px long edge and at
+most 1568 tokens, the high-resolution tier (Claude 4.7 and later) with a
+2576 px long edge and at most 4784 tokens. No enrolled fact records a model's
+tier, so every Claude route meters the high-resolution maximum, **4784 tokens
+per image**. This is harness accounting only; the wire bytes do not change.
+Codex, OpenAI Platform, xAI subscription/API and all three OpenRouter dialects
 use the named conservative default of **8192 tokens per image** where no tighter
 documented bound is enrolled. This is a conservative harness default, **not a
 provider-reported figure**. Dimensions are not parsed from image bytes. A custom

@@ -891,6 +891,74 @@ async fn production_api_accepted_stall_cancellation_joins_connection() -> TestRe
 }
 
 #[tokio::test]
+async fn production_api_meters_each_image_at_the_high_resolution_tier_maximum() -> TestResult {
+    let (client, origin, peer) = tls_exchange(vec![None], false).await?;
+    let binding = configured(
+        client,
+        origin,
+        Arc::new(Rotating(std::sync::Mutex::new("offline-one"))),
+        crate::CLAUDE_SONNET_5_MODEL_ID,
+        ReasoningEffort::Low,
+    )?;
+    let now = SystemClock.now();
+    let image = || -> TestResult<ContentBlock> {
+        Ok(ContentBlock::Image(ImageBlock::new(
+            "image/png",
+            MediaSource::bytes(b"\x89PNG\r\n\x1a\n".to_vec())?,
+        )?))
+    };
+    let mut image_tokens = Vec::new();
+    for images in [1_usize, 2] {
+        let mut blocks = vec![ContentBlock::Text(TextBlock::new("what is this?", None)?)];
+        for _ in 0..images {
+            blocks.push(image()?);
+        }
+        let request = ModelRequest::builder(
+            binding.configuration().selected().identity(),
+            binding.configuration().effective().identity(),
+            ConversationView::from_items(vec![ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(1))?,
+                Actor::User,
+                blocks,
+                Provenance::UserInput,
+            )?])?,
+            RequestMetadata::for_turn(
+                RunId::try_from(uuid::Uuid::from_u128(2))?,
+                TurnId::try_from(uuid::Uuid::from_u128(3))?,
+                AttemptId::try_from(uuid::Uuid::from_u128(4))?,
+                now,
+            ),
+        )
+        .reasoning(ReasoningPolicy::Enabled {
+            effort: Some(ReasoningEffort::Low),
+            requirement: CapabilityRequirement::Required,
+        })
+        .limits(GenerationLimits::new(NonZeroU32::new(64), vec![])?)
+        .build()?;
+        let plan = binding
+            .registered()
+            .descriptor()
+            .validate_request(request, ValidationMode::Strict)?;
+        let prepared = binding.model().prepare_call(
+            plan,
+            ModelPreparationContext::new(binding.initial_authority().clone(), now),
+        )?;
+        let parts = prepared
+            .record()
+            .projection()
+            .token_projection()
+            .input_parts()
+            .ok_or("measured input parts")?;
+        image_tokens.push(parts.image_tokens());
+    }
+    // ceil(2576 / 28) * ceil(1449 / 28) and the tier's 4784 cap agree on a 16:9 image.
+    assert_eq!(CLAUDE_IMAGE_MAX_TOKENS, 92 * 52);
+    assert_eq!(image_tokens, [4784, 2 * 4784]);
+    peer.abort();
+    Ok(())
+}
+
+#[tokio::test]
 async fn production_api_rotation_after_preparation_refuses_deferred_dispatch() -> TestResult {
     let (client, origin, mut peer) = tls_exchange(vec![None], false).await?;
     let source = Arc::new(Rotating(std::sync::Mutex::new("offline-one")));

@@ -5015,9 +5015,10 @@ one user message; an image-only message has no text part.
 The pre-send context measurement (the composer meter, scheduled compaction
 and the send-or-park decision) measures the pending message with its images.
 Each image counts as its route's per-image token bound: Claude routes use
-Anthropic's documented rule (images are resized to at most 1568 px a side,
-about width x height / 750 tokens, so at most 3279 tokens), and every other
-route counts the conservative bound of 8192 tokens per image.
+Anthropic's documented rule (`ceil(width / 28) * ceil(height / 28)` after
+resizing to the model's resolution tier) at its high-resolution maximum of
+4784 tokens, because no enrolled fact tells a model's tier (chapter 01 §6.8),
+and every other route counts the conservative bound of 8192 tokens per image.
 
 The user row shows one chip line per image after the prompt text,
 `[image: png 1280x720 412 KB]`. The row is derived from committed history,

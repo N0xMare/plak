@@ -1,6 +1,9 @@
 //! Executable exact-origin Anthropic API-key Messages binding.
-// Claude resizes images to at most 1568 x 1568; tokens are bounded by pixels / 750.
-pub(crate) const CLAUDE_IMAGE_MAX_TOKENS: u64 = 3279;
+// Claude bills an image at ceil(w / 28) * ceil(h / 28) visual tokens after resizing it to the
+// model's resolution tier: standard, 1568 px long edge and at most 1568 tokens; high resolution
+// (Claude 4.7 and later), 2576 px and at most 4784 tokens. No enrolled fact records a model's
+// tier, so every Claude route meters the high-resolution maximum.
+pub(crate) const CLAUDE_IMAGE_MAX_TOKENS: u64 = 4784;
 
 use crate::{
     AnthropicAccountIdentity, AnthropicApiKeySource, AnthropicError, AnthropicErrorKind,

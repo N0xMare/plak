@@ -7,6 +7,13 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+### Plakous
+
+- The context meter counts each image on Claude routes at 4,784 tokens,
+  Anthropic's current high-resolution maximum (`ceil(w/28) * ceil(h/28)`
+  after resizing), instead of 3,279 from the retired `w * h / 750` rule.
+  Requests are unchanged.
+
 ### Persisted formats
 
 - Runtime format epoch 30: inline image bytes are stored as canonical padded

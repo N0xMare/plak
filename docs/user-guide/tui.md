@@ -73,9 +73,9 @@ renumbered from `#1` to match. A queued message keeps its images when you
 edit its text, and the queue panel marks it `[1 image]`. In the transcript
 the message shows one chip per image, such as `[image: png 1280x720 412 KB]`
 (history keeps the type, not the file name). The context meter counts each
-image before it is sent (up to about 3,300 tokens on Claude routes, a
-conservative 8,192 elsewhere). A model without image input refuses the
-message, naming the route and model. Images are not drawn in the terminal.
+image before it is sent (4,784 tokens on Claude routes, the most a Claude
+model charges for one image; a conservative 8,192 elsewhere). A model without
+image input refuses the message, naming the route and model. Images are not drawn in the terminal.
 
 An image larger than 2048 px on its long edge or 3.75 MiB is downscaled when
 you attach it, so a full-resolution Retina screenshot attaches as is: it is
