@@ -1,0 +1,168 @@
+//! The shared manager core: admission, stored credentials and leases.
+
+use super::{
+    Bytes, CLAUDE_OAUTH_MESSAGES_ORIGIN, CLAUDE_OAUTH_TOKEN_PATH, ClaudeNativeAuthError,
+    ClaudeOAuthTokenGrant, ClaudeSubscriptionStatus, CredentialFence, CredentialGeneration,
+    Duration, ExchangeControl, HEADER_ACCEPT, HEADER_CONTENT_TYPE, HEADER_USER_AGENT, HeaderMap,
+    HeaderValue, Instant, MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES, MAX_TOKEN_BYTES, ManagerCore,
+    Method, Origin, REQUEST_TIMEOUT, Request, SensitiveBytes, StatusCode, StoredTokens, USER_AGENT,
+    UsageTransportError, Zeroizing, credential_record_from_grant, network_failure, remaining_until,
+    system_unix_seconds, validate_acceptance,
+};
+
+impl ManagerCore {
+    pub(super) fn ensure_active(&self) -> Result<(), ClaudeNativeAuthError> {
+        validate_acceptance(&self.acceptance, system_unix_seconds()?)
+    }
+
+    pub(super) fn flow_deadline(limit: Duration) -> Result<Instant, ClaudeNativeAuthError> {
+        Instant::now()
+            .checked_add(limit)
+            .ok_or(ClaudeNativeAuthError::LoginExpired)
+    }
+
+    pub(super) fn ensure_flow_active(
+        &self,
+        deadline: Instant,
+    ) -> Result<(), ClaudeNativeAuthError> {
+        self.ensure_active()?;
+        remaining_until(deadline, Instant::now()).ok_or(ClaudeNativeAuthError::LoginExpired)?;
+        Ok(())
+    }
+
+    pub(super) fn persist_grant(
+        &self,
+        baseline: Option<&CredentialFence>,
+        grant: &ClaudeOAuthTokenGrant,
+    ) -> Result<ClaudeSubscriptionStatus, ClaudeNativeAuthError> {
+        let generation = match baseline {
+            Some(fence) => fence.generation().next()?,
+            None => CredentialGeneration::new(1)?,
+        };
+        let record = credential_record_from_grant(generation, grant)?;
+        let fence = if let Some(expected) = baseline {
+            self.store.replace_selected_login(expected, record)?
+        } else {
+            self.store.initialize_selected(&record)?;
+            record.fence()
+        };
+        Ok(ClaudeSubscriptionStatus {
+            generation: fence.generation(),
+            status: fence.status(),
+        })
+    }
+
+    pub(super) async fn post_json(
+        &self,
+        body: String,
+    ) -> Result<Zeroizing<Vec<u8>>, ClaudeNativeAuthError> {
+        let request = self.json_request(body)?;
+        let control = ExchangeControl::new(Instant::now() + REQUEST_TIMEOUT);
+        let response = self
+            .client
+            .execute(request, control)
+            .await
+            .map_err(|failure| ClaudeNativeAuthError::Transport(network_failure(failure)))?;
+        let status = response.status();
+        let mut body = response.into_body();
+        let mut bytes = Zeroizing::new(Vec::new());
+        while let Some(chunk) = body.next_chunk().await {
+            let chunk = chunk
+                .map_err(|failure| ClaudeNativeAuthError::Transport(network_failure(failure)))?;
+            if bytes.len().saturating_add(chunk.len()) > MAX_TOKEN_BYTES {
+                let _ = body.close().await;
+                return Err(ClaudeNativeAuthError::LoginTokenExchange);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            return Err(ClaudeNativeAuthError::LoginTokenExchange);
+        }
+        Ok(bytes)
+    }
+
+    pub(super) fn json_request(&self, body: String) -> Result<Request, ClaudeNativeAuthError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HEADER_CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        headers.insert(HEADER_ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(HEADER_USER_AGENT, HeaderValue::from_static(USER_AGENT));
+        let mut body = Zeroizing::new(body);
+        Request::new(
+            Origin::parse(&self.token_origin)?,
+            Method::POST,
+            CLAUDE_OAUTH_TOKEN_PATH,
+            headers,
+            SensitiveBytes::new(std::mem::take(&mut *body).into_bytes()).into_bytes(),
+            self.client.limits(),
+        )
+        .map_err(Into::into)
+    }
+
+    pub(super) fn oauth_control_get(
+        &self,
+        path: &'static str,
+        headers: HeaderMap,
+    ) -> Result<Request, ClaudeNativeAuthError> {
+        let origin = CLAUDE_OAUTH_MESSAGES_ORIGIN;
+        #[cfg(test)]
+        let origin = self.control_origin.as_deref().unwrap_or(origin);
+        Request::new(
+            Origin::parse(origin)?,
+            Method::GET,
+            path,
+            headers,
+            Bytes::new(),
+            self.client.limits(),
+        )
+        .map_err(Into::into)
+    }
+
+    pub(super) async fn execute_usage(
+        &self,
+        request: Request,
+    ) -> Result<(StatusCode, bool, Zeroizing<Vec<u8>>), UsageTransportError> {
+        let control = ExchangeControl::new(Instant::now() + REQUEST_TIMEOUT);
+        let response = self
+            .client
+            .execute(request, control)
+            .await
+            .map_err(UsageTransportError::Failure)?;
+        let status = response.status();
+        let is_json = response.headers().iter().any(|(name, value)| {
+            *name == HEADER_CONTENT_TYPE
+                && value
+                    .to_str()
+                    .ok()
+                    .and_then(|media| media.split(';').next())
+                    .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json"))
+        });
+        let mut body = response.into_body();
+        let mut bytes = Zeroizing::new(Vec::new());
+        while let Some(chunk) = body.next_chunk().await {
+            let chunk = chunk.map_err(UsageTransportError::Failure)?;
+            if bytes.len().saturating_add(chunk.len()) > MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES {
+                let _ = body.close().await;
+                return Err(UsageTransportError::TooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok((status, is_json, bytes))
+    }
+
+    pub(super) fn read_stored(
+        &self,
+        fence: &CredentialFence,
+    ) -> Result<StoredTokens, ClaudeNativeAuthError> {
+        let lease = self.store.acquire_ready(fence)?;
+        let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
+            .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
+        stored.validate()?;
+        if stored.grant_binding != fence.account_binding().as_str() {
+            return Err(ClaudeNativeAuthError::InvalidStoredCredential);
+        }
+        Ok(stored)
+    }
+}
