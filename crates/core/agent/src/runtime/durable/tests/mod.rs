@@ -80,6 +80,7 @@ mod provenance;
 mod record_tests;
 mod reopen_and_lease;
 mod seeded_carry;
+mod segment_pressure;
 mod session_update;
 mod store_fixtures;
 mod telemetry;

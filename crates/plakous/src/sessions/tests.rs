@@ -7596,6 +7596,63 @@ mod portable_history {
         Ok(())
     }
 
+    /// A session one segment under the 4,096-segment checkpoint bound, with
+    /// compaction disabled, refuses its next prompt before the prompt appends
+    /// or any model request is prepared, and its history still exports whole.
+    #[tokio::test]
+    async fn a_session_at_the_segment_limit_refuses_and_still_exports() -> TestResult {
+        let directory = tempfile::tempdir()?;
+        let account = b"carry-account";
+        let segments = (0..4_095_u128)
+            .map(|index| {
+                let (actor, kind) = if index % 2 == 0 {
+                    (Actor::User, HistorySegmentKind::RecentIntent)
+                } else {
+                    (Actor::Assistant, HistorySegmentKind::Conversation)
+                };
+                Ok(HistorySegment::new(
+                    kind,
+                    vec![entry(
+                        0x5e6_0000 + index,
+                        actor,
+                        vec![text(&format!("small turn {index}"))?],
+                    )?],
+                )?)
+            })
+            .collect::<TestResult<Vec<_>>>()?;
+        let database = directory.path().join("segment-limit.sqlite");
+        let sessions = sqlite_test_sessions(&database)?;
+        let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+        let (runtime, captured) = capturing_binding(workspace, descriptor()?, account)?;
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(
+                CreateSessionRequest::new(
+                    SessionOperationId::new("create:segment-limit")?,
+                    runtime,
+                )
+                .with_history(PortableSessionHistory::new(
+                    segments.clone(),
+                    account_reference(account)?,
+                    ModelId::new("test.model")?,
+                )),
+            )
+            .await?;
+        let result = session.agent().prompt("refused").await?.result().await?;
+        let TurnResultOutcome::Failed(error) = result.outcome() else {
+            return Err(format!("expected the segment refusal: {:?}", result.outcome()).into());
+        };
+        assert_eq!(error.model_kind(), Some(ModelErrorKind::ContextLimit));
+        assert!(
+            error.message().contains("enable scheduled compaction"),
+            "{error:?}"
+        );
+        assert!(test_lock(&captured).is_none());
+        let locator = session.release().await?;
+        let exported = AgentSessions::export_history_sqlite(&database, locator)?;
+        assert_same_history(exported.segments(), &segments)?;
+        Ok(())
+    }
+
     /// A carried tool exchange is canonical history of the new session, so its
     /// call detail reads from there; an unknown id or another session's call
     /// is never answered from anywhere else.

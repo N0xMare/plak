@@ -154,12 +154,45 @@ impl DurableCompactionPublicationEvidence {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::runtime) enum CompactOrigin {
     Endpoint,
-    TurnFence { pressure_forced: bool },
+    TurnFence { trigger: FenceTrigger },
+}
+
+/// Why a turn fence compacts (spec 01 §10.3).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::runtime) enum FenceTrigger {
+    /// The occupancy trigger or an overflow.
+    Occupancy,
+    /// Exhausted observation capacity.
+    CapacityPressure,
+    /// The committed segment count alone. Placeholder and replay-omission
+    /// successors keep every segment, so only a fold or native successor
+    /// relieves it.
+    SegmentPressure,
+}
+
+impl FenceTrigger {
+    /// Whether the pass spends the per-turn pressure guard.
+    pub(in crate::runtime) const fn pressure_forced(self) -> bool {
+        !matches!(self, Self::Occupancy)
+    }
 }
 
 impl CompactOrigin {
     pub(in crate::runtime) const fn is_turn_fence(self) -> bool {
         matches!(self, Self::TurnFence { .. })
+    }
+
+    pub(in crate::runtime) const fn pressure_forced(self) -> bool {
+        matches!(self, Self::TurnFence { trigger } if trigger.pressure_forced())
+    }
+
+    pub(in crate::runtime) const fn segment_pressure_only(self) -> bool {
+        matches!(
+            self,
+            Self::TurnFence {
+                trigger: FenceTrigger::SegmentPressure
+            }
+        )
     }
 }
 

@@ -1167,6 +1167,15 @@ separate from the 16 MiB bound on a flat manifest. Construction checks object
 count and bytes before publication so an accepted checkpoint cannot exceed
 the cold-open graph bound and strand its own session. The store's aggregate
 retention bounds remain separate.
+A checkpoint also retains at most 4,096 records of each kind: commands,
+operations, canonical history segments and lifecycle obligations; decoding
+refuses a larger count. History segments are bounded by turn admission rather
+than by retention: the turn fences schedule compaction on segment pressure and
+refuse the next round below this bound (§10.3), so no turn's own publication
+reaches it. A Working head already at exactly 4,096 segments, which an earlier
+build could leave when its turn's terminal publication exceeded the bound, is
+not recoverable: every recovery finish appends a segment, so reopen fails and
+export refuses the unfinished turn.
 Publication supplies only newly constructed objects reachable from its final
 root, stopping at the exact prior bundle's CAS membership. Intermediate
 operation-map roots from batched rewrites are not publication objects: every
@@ -7154,6 +7163,34 @@ There are two fences.
   `Failed`, `NotNeeded`, and `Unavailable` do not abort the turn. If output was
   withheld for context capacity, however, only a committed successor permits
   continuation; otherwise a typed context-limit error stops the shrunken history.
+
+**Segment pressure.** The checkpoint's 4,096-segment history bound (§5) is
+independent of tokens: a session of short turns adds about three segments per
+prompt and reaches it with no token pressure. When the committed head holds at
+least 3,072 segments (three quarters of the bound) and no other trigger applies,
+fence (a) and fence (b) schedule a pressure-forced paid fold even below the
+token trigger. It is admitted like any pressure-forced fold: it spends the
+pressure guard and is subject to the failed-fold backoff and per-turn cap, and,
+like the occupancy trigger, it waits for another model round when the newest
+finalized provider call is a fold that failed after dispatch. It uses the
+sealed harness cut even on a route with a native facet, because a native
+successor keeps every newest user message its token budget admits. A
+placeholder or replay-omission successor keeps every segment and never counts
+as relief, so this pass never commits one: when no paid fold is admissible, no
+eligible cut exists, or the fold fails, it commits nothing and the turn goes
+on. A committed fold resets the count.
+At 4,032 segments (the bound minus 64) the next round is refused before
+anything commits, with or without scheduled compaction. A turn whose prompt
+has not appended fails before the append, after fence (a); a running turn
+fails before its next model round. The failure is a typed `ContextLimit` model
+error in the preparation phase with the Compact remedy, and its message names
+what to do: compact the session or fork it, or with scheduled compaction
+disabled, compact the session or enable scheduled compaction. A refused prompt
+adds no segment, and the margin holds what one round and the refused turn's
+failure note append, so the refusal always publishes its terminal: the session
+stays quiescent, reopens, exports, and compacts through the idle endpoint.
+The prompt is never withheld at the limit, since a note in its place keeps the
+count.
 
 `ProtectedOverflow` requests compaction on **every** route at both fences.
 Before overflow recovery dispatches a harness fold, a legal semantic cut or

@@ -229,7 +229,10 @@ pub mod internal {
     }
 }
 
-pub(crate) use crate::manifest::{MAX_RUNTIME_CHECKPOINT_BYTES, MAX_RUNTIME_RECORDS};
+pub(crate) use crate::manifest::{
+    MAX_RUNTIME_CHECKPOINT_BYTES, MAX_RUNTIME_RECORDS, SEGMENT_PRESSURE_SEGMENTS,
+    SEGMENT_REFUSAL_SEGMENTS,
+};
 
 pub(crate) use crate::rehydration::{HarnessPlanReadiness, rehydrate_harness_plan};
 #[cfg_attr(

@@ -811,6 +811,8 @@ impl Driver {
                 AgentErrorKind::OutcomeUnknown | AgentErrorKind::Cancelled
             )
             && error.model_kind() == Some(ModelErrorKind::ContextLimit)
+            // A note in the prompt's place keeps the segment count.
+            && !self.segment_limit_reached()
             && self.appended_prompt.is_some_and(|prompt| {
                 trailing_prompt(
                     self.authority.checkpoint().manifest().canonical().history(),

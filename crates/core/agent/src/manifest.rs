@@ -115,6 +115,13 @@ pub(crate) const MAX_RUNTIME_OPERATION_COMPONENT_BYTES: usize = 64 * 1024 * 1024
 const MAX_CHECKPOINT_HISTORY_SEGMENT_BYTES: usize = MAX_RUNTIME_CHECKPOINT_BYTES;
 /// Maximum retained commands, operations, history segments, or obligations.
 pub(crate) const MAX_RUNTIME_RECORDS: usize = 4_096;
+/// Committed history segments at which a turn fence schedules a paid fold even
+/// below the token trigger (spec 01 §10.3).
+pub(crate) const SEGMENT_PRESSURE_SEGMENTS: usize = MAX_RUNTIME_RECORDS / 4 * 3;
+/// Committed history segments at which the next round is refused. The margin
+/// holds what one round and its terminal append, so the checkpoint that ends a
+/// refused turn still encodes under [`MAX_RUNTIME_RECORDS`].
+pub(crate) const SEGMENT_REFUSAL_SEGMENTS: usize = MAX_RUNTIME_RECORDS - 64;
 /// Exact byte width of one runtime-minted durable process-session identity.
 pub const PROCESS_SESSION_ID_BYTES: usize = 16;
 

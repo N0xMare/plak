@@ -165,6 +165,10 @@ impl Driver {
         occupancy_before: Option<u64>,
         native_protected_history: bool,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        // Placeholders keep every segment, so they never relieve segment pressure.
+        if origin.segment_pressure_only() {
+            return Ok(AgentCompactSessionOutcome::NotNeeded);
+        }
         let source_history = self
             .authority
             .checkpoint()

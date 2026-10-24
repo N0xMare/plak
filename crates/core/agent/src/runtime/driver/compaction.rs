@@ -24,7 +24,7 @@ use crate::runtime::compaction::request::{
 };
 use crate::runtime::compaction::{
     CompactOrigin, CompactionCompletionError, DurableCompactionIdentity,
-    DurableCompactionRequestRecord, ExactCompactionRuntime,
+    DurableCompactionRequestRecord, ExactCompactionRuntime, FenceTrigger,
 };
 use crate::runtime::context::{context_status_projection, pending_user_segment};
 use crate::runtime::continuation::{runtime_component, runtime_manifest_error};
@@ -50,8 +50,8 @@ use crate::{
     AgentErrorKind, AgentEventKind, AgentSessionEndpointError, CheckpointId,
     CompactionEventOutcome, CompactionEventReason, ContextEvaluationAudit, DurableOperationKind,
     DurableOperationRecord, DurableOperationState, DurableOperationTransition, EventContext,
-    RuntimeCheckpoint, RuntimeComponentKind, RuntimeLifecycle, StoreAdmission,
-    TelemetryObservationKind,
+    MAX_RUNTIME_RECORDS, RuntimeCheckpoint, RuntimeComponentKind, RuntimeLifecycle,
+    SEGMENT_PRESSURE_SEGMENTS, SEGMENT_REFUSAL_SEGMENTS, StoreAdmission, TelemetryObservationKind,
 };
 use futures_util::StreamExt;
 use plakous_model::{
@@ -377,23 +377,91 @@ impl Driver {
         self.refresh_paid_fold_backoff(command.turn_id);
         let pressure = self.observation_budget.capacity_exhausted();
         if pressure && !self.turn_budgets.pressure_fold_spent {
-            return self.run_turn_fence_compaction(command, true).await;
+            return self
+                .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure)
+                .await;
         }
         let Some(status) = self.measure_scheduling_context(command).await else {
             if pressure {
-                return self.run_turn_fence_compaction(command, true).await;
+                return self
+                    .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure)
+                    .await;
             }
-            return Ok(TurnCompactionOutcome::Deferred);
+            return self.compact_for_segment_pressure(command, None).await;
         };
         let occupied = self.anchored_occupied_tokens(&status);
         let trigger = status.compaction_trigger_tokens();
         if !should_schedule_mid_turn_compaction_with_trigger(status.kind(), occupied, trigger) {
             if pressure {
-                return self.run_turn_fence_compaction(command, true).await;
+                return self
+                    .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure)
+                    .await;
             }
+            return self.compact_for_segment_pressure(command, None).await;
+        }
+        self.run_turn_fence_compaction(command, FenceTrigger::Occupancy)
+            .await
+    }
+
+    fn committed_segment_count(&self) -> usize {
+        self.authority
+            .checkpoint()
+            .manifest()
+            .canonical()
+            .history()
+            .segments()
+            .len()
+    }
+
+    /// A paid fold for a committed head of at least
+    /// [`SEGMENT_PRESSURE_SEGMENTS`] segments when nothing else triggers one.
+    /// It is pressure-forced, so it spends the turn's pressure guard, and like
+    /// the occupancy trigger it waits for a model round after a fold that
+    /// failed after dispatch: the same source would fail the same way.
+    async fn compact_for_segment_pressure(
+        &mut self,
+        command: &PromptCommand,
+        pending_user_input: Option<UserInput>,
+    ) -> Result<TurnCompactionOutcome, AgentError> {
+        if self.committed_segment_count() < SEGMENT_PRESSURE_SEGMENTS
+            || !self.paid_fold_admissible(true)
+            || self.paid_fold_failed_since_last_round()
+        {
             return Ok(TurnCompactionOutcome::Deferred);
         }
-        self.run_turn_fence_compaction(command, false).await
+        self.run_turn_compaction(command, FenceTrigger::SegmentPressure, pending_user_input)
+            .await
+    }
+
+    pub(super) fn segment_limit_reached(&self) -> bool {
+        self.committed_segment_count() >= SEGMENT_REFUSAL_SEGMENTS
+    }
+
+    /// Refuses the next round once the committed head holds
+    /// [`SEGMENT_REFUSAL_SEGMENTS`] segments. The margin under
+    /// [`MAX_RUNTIME_RECORDS`] holds what one round and the refused turn's
+    /// terminal append, so the refusal itself always publishes.
+    pub(super) fn segment_limit_refusal(&self) -> Option<AgentError> {
+        if !self.segment_limit_reached() {
+            return None;
+        }
+        let segments = self.committed_segment_count();
+        let remedy = if self.config.scheduled_compaction_enabled {
+            "compact the session or fork it"
+        } else {
+            "compact the session, or enable scheduled compaction"
+        };
+        Some(self.project_model_error(
+            ModelError::new(
+                ModelErrorKind::ContextLimit,
+                format!(
+                    "session history holds {segments} segments, at the \
+                     {SEGMENT_REFUSAL_SEGMENTS}-segment limit below the \
+                     {MAX_RUNTIME_RECORDS}-segment checkpoint bound; {remedy}"
+                ),
+            ),
+            ModelErrorPhase::Preparation,
+        ))
     }
 
     /// Occupancy measured from a current-binding anchor; an unanchored
@@ -453,7 +521,7 @@ impl Driver {
         }
         self.reresolve_expired_model(command).await?;
         self.refresh_paid_fold_backoff(command.turn_id);
-        self.run_turn_fence_compaction(command, false)
+        self.run_turn_fence_compaction(command, FenceTrigger::Occupancy)
             .await
             .map(|outcome| outcome.committed())
     }
@@ -475,7 +543,11 @@ impl Driver {
             return Ok(());
         }
         self.reresolve_expired_model(command).await?;
+        let pending_user_input =
+            || Some(command.input.clone()).filter(|input| !input.parts().is_empty());
         let Some(status) = self.measure_scheduling_context(command).await else {
+            self.compact_for_segment_pressure(command, pending_user_input())
+                .await?;
             return Ok(());
         };
         let overflow = matches!(
@@ -500,16 +572,14 @@ impl Driver {
                 .is_some_and(|(occupied, trigger)| occupied >= trigger)
             && !self.paid_fold_failed_since_last_round();
         if !overflow && !occupancy {
+            self.compact_for_segment_pressure(command, pending_user_input())
+                .await?;
             return Ok(());
         }
         // Seal against committed intent before the follow-up changes the cut.
         // The pending prompt participates in the retained-tail fit check only.
         if !self
-            .run_turn_compaction(
-                command,
-                false,
-                Some(command.input.clone()).filter(|input| !input.parts().is_empty()),
-            )
+            .run_turn_compaction(command, FenceTrigger::Occupancy, pending_user_input())
             .await?
             .committed()
             && self.turn_budgets.paid_fold_spent
@@ -525,16 +595,15 @@ impl Driver {
     async fn run_turn_fence_compaction(
         &mut self,
         command: &PromptCommand,
-        pressure_forced: bool,
+        trigger: FenceTrigger,
     ) -> Result<TurnCompactionOutcome, AgentError> {
-        self.run_turn_compaction(command, pressure_forced, None)
-            .await
+        self.run_turn_compaction(command, trigger, None).await
     }
 
     async fn run_turn_compaction(
         &mut self,
         command: &PromptCommand,
-        pressure_forced: bool,
+        trigger: FenceTrigger,
         pending_user_input: Option<UserInput>,
     ) -> Result<TurnCompactionOutcome, AgentError> {
         let checkpoint = self.authority.checkpoint();
@@ -593,7 +662,7 @@ impl Driver {
         let outcome = Box::pin(self.compact_session_with_detail(
             Some(command),
             request,
-            CompactOrigin::TurnFence { pressure_forced },
+            CompactOrigin::TurnFence { trigger },
             &mut committed_detail,
         ))
         .await;
@@ -914,7 +983,9 @@ impl Driver {
             source,
             identity,
         };
-        let mut native_allowed = true;
+        // A native successor keeps every newest user message its token budget
+        // admits, so only the sealed harness cut bounds the segment count.
+        let mut native_allowed = !origin.segment_pressure_only();
         loop {
             let measured = self
                 .measure_compaction_source(
@@ -925,9 +996,7 @@ impl Driver {
                     committed_detail,
                 )
                 .await?;
-            if let CompactOrigin::TurnFence { pressure_forced } = origin
-                && !self.paid_fold_admissible(pressure_forced)
-            {
+            if origin.is_turn_fence() && !self.paid_fold_admissible(origin.pressure_forced()) {
                 return self
                     .compaction_source_placeholders(&attempt, &runtime, &measured, false)
                     .await;
@@ -1620,12 +1689,7 @@ impl Driver {
         let result = if let Some(error) = locator_refusal {
             Err(error)
         } else {
-            if matches!(
-                attempt.origin,
-                CompactOrigin::TurnFence {
-                    pressure_forced: true
-                }
-            ) {
+            if attempt.origin.pressure_forced() {
                 self.turn_budgets.pressure_fold_spent = true;
             }
             Box::pin(self.run_compaction_call(&mut live)).await
@@ -1814,12 +1878,7 @@ impl Driver {
             .await
         {
             Ok((target, occupancy_after)) => {
-                if matches!(
-                    origin,
-                    CompactOrigin::TurnFence {
-                        pressure_forced: true
-                    }
-                ) {
+                if origin.pressure_forced() {
                     self.pressure_folds_committed += 1;
                 }
                 if origin.is_turn_fence() {

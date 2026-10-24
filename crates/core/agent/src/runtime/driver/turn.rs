@@ -825,10 +825,20 @@ impl Driver {
         // wrap-up already ran, and spec 01 §3.3 allows exactly one.
         let mut wrap_up_round_taken = self.turn_budgets.over_round_cap(command.max_model_rounds);
         let mut wrap_up_note_appended = wrap_up_round_taken;
+        // The prompt append checked the segment limit just before this frame's
+        // first round.
+        let mut segment_limit_checked = append_user;
         loop {
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 command.cancellation.cancel();
                 return Err(cancelled_error());
+            }
+            if !std::mem::take(&mut segment_limit_checked)
+                && let Some(refusal) = self.segment_limit_refusal()
+            {
+                self.finalize_hosted_continuation(command.turn_id, continuation_baton)
+                    .await?;
+                return Err(refusal);
             }
             self.reresolve_expired_model(command).await?;
             self.turn_budgets.model_rounds = self.turn_budgets.model_rounds.saturating_add(1);
@@ -1199,6 +1209,10 @@ impl Driver {
     /// Appends the turn's prompt to history after any pre-prompt compaction.
     async fn append_turn_prompt(&mut self, command: &PromptCommand) -> Result<(), AgentError> {
         self.maybe_compact_before_turn_prompt(command).await?;
+        // Refused before the prompt appends, so a refused turn adds no segment.
+        if let Some(refusal) = self.segment_limit_refusal() {
+            return Err(refusal);
+        }
         let prompt_entry = self.entry_id()?;
         let user_item = ConversationItem::new(
             prompt_entry,
