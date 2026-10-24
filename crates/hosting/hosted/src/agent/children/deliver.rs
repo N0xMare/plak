@@ -33,8 +33,8 @@ pub(in crate::agent) struct ProductLiveCanceller {
     pub(in crate::agent) runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
 }
 
-impl crate::agent_tree_tools::LiveTurnCanceller for ProductLiveCanceller {
-    fn cancel_agents(
+impl ProductLiveCanceller {
+    pub(in crate::agent) fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
     ) -> Pin<
@@ -75,8 +75,8 @@ pub(in crate::agent) struct ProductMailDeliverer {
     pub(in crate::agent) runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
 }
 
-impl crate::agent_tree_tools::MailDeliverer for ProductMailDeliverer {
-    fn withdraw_followup(
+impl ProductMailDeliverer {
+    pub(in crate::agent) fn withdraw_followup(
         &self,
         driver: TreeDriver,
         agent_id: String,
@@ -165,7 +165,7 @@ impl crate::agent_tree_tools::MailDeliverer for ProductMailDeliverer {
         })
     }
 
-    fn deliver(
+    pub(in crate::agent) fn deliver(
         &self,
         request: crate::agent_tree_tools::MailDeliveryRequest,
     ) -> Pin<
@@ -181,9 +181,7 @@ impl crate::agent_tree_tools::MailDeliverer for ProductMailDeliverer {
     > {
         Box::pin(async move { self.deliver_mail(request).await })
     }
-}
 
-impl ProductMailDeliverer {
     async fn deliver_mail(
         &self,
         request: crate::agent_tree_tools::MailDeliveryRequest,

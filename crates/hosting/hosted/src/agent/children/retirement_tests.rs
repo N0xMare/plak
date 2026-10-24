@@ -2568,7 +2568,6 @@ async fn completion_reservation_survives_concurrent_cancel_and_reopen() {
 }
 #[tokio::test]
 async fn failed_normal_release_clears_slot_and_fails_joined_close_canceller() {
-    use crate::agent_tree_tools::LiveTurnCanceller;
     let root = tempfile::tempdir().unwrap();
     let runtime = runtime(root.path());
     let turn = TurnId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
@@ -2736,9 +2735,9 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
                     &arguments,
                     "exact-cancel".into(),
                     crate::agent_tree_tools::TopologyHostPorts {
-                        canceller: Some(Arc::new(ProductLiveCanceller {
+                        controller: Some(Arc::new(CancelOnly(ProductLiveCanceller {
                             runtime: runtime.clone(),
-                        })),
+                        }))),
                         ..Default::default()
                     },
                 )
@@ -2801,5 +2800,32 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
             );
             assert_eq!(calls.load(Ordering::SeqCst), 1);
         }
+    }
+}
+
+/// The product's live canceller as a cancel-only controller, for a tool call
+/// that exercises cancellation alone.
+struct CancelOnly(ProductLiveCanceller);
+
+impl crate::agent_tree_tools::ChildController for CancelOnly {
+    fn services(&self) -> crate::agent_tree_tools::ChildServices {
+        crate::agent_tree_tools::ChildServices::CANCEL
+    }
+
+    fn cancel_agents(
+        &self,
+        agent_ids: Vec<String>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        crate::agent_tree_tools::LiveCancelOutcome,
+                        crate::agent_tree_tools::LiveCancelFailure,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > {
+        self.0.cancel_agents(agent_ids)
     }
 }

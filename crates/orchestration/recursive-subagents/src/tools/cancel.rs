@@ -1,4 +1,4 @@
-//! Interrupt, close and recover: the cancel ports and the fail-closed receipts.
+//! Interrupt, close and recover: the cancel outcomes and the fail-closed receipts.
 
 use super::*;
 
@@ -32,29 +32,6 @@ pub struct LiveCancelOutcome {
     pub cancelled_ids: Vec<String>,
     /// Agents that held no live turn.
     pub not_live_ids: Vec<String>,
-}
-
-/// Cancels the live turns behind nodes the tree has already moved.
-pub trait LiveTurnCanceller: Send + Sync {
-    /// Cancels the live turns of these agents, after the tree has already
-    /// recorded the interrupt or close durably.
-    fn cancel_agents(
-        &self,
-        agent_ids: Vec<String>,
-    ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>;
-}
-
-/// Settles a `recovery_required` child by reopening its session exactly.
-///
-/// The tree cannot open a session; the host can. Recovery never replays a
-/// model call or a tool, and a refusal leaves the node exactly as it was.
-pub trait ChildRecoverer: Send + Sync {
-    /// Recovers `agent_id`, fenced to `expected_attempt_id` when given.
-    fn recover(
-        &self,
-        agent_id: String,
-        expected_attempt_id: Option<crate::protocol::AttemptId>,
-    ) -> Pin<Box<dyn Future<Output = Result<RecoverAgentOutput, TopologyError>> + Send + '_>>;
 }
 
 impl TopologyTool {
@@ -106,7 +83,7 @@ impl TopologyTool {
         if replayed {
             return ToolOutcome::success_text(payload.to_string());
         }
-        let Some(canceller) = &self.canceller else {
+        let Some(canceller) = self.canceller() else {
             return ToolOutcome::success_text(payload.to_string());
         };
         let cancellation = canceller
@@ -193,7 +170,7 @@ impl TopologyTool {
             self.settle(effects).await?;
             return ToolOutcome::success_text(payload.to_string());
         }
-        let mut cancellation = match &self.canceller {
+        let mut cancellation = match self.canceller() {
             Some(canceller) => canceller.cancel_agents(ids.clone()).await,
             None => Ok(LiveCancelOutcome {
                 cancelled_ids: Vec::new(),
@@ -286,11 +263,8 @@ impl TopologyTool {
         if let Err(error) = authorized {
             return Self::topology_failure(&error);
         }
-        let Some(recoverer) = &self.recoverer else {
-            return Self::topology_failure(&TopologyError::new(
-                TopologyErrorCode::RecoverySessionUnavailable,
-                "this host cannot reopen child sessions; nothing changed",
-            ));
+        let Some(recoverer) = self.recoverer() else {
+            return Self::topology_failure(&controller::recovery_unavailable());
         };
         match recoverer
             .recover(request.agent_id, request.expected_attempt_id)

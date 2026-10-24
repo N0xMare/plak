@@ -244,7 +244,11 @@ struct StubRecoverer {
     calls: AtomicUsize,
 }
 
-impl ChildRecoverer for StubRecoverer {
+impl ChildController for StubRecoverer {
+    fn services(&self) -> ChildServices {
+        ChildServices::RECOVER
+    }
+
     fn recover(
         &self,
         agent_id: String,
@@ -286,7 +290,7 @@ async fn invoke_granted_recover_agent_authorizes_then_asks_the_host() {
         let arguments = json!({ "agent_id": target });
         let operation = operation.to_owned();
         let ports = TopologyHostPorts {
-            recoverer: with_port.then(|| Arc::clone(&recoverer) as Arc<dyn ChildRecoverer>),
+            controller: with_port.then(|| Arc::clone(&recoverer) as Arc<dyn ChildController>),
             ..TopologyHostPorts::default()
         };
         async move {

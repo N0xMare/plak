@@ -13,7 +13,7 @@ async fn interrupt_cancels_live_child_and_replays() {
     let canceller = Arc::new(StubCanceller::ok());
     let tool = interrupt_tool(
         driver.clone(),
-        Some(Arc::clone(&canceller) as Arc<dyn LiveTurnCanceller>),
+        Some(Arc::clone(&canceller) as Arc<dyn ChildController>),
     );
     let first = tool
         .interrupt_with("op-interrupt".into(), &agent_id_request("c1"))
@@ -70,7 +70,7 @@ async fn interrupt_cancel_failure_is_fail_closed() {
     let canceller = Arc::new(StubCanceller::fail());
     let outcome = interrupt_tool(
         driver.clone(),
-        Some(Arc::clone(&canceller) as Arc<dyn LiveTurnCanceller>),
+        Some(Arc::clone(&canceller) as Arc<dyn ChildController>),
     )
     .interrupt_with("op-interrupt-fail".into(), &agent_id_request("c1"))
     .await
@@ -97,7 +97,7 @@ async fn close_cancels_closed_ids_in_domain_order() {
     let canceller = Arc::new(StubCanceller::ok());
     let outcome = close_tool(
         driver.clone(),
-        Some(Arc::clone(&canceller) as Arc<dyn LiveTurnCanceller>),
+        Some(Arc::clone(&canceller) as Arc<dyn ChildController>),
     )
     .close_with("op-close".into(), &agent_id_request("c1"))
     .await
@@ -114,7 +114,7 @@ async fn close_cancels_closed_ids_in_domain_order() {
     );
     let replay = close_tool(
         driver.clone(),
-        Some(Arc::clone(&canceller) as Arc<dyn LiveTurnCanceller>),
+        Some(Arc::clone(&canceller) as Arc<dyn ChildController>),
     )
     .close_with("op-close".into(), &agent_id_request("c1"))
     .await
@@ -133,7 +133,7 @@ async fn close_cancel_failure_keeps_close_intent_and_recovery_evidence() {
     let tree = Arc::clone(&driver.tree);
     let outcome = close_tool(
         driver.clone(),
-        Some(Arc::new(StubCanceller::fail()) as Arc<dyn LiveTurnCanceller>),
+        Some(Arc::new(StubCanceller::fail()) as Arc<dyn ChildController>),
     )
     .close_with("op-close-fail".into(), &agent_id_request("c1"))
     .await
@@ -158,7 +158,7 @@ async fn close_cancel_failure_without_ids_keeps_closed() {
     let tree = Arc::clone(&driver.tree);
     let outcome = close_tool(
         driver.clone(),
-        Some(Arc::new(StubCanceller::fail_without_ids()) as Arc<dyn LiveTurnCanceller>),
+        Some(Arc::new(StubCanceller::fail_without_ids()) as Arc<dyn ChildController>),
     )
     .close_with("op-close-empty".into(), &agent_id_request("c1"))
     .await
@@ -209,10 +209,7 @@ async fn fail_closed_session_does_not_project_unsaved_materialization() {
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Spawn,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: None,
         observer: Some(Arc::clone(&observer)),
         cell_budget: test_budget(),
     };
@@ -261,7 +258,7 @@ async fn an_interrupt_during_a_resume_start_admission_is_not_unwatched() {
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let send = |operation: &'static str, text: &'static str| {
         let tool = Arc::clone(&tool);

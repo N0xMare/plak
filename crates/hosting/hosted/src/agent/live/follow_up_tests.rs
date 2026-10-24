@@ -4,7 +4,7 @@
 use super::*;
 use crate::agent::children::ChildTurnIdentity;
 use crate::agent::park::{self, TurnEnd};
-use crate::agent_tree_tools::{MailDeliverer, MailDeliveryRequest};
+use crate::agent_tree_tools::MailDeliveryRequest;
 use plakous::sessions::{
     AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend, SessionOperationId,
 };

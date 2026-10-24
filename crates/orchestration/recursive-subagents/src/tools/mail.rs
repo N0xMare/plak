@@ -1,4 +1,4 @@
-//! Mail: the delivery port and `send_agent_message` reaching, following up or steering a turn.
+//! Mail: the delivery request and `send_agent_message` reaching, following up or steering a turn.
 
 use super::*;
 
@@ -120,36 +120,6 @@ impl From<&str> for MailDeliveryFailure {
     fn from(message: &str) -> Self {
         Self::RecoveryRequired(message.to_owned())
     }
-}
-
-/// Starts, follows up, or steers the bound child session for one mail record.
-///
-/// A Start the deliverer admits is bound to the recipient's attempt and
-/// marked active by the deliverer, under the tree lock, before that turn can
-/// end. A follow-up or steer joins the turn the attempt already binds; a
-/// follow-up the runtime admits as the next turn is bound by the host's turn
-/// waiter when the turn before it ends. The send never binds or activates a
-/// turn or acknowledges mail: the deliverer records a command intent and
-/// projects its committed acceptance, including the exact envelope, before
-/// returning success. A no-fact refusal remains a keyed host decision.
-pub trait MailDeliverer: Send + Sync {
-    /// Withdraws only after a definitive Start refusal, holding startup and
-    /// exact session ownership across an authoritative tail read and tree CAS.
-    /// The opening mail and supplied send failure receipt settle in that CAS.
-    fn withdraw_followup(
-        &self,
-        driver: TreeDriver,
-        agent_id: String,
-        message_id: String,
-        receipt: Option<(String, TopologyErrorCode)>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TopologyError>> + Send + '_>>;
-
-    /// Hands one accepted message to the recipient's session, in whatever
-    /// shape the tree's `disposition` already chose.
-    fn deliver(
-        &self,
-        request: MailDeliveryRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<MailDeliveryAck, MailDeliveryFailure>> + Send + '_>>;
 }
 
 pub(super) fn settle_followup_refusal(
@@ -343,7 +313,7 @@ impl TopologyTool {
                 );
             }
         };
-        let Some(deliverer) = &self.deliverer else {
+        let Some(deliverer) = self.deliverer() else {
             return ToolOutcome::success_text(json!(output).to_string());
         };
         let snapshot = loop {
@@ -941,7 +911,7 @@ impl TopologyTool {
             return Ok(false);
         };
         if !uncertain
-            && let Some(deliverer) = &self.deliverer
+            && let Some(deliverer) = self.deliverer()
             && deliverer
                 .withdraw_followup(
                     self.driver.clone(),
@@ -1026,7 +996,7 @@ impl TopologyTool {
         if !definite_refusal {
             return self.fail_closed_session(agent_id, message);
         }
-        let withdrawn = match &self.deliverer {
+        let withdrawn = match self.deliverer() {
             Some(deliverer) => {
                 deliverer
                     .withdraw_followup(

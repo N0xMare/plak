@@ -214,10 +214,7 @@ fn registration(
     kind: TopologyKind,
     spawn_description: Option<&SpawnDescription>,
     spawnable_templates: &[String],
-    binder: Option<Arc<dyn SpawnedSessionBinder>>,
-    deliverer: Option<Arc<dyn MailDeliverer>>,
-    canceller: Option<Arc<dyn LiveTurnCanceller>>,
-    recoverer: Option<Arc<dyn ChildRecoverer>>,
+    controller: Option<Arc<dyn ChildController>>,
     observer: Option<Arc<dyn TopologyObserver>>,
     cell_budget: Arc<CellAgentBudget>,
     vocabulary: TopologyVocabulary,
@@ -279,10 +276,7 @@ fn registration(
             caller_id,
             kind,
             vocabulary,
-            binder,
-            deliverer,
-            canceller,
-            recoverer,
+            controller,
             observer,
             cell_budget,
         }),
@@ -340,14 +334,9 @@ pub fn topology_tool_registrations_in(
 pub struct TopologyHostPorts {
     /// Exact session-owned process services for topology waits and settlement.
     pub job_host: Option<Arc<dyn plakous::tools::JobHost>>,
-    /// Opens a spawned child's session and starts its assignment turn.
-    pub binder: Option<Arc<dyn SpawnedSessionBinder>>,
-    /// Delivers mail onto a bound child session.
-    pub deliverer: Option<Arc<dyn MailDeliverer>>,
-    /// Cancels live child turns after an interrupt or close.
-    pub canceller: Option<Arc<dyn LiveTurnCanceller>>,
-    /// Settles a `recovery_required` child by an exact session reopen.
-    pub recoverer: Option<Arc<dyn ChildRecoverer>>,
+    /// Binds, mails, cancels and recovers child sessions, for the services
+    /// it declares.
+    pub controller: Option<Arc<dyn ChildController>>,
     /// Telemetry for node lifecycle.
     pub observer: Option<Arc<dyn TopologyObserver>>,
     /// How the node's pack spells the await and interrupt slots.
@@ -363,10 +352,7 @@ pub fn topology_tool_registrations_on(
     driver.bind_job_host(ports.job_host.clone());
     let TopologyHostPorts {
         job_host: _,
-        binder,
-        deliverer,
-        canceller,
-        recoverer,
+        controller,
         observer,
         vocabulary,
     } = ports;
@@ -425,10 +411,7 @@ pub fn topology_tool_registrations_on(
             vocabulary.presents(slot),
             spawn_description.as_ref(),
             &spawnable_templates,
-            binder.as_ref().map(Arc::clone),
-            deliverer.as_ref().map(Arc::clone),
-            canceller.as_ref().map(Arc::clone),
-            recoverer.as_ref().map(Arc::clone),
+            controller.as_ref().map(Arc::clone),
             observer.as_ref().map(Arc::clone),
             Arc::clone(&cell_budget),
             vocabulary,
@@ -453,10 +436,7 @@ pub async fn invoke_granted_topology_tool_on(
     driver.bind_job_host(ports.job_host.clone());
     let TopologyHostPorts {
         job_host: _,
-        binder,
-        deliverer,
-        canceller,
-        recoverer,
+        controller,
         ..
     } = ports;
     let tree = Arc::clone(&driver.tree);
@@ -488,10 +468,7 @@ pub async fn invoke_granted_topology_tool_on(
         caller_id: Arc::new(Mutex::new(caller_id)),
         kind,
         vocabulary: TopologyVocabulary::default(),
-        binder,
-        deliverer,
-        canceller,
-        recoverer,
+        controller,
         observer: None,
         cell_budget,
     };

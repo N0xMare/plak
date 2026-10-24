@@ -1931,7 +1931,7 @@ async fn mail_during_a_failed_wake_end_is_refused_not_started() {
                     ),
                     runtime: Arc::clone(&runtime),
                 };
-                let started = crate::agent_tree_tools::MailDeliverer::deliver(
+                let started = crate::agent::children::ProductMailDeliverer::deliver(
                     &deliverer,
                     crate::agent_tree_tools::MailDeliveryRequest {
                         agent_id: child.clone(),
@@ -2008,7 +2008,7 @@ async fn deliver_started(
         parent: crate::agent::SpawnParent::Api(super::super::tests::openrouter_test_parent()),
         runtime: Arc::clone(&fixture.runtime),
     };
-    crate::agent_tree_tools::MailDeliverer::deliver(
+    crate::agent::children::ProductMailDeliverer::deliver(
         &deliverer,
         crate::agent_tree_tools::MailDeliveryRequest {
             agent_id: fixture.child.clone(),

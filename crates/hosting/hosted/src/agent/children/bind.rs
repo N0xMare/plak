@@ -18,8 +18,8 @@ pub(in crate::agent) struct ProductChildSessionBinder {
     pub(in crate::agent) parent: SpawnParent,
 }
 
-impl crate::agent_tree_tools::SpawnedSessionBinder for ProductChildSessionBinder {
-    fn admit_spawn(
+impl ProductChildSessionBinder {
+    pub(in crate::agent) fn admit_spawn(
         &self,
         request: &crate::agent_tree_protocol::SpawnAgentRequest,
     ) -> Result<(), crate::agent_tree::TopologyError> {
@@ -48,7 +48,7 @@ impl crate::agent_tree_tools::SpawnedSessionBinder for ProductChildSessionBinder
         })?
     }
 
-    fn admit_binding<'a>(
+    pub(in crate::agent) fn admit_binding<'a>(
         &'a self,
         template: &'a crate::agent_tree_protocol::TemplateName,
         binding: &'a crate::orchestration::RosterBinding,
@@ -85,7 +85,7 @@ impl crate::agent_tree_tools::SpawnedSessionBinder for ProductChildSessionBinder
         })
     }
 
-    fn bind(
+    pub(in crate::agent) fn bind(
         &self,
         start: crate::agent_tree_tools::SpawnStart,
     ) -> Pin<

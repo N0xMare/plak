@@ -17,7 +17,7 @@ async fn hub_working_copy_is_shared_across_compiles_and_persists() {
     let binder = Arc::new(StubBinder::ok());
     let outcome = spawn_tool(
         runtime.driver().clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-hub-spawn".into(),

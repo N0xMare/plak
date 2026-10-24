@@ -133,7 +133,11 @@ async fn close_stops_child_jobs_but_interrupt_preserves_them() {
 
 struct ExpiredCloseCanceller(TreeDriver);
 
-impl LiveTurnCanceller for ExpiredCloseCanceller {
+impl ChildController for ExpiredCloseCanceller {
+    fn services(&self) -> ChildServices {
+        ChildServices::CANCEL
+    }
+
     fn cancel_agents(
         &self,
         ids: Vec<String>,
@@ -276,7 +280,11 @@ struct LateJobCanceller {
     >,
 }
 
-impl LiveTurnCanceller for LateJobCanceller {
+impl ChildController for LateJobCanceller {
+    fn services(&self) -> ChildServices {
+        ChildServices::CANCEL
+    }
+
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
@@ -325,7 +333,11 @@ async fn a_job_promoted_between_closure_and_cancel_is_stopped_not_parked() {
     );
 }
 
-impl LiveTurnCanceller for JobCheckingCanceller {
+impl ChildController for JobCheckingCanceller {
+    fn services(&self) -> ChildServices {
+        ChildServices::CANCEL
+    }
+
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,

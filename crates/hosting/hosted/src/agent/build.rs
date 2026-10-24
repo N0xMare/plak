@@ -1082,19 +1082,21 @@ fn topology_host_ports(
     Ok(crate::agent_tree_tools::TopologyHostPorts {
         vocabulary: topology_vocabulary(&parent)?,
         job_host: Some(parent.state_roots().job_registry().clone()),
-        binder: Some(Arc::new(ProductChildSessionBinder {
-            parent: parent.clone(),
-        })),
-        deliverer: Some(Arc::new(ProductMailDeliverer {
-            parent: parent.clone(),
-            runtime: Arc::clone(runtime),
-        })),
-        canceller: Some(Arc::new(ProductLiveCanceller {
-            runtime: Arc::clone(runtime),
-        })),
-        recoverer: Some(Arc::new(super::recovery::ProductChildRecoverer {
-            parent,
-            runtime: Arc::clone(runtime),
+        controller: Some(Arc::new(super::children::ProductChildController {
+            binder: ProductChildSessionBinder {
+                parent: parent.clone(),
+            },
+            deliverer: ProductMailDeliverer {
+                parent: parent.clone(),
+                runtime: Arc::clone(runtime),
+            },
+            canceller: ProductLiveCanceller {
+                runtime: Arc::clone(runtime),
+            },
+            recoverer: super::recovery::ProductChildRecoverer {
+                parent,
+                runtime: Arc::clone(runtime),
+            },
         })),
         observer,
     })

@@ -130,7 +130,11 @@ impl StubBinder {
     }
 }
 
-impl SpawnedSessionBinder for StubBinder {
+impl ChildController for StubBinder {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
     fn bind(
         &self,
         start: SpawnStart,
@@ -151,7 +155,11 @@ struct RelockingBinder {
     binds: AtomicUsize,
 }
 
-impl SpawnedSessionBinder for RelockingBinder {
+impl ChildController for RelockingBinder {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
     fn admit_spawn(&self, request: &SpawnAgentRequest) -> Result<(), TopologyError> {
         let tree = self.tree.lock().map_err(|_| {
             TopologyError::new(
@@ -191,16 +199,14 @@ fn test_budget() -> Arc<CellAgentBudget> {
     Arc::new(CellAgentBudget::new(DEFAULT_MAX_AGENTS_PER_CELL))
 }
 
-fn spawn_tool(driver: TreeDriver, binder: Option<Arc<dyn SpawnedSessionBinder>>) -> TopologyTool {
+fn spawn_tool(driver: TreeDriver, binder: Option<Arc<dyn ChildController>>) -> TopologyTool {
+    debug_assert!(binder.as_ref().is_none_or(|binder| binder.services().bind));
     TopologyTool {
         driver,
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Spawn,
         vocabulary: TopologyVocabulary::default(),
-        binder,
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: binder,
         observer: None,
         cell_budget: test_budget(),
     }
@@ -212,21 +218,22 @@ fn wait_tool(driver: TreeDriver) -> TopologyTool {
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Wait,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: None,
         observer: None,
         cell_budget: test_budget(),
     }
 }
 
-fn send_tool(driver: TreeDriver, deliverer: Option<Arc<dyn MailDeliverer>>) -> TopologyTool {
+fn send_tool(driver: TreeDriver, deliverer: Option<Arc<dyn ChildController>>) -> TopologyTool {
     struct ProjectedDeliverer {
-        inner: Arc<dyn MailDeliverer>,
+        inner: Arc<dyn ChildController>,
         driver: TreeDriver,
     }
-    impl MailDeliverer for ProjectedDeliverer {
+    impl ChildController for ProjectedDeliverer {
+        fn services(&self) -> ChildServices {
+            self.inner.services()
+        }
+
         fn withdraw_followup(
             &self,
             driver: TreeDriver,
@@ -271,54 +278,57 @@ fn send_tool(driver: TreeDriver, deliverer: Option<Arc<dyn MailDeliverer>>) -> T
             })
         }
     }
+    debug_assert!(
+        deliverer
+            .as_ref()
+            .is_none_or(|deliverer| deliverer.services().mail)
+    );
     let deliverer = deliverer.map(|inner| {
         Arc::new(ProjectedDeliverer {
             inner,
             driver: driver.clone(),
-        }) as Arc<dyn MailDeliverer>
+        }) as Arc<dyn ChildController>
     });
     TopologyTool {
         driver,
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Send,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer,
-        canceller: None,
-        recoverer: None,
+        controller: deliverer,
         observer: None,
         cell_budget: test_budget(),
     }
 }
 
-fn interrupt_tool(
-    driver: TreeDriver,
-    canceller: Option<Arc<dyn LiveTurnCanceller>>,
-) -> TopologyTool {
+fn interrupt_tool(driver: TreeDriver, canceller: Option<Arc<dyn ChildController>>) -> TopologyTool {
+    debug_assert!(
+        canceller
+            .as_ref()
+            .is_none_or(|canceller| canceller.services().cancel)
+    );
     TopologyTool {
         driver,
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Interrupt,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller,
-        recoverer: None,
+        controller: canceller,
         observer: None,
         cell_budget: test_budget(),
     }
 }
 
-fn close_tool(driver: TreeDriver, canceller: Option<Arc<dyn LiveTurnCanceller>>) -> TopologyTool {
+fn close_tool(driver: TreeDriver, canceller: Option<Arc<dyn ChildController>>) -> TopologyTool {
+    debug_assert!(
+        canceller
+            .as_ref()
+            .is_none_or(|canceller| canceller.services().cancel)
+    );
     TopologyTool {
         driver,
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Close,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller,
-        recoverer: None,
+        controller: canceller,
         observer: None,
         cell_budget: test_budget(),
     }
@@ -330,10 +340,7 @@ fn adopt_tool(driver: TreeDriver) -> TopologyTool {
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Adopt,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: None,
         observer: None,
         cell_budget: test_budget(),
     }
@@ -417,10 +424,7 @@ fn list_tool(driver: TreeDriver) -> TopologyTool {
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::List,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: None,
         observer: None,
         cell_budget: test_budget(),
     }
@@ -432,10 +436,7 @@ fn discard_tool(driver: TreeDriver) -> TopologyTool {
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Discard,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: None,
         observer: None,
         cell_budget: test_budget(),
     }
@@ -584,7 +585,7 @@ struct StubDeliverer {
     /// Calls from this index on answer only once the test adds a permit.
     hold: Option<(usize, Arc<tokio::sync::Semaphore>)>,
     /// The tree an admitted Start binds its turn on at admission, as the
-    /// product deliverer does (`MailDeliverer`).
+    /// product deliverer does (`ChildController`).
     tree: Option<Arc<Mutex<ProductAgentTree>>>,
 }
 
@@ -669,7 +670,11 @@ impl StubDeliverer {
     }
 }
 
-impl MailDeliverer for StubDeliverer {
+impl ChildController for StubDeliverer {
+    fn services(&self) -> ChildServices {
+        ChildServices::MAIL
+    }
+
     fn withdraw_followup(
         &self,
         driver: TreeDriver,
@@ -773,7 +778,11 @@ impl StubCanceller {
     }
 }
 
-impl LiveTurnCanceller for StubCanceller {
+impl ChildController for StubCanceller {
+    fn services(&self) -> ChildServices {
+        ChildServices::CANCEL
+    }
+
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
@@ -828,7 +837,7 @@ fn agent_id_request(agent_id: &str) -> Value {
 async fn interrupted_unwinding_child(driver: &TreeDriver) {
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),

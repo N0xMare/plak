@@ -164,6 +164,10 @@ change to it needs a successor epoch. The API accounts `openai`, `anthropic`
 and `xai-api` belong to both sets: they are admitted accounts and refuse
 native PTC.
 
+The host supplies one child controller that declares which child services it
+provides (binding spawned children, mail delivery, live-turn cancellation and
+recovery); an undeclared service behaves exactly as if the host had none.
+
 ## 2. Tiers and workspaces
 
 `tier` is required on every `spawn_agent` call and is **clipped** to the

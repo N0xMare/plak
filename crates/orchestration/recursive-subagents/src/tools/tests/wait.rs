@@ -121,7 +121,7 @@ async fn child_completion_settles_a_pending_wait_within_a_poll_interval() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-wait".into(),
@@ -170,7 +170,7 @@ async fn a_submitted_result_rides_the_wait_row_and_the_full_list_row() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-out".into(),
@@ -229,7 +229,7 @@ async fn bare_waits_return_each_result_once_then_refuse() {
         request.request_key = Some(format!("wave-{key}"));
         spawn_tool(
             driver.clone(),
-            Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+            Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
         )
         .spawn_with(
             format!("op-spawn-{key}"),
@@ -287,7 +287,7 @@ async fn a_child_that_cannot_start_is_faulted_with_a_reason_and_settles_waits() 
     let tree = Arc::clone(&driver.tree);
     let outcome = spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::fail()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::fail()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-nostart".into(),
@@ -809,7 +809,7 @@ async fn a_fan_out_wait_past_the_outcome_limit_returns_in_budgeted_batches() {
         request.output_schema_json = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"blob":{"type":"string"}},"required":["blob"],"additionalProperties":false}"#.into();
         spawn_tool(
             driver.clone(),
-            Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+            Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
         )
         .spawn_with(
             format!("op-spawn-budget-{index}"),
@@ -906,7 +906,7 @@ async fn withheld_mail_from_a_delivered_child_returns(submit: bool) {
     request.output_schema_json = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"blob":{"type":"string"}},"required":["blob"],"additionalProperties":false}"#.into();
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-probe-mail".into(),
@@ -991,7 +991,7 @@ async fn a_bare_wait_over_withheld_mail_does_not_resend_a_delivered_output() {
         request.output_schema_json = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"blob":{"type":"string"}},"required":["blob"],"additionalProperties":false}"#.into();
         spawn_tool(
             driver.clone(),
-            Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+            Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
         )
         .spawn_with(
             "op-spawn-probe-reread".into(),
@@ -1133,7 +1133,7 @@ async fn parked_hub_wait_is_the_only_consumer_of_a_child_question() {
     let deliverer = Arc::new(StubDeliverer::ok());
     let mut send = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     send.caller_id = Arc::new(Mutex::new("c2".into()));
     let arguments = json!({"agent_id": "c1", "message": "which file?", "purpose": "question", "priority": "urgent"});
@@ -1182,7 +1182,7 @@ async fn watched_urgent_mail_beats_a_simultaneous_steer_flag() {
     let deliverer = Arc::new(StubDeliverer::ok());
     let mut send = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     send.caller_id = Arc::new(Mutex::new("c2".into()));
     let arguments = json!({"agent_id": "c1", "message": "which file?", "purpose": "question", "priority": "urgent"});

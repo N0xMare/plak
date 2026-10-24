@@ -718,7 +718,7 @@ fn binding_for(
 /// A `FakeVcs` tree over a `MemoryTreeStore`: mints, seals and lands are
 /// recorded rather than run, so the observations the drivers compare carry the
 /// tree's own deterministic ids instead of a repository's commit hashes.
-/// [`ParityChildBinder`] is the product's `SpawnedSessionBinder` seam standing
+/// [`ParityChildBinder`] is the product's `ChildController` seam standing
 /// in for a real child session — it binds a locator and then, once the tree has
 /// recorded that bind, completes the child's one turn so the parent's
 /// `wait_agent` settles and leaves a candidate to adopt.
@@ -754,7 +754,11 @@ struct ParityChildBinder {
     tree: Arc<std::sync::Mutex<plakous_hosted::agent_tree::ProductAgentTree>>,
 }
 
-impl plakous_hosted::agent_tree_tools::SpawnedSessionBinder for ParityChildBinder {
+impl plakous_hosted::agent_tree_tools::ChildController for ParityChildBinder {
+    fn services(&self) -> plakous_hosted::agent_tree_tools::ChildServices {
+        plakous_hosted::agent_tree_tools::ChildServices::BIND
+    }
+
     fn bind(
         &self,
         start: plakous_hosted::agent_tree_tools::SpawnStart,
@@ -863,12 +867,12 @@ fn script_binding(
         .clone();
     let binder = Arc::new(ParityChildBinder {
         tree: Arc::clone(driver.tree_handle_for_test()),
-    }) as Arc<dyn plakous_hosted::agent_tree_tools::SpawnedSessionBinder>;
+    }) as Arc<dyn plakous_hosted::agent_tree_tools::ChildController>;
     let registrations = plakous_hosted::agent_tree_tools::topology_tool_registrations_on(
         driver,
         caller_id,
         plakous_hosted::agent_tree_tools::TopologyHostPorts {
-            binder: Some(binder),
+            controller: Some(binder),
             ..Default::default()
         },
     )
@@ -1834,7 +1838,7 @@ fn a_cancelled_tool_terminalises_once_before_the_interrupted_status() {
 /// session's tool set — so the three drivers are compared on the observations
 /// a topology turn actually produces: three tool lines, their terminal states,
 /// and the assistant text that closes the turn. What stands in for a real child
-/// session is [`ParityChildBinder`] at the product's `SpawnedSessionBinder`
+/// session is [`ParityChildBinder`] at the product's `ChildController`
 /// seam: it binds a locator and completes the child's one turn, which is what a
 /// bound child session would have done. The tree's own behaviour under that
 /// seam — the mint, the seal, the wait row, the adopt receipt — is the crate's

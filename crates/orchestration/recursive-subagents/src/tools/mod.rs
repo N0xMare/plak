@@ -49,6 +49,7 @@ use crate::tree::{TreeRuntimeError, TreeRuntimeResult};
 use plakous_workspace::occupancy_vcs::{VcsError, VcsOps};
 
 mod cancel;
+mod controller;
 mod driver;
 mod jobs;
 mod mail;
@@ -56,14 +57,15 @@ mod registrations;
 mod spawn;
 mod wait;
 
-pub use cancel::{ChildRecoverer, LiveCancelFailure, LiveCancelOutcome, LiveTurnCanceller};
+pub use cancel::{LiveCancelFailure, LiveCancelOutcome};
+pub use controller::{ChildController, ChildServices};
 pub use driver::TreeDriver;
-pub use mail::{MailDeliverer, MailDeliveryAck, MailDeliveryFailure, MailDeliveryRequest};
+pub use mail::{MailDeliveryAck, MailDeliveryFailure, MailDeliveryRequest};
 pub use registrations::{
     TopologyHostPorts, invoke_granted_topology_tool_on, topology_tool_registrations,
     topology_tool_registrations_in, topology_tool_registrations_on,
 };
-pub use spawn::{SpawnBindError, SpawnBound, SpawnStart, SpawnedSessionBinder};
+pub use spawn::{SpawnBindError, SpawnBound, SpawnStart};
 
 use driver::driver_for_tree;
 use jobs::{admit_awaited_jobs, await_job_rows, named_job_settled};
@@ -220,10 +222,8 @@ struct TopologyTool {
     kind: TopologyKind,
     /// How this node's pack spells the await and interrupt slots.
     vocabulary: TopologyVocabulary,
-    binder: Option<Arc<dyn SpawnedSessionBinder>>,
-    deliverer: Option<Arc<dyn MailDeliverer>>,
-    canceller: Option<Arc<dyn LiveTurnCanceller>>,
-    recoverer: Option<Arc<dyn ChildRecoverer>>,
+    /// The host's port onto child sessions; see [`ChildController`].
+    controller: Option<Arc<dyn ChildController>>,
     observer: Option<Arc<dyn TopologyObserver>>,
     /// The tree's per-cell agent budget. Shared by every
     /// `TopologyTool` bound to the same tree, so it survives the per-turn
@@ -628,7 +628,7 @@ impl TopologyTool {
         Out: DeserializeOwned,
     {
         let settles_live =
-            self.canceller.is_some() && matches!(tool_name, "interrupt_agent" | "close_agent");
+            self.canceller().is_some() && matches!(tool_name, "interrupt_agent" | "close_agent");
         let prepared = tree.operations().contains_key(operation_id);
         if tool_name == "discard_workspace" && prepared && tree.revision != tree.stored_revision {
             self.driver.save(tree)?;

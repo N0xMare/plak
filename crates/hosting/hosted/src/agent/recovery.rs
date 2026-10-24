@@ -1034,8 +1034,8 @@ pub(super) struct ProductChildRecoverer {
     pub(super) runtime: Arc<ProductTopologyRuntime>,
 }
 
-impl crate::agent_tree_tools::ChildRecoverer for ProductChildRecoverer {
-    fn recover(
+impl ProductChildRecoverer {
+    pub(super) fn recover(
         &self,
         agent_id: String,
         expected_attempt_id: Option<AttemptId>,

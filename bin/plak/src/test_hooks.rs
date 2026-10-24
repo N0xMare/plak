@@ -68,7 +68,7 @@ fn tree_registrations(
         driver.clone(),
         caller_id,
         plakous_hosted::agent_tree_tools::TopologyHostPorts {
-            binder: Some(binder),
+            controller: Some(binder),
             ..Default::default()
         },
     )
@@ -289,7 +289,11 @@ impl ScriptedChildBinder {
     }
 }
 
-impl plakous_hosted::agent_tree_tools::SpawnedSessionBinder for ScriptedChildBinder {
+impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
+    fn services(&self) -> plakous_hosted::agent_tree_tools::ChildServices {
+        plakous_hosted::agent_tree_tools::ChildServices::BIND
+    }
+
     fn bind(
         &self,
         start: plakous_hosted::agent_tree_tools::SpawnStart,

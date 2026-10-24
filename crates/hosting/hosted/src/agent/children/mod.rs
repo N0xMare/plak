@@ -31,6 +31,7 @@ use crate::prompt_inputs::{prompt_agent_tier, prompt_composition};
 use crate::topology_runtime::{ChildStartup, ChildStartupStage, LiveRelease};
 
 mod bind;
+mod controller;
 mod deliver;
 mod failed_worktree;
 mod reopen;
@@ -56,6 +57,7 @@ pub(super) use bind::{
     frozen_child_tool_selection, frozen_openrouter_child_pin, openrouter_child_runtime_binding,
     openrouter_frozen_pin,
 };
+pub(super) use controller::ProductChildController;
 #[cfg(test)]
 pub(super) use deliver::turn_ended_or;
 pub(super) use deliver::{ProductLiveCanceller, ProductMailDeliverer, submit_harness_prompt};

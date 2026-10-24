@@ -1,4 +1,4 @@
-//! Spawning a child (the bind port, the minting phases) and landing its candidate.
+//! Spawning a child (the bind request, the minting phases) and landing its candidate.
 
 use super::*;
 
@@ -67,55 +67,6 @@ impl From<&str> for SpawnBindError {
     fn from(message: &str) -> Self {
         Self::Refused(message.into())
     }
-}
-
-/// Binds a spawned child to a real session **and starts its assignment turn**.
-///
-/// `spawn_agent` carries the prompt (mail `delegate` is refused), so
-/// the child must be running its brief when spawn returns. Leaving the first
-/// turn to a later `send_agent_message` left children `running` with empty
-/// transcripts forever and every `wait_agent` burning its full timeout.
-pub trait SpawnedSessionBinder: Send + Sync {
-    /// Product admission of the spawn request itself, before the tree
-    /// resolves its template. The default admits everything.
-    ///
-    /// # Errors
-    ///
-    /// Refuses when the product will not admit this spawn.
-    fn admit_spawn(&self, request: &SpawnAgentRequest) -> Result<(), TopologyError> {
-        let _ = request;
-        Ok(())
-    }
-
-    /// Product admission of the frozen card a spawn resolved to:
-    /// account availability, and nothing about the wire. Called after
-    /// [`Self::admit_spawn`], with the tree mutex released and before the
-    /// tree admits a node, once the caller's menu contains
-    /// `request.template`. A template the epoch does not carry, or one that
-    /// is not on the caller's menu, never reaches here.
-    /// A refusal here spends no node, attempt, or copy. The default admits
-    /// everything. Wire-vocabulary rules (an OpenRouter card asking for
-    /// `native-ptc`) live in the tree's own resolution, so a spawn with no
-    /// binder installed is held to them too.
-    ///
-    /// # Errors
-    ///
-    /// Refuses when the product will not admit this card's bind.
-    fn admit_binding<'a>(
-        &'a self,
-        template: &'a TemplateName,
-        binding: &'a RosterBinding,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TopologyError>> + Send + 'a>> {
-        let _ = (template, binding);
-        Box::pin(async { Ok(()) })
-    }
-
-    /// Opens the child's session and starts its assignment turn. Awaited
-    /// with the tree mutex released; the spawn records the answer afterwards.
-    fn bind(
-        &self,
-        start: SpawnStart,
-    ) -> Pin<Box<dyn Future<Output = Result<SpawnBound, SpawnBindError>> + Send + '_>>;
 }
 
 /// Where [`TopologyTool::spawn_admit`]'s first locked phase left the spawn:
@@ -509,7 +460,7 @@ impl TopologyTool {
         // lock is released before `admit_spawn` / `admit_binding`; holding it
         // across those calls deadlocks live spawn.
         if replay.is_none()
-            && let Some(binder) = &self.binder
+            && let Some(binder) = self.binder()
         {
             let binding = {
                 let tree = self.driver.tree.lock().map_err(|_| {
@@ -641,7 +592,7 @@ impl TopologyTool {
             }
             return ToolOutcome::success_text(json!(output).to_string());
         }
-        if let Some(binder) = &self.binder {
+        if let Some(binder) = self.binder() {
             let start = {
                 let tree = self.driver.tree.lock().map_err(|_| {
                     ToolRuntimeError::new(

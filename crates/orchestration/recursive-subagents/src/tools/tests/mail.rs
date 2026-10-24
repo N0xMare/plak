@@ -32,7 +32,7 @@ async fn send_deliverer_starts_idle_child_and_skips_replay() {
     let binder = Arc::new(StubBinder::bind_only());
     let spawn = spawn_tool(
         driver.clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     spawn
         .spawn_with(
@@ -44,7 +44,7 @@ async fn send_deliverer_starts_idle_child_and_skips_replay() {
     let deliverer = Arc::new(StubDeliverer::ok().binding(&tree));
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let first = tool
         .send_with("op-mail-1".into(), &send_request("c1", "hello", None))
@@ -107,7 +107,7 @@ async fn send_receipt_replays_after_acknowledged_mail_history_is_pruned() {
     let deliverer = Arc::new(StubDeliverer::ok());
     let sender = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let request = send_request("c1", "original", None);
     let first = sender
@@ -143,7 +143,7 @@ async fn send_without_locator_is_fail_closed_when_deliverer_present() {
     let deliverer = Arc::new(StubDeliverer::ok());
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let outcome = tool
         .send_with("op-mail-missing".into(), &send_request("c1", "hello", None))
@@ -172,7 +172,7 @@ async fn send_deliverer_failure_is_fail_closed() {
     let binder = Arc::new(StubBinder::ok());
     spawn_tool(
         driver.clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -183,7 +183,7 @@ async fn send_deliverer_failure_is_fail_closed() {
     let deliverer = Arc::new(StubDeliverer::fail());
     let outcome = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     )
     .send_with("op-mail-fail".into(), &send_request("c1", "hello", None))
     .await
@@ -207,7 +207,7 @@ async fn send_to_a_turn_that_already_ended_leaves_the_mail_for_the_wake() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -218,7 +218,7 @@ async fn send_to_a_turn_that_already_ended_leaves_the_mail_for_the_wake() {
     let deliverer = Arc::new(StubDeliverer::turn_ended());
     let outcome = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     )
     .send_with(
         "op-mail-late".into(),
@@ -261,7 +261,7 @@ async fn turn_ended_send_to_a_submitted_child_is_refused_and_settled() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -285,7 +285,7 @@ async fn turn_ended_send_to_a_submitted_child_is_refused_and_settled() {
     let deliverer = Arc::new(StubDeliverer::turn_ended());
     let outcome = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     )
     .send_with(
         "op-mail-late".into(),
@@ -302,7 +302,7 @@ async fn turn_ended_send_to_a_submitted_child_is_refused_and_settled() {
     // the send first recorded.
     let replay = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     )
     .send_with(
         "op-mail-late".into(),
@@ -341,7 +341,7 @@ async fn turn_ended_send_to_an_interrupted_child_starts_its_resume_turn() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -374,7 +374,7 @@ async fn turn_ended_send_to_an_interrupted_child_starts_its_resume_turn() {
     let deliverer = Arc::new(StubDeliverer::turn_ended_then_ok().binding(&tree));
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let request = send_request("c1", "use the v2 schema instead", None);
     let pending_send = tokio::spawn({
@@ -467,7 +467,7 @@ async fn concurrent_turn_ended_sends_restart_an_interrupted_child_once() {
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let send = |operation: &'static str, text: &'static str| {
         let tool = Arc::clone(&tool);
@@ -542,7 +542,7 @@ async fn a_cancelled_sender_stops_waiting_for_the_unwind_before_any_restart() {
     let deliverer = Arc::new(StubDeliverer::turn_ended_then_ok());
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let cancellation = plakous::model::CancellationToken::new();
     let pending = tokio::spawn({
@@ -605,7 +605,7 @@ async fn a_cancelled_sender_stops_waiting_behind_a_parked_wait() {
     let deliverer = Arc::new(StubDeliverer::ok());
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let cancellation = plakous::model::CancellationToken::new();
     let pending = tokio::spawn({
@@ -651,7 +651,7 @@ async fn a_failed_resume_start_never_records_a_started_receipt() {
     let deliverer = Arc::new(StubDeliverer::turn_ended_then_fail());
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let request = send_request("c1", "use the v2 schema", None);
     let pending = tokio::spawn({
@@ -711,7 +711,7 @@ async fn a_followup_start_on_a_retiring_slot_is_retried() {
     let deliverer = Arc::new(stub);
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let request = serde_json::to_value(SendAgentMessageRequest {
         agent_id: "c1".into(),
@@ -765,7 +765,7 @@ async fn a_started_mail_that_finds_another_commands_turn_follows_up_into_it() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::bind_only()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::bind_only()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -785,7 +785,7 @@ async fn a_started_mail_that_finds_another_commands_turn_follows_up_into_it() {
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let send = |operation: &'static str, text: &'static str| {
         let tool = Arc::clone(&tool);
@@ -860,7 +860,7 @@ async fn a_restart_loop_is_bounded_by_the_send_budget() {
     let deliverer = Arc::new(StubDeliverer::turn_ended());
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(300),
@@ -929,7 +929,7 @@ async fn a_followup_start_that_never_finds_the_slot_vacant_withdraws_its_attempt
     let deliverer = Arc::new(stub);
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let request = serde_json::to_value(SendAgentMessageRequest {
         agent_id: "c1".into(),
@@ -991,7 +991,7 @@ async fn pf5_a_left_follow_up_answers_its_durable_receipt() {
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let request = serde_json::to_value(SendAgentMessageRequest {
         agent_id: "c1".into(),
@@ -1059,7 +1059,7 @@ async fn a_cancelled_followup_withdraws_its_unstarted_attempt() {
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let request = serde_json::to_value(SendAgentMessageRequest {
         agent_id: "c1".into(),
@@ -1188,7 +1188,11 @@ async fn followup_cancel_and_slot_expiry_with_a_future_tail_hold_recovery_and_re
     struct FutureTail {
         inner: Arc<StubDeliverer>,
     }
-    impl MailDeliverer for FutureTail {
+    impl ChildController for FutureTail {
+        fn services(&self) -> ChildServices {
+            ChildServices::MAIL
+        }
+
         fn deliver(
             &self,
             request: MailDeliveryRequest,
@@ -1460,7 +1464,7 @@ async fn a_refused_coordinate_start_never_rolls_back_another_sends_followup() {
     let deliverer = Arc::new(StubDeliverer::refuse());
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let outcome = tool
         .send_with(
@@ -1489,7 +1493,7 @@ async fn a_follow_up_whose_turn_is_not_live_in_time_is_left_for_its_end() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -1510,7 +1514,7 @@ async fn a_follow_up_whose_turn_is_not_live_in_time_is_left_for_its_end() {
     let deliverer = Arc::new(stub);
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(300),
@@ -1556,7 +1560,7 @@ async fn an_admitted_start_whose_turn_already_ended_is_not_marked_active() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::bind_only()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::bind_only()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -1568,7 +1572,7 @@ async fn an_admitted_start_whose_turn_already_ended_is_not_marked_active() {
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let pending = tokio::spawn({
         let tool = Arc::clone(&tool);
@@ -1622,7 +1626,7 @@ async fn start_held_at_admission() -> (
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::bind_only()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::bind_only()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -1634,7 +1638,7 @@ async fn start_held_at_admission() -> (
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let pending = tokio::spawn({
         let tool = Arc::clone(&tool);
@@ -1737,7 +1741,7 @@ async fn a_rider_reaches_the_resumed_turn() {
     let deliverer = Arc::new(stub);
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let send = |operation: &'static str, text: &'static str| {
         let tool = Arc::clone(&tool);
@@ -1796,7 +1800,7 @@ async fn send_urgent_busy_child_steers() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -1807,7 +1811,7 @@ async fn send_urgent_busy_child_steers() {
     let deliverer = Arc::new(StubDeliverer::ok());
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     tool.send_with("op-mail-1".into(), &send_request("c1", "hello", None))
         .await
@@ -1847,7 +1851,7 @@ async fn send_deferred_busy_child_queues_follow_up() {
     let driver = driver_on(tree, Arc::clone(&store));
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn-bind".into(),
@@ -1858,7 +1862,7 @@ async fn send_deferred_busy_child_queues_follow_up() {
     let deliverer = Arc::new(StubDeliverer::ok());
     let tool = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     tool.send_with("op-mail-1".into(), &send_request("c1", "hello", None))
         .await
@@ -1924,7 +1928,7 @@ async fn followup_after_completion_opens_attempt_two_and_completes() {
     let binder = Arc::new(StubBinder::ok());
     let spawned = spawn_tool(
         driver.clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn".into(),
@@ -1962,7 +1966,7 @@ async fn followup_after_completion_opens_attempt_two_and_completes() {
     too_big["message"] = json!(body.clone() + "a");
     let refused = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     )
     .send_with("op-followup-too-big".into(), &too_big)
     .await
@@ -1971,7 +1975,7 @@ async fn followup_after_completion_opens_attempt_two_and_completes() {
     assert!(deliverer.calls.lock().unwrap().is_empty());
     let outcome = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     )
     .send_with("op-followup".into(), &followup)
     .await
@@ -2108,7 +2112,7 @@ async fn refused_followup_start_rolls_the_attempt_back() {
     let tree = Arc::clone(&driver.tree);
     spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     )
     .spawn_with(
         "op-spawn".into(),
@@ -2144,7 +2148,7 @@ async fn refused_followup_start_rolls_the_attempt_back() {
     .unwrap();
     let outcome = send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     )
     .send_with("op-followup-refused".into(), &followup)
     .await
@@ -2200,7 +2204,7 @@ async fn a_send_whose_turn_waiter_left_without_releasing_fails_closed() {
     let deliverer = Arc::new(StubDeliverer::turn_ended());
     let tool = Arc::new(send_tool(
         driver.clone(),
-        Some(Arc::clone(&deliverer) as Arc<dyn MailDeliverer>),
+        Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let started = tokio::time::Instant::now();
     let pending = tokio::spawn({

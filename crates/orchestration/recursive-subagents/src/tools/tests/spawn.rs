@@ -14,7 +14,7 @@ async fn spawn_admit_may_relock_hub_tree_without_deadlock() {
     });
     let tool = spawn_tool(
         driver.clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     let arguments = serde_json::to_value(spawn_request()).unwrap();
     let outcome = tokio::time::timeout(
@@ -38,7 +38,11 @@ struct ChangingReadinessBinder {
     binds: AtomicUsize,
 }
 
-impl SpawnedSessionBinder for ChangingReadinessBinder {
+impl ChildController for ChangingReadinessBinder {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
     fn admit_binding<'a>(
         &'a self,
         _template: &'a TemplateName,
@@ -84,7 +88,7 @@ async fn spawn_receipt_replays_after_account_readiness_changes() {
     });
     let tool = spawn_tool(
         driver,
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     let arguments = serde_json::to_value(spawn_request()).unwrap();
     let first = tool
@@ -120,7 +124,11 @@ async fn spawn_receipt_replays_after_account_readiness_changes() {
     assert_eq!(binder.binds.load(Ordering::SeqCst), 1);
 }
 
-impl SpawnedSessionBinder for NotReadyBinder {
+impl ChildController for NotReadyBinder {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
     fn admit_binding<'a>(
         &'a self,
         _template: &'a TemplateName,
@@ -156,7 +164,7 @@ async fn a_not_ready_account_is_refused_before_any_node_is_admitted() {
     });
     let tool = spawn_tool(
         driver.clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     let outcome = tool
         .spawn_with(
@@ -178,7 +186,11 @@ struct MenuProbeBinder {
     admits: AtomicUsize,
 }
 
-impl SpawnedSessionBinder for MenuProbeBinder {
+impl ChildController for MenuProbeBinder {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
     fn admit_spawn(&self, _request: &SpawnAgentRequest) -> Result<(), TopologyError> {
         self.admits.fetch_add(1, Ordering::SeqCst);
         Err(TopologyError::new(
@@ -239,7 +251,7 @@ async fn root_off_menu_spawn_refuses_before_the_binder_runs() {
     });
     let tool = spawn_tool(
         driver,
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     let request =
         SpawnAgentRequest::test_named("nested", Tier::Mutate, "nested", "do the nested work");
@@ -272,7 +284,7 @@ async fn child_off_menu_spawn_refuses_before_the_binder_runs() {
     });
     let tool = spawn_tool(
         driver,
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     *tool.caller_id.lock().unwrap() = supervisor.agent_id;
     let outcome = tool
@@ -296,7 +308,7 @@ async fn spawn_binder_binds_locator_and_skips_replay() {
     let binder = Arc::new(StubBinder::ok());
     let tool = spawn_tool(
         driver.clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     let arguments = serde_json::to_value(spawn_request()).unwrap();
     let first = tool
@@ -344,7 +356,11 @@ async fn binder_accepts_only_exact_previously_published_locator() {
         driver: TreeDriver,
         same: bool,
     }
-    impl SpawnedSessionBinder for PublishedBinder {
+    impl ChildController for PublishedBinder {
+        fn services(&self) -> ChildServices {
+            ChildServices::BIND
+        }
+
         fn bind(
             &self,
             start: SpawnStart,
@@ -457,7 +473,7 @@ async fn spawn_replay_restores_running_after_bound_recovery() {
     let tree = Arc::clone(&driver.tree);
     let tool = spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     );
     let arguments = serde_json::to_value(spawn_request()).unwrap();
     tool.spawn_with("op-spawn-bind".into(), &arguments)
@@ -518,7 +534,7 @@ async fn spawn_starts_the_assignment_turn_and_later_mail_follows_up() {
     let tree = Arc::clone(&driver.tree);
     let tool = spawn_tool(
         driver.clone(),
-        Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
     );
     let outcome = tool
         .spawn_with(
@@ -573,7 +589,7 @@ async fn spawn_binder_refusal_fails_the_node_without_a_recovery_fence() {
     let binder = Arc::new(StubBinder::fail());
     let tool = spawn_tool(
         driver.clone(),
-        Some(Arc::clone(&binder) as Arc<dyn SpawnedSessionBinder>),
+        Some(Arc::clone(&binder) as Arc<dyn ChildController>),
     );
     let outcome = tool
         .spawn_with(
@@ -745,10 +761,7 @@ async fn spawn_close_emits_tree_node_spawned_and_detached() {
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Spawn,
         vocabulary: TopologyVocabulary::default(),
-        binder: Some(Arc::new(StubBinder::ok()) as Arc<dyn SpawnedSessionBinder>),
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: Some(Arc::new(StubBinder::ok()) as Arc<dyn ChildController>),
         observer: Some(Arc::clone(&observer)),
         cell_budget: test_budget(),
     };
@@ -762,10 +775,7 @@ async fn spawn_close_emits_tree_node_spawned_and_detached() {
         caller_id: Arc::new(Mutex::new("root".into())),
         kind: TopologyKind::Close,
         vocabulary: TopologyVocabulary::default(),
-        binder: None,
-        deliverer: None,
-        canceller: None,
-        recoverer: None,
+        controller: None,
         observer: Some(Arc::clone(&observer)),
         cell_budget: test_budget(),
     };

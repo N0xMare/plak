@@ -776,7 +776,7 @@ impl crate::topology_runtime::LiveChildHandle for LateReleaseChild {
 
 #[tokio::test]
 async fn panicking_child_create_frees_startup_owner_and_triggers_recovery() {
-    use crate::agent_tree_tools::{SpawnBindError, SpawnStart, SpawnedSessionBinder};
+    use crate::agent_tree_tools::{SpawnBindError, SpawnStart};
 
     let fixture = Fixture::new("startup-create-panic");
     let start = fixture
@@ -3555,7 +3555,7 @@ async fn a_start_whose_slot_is_taken_during_reopen_answers_slot_busy() {
         parent: fixture.parent.clone(),
         runtime: Arc::clone(&fixture.runtime),
     };
-    let outcome = crate::agent_tree_tools::MailDeliverer::deliver(
+    let outcome = crate::agent::children::ProductMailDeliverer::deliver(
         &deliverer,
         crate::agent_tree_tools::MailDeliveryRequest {
             agent_id: id.clone(),
@@ -3651,7 +3651,7 @@ async fn deliver_queued(
         parent: fixture.parent.clone(),
         runtime: Arc::clone(&fixture.runtime),
     };
-    crate::agent_tree_tools::MailDeliverer::deliver(
+    crate::agent::children::ProductMailDeliverer::deliver(
         &deliverer,
         crate::agent_tree_tools::MailDeliveryRequest {
             agent_id: id.to_owned(),
