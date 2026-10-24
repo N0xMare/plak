@@ -1323,7 +1323,6 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "agent": {"UserInput"},
         "sessions": {"internal"},
     },
-    ("plakous-hosted", "src/agent/build/injected.rs"): {"sessions": {"internal"}},
     # A Direct extension's registry owner names its MCP server.
     ("plakous-hosted", "src/agent/build/tools.rs"): {"tools": {"ToolOwnerClass"}},
     ("plakous-hosted", "src/api_runtime.rs"): {"tools": {"RegisteredToolIdentity"}},

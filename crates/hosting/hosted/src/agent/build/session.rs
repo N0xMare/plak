@@ -512,6 +512,118 @@ impl SeededHistory {
     }
 }
 
+/// Where [`build_or_open`] gets the runtime it creates or opens a session
+/// over.
+pub(super) enum SessionSource<'a> {
+    /// A native product spec: its runtime is compiled here and the root
+    /// topology attached.
+    Native {
+        spec: Box<ProductAgentSpec>,
+        stderr: &'a mut dyn Write,
+    },
+    /// An API topology parent: its runtime is compiled here and its topology
+    /// attached.
+    Api {
+        parent: Box<ApiTopologyParent>,
+        topology_attach: crate::topology_runtime::TopologyHubAttach,
+        cached_evidence: Option<Box<plakous::openrouter::OpenRouterChatModelEvidence>>,
+        tool_fence: SessionToolFence,
+    },
+    /// A runtime binding the caller already sealed.
+    Runtime {
+        sessions: Arc<AgentSessions>,
+        runtime: Box<SessionRuntimeBinding>,
+        topology_owner: Option<String>,
+        output_bound_rederived: Option<crate::openrouter::OutputBoundRederived>,
+        wording: &'a RuntimeWording,
+    },
+}
+
+/// What a create or open over a sealed runtime checks and how it words its
+/// refusals: the product's, or an injected test runtime's.
+pub(super) struct RuntimeWording {
+    /// Whether a seed is inspected against the runtime and the session's tool
+    /// projection is required. Only an injected test runtime is unchecked;
+    /// its seeds never carry a preflight.
+    pub(super) checked: bool,
+    pub(super) reopen_failed: fn(&AgentSessionsError) -> String,
+    pub(super) reopen_needs_recovery: &'static str,
+    pub(super) reopen_unavailable: &'static str,
+    pub(super) create_failed: &'static str,
+    pub(super) create_unavailable: &'static str,
+}
+
+const PRODUCT_WORDING: RuntimeWording = RuntimeWording {
+    checked: true,
+    reopen_failed: product_reopen_failed,
+    reopen_needs_recovery: "exact session reopen requires explicit recovery; no new turn was admitted",
+    reopen_unavailable: "exact session reopen was unavailable",
+    create_failed: "agent could not be initialized",
+    create_unavailable: "agent session creation was unavailable",
+};
+
+fn product_reopen_failed(error: &AgentSessionsError) -> String {
+    format_session_reopen_error("exact session reopen failed", error)
+}
+
+/// Creates a session (no locator) or opens the one `locator` names, over
+/// the runtime `source` yields. The one build/open entry point.
+pub(super) async fn build_or_open(
+    source: SessionSource<'_>,
+    locator: Option<SessionLocator>,
+    seed: Option<SeededHistory>,
+    operation_id: SessionOperationId,
+) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
+    match source {
+        SessionSource::Native { spec, stderr } => {
+            Box::pin(attach_native_source(
+                *spec,
+                locator,
+                seed,
+                operation_id,
+                stderr,
+            ))
+            .await
+        }
+        SessionSource::Api {
+            parent,
+            topology_attach,
+            cached_evidence,
+            tool_fence,
+        } => {
+            Box::pin(attach_api_source(
+                *parent,
+                locator,
+                seed,
+                operation_id,
+                topology_attach,
+                cached_evidence.map(|evidence| *evidence),
+                tool_fence,
+            ))
+            .await
+        }
+        SessionSource::Runtime {
+            sessions,
+            runtime,
+            topology_owner,
+            output_bound_rederived,
+            wording,
+        } => {
+            Box::pin(attach_runtime_source(
+                sessions,
+                *runtime,
+                locator,
+                seed,
+                operation_id,
+                topology_owner,
+                output_bound_rederived,
+                wording,
+            ))
+            .await
+        }
+    }
+}
+
 /// Builds and returns the attached public Plakous session authority.
 ///
 /// Product code that persists or later reopens a conversation must retain this
@@ -539,12 +651,14 @@ pub(crate) async fn build_coding_session_seed(
 ) -> CliResult<AttachedCodingSession> {
     let operation_id = SessionOperationId::new(create_operation_id)
         .map_err(|_| CliFailure::new("plak create operation identity is invalid"))?;
-    Box::pin(build_or_open_coding_session(
-        spec,
+    Box::pin(build_or_open(
+        SessionSource::Native {
+            spec: Box::new(spec),
+            stderr,
+        },
         None,
         seed,
         operation_id,
-        stderr,
     ))
     .await
     .map_err(|error| error.failure)
@@ -559,12 +673,14 @@ pub async fn open_coding_session(
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     let operation_id = SessionOperationId::new(format!("plak:open:{}", uuid::Uuid::new_v4()))
         .map_err(|_| CliFailure::new("plak open operation identity is invalid"))?;
-    Box::pin(build_or_open_coding_session(
-        spec,
+    Box::pin(build_or_open(
+        SessionSource::Native {
+            spec: Box::new(spec),
+            stderr,
+        },
         Some(locator),
         None,
         operation_id,
-        stderr,
     ))
     .await
 }
@@ -578,20 +694,23 @@ pub async fn build_runtime_session(
 ) -> CliResult<AttachedCodingSession> {
     let operation_id = SessionOperationId::new(create_operation_id)
         .map_err(|_| CliFailure::new("plak create operation identity is invalid"))?;
-    build_or_open_runtime_session(
-        state_roots.runtime_sessions()?,
-        runtime,
+    Box::pin(build_or_open(
+        SessionSource::Runtime {
+            sessions: state_roots.runtime_sessions()?,
+            runtime: Box::new(runtime),
+            topology_owner: None,
+            output_bound_rederived: None,
+            wording: &PRODUCT_WORDING,
+        },
         None,
         None,
         operation_id,
-        None,
-        None,
-    )
+    ))
     .await
     .map_err(|error| error.failure)
 }
 
-pub(in crate::agent) async fn build_or_open_coding_session(
+async fn attach_native_source(
     mut spec: ProductAgentSpec,
     locator: Option<SessionLocator>,
     seed: Option<SeededHistory>,
@@ -639,7 +758,7 @@ pub(in crate::agent) async fn build_or_open_coding_session(
         crate::agent::recovery::install_retirement_recovery(&topology, &tree_id).await;
     }
     // A reattach recompiles nothing, so it has no moved budget to report.
-    let result = build_or_open_runtime_session(
+    let result = attach_runtime_source(
         sessions,
         runtime,
         locator,
@@ -647,6 +766,7 @@ pub(in crate::agent) async fn build_or_open_coding_session(
         operation_id,
         topology_owner,
         None,
+        &PRODUCT_WORDING,
     )
     .await;
     if result.is_err() {
@@ -705,14 +825,16 @@ pub(crate) async fn build_api_coding_session_seed(
 ) -> CliResult<AttachedCodingSession> {
     let operation_id = SessionOperationId::new(create_operation_id)
         .map_err(|_| CliFailure::new("plak create operation identity is invalid"))?;
-    Box::pin(build_or_open_api_coding_session(
-        parent,
+    Box::pin(build_or_open(
+        SessionSource::Api {
+            parent: Box::new(parent),
+            topology_attach,
+            cached_evidence: cached_evidence.map(Box::new),
+            tool_fence: SessionToolFence::Full,
+        },
         None,
         seed,
         operation_id,
-        topology_attach,
-        cached_evidence,
-        SessionToolFence::Full,
     ))
     .await
     .map_err(|error| error.failure)
@@ -757,19 +879,21 @@ pub(crate) async fn open_api_coding_session_with_fence(
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     let operation_id = SessionOperationId::new(format!("plak:open:{}", uuid::Uuid::new_v4()))
         .map_err(|_| CliFailure::new("plak open operation identity is invalid"))?;
-    Box::pin(build_or_open_api_coding_session(
-        parent,
+    Box::pin(build_or_open(
+        SessionSource::Api {
+            parent: Box::new(parent),
+            topology_attach,
+            cached_evidence: cached_evidence.map(Box::new),
+            tool_fence,
+        },
         Some(locator),
         None,
         operation_id,
-        topology_attach,
-        cached_evidence,
-        tool_fence,
     ))
     .await
 }
 
-pub(in crate::agent) async fn build_or_open_api_coding_session(
+async fn attach_api_source(
     parent: ApiTopologyParent,
     locator: Option<SessionLocator>,
     seed: Option<SeededHistory>,
@@ -845,7 +969,7 @@ pub(in crate::agent) async fn build_or_open_api_coding_session(
         }
     };
     let acquired_owner = topology_owner.clone();
-    let result = build_or_open_runtime_session(
+    let result = attach_runtime_source(
         sessions,
         runtime,
         locator,
@@ -853,6 +977,7 @@ pub(in crate::agent) async fn build_or_open_api_coding_session(
         operation_id,
         topology_owner,
         output_bound_rederived,
+        &PRODUCT_WORDING,
     )
     .await;
     if result.is_err() {
@@ -881,7 +1006,7 @@ pub(in crate::agent) async fn build_or_open_api_coding_session(
     result
 }
 
-pub(in crate::agent) async fn build_or_open_runtime_session(
+async fn attach_runtime_source(
     sessions: Arc<AgentSessions>,
     runtime: SessionRuntimeBinding,
     locator: Option<SessionLocator>,
@@ -891,8 +1016,11 @@ pub(in crate::agent) async fn build_or_open_runtime_session(
     // Set only by a reopen whose route has moved its output budget; carried to
     // the attached session so it is reported once, at open.
     output_bound_rederived: Option<crate::openrouter::OutputBoundRederived>,
+    wording: &RuntimeWording,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
-    if let Some(seed) = seed.as_mut() {
+    if wording.checked
+        && let Some(seed) = seed.as_mut()
+    {
         seed.inspect(&runtime)?;
     }
     let reachability_probe = plakous::sessions::internal::reachability_probe(&runtime);
@@ -904,15 +1032,14 @@ pub(in crate::agent) async fn build_or_open_runtime_session(
             Box::pin(sessions.open(OpenSessionRequest::new(operation_id, locator, runtime)))
                 .await
                 .map_err(|error| CodingSessionOpenFailure {
-                    failure: CliFailure::new(format_session_reopen_error(
-                        "exact session reopen failed",
-                        &error,
-                    )),
+                    failure: CliFailure::new((wording.reopen_failed)(&error)),
                     current_locator: error.current_locator(),
                 })?;
         return match opened {
             OpenSessionOutcome::Opened { session, .. } => {
-                require_reconstructed_coding_projection(&session)?;
+                if wording.checked {
+                    require_reconstructed_coding_projection(&session)?;
+                }
                 let locator = session.locator();
                 Ok(AttachedCodingSession {
                     output_bound_rederived,
@@ -925,7 +1052,9 @@ pub(in crate::agent) async fn build_or_open_runtime_session(
                 })
             }
             OpenSessionOutcome::RestoredWorking { session, turn, .. } => {
-                require_reconstructed_coding_projection(&session)?;
+                if wording.checked {
+                    require_reconstructed_coding_projection(&session)?;
+                }
                 let locator = session.locator();
                 Ok(AttachedCodingSession {
                     output_bound_rederived,
@@ -940,24 +1069,23 @@ pub(in crate::agent) async fn build_or_open_runtime_session(
             OpenSessionOutcome::RecoveryRequired {
                 retry_after_seconds,
                 ..
-            } => Err(reopen_refusal(
-                "exact session reopen requires explicit recovery; no new turn was admitted",
-                retry_after_seconds,
-            )
-            .into()),
-            _ => Err(CliFailure::new("exact session reopen was unavailable").into()),
+            } => Err(reopen_refusal(wording.reopen_needs_recovery, retry_after_seconds).into()),
+            _ => Err(CliFailure::new(wording.reopen_unavailable).into()),
         };
     }
     match Box::pin(sessions.create(create_request(operation_id, runtime, seed)))
         .await
         .map_err(|error| {
             CliFailure::new(format!(
-                "agent could not be initialized ({:?}): {error}",
+                "{} ({:?}): {error}",
+                wording.create_failed,
                 error.kind()
             ))
         })? {
         CreateSessionOutcome::Created { session, .. } => {
-            require_reconstructed_coding_projection(&session)?;
+            if wording.checked {
+                require_reconstructed_coding_projection(&session)?;
+            }
             let locator = session.locator();
             Ok(AttachedCodingSession {
                 output_bound_rederived,
@@ -969,11 +1097,11 @@ pub(in crate::agent) async fn build_or_open_runtime_session(
                 topology_owner,
             })
         }
-        _ => Err(CliFailure::new("agent session creation was unavailable").into()),
+        _ => Err(CliFailure::new(wording.create_unavailable).into()),
     }
 }
 
-pub(super) fn create_request(
+fn create_request(
     operation_id: SessionOperationId,
     runtime: SessionRuntimeBinding,
     seed: Option<SeededHistory>,

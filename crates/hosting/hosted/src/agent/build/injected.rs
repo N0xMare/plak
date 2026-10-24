@@ -1,16 +1,15 @@
 //! Session construction over an injected runtime.
 
-use crate::CliFailure;
-
 use super::session::{
-    AttachedCodingSession, CodingSessionOpenFailure, SeededHistory, create_request, reopen_refusal,
+    AttachedCodingSession, CodingSessionOpenFailure, RuntimeWording, SeededHistory, SessionSource,
+    build_or_open,
 };
 use super::tools::bind_node_tool_plan;
 use crate::agent::ProductStateRoots;
 use crate::tools::ProductToolExtensions;
 use plakous::sessions::{
-    AgentSessions, CreateSessionOutcome, OpenSessionOutcome, OpenSessionRequest,
-    PortableSessionHistory, SessionLocator, SessionOperationId, SessionRuntimeBinding,
+    AgentSessions, AgentSessionsError, PortableSessionHistory, SessionLocator, SessionOperationId,
+    SessionRuntimeBinding,
 };
 use plakous::subscriptions::NativeProvider;
 use std::sync::Arc;
@@ -52,79 +51,32 @@ pub async fn build_or_open_bound_session(
     operation_id: SessionOperationId,
     runtime: SessionRuntimeBinding,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
-    let reachability_probe = plakous::sessions::internal::reachability_probe(&runtime);
-    if let Some(locator) = locator {
-        if seed.is_some() {
-            return Err(CliFailure::new("a carried history seeds only a new session").into());
-        }
-        let opened = sessions
-            .open(OpenSessionRequest::new(operation_id, locator, runtime))
-            .await
-            .map_err(|error| CodingSessionOpenFailure {
-                failure: CliFailure::new(format!("injected exact reopen failed: {error}")),
-                current_locator: error.current_locator(),
-            })?;
-        return match opened {
-            OpenSessionOutcome::Opened { session, .. } => {
-                let locator = session.locator();
-                Ok(AttachedCodingSession {
-                    output_bound_rederived: None,
-                    reachability_probe: reachability_probe.clone(),
-                    sessions: Arc::clone(&sessions),
-                    opened: Some(session),
-                    recovered_turn: None,
-                    locator,
-                    topology_owner: None,
-                })
-            }
-            OpenSessionOutcome::RestoredWorking { session, turn, .. } => {
-                let locator = session.locator();
-                Ok(AttachedCodingSession {
-                    output_bound_rederived: None,
-                    reachability_probe: reachability_probe.clone(),
-                    sessions: Arc::clone(&sessions),
-                    opened: Some(session),
-                    recovered_turn: Some(turn),
-                    locator,
-                    topology_owner: None,
-                })
-            }
-            OpenSessionOutcome::RecoveryRequired {
-                retry_after_seconds,
-                ..
-            } => Err(reopen_refusal(
-                "injected exact reopen requires recovery",
-                retry_after_seconds,
-            )
-            .into()),
-            _ => Err(CliFailure::new("injected exact reopen was unavailable").into()),
-        };
-    }
-    match sessions
-        .create(create_request(
-            operation_id,
-            runtime,
-            seed.map(SeededHistory::new),
-        ))
-        .await
-        .map_err(|error| {
-            CliFailure::new(format!(
-                "injected session create failed ({:?}): {error}",
-                error.kind()
-            ))
-        })? {
-        CreateSessionOutcome::Created { session, .. } => {
-            let locator = session.locator();
-            Ok(AttachedCodingSession {
-                output_bound_rederived: None,
-                reachability_probe: reachability_probe.clone(),
-                sessions: Arc::clone(&sessions),
-                opened: Some(session),
-                recovered_turn: None,
-                locator,
-                topology_owner: None,
-            })
-        }
-        _ => Err(CliFailure::new("injected session create was unavailable").into()),
-    }
+    Box::pin(build_or_open(
+        SessionSource::Runtime {
+            sessions,
+            runtime: Box::new(runtime),
+            topology_owner: None,
+            output_bound_rederived: None,
+            wording: &INJECTED_WORDING,
+        },
+        locator,
+        seed.map(SeededHistory::new),
+        operation_id,
+    ))
+    .await
+}
+
+/// An injected runtime is not checked against the product's tool
+/// projection, and its refusals name the injection.
+const INJECTED_WORDING: RuntimeWording = RuntimeWording {
+    checked: false,
+    reopen_failed: injected_reopen_failed,
+    reopen_needs_recovery: "injected exact reopen requires recovery",
+    reopen_unavailable: "injected exact reopen was unavailable",
+    create_failed: "injected session create failed",
+    create_unavailable: "injected session create was unavailable",
+};
+
+fn injected_reopen_failed(error: &AgentSessionsError) -> String {
+    format!("injected exact reopen failed: {error}")
 }
