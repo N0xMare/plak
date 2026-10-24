@@ -35,6 +35,10 @@ use super::{
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
+mod complete;
+
+pub(super) use complete::complete_rebind;
+
 fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     opened: &AttachedCodingSession,
@@ -336,393 +340,6 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "durable source/target adoption requires complete host authority"
-)]
-pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
-    executor: &ApplicationExecutor,
-    watch: InterruptWatch<'_, P>,
-    config: &mut HostConfig<P>,
-    opened: &mut AttachedCodingSession,
-    stderr_buf: &mut Vec<u8>,
-    events: &Sender<P>,
-    operation: &str,
-    source_locator: plakous::sessions::SessionLocator,
-    target: ResolvedRebindTarget,
-    runtime: SessionRuntimeBinding,
-    started: Instant,
-) -> CliResult<()> {
-    super::jobs_transition_guard(config, opened)?;
-    let source_was_detached = opened.agent().is_none();
-    // Captured before the target overwrites them, so an effort-only fork is
-    // not reported as a model switch.
-    let previous_account = config.session.account.clone();
-    let previous_model = config.model_id.clone();
-    let previous_effort = config.effort;
-    let Ok(operation_id) = SessionOperationId::new(operation) else {
-        if source_was_detached {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-        }
-        return Err(CliFailure::new("rebind operation identity is invalid"));
-    };
-    let released_source = executor
-        .block_on(opened.detach())
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| {
-            CliFailure::new(format!(
-                "rebind source release failed ({:?}): {error}",
-                error.kind()
-            ))
-        })?;
-    if released_source != source_locator {
-        restore_detached_source(executor, config, opened, released_source, stderr_buf)?;
-        return Err(CliFailure::new(
-            "rebind source advanced while entering its safe boundary; retry from the current head",
-        ));
-    }
-    // an interrupt observed before the canonical transition rolls
-    // the prepared workflow back and reattaches the exact source. No branch is
-    // created and no receipt is claimed.
-    if watch.observe_now() {
-        let abandoned = abandon_prepared_rebind(executor, config, operation);
-        restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-        abandoned?;
-        return Err(interrupted_before_dispatch("rebind"));
-    }
-    let rebind_result = match run_watched(
-        executor,
-        watch,
-        opened.rebind_from(
-            operation_id,
-            source_locator,
-            target.binding.clone(),
-            runtime,
-        ),
-    ) {
-        Ok(Ok(outcome)) => Ok(outcome),
-        Ok(Err(error))
-            if matches!(
-                error.kind(),
-                AgentSessionsErrorKind::InvalidInput
-                    | AgentSessionsErrorKind::IdentityConflict
-                    | AgentSessionsErrorKind::Revalidation
-            ) =>
-        {
-            let workflow_finish = abandon_prepared_rebind(executor, config, operation);
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            workflow_finish?;
-            return Err(CliFailure::new(format!("canonical rebind failed: {error}")));
-        }
-        Ok(Err(error)) => Err(CliFailure::new(format!("canonical rebind failed: {error}"))),
-        Err(_) => Err(CliFailure::new("application execution failed")),
-    };
-    let outcome = match rebind_result {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            return Err(error);
-        }
-    };
-    observe_phase(
-        events,
-        HostLifecyclePhase::RebindCanonicalTransition,
-        started,
-        config.session.pending_queue.len(),
-    );
-    observe_boundary(
-        config.runtime_factory.as_ref(),
-        HostWorkflow::Rebind,
-        HostBoundary::RuntimeReturned,
-    );
-    let target_locator = match outcome {
-        RebindSessionOutcome::Rebound {
-            source,
-            target: locator,
-            binding,
-            ..
-        } if source == source_locator
-            && binding.protocol() == target.binding.protocol()
-            && binding.route() == target.binding.route()
-            && binding.model() == target.binding.model()
-            && binding.selected_provider_configuration()
-                == target.binding.selected_provider_configuration()
-            && binding.effective_provider_configuration()
-                == target.binding.effective_provider_configuration() =>
-        {
-            locator
-        }
-        RebindSessionOutcome::RecoveryRequired { recovery, .. }
-            if recovery.locator() == source_locator =>
-        {
-            let recovery_save = abandon_prepared_rebind(executor, config, operation);
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            recovery_save?;
-            return Err(CliFailure::new(
-                "the session has an interrupted turn, so the model change was not started; the \
-                 next prompt (or /recover) recovers it, then the change can be retried",
-            ));
-        }
-        _ => {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            return Err(CliFailure::new("canonical rebind receipt is inconsistent"));
-        }
-    };
-    let target_record_result = (|| -> CliResult<SessionRecord> {
-        // Publish the successor and settle the canonical receipt before an
-        // interrupt can stop catch-up on the saved, resumable target.
-        run_watched(
-            executor,
-            watch,
-            super::projection::project_to_tail(
-                opened.sessions(),
-                &config.store,
-                &config.session.id,
-                source_locator,
-            ),
-        )
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(CliFailure::new)?;
-        let request = config
-            .store
-            .load_intents(&config.session.id)
-            .map_err(CliFailure::new)?
-            .workflow_request(operation)
-            .cloned()
-            .ok_or_else(|| CliFailure::new("rebind request is missing"))?;
-        run_watched(
-            executor,
-            watch,
-            super::projection::project_to_tail_interruptible(
-                opened.sessions(),
-                &config.store,
-                &request.successor_product_id(),
-                target_locator,
-                || watch.observe_now(),
-                |_, _| {},
-            ),
-        )
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(CliFailure::new)?;
-        let record = config
-            .store
-            .load(&request.successor_product_id())
-            .map_err(CliFailure::new)?;
-        if record.plakous_locator != Some(target_locator) {
-            return Err(CliFailure::new(
-                "rebind successor differs from its projected branch fact",
-            ));
-        }
-        Ok(record)
-    })();
-    let target_record = match target_record_result {
-        Ok(record) => record,
-        Err(error) => {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            let target_id = config
-                .store
-                .load_intents(&config.session.id)
-                .map_err(CliFailure::new)?
-                .workflow_request(operation)
-                .map(sessions::projector::WorkflowRequest::successor_product_id)
-                .ok_or_else(|| CliFailure::new("rebind request is missing"))?;
-            if config.store.load(&target_id).is_err() {
-                return Err(error);
-            }
-            if watch.interrupted() {
-                return Err(CliFailure::new(format!(
-                    "fork stopped; saved as session {target_id}; this session stays attached; /resume {target_id} opens it"
-                )));
-            }
-            return Err(CliFailure::new(format!(
-                "the fork was saved as session {target_id} but could not project ({}); this session stays attached, and /resume {target_id} opens the fork",
-                error.message(),
-            )));
-        }
-    };
-    observe_boundary(
-        config.runtime_factory.as_ref(),
-        HostWorkflow::Rebind,
-        HostBoundary::ProductPublished,
-    );
-    let Some(resume_locator) = target_record.plakous_locator else {
-        restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-        return Err(CliFailure::new("rebind target product binding is missing"));
-    };
-    let target_model = target_record
-        .model
-        .clone()
-        .ok_or_else(|| CliFailure::new("rebind target product model is missing"));
-    let target_model = match target_model {
-        Ok(model) => model,
-        Err(error) => {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            return Err(error);
-        }
-    };
-    stderr_buf.clear();
-    let spec = match &target.route {
-        RebindRoute::Native { spec, .. } => spec.as_deref(),
-        RebindRoute::Api(_) => None,
-    };
-    let replacement_result = match executor.block_on(config.runtime_factory.open_rebind_target(
-        config,
-        &target_record,
-        spec,
-        resume_locator,
-        stderr_buf,
-    )) {
-        Ok(result) => result.map_err(|error| error.failure),
-        Err(_) => Err(CliFailure::new("application execution failed")),
-    };
-    let replacement = match replacement_result {
-        Ok(replacement) => replacement,
-        Err(error) => {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            return Err(error);
-        }
-    };
-    observe_phase(
-        events,
-        HostLifecyclePhase::RebindOpenTarget,
-        started,
-        config.session.pending_queue.len(),
-    );
-    let previous = std::mem::replace(opened, replacement);
-    let source = std::mem::replace(&mut config.session, target_record);
-    config.target = match (target.route, &config.target) {
-        (RebindRoute::Api(record), _) => {
-            let subscriptions = config
-                .target
-                .native_subscriptions()
-                .cloned()
-                .ok_or_else(|| CliFailure::new("native subscription authority is missing"))?;
-            match record.target_selection {
-                TargetSelection::Platform { provider } => HostTargetAuthority::Platform {
-                    provider,
-                    subscriptions,
-                },
-                TargetSelection::OpenRouter { .. } => HostTargetAuthority::OpenRouter {
-                    subscriptions,
-                    evidence: None,
-                },
-                TargetSelection::Native | TargetSelection::NativePriority => {
-                    return Err(CliFailure::new("API rebind published a non-API target"));
-                }
-            }
-        }
-        (
-            RebindRoute::Native {
-                provider, resolved, ..
-            },
-            HostTargetAuthority::Native { subscriptions, .. }
-            | HostTargetAuthority::OpenRouter { subscriptions, .. }
-            | HostTargetAuthority::Platform { subscriptions, .. },
-        ) => HostTargetAuthority::Native {
-            provider,
-            resolved: resolved
-                .ok_or_else(|| CliFailure::new("resolved rebind target is missing"))?,
-            subscriptions: subscriptions.clone(),
-            catalog_candidates: match &config.target {
-                HostTargetAuthority::Native {
-                    catalog_candidates, ..
-                } => std::sync::Arc::clone(catalog_candidates),
-                HostTargetAuthority::OpenRouter { .. } | HostTargetAuthority::Platform { .. } => {
-                    std::sync::Arc::from([])
-                }
-
-                HostTargetAuthority::Registered { .. } => std::sync::Arc::from([]),
-            },
-        },
-
-        (RebindRoute::Native { provider, .. }, HostTargetAuthority::Registered { token, .. }) => {
-            HostTargetAuthority::Registered {
-                provider,
-                token: token.clone(),
-            }
-        }
-    };
-    config.model_id = target_model;
-    config.effort = target.effort;
-    config.effort_explicit = target.effort_explicit;
-    observe_phase(
-        events,
-        HostLifecyclePhase::RebindActivate,
-        started,
-        config.session.pending_queue.len(),
-    );
-    config.source_releases.track(release_source_attachment(
-        previous,
-        source.id,
-        events.pinned_to(&config.session.id),
-        "rebind",
-        config.runtime_factory.clone(),
-    ));
-    emit_queue_snapshot(events, &config.session);
-    let _ = events.send(super::logging::project_session_snapshot(&config.session));
-    send_binding(events, config);
-    send_last_user_prompt_at(events, opened);
-    report_rebind_context(executor, opened, events, config);
-    let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
-    // A profile fork's session froze its roster at its own genesis; only a
-    // branch on the source's tree installs a successor epoch there.
-    if let (Some(account), Some(model)) = (
-        config.session.account.as_deref(),
-        config.session.model.as_deref(),
-    ) && tree_id != config.session.id
-    {
-        let snapshot = crate::orchestration::OrchestrationSnapshot::freeze(
-            config.state_roots.roster_source().roster(
-                account,
-                model,
-                config.session.effort.as_deref(),
-            )?,
-        );
-        topology_state::install_successor_epoch(
-            &config.topology_rows(),
-            snapshot,
-            &tree_id,
-            &|observation| config.state_roots.emit_product(observation),
-        )
-        .map_err(CliFailure::new)?;
-        if let (Some(session_id), Some(tree_id_text)) = (
-            crate::product_observation::session_id_from_text(&tree_id),
-            crate::product_observation::BoundedText64::new(&tree_id),
-        ) {
-            config.state_roots.emit_product(
-                crate::product_observation::ProductObservation::TreeRebound {
-                    at: crate::product_observation::wall_timestamp(),
-                    session_id,
-                    tree_id: tree_id_text,
-                },
-            );
-        }
-    }
-    // A profile fork onto the same root changes only the cards; the product
-    // reports that itself, and "effort changed" would be false.
-    let same_root = previous_account == config.session.account
-        && previous_model == config.model_id
-        && previous_effort == config.effort;
-    if !same_root {
-        let _ = events.notice(TranscriptRow::info(
-            NoticeScope::Settings,
-            rebind_note(
-                RebindBefore {
-                    account: previous_account.as_deref(),
-                    model: &previous_model,
-                    effort: previous_effort,
-                },
-                RebindBefore {
-                    account: config.session.account.as_deref(),
-                    model: &config.model_id,
-                    effort: config.effort,
-                },
-            ),
-        ));
-    }
-    Ok(())
-}
-
 /// The refusal of a rebind whose target route cannot serve one of the
 /// session's frozen tools. A rebind keeps those tools, so canonical tool
 /// authority never changes across it; this refuses before any durable work.
@@ -996,51 +613,19 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     let instructions_before = instruction_sources(opened);
     let mut attached_tree = None;
     let branched = (|| -> CliResult<Rebound> {
-        stderr_buf.clear();
-        // A profile's own tree has no hub yet: attach one so the new
-        // session's tools compile against it. Only a lease this build
-        // took is dropped below.
-        let (runtime, mut target) = match target {
-            ProfileTarget::Native(target) => {
-                let (runtime, tree) =
-                    native_rebind_runtime(config, &target.route, own_tree, stderr_buf);
-                attached_tree = tree;
-                (runtime?, *target)
-            }
-            ProfileTarget::Api(record) => {
-                let attach = if own_tree {
-                    crate::topology_runtime::TopologyHubAttach::AttachRoot
-                } else {
-                    crate::topology_runtime::TopologyHubAttach::LookupOnly
-                };
-                let mut tree = None;
-                let runtime = run_watched(
-                    executor,
-                    watch,
-                    api_runtime_for_record(
-                        config,
-                        &record,
-                        false,
-                        attach,
-                        Some(&topology_tree_id),
-                        &mut tree,
-                    ),
-                )
-                .map_err(|_| CliFailure::new("application execution failed"))?;
-                attached_tree = tree;
-                let runtime = runtime?;
-                let (effort, effort_explicit) = effort_from_config(effort_label.as_deref());
-                let binding = runtime.target_binding();
-                let target = ResolvedRebindTarget {
-                    route: RebindRoute::Api(record),
-                    effort: effort_explicit.then_some(effort),
-                    effort_explicit,
-                    binding,
-                };
-                (runtime, target)
-            }
-        };
-        target.binding = runtime.target_binding();
+        let (runtime, target) = prepare_profile_runtime(
+            executor,
+            watch,
+            config,
+            stderr_buf,
+            target,
+            ProfileRuntimeInput {
+                own_tree,
+                topology_tree_id: &topology_tree_id,
+                effort_label: effort_label.as_deref(),
+            },
+            &mut attached_tree,
+        )?;
         observe_phase(
             events,
             HostLifecyclePhase::RebindPrepareRuntime,
@@ -1052,127 +637,35 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         if watch.observe_now() {
             return Err(interrupted_before_dispatch("rebind"));
         }
-        let provider = match &target.route {
-            RebindRoute::Native { provider, .. } => format!("{provider:?}").to_ascii_lowercase(),
-            RebindRoute::Api(_) => account.clone(),
-        };
-        let workflow_kind =
-            sessions::SessionWorkflowKind::Rebind(Box::new(sessions::RebindSelection {
-                provider,
-                account: account.clone(),
-                model: model.to_owned(),
-                effort: effort_label.clone(),
-                composition,
-                target_selection,
-                protocol: target.binding.protocol().as_str().to_owned(),
-                route: target.binding.route().as_str().to_owned(),
-                requested_model: target.binding.model().as_str().to_owned(),
-                selected_configuration: serde_json::to_string(
-                    &target.binding.selected_provider_configuration(),
-                )
-                .map_err(|_| CliFailure::new("selected configuration could not be persisted"))?,
-                effective_configuration: serde_json::to_string(
-                    &target.binding.effective_provider_configuration(),
-                )
-                .map_err(|_| CliFailure::new("effective configuration could not be persisted"))?,
-                account_binding: serde_json::to_string(&target.binding.account_binding())
-                    .map_err(|_| CliFailure::new("account binding could not be persisted"))?,
-            }));
-        let attached_locator = opened.locator();
-        if config.session.plakous_locator != Some(attached_locator) {
-            return Err(CliFailure::new(
-                "rebind source does not match the exact durable product binding",
-            ));
-        }
-        if config.session.store_revision == 0 {
-            config
-                .store
-                .save(&mut config.session)
-                .map_err(CliFailure::new)?;
-        }
-        run_watched(
+        let workflow_kind = rebind_workflow_kind(
+            &target,
+            &account,
+            model,
+            effort_label.as_deref(),
+            composition,
+            target_selection,
+        )?;
+        let attached_locator = publish_rebind_intent(
             executor,
             watch,
-            super::projection::project_to_tail_interruptible(
-                opened.sessions(),
-                &config.store,
-                &config.session.id,
-                attached_locator,
-                || watch.observe_now(),
-                |_, _| {},
-            ),
-        )
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| {
-            if watch.interrupted() {
-                interrupted_before_dispatch("rebind")
-            } else {
-                CliFailure::new(error)
-            }
-        })?;
-        let intents = config
-            .store
-            .load_intents(&config.session.id)
-            .map_err(CliFailure::new)?;
-        let views = config
-            .store
-            .load_views(&config.session.id)
-            .map_err(CliFailure::new)?
-            .ok_or_else(|| CliFailure::new("rebind requires projected views"))?;
-        if intents.workflow_requests.iter().any(|request| {
-            views
-                .state
-                .workflows
-                .get(&request.operation_id)
-                .is_none_or(|workflow| workflow.settled.is_none())
-        }) {
-            return Err(CliFailure::new(
-                "rebind requires a safe boundary with no unresolved workflow request",
-            ));
-        }
-        config
-            .store
-            .submit_workflow_request(
-                &mut config.session,
-                &sessions::projector::WorkflowRequest {
-                    operation_id: operation.clone(),
-                    source_locator: attached_locator,
-                    kind: workflow_kind,
-                },
-            )
-            .map_err(CliFailure::new)?;
-        observe_phase(
+            config,
+            opened,
             events,
-            HostLifecyclePhase::RebindPublishIntent,
-            started,
-            config.session.pending_queue.len(),
-        );
-        observe_boundary(
-            config.runtime_factory.as_ref(),
-            HostWorkflow::Rebind,
-            HostBoundary::Prepared,
-        );
-        let source_locator = match run_watched(executor, watch, opened.detach()) {
-            Ok(Ok(locator)) => locator,
-            Ok(Err(error)) => {
-                abandon_prepared_rebind(executor, config, &operation)?;
-                return Err(CliFailure::new(format!(
-                    "rebind source release failed after durable preparation ({:?}): {error}",
-                    error.kind()
-                )));
-            }
-            Err(_) => {
-                abandon_prepared_rebind(executor, config, &operation)?;
-                return Err(CliFailure::new("application execution failed"));
-            }
-        };
-        if source_locator != attached_locator {
-            restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            abandon_prepared_rebind(executor, config, &operation)?;
-            return Err(CliFailure::new(
-                "rebind source advanced after durable preparation; exact reconciliation is required",
-            ));
-        }
+            RebindIntent {
+                operation: &operation,
+                workflow_kind,
+                started,
+            },
+        )?;
+        let source_locator = detach_prepared_rebind(
+            executor,
+            watch,
+            config,
+            opened,
+            stderr_buf,
+            &operation,
+            attached_locator,
+        )?;
         complete_rebind(
             executor,
             watch,
@@ -1195,6 +688,240 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         note_reread_instructions(events, instructions_before, opened);
     }
     branched
+}
+
+struct ProfileRuntimeInput<'a> {
+    own_tree: bool,
+    topology_tree_id: &'a str,
+    effort_label: Option<&'a str>,
+}
+
+fn prepare_profile_runtime<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    watch: InterruptWatch<'_, P>,
+    config: &HostConfig<P>,
+    stderr_buf: &mut Vec<u8>,
+    target: ProfileTarget,
+    input: ProfileRuntimeInput<'_>,
+    attached_tree: &mut Option<String>,
+) -> CliResult<(SessionRuntimeBinding, ResolvedRebindTarget)> {
+    let ProfileRuntimeInput {
+        own_tree,
+        topology_tree_id,
+        effort_label,
+    } = input;
+    stderr_buf.clear();
+    // A profile's own tree has no hub yet: attach one so the new
+    // session's tools compile against it. Only a lease this build
+    // took is dropped below.
+    let (runtime, mut target) = match target {
+        ProfileTarget::Native(target) => {
+            let (runtime, tree) =
+                native_rebind_runtime(config, &target.route, own_tree, stderr_buf);
+            *attached_tree = tree;
+            (runtime?, *target)
+        }
+        ProfileTarget::Api(record) => {
+            let attach = if own_tree {
+                crate::topology_runtime::TopologyHubAttach::AttachRoot
+            } else {
+                crate::topology_runtime::TopologyHubAttach::LookupOnly
+            };
+            let mut tree = None;
+            let runtime = run_watched(
+                executor,
+                watch,
+                api_runtime_for_record(
+                    config,
+                    &record,
+                    false,
+                    attach,
+                    Some(topology_tree_id),
+                    &mut tree,
+                ),
+            )
+            .map_err(|_| CliFailure::new("application execution failed"))?;
+            *attached_tree = tree;
+            let runtime = runtime?;
+            let (effort, effort_explicit) = effort_from_config(effort_label);
+            let binding = runtime.target_binding();
+            let target = ResolvedRebindTarget {
+                route: RebindRoute::Api(record),
+                effort: effort_explicit.then_some(effort),
+                effort_explicit,
+                binding,
+            };
+            (runtime, target)
+        }
+    };
+    target.binding = runtime.target_binding();
+    Ok((runtime, target))
+}
+
+fn rebind_workflow_kind(
+    target: &ResolvedRebindTarget,
+    account: &str,
+    model: &str,
+    effort_label: Option<&str>,
+    composition: crate::binding::CompositionSelection,
+    target_selection: TargetSelection,
+) -> CliResult<sessions::SessionWorkflowKind> {
+    let provider = match &target.route {
+        RebindRoute::Native { provider, .. } => format!("{provider:?}").to_ascii_lowercase(),
+        RebindRoute::Api(_) => account.to_owned(),
+    };
+    let workflow_kind =
+        sessions::SessionWorkflowKind::Rebind(Box::new(sessions::RebindSelection {
+            provider,
+            account: account.to_owned(),
+            model: model.to_owned(),
+            effort: effort_label.map(str::to_owned),
+            composition,
+            target_selection,
+            protocol: target.binding.protocol().as_str().to_owned(),
+            route: target.binding.route().as_str().to_owned(),
+            requested_model: target.binding.model().as_str().to_owned(),
+            selected_configuration: serde_json::to_string(
+                &target.binding.selected_provider_configuration(),
+            )
+            .map_err(|_| CliFailure::new("selected configuration could not be persisted"))?,
+            effective_configuration: serde_json::to_string(
+                &target.binding.effective_provider_configuration(),
+            )
+            .map_err(|_| CliFailure::new("effective configuration could not be persisted"))?,
+            account_binding: serde_json::to_string(&target.binding.account_binding())
+                .map_err(|_| CliFailure::new("account binding could not be persisted"))?,
+        }));
+    Ok(workflow_kind)
+}
+
+struct RebindIntent<'a> {
+    operation: &'a str,
+    workflow_kind: sessions::SessionWorkflowKind,
+    started: Instant,
+}
+
+fn publish_rebind_intent<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    watch: InterruptWatch<'_, P>,
+    config: &mut HostConfig<P>,
+    opened: &AttachedCodingSession,
+    events: &Sender<P>,
+    intent: RebindIntent<'_>,
+) -> CliResult<plakous::sessions::SessionLocator> {
+    let RebindIntent {
+        operation,
+        workflow_kind,
+        started,
+    } = intent;
+    let attached_locator = opened.locator();
+    if config.session.plakous_locator != Some(attached_locator) {
+        return Err(CliFailure::new(
+            "rebind source does not match the exact durable product binding",
+        ));
+    }
+    if config.session.store_revision == 0 {
+        config
+            .store
+            .save(&mut config.session)
+            .map_err(CliFailure::new)?;
+    }
+    run_watched(
+        executor,
+        watch,
+        super::projection::project_to_tail_interruptible(
+            opened.sessions(),
+            &config.store,
+            &config.session.id,
+            attached_locator,
+            || watch.observe_now(),
+            |_, _| {},
+        ),
+    )
+    .map_err(|_| CliFailure::new("application execution failed"))?
+    .map_err(|error| {
+        if watch.interrupted() {
+            interrupted_before_dispatch("rebind")
+        } else {
+            CliFailure::new(error)
+        }
+    })?;
+    let intents = config
+        .store
+        .load_intents(&config.session.id)
+        .map_err(CliFailure::new)?;
+    let views = config
+        .store
+        .load_views(&config.session.id)
+        .map_err(CliFailure::new)?
+        .ok_or_else(|| CliFailure::new("rebind requires projected views"))?;
+    if intents.workflow_requests.iter().any(|request| {
+        views
+            .state
+            .workflows
+            .get(&request.operation_id)
+            .is_none_or(|workflow| workflow.settled.is_none())
+    }) {
+        return Err(CliFailure::new(
+            "rebind requires a safe boundary with no unresolved workflow request",
+        ));
+    }
+    config
+        .store
+        .submit_workflow_request(
+            &mut config.session,
+            &sessions::projector::WorkflowRequest {
+                operation_id: operation.to_owned(),
+                source_locator: attached_locator,
+                kind: workflow_kind,
+            },
+        )
+        .map_err(CliFailure::new)?;
+    observe_phase(
+        events,
+        HostLifecyclePhase::RebindPublishIntent,
+        started,
+        config.session.pending_queue.len(),
+    );
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Rebind,
+        HostBoundary::Prepared,
+    );
+    Ok(attached_locator)
+}
+
+fn detach_prepared_rebind<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    watch: InterruptWatch<'_, P>,
+    config: &mut HostConfig<P>,
+    opened: &mut AttachedCodingSession,
+    stderr_buf: &mut Vec<u8>,
+    operation: &str,
+    attached_locator: plakous::sessions::SessionLocator,
+) -> CliResult<plakous::sessions::SessionLocator> {
+    let source_locator = match run_watched(executor, watch, opened.detach()) {
+        Ok(Ok(locator)) => locator,
+        Ok(Err(error)) => {
+            abandon_prepared_rebind(executor, config, operation)?;
+            return Err(CliFailure::new(format!(
+                "rebind source release failed after durable preparation ({:?}): {error}",
+                error.kind()
+            )));
+        }
+        Err(_) => {
+            abandon_prepared_rebind(executor, config, operation)?;
+            return Err(CliFailure::new("application execution failed"));
+        }
+    };
+    if source_locator != attached_locator {
+        restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+        abandon_prepared_rebind(executor, config, operation)?;
+        return Err(CliFailure::new(
+            "rebind source advanced after durable preparation; exact reconciliation is required",
+        ));
+    }
+    Ok(source_locator)
 }
 
 /// The attached agent's enrolled instruction sources, captured before a

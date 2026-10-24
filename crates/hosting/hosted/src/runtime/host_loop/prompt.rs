@@ -13,6 +13,21 @@ use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::runtime::admission::{QueuePersistAction, log_queue_persist_failed};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
+struct PromptInput {
+    user_text: String,
+    queued_delivery: Option<SessionQueueItem>,
+    user_echoed: bool,
+    host_authored: bool,
+    transient_resume: bool,
+    images: std::sync::Arc<[plakous_host_protocol::DraftImage]>,
+}
+
+struct PromptMail {
+    canonical_command: String,
+    selected_mail: Option<sessions::ResultMailBatch>,
+    replayed_mail: bool,
+}
+
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     pub(super) fn run_prompt(
         &mut self,
@@ -154,49 +169,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .as_ref()
             .map(|item| std::sync::Arc::clone(&item.images))
             .unwrap_or_default();
-        let pending_input = |command: &str| queue::user_input(command, &images);
-
-        if (!host_authored || transient_resume)
-            && let Err(error) = self.refresh_native_authority_before_prompt()
+        if let std::ops::ControlFlow::Break(()) =
+            self.prepare_prompt_authority(host_authored, transient_resume, &mut one_shot)?
         {
-            self.recovery_blocked |= self.opened.agent().is_none();
-            if let Some(state) = one_shot.as_deref_mut() {
-                state.result = Some(Err(error.clone()));
-            }
-            self.pause_unrecorded(error.message().to_owned())?;
-            let _ = self.events.notice(TranscriptRow::error(
-                NoticeScope::Queue,
-                format!(
-                    "fresh model authority: {}; the prompt remains queued and drain stays paused",
-                    error.message()
-                ),
-            ));
             return Ok(HostStep::Continue);
         }
-
-        // Receipts a terminal could not settle (its settlement failed, or it
-        // left no authoritative result) settle from committed history before
-        // anything is dispatched, and before mail selection so restored mail
-        // rides this command (spec 03 section 4.4).
-        if let Err(error) = self
-            .executor
-            .block_on(super::super::result_mail::settle_waits(
-                &self.config.topology_rows(),
-                &self.config.session,
-                &self.opened,
-            ))
-            .unwrap_or_else(|_| Err("application execution failed".to_owned()))
-        {
-            if let Some(state) = one_shot.as_deref_mut() {
-                state.result = Some(Err(CliFailure::new(error.clone())));
-            }
-            let _ = self.events.notice(TranscriptRow::error(
-                NoticeScope::Tree,
-                format!("wait receipt settlement failed: {error}"),
-            ));
-            return Ok(HostStep::Continue);
-        }
-
         let rows = self.config.topology_rows();
         self.executor
             .block_on(super::super::projection::project_tree(
@@ -210,7 +187,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 
         // A replayed delivery's command and batch are immutable.
         let mut replayed_mail = false;
-        let (mut canonical_command, mut selected_mail) = if let Some(intent) = queued_delivery
+        let (canonical_command, selected_mail) = if let Some(intent) = queued_delivery
             .as_ref()
             .and_then(|item| self.config.session.queue_commands.pending_for(item))
         {
@@ -238,6 +215,94 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             }
         };
 
+        self.preflight_prompt(
+            PromptInput {
+                user_text,
+                queued_delivery,
+                user_echoed,
+                host_authored,
+                transient_resume,
+                images,
+            },
+            PromptMail {
+                canonical_command,
+                selected_mail,
+                replayed_mail,
+            },
+            one_shot,
+        )
+    }
+
+    fn prepare_prompt_authority(
+        &mut self,
+        host_authored: bool,
+        transient_resume: bool,
+        one_shot: &mut Option<&mut super::super::oneshot::OneShotState>,
+    ) -> CliResult<std::ops::ControlFlow<()>> {
+        if (!host_authored || transient_resume)
+            && let Err(error) = self.refresh_native_authority_before_prompt()
+        {
+            self.recovery_blocked |= self.opened.agent().is_none();
+            if let Some(state) = one_shot.as_deref_mut() {
+                state.result = Some(Err(error.clone()));
+            }
+            self.pause_unrecorded(error.message().to_owned())?;
+            let _ = self.events.notice(TranscriptRow::error(
+                NoticeScope::Queue,
+                format!(
+                    "fresh model authority: {}; the prompt remains queued and drain stays paused",
+                    error.message()
+                ),
+            ));
+            return Ok(std::ops::ControlFlow::Break(()));
+        }
+
+        // Receipts a terminal could not settle (its settlement failed, or it
+        // left no authoritative result) settle from committed history before
+        // anything is dispatched, and before mail selection so restored mail
+        // rides this command (spec 03 section 4.4).
+        if let Err(error) = self
+            .executor
+            .block_on(super::super::result_mail::settle_waits(
+                &self.config.topology_rows(),
+                &self.config.session,
+                &self.opened,
+            ))
+            .unwrap_or_else(|_| Err("application execution failed".to_owned()))
+        {
+            if let Some(state) = one_shot.as_deref_mut() {
+                state.result = Some(Err(CliFailure::new(error.clone())));
+            }
+            let _ = self.events.notice(TranscriptRow::error(
+                NoticeScope::Tree,
+                format!("wait receipt settlement failed: {error}"),
+            ));
+            return Ok(std::ops::ControlFlow::Break(()));
+        }
+
+        Ok(std::ops::ControlFlow::Continue(()))
+    }
+
+    fn preflight_prompt(
+        &mut self,
+        input: PromptInput,
+        mail: PromptMail,
+        mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
+    ) -> CliResult<HostStep> {
+        let PromptInput {
+            user_text,
+            queued_delivery,
+            user_echoed,
+            host_authored,
+            transient_resume,
+            images,
+        } = input;
+        let PromptMail {
+            mut canonical_command,
+            mut selected_mail,
+            replayed_mail,
+        } = mail;
+        let pending_input = |command: &str| queue::user_input(command, &images);
         // One failed context query must not end the host: the TUI would only
         // see a dead channel. Park the queue and stay attached instead.
         let queried = if host_authored && !transient_resume {
@@ -398,6 +463,47 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             }
         }
 
+        self.dispatch_prompt(
+            PromptInput {
+                user_text,
+                queued_delivery,
+                user_echoed,
+                host_authored,
+                transient_resume,
+                images,
+            },
+            PromptMail {
+                canonical_command,
+                selected_mail,
+                replayed_mail,
+            },
+            pending_context,
+            enrolled_source_bytes,
+            one_shot,
+        )
+    }
+
+    fn dispatch_prompt(
+        &mut self,
+        input: PromptInput,
+        mail: PromptMail,
+        pending_context: crate::context::ContextProjection,
+        enrolled_source_bytes: u64,
+        one_shot: Option<&mut super::super::oneshot::OneShotState>,
+    ) -> CliResult<HostStep> {
+        let PromptInput {
+            user_text,
+            queued_delivery,
+            user_echoed,
+            host_authored,
+            transient_resume,
+            images,
+        } = input;
+        let PromptMail {
+            canonical_command,
+            selected_mail,
+            ..
+        } = mail;
         let _ = self.events.send(HostEvent::SetBusy(true));
         let _ = self.events.send(HostEvent::Status {
             phase: "running".into(),
@@ -482,6 +588,37 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let drive = driven
             .map(|driven| driven.outcome)
             .map_err(|error| error.message);
+        self.finish_prompt(
+            PromptInput {
+                user_text,
+                queued_delivery,
+                user_echoed,
+                host_authored,
+                transient_resume,
+                images,
+            },
+            drive,
+            turn_started,
+            quit_after_terminal,
+            one_shot,
+        )
+    }
+
+    fn finish_prompt(
+        &mut self,
+        input: PromptInput,
+        drive: Result<TurnHostOutcome, String>,
+        turn_started: Instant,
+        quit_after_terminal: bool,
+        one_shot: Option<&mut super::super::oneshot::OneShotState>,
+    ) -> CliResult<HostStep> {
+        let PromptInput {
+            user_text,
+            queued_delivery,
+            host_authored,
+            images,
+            ..
+        } = input;
         if matches!(&drive, Ok(TurnHostOutcome::ContextCapacity { .. })) {
             if host_authored {
                 // A wake refused at the window pauses as a failed wake
@@ -629,6 +766,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             return Ok(HostStep::Quit);
         }
 
+        self.continue_prompt_queue(completed, admission_rejected, stop_drain)
+    }
+
+    fn continue_prompt_queue(
+        &mut self,
+        completed: bool,
+        admission_rejected: bool,
+        stop_drain: bool,
+    ) -> CliResult<HostStep> {
         if !completed && !admission_rejected && !self.config.session.pending_queue.is_empty() {
             match commit_session_update(
                 &*self.config.store,

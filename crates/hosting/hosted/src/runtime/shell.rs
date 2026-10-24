@@ -44,6 +44,66 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
             .opt_str("model", config.session.model.as_deref()),
     );
 
+    publish_shell_startup(&config, &events);
+    let held_usage = HeldUsage::default();
+    let session_ledger = SessionLedger::default();
+    let subscription_usage_refresh = SubscriptionUsageRefresh::new(
+        &events,
+        std::sync::Arc::clone(&config.openrouter_credentials),
+        held_usage.clone(),
+        session_ledger.clone(),
+    );
+    let mut state = ShellState {
+        held_usage,
+        session_ledger,
+        subscription_usage_refresh,
+        readiness: ReadinessRefresh::new(),
+        recovery_blocked,
+        clear_publication,
+    };
+
+    loop {
+        state.readiness.apply_settled(&mut config, &events);
+        let delivery = match actions.recv_timeout(IDLE_OBSERVE_POLL_INTERVAL) {
+            Ok(delivery) => delivery,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if let Some(started) = delivery.started() {
+            let _ = events.send(started);
+        }
+        let (action, _acknowledgement) = delivery.into_parts();
+        if state.recovery_blocked && recovery_blocked_action(&action) {
+            refuse_detached_recovery_action(&events, &action);
+            continue;
+        }
+        if matches!(
+            handle_shell_action(&mut config, &events, log.as_ref(), &mut state, action),
+            ShellStep::Quit
+        ) {
+            break;
+        }
+    }
+}
+
+struct ShellState<P: plakous_host_protocol::ProtocolExtension> {
+    readiness: ReadinessRefresh,
+    subscription_usage_refresh: SubscriptionUsageRefresh<P>,
+    session_ledger: SessionLedger,
+    held_usage: HeldUsage,
+    recovery_blocked: bool,
+    clear_publication: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+}
+
+enum ShellStep {
+    Continue,
+    Quit,
+}
+
+fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
+    config: &ShellHostConfig<P>,
+    events: &Sender<P>,
+) {
     // The not-ready shell is reachable as a fallback *after* the canonical
     // attach published `SessionOpening` and then failed. Nothing else retires
     // that startup row, so the TUI kept its 80 ms spinner cadence alive for the
@@ -54,369 +114,414 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
     let _ = events.send(HostEvent::SessionOpened {
         session_open_ms: None,
     });
-    emit_shell_empty_state(&events, &config);
-    send_shell_binding(&events, &config);
+    emit_shell_empty_state(events, config);
+    send_shell_binding(events, config);
     let _ = events.send(project_session_snapshot(&config.session));
-    emit_prompt_history(&events, &config.session);
-    emit_queue_snapshot(&events, &config.session);
+    emit_prompt_history(events, &config.session);
+    emit_queue_snapshot(events, &config.session);
     let _ = events.send(HostEvent::Status {
         phase: "not_ready".into(),
         queue_len: config.session.pending_queue.len(),
         detail: Some(format!("not ready · {}", config.reason)),
     });
     let _ = events.send(HostEvent::SetBusy(false));
-    let held_usage = HeldUsage::default();
-    let session_ledger = SessionLedger::default();
-    let subscription_usage_refresh = SubscriptionUsageRefresh::new(
-        &events,
-        std::sync::Arc::clone(&config.openrouter_credentials),
-        held_usage.clone(),
-        session_ledger.clone(),
-    );
-    let mut readiness = ReadinessRefresh::new();
+}
 
-    loop {
-        readiness.apply_settled(&mut config, &events);
-        let delivery = match actions.recv_timeout(IDLE_OBSERVE_POLL_INTERVAL) {
-            Ok(delivery) => delivery,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
-        };
-        if let Some(started) = delivery.started() {
-            let _ = events.send(started);
+fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut ShellHostConfig<P>,
+    events: &Sender<P>,
+    log: Option<&SessionLog>,
+    state: &mut ShellState<P>,
+    action: UserAction<P>,
+) -> ShellStep {
+    match action {
+        UserAction::Recover => {
+            let _ = events.notice(TranscriptRow::error(
+                NoticeScope::Session,
+                "no session is attached; /attach reopens it, and reopening recovers any \
+                 interrupted turn",
+            ));
         }
-        let (action, _acknowledgement) = delivery.into_parts();
-        if recovery_blocked && recovery_blocked_action(&action) {
-            refuse_detached_recovery_action(&events, &action);
-            continue;
+        UserAction::Quit => return ShellStep::Quit,
+        UserAction::Background => {}
+        action @ (UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)) => {
+            refuse_not_ready(events, config, log);
+            reject_draft(events, action);
         }
-        match action {
-            UserAction::Recover => {
+        UserAction::DropQueued => {
+            handle_shell_queue_edit(config, events, ShellQueueEdit::Drop);
+        }
+        UserAction::DeleteQueued { id, revision } => {
+            handle_shell_queue_edit(config, events, ShellQueueEdit::Delete { id, revision });
+        }
+        UserAction::EditQueued { id, revision, text } => {
+            handle_shell_queue_edit(config, events, ShellQueueEdit::Edit { id, revision, text });
+        }
+        UserAction::MoveQueued {
+            id,
+            revision,
+            new_index,
+        } => {
+            handle_shell_queue_edit(
+                config,
+                events,
+                ShellQueueEdit::Move {
+                    id,
+                    revision,
+                    new_index,
+                },
+            );
+        }
+        UserAction::ResolveApproval { .. } => {
+            // No turn is attached, so no decision was ever offered. The
+            // host refuses without contacting any runtime.
+            let _ = events.notice(TranscriptRow::error(
+                NoticeScope::Approval,
+                APPROVAL_REFUSED_NOTE,
+            ));
+        }
+        UserAction::Interrupt | UserAction::StopProcesses { .. } => {
+            let _ = events.send(HostEvent::Status {
+                phase: "not_ready".into(),
+                queue_len: config.session.pending_queue.len(),
+                detail: Some("nothing to interrupt; no agent turn is attached".into()),
+            });
+        }
+        UserAction::SendQueuedNow { .. } | UserAction::ResumeQueueDrain => {
+            let _ = events.send(HostEvent::Status {
+                phase: "not_ready".into(),
+                queue_len: config.session.pending_queue.len(),
+                detail: Some("queue delivery requires an attached canonical agent".into()),
+            });
+        }
+        UserAction::ClearSession => {
+            if let Err(error) = commit_detached_clear(&mut config.session, |candidate| {
+                config.store.save(candidate)
+            }) {
                 let _ = events.notice(TranscriptRow::error(
                     NoticeScope::Session,
-                    "no session is attached; /attach reopens it, and reopening recovers any \
-                     interrupted turn",
-                ));
-            }
-            UserAction::Quit => break,
-            UserAction::Background => {}
-            action @ (UserAction::Prompt(_) | UserAction::FollowUp(_) | UserAction::Steer(_)) => {
-                refuse_not_ready(&events, &config, log.as_ref());
-                reject_draft(&events, action);
-            }
-            UserAction::DropQueued => {
-                match commit_session_update(
-                    &*config.store,
-                    &config.home,
-                    &mut config.session,
-                    drop_last_mutable,
-                ) {
-                    Ok(true) => emit_queue_snapshot(&events, &config.session),
-                    Ok(false) => {}
-                    Err(error) => report_queue_persist_failed(
-                        &events,
-                        &config.home,
-                        &config.session,
-                        QueuePersistAction::Drop,
-                        &error,
+                    format!(
+                        "clear session was not saved; previous session remains active: {error}"
                     ),
-                }
-            }
-            UserAction::ResolveApproval { .. } => {
-                // No turn is attached, so no decision was ever offered. The
-                // host refuses without contacting any runtime.
-                let _ = events.notice(TranscriptRow::error(
-                    NoticeScope::Approval,
-                    APPROVAL_REFUSED_NOTE,
                 ));
+                return ShellStep::Continue;
             }
-            UserAction::DeleteQueued { id, revision } => {
-                match commit_session_update(
-                    &*config.store,
-                    &config.home,
-                    &mut config.session,
-                    |candidate| remove_mutable(candidate, &id, revision),
-                ) {
-                    Ok(true) => emit_queue_snapshot(&events, &config.session),
-                    Ok(false) => reject_stale_queue_action(&events, &config.session),
-                    Err(error) => report_queue_persist_failed(
-                        &events,
-                        &config.home,
-                        &config.session,
-                        QueuePersistAction::Delete,
-                        &error,
-                    ),
+            let _ = events.send(HostEvent::ClearView);
+            let _ = events.send(project_session_snapshot(&config.session));
+            emit_shell_empty_state(events, config);
+            send_shell_binding(events, config);
+            let _ = events.notice(TranscriptRow::info(
+                NoticeScope::Session,
+                format!("new session {} (still not ready)", config.session.id),
+            ));
+            log_event(
+                log,
+                &config.session.id,
+                SessionEvent::new("session.cleared").str("id", &config.session.id),
+            );
+            if state.recovery_blocked {
+                if let Some(publication) = &state.clear_publication
+                    && let Ok(mut published) = publication.lock()
+                {
+                    *published = Some(config.session.id.clone());
                 }
+                let _ = events.send(HostEvent::ReattachReady);
+                return ShellStep::Quit;
             }
-            UserAction::EditQueued { id, revision, text } => {
-                let mut refusal = None;
-                match commit_session_update(
-                    &*config.store,
-                    &config.home,
-                    &mut config.session,
-                    |candidate| match edit_mutable(candidate, &id, revision, &text) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            refusal = Some(error);
-                            false
-                        }
-                    },
-                ) {
-                    Ok(true) => {
-                        emit_queue_snapshot(&events, &config.session);
-                        queue_edit_applied(&events, id);
-                    }
-                    Ok(false) => {
-                        emit_queue_snapshot(&events, &config.session);
-                        queue_edit_refused(&events, id);
-                        queue_refusal(
-                            &events,
-                            "queue edit",
-                            refusal.unwrap_or(queue::Refusal::Stale),
-                        );
-                    }
-                    Err(error) => {
-                        report_queue_persist_failed(
-                            &events,
-                            &config.home,
-                            &config.session,
-                            QueuePersistAction::Edit,
-                            &error,
-                        );
-                        queue_edit_refused(&events, id);
-                    }
-                }
-            }
-            UserAction::MoveQueued {
-                id,
-                revision,
-                new_index,
-            } => {
-                match commit_session_update(
-                    &*config.store,
-                    &config.home,
-                    &mut config.session,
-                    |candidate| move_mutable(candidate, &id, revision, new_index),
-                ) {
-                    Ok(true) => emit_queue_snapshot(&events, &config.session),
-                    Ok(false) => reject_stale_queue_action(&events, &config.session),
-                    Err(error) => report_queue_persist_failed(
-                        &events,
-                        &config.home,
-                        &config.session,
-                        QueuePersistAction::Move,
-                        &error,
-                    ),
-                }
-            }
-            UserAction::Interrupt | UserAction::StopProcesses { .. } => {
-                let _ = events.send(HostEvent::Status {
-                    phase: "not_ready".into(),
-                    queue_len: config.session.pending_queue.len(),
-                    detail: Some("nothing to interrupt; no agent turn is attached".into()),
-                });
-            }
-            UserAction::SendQueuedNow { .. } | UserAction::ResumeQueueDrain => {
-                let _ = events.send(HostEvent::Status {
-                    phase: "not_ready".into(),
-                    queue_len: config.session.pending_queue.len(),
-                    detail: Some("queue delivery requires an attached canonical agent".into()),
-                });
-            }
-            UserAction::ClearSession => {
-                if let Err(error) = commit_detached_clear(&mut config.session, |candidate| {
-                    config.store.save(candidate)
-                }) {
-                    let _ = events.notice(TranscriptRow::error(
-                        NoticeScope::Session,
-                        format!(
-                            "clear session was not saved; previous session remains active: {error}"
-                        ),
-                    ));
-                    continue;
-                }
-                let _ = events.send(HostEvent::ClearView);
-                let _ = events.send(project_session_snapshot(&config.session));
-                emit_shell_empty_state(&events, &config);
-                send_shell_binding(&events, &config);
-                let _ = events.notice(TranscriptRow::info(
-                    NoticeScope::Session,
-                    format!("new session {} (still not ready)", config.session.id),
-                ));
-                log_event(
-                    log.as_ref(),
-                    &config.session.id,
-                    SessionEvent::new("session.cleared").str("id", &config.session.id),
-                );
-                if recovery_blocked {
-                    if let Some(publication) = clear_publication
-                        && let Ok(mut published) = publication.lock()
-                    {
-                        *published = Some(config.session.id.clone());
-                    }
-                    let _ = events.send(HostEvent::ReattachReady);
-                    break;
-                }
-            }
-            UserAction::Compact => {
-                let _ = events.notice(TranscriptRow::error(
-                    NoticeScope::Compaction,
-                    "compact unavailable: no exact Plakous session is attached; source unchanged",
-                ));
-            }
-            UserAction::RefreshTemplates => {
-                super::surface::publish_template_readiness(
-                    config.surface.as_deref(),
-                    &config.ready_catalog.accounts,
-                    &events,
-                );
-            }
-            UserAction::ResumeSession { id: None } => {
-                handle_resume_picker_shell(&config, &events);
-            }
-            UserAction::ResumeSession { id: Some(id) } => {
-                handle_resume_load_shell(&mut config, &events, &id);
-            }
-            UserAction::ResumeSessionHandoff { .. } => {
-                let _ = events.notice(TranscriptRow::error(
-                    NoticeScope::Session,
-                    "resume relaunch must be handled by the terminal owner",
-                ));
-            }
-            UserAction::ForkSession {
-                account,
-                compact: _,
-            } => {
-                let _ = account;
-                handle_fork_shell(&events);
-            }
-            // The one product-intent arm; see the idle loop's twin. The cached
-            // allowance below is the shell's own projection.
-            UserAction::Extension(intent) => {
-                if super::surface::needs_usage(config.surface.as_deref(), &intent) {
-                    report_unavailable_context(&events);
-                    if super::surface::fresh_usage(config.surface.as_deref(), &intent) {
-                        subscription_usage_refresh.request_fresh(config.subscriptions.clone());
-                    } else {
-                        request_subscription_usage_cached(
-                            &held_usage,
-                            &session_ledger,
-                            &events,
-                            &subscription_usage_refresh,
-                            config.subscriptions.clone(),
-                        );
-                    }
-                }
-                let with_tools =
-                    super::surface::needs_session_tools(config.surface.as_deref(), &intent);
-                let effect = super::surface::dispatch(
-                    config.surface.as_deref(),
-                    intent,
-                    super::surface::SurfaceFacts {
-                        session: Some(super::surface::session_facts(
-                            &config.session,
-                            None,
-                            with_tools,
-                        )),
-                        phase: super::surface::SurfacePhase::Detached,
-                        attached_one_shot: false,
-                        catalog: &config.ready_catalog.accounts,
-                        queue_len: config.session.pending_queue.len(),
-                        usage_reads: subscription_usage_refresh.reads(),
-                    },
-                    &events,
-                );
-                let Some(fork) = effect.profile_fork else {
-                    continue;
-                };
-                // Nothing to fork: an unattached session with no conversation
-                // takes the profile's root, and the agent attaches on it.
-                if !config.session.transcript.is_empty() {
-                    fork.refuse(
-                        "this session is not attached; /attach it before forking onto a profile",
-                    );
-                    continue;
-                }
-                match handle_shell_set_model(
-                    &mut config,
-                    &events,
-                    log.as_ref(),
-                    &fork.account,
-                    &fork.model,
-                    fork.effort.as_deref(),
-                    fork.extra.as_deref(),
-                    fork.composition,
-                    fork.protocol,
-                ) {
-                    ShellBindingOutcome::Committed => {
-                        (fork.finish)(super::surface::ProfileForkOutcome::Bound);
-                        let _ = events.send(HostEvent::ReattachReady);
-                        break;
-                    }
-                    ShellBindingOutcome::RecoveryRequired => {
-                        fork.refuse("this session requires recovery before it can bind a profile");
-                        break;
-                    }
-                    ShellBindingOutcome::Refused => {
-                        fork.refuse("the profile's root could not be bound to this session");
-                    }
-                }
-            }
-            UserAction::RetryAttach => {
-                let _ = events.send(HostEvent::Activity {
-                    label: "resolving account/model".into(),
-                    active: true,
-                });
-            }
-            UserAction::RefreshReadiness => readiness.start(&config),
-            UserAction::OpenAgentTranscript { agent_id } => {
-                let _ = events.send(HostEvent::AgentTranscript(
-                    plakous_host_protocol::views::AgentTranscript {
-                        agent_id,
-                        rows: Vec::new(),
-                        live_turn_id: None,
-                        note: Some("no session is attached yet".to_owned()),
-                    },
-                ));
-            }
-            UserAction::CloseAgentTranscript => {}
-            UserAction::OpenTopologyNavigator
-            | UserAction::RefreshTopologyTree
-            | UserAction::ResumeTopologyTree
-            | UserAction::InterruptTopologyNode { .. }
-            | UserAction::CloseTopologyNode { .. }
-            | UserAction::StopAllTopology => {
-                crate::topology_navigator::emit_navigator_unavailable(
-                    |event| {
-                        let _ = events.send(event);
-                    },
-                    "agent tree navigator requires an attached canonical session",
-                );
-            }
-            UserAction::InvokeTool { .. } => {
-                let _ = events.notice(TranscriptRow::error(
-                    NoticeScope::Tree,
-                    "invoke_tool requires an attached canonical session",
-                ));
-            }
-            UserAction::RequestCallDetail {
-                call_id,
-                agent_id,
-                session_id,
-            } => {
-                // Same rule as an attached host: a request for some other
-                // session is not this shell's to answer.
-                if session_id == config.session.id {
-                    let _ = events.send(HostEvent::CallDetail(crate::call_detail::unavailable(
-                        call_id,
-                        agent_id,
-                        session_id,
-                        "call detail requires an attached canonical session".into(),
-                    )));
-                }
+        }
+        UserAction::Compact => {
+            let _ = events.notice(TranscriptRow::error(
+                NoticeScope::Compaction,
+                "compact unavailable: no exact Plakous session is attached; source unchanged",
+            ));
+        }
+        UserAction::RefreshTemplates => {
+            super::surface::publish_template_readiness(
+                config.surface.as_deref(),
+                &config.ready_catalog.accounts,
+                events,
+            );
+        }
+        UserAction::ResumeSession { id: None } => {
+            handle_resume_picker_shell(config, events);
+        }
+        UserAction::ResumeSession { id: Some(id) } => {
+            handle_resume_load_shell(config, events, &id);
+        }
+        UserAction::ResumeSessionHandoff { .. } => {
+            let _ = events.notice(TranscriptRow::error(
+                NoticeScope::Session,
+                "resume relaunch must be handled by the terminal owner",
+            ));
+        }
+        UserAction::ForkSession {
+            account,
+            compact: _,
+        } => {
+            let _ = account;
+            handle_fork_shell(events);
+        }
+        // The one product-intent arm; see the idle loop's twin. The cached
+        // allowance below is the shell's own projection.
+        UserAction::Extension(intent) => {
+            return handle_shell_extension(config, events, log, state, intent);
+        }
+        UserAction::RetryAttach => {
+            let _ = events.send(HostEvent::Activity {
+                label: "resolving account/model".into(),
+                active: true,
+            });
+        }
+        UserAction::RefreshReadiness => state.readiness.start(config),
+        UserAction::OpenAgentTranscript { agent_id } => {
+            let _ = events.send(HostEvent::AgentTranscript(
+                plakous_host_protocol::views::AgentTranscript {
+                    agent_id,
+                    rows: Vec::new(),
+                    live_turn_id: None,
+                    note: Some("no session is attached yet".to_owned()),
+                },
+            ));
+        }
+        UserAction::CloseAgentTranscript => {}
+        UserAction::OpenTopologyNavigator
+        | UserAction::RefreshTopologyTree
+        | UserAction::ResumeTopologyTree
+        | UserAction::InterruptTopologyNode { .. }
+        | UserAction::CloseTopologyNode { .. }
+        | UserAction::StopAllTopology => {
+            crate::topology_navigator::emit_navigator_unavailable(
+                |event| {
+                    let _ = events.send(event);
+                },
+                "agent tree navigator requires an attached canonical session",
+            );
+        }
+        UserAction::InvokeTool { .. } => {
+            let _ = events.notice(TranscriptRow::error(
+                NoticeScope::Tree,
+                "invoke_tool requires an attached canonical session",
+            ));
+        }
+        UserAction::RequestCallDetail {
+            call_id,
+            agent_id,
+            session_id,
+        } => {
+            // Same rule as an attached host: a request for some other
+            // session is not this shell's to answer.
+            if session_id == config.session.id {
+                let _ = events.send(HostEvent::CallDetail(crate::call_detail::unavailable(
+                    call_id,
+                    agent_id,
+                    session_id,
+                    "call detail requires an attached canonical session".into(),
+                )));
             }
         }
     }
+    ShellStep::Continue
+}
+
+enum ShellQueueEdit {
+    Drop,
+    Delete {
+        id: String,
+        revision: u64,
+    },
+    Edit {
+        id: String,
+        revision: u64,
+        text: String,
+    },
+    Move {
+        id: String,
+        revision: u64,
+        new_index: usize,
+    },
+}
+
+fn handle_shell_queue_edit<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut ShellHostConfig<P>,
+    events: &Sender<P>,
+    action: ShellQueueEdit,
+) {
+    match action {
+        ShellQueueEdit::Drop => {
+            match commit_session_update(
+                &*config.store,
+                &config.home,
+                &mut config.session,
+                drop_last_mutable,
+            ) {
+                Ok(true) => emit_queue_snapshot(events, &config.session),
+                Ok(false) => {}
+                Err(error) => report_queue_persist_failed(
+                    events,
+                    &config.home,
+                    &config.session,
+                    QueuePersistAction::Drop,
+                    &error,
+                ),
+            }
+        }
+        ShellQueueEdit::Delete { id, revision } => {
+            match commit_session_update(
+                &*config.store,
+                &config.home,
+                &mut config.session,
+                |candidate| remove_mutable(candidate, &id, revision),
+            ) {
+                Ok(true) => emit_queue_snapshot(events, &config.session),
+                Ok(false) => reject_stale_queue_action(events, &config.session),
+                Err(error) => report_queue_persist_failed(
+                    events,
+                    &config.home,
+                    &config.session,
+                    QueuePersistAction::Delete,
+                    &error,
+                ),
+            }
+        }
+        ShellQueueEdit::Edit { id, revision, text } => {
+            let mut refusal = None;
+            match commit_session_update(
+                &*config.store,
+                &config.home,
+                &mut config.session,
+                |candidate| match edit_mutable(candidate, &id, revision, &text) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        refusal = Some(error);
+                        false
+                    }
+                },
+            ) {
+                Ok(true) => {
+                    emit_queue_snapshot(events, &config.session);
+                    queue_edit_applied(events, id);
+                }
+                Ok(false) => {
+                    emit_queue_snapshot(events, &config.session);
+                    queue_edit_refused(events, id);
+                    queue_refusal(
+                        events,
+                        "queue edit",
+                        refusal.unwrap_or(queue::Refusal::Stale),
+                    );
+                }
+                Err(error) => {
+                    report_queue_persist_failed(
+                        events,
+                        &config.home,
+                        &config.session,
+                        QueuePersistAction::Edit,
+                        &error,
+                    );
+                    queue_edit_refused(events, id);
+                }
+            }
+        }
+        ShellQueueEdit::Move {
+            id,
+            revision,
+            new_index,
+        } => {
+            match commit_session_update(
+                &*config.store,
+                &config.home,
+                &mut config.session,
+                |candidate| move_mutable(candidate, &id, revision, new_index),
+            ) {
+                Ok(true) => emit_queue_snapshot(events, &config.session),
+                Ok(false) => reject_stale_queue_action(events, &config.session),
+                Err(error) => report_queue_persist_failed(
+                    events,
+                    &config.home,
+                    &config.session,
+                    QueuePersistAction::Move,
+                    &error,
+                ),
+            }
+        }
+    }
+}
+
+fn handle_shell_extension<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut ShellHostConfig<P>,
+    events: &Sender<P>,
+    log: Option<&SessionLog>,
+    state: &ShellState<P>,
+    intent: P::Intent,
+) -> ShellStep {
+    if super::surface::needs_usage(config.surface.as_deref(), &intent) {
+        report_unavailable_context(events);
+        if super::surface::fresh_usage(config.surface.as_deref(), &intent) {
+            state
+                .subscription_usage_refresh
+                .request_fresh(config.subscriptions.clone());
+        } else {
+            request_subscription_usage_cached(
+                &state.held_usage,
+                &state.session_ledger,
+                events,
+                &state.subscription_usage_refresh,
+                config.subscriptions.clone(),
+            );
+        }
+    }
+    let with_tools = super::surface::needs_session_tools(config.surface.as_deref(), &intent);
+    let effect = super::surface::dispatch(
+        config.surface.as_deref(),
+        intent,
+        super::surface::SurfaceFacts {
+            session: Some(super::surface::session_facts(
+                &config.session,
+                None,
+                with_tools,
+            )),
+            phase: super::surface::SurfacePhase::Detached,
+            attached_one_shot: false,
+            catalog: &config.ready_catalog.accounts,
+            queue_len: config.session.pending_queue.len(),
+            usage_reads: state.subscription_usage_refresh.reads(),
+        },
+        events,
+    );
+    let Some(fork) = effect.profile_fork else {
+        return ShellStep::Continue;
+    };
+    // Nothing to fork: an unattached session with no conversation
+    // takes the profile's root, and the agent attaches on it.
+    if !config.session.transcript.is_empty() {
+        fork.refuse("this session is not attached; /attach it before forking onto a profile");
+        return ShellStep::Continue;
+    }
+    match handle_shell_set_model(
+        config,
+        events,
+        log,
+        &fork.account,
+        &fork.model,
+        fork.effort.as_deref(),
+        fork.extra.as_deref(),
+        fork.composition,
+        fork.protocol,
+    ) {
+        ShellBindingOutcome::Committed => {
+            (fork.finish)(super::surface::ProfileForkOutcome::Bound);
+            let _ = events.send(HostEvent::ReattachReady);
+            return ShellStep::Quit;
+        }
+        ShellBindingOutcome::RecoveryRequired => {
+            fork.refuse("this session requires recovery before it can bind a profile");
+            return ShellStep::Quit;
+        }
+        ShellBindingOutcome::Refused => {
+            fork.refuse("the profile's root could not be bound to this session");
+        }
+    }
+    ShellStep::Continue
 }
 
 pub(super) fn commit_detached_clear(
