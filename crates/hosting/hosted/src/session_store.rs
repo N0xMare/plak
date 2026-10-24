@@ -527,13 +527,8 @@ mod memory {
         record
             .pending_queue
             .retain(|item| !record.queue_commands.is_consumed(item));
-        record.transcript = crate::sessions::ProductTranscript::committed(
-            views
-                .unwrap_or(&SessionViews::empty())
-                .transcript(&intents)
-                .into_iter()
-                .map(|(_, row)| row)
-                .collect(),
+        record.transcript = crate::sessions::ProductTranscript::stored(
+            views.unwrap_or(&SessionViews::empty()).transcript(&intents),
         );
         let empty = SessionViews::empty();
         let joined = views.unwrap_or(&empty);

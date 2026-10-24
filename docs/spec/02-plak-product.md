@@ -1476,6 +1476,12 @@ start and finish timestamps rather than time spent qualifying the operation.
 A field this table does not name is not persisted. A live row may carry more
 (an `elapsed_ms`, a streamed preview); the persisted row the projector writes,
 and therefore every restore and rebuild, carries exactly the sourced fields.
+The projector redacts and bounds each row once, when it writes it, and a
+bounded row is a fixed point of that bounding. A restore or terminal
+publication shows projector rows as persisted, without redacting or bounding
+them again; notices and imported rows are still bounded. A change to the
+display redactor or the row bounds therefore bumps the product schema or drops
+the views to force a rebuild.
 
 **The projector.** One pure function applies one feed record to the views:
 `project(views, intents, record, reads) -> views'`, where `reads` are the

@@ -2746,6 +2746,96 @@ fn a_rejected_call_takes_its_subject_from_its_call_block() {
     assert_eq!(stored, views.rows);
 }
 
+/// The transcript a store restores without bounding projector rows again
+/// equals the one bounding every row rebuilds, call identities included.
+fn assert_restore_equals_rebuild(views: &SessionViews, intents: &ProductIntents) {
+    for row in views.rows.values() {
+        assert_eq!(&crate::sessions::bound_row(row.clone()), row);
+    }
+    let merged = views.transcript(intents);
+    let rebuilt = crate::sessions::ProductTranscript::from_lines(
+        merged.iter().map(|(_, row)| row.clone()).collect(),
+    );
+    let restored = crate::sessions::ProductTranscript::stored(merged);
+    assert_eq!(restored.rows(), rebuilt.rows());
+    assert_eq!(restored.pending_notices(), []);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn stored_rows_are_fixed_points_and_restore_equals_rebuild(
+        steps in prop::collection::vec(step(), 1..7),
+    ) {
+        let feed = feed_of(&steps);
+        assert_restore_equals_rebuild(&project_all(&feed).views, &feed.intents);
+    }
+}
+
+/// Rows the bounds change when stored, a redacted and truncated tool detail
+/// and a multi-line subject carrying a credential, are fixed points once
+/// stored. Product-lane rows are not projector output, so a restore still
+/// bounds them.
+#[test]
+fn bounded_stored_rows_restore_as_rebuilt_and_product_rows_are_bounded() {
+    let mut feed = Feed::new();
+    let turn_id: TurnId = id(feed.fresh());
+    let call: CallId = id(feed.fresh());
+    let secret = "sk-0123456789abcdefghijklmnop";
+    let (response, items) = feed.history(
+        Some(turn_id),
+        HistorySegmentKind::Conversation,
+        vec![ReadItem {
+            actor: ReadActor::Assistant,
+            harness_authored: false,
+            parts: vec![
+                call_part(
+                    call,
+                    "web_search",
+                    Some(&format!("first line\nAuthorization: Bearer {secret}")),
+                ),
+                ReadPart::Result {
+                    call_id: call.to_string(),
+                    result: ResultRead {
+                        succeeded: true,
+                        text: format!("key {secret}\n{}", "result line\n".repeat(1_000)),
+                    },
+                },
+                ReadPart::Reasoning("thinking ".repeat(20_000)),
+            ],
+        }],
+        Vec::new(),
+    );
+    feed.advance(
+        vec![response],
+        Reads {
+            items: vec![(0, items)],
+            ..Reads::default()
+        },
+    );
+    let imported = crate::sessions::ToolItem {
+        detail: Some(format!("imported {secret}")),
+        ..only_tool(&project_all(&feed).views).clone()
+    };
+    feed.intents.imported = vec![TranscriptRow::Tool(crate::sessions::ToolItem {
+        call_id: "imported-call".to_owned(),
+        ..imported
+    })];
+    let views = project_all(&feed).views;
+    let tool = only_tool(&views);
+    let detail = tool.detail.as_deref().unwrap();
+    assert!(
+        !detail.contains(secret) && detail.len() <= crate::sessions::MAX_TOOL_ACTIVITY_DETAIL_BYTES,
+        "{detail:?}"
+    );
+    assert!(!tool.subject.as_deref().unwrap().contains(secret));
+    assert_restore_equals_rebuild(&views, &feed.intents);
+    let restored = crate::sessions::ProductTranscript::stored(views.transcript(&feed.intents));
+    let imported = restored.tool_activity("imported-call").unwrap();
+    assert!(!imported.detail.unwrap().contains(secret));
+}
+
 #[test]
 fn child_mail_riding_a_prompt_projects_as_rows_attributed_to_each_child() {
     let feed = feed_of(&[]);

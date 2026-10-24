@@ -6,10 +6,8 @@ use std::collections::HashMap;
 use plakous_host_protocol::views::presentation::row_bytes;
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptRow};
 
-use super::{
-    MAX_THINKING_ACTIVITY_BYTES, MAX_TOOL_ACTIVITY_DETAIL_BYTES, MAX_TRANSCRIPT_BYTES,
-    MAX_TRANSCRIPT_LINES,
-};
+use super::projector::{Lane, RowKey};
+use super::{MAX_THINKING_ACTIVITY_BYTES, MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES};
 
 /// Text that replaces the dropped head of a single oversized row.
 pub const TRANSCRIPT_TRUNCATION_MARKER: &str = "[older product transcript projection omitted]";
@@ -239,11 +237,32 @@ impl ProductTranscript {
         self.append(row);
     }
 
-    /// A projection holding exactly `rows` as committed: nothing pending.
+    /// The projection of a stored transcript, as
+    /// [`SessionViews::transcript`](super::projector::SessionViews::transcript)
+    /// merges it, with nothing pending. It equals [`Self::from_lines`] of the
+    /// same rows without bounding each projector row again: the projector
+    /// stored each one through [`bound_row`], which is the identity on its
+    /// output. Notices and imported rows (the product lane) are bounded as an
+    /// append bounds them.
     #[must_use]
-    pub fn committed(rows: Vec<TranscriptRow>) -> Self {
-        let mut transcript = Self::from_lines(rows);
-        transcript.mark_committed();
+    pub fn stored(rows: Vec<(RowKey, TranscriptRow)>) -> Self {
+        let mut transcript = Self::default();
+        let mut rows = rows.into_iter().peekable();
+        if rows
+            .next_if(|(_, row)| *row == TranscriptRow::Truncated)
+            .is_some()
+        {
+            transcript.marked = true;
+            transcript.lines.push(TranscriptRow::Truncated);
+            transcript.sizes.push(marker_bytes());
+            transcript.bytes = marker_bytes();
+        }
+        for (key, row) in rows {
+            match key.lane {
+                Lane::Runtime => transcript.insert(row, std::convert::identity),
+                Lane::Product => transcript.insert(row, bound_row),
+            }
+        }
         transcript
     }
 
@@ -252,33 +271,46 @@ impl ProductTranscript {
     /// marker is the projection's own and the session header is derived from
     /// the record, so neither is ever appended; blank thinking is not a row.
     pub fn append(&mut self, row: TranscriptRow) {
+        self.insert(row, bound_row);
+    }
+
+    /// [`Self::append`] with `bound` applied to each row it keeps.
+    fn insert(&mut self, row: TranscriptRow, bound: fn(TranscriptRow) -> TranscriptRow) {
         match row {
             TranscriptRow::Tool(tool) => {
-                self.upsert_tool(&tool);
+                let call_id = tool.call_id.clone();
+                self.upsert_row(bound(TranscriptRow::Tool(tool)), call_id);
             }
             TranscriptRow::Truncated | TranscriptRow::SessionHeader { .. } => {}
             TranscriptRow::Thinking(thinking)
                 if thinking.location_key.trim().is_empty() || thinking.text.trim().is_empty() => {}
-            row => self.push_row(row, None),
+            row => self.push_row(bound(row), None),
         }
     }
 
     /// Write a tool activity row: replace the row of its call id in place, or
     /// append a new one. Returns whether the row is new.
     pub fn upsert_tool(&mut self, activity: &ToolItem) -> bool {
-        let row = bound_row(TranscriptRow::Tool(activity.clone()));
-        if let Some(index) = self.call_index(&activity.call_id) {
+        self.upsert_row(
+            bound_row(TranscriptRow::Tool(activity.clone())),
+            activity.call_id.clone(),
+        )
+    }
+
+    /// [`Self::upsert_tool`] of a bounded row under `call_id`.
+    fn upsert_row(&mut self, row: TranscriptRow, call_id: String) -> bool {
+        if let Some(index) = self.call_index(&call_id) {
             let size = row_bytes(&row);
             self.bytes = self
                 .bytes
                 .saturating_sub(self.sizes[index])
                 .saturating_add(size);
             self.sizes[index] = size;
-            self.lines[index].clone_from(&row);
+            self.lines[index] = row;
             self.bound();
             return false;
         }
-        self.push_row(row, Some(activity.call_id.clone()));
+        self.push_row(row, Some(call_id));
         true
     }
 
@@ -293,11 +325,11 @@ impl ProductTranscript {
         *self = Self::default();
     }
 
+    /// Push one bounded row.
     fn push_row(&mut self, row: TranscriptRow, call_id: Option<String>) {
-        let row = bound_row(row);
-        if let Some(call_id) = &call_id {
+        if let Some(call_id) = call_id {
             let sequence = self.next_sequence();
-            self.calls.insert(call_id.clone(), sequence);
+            self.calls.insert(call_id, sequence);
         }
         let size = row_bytes(&row);
         self.bytes = self.bytes.saturating_add(size);
@@ -367,15 +399,19 @@ fn marker_bytes() -> usize {
     row_bytes(&TranscriptRow::Truncated)
 }
 
-/// Every stored row is bounded here, live and imported alike: a tool or
-/// process row's subject (redacted, then 240 bytes on one line, the same
-/// function the live path uses), a tool row's detail (redacted, then
-/// [`MAX_TOOL_ACTIVITY_DETAIL_BYTES`]; redaction is idempotent, so a live
-/// detail the event path already redacted is unchanged), a thinking row's text
-/// ([`MAX_THINKING_ACTIVITY_BYTES`]). A single row still larger than the
-/// whole byte bound keeps the tail of its text, behind
-/// [`TRANSCRIPT_TRUNCATION_MARKER`], sized so the marker row and the row
-/// still fit together. Only text-bearing rows can grow that large.
+/// Every stored row is bounded here, live, projected and imported alike: a
+/// tool or process row's subject (redacted, then 240 bytes on one line, the
+/// same function the live path uses), a tool row's detail (redacted, then
+/// [`MAX_TOOL_ACTIVITY_DETAIL_BYTES`](super::MAX_TOOL_ACTIVITY_DETAIL_BYTES)),
+/// a thinking row's text ([`MAX_THINKING_ACTIVITY_BYTES`]). A single row still
+/// larger than the whole byte bound keeps the tail of its text, behind
+/// [`TRANSCRIPT_TRUNCATION_MARKER`], sized so the marker row and the row still
+/// fit together. Only text-bearing rows can grow that large.
+///
+/// A bounded row is a fixed point: a cut never leaves text a second redaction
+/// would change. [`ProductTranscript::stored`] relies on it and shows projector
+/// rows as persisted, so a change to the display redactor or to these bounds
+/// must bump the product schema or drop the views to force a rebuild.
 pub(crate) fn bound_row(mut row: TranscriptRow) -> TranscriptRow {
     match &mut row {
         TranscriptRow::Tool(tool) => {
@@ -383,12 +419,10 @@ pub(crate) fn bound_row(mut row: TranscriptRow) -> TranscriptRow {
                 .subject
                 .take()
                 .map(|value| super::live_tool_subject(&value));
-            tool.detail = tool.detail.take().map(|value| {
-                super::bound_activity(
-                    plakous::tools::preview_redaction::text(&value),
-                    MAX_TOOL_ACTIVITY_DETAIL_BYTES,
-                )
-            });
+            tool.detail = tool
+                .detail
+                .take()
+                .map(|value| super::bound_tool_detail(&value));
         }
         TranscriptRow::Process(process) => {
             process.subject = process

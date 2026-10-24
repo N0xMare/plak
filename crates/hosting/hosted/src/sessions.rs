@@ -63,10 +63,51 @@ pub(crate) fn bound_subject(value: &str) -> String {
 }
 
 /// A tool or process subject as the live path stores it: redact, then bound
-/// to one line (spec 04 §5). Redaction is idempotent, so import runs the
-/// same function rather than a second copy.
+/// to one line (spec 04 §5). The result is a fixed point of this function, so
+/// import runs the same function rather than a second copy.
 pub(crate) fn live_tool_subject(value: &str) -> String {
-    bound_subject(&crate::session_log::redact_text_preview(value))
+    redaction_fixed_point(
+        bound_subject(&crate::session_log::redact_text_preview(value)),
+        "…",
+    )
+}
+
+/// A tool row's detail as stored: redacted, then bounded to
+/// [`MAX_TOOL_ACTIVITY_DETAIL_BYTES`], as a fixed point of this function.
+pub(crate) fn bound_tool_detail(value: &str) -> String {
+    redaction_fixed_point(
+        bound_activity(
+            plakous::tools::preview_redaction::text(value),
+            MAX_TOOL_ACTIVITY_DETAIL_BYTES,
+        ),
+        TRUNCATED_ACTIVITY_MARKER,
+    )
+}
+
+/// `bounded` if redaction leaves it unchanged, else the longest cut of it
+/// ending in `marker` that redaction leaves unchanged. A cut or a folded line
+/// can complete a shape the redactor did not match before (`AKIA` and sixteen
+/// characters before the marker, `Cookie: ` before an ellipsis), so without
+/// this a second redact-and-bound pass could change a stored row. The cut only
+/// shrinks, so the bound still holds, and it ends: the marker alone matches no
+/// rule.
+fn redaction_fixed_point(bounded: String, marker: &str) -> String {
+    let redact = plakous::tools::preview_redaction::text;
+    if redact(&bounded) == bounded {
+        return bounded;
+    }
+    let body = bounded.strip_suffix(marker).unwrap_or(&bounded);
+    let mut end = body.len();
+    loop {
+        end = body[..end]
+            .char_indices()
+            .next_back()
+            .map_or(0, |(index, _)| index);
+        let candidate = format!("{}{marker}", body[..end].trim_end_matches(marker));
+        if end == 0 || redact(&candidate) == candidate {
+            return candidate;
+        }
+    }
 }
 
 pub(crate) fn bound_subject_to(value: &str, limit: usize) -> String {
@@ -84,11 +125,13 @@ pub(crate) fn bound_subject_to(value: &str, limit: usize) -> String {
     format!("{}…", value[..end].trim_end_matches('…'))
 }
 
+const TRUNCATED_ACTIVITY_MARKER: &str = "\n[preview truncated]";
+
 fn bound_activity(value: String, maximum: usize) -> String {
     if value.len() <= maximum {
         return value;
     }
-    let marker = "\n[preview truncated]";
+    let marker = TRUNCATED_ACTIVITY_MARKER;
     let mut end = maximum.saturating_sub(marker.len());
     while end > 0 && !value.is_char_boundary(end) {
         end -= 1;

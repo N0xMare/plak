@@ -100,6 +100,104 @@ fn written_subject_is_single_line_and_byte_bounded() {
     assert!(!subject.contains('\n'));
 }
 
+fn tool_row(subject: String, detail: String) -> TranscriptRow {
+    TranscriptRow::Tool(ToolItem {
+        subject: Some(subject),
+        detail: Some(detail),
+        ..running_activity("bounded")
+    })
+}
+
+/// A cut that ends exactly twenty characters into `AKIA` and seventeen
+/// characters completes `\bAKIA[0-9A-Z]{16}\b` at the marker; a cut right
+/// after a redacted header name leaves the ellipsis as its value. The stored
+/// row is redacted and a fixed point of `bound_row` all the same.
+#[test]
+fn a_cut_never_completes_a_credential_shape() {
+    let key = "AKIAABCDEFGHIJKLMNOPQ";
+    // The subject keeps 237 bytes before its ellipsis, the detail 2,028
+    // before its marker: both cuts land right after `AKIAABCDEFGHIJKLMNOP`.
+    let subject = format!("{} {key} tail", "x".repeat(216));
+    let detail = format!("{} {key} tail {}", "y".repeat(2_007), "z".repeat(40));
+    for (subject, detail) in [
+        (subject, detail),
+        (
+            format!("{} Cookie: abc tail", "x".repeat(228)),
+            format!("{}\nCookie: abc\n{}", "y".repeat(2_019), "z".repeat(100)),
+        ),
+    ] {
+        let once = bound_row(tool_row(subject, detail));
+        assert_eq!(bound_row(once.clone()), once);
+        let tool = once.as_tool().unwrap();
+        for text in [tool.subject.as_deref(), tool.detail.as_deref()] {
+            let text = text.unwrap();
+            assert_eq!(plakous::tools::preview_redaction::text(text), text);
+            assert!(!text.contains("AKIAABCDEFGHIJKLMNOP"), "{text}");
+        }
+        assert!(tool.subject.as_deref().unwrap().len() <= 240);
+        assert!(tool.detail.as_deref().unwrap().len() <= MAX_TOOL_ACTIVITY_DETAIL_BYTES);
+    }
+}
+
+fn credential() -> impl proptest::strategy::Strategy<Value = String> {
+    use proptest::prelude::*;
+    prop_oneof![
+        "[0-9A-Z]{14,20}".prop_map(|body| format!("AKIA{body}")),
+        "[A-Za-z0-9_-]{18,26}".prop_map(|body| format!("sk-{body}")),
+        "[A-Za-z0-9._~+/-]{14,20}".prop_map(|body| format!("Authorization: Bearer {body}")),
+        "[A-Za-z0-9._~+/-]{14,20}".prop_map(|body| format!("Bearer {body}")),
+        "[A-Za-z0-9]{6,12}".prop_map(|body| format!("api_key={body}")),
+        "[A-Za-z0-9]{6,12}".prop_map(|body| format!("\"password\": \"{body}\"")),
+        "[A-Za-z0-9]{1,4}".prop_map(|body| format!("Cookie: {body}")),
+        "[a-z0-9]{1,10}".prop_map(|body| format!("https://h/p?token={body}")),
+    ]
+}
+
+/// Text whose credentials sit within a few dozen bytes of `bound`.
+fn near(bound: usize) -> impl proptest::strategy::Strategy<Value = String> {
+    use proptest::prelude::*;
+    (
+        0_usize..72,
+        prop::collection::vec(
+            (
+                prop_oneof![Just(" "), Just("\n"), Just(":"), Just("="), Just("-")],
+                credential(),
+            ),
+            1..4,
+        ),
+        "[ a-zA-Z0-9]{0,24}",
+    )
+        .prop_map(move |(offset, parts, tail)| {
+            let mut text = "a".repeat(bound.saturating_sub(offset));
+            for (separator, credential) in parts {
+                text.push_str(separator);
+                text.push_str(&credential);
+            }
+            text.push_str(&tail);
+            text
+        })
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+    #[test]
+    fn bound_rows_are_fixed_points(
+        subject in near(240),
+        detail in near(MAX_TOOL_ACTIVITY_DETAIL_BYTES),
+        thinking in near(MAX_THINKING_ACTIVITY_BYTES),
+    ) {
+        let tool = bound_row(tool_row(subject, detail));
+        proptest::prop_assert_eq!(bound_row(tool.clone()), tool);
+        let thinking = bound_row(TranscriptRow::Thinking(ThinkingRow {
+            location_key: "0:0".to_owned(),
+            text: thinking,
+            elapsed_ms: None,
+        }));
+        proptest::prop_assert_eq!(bound_row(thinking.clone()), thinking);
+    }
+}
+
 #[test]
 fn blank_thinking_is_not_a_row() {
     let mut session = SessionRecord::new(PathBuf::from("/work"));

@@ -296,13 +296,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             return;
         };
         let unsaved = self.config.session.transcript.pending_notices().to_vec();
-        self.config.session.transcript = sessions::ProductTranscript::committed(
-            views
-                .transcript(&intents)
-                .into_iter()
-                .map(|(_, row)| row)
-                .collect(),
-        );
+        self.config.session.transcript =
+            sessions::ProductTranscript::stored(views.transcript(&intents));
         for notice in unsaved {
             self.config.session.record_notice(notice);
         }

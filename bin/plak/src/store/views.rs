@@ -1219,12 +1219,9 @@ pub(super) fn transcript_of(
     let rows = views
         .as_ref()
         .unwrap_or(&SessionViews::empty())
-        .transcript(&intents)
-        .into_iter()
-        .map(|(_, row)| row)
-        .collect();
+        .transcript(&intents);
     Ok((
-        plakous_hosted::sessions::ProductTranscript::committed(rows),
+        plakous_hosted::sessions::ProductTranscript::stored(rows),
         views,
         queue_commands,
     ))

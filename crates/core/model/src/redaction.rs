@@ -3,6 +3,10 @@
 //! The one text redactor shared by [`crate::SafeDiagnostic`], observation
 //! subjects, argument/result previews and hosted session-log previews. It is an
 //! unsupported seam re-exported to sibling crates, not a supported API.
+//!
+//! A host may persist text redacted with these rules and show it again
+//! without redacting it (the product transcript, spec 02 §2.6), so a rule
+//! change must also force that host's stored rows to be rebuilt.
 
 #![allow(
     clippy::must_use_candidate,

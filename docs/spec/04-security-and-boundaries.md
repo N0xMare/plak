@@ -1263,7 +1263,12 @@ is dropped. Booleans and null stay.
 Header values stop at a newline or quote; URL rules retain the username, host,
 path and non-credential query fields. Assignment values require eight
 characters, bearer/basic bodies sixteen, and recognized key-prefix bodies
-twenty. The marker is excluded from value matches, so a second pass is a no-op.
+twenty. The marker is excluded from value matches, so redacting redacted text
+again changes nothing. Bounding can still complete a shape the redactor did not
+match (a cut twenty characters into a longer `AKIA` run, or right after a
+header name), so a bounded transcript subject or detail moves its cut back
+until redaction leaves it unchanged: redaction followed by bounding is a fixed
+point, and running it again on a stored row is a no-op.
 Usage fields (`input_tokens`, `max_tokens`, `token_count`), `tokenizer`,
 ordinary credential-word prose, `API-key route`, account IDs and the exact
 markers remain readable.
