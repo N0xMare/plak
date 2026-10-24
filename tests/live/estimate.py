@@ -2,22 +2,24 @@
 """Dry-run spend for the planned live matrix. No network.
 
 Usage: estimate.py --rate-card PATH --soak-row ROUTE [--contingency 0.20]
-       [--openrouter-ceiling N]
+       [--openrouter-ceiling N] [--openrouter-window N] [--confirm ROUTES]
 
 The rate card is a JSON object with `unit` equal to `USD per million tokens`
 and `models` mapping a model id to `input`, `output`, `cache_read` and
 `cache_write` prices. Extra fields are ignored. This script never fetches the
 card's source URL and never invents a price.
 
-A cell is one platform, lane and route:
+A cell is one platform, lane and route. Routes are taken in ladder order,
+cheapest rung first. The sparing `CONFIRM` rows are left out unless
+`--confirm a,b` names them for a targeted confirmation:
 
-- every planned route: one Mac smoke
+- every other route: one Mac smoke
 - `full`: also Mac long-session, jobs, two extra crash_jobs runs, and Linux smoke;
   a lane the route marks informational is priced and shows class `informational`
 - one selected `full` row: Mac headless soak for one hour
 - optional `--tui-rows a,b`: half-hour Mac TUI sessions on those full routes
-- the four direct API rows (`api-openai`, `api-openai-medium`,
-  `api-anthropic`, `api-xai`): also a Linux smoke
+- the three direct API rows (`api-openai`, `api-anthropic`, `api-xai`): also a
+  Linux smoke
 
 Linux does not run long-session, jobs or either soak (spec 05 §3.4).
 
@@ -39,8 +41,11 @@ upper band where it did not:
   output/input ratio, because the TUI logs did not report output
 - long-session, all four scenarios: 750,415 input and 4,673 output on the
   measured DeepSeek window (1,048,576). Other windows scale by
-  catalog_window / that window. The previous per-scenario million-token
-  bands priced one DeepSeek cell like the whole OpenRouter matrix
+  catalog_window / that window. OpenRouter windows are not compiled into the
+  tree: an OpenRouter long-session cell takes `--openrouter-window`, the
+  model's context length from the OpenRouter listing, and is refused without
+  it. The previous per-scenario million-token bands priced one DeepSeek cell
+  like the whole OpenRouter matrix
 - jobs, 11 scenarios: the smoke per-scenario share, at the smoke cache share.
   The jobs trial recorded no tokens, so this is the smoke measurement applied
   to the jobs scenario count
@@ -69,7 +74,7 @@ import live  # noqa: E402
 UNIT = "USD per million tokens"
 MILLION = Decimal(1_000_000)
 DISPLAY = Decimal("0.000001")
-LINUX_SMOKE_ACCOUNTS = frozenset({"openai", "anthropic", "xai-api"})
+LINUX_SMOKE_ACCOUNTS = live.VERY_LIGHT_ACCOUNTS
 API_ACCOUNTS = frozenset(live.API_KEY_ENV)
 CLASS_ORDER = {live.FULL: 0, live.LIGHT: 1, live.INFORMATIONAL: 2}
 LANE_ORDER = {"smoke": 0, "long-session": 1, "jobs": 2, "crash-jobs": 3, "soak": 4, "tui-soak": 5}
@@ -89,12 +94,12 @@ TUI_INPUT = 8_600_000
 TUI_OUTPUT = TUI_INPUT * SOAK_OUTPUT // SOAK_INPUT
 TUI_CACHE_SHARE = Decimal("0.9")
 TUI_HOURS = Decimal(2)
-# Four scenarios on deepseek/deepseek-v4.1-flash, same trial: 22% cached.
+# Four scenarios on deepseek/deepseek-v4.1-flash-1017, same trial: 22% cached.
 GROWTH_SCENARIOS = ("in_turn_compaction", "overflow", "kill_reopen", "child_compaction")
 LONG_SESSION_INPUT = 750_415
 LONG_SESSION_OUTPUT = 4_673
 LONG_SESSION_CACHE_SHARE = Decimal("0.22")
-# `input_window` for that model. Other cells scale by their catalog window.
+# That model's catalog window. Other cells scale by their own window.
 LONG_SESSION_MEASURED_WINDOW = 1_048_576
 JOBS_SCENARIOS = 11
 JOBS_INPUT = (SMOKE_INPUT // 12) * JOBS_SCENARIOS
@@ -131,6 +136,7 @@ class Assumptions:
     jobs_cache_share: Decimal = JOBS_CACHE_SHARE
     contingency: Decimal = Decimal("0.20")
     openrouter_ceiling: Decimal | None = None
+    openrouter_window: int | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,7 @@ class Cell:
     route_class: str
     model: str
     account: str
+    rung: int
 
 
 @dataclass(frozen=True)
@@ -191,20 +198,23 @@ class Estimate:
 
 
 def planned_cells(routes: dict[str, live.Route] | None = None, *,
-                  soak_row: str | None = None, tui_rows: tuple[str, ...] = ()) -> list[Cell]:
+                  soak_row: str | None = None, tui_rows: tuple[str, ...] = (),
+                  confirm: tuple[str, ...] = ()) -> list[Cell]:
     """Lean pre-release plan; choose the least-used full row from daily use."""
     routes = routes if routes is not None else live.ROUTES
-    full = {name for name, route in routes.items() if route.planned and route.route_class == live.FULL}
+    full = {name for name, route in routes.items() if route.route_class == live.FULL}
     if full and soak_row is None:
         raise EstimateError("--soak-row is required for the full plan")
     if soak_row is not None and soak_row not in full:
-        raise EstimateError("--soak-row must name a planned full route")
+        raise EstimateError("--soak-row must name a full route")
     if len(set(tui_rows)) != len(tui_rows) or any(name not in full for name in tui_rows):
-        raise EstimateError("--tui-rows must name distinct planned full routes")
+        raise EstimateError("--tui-rows must name distinct full routes")
+    if len(set(confirm)) != len(confirm) or any(
+            name not in routes or not routes[name].sparing for name in confirm):
+        raise EstimateError("--confirm must name distinct sparing routes")
     cells: list[Cell] = []
-    for name in routes:
-        route = routes[name]
-        if not route.planned:
+    for name, route in routes.items():
+        if route.sparing and name not in confirm:
             continue
         if route.route_class not in live.ROUTE_CLASSES:
             raise EstimateError(f"{name} has no route class")
@@ -222,6 +232,7 @@ def planned_cells(routes: dict[str, live.Route] | None = None, *,
             cells.append(_cell("linux", "smoke", route))
     cells.sort(key=lambda cell: (
         PLATFORM_ORDER[cell.platform],
+        cell.rung,
         CLASS_ORDER[cell.route_class],
         cell.route_name,
         LANE_ORDER[cell.lane],
@@ -253,13 +264,13 @@ def load_rate_card(path: Path) -> dict[str, Rate]:
     return rates
 
 
-def input_window(model: str) -> int:
+def input_window(model: str, openrouter_window: int | None = None) -> int:
     """Catalog input window used to pick the long-session growth band.
 
     Claude is 1,000,000. `grok-4.7` is 256,000 and `grok-4.6` is 500,000
     (spec 01). Codex and OpenAI API rows are 272,000, except `gpt-6.1-sol`,
-    whose Codex catalog row reports 500,000.
-    `deepseek/deepseek-v4.1-flash-1017` is 1,048,576 in the OpenRouter catalog.
+    whose Codex catalog row reports 500,000. An OpenRouter model's window is
+    the operator's `openrouter_window`: the tree pins no OpenRouter window.
     """
     if model == "gpt-6.1-sol":
         return 500_000
@@ -271,8 +282,13 @@ def input_window(model: str) -> int:
         return 1_000_000
     if model.startswith("gpt-"):
         return 272_000
-    if model == "deepseek/deepseek-v4.1-flash-1017":
-        return 1_048_576
+    if "/" in model:
+        if openrouter_window is None:
+            raise EstimateError(f"{model} long-session needs --openrouter-window, its context "
+                                "length from the OpenRouter model listing")
+        if openrouter_window <= 0:
+            raise EstimateError("--openrouter-window must be positive")
+        return openrouter_window
     raise EstimateError(f"no input window for {model}")
 
 
@@ -358,13 +374,14 @@ def estimate_matrix(cells: list[Cell], rates: dict[str, Rate],
 
 
 def render(report: Estimate) -> str:
-    header = ("platform", "lane", "class", "route", "model", "usd", "rerun_reserve",
+    header = ("platform", "rung", "lane", "class", "route", "model", "usd", "rerun_reserve",
               "with_contingency")
     body = [header]
     for item in report.cells:
         cell = item.cell
         body.append((
-            cell.platform, cell.lane, cell.route_class, cell.route_name, cell.model,
+            cell.platform, str(cell.rung), cell.lane, cell.route_class, cell.route_name,
+            cell.model,
             _usd(item.usd, item.billing), _usd(item.usd, item.billing),
             _usd(item.with_contingency(report.contingency), item.billing),
         ))
@@ -397,8 +414,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--rate-card", type=Path, required=True)
     parser.add_argument("--soak-row", required=True, help="least-used full route; one Mac headless soak")
     parser.add_argument("--tui-rows", default="", help="comma-separated full routes lacking root use")
+    parser.add_argument("--confirm", default="",
+                        help="comma-separated sparing routes for a targeted confirmation")
     parser.add_argument("--contingency", type=Decimal, default=Decimal("0.20"))
     parser.add_argument("--openrouter-ceiling", type=Decimal, default=None)
+    parser.add_argument("--openrouter-window", type=int, default=None,
+                        help="OpenRouter long-session model's context length")
     parser.add_argument("--smoke-input", type=int, default=SMOKE_INPUT)
     parser.add_argument("--smoke-output", type=int, default=SMOKE_OUTPUT)
     parser.add_argument("--smoke-cache-share", type=Decimal, default=SMOKE_CACHE_SHARE)
@@ -440,11 +461,14 @@ def main(argv: list[str]) -> int:
         jobs_cache_share=args.jobs_cache_share,
         contingency=args.contingency,
         openrouter_ceiling=args.openrouter_ceiling,
+        openrouter_window=args.openrouter_window,
     )
     try:
         tui_rows = tuple(args.tui_rows.split(",")) if args.tui_rows else ()
-        report = estimate_matrix(planned_cells(soak_row=args.soak_row, tui_rows=tui_rows),
-                                 load_rate_card(args.rate_card), assumptions)
+        confirm = tuple(args.confirm.split(",")) if args.confirm else ()
+        report = estimate_matrix(
+            planned_cells(soak_row=args.soak_row, tui_rows=tui_rows, confirm=confirm),
+            load_rate_card(args.rate_card), assumptions)
     except EstimateError as error:
         print(f"estimate: {error}", file=sys.stderr)
         return 2
@@ -457,7 +481,8 @@ def main(argv: list[str]) -> int:
 
 
 def _cell(platform: str, lane: str, route: live.Route) -> Cell:
-    return Cell(platform, lane, route.name, route.lane_class(lane), route.model, route.account)
+    return Cell(platform, lane, route.name, route.lane_class(lane), route.model, route.account,
+                route.rung)
 
 
 def scaled_long_session(total: int, window: int, measured_window: int) -> int:
@@ -469,7 +494,7 @@ def scaled_long_session(total: int, window: int, measured_window: int) -> int:
 
 
 def _long_session(model: str, assumptions: Assumptions) -> Charge:
-    window = input_window(model)
+    window = input_window(model, assumptions.openrouter_window)
     total_in = scaled_long_session(
         assumptions.long_session_input_tokens, window, assumptions.long_session_measured_window)
     total_out = scaled_long_session(

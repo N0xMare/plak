@@ -39,7 +39,7 @@ class QualificationFixTests(unittest.TestCase):
     def test_smoke_compaction_accepts_context_limit_then_capacity_commit(self):
         with tempfile.TemporaryDirectory() as directory:
             driver, agent = self.compaction_driver(Path(directory))
-            driver.route = live.ROUTES["or-qwen38"]
+            driver.route = live.ROUTES["or-glm"]
             agent.prompt.side_effect = [
                 live.Turn(phase="failed", model_error_kind="ContextLimit"),
                 live.Turn(phase="completed"),
@@ -64,8 +64,8 @@ class QualificationFixTests(unittest.TestCase):
             for route, rows in (
                     ("codex", [failed, started, committed]),
                     ("grok", [failed, started, committed]),
-                    ("or-qwen38", [started, failed, committed]),
-                    ("or-qwen38", [started, committed]),
+                    ("or-glm", [started, failed, committed]),
+                    ("or-glm", [started, committed]),
                     ("deepseek", [dict(failed, phase="completed"), started, committed])):
                 with self.subTest(route=route, rows=rows):
                     driver, agent = self.compaction_driver(Path(directory))

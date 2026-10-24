@@ -25,8 +25,7 @@ last showed.
 
 ```sh
 just live smoke            # grok (grok-4.7, low)
-just live smoke claude     # Claude OAuth (claude-sonnet-5, low)
-just live smoke claude-sonnet-medium
+just live smoke claude-sonnet55-low    # Claude OAuth (claude-sonnet-5-5, low)
 just live smoke claude-sonnet55-low --only cli_resume,jsonl_task,tui
 just live smoke claude-sonnet55-medium --only cli_resume,jsonl_task,tui
 just live smoke claude-haiku55-low    # claude-haiku-5-5
@@ -41,7 +40,7 @@ just live smoke grok --only in_turn_compaction,overflow,kill_reopen,child_compac
 just live soak grok --long-session --only in_turn_compaction
 just live soak grok --long-session --all
 PLAK_LIVE_GROWTH_PAGES=20 just live smoke claude-haiku55-low --only in_turn_compaction
-just live soak claude --hours 2
+just live soak claude-sonnet55-low --hours 2
 just live tui-soak claude-opus-medium --hours 4
 python3 tests/live/tui_soak.py claude-opus-medium --hours 1
 just live jobs grok
@@ -185,7 +184,7 @@ just live smoke claude-sonnet55-low --only image_input,fetch_url,mcp_stdio,mcp_h
 just live smoke codex --only mcp_github_stdio,mcp_github_http
 just live smoke api-anthropic --only web_search,web_fetch
 just live smoke grok --only x_search
-just live smoke claude --only profile_researcher,multi_roles,worker_spawns_researcher
+just live smoke claude-sonnet55-low --only profile_researcher,multi_roles,worker_spawns_researcher
 PLAK_LIVE_VISION_ROUTE=claude-haiku55-low just live smoke api-openai --only image_gen_roundtrip
 ```
 
@@ -494,58 +493,53 @@ block, and a harness outcome does. A row may mark single lanes informational
 (`informational_lanes`): the lane runs at the row's depth and is scored like
 an informational row. `deepseek` and `deepseek-messages` mark long-session,
 so no OpenRouter row has a blocking long-session: given Plak's complete
-summary request, DeepSeek's own compaction summary drops the earlier turn's
-fact once one or two large tool results follow it, on Chat and on Messages,
-from about 34k tokens up (Grok and Claude pass the same lane), and over
-Messages it also drops `read` offset and limit deep into long tool loops.
-Smoke, jobs and the headless soak stay blocking on both rows. Linux `x86_64-unknown-linux-musl` runs the
-twelve-scenario smoke on each `full` row and on `api-openai`,
-`api-openai-medium`, `api-anthropic` and `api-xai` only. `or-mimo`, `or-glm`
-and `or-qwen37` are best-effort light rows: a second provider outcome is
-recorded and does not block. Ids below are
-the `ROUTES` fields. Messages is planned only for
-`deepseek/deepseek-v4.1-flash-1017`; every other OpenRouter row stays on Chat, the
-product default. `inclusionai/ling-3.0-flash-vl` and `qwen/qwen3.8-27b` are
-paid ids at informational depth.
+summary request, the earlier DeepSeek flash model's own compaction summary
+dropped the earlier turn's fact once one or two large tool results followed
+it, on Chat and on Messages, from about 34k tokens up (Grok and Claude pass
+the same lane), and over Messages it also dropped `read` offset and limit deep
+into long tool loops. The marking stays until the current DeepSeek id has its
+own long-session evidence. Smoke, jobs and the headless soak stay blocking on
+both rows. Linux `x86_64-unknown-linux-musl` runs the twelve-scenario smoke on
+each `full` row and on `api-openai`, `api-anthropic` and `api-xai` only.
 
-| Route | Account | Model | Effort | Class |
-| --- | --- | --- | --- | --- |
-| `codex` | `codex` | `gpt-6-luna` | low | light |
-| `codex-luna-medium` | `codex` | `gpt-6-luna` | medium | light |
-| `codex-sol` | `codex` | `gpt-6.1-sol` | low | full; the full Codex row |
-| `codex-astra` | `codex` | `gpt-6-astra` | low | light |
-| `grok` | `grok` | `grok-4.7` | low | full |
-| `grok-46` | `grok` | `grok-4.6` | low | light |
-| `claude-sonnet55-low` | `claude` | `claude-sonnet-5-5` | low | full |
-| `claude-sonnet55-medium` | `claude` | `claude-sonnet-5-5` | medium | light |
-| `claude-haiku55-low` | `claude` | `claude-haiku-5-5` | low | light |
-| `claude-haiku55-medium` | `claude` | `claude-haiku-5-5` | medium | light |
-| `claude-opus-low` | `claude` | `claude-opus-5-5` | low | light |
-| `claude-opus-medium` | `claude` | `claude-opus-5-5` | medium | light |
-| `claude-fable` | `claude` | `claude-fable-5-1` | low | light |
-| `deepseek` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Chat; long-session informational |
-| `deepseek-messages` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Messages; long-session informational |
-| `or-mimo` | `openrouter` | `xiaomi/mimo-v2.6-flash` | | light |
-| `or-glm` | `openrouter` | `z-ai/glm-5.3-flash` | | light |
-| `or-qwen37` | `openrouter` | `qwen/qwen3.7-flash` | | light |
-| `or-nemotron-free` | `openrouter` | `nvidia/nemotron-3-ultra-550b-a55b:free` | | informational |
-| `or-laguna-free` | `openrouter` | `poolside/laguna-s-2.1:free` | | informational |
-| `or-ling` | `openrouter` | `inclusionai/ling-3.0-flash-vl` | | informational |
-| `or-qwen38` | `openrouter` | `qwen/qwen3.8-27b` | | informational |
-| `api-openai` | `openai` | `gpt-6-luna` | low | light |
-| `api-openai-medium` | `openai` | `gpt-6-luna` | medium | light |
-| `api-anthropic` | `anthropic` | `claude-haiku-5-5` | medium | light |
-| `api-xai` | `xai-api` | `grok-4.7` | low | light |
+Depth follows the account: the Codex, SuperGrok and Claude subscriptions and
+OpenRouter are deep and carry the `full` rows; each API key is very light, one
+`light` row on its cheapest tuple. The free OpenRouter rows are best effort
+(informational); the paid OpenRouter rows are not. Ids below are the `ROUTES`
+fields. Messages is planned only for `deepseek-messages`; every other
+OpenRouter row stays on Chat, the product default. OpenRouter ids are not
+compiled into the tree: the product discovers them.
 
-`claude` and `claude-sonnet-medium` (`claude-sonnet-5` low and medium) still
-run, but they are not in this matrix. Nor are two feature-scenario roster
-rows: `api-anthropic-low` (`anthropic`, `claude-haiku-5-5`, low) and
-`or-gemma4-free` (`openrouter`, `google/gemma-4-31b-it:free`). Nor is
-`or-lfm-free` (`openrouter`, `liquid/lfm-2.5-2.6b:free`): its free upstream
-streamed at about 7 tokens per second with in-band 504s on every 0.0.2 run.
-The four direct API rows are light and not best-effort: `api-openai` is
-`gpt-6-luna` low, `api-openai-medium` is `gpt-6-luna` medium, `api-anthropic`
-is `claude-haiku-5-5` medium, and `api-xai` is `grok-4.7` low.
+Rung is the testing ladder, cheapest first: run rung 1 before rung 2 spends.
+Rung 3 rows are sparing: run them only for a targeted confirmation, never in a
+default sweep (`just live estimate` adds them only with `--confirm`).
+
+| Route | Account | Model | Effort | Class | Rung |
+| --- | --- | --- | --- | --- | --- |
+| `or-nemotron-free` | `openrouter` | `nvidia/nemotron-3-ultra-550b-a55b:free` | | informational | 1 |
+| `or-nemotron-vl-free` | `openrouter` | `nvidia/nemotron-3.5-super-vl:free` | | informational | 1 |
+| `or-inkling-free` | `openrouter` | `thinkingmachines/inkling:free` | | informational | 1 |
+| `or-flint-free` | `openrouter` | `recursive/flint-v1.0:free` | | informational | 1 |
+| `or-lfm-free` | `openrouter` | `liquid/lfm-2.5-2.6b:free` | | informational | 1 |
+| `codex` | `codex` | `gpt-6-luna` | low | light | 1 |
+| `claude-haiku55-low` | `claude` | `claude-haiku-5-5` | low | light | 1 |
+| `grok-46` | `grok` | `grok-4.6` | low | light | 1 |
+| `api-openai` | `openai` | `gpt-6-luna` | low | light | 1 |
+| `api-anthropic` | `anthropic` | `claude-haiku-5-5` | low | light | 1 |
+| `api-xai` | `xai-api` | `grok-4.6` | low | light | 1 |
+| `codex-sol` | `codex` | `gpt-6.1-sol` | low | full; the full Codex row | 2 |
+| `claude-sonnet55-low` | `claude` | `claude-sonnet-5-5` | low | full | 2 |
+| `grok` | `grok` | `grok-4.7` | low | full | 2 |
+| `deepseek` | `openrouter` | `deepseek/deepseek-v4-flash-0731` | | full, Chat; long-session informational | 2 |
+| `deepseek-messages` | `openrouter` | `deepseek/deepseek-v4-flash-0731` | | full, Messages; long-session informational | 2 |
+| `or-glm` | `openrouter` | `z-ai/glm-5.3-flash` | | light | 2 |
+| `codex-luna-medium` | `codex` | `gpt-6-luna` | medium | light | 2 |
+| `claude-haiku55-medium` | `claude` | `claude-haiku-5-5` | medium | light | 2 |
+| `claude-sonnet55-medium` | `claude` | `claude-sonnet-5-5` | medium | light | 2 |
+| `claude-opus-low` | `claude` | `claude-opus-5-5` | low | light | 3, sparing |
+| `claude-opus-medium` | `claude` | `claude-opus-5-5` | medium | light | 3, sparing |
+| `codex-astra` | `codex` | `gpt-6-astra` | low | light | 3, sparing |
+| `claude-fable` | `claude` | `claude-fable-5-1` | low | light | 3, sparing |
 
 The pre-release bar runs once per release candidate, not per install. It
 binds the same clean source revision, binary/sidecar hashes and platform
@@ -681,12 +675,17 @@ instead of `input`. Reasoning is not priced again. An API-key model the card
 omits is `unpriced` and stays out of the total. A subscription row is `quota`
 even when the card names its model. `--openrouter-ceiling N` warns on stderr
 and in the report when the OpenRouter cells, including contingency, exceed it.
-The warning does not drop cells and the exit status stays 0.
+The warning does not drop cells and the exit status stays 0. Cells print in
+ladder order. Sparing rows are left out unless `--confirm a,b` names them. The
+tree pins no OpenRouter context window: `--openrouter-window N`, the model's
+context length from the OpenRouter listing, scales the OpenRouter long-session
+cells, and the estimate is refused without it.
 
 ```sh
-python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek
-python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek --contingency 0.25 --openrouter-ceiling 40
-just live estimate --rate-card rates.json --soak-row deepseek --tui-rows codex-sol,grok
+python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek --openrouter-window 1048576
+python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek --openrouter-window 1048576 --contingency 0.25 --openrouter-ceiling 40
+just live estimate --rate-card rates.json --soak-row deepseek --openrouter-window 1048576 --tui-rows codex-sol,grok
+just live estimate --rate-card rates.json --soak-row deepseek --openrouter-window 1048576 --confirm claude-opus-low
 ```
 
 Defaults are measured volumes where a trial recorded them, all overridable.
@@ -696,18 +695,18 @@ Headless soak (1 hour): 5,600,000 input and 60,000 output, cached share 0.9.
 TUI soak (2 hours): 8,600,000 input, output scaled by the soak output/input
 ratio, cached share 0.9. Long-session, on each `full` row: the measured
 DeepSeek four-scenario cell, 750,415 input and 4,673 output at 22% cached,
-scaled by catalog window / 1,048,576 for every other window; the
+scaled by catalog window / 1,048,576 for every other window (the OpenRouter
+rows by `--openrouter-window`); the
 `deepseek` and `deepseek-messages` long-session cells are priced and printed
 with class `informational`. Jobs (11
 scenarios) uses the smoke per-scenario share and the smoke cache share.
 Two further `crash_jobs` runs are priced on every `full` row at two elevenths
 of the jobs volume, so that scenario runs three times including the jobs cell.
-`--soak-row <route>` is required: it must name the least-used planned `full`
-row and prices ONE Mac headless soak (one hour by default). No TUI soak is
-priced unless `--tui-rows a,b` names distinct planned `full` rows; each is
-0.5 hours by default. Linux prices a smoke only, on the
-`full` rows and `api-openai`, `api-openai-medium`, `api-anthropic` and
-`api-xai`. Contingency is
+`--soak-row <route>` is required: it must name the least-used `full` row and
+prices ONE Mac headless soak (one hour by default). No TUI soak is priced
+unless `--tui-rows a,b` names distinct `full` rows; each is 0.5 hours by
+default. Linux prices a smoke only, on the `full` rows and `api-openai`,
+`api-anthropic` and `api-xai`. Contingency is
 0.20. Soak and TUI totals scale with `--soak-hours` and `--tui-soak-hours`.
 
 `tests/tooling/test_live_oracles.py` covers the offline pieces (fault plans,

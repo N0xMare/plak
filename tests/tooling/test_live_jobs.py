@@ -360,13 +360,13 @@ class JobEvidenceTests(unittest.TestCase):
         self.assertTrue(jobs.code_mode(live.ROUTES["api-openai"]))
         self.assertFalse(jobs.code_mode(live.ROUTES["grok"]))
         self.assertIn("yield_time_ms 0", jobs.immediate_hint(live.ROUTES["codex"]))
-        self.assertIn("run_in_background true", jobs.immediate_hint(live.ROUTES["claude"]))
+        self.assertIn("run_in_background true", jobs.immediate_hint(live.ROUTES["claude-sonnet55-low"]))
         self.assertIn("timeout 0", jobs.immediate_hint(live.ROUTES["deepseek"]))
         self.assertIn("block_until_ms 0", jobs.immediate_hint(live.ROUTES["grok"]))
         command = "python3 hold.py 25 token"
         for route, hint, wait in (
             ("codex", "yield_time_ms 0", "write_stdin"),
-            ("claude", "run_in_background true", "Read"),
+            ("claude-sonnet55-low", "run_in_background true", "Read"),
             ("deepseek", "timeout 0", "timeout_ms"),
             ("grok", "block_until_ms 0", "get_command_or_subagent_output"),
         ):
@@ -636,7 +636,7 @@ class JobEvidenceTests(unittest.TestCase):
         self.assertIn("kill_command_or_subagent", task)
         self.assertIn("submit_result once", task)
         self.assertNotIn("live_work", task)
-        self.assertIn("TaskStop", jobs.stop_hint(live.ROUTES["claude"]))
+        self.assertIn("TaskStop", jobs.stop_hint(live.ROUTES["claude-sonnet55-low"]))
         self.assertIn("write_stdin", jobs.stop_hint(live.ROUTES["codex"]))
         closed = jobs.close_child_task(live.ROUTES["grok"], "python3 hold.py 40 tok")
         self.assertIn("Do not submit_result", closed)

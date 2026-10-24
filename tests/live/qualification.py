@@ -139,12 +139,7 @@ def qualifies(route: live.Route, result: dict, lane: str) -> bool:
         return True
     if outcome in (live.HARNESS, live.PENDING):
         return False
-    if route.lane_class(lane) == live.INFORMATIONAL:
-        return True
-    attempts = result["attempts"]
-    return (route.name in ("or-mimo", "or-glm", "or-qwen37")
-            and len(attempts) == 2
-            and all(attempt["outcome"] == live.PROVIDER for attempt in attempts))
+    return route.lane_class(lane) == live.INFORMATIONAL
 
 
 def execute(lane: str, route: str, binary: Path, argv: list[str], seed: int, path: Path):

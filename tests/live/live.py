@@ -69,12 +69,24 @@ def binary_sha256(binary: Path) -> str:
 # Planned depth for a live route. The pre-release bar is spec 05 §3.4.
 # `full` is the twelve smoke scenarios, long-session, jobs and both soaks on
 # Apple Silicon, plus a Linux smoke. `light` is an Apple Silicon smoke, plus
-# a Linux smoke on the four direct API rows. `informational` is one Apple
-# Silicon smoke, recorded, and non-blocking except for a harness failure.
-# A route's `informational_lanes` run at its class depth but score like an
+# a Linux smoke on the direct API rows. `informational` is one Apple Silicon
+# smoke, recorded, and non-blocking except for a harness failure. A route's
+# `informational_lanes` run at its class depth but score like an
 # informational row.
 FULL, LIGHT, INFORMATIONAL = "full", "light", "informational"
 ROUTE_CLASSES = (FULL, LIGHT, INFORMATIONAL)
+
+# The testing ladder, cheapest first. `FIRST` rows prove behavior before any
+# `THEN` row spends; `CONFIRM` rows are the sparing ones, run only for a
+# targeted confirmation and left out of default sweeps.
+FIRST, THEN, CONFIRM = 1, 2, 3
+RUNGS = (FIRST, THEN, CONFIRM)
+
+# Depth by account. Subscriptions and OpenRouter are tested deep: they carry
+# the `full` rows. API-key accounts are very light: one `light` row each, on
+# their cheapest first-rung tuple.
+DEEP_ACCOUNTS = frozenset({"codex", "grok", "claude", "openrouter"})
+VERY_LIGHT_ACCOUNTS = frozenset({"openai", "anthropic", "xai-api"})
 
 _CODEX = ("chatgpt.com", "/backend-api/codex/responses")
 _GROK = ("cli-chat-proxy.grok.com", "/v1/responses")
@@ -90,9 +102,9 @@ _XAI_API = ("api.x.ai", "/v1/responses")
 class Route:
     """One account/model tuple and where its inference requests go.
 
-    `planned` is false for enrolled routes kept runnable but left out of the
-    owner matrix (the dry-run estimator skips them). `informational_lanes`
-    names lanes whose cell is informational on an otherwise blocking row.
+    `rung` is the route's place on the testing ladder; a `CONFIRM` row is
+    sparing. `informational_lanes` names lanes whose cell is informational on
+    an otherwise blocking row.
     """
 
     name: str
@@ -102,9 +114,13 @@ class Route:
     protocol: str | None
     host: str
     path: str
-    route_class: str = LIGHT
-    planned: bool = True
+    route_class: str
+    rung: int
     informational_lanes: frozenset[str] = frozenset()
+
+    @property
+    def sparing(self) -> bool:
+        return self.rung == CONFIRM
 
     def lane_class(self, lane: str) -> str:
         return INFORMATIONAL if lane in self.informational_lanes else self.route_class
@@ -119,99 +135,81 @@ class Route:
 
 
 def _route(name: str, account: str, model: str, effort: str | None,
-           protocol: str | None, endpoint: tuple[str, str], route_class: str,
-           planned: bool = True, informational_lanes: frozenset[str] = frozenset()) -> Route:
+           protocol: str | None, endpoint: tuple[str, str], route_class: str, rung: int,
+           informational_lanes: frozenset[str] = frozenset()) -> Route:
     host, path = endpoint
-    return Route(name, account, model, effort, protocol, host, path, route_class, planned,
+    return Route(name, account, model, effort, protocol, host, path, route_class, rung,
                  informational_lanes)
 
 
-# Exact ids are pinned spellings. OpenRouter ids are the 2026-10-08
-# catalog probe: Messages is planned only for deepseek, the one id that probe
-# marked Chat and Messages. Other OpenRouter rows stay on Chat, the default.
+# The owner's catalog. Exact ids are pinned spellings. OpenRouter ids are not
+# compiled into the tree (the product discovers them); every OpenRouter row
+# but `deepseek-messages` stays on Chat, the default.
 ROUTES = {
-    "claude": _route("claude", "claude", "claude-sonnet-5", "low", None, _CLAUDE,
-                     LIGHT, planned=False),
-    "claude-sonnet-medium": _route(
-        "claude-sonnet-medium", "claude", "claude-sonnet-5", "medium", None, _CLAUDE,
-        LIGHT, planned=False),
-    "claude-sonnet55-low": _route(
-        "claude-sonnet55-low", "claude", "claude-sonnet-5-5", "low", None, _CLAUDE, FULL),
-    "claude-sonnet55-medium": _route(
-        "claude-sonnet55-medium", "claude", "claude-sonnet-5-5", "medium", None,
-        _CLAUDE, LIGHT),
-    "claude-haiku55-low": _route(
-        "claude-haiku55-low", "claude", "claude-haiku-5-5", "low", None, _CLAUDE, LIGHT),
-    "claude-haiku55-medium": _route(
-        "claude-haiku55-medium", "claude", "claude-haiku-5-5", "medium", None, _CLAUDE, LIGHT),
-    "claude-opus-low": _route(
-        "claude-opus-low", "claude", "claude-opus-5-5", "low", None, _CLAUDE, LIGHT),
-    "claude-opus-medium": _route(
-        "claude-opus-medium", "claude", "claude-opus-5-5", "medium", None, _CLAUDE, LIGHT),
-    "claude-fable": _route(
-        "claude-fable", "claude", "claude-fable-5-1", "low", None, _CLAUDE, LIGHT),
-    "grok": _route("grok", "grok", "grok-4.7", "low", None, _GROK, FULL),
-    "grok-46": _route("grok-46", "grok", "grok-4.6", "low", None, _GROK, LIGHT),
-    # Long-session is informational on both DeepSeek rows: given Plak's
-    # complete summary request, the model's summary drops the earlier turn's
-    # fact once large tool results follow it, on Chat and on Messages. On
-    # Messages it also sends reads with only a path deep into long tool loops.
-    # Smoke, jobs and soak stay blocking.
-    "deepseek": _route(
-        "deepseek", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None, None,
-        _OR_CHAT, FULL, informational_lanes=frozenset({"long-session"})),
-    "deepseek-messages": _route(
-        "deepseek-messages", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None,
-        "messages", _OR_MESSAGES, FULL, informational_lanes=frozenset({"long-session"})),
-    "or-mimo": _route(
-        "or-mimo", "openrouter", "xiaomi/mimo-v2.6-flash", None, None, _OR_CHAT, LIGHT),
-    "or-glm": _route(
-        "or-glm", "openrouter", "z-ai/glm-5.3-flash", None, None, _OR_CHAT, LIGHT),
-    "or-qwen37": _route(
-        "or-qwen37", "openrouter", "qwen/qwen3.7-flash", None, None, _OR_CHAT, LIGHT),
-    "or-nemotron-free": _route(
-        "or-nemotron-free", "openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free",
-        None, None, _OR_CHAT, INFORMATIONAL),
-    "or-laguna-free": _route(
-        "or-laguna-free", "openrouter", "poolside/laguna-s-2.1:free", None, None,
-        _OR_CHAT, INFORMATIONAL),
-    # Runnable, not planned: its free upstream streamed this 2.6B model at about
-    # 7 tokens per second with in-band 504s on every 0.0.2 run, so its smoke
-    # outlived scenario budgets without evidence that clears the product.
-    "or-lfm-free": _route(
-        "or-lfm-free", "openrouter", "liquid/lfm-2.5-2.6b:free", None, None,
-        _OR_CHAT, INFORMATIONAL, planned=False),
-    # Not offered as `:free` on the probe day. Paid ids, informational depth.
-    "or-ling": _route(
-        "or-ling", "openrouter", "inclusionai/ling-3.0-flash-vl", None, None,
-        _OR_CHAT, INFORMATIONAL),
-    "or-qwen38": _route(
-        "or-qwen38", "openrouter", "qwen/qwen3.8-27b", None, None, _OR_CHAT, INFORMATIONAL),
     # gpt-6.1-sol is the full Codex row: gpt-6-luna at low and medium ended
     # long growth turns early and skipped a page after a child's compaction in
     # every long-session cell, while sol paged through compaction and passed.
-    "codex": _route("codex", "codex", "gpt-6-luna", "low", None, _CODEX, LIGHT),
+    "codex": _route("codex", "codex", "gpt-6-luna", "low", None, _CODEX, LIGHT, FIRST),
     "codex-luna-medium": _route(
-        "codex-luna-medium", "codex", "gpt-6-luna", "medium", None, _CODEX, LIGHT),
-    "codex-sol": _route("codex-sol", "codex", "gpt-6.1-sol", "low", None, _CODEX, FULL),
-    "codex-astra": _route("codex-astra", "codex", "gpt-6-astra", "low", None, _CODEX, LIGHT),
-    # Direct API rows for the pre-release bar (spec 05 §3.4). Light, not
-    # best-effort. Linux musl smokes these four plus the full rows.
+        "codex-luna-medium", "codex", "gpt-6-luna", "medium", None, _CODEX, LIGHT, THEN),
+    "codex-sol": _route("codex-sol", "codex", "gpt-6.1-sol", "low", None, _CODEX, FULL, THEN),
+    "codex-astra": _route(
+        "codex-astra", "codex", "gpt-6-astra", "low", None, _CODEX, LIGHT, CONFIRM),
+    "grok-46": _route("grok-46", "grok", "grok-4.6", "low", None, _GROK, LIGHT, FIRST),
+    "grok": _route("grok", "grok", "grok-4.7", "low", None, _GROK, FULL, THEN),
+    "claude-haiku55-low": _route(
+        "claude-haiku55-low", "claude", "claude-haiku-5-5", "low", None, _CLAUDE, LIGHT, FIRST),
+    "claude-haiku55-medium": _route(
+        "claude-haiku55-medium", "claude", "claude-haiku-5-5", "medium", None, _CLAUDE,
+        LIGHT, THEN),
+    "claude-sonnet55-low": _route(
+        "claude-sonnet55-low", "claude", "claude-sonnet-5-5", "low", None, _CLAUDE, FULL, THEN),
+    "claude-sonnet55-medium": _route(
+        "claude-sonnet55-medium", "claude", "claude-sonnet-5-5", "medium", None, _CLAUDE,
+        LIGHT, THEN),
+    "claude-opus-low": _route(
+        "claude-opus-low", "claude", "claude-opus-5-5", "low", None, _CLAUDE, LIGHT, CONFIRM),
+    "claude-opus-medium": _route(
+        "claude-opus-medium", "claude", "claude-opus-5-5", "medium", None, _CLAUDE,
+        LIGHT, CONFIRM),
+    "claude-fable": _route(
+        "claude-fable", "claude", "claude-fable-5-1", "low", None, _CLAUDE, LIGHT, CONFIRM),
+    # Free OpenRouter rows are best effort and flaky: informational depth.
+    "or-nemotron-free": _route(
+        "or-nemotron-free", "openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free", None, None,
+        _OR_CHAT, INFORMATIONAL, FIRST),
+    "or-nemotron-vl-free": _route(
+        "or-nemotron-vl-free", "openrouter", "nvidia/nemotron-3.5-super-vl:free", None, None,
+        _OR_CHAT, INFORMATIONAL, FIRST),
+    "or-inkling-free": _route(
+        "or-inkling-free", "openrouter", "thinkingmachines/inkling:free", None, None,
+        _OR_CHAT, INFORMATIONAL, FIRST),
+    "or-flint-free": _route(
+        "or-flint-free", "openrouter", "recursive/flint-v1.0:free", None, None,
+        _OR_CHAT, INFORMATIONAL, FIRST),
+    "or-lfm-free": _route(
+        "or-lfm-free", "openrouter", "liquid/lfm-2.5-2.6b:free", None, None,
+        _OR_CHAT, INFORMATIONAL, FIRST),
+    # Long-session stays informational on both DeepSeek rows: given Plak's
+    # complete summary request, the earlier DeepSeek flash model's summary
+    # dropped the earlier turn's fact once large tool results followed it, on
+    # Chat and on Messages. Smoke, jobs and soak stay blocking.
+    "deepseek": _route(
+        "deepseek", "openrouter", "deepseek/deepseek-v4-flash-0731", None, None,
+        _OR_CHAT, FULL, THEN, informational_lanes=frozenset({"long-session"})),
+    "deepseek-messages": _route(
+        "deepseek-messages", "openrouter", "deepseek/deepseek-v4-flash-0731", None,
+        "messages", _OR_MESSAGES, FULL, THEN, informational_lanes=frozenset({"long-session"})),
+    "or-glm": _route(
+        "or-glm", "openrouter", "z-ai/glm-5.3-flash", None, None, _OR_CHAT, LIGHT, THEN),
+    # Direct API rows (spec 05 §3.4): very light, not best-effort. Linux musl
+    # smokes these three plus the full rows.
     "api-openai": _route(
-        "api-openai", "openai", "gpt-6-luna", "low", None, _OPENAI_API, LIGHT),
-    "api-openai-medium": _route(
-        "api-openai-medium", "openai", "gpt-6-luna", "medium", None, _OPENAI_API, LIGHT),
+        "api-openai", "openai", "gpt-6-luna", "low", None, _OPENAI_API, LIGHT, FIRST),
     "api-anthropic": _route(
-        "api-anthropic", "anthropic", "claude-haiku-5-5", "medium", None,
-        _ANTHROPIC_API, LIGHT),
-    "api-xai": _route("api-xai", "xai-api", "grok-4.7", "low", None, _XAI_API, LIGHT),
-    # Feature-scenario roster rows (image input, tools), outside the bar matrix.
-    "api-anthropic-low": _route(
-        "api-anthropic-low", "anthropic", "claude-haiku-5-5", "low", None, _ANTHROPIC_API,
-        LIGHT, planned=False),
-    "or-gemma4-free": _route(
-        "or-gemma4-free", "openrouter", "google/gemma-4-31b-it:free", None, None, _OR_CHAT,
-        INFORMATIONAL, planned=False),
+        "api-anthropic", "anthropic", "claude-haiku-5-5", "low", None, _ANTHROPIC_API,
+        LIGHT, FIRST),
+    "api-xai": _route("api-xai", "xai-api", "grok-4.6", "low", None, _XAI_API, LIGHT, FIRST),
 }
 
 

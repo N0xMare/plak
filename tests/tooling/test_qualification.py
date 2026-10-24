@@ -108,7 +108,7 @@ class QualificationTests(unittest.TestCase):
         self.assertIn("compaction", text)
 
     def test_estimate_reserves_one_extra_attempt_explicitly(self):
-        cell = estimate.Cell("mac", "smoke", "api", live.LIGHT, "model", "openai")
+        cell = estimate.Cell("mac", "smoke", "api", live.LIGHT, "model", "openai", live.FIRST)
         rate = estimate.Rate(Decimal(1), Decimal(0), Decimal(1), Decimal(0))
         assumptions = estimate.Assumptions(smoke_input_tokens=1_000_000,
                                           smoke_output_tokens=0, contingency=Decimal(0))
@@ -162,10 +162,13 @@ class QualificationTests(unittest.TestCase):
         second_jobs = jobs.Jobs(route, env)
         self.assertEqual(first_jobs.fresh_token("job"), second_jobs.fresh_token("job"))
 
-    def test_best_effort_provider_waiver_does_not_apply_to_model_rerun(self):
-        for initial, expected in ((live.PROVIDER, True), (live.MODEL, False)):
-            result, _ = self.run_cell([initial, live.PROVIDER])
-            self.assertEqual(qualification.qualifies(live.ROUTES["or-mimo"], result, "smoke"), expected)
+    def test_a_second_provider_blocks_every_light_row(self):
+        # The paid OpenRouter light row is reliable, not best-effort.
+        for name in ("or-glm", "codex", "api-xai"):
+            for initial in (live.PROVIDER, live.MODEL):
+                with self.subTest(route=name, initial=initial):
+                    result, _ = self.run_cell([initial, live.PROVIDER])
+                    self.assertFalse(qualification.qualifies(live.ROUTES[name], result, "smoke"))
 
     def test_driver_error_during_rerun_is_recorded_harness(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -427,8 +430,8 @@ class QualificationReviewTests(unittest.TestCase):
                 self.assertEqual(report["binding"]["lane_class"], lane_class)
 
     def test_openrouter_contingency_includes_shared_rerun_reserve(self):
-        cells = [estimate.Cell("mac", "smoke", "or", live.LIGHT, "model", "openrouter"),
-                 estimate.Cell("mac", "smoke", "api", live.LIGHT, "model", "openai")]
+        cells = [estimate.Cell("mac", "smoke", "or", live.LIGHT, "model", "openrouter", live.FIRST),
+                 estimate.Cell("mac", "smoke", "api", live.LIGHT, "model", "openai", live.FIRST)]
         rate = estimate.Rate(Decimal(1), Decimal(0), Decimal(1), Decimal(0))
         assumptions = estimate.Assumptions(smoke_input_tokens=1_000_000,
                                           smoke_output_tokens=0, contingency=Decimal("0.25"),

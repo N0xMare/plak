@@ -85,7 +85,7 @@ class LiveOracleTests(unittest.TestCase):
                                "fault=reset,after-events=3")
 
     def test_claude_fault_targets_exact_oauth_inference_endpoint(self):
-        plan = live.fault_plan(live.ROUTES["claude"], "429", retry_after=2)
+        plan = live.fault_plan(live.ROUTES["claude-sonnet55-low"], "429", retry_after=2)
         self.assertEqual(plan, "host=api.anthropic.com,path=/v1/messages?beta=true,nth=1,"
                                "fault=429,retry-after=2")
 

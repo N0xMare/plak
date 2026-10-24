@@ -2901,26 +2901,58 @@ of that scenario: both digests are recorded, and any other digest change is not
 a qualification.
 
 Route names are the keys of `ROUTES` in `tests/live/live.py`. Account, model,
-effort and protocol are that route's fields. Routes with `planned` false stay
-runnable and are not in the matrix: `claude`, `claude-sonnet-medium`, the
-feature-scenario roster rows `api-anthropic-low` and `or-gemma4-free`, and
-`or-lfm-free`, whose free upstream streamed at about 7 tokens per second with
-in-band 504s on every 0.0.2 run, so its smoke outlived scenario budgets without
-evidence that clears the product.
-`deepseek` is Chat, with no protocol. `deepseek-messages` is the same model
-with protocol `messages`. `or-ling` and `or-qwen38` are paid model ids at
-informational depth.
+effort and protocol are that route's fields. The routes are the owner's
+catalog and nothing else:
+
+- Codex: `gpt-6-luna` at low (`codex`) and medium (`codex-luna-medium`),
+  `gpt-6.1-sol` at low (`codex-sol`), `gpt-6-astra` at low (`codex-astra`).
+- SuperGrok: `grok-4.6` at low (`grok-46`), `grok-4.7` at low (`grok`).
+- Claude: `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-5-5` at low
+  and medium (`claude-haiku55-low`, `claude-haiku55-medium`,
+  `claude-sonnet55-low`, `claude-sonnet55-medium`, `claude-opus-low`,
+  `claude-opus-medium`), `claude-fable-5-1` at low (`claude-fable`).
+- OpenRouter free, best effort: `nvidia/nemotron-3-ultra-550b-a55b:free`
+  (`or-nemotron-free`), `nvidia/nemotron-3.5-super-vl:free`
+  (`or-nemotron-vl-free`), `thinkingmachines/inkling:free` (`or-inkling-free`),
+  `recursive/flint-v1.0:free` (`or-flint-free`), `liquid/lfm-2.5-2.6b:free`
+  (`or-lfm-free`).
+- OpenRouter paid, not best-effort: `deepseek/deepseek-v4-flash-0731` on Chat
+  (`deepseek`, no protocol) and on Messages (`deepseek-messages`, protocol
+  `messages`), `z-ai/glm-5.3-flash` (`or-glm`).
+- API keys: OpenAI `gpt-6-luna` at low (`api-openai`), Anthropic
+  `claude-haiku-5-5` at low (`api-anthropic`), xAI API `grok-4.6` at low
+  (`api-xai`).
+
+Depth follows the account. The Codex, SuperGrok and Claude subscriptions and
+OpenRouter are tested deep: they carry every `full` row. API keys are very
+light: each has one `light` row on its cheapest first-rung tuple, and nothing
+else.
 
 - `full`: `codex-sol`, `grok`, `claude-sonnet55-low`, `deepseek`,
   `deepseek-messages` (both DeepSeek rows' long-session lanes are
   informational, below).
 - `light`: `codex`, `codex-luna-medium`, `codex-astra`, `grok-46`,
   `claude-sonnet55-medium`, `claude-haiku55-low`, `claude-haiku55-medium`,
-  `claude-opus-low`, `claude-opus-medium`, `claude-fable`, `or-mimo`,
-  `or-glm`, `or-qwen37`, `api-openai`, `api-openai-medium`, `api-anthropic`,
-  `api-xai`.
-- `informational`: `or-nemotron-free`, `or-laguna-free`, `or-ling`,
-  `or-qwen38`; also the `deepseek` and `deepseek-messages` long-session lanes.
+  `claude-opus-low`, `claude-opus-medium`, `claude-fable`, `or-glm`,
+  `api-openai`, `api-anthropic`, `api-xai`.
+- `informational`: the five free OpenRouter rows; also the `deepseek` and
+  `deepseek-messages` long-session lanes.
+
+Each route has a `rung` on the testing ladder. A qualification cycle runs the
+rungs in order, cheapest first, and a `harness` outcome on a lower rung is
+fixed before a higher rung spends.
+
+1. `FIRST`: the free OpenRouter rows, `codex`, `claude-haiku55-low`,
+   `grok-46`, and the three API rows.
+2. `THEN`: `codex-sol`, `claude-sonnet55-low`, `grok`, `deepseek`,
+   `deepseek-messages`, `or-glm`, and the medium-effort rows
+   `codex-luna-medium`, `claude-haiku55-medium` and `claude-sonnet55-medium`.
+3. `CONFIRM`: `claude-opus-low`, `claude-opus-medium`, `codex-astra` and
+   `claude-fable`. These rows are sparing: they run only for a targeted
+   confirmation, the maintainer naming the row and the change it confirms,
+   and are left out of default sweeps and the default estimate. A confirmation
+   runs at `light` depth and scores like a `light` cell. The bar does not wait
+   for a sparing row that no confirmation named.
 
 `codex-sol` (`gpt-6.1-sol` at low) is the full Codex row. `gpt-6-luna` at low
 and at medium ended long growth turns early ("I can't finish paging ...
@@ -2931,35 +2963,35 @@ growth pages through compaction under the derived round cap and passed
 in-turn compaction, the child (10 of 10 pages) and kill-reopen. Its overflow
 attempt in that diagnostic was a model runaway (one tool call's input
 repeated until the 8 MiB capture bound), which the runaway rule in §3.2
-scores `model`. `codex`,
-`codex-luna-medium` and `codex-astra` stay `light`.
+scores `model`. `codex`, `codex-luna-medium` and `codex-astra` stay `light`.
 
 A route may mark single lanes informational (`informational_lanes` in
 `ROUTES`). Such a lane still runs at its row's depth and is scored like an
 informational row; the row's other lanes keep its class. `deepseek` and
 `deepseek-messages` mark long-session, so no OpenRouter row has a blocking
-long-session lane. The model's own compaction summary loses the earlier
-turn's fact: replaying Plak's captured summary request through OpenRouter, on
-Chat and on Messages, the summary dropped that fact once one or two large tool
-results followed it, at about 34k to 70k tokens as well as at about 826k (none
-of 18 kept it from 100k to 826k; three of three kept it with no bulk; with
-tool definitions present it kept the fact at about 38k and lost it at about
-71k). Plak's summary input was complete and byte-equal to the request before
-the fold, and Grok and Claude pass the same lane. Deep into long tool loops,
-DeepSeek over OpenRouter Messages also sends `read` calls with only a path,
-even given an argument example, while the same model and upstream on Chat
-pages correctly with the same tool schema. Both are model or provider
-translation limits, not product behavior. Smoke, jobs and the headless soak
-stay blocking on both rows and cover the Chat and Messages dialects.
+long-session lane. The marking carries from the DeepSeek flash model these
+rows ran before (`deepseek/deepseek-v4.1-flash-1017`) until
+`deepseek/deepseek-v4-flash-0731` has its own long-session evidence. The
+earlier model's own compaction summary lost the earlier turn's fact: replaying Plak's
+captured summary request through OpenRouter, on Chat and on Messages, the
+summary dropped that fact once one or two large tool results followed it, at
+about 34k to 70k tokens as well as at about 826k (none of 18 kept it from 100k
+to 826k; three of three kept it with no bulk; with tool definitions present it
+kept the fact at about 38k and lost it at about 71k). Plak's summary input was
+complete and byte-equal to the request before the fold, and Grok and Claude
+pass the same lane. Deep into long tool loops, that model over OpenRouter
+Messages also sent `read` calls with only a path, even given an argument
+example, while the same model and upstream on Chat paged correctly with the
+same tool schema. Both are model or provider translation limits, not product
+behavior. Smoke, jobs and the headless soak stay blocking on both rows and
+cover the Chat and Messages dialects.
 
-`api-openai` is OpenAI `gpt-6-luna` at low. `api-openai-medium` is the same
-model at medium. `api-anthropic` is Anthropic `claude-haiku-5-5` at medium.
-`api-xai` is xAI API `grok-4.7` at low. All four are `light` and are not
-best-effort.
+The three API rows are `light` and are not best-effort.
 
-Apple Silicon runs every planned row at the depth of its class. Linux x86_64
-musl runs only the twelve-scenario smoke, and only on the `full` rows and the
-four API rows `api-openai`, `api-openai-medium`, `api-anthropic` and `api-xai`.
+Apple Silicon runs every row at the depth of its class, sparing rows only when
+a confirmation names them. Linux x86_64 musl runs only the twelve-scenario
+smoke, and only on the `full` rows and the three API rows `api-openai`,
+`api-anthropic` and `api-xai`.
 
 On Apple Silicon, §3.2 names the oracles:
 
@@ -3006,7 +3038,7 @@ diagnostics: `just live smoke <route>` is the twelve scenarios; `just live soak 
 The headless soak is the driver default of one hour; a shorter soak does not
 fill the cell and a longer one does. Linux x86_64 musl's cell is
 `python3 tests/live/qualification.py smoke <route>` on each `full` row and on
-the four API rows.
+the three API rows.
 
 A refused reopen in `crash_jobs` or `kill_reopen` is a `harness` outcome. The
 drivers record the refused head's decoded shape and bucket it as covered,
@@ -3076,17 +3108,20 @@ The dry-run command prints the selected lane and its maximum of two attempts.
 explicitly priced beside the clean-attempt subtotal and before contingency.
 The PROVIDER and MODEL rules share that reserve, not successive attempts.
 
-Best-effort rows are the informational rows and the OpenRouter light rows
-`or-mimo`, `or-glm` and `or-qwen37`; an informational lane is best-effort
-too. On those three light rows the only waiver is the second `provider`
-outcome. `deepseek` and `deepseek-messages` outside their long-session lanes, every
-subscription row, and `api-openai`, `api-openai-medium`, `api-anthropic` and
-`api-xai` are not best-effort.
+Best-effort rows are the informational rows, the free OpenRouter models; an
+informational lane is best-effort too. The paid OpenRouter rows `deepseek`
+and `deepseek-messages` outside their long-session lanes and `or-glm`, every
+subscription row, and `api-openai`, `api-anthropic` and `api-xai` are not
+best-effort.
 
 A later revision is re-confirmed by a new twelve-scenario smoke on each
 `full` row, on Apple Silicon and on Linux x86_64 musl. That smoke does not
 by itself repeat light rows, informational rows, long-session, jobs or either
 soak, and it does not replace the offline gate.
+
+A row that was never qualified, or whose tuple changed, has no earlier pass
+to carry: it runs at its class depth before the bar is met (a sparing row
+only when a confirmation names it).
 
 In addition, every row whose own rendered-prompt digests (§2.5) or harness
 footprints (chapter 02 §6.7) differ from the passing revision reruns at its
@@ -3104,26 +3139,30 @@ matrix. Rows that share those pins and footprints move together. A pin or
 footprint outside that set does not move the row.
 
 Before a paid matrix or that re-confirmation, run
-`just live estimate --rate-card PATH [--openrouter-ceiling N]`. It prices the
-planned cells from a local rate card and does not fetch a price. The
+`just live estimate --rate-card PATH [--openrouter-ceiling N]
+[--openrouter-window N] [--confirm ROUTES]`. It prices the cells from a local
+rate card and does not fetch a price, and prints them in ladder order. The
 OpenRouter ceiling is an operator input. This chapter states no amount. The
 estimate warns when the OpenRouter cells, including the contingency, exceed
 that ceiling, and it still prints every cell. It prices a Mac smoke for every
-planned route. For each `full` row it also prices the four long-session
-scenarios, the eleven jobs scenarios plus two further `crash_jobs` runs, and a
-Linux smoke, and prints an informational lane's cell with class
-`informational`; it prices one Mac headless soak for the row named by
-`--soak-row`. For `api-openai`, `api-openai-medium`, `api-anthropic`
-and `api-xai` it also prices a Linux smoke. An API-key row, including
-OpenRouter and those four, is priced when the card names its model id. A
-subscription row is quota and stays unpriced even when the card names its
-model. An API model the card omits is unpriced and left out of the total.
+route except the sparing rows, which it adds only when `--confirm` names
+them. For each `full` row it also prices the four long-session scenarios, the
+eleven jobs scenarios plus two further `crash_jobs` runs, and a Linux smoke,
+and prints an informational lane's cell with class `informational`; it prices
+one Mac headless soak for the row named by `--soak-row`. The tree pins no
+OpenRouter context window, so an OpenRouter long-session cell is scaled by
+`--openrouter-window`, the model's context length from the OpenRouter
+listing, and the estimate is refused without it. For `api-openai`,
+`api-anthropic` and `api-xai` it also prices a Linux smoke. An API-key row,
+including OpenRouter and those three, is priced when the card names its model
+id. A subscription row is quota and stays unpriced even when the card names
+its model. An API model the card omits is unpriced and left out of the total.
 The printed total is not evidence and is not the ceiling.
 
 This bar does not cover:
 
 - the gate tiers in §1
-- any route not listed above, including `claude` and `claude-sonnet-medium`
+- any route not listed above, and a sparing row no confirmation named
 - `wrap_up`, `py_ptc`, and any scenario the class lists do not name
 - a composition other than `plakous-default`, or an effort other than the
   route's
