@@ -3358,15 +3358,15 @@ ladder's second press over a stuck cancel. A bare
 mid-turn.
 
 `SIGTERM` and `SIGHUP` are quit requests. A watcher thread armed before the
-terminal is taken records the signal, and the event loop quits exactly as
-`Ctrl+Q` does: the same restoration, the same resume hint, the same bounded
-host grace. The process then exits 4, the status a signalled CLI turn
-reports. A second signal, or a loop that has not exited one second after
-the first, makes the watcher restore the terminal itself — the same mode
-sequence, written straight to the descriptor — and exit 4 at once. The
-watcher leaves no disposition behind for `/reload`: caught signals revert to
-their default across `exec`, none is ignored or blocked, and the new process
-arms its own.
+terminal is taken records the signal and wakes the event loop (§5.8), which
+quits exactly as `Ctrl+Q` does: the same restoration, the same resume hint,
+the same bounded host grace. The process then exits 4, the status a signalled
+CLI turn reports. A second signal, or a loop that has not exited one second
+after the first, makes the watcher restore the terminal itself — the same mode
+sequence, written straight to the descriptor — and exit 4 at once. The watcher
+leaves no disposition behind for `/reload`: caught signals revert to their
+default across `exec`, none is ignored or blocked, and the new process arms
+its own.
 
 **Quit restores the terminal and abandons runtime ownership.** The cooked
 terminal prints a resume hint only for a published session, then requests
@@ -4875,8 +4875,31 @@ camera easing, and never the banner.
 
 Motion is optional and reduced-motion aware, and every mouse action has
 keyboard parity. Redraw is state-driven with a true idle: the frame timer is
-armed by demand, and with no spinner, stream, camera tween, or pending snapshot
-the loop parks and consumes no CPU. Input is selected ahead of host events, and
+armed by demand, and with no spinner, stream, camera tween, or pending
+snapshot the loop parks and consumes no CPU. The loop has one wait point, a
+`poll` over the terminal input descriptor and a wake pipe, and a park has no
+polling ceiling. The pipe is written by the host observation mailbox's
+notifier, on each empty to non-empty edge and when the host's last sender
+leaves, by the stop-signal watcher on `SIGTERM` and `SIGHUP`, on `SIGWINCH`,
+and once when the background binary identity is ready, so a host observation,
+a stop or a resize reaches a parked loop at once. The loop drains terminal
+input and the mailbox before every wait, so the descriptor wait never misses
+an event the terminal reader already parsed. A park ends early only at a
+deadline the shell armed itself: a wheel gesture settling, an unanswered
+call-detail ask, an Agents row ageing, and the installed-build check, which
+re-arms every five seconds, so a parked shell wakes once every five seconds
+for one `stat`. The terminal reader takes an edge-triggered 1 KiB per arrival,
+so a larger burst can leave bytes it reads only when more input arrives. A
+readable wake that yields no event stops the wait on the descriptor: the loop
+waits on the pipe for 20 ms, then looks at the descriptor without waiting,
+until the reader yields an event or the descriptor has nothing left. The
+reader's zero-timeout poll can also stop at an internal reply it set aside
+while real events stay parsed behind it, so every readable wake is followed by
+one more look 20 ms later. A descriptor `poll` cannot watch gets the 20 ms
+look for the session. None of these is a spin. A hung-up descriptor (an error,
+or a hang-up with nothing to read) is a quit request, as `SIGHUP` is (§5.3),
+and is not read.
+Input is selected ahead of host events, and
 host events drain in a bounded batch, so a burst of stream deltas cannot starve
 a keypress. An unfollowed transcript camera is the last block-space anchor:
 stream growth remaps that row and must not move it, and a wheel or key notch

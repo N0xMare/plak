@@ -28,12 +28,14 @@
 //! inside a supervisor's grace period. `SIGINT` is deliberately untouched:
 //! Ctrl-C keeps its graceful cancel-and-join path and its own interrupt status.
 //!
-//! **The TUI quits on its own loop.** [`install_interactive`] only records the
-//! signal; the event loop polls [`signalled_stops`] and quits exactly as
-//! `Ctrl+Q` does, so the terminal is restored by the ordinary restoration
-//! before the session is released. Only a second signal, or a loop that has
-//! not exited by [`INTERACTIVE_FORCED_EXIT_DEADLINE`], makes the watcher
-//! restore the terminal itself and exit. Nothing here survives the `/reload`
+//! **The TUI quits on its own loop.** [`install_interactive`] records the
+//! signal and wakes the parked event loop, which reads [`signalled_stops`] and
+//! quits exactly as `Ctrl+Q` does, so the terminal is restored by the ordinary
+//! restoration before the session is released. The same watcher wakes the loop
+//! on `SIGWINCH`, so a resize repaints at once while the loop is parked. Only a
+//! second signal, or a loop that has not exited by
+//! [`INTERACTIVE_FORCED_EXIT_DEADLINE`], makes the watcher restore the terminal
+//! itself and exit. Nothing here survives the `/reload`
 //! `exec`: caught signals reset to their default disposition across `exec`,
 //! no signal is ignored or blocked, and the watcher thread does not outlive
 //! the old image, so the new process arms its own watcher from scratch.
@@ -293,8 +295,8 @@ pub const INTERACTIVE_FORCED_EXIT_DEADLINE: std::time::Duration = std::time::Dur
 
 /// Starts the terminating-signal watcher for the interactive TUI.
 ///
-/// The first `SIGTERM` or `SIGHUP` is only recorded: the event loop sees
-/// [`signalled_stops`] rise and quits as `Ctrl+Q` would. A second signal, or
+/// The first `SIGTERM` or `SIGHUP` is recorded and wakes the event loop, which
+/// sees [`signalled_stops`] rise and quits as `Ctrl+Q` would. A second signal, or
 /// [`INTERACTIVE_FORCED_EXIT_DEADLINE`] passing after the first, calls
 /// `force_restore` on the watcher thread and exits with
 /// [`SIGNALLED_EXIT_CODE`]. Registration is live when this returns; a second
@@ -332,12 +334,21 @@ fn watch_interactive(force_restore: fn(), registered: &std::sync::mpsc::SyncSend
         ) else {
             return false;
         };
+        // Crossterm reads the resize itself; the loop only has to look.
+        if let Ok(mut resized) = signal(SignalKind::window_change()) {
+            tokio::spawn(async move {
+                while resized.recv().await.is_some() {
+                    crate::tui::wake::wake();
+                }
+            });
+        }
         let _ = registered.try_send(());
         tokio::select! {
             _ = terminate.recv() => STOPPED_BY.store(STOPPED_BY_TERMINATE, Ordering::Release),
             _ = hangup.recv() => STOPPED_BY.store(STOPPED_BY_HANGUP, Ordering::Release),
         }
         SIGNALLED_STOPS.fetch_add(1, Ordering::Release);
+        crate::tui::wake::wake();
         crate::tui_timing::quit_requested();
         let _ = tokio::time::timeout(INTERACTIVE_FORCED_EXIT_DEADLINE, async {
             tokio::select! {

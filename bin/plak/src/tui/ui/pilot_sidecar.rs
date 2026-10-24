@@ -50,6 +50,25 @@ pub(super) struct PilotSidecar {
     next_sequence: u64,
 }
 
+/// Requests are files nothing announces, so a parked loop is woken to look
+/// for one every 250 ms, the cadence its old poll ceiling had. That wake
+/// stands in for the real sources: a pilot-driven test does not show that a
+/// host observation, a signal or a resize wakes a parked loop; the PTY tests
+/// in `tests/integration/offline_tui.rs` do.
+fn start_request_waker() {
+    static WAKER: std::sync::Once = std::sync::Once::new();
+    WAKER.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("plak-tui-pilot".to_owned())
+            .spawn(|| {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    crate::tui::wake::wake();
+                }
+            });
+    });
+}
+
 impl PilotSidecar {
     pub(super) fn from_root(root: Option<std::ffi::OsString>) -> Result<Option<Self>, String> {
         let Some(root) = root else {
@@ -70,6 +89,7 @@ impl PilotSidecar {
         if !metadata.is_dir() || metadata.mode() & 0o077 != 0 {
             return Err("PLAK_TEST_TUI_PILOT must be an owner-only directory".to_owned());
         }
+        start_request_waker();
         Ok(Some(Self {
             root,
             next_sequence: 1,

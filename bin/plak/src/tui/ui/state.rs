@@ -10,6 +10,10 @@ use super::{
 };
 use std::time::Duration;
 
+/// How long after the last wheel notch a wheel gesture settles and hands the
+/// caret back.
+const WHEEL_SETTLE: Duration = Duration::from_millis(100);
+
 impl App {
     /// Enter the quitting state. The frame painted before the loop exits shows
     /// `quitting…` on the HUD (spec 02 §5.3). The launcher then restores the
@@ -32,6 +36,39 @@ impl App {
         let changed = newer != self.newer_build_installed;
         self.newer_build_installed = newer;
         changed
+    }
+
+    /// How long a parked loop may sleep before a deadline this state armed
+    /// falls due: a wheel gesture settling, a call-detail ask, an Agents row
+    /// ageing, and the installed-build check. The build check re-arms every
+    /// [`BUILD_CHECK_INTERVAL`], so a parked shell wakes that often; nothing
+    /// else here repeats. `None` parks until input, a host observation or a
+    /// signal wakes the loop.
+    pub(super) fn next_deadline(&self, now: Instant) -> Option<Duration> {
+        let wheel_settles = self
+            .last_wheel_at
+            .filter(|_| self.transcript_gesture && self.transcript_gesture_is_wheel)
+            .map(|last| last + WHEEL_SETTLE);
+        let ages = self
+            .agents_list_open()
+            .then(|| self.tree_navigator.as_ref()?.age_wake_at)
+            .flatten()
+            .map(|at| {
+                let unix_now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                now + Duration::from_secs(at).saturating_sub(unix_now)
+            });
+        [
+            Some(self.next_build_check),
+            wheel_settles,
+            self.call_details.next_ask(now),
+            ages,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .map(|due| due.saturating_duration_since(now))
     }
 
     pub(super) fn mark_dirty(&mut self) {
@@ -260,7 +297,7 @@ impl App {
         if self.mouse_scroll_queue != 0
             || self
                 .last_wheel_at
-                .is_some_and(|last| self.now().duration_since(last) < Duration::from_millis(100))
+                .is_some_and(|last| self.now().duration_since(last) < WHEEL_SETTLE)
             || !self.transcript_gesture
             || !self.transcript_gesture_is_wheel
             || self.composer_dragging

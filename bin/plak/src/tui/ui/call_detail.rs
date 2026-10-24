@@ -115,6 +115,18 @@ impl CallDetails {
             })
     }
 
+    /// When the next request falls due: at once for a queued one, and
+    /// [`REASK_AFTER`] after a sent or retried one.
+    pub(super) fn next_ask(&self, now: Instant) -> Option<Instant> {
+        self.in_flight
+            .values()
+            .map(|ask| match *ask {
+                Ask::Queued => now,
+                Ask::Sent(at) | Ask::Retry(at) => at + REASK_AFTER,
+            })
+            .min()
+    }
+
     #[cfg(test)]
     pub(super) fn waiting(&self) -> usize {
         self.in_flight.len()

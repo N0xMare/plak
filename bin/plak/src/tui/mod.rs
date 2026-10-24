@@ -56,6 +56,7 @@ mod theme;
 mod tree_navigator;
 mod tree_view;
 mod usage_tab;
+pub(crate) mod wake;
 #[cfg(test)]
 mod wave;
 

@@ -7,12 +7,9 @@
 //! transition is unit-testable.
 //!
 //! Deep idle returns [`RedrawWait::Park`]: no timer is required and a frame
-//! must not be painted. The synchronous loop has exactly one wait point
-//! (`crossterm::event::poll`), which cannot also wait on the host queue, so it
-//! clamps a park to [`PARK_POLL_CEILING`]. That ceiling exists only to notice
-//! an unsolicited host observation while the session is idle; it never paints
-//! on its own, because [`RedrawState::periodic_redraw_required`] is false for
-//! both idle states.
+//! must not be painted. The loop's one wait point (`tui::wake::wait`) wakes on
+//! terminal input, a host observation or a signal, so a park has no bound
+//! except a one-shot deadline the application armed itself.
 
 use std::time::Duration;
 
@@ -29,10 +26,6 @@ pub(crate) const SPINNER_INTERVAL: Duration = Duration::from_millis(80);
 
 /// Cadence while a coalesced wheel queue drains into scroll offsets.
 pub(crate) const WHEEL_DRAIN_INTERVAL: Duration = Duration::from_millis(8);
-
-/// Longest a parked loop may block on stdin before re-checking the host
-/// queue. Not a redraw cadence: a park tick paints nothing.
-pub(crate) const PARK_POLL_CEILING: Duration = Duration::from_millis(250);
 
 /// What the renderer currently needs from the clock.
 ///
@@ -121,12 +114,14 @@ pub(crate) enum RedrawWait {
 }
 
 impl RedrawWait {
-    /// The wait a synchronous single-wait-point loop actually uses.
+    /// The bound of the loop's wait: none while parked, and the cadence
+    /// interval otherwise, either cut short by an armed one-shot `deadline`.
     #[must_use]
-    pub(crate) const fn bounded(self, park_ceiling: Duration) -> Duration {
-        match self {
-            Self::Park => park_ceiling,
-            Self::Until(interval) => interval,
+    pub(crate) fn bound(self, deadline: Option<Duration>) -> Option<Duration> {
+        match (self, deadline) {
+            (Self::Park, deadline) => deadline,
+            (Self::Until(interval), None) => Some(interval),
+            (Self::Until(interval), Some(deadline)) => Some(interval.min(deadline)),
         }
     }
 }
@@ -314,8 +309,8 @@ pub(crate) const SCHEDULE_TABLE: &[(RedrawState, RedrawWait, bool)] = &[
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_FRAME_CAP_FPS, FrameWork, IDLE_INTERVAL, PARK_POLL_CEILING, RedrawDemand,
-        RedrawReason, RedrawSchedule, RedrawState, RedrawWait, SCHEDULE_TABLE, SPINNER_INTERVAL,
+        DEFAULT_FRAME_CAP_FPS, FrameWork, IDLE_INTERVAL, RedrawDemand, RedrawReason,
+        RedrawSchedule, RedrawState, RedrawWait, SCHEDULE_TABLE, SPINNER_INTERVAL,
         WHEEL_DRAIN_INTERVAL,
     };
     use std::time::Duration;
@@ -355,15 +350,19 @@ mod tests {
         assert!(!RedrawSchedule::periodic_redraw_required(demand));
     }
 
+    /// Spec 02 §5.8's true idle: a park has no polling ceiling, only a
+    /// deadline something armed, and a cadence is cut short by one.
     #[test]
-    fn a_parked_wait_is_bounded_only_by_the_ceiling() {
+    fn a_parked_wait_is_unbounded_unless_a_deadline_is_armed() {
+        assert_eq!(RedrawWait::Park.bound(None), None);
+        let soon = Duration::from_millis(30);
+        assert_eq!(RedrawWait::Park.bound(Some(soon)), Some(soon));
+        let spinner = RedrawWait::Until(SPINNER_INTERVAL);
+        assert_eq!(spinner.bound(None), Some(SPINNER_INTERVAL));
+        assert_eq!(spinner.bound(Some(soon)), Some(soon));
         assert_eq!(
-            RedrawWait::Park.bounded(PARK_POLL_CEILING),
-            PARK_POLL_CEILING
-        );
-        assert_eq!(
-            RedrawWait::Until(SPINNER_INTERVAL).bounded(PARK_POLL_CEILING),
-            SPINNER_INTERVAL
+            spinner.bound(Some(Duration::from_secs(5))),
+            Some(SPINNER_INTERVAL)
         );
     }
 

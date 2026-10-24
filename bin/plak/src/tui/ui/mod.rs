@@ -92,7 +92,7 @@ use crate::tui::presentation::{ContextUsage, SubscriptionUsageView};
 use crate::tui::quit_guard::{
     CtrlCOutcome, ESC_CLEAR_WINDOW, EscOutcome, QuitArm, classify_ctrl_c, classify_esc,
 };
-use crate::tui::redraw::{self, FrameWork, RedrawDemand, RedrawSchedule};
+use crate::tui::redraw::{FrameWork, RedrawDemand, RedrawSchedule};
 use crate::tui::selection::{ContentPosition, TranscriptSelection};
 use crate::tui::settings::SettingsPane;
 use crate::tui::settings_registry::{self, SettingKind};

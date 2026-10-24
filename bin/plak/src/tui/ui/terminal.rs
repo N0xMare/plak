@@ -7,7 +7,7 @@ use super::{
     KeyboardEnhancementFlags, MAX_HOST_EVENTS_PER_FRAME, MAX_INPUT_DRAIN_PER_FRAME, Once, Path,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags, RedrawSchedule, ScrollBlock,
     SettingsMenu, ShowCursor, TuiError, TuiHandoff, TuiLaunch, TuiOutcome, UserAction, event,
-    local_echo_line, redraw, stdout,
+    local_echo_line, stdout,
 };
 use crate::tui::SurfaceIntent;
 #[cfg(feature = "test-hooks")]
@@ -385,10 +385,10 @@ pub(super) fn handle_terminal_event(
     }
 }
 
-/// Drain at most `budget` pending terminal events.
+/// Drain at most `budget` pending terminal events and return how many.
 ///
-/// Returns true when the budget ran out, so the loop can come straight back
-/// instead of waiting: a paste or key-repeat burst is bounded per frame, never
+/// A count equal to the budget means the budget ran out, so the loop can come
+/// straight back instead of waiting: a paste or key-repeat burst is bounded per frame, never
 /// per iteration. An exhausted budget is the only "more input" signal — asking
 /// `poll` again would report a partially received escape sequence as ready and
 /// send the loop into a blocking `read` for bytes that have not arrived.
@@ -397,15 +397,15 @@ pub(super) fn drain_terminal_input(
     actions: Option<&crate::tui::UserActionSender>,
     mouse_enabled: bool,
     budget: usize,
-) -> Result<bool, TuiError> {
-    for _ in 0..budget {
+) -> Result<usize, TuiError> {
+    for taken in 0..budget {
         if !event::poll(Duration::ZERO).map_err(|error| from_io(&error))? {
-            return Ok(false);
+            return Ok(taken);
         }
         let event = event::read().map_err(|error| from_io(&error))?;
         handle_terminal_event(app, event, actions, mouse_enabled);
     }
-    Ok(true)
+    Ok(budget)
 }
 
 /// One frame's worth of coalesced host observations.
@@ -473,17 +473,33 @@ pub(super) fn run_app(
 ) -> Result<TuiOutcome, TuiError> {
     let schedule = RedrawSchedule::default();
     let mut host_connected = events.is_some();
+    crate::tui::wake::arm().map_err(|error| from_io(&error))?;
+    if let Some(events) = events {
+        events.set_notify(crate::tui::wake::wake);
+    }
     #[cfg(feature = "test-hooks")]
     let mut pilot =
         PilotSidecar::from_root(crate::test_hooks::tui_pilot_root()).map_err(TuiError::Io)?;
+    let mut input_watch = crate::tui::wake::InputWatch::default();
+    let mut input_seen = crate::tui::wake::Input::Quiet;
     loop {
         // Biased: terminal input is drained before host observations, so a
         // burst of stream deltas can never starve a keystroke or an interrupt.
         if let Some(actions) = actions {
             app.apply_process_snapshot(actions.processes());
         }
-        let input_pending =
-            drain_terminal_input(&mut app, actions, mouse_enabled, MAX_INPUT_DRAIN_PER_FRAME)?;
+        // A hung-up terminal is a quit, as `SIGHUP` is: crossterm's reader
+        // would spin on the dead descriptor, so it is not drained.
+        let input_events = if input_seen == crate::tui::wake::Input::HungUp {
+            if !app.should_quit {
+                dispatch_action(&mut app, &UserAction::Quit, actions);
+            }
+            0
+        } else {
+            drain_terminal_input(&mut app, actions, mouse_enabled, MAX_INPUT_DRAIN_PER_FRAME)?
+        };
+        let input_pending = input_events == MAX_INPUT_DRAIN_PER_FRAME;
+        input_watch.observe(input_seen, input_events);
         // A `SIGTERM` or `SIGHUP` is a quit request: the same path `Ctrl+Q`
         // takes, so restoration and session release stay the ordinary ones.
         if crate::signals::signalled_stops() > 0 && !app.should_quit {
@@ -531,9 +547,9 @@ pub(super) fn run_app(
         // Everything above is a state change; everything below is the clock.
         let state_dirty = app.dirty;
         let now = Instant::now();
-        // A shown recent row dims or leaves at an absolute unix boundary.
-        // The park poll still notices host observations; it must not repaint
-        // the list on every tick. Running rows keep the spinner cadence.
+        // A shown recent row dims or leaves at an absolute unix boundary, a
+        // one-shot deadline of its own; it must not repaint the list on every
+        // wake. Running rows keep the spinner cadence.
         let now_unix = app.agents_now();
         let age_due = app.agents_list_open()
             && app
@@ -585,7 +601,7 @@ pub(super) fn run_app(
         }
         // The list frame arms the next boundary from its one projection. A
         // transcript overlay does not, so a due wake that is still due arms
-        // the following boundary here instead of painting every poll.
+        // the following boundary here instead of painting every wake.
         if age_due {
             let now_unix = app.agents_now();
             if let Some(nav) = app.tree_navigator.as_mut()
@@ -603,13 +619,14 @@ pub(super) fn run_app(
         // State-driven cadence: park when nothing animates, streams, or is
         // armed, and come straight back while a bounded drain left work.
         let wait = if input_pending || host.pending {
-            Duration::ZERO
+            Some(Duration::ZERO)
         } else {
             schedule
                 .wait(app.redraw_demand())
-                .bounded(redraw::PARK_POLL_CEILING)
+                .bound(app.next_deadline(Instant::now()))
         };
-        let _ = event::poll(wait).map_err(|error| from_io(&error))?;
+        let (wait, input_mode) = input_watch.next_wait(wait);
+        input_seen = crate::tui::wake::wait(wait, input_mode).map_err(|error| from_io(&error))?;
     }
     // `app.session_id` is the last `HostEvent::Binding` the host published, so
     // it is the only identity that survives an in-host session switch.

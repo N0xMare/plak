@@ -70,6 +70,8 @@ pub(crate) fn prepare_binary_id(startup_command: Option<&'static str>) {
                 #[cfg(test)]
                 let _gate = BACKGROUND_IDENTITY_TEST_GATE.lock().ok();
                 let binary = binary_id();
+                // The banner shows the identity once it is ready.
+                crate::tui::wake::wake();
                 if let Some(command) = startup_command {
                     crate::log_start(binary, command);
                 }

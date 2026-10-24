@@ -2131,6 +2131,163 @@ fn the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one() {
 }
 
 // ---------------------------------------------------------------------------
+// Case 9: the parked loop wakes for its sources and for nothing else
+// ---------------------------------------------------------------------------
+
+/// Answers that tell five turns apart.
+fn five_distinct_answers() -> Value {
+    json!({
+        "version": 1,
+        "repeat_last_step": true,
+        "steps": (0..5)
+            .map(|turn| json!({"output": {"text": format!("woken answer {turn}")}}))
+            .collect::<Vec<_>>()
+    })
+}
+
+/// Rows of finished provider calls in the evidence log.
+fn provider_outcomes(fixture: &Fixture) -> usize {
+    std::fs::read_to_string(fixture.evidence())
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.contains("provider_outcome"))
+        .count()
+}
+
+/// Whether `needle` is on a row other than the composer's (the cursor row).
+fn host_row_shows(terminal: &Terminal, needle: &str) -> bool {
+    let (cursor_row, _) = terminal.cursor();
+    terminal
+        .screen()
+        .lines()
+        .enumerate()
+        .any(|(row, line)| row != usize::from(cursor_row) && line.contains(needle))
+}
+
+/// Spec 02 §5.8: a parked loop waits on the host mailbox as well as the
+/// terminal. An idle send's user row is the host's observation, published a
+/// few milliseconds after Enter, with nothing typed after it. A loop that
+/// re-read the mailbox only when a 250 ms poll ceiling ran out showed it no
+/// sooner than that, every time; the fastest of five sends shows the wake.
+#[test]
+fn an_idle_send_paints_the_host_row_without_waiting_out_a_poll() {
+    let fixture = Fixture::new(&five_distinct_answers());
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    let mut fastest = Duration::MAX;
+    for turn in 0..5 {
+        let prompt = format!("woken send {turn}");
+        terminal.type_draft(&prompt);
+        // Long enough for the loop to park on the drafted frame.
+        std::thread::sleep(Duration::from_millis(300));
+        let enter = Instant::now();
+        terminal.send(b"\r");
+        while !host_row_shows(&terminal, &prompt) {
+            assert!(
+                enter.elapsed() < WAIT,
+                "the host's row for `{prompt}` never painted:\n{}",
+                terminal.screen()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        fastest = fastest.min(enter.elapsed());
+        terminal.wait_screen(&format!("woken answer {turn}"));
+        let deadline = Instant::now() + WAIT;
+        while provider_outcomes(&fixture) <= turn {
+            assert!(Instant::now() < deadline, "turn {turn} never finished");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // The turn's tail lands before the next draft, so it is a prompt.
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    assert!(
+        fastest < Duration::from_millis(150),
+        "the fastest idle send painted its host row {fastest:?} after Enter"
+    );
+    terminal.quit();
+}
+
+/// The UI loop's main-thread counters from `/proc`: context switches and
+/// user CPU ticks. The loop runs on the main thread, whose task id is the pid.
+#[cfg(target_os = "linux")]
+fn ui_thread_counters(terminal: &Terminal) -> (u64, u64) {
+    let pid = terminal.pid();
+    let status = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/status"))
+        .expect("main thread status");
+    let switches = status
+        .lines()
+        .filter(|line| line.contains("ctxt_switches:"))
+        .filter_map(|line| line.split_whitespace().last()?.parse::<u64>().ok())
+        .sum();
+    let stat =
+        std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/stat")).expect("main thread stat");
+    // Fields after the parenthesised command: state is field 3, utime 14.
+    let utime = stat
+        .rsplit_once(')')
+        .and_then(|(_, fields)| fields.split_whitespace().nth(11)?.parse().ok())
+        .expect("utime");
+    (switches, utime)
+}
+
+/// Spec 02 §5.8's true idle: a parked shell's UI thread sleeps until
+/// something wakes it, and its only timer is the installed-build check,
+/// re-armed every five seconds. A 250 ms poll ceiling woke it eight times in
+/// this two-second window; the build check may land inside it once.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_parked_shell_wakes_only_for_its_five_second_build_check() {
+    let fixture = Fixture::new(&recovery_answer_script());
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"settle before parking\r");
+    terminal.wait_screen("recovered and answered");
+    // The turn's tail, the build identity and the chrome reads settle.
+    std::thread::sleep(Duration::from_millis(1_500));
+    let (before, _) = ui_thread_counters(&terminal);
+    std::thread::sleep(Duration::from_secs(2));
+    let woken = ui_thread_counters(&terminal).0 - before;
+    eprintln!("parked UI thread: {woken} wakeups in 2 s");
+    assert!(woken <= 2, "the parked UI thread woke {woken} times in 2 s");
+    // Parked is not deaf: input still wakes it.
+    terminal.type_draft("still awake");
+    terminal.esc_esc_clear_draft("still awake");
+    terminal.quit();
+}
+
+/// Crossterm reads an edge-triggered 1 KiB per arrival, so one write larger
+/// than that leaves bytes in the kernel that a level `poll` keeps reporting
+/// until more input arrives. The loop must not spin on them: it looks on a
+/// bounded tick instead, and the next keys still get through.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_parked_shell_stays_parked_over_a_stranded_input_burst() {
+    let fixture = Fixture::new(&recovery_answer_script());
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    std::thread::sleep(Duration::from_millis(1_500));
+    // 250 SGR pointer moves over one cell: 3000 bytes in a single write.
+    terminal.send(&b"\x1b[<35;40;12M".repeat(250));
+    std::thread::sleep(Duration::from_millis(500));
+    let (switches, utime) = ui_thread_counters(&terminal);
+    std::thread::sleep(Duration::from_secs(1));
+    let (later_switches, later_utime) = ui_thread_counters(&terminal);
+    let (woken, busy) = (later_switches - switches, later_utime - utime);
+    eprintln!("stranded burst: {woken} wakeups and {busy} CPU ticks in 1 s");
+    // A spin holds the CPU for the whole second (about 100 ticks); a 20 ms
+    // look is about 50 wakeups that cost next to nothing.
+    assert!(busy <= 10, "the UI thread spun: {busy} CPU ticks in 1 s");
+    assert!(woken <= 80, "the UI thread woke {woken} times in 1 s");
+    // And the burst really was left in the kernel: the loop was looking.
+    assert!(woken >= 25, "nothing was stranded: {woken} wakeups in 1 s");
+    // Each arrival lets crossterm read another chunk, the stranded reports
+    // first, so keys sent one at a time reach the composer.
+    for key in "after the burst".bytes() {
+        terminal.send(&[key]);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    terminal.wait_screen("after the burst");
+    terminal.esc_esc_clear_draft("after the burst");
+    terminal.quit();
+}
+
+// ---------------------------------------------------------------------------
 // Session carry-forward
 // ---------------------------------------------------------------------------
 
