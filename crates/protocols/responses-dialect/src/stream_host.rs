@@ -4,31 +4,37 @@
 //! trial semantics and common error maps / event-kind shapes.
 
 use std::fmt;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
 
-use plakous_attempt::{is_decoding, mark_decode_failed, mark_decoded};
+pub use event_kind::ResponsesStreamEventKind;
 use plakous_http::SseError;
 use plakous_model::{Digest, DigestDomain};
 use plakous_responses::{
     BomPolicy, DialectStreamHooks, FinishPolicy, LifecycleDialectPolicy, ReasoningLifecycleMode,
     ResponsesDecodeLimits, ResponsesDialectProfile, ResponsesFieldError, ResponsesLifecycle,
-    ResponsesLifecycleError, ResponsesStreamKernel, ResponsesStreamLimits, SequencePolicy,
-    SequenceValidationError, TerminalPolicy, required_object, required_provider_label,
-    required_string, required_u32,
+    ResponsesLifecycleError, ResponsesStreamLimits, SequencePolicy, SequenceValidationError,
+    TerminalPolicy, required_object, required_provider_label, required_string, required_u32,
 };
 use serde_json::{Map, Value};
 
-mod event_kind;
-pub use event_kind::ResponsesStreamEventKind;
-
 use crate::response_host::{
-    ResponsesAnnotation, ResponsesHostDecodeError, ResponsesOutputItem, ResponsesProviderError,
+    ResponsesAnnotation, ResponsesHostDecodeError, ResponsesOutputItem,
     ResponsesProviderErrorPolicy, ResponsesResponse, ResponsesResponseLimits,
     ResponsesResponseStatus, ResponsesUsagePolicy, parse_annotation, parse_output_item,
     parse_provider_error_with_canonical_type, parse_unique_json_value,
     validate_bounded_unknown_item,
 };
+
+mod decoder;
+mod error;
+
+pub use decoder::{ResponsesFamilySseDecoder, ResponsesSseDecoderFront, required_output_index};
+use error::map_lifecycle_error;
+pub use error::{
+    ResponsesFamilyStreamError, ResponsesFamilyStreamEvent, ResponsesStreamHostError,
+    map_sequence_error_standard, map_sse_error_standard,
+};
+
+mod event_kind;
 
 /// Closed capability data for one admitted Responses stream dialect.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -376,151 +382,6 @@ impl ResponsesStreamDialectData {
         Digest::sha256(DigestDomain::ModelBinding, 1, &parts).ok()
     }
 }
-
-/// Concrete Responses stream host failure (redaction-safe and provider-neutral).
-#[derive(Clone, Copy, Debug, Eq, thiserror::Error, PartialEq)]
-#[non_exhaustive]
-pub enum ResponsesFamilyStreamError {
-    /// Invalid UTF-8 in SSE framing.
-    #[error("invalid UTF-8 in Responses stream")]
-    InvalidUtf8,
-    /// Malformed SSE framing.
-    #[error("malformed Responses SSE framing")]
-    MalformedSse,
-    /// Malformed JSON payload.
-    #[error("malformed Responses JSON event")]
-    InvalidJson,
-    /// A required or documented field was invalid.
-    #[error("invalid Responses event field: {0}")]
-    InvalidField(&'static str),
-    /// Event name and JSON type differed.
-    #[error("Responses SSE event name does not match JSON type")]
-    EventNameMismatch,
-    /// Sequence policy failed.
-    #[error("Responses sequence policy failed")]
-    InvalidSequence,
-    /// Shared item/content/tool lifecycle failed.
-    #[error("Responses lifecycle failed")]
-    InvalidLifecycle,
-    /// Shared lifecycle failed with one static redaction-safe reason.
-    #[error("Responses lifecycle failed: {0}")]
-    Lifecycle(&'static str),
-    /// The response stopped at its output bound with an item still open, so
-    /// the item never became output.
-    #[error("Responses stream stopped at the output bound with an unfinished item")]
-    OutputBoundReached,
-    /// Event arrived after a typed terminal.
-    #[error("Responses event arrived after terminal")]
-    EventAfterTerminal,
-    /// EOF arrived inside an unfinished frame.
-    #[error("truncated Responses SSE frame")]
-    Truncated,
-    /// Required typed terminal was absent.
-    #[error("Responses stream omitted a typed terminal")]
-    MissingTerminal,
-    /// Required trailing DONE marker was absent or invalid.
-    #[error("Responses DONE marker policy failed")]
-    DonePolicy,
-    /// A declared event surface was not admitted.
-    #[error("Responses event surface is not admitted: {0}")]
-    Unsupported(&'static str),
-    /// A configured resource bound was exceeded.
-    #[error("Responses stream resource limit exceeded: {0}")]
-    ResourceLimit(&'static str),
-    /// Decoder is already terminally failed.
-    #[error("Responses decoder already failed")]
-    DecoderFailed,
-}
-
-impl From<ResponsesFieldError> for ResponsesFamilyStreamError {
-    fn from(error: ResponsesFieldError) -> Self {
-        match error {
-            ResponsesFieldError::Missing { field } | ResponsesFieldError::Invalid { field } => {
-                Self::InvalidField(field)
-            }
-            _ => Self::InvalidField("unknown Responses field"),
-        }
-    }
-}
-
-impl From<ResponsesHostDecodeError> for ResponsesFamilyStreamError {
-    fn from(error: ResponsesHostDecodeError) -> Self {
-        match error {
-            ResponsesHostDecodeError::MissingField(field)
-            | ResponsesHostDecodeError::InvalidField(field) => Self::InvalidField(field),
-            ResponsesHostDecodeError::ResourceLimit(resource) => Self::ResourceLimit(resource),
-            ResponsesHostDecodeError::InvalidUsageAccounting => {
-                Self::InvalidField("usage accounting")
-            }
-        }
-    }
-}
-
-impl ResponsesStreamHostError for ResponsesFamilyStreamError {
-    fn invalid_utf8() -> Self {
-        Self::InvalidUtf8
-    }
-
-    fn resource_limit_frame(_maximum: usize) -> Self {
-        Self::ResourceLimit("SSE frame bytes")
-    }
-
-    fn resource_limit(resource: &'static str, _maximum: usize) -> Self {
-        Self::ResourceLimit(resource)
-    }
-
-    fn decoder_failed() -> Self {
-        Self::DecoderFailed
-    }
-
-    fn malformed_sse() -> Self {
-        Self::MalformedSse
-    }
-
-    fn duplicate_or_reordered(_previous: u64, _sequence: u64) -> Self {
-        Self::InvalidSequence
-    }
-
-    fn sequence_gap(_expected: u64, _sequence: u64) -> Self {
-        Self::InvalidSequence
-    }
-
-    fn inconsistent_sequence_presence() -> Self {
-        Self::InvalidSequence
-    }
-
-    fn done_forbidden() -> Self {
-        Self::DonePolicy
-    }
-
-    fn event_after_terminal() -> Self {
-        Self::EventAfterTerminal
-    }
-
-    fn truncated() -> Self {
-        Self::Truncated
-    }
-
-    fn missing_terminal() -> Self {
-        Self::MissingTerminal
-    }
-
-    fn missing_done() -> Self {
-        Self::DonePolicy
-    }
-
-    fn attempt_not_admitted() -> Self {
-        Self::InvalidLifecycle
-    }
-
-    fn from_field_error(error: ResponsesFieldError) -> Self {
-        error.into()
-    }
-}
-
-/// Concrete typed event emitted by [`ResponsesFamilySseDecoder`].
-pub type ResponsesFamilyStreamEvent =
-    ResponsesStreamEventKind<ResponsesResponse, ResponsesProviderError>;
 
 struct ResponsesFamilyHooks {
     data: ResponsesStreamDialectData,
@@ -1162,94 +1023,6 @@ impl DialectStreamHooks for ResponsesFamilyHooks {
     }
 }
 
-/// Concrete non-cloning Responses SSE decoder used by Codex-family migration.
-pub struct ResponsesFamilySseDecoder {
-    kernel: Option<ResponsesStreamKernel>,
-    hooks: ResponsesFamilyHooks,
-    failed: bool,
-}
-
-impl ResponsesFamilySseDecoder {
-    /// Creates a decoder from immutable admitted family/dialect data.
-    #[must_use]
-    pub fn new(data: ResponsesStreamDialectData, limits: ResponsesStreamLimits) -> Self {
-        let mut kernel = ResponsesStreamKernel::new(data.profile, limits);
-        if data.typed_terminal_cutoff {
-            kernel = kernel.with_typed_terminal_cutoff();
-        }
-        Self {
-            kernel: Some(kernel),
-            hooks: ResponsesFamilyHooks::new(data),
-            failed: false,
-        }
-    }
-
-    fn with_kernel_mut<T>(
-        &mut self,
-        operation: impl FnOnce(&mut ResponsesStreamKernel, &mut ResponsesFamilyHooks) -> T,
-    ) -> T {
-        let Some(mut kernel) = self.kernel.take() else {
-            unreachable!("Responses kernel cannot be re-entered");
-        };
-        let output = operation(&mut kernel, &mut self.hooks);
-        self.kernel = Some(kernel);
-        output
-    }
-
-    /// Feeds arbitrary byte fragments and returns every completed event.
-    ///
-    /// # Errors
-    ///
-    /// Returns a terminal family error for malformed, over-limit, or invalid
-    /// lifecycle input.
-    pub fn push(
-        &mut self,
-        bytes: &[u8],
-    ) -> Result<Vec<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
-        if self.failed {
-            return Err(ResponsesFamilyStreamError::DecoderFailed);
-        }
-        match self.with_kernel_mut(|kernel, hooks| kernel.push(bytes, hooks)) {
-            Ok(events) => Ok(events),
-            Err(error) => {
-                self.failed = true;
-                Err(error)
-            }
-        }
-    }
-
-    /// Validates EOF and returns auto-dispatched residual events.
-    ///
-    /// # Errors
-    ///
-    /// Returns a terminal family error for truncation or missing terminal state.
-    pub fn finish(
-        &mut self,
-    ) -> Result<Vec<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
-        if self.failed {
-            return Err(ResponsesFamilyStreamError::DecoderFailed);
-        }
-        match self.with_kernel_mut(ResponsesStreamKernel::finish) {
-            Ok(events) => Ok(events),
-            Err(error) => {
-                self.failed = true;
-                Err(error)
-            }
-        }
-    }
-}
-
-impl fmt::Debug for ResponsesFamilySseDecoder {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ResponsesFamilySseDecoder")
-            .field("kernel", &self.kernel)
-            .field("expected_model", &"<redacted>")
-            .field("failed", &self.failed)
-            .finish_non_exhaustive()
-    }
-}
-
 fn output_index(
     object: &Map<String, Value>,
     limits: ResponsesResponseLimits,
@@ -1259,250 +1032,6 @@ fn output_index(
         return Err(ResponsesFamilyStreamError::ResourceLimit("output items"));
     }
     Ok(index)
-}
-
-fn map_lifecycle_error(error: ResponsesLifecycleError) -> ResponsesFamilyStreamError {
-    match error {
-        ResponsesLifecycleError::InvalidLifecycle { reason } => {
-            ResponsesFamilyStreamError::Lifecycle(reason)
-        }
-        ResponsesLifecycleError::BindingMismatch => {
-            ResponsesFamilyStreamError::Lifecycle("response lifecycle binding mismatch")
-        }
-        ResponsesLifecycleError::OutputBoundReached => {
-            ResponsesFamilyStreamError::OutputBoundReached
-        }
-        ResponsesLifecycleError::MissingField { field }
-        | ResponsesLifecycleError::InvalidField { field } => {
-            ResponsesFamilyStreamError::InvalidField(field)
-        }
-        _ => ResponsesFamilyStreamError::InvalidLifecycle,
-    }
-}
-
-/// Stream-error factories for shared SSE / sequence maps.
-pub trait ResponsesStreamHostError: Sized {
-    /// Invalid UTF-8 in an SSE frame.
-    fn invalid_utf8() -> Self;
-    /// SSE frame byte limit.
-    fn resource_limit_frame(maximum: usize) -> Self;
-    /// Named resource limit.
-    fn resource_limit(resource: &'static str, maximum: usize) -> Self;
-    /// Decoder already failed.
-    fn decoder_failed() -> Self;
-    /// Malformed SSE.
-    fn malformed_sse() -> Self;
-    /// Duplicate or reordered sequence.
-    fn duplicate_or_reordered(previous: u64, sequence: u64) -> Self;
-    /// Sequence gap.
-    fn sequence_gap(expected: u64, sequence: u64) -> Self;
-    /// Sequence presence inconsistency.
-    fn inconsistent_sequence_presence() -> Self;
-    /// Forbidden / unexpected `[DONE]`.
-    fn done_forbidden() -> Self;
-    /// Event after terminal.
-    fn event_after_terminal() -> Self;
-    /// Truncated frame.
-    fn truncated() -> Self;
-    /// Missing typed terminal.
-    fn missing_terminal() -> Self;
-    /// Missing required `[DONE]`.
-    fn missing_done() -> Self;
-    /// Attempt not admitted / not decoding.
-    fn attempt_not_admitted() -> Self;
-    /// Map field errors.
-    fn from_field_error(error: ResponsesFieldError) -> Self;
-}
-
-/// Standard SSE framing error map used by OpenRouter / xAI-style dialects.
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "owned value matches the dialect hook and caller ownership"
-)]
-pub fn map_sse_error_standard<E: ResponsesStreamHostError>(
-    error: SseError,
-    limits: &ResponsesStreamLimits,
-) -> E {
-    match error {
-        SseError::InvalidUtf8 => E::invalid_utf8(),
-        SseError::ResourceLimit("SSE line bytes" | "SSE event bytes") => {
-            E::resource_limit_frame(limits.max_frame_bytes())
-        }
-        SseError::ResourceLimit(resource) => E::resource_limit(resource, limits.max_frame_bytes()),
-        SseError::AlreadyFailed => E::decoder_failed(),
-        _ => E::malformed_sse(),
-    }
-}
-
-/// Standard sequence-policy error map.
-pub fn map_sequence_error_standard<E: ResponsesStreamHostError>(
-    error: SequenceValidationError,
-) -> E {
-    match error {
-        SequenceValidationError::DuplicateOrReordered { previous, sequence } => {
-            E::duplicate_or_reordered(previous, sequence)
-        }
-        SequenceValidationError::Gap { expected, sequence } => E::sequence_gap(expected, sequence),
-        SequenceValidationError::MissingRequired
-        | SequenceValidationError::InconsistentPresence
-        | _ => E::inconsistent_sequence_presence(),
-    }
-}
-
-/// Validates `output_index` against decode limits.
-///
-/// # Errors
-///
-/// Returns `E` when the field is missing/invalid or exceeds the item budget.
-pub fn required_output_index<E>(
-    object: &Map<String, Value>,
-    limits: ResponsesDecodeLimits,
-) -> Result<u32, E>
-where
-    E: From<ResponsesFieldError> + ResponsesStreamHostError,
-{
-    let index = required_u32(object, "output_index")?;
-    let index_usize = usize::try_from(index).map_err(|_| {
-        E::from_field_error(ResponsesFieldError::Invalid {
-            field: "output_index",
-        })
-    })?;
-    if index_usize >= limits.max_output_items() {
-        return Err(E::resource_limit("output items", limits.max_output_items()));
-    }
-    Ok(index)
-}
-
-/// Admitted SSE decoder front-half around one kernel + hook state.
-///
-/// A decode failure poisons the operation, so pushes mutate the owned kernel and
-/// hooks directly. This avoids cloning all framing, lifecycle, and projection
-/// state for every transport fragment.
-pub struct ResponsesSseDecoderFront<H> {
-    attempt_lifecycle: Arc<AtomicU8>,
-    kernel: ResponsesStreamKernel,
-    hooks: H,
-    failed: bool,
-}
-
-impl<H> ResponsesSseDecoderFront<H> {
-    /// Builds a front-half decoder.
-    #[must_use]
-    pub fn new(attempt_lifecycle: Arc<AtomicU8>, kernel: ResponsesStreamKernel, hooks: H) -> Self {
-        Self {
-            attempt_lifecycle,
-            kernel,
-            hooks,
-            failed: false,
-        }
-    }
-
-    /// Returns a shared handle to dialect hooks.
-    #[must_use]
-    pub const fn hooks(&self) -> &H {
-        &self.hooks
-    }
-
-    /// Returns the stream kernel.
-    #[must_use]
-    pub const fn kernel(&self) -> &ResponsesStreamKernel {
-        &self.kernel
-    }
-
-    /// Whether the decoder is terminally failed.
-    #[must_use]
-    pub const fn failed(&self) -> bool {
-        self.failed
-    }
-
-    /// Feeds bytes through the kernel under attempt-admission checks.
-    ///
-    /// # Errors
-    ///
-    /// Returns dialect stream errors from hooks or admission failures.
-    pub fn push<E>(&mut self, chunk: &[u8]) -> Result<Vec<H::Event>, E>
-    where
-        H: DialectStreamHooks<Error = E>,
-        E: ResponsesStreamHostError,
-    {
-        if self.failed {
-            return Err(E::decoder_failed());
-        }
-        if !is_decoding(&self.attempt_lifecycle) {
-            return Err(E::attempt_not_admitted());
-        }
-        match self.kernel.push(chunk, &mut self.hooks) {
-            Ok(events) => Ok(events),
-            Err(error) => {
-                mark_decode_failed(&self.attempt_lifecycle);
-                self.failed = true;
-                Err(error)
-            }
-        }
-    }
-
-    /// Finishes the stream, returns residual decoded events, and marks the
-    /// attempt decoded on success.
-    ///
-    /// Auto-dispatch dialects may complete a final SSE frame only at EOF. Those
-    /// events are semantic stream output and must be delivered to the caller.
-    ///
-    /// # Errors
-    ///
-    /// Returns dialect stream errors from hooks or admission failures.
-    pub fn finish_events<E>(mut self) -> Result<Vec<H::Event>, E>
-    where
-        H: DialectStreamHooks<Error = E>,
-        E: ResponsesStreamHostError,
-    {
-        if self.failed {
-            return Err(E::decoder_failed());
-        }
-        if !is_decoding(&self.attempt_lifecycle) {
-            return Err(E::attempt_not_admitted());
-        }
-        match self.kernel.finish(&mut self.hooks) {
-            Ok(residual) => {
-                mark_decoded(&self.attempt_lifecycle).map_err(|_| E::attempt_not_admitted())?;
-                Ok(residual)
-            }
-            Err(error) => {
-                mark_decode_failed(&self.attempt_lifecycle);
-                Err(error)
-            }
-        }
-    }
-
-    /// Finishes a stream whose dialect requires blank-line-closed frames.
-    ///
-    /// Existing xAI/OpenRouter callers use this compatibility convenience; its
-    /// profiles cannot produce residual events. Auto-dispatch dialects must use
-    /// [`Self::finish_events`] so EOF-decoded events are not discarded.
-    ///
-    /// # Errors
-    ///
-    /// Returns dialect stream errors from hooks or admission failures.
-    pub fn finish<E>(self) -> Result<(), E>
-    where
-        H: DialectStreamHooks<Error = E>,
-        E: ResponsesStreamHostError,
-    {
-        let residual = self.finish_events()?;
-        debug_assert!(residual.is_empty());
-        Ok(())
-    }
-}
-
-impl<H> fmt::Debug for ResponsesSseDecoderFront<H> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ResponsesSseDecoderFront")
-            .field("attempt_decoding", &is_decoding(&self.attempt_lifecycle))
-            .field("kernel", &self.kernel)
-            .field("failed", &self.failed)
-            .field("hooks", &"<redacted dialect hooks>")
-            .finish_non_exhaustive()
-    }
 }
 
 #[cfg(test)]

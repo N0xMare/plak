@@ -1,5 +1,5 @@
 use super::*;
-use crate::response_host::{ResponsesProviderErrorClass, ResponsesUsage};
+use crate::response_host::{ResponsesProviderError, ResponsesProviderErrorClass, ResponsesUsage};
 
 const MODEL: &str = "gpt-5.4";
 const MIXED: &str = include_str!("../../tests/fixtures/response_mixed.sse");
