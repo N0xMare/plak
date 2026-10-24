@@ -195,6 +195,13 @@ run_group() {
       echo "== clippy =="
       cargo clippy --locked --workspace --all-features --all-targets ${target_args[@]+"${target_args[@]}"} -- -D warnings \
         || failed_steps="${failed_steps:+$failed_steps }clippy"
+      # Each supported package's own default resolution: a lint that only that
+      # closure (or its own tests) sees is hidden from the all-features run.
+      for package in "${supported_packages[@]}"; do
+        echo "== clippy: $package alone =="
+        cargo clippy --locked -p "$package" --all-targets ${target_args[@]+"${target_args[@]}"} -- -D warnings \
+          || failed_steps="${failed_steps:+$failed_steps }clippy:$package"
+      done
       if [[ -n "$failed_steps" ]]; then
         echo "== failed static steps: $failed_steps =="
         return 1

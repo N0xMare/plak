@@ -15,6 +15,8 @@ GROUPS = ('static', 'builds', 'rustdoc', 'tests-parallel', 'tests-serial',
 CHECK_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'contracts', 'tooling')
 PLATFORM_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'tests-durability')
 SUPPORTED = ('plakous', 'plakous-agent', 'plakous-model', 'plakous-tools', 'plak')
+# The static group's clippy runs: the workspace, then each supported package alone.
+CLIPPIES = ['clippy'] * (1 + len(SUPPORTED))
 # The builds group, in order: workspace defaults, each supported package's own
 # resolution, then the maintainer parent build the linkage check reads.
 BUILDS = [
@@ -273,11 +275,12 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--steps', 'static,contracts,tooling')
         self.assertEqual(result.returncode, 1)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'],
-                         ['fmt', 'fetch', 'clippy'])
+                         ['fmt', 'fetch', *CLIPPIES])
         self.assertEqual([Path(s[0]).name for s in scripts if s[0].endswith('.py')],
                          ['check_workspace.py', 'check_features.py', 'gate_evidence.py',
                           'check_public_compile.py', 'run_tooling_tests.py'])
-        self.assertIn('failed static steps: fmt workspace features evidence clippy', result.stdout)
+        self.assertIn('failed static steps: fmt workspace features evidence clippy '
+                      + ' '.join(f'clippy:{package}' for package in SUPPORTED), result.stdout)
         self.assertIn('failed groups: static tooling', result.stdout)
         self.assertEqual([line.split()[2] for line in result.stdout.splitlines()
                           if line.startswith('== time: ')], ['static', 'contracts', 'tooling'])
@@ -297,7 +300,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-                         ['fmt', 'fetch', 'clippy', *['build'] * len(BUILDS), 'test'])
+                         ['fmt', 'fetch', *CLIPPIES, *['build'] * len(BUILDS), 'test'])
         builds = [c['args'] for c in calls if c['args'][0] == 'build']
         self.assertIn('--workspace', builds[0])
         self.assertNotIn('--all-features', builds[0])
@@ -344,7 +347,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
         order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(order, ['fmt', 'fetch', 'clippy', *['build'] * len(BUILDS), 'doc', 'test',
+        self.assertEqual(order, ['fmt', 'fetch', *CLIPPIES, *['build'] * len(BUILDS), 'doc', 'test',
                                  'nextest', 'nextest', 'nextest'])
         doc = next(c for c in calls if c['args'][0] == 'doc')
         self.assertEqual(doc['rustdocflags'], '-D warnings')
@@ -358,7 +361,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--platform')
         self.assertEqual(result.returncode, 0, result.stderr)
         order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(order, ['fmt', 'clippy', *['build'] * len(BUILDS), 'test',
+        self.assertEqual(order, ['fmt', *CLIPPIES, *['build'] * len(BUILDS), 'test',
                                  'nextest', 'nextest', 'nextest'])
         self.assertEqual(self.profiles(calls), ['offline', 'serial', 'durability'])
         checks = [c['args'] for c in calls if c['args'][0] == 'build']
@@ -451,7 +454,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.env['PLAK_MONTY_WORKER'] = 'missing'
         result, calls, _ = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch', 'clippy'])
+        self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch', *CLIPPIES])
         self.assertEqual(self.lanes(calls), [])
 
     def test_unknown_argument_is_refused(self):
@@ -465,7 +468,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--steps', 'static')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'],
-                         ['fmt', 'fetch', 'clippy'])
+                         ['fmt', 'fetch', *CLIPPIES])
         self.assertIn(['tools/checks/check_workspace.py'], scripts)
         self.assertIn(['tools/checks/check_features.py'], scripts)
         self.assertEqual(self.lanes(calls), [])
@@ -476,6 +479,13 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(records[fmt + 3]['python'], ['tools/checks/check_features.py'])
         self.assertEqual(records[fmt + 4]['python'], ['tools/release/gate_evidence.py', 'audit'])
         self.assertEqual(records[fmt + 5]['args'][0], 'clippy')
+        clippies = [row['args'] for row in records if row.get('args', [''])[0] == 'clippy']
+        self.assertEqual(clippies[0][:3], ['clippy', '--locked', '--workspace'])
+        self.assertEqual([args[args.index('-p') + 1] for args in clippies[1:]], list(SUPPORTED))
+        for args in clippies[1:]:
+            self.assertNotIn('--all-features', args)
+            self.assertIn('--all-targets', args)
+            self.assertEqual(args[args.index('--') + 1:], ['-D', 'warnings'])
 
     def test_cold_cache_fetches_locked_online_before_structure_checks(self):
         self.env['GATE_COLD_CACHE'] = '1'

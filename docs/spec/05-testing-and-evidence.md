@@ -517,7 +517,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace clippy |
+| `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings |
 | `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build. All deny rustc warnings |
 | `rustdoc` | Workspace all-features rustdoc, denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
@@ -599,7 +599,11 @@ features across members, so neither sees the closure a crates.io consumer or
 the release `cargo build -p plak` resolves (for example `plakous-workspace`
 without `jj-lib`); a feature-gated slip in any of them fails the gate. The
 per-package builds run before the maintainer build, whose `plak` the linkage
-check reads. All of these builds deny rustc warnings.
+check reads. All of these builds deny rustc warnings. The `static` group lints
+the same per-package resolutions with clippy, all targets included, so a lint
+or a test that compiles only in a package's own default closure (a constant
+gated behind a feature its default build lacks, a test helper only a
+feature-gated test uses) fails there too.
 `-D warnings` is appended to the rustflags Cargo will actually pass
 (`CARGO_TARGET_<triple>_RUSTFLAGS` when that variable is set, otherwise
 `RUSTFLAGS`) and is not exported to later steps, so the all-features test

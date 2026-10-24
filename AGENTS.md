@@ -68,7 +68,8 @@ arm exists, compare interactive subscription OAuth, not `claude --print`.
 All tiers are `scripts/dev-check.sh` and build the whole workspace with all
 features, so they share one artifact set. The groups, in canonical order, are
 `static` (fmt, locked dependency fetch, offline first, online only for missing
-cache inputs, the workspace and feature structure checkers, clippy -D warnings),
+cache inputs, the workspace and feature structure checkers, clippy -D warnings
+on the workspace and on each supported package alone),
 `builds` (default-feature, each supported package alone in its own default
 resolution, and maintainer-feature builds, rustc warnings denied),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
