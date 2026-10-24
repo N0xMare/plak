@@ -66,8 +66,11 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("auth", (("plakous-auth", "src/"),)),
     ("auth", (
         ("plakous-openai", "src/native_auth.rs"),
+        ("plakous-openai", "src/native_auth/"),
         ("plakous-anthropic", "src/native_auth.rs"),
+        ("plakous-anthropic", "src/native_auth/"),
         ("plakous-xai", "src/native_auth.rs"),
+        ("plakous-xai", "src/native_auth/"),
     )),
     ("event/presentation", (
         ("plakous-agent", "src/event/"),
