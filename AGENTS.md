@@ -28,8 +28,9 @@ MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest and cargo-deny. Run `just fast` while iterating and `just check`
 before each commit. Before `just install maintainer`, run `just full` and a
-strict crash sweep on Linux, plus `just platform` on macOS and `just musl native`
-on Linux. The full strict crash sweep runs at publication boundaries.
+strict crash sweep (`just dev crash-sweep --strict`) on Linux, plus
+`just platform` on macOS and `just musl native` on Linux. The full strict
+crash sweep runs at publication boundaries.
 `just musl container` is a maintainer-only container gate: it needs the preloaded
 offline image `plak-qual-base:2f225fd7`, which is not published (spec 06).
 
@@ -91,7 +92,7 @@ partition the suite; a new serial test goes into the `serial` or `durability`
 filter and the `offline` exclusion. Contract fixture builds use a persistent
 `.public-contracts/<target-dir-name>/<triple>` directory beside
 `CARGO_TARGET_DIR` (`PLAK_PUBLIC_CONTRACTS_DIR` overrides it).
-`dev-check.sh` and the test recipes set `TMPDIR` from `scripts/test-tmpdir.sh`
+`dev-check.sh` and `just dev coverage` set `TMPDIR` from `scripts/test-tmpdir.sh`
 (a per-checkout 0700 directory under `/dev/shm` on Linux, where fsync under gate
 load breaks process deadlines, and under `/private/tmp` on macOS, outside
 `HOME`; `PLAK_TEST_TMPDIR` overrides) and `PLAK_HOME=$TMPDIR/plak-isolated-home`

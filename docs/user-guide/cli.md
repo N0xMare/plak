@@ -783,8 +783,8 @@ See [configuration](configuration.md).
 
 ## Maintainer commands
 
-`just build debug` and `just build release` compile with `--features maintainer`, so
-your binary also has `plak fork`, `plak compact` and
+`just build debug|release|maintainer` and `just install maintainer` compile with
+`--features maintainer`, so your binary also has `plak fork`, `plak compact` and
 `plak compatibility` under a `MAINTAINER:` heading in `plak help`. They are not
 part of the product surface; `plak <cmd> --help` documents each.
 

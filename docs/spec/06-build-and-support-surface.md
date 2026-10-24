@@ -780,9 +780,11 @@ just install maintainer # dogfood snapshot under ~/.local/lib/plak/maintainer
 ```
 
 `just build` writes Cargo output only. It does not install a snapshot or change
-`PATH`, and it may run from a linked worktree. `just install release`
+`PATH`, and it may run from a linked worktree. `build-plak.sh` with no flag,
+`--release` or `--maintainer` is that build: linkage check, no snapshot.
+`just install release`
 (`build-plak.sh --install`) and `just install maintainer`
-(`build-plak.sh --maintainer`) copy `plak` into an immutable snapshot directory
+(`build-plak.sh --install-maintainer`) copy `plak` into an immutable snapshot directory
 `~/.local/lib/plak/release/<id>/` or `~/.local/lib/plak/maintainer/<id>/`.
 `just build debug`, `just build release`, `just build maintainer` and
 `just install maintainer` pass `--features plak/maintainer`. `just install release`

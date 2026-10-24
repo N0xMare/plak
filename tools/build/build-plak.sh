@@ -2,32 +2,32 @@
 # Native Linux/macOS build and install of plak and its rquickjs and pinned
 # upstream Monty sidecars.
 #
+# Build modes check linkage and stop. They do not write a snapshot or change PATH,
+# and a linked worktree is allowed:
+#   (no flags)    debug + maintainer features
+#   --release     release + maintainer features
+#   --maintainer  maintainer profile
 # Install modes write an immutable snapshot and point PATH at it:
-#   (no flags)    debug + maintainer features, then install
-#   --release     release + maintainer features, then install
-#   --maintainer  maintainer profile, then install
-#   --install     plain release, then install under the release snapshot root
-#   --artifacts   plain release build and linkage check; prints the directory
-# --no-install, alone or with --release or --maintainer, builds and checks
-# linkage only: no snapshot, no PATH change, and a linked worktree is allowed.
-# It is not valid with --install or --artifacts.
+#   --install             plain release, under the release snapshot root
+#   --install-maintainer  maintainer profile, under the maintainer snapshot root
+#   --artifacts           plain release build and linkage check; prints the directory
+# The modes are exclusive.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 profile=debug
-snapshot_flavor=maintainer
+snapshot_flavor=
 plak_features=(--features plak/maintainer)
 artifacts_only=
-no_install=
+install=
 mode=
 usage() {
-  echo "usage: $0 [--no-install] [--release|--maintainer] | [--install] | [--artifacts]" >&2
+  echo "usage: $0 [--release|--maintainer|--install|--install-maintainer|--artifacts]" >&2
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-install) no_install=1 ;;
-    --release|--maintainer|--install|--artifacts)
+    --release|--maintainer|--install|--install-maintainer|--artifacts)
       if [[ -n "$mode" ]]; then
         usage
         exit 2
@@ -45,19 +45,17 @@ case "$mode" in
   --release) profile=release ;;
   --maintainer) profile=maintainer ;;
   --install)
-    if [[ -n "$no_install" ]]; then
-      usage
-      exit 2
-    fi
     profile=release
     snapshot_flavor=release
     plak_features=()
+    install=1
+    ;;
+  --install-maintainer)
+    profile=maintainer
+    snapshot_flavor=maintainer
+    install=1
     ;;
   --artifacts)
-    if [[ -n "$no_install" ]]; then
-      usage
-      exit 2
-    fi
     profile=release
     plak_features=()
     artifacts_only=1
@@ -65,7 +63,7 @@ case "$mode" in
   "") ;;
 esac
 
-if [[ -z "$artifacts_only" && -z "$no_install" ]]; then
+if [[ -n "$install" ]]; then
 # BEGIN LINKED WORKTREE GUARD
 # This command also updates the installed symlinks. A build from a
 # linked worktree must never silently repoint those daily-use commands away from
@@ -114,7 +112,7 @@ python3 tools/build/check-artifact-linkage.py "$output_dir" >&2
 if [[ "$profile" == debug ]]; then
   echo "build-plak: debug binary (slow TUI cold start); daily PATH CLI is just install release or just install maintainer" >&2
 fi
-if [[ -n "$no_install" ]]; then
+if [[ -z "$install" && -z "$artifacts_only" ]]; then
   exit 0
 fi
 if [[ "$profile" == release ]]; then

@@ -1266,9 +1266,9 @@ passes with no artifacts present.
 The human-readable render is a local review artifact:
 
 ```text
-just prompts render        # PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_
-just prompts diff   # copy the previous render aside, re-render, diff -ru
-just prompts pins   # PLAK_PRINT_PROMPT_PINS=1: print the new pin tables
+just prompts render  # PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_
+just prompts diff    # copy the previous render aside, re-render, diff -ru
+just prompts pins    # PLAK_PRINT_PROMPT_PINS=1: print the new pin tables
 ```
 
 Output goes to the git-ignored `target/prompt-renders/`, overridable with

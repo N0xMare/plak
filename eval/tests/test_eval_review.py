@@ -53,7 +53,7 @@ class CampaignGateTests(unittest.TestCase):
                 if argv[:2] == ['git', 'rev-parse']:
                     return state['commit']
                 if argv[:2] == ['git', 'status']:
-                    self.assertEqual(argv[-2:], ['eval', 'Justfile'])
+                    self.assertEqual(argv[-3:], ['eval', 'Justfile', 'harbor.just'])
                     return state['dirty']
                 self.assertEqual(argv[:3], ['docker', 'image', 'inspect'])
                 return json.dumps([info])

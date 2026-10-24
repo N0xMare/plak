@@ -16,31 +16,37 @@ mod harbor
 
 # fmt, structure checkers, clippy, then the parallel lane over the packages the
 # working-tree diff touches (or the named ones) and their dependents.
+[doc("static checks, then the parallel lane for the diff's packages and dependents")]
 fast *PACKAGES:
     scripts/dev-check.sh --fast {{PACKAGES}}
 
 # Linux pre-commit: fmt/clippy, structure checks, default/maintainer builds,
 # parallel and serial lanes, public contracts and tooling. No durability lane.
+[doc("pre-commit: fmt, clippy, structure, builds, parallel and serial, contracts, tooling")]
 check:
     scripts/dev-check.sh
 
 # Exactly these comma-separated groups, in canonical order (for independent lanes).
+[doc("exactly these comma-separated groups, in canonical order")]
 steps GROUPS:
     scripts/dev-check.sh --steps {{quote(GROUPS)}}
 
 # Per install on macOS/musl: fmt/clippy, default/maintainer builds, parallel,
 # serial and durability lanes. No platform-independent structure checkers or
 # public compile contracts.
+[doc("per install: fmt, clippy, builds, parallel, serial and durability")]
 platform:
     scripts/dev-check.sh --platform
 
 # Every group: check + rustdoc, the durability lane and the publish dry run.
 # A pass on a clean tree records it as publication evidence.
+[doc("every group: check, plus rustdoc, durability and the publish dry run")]
 full:
     scripts/dev-check.sh --full
 
 # crates.io cohort: dry run by default (clean tree with `just full` evidence,
 # package and verify every crate); `--execute` uploads, with CARGO_REGISTRY_TOKEN.
+[doc("crates.io cohort dry run; --execute uploads")]
 publish *ARGS:
     bash scripts/publish.sh {{ARGS}}
 
@@ -56,18 +62,19 @@ clippy:
 # Build plak and its workers without installing a snapshot or touching PATH.
 # profile: debug, release, maintainer, or profiling.
 # profiling builds only target/profiling/plak (no workers, no linkage check).
+[doc("debug, release, maintainer or profiling; no snapshot and no PATH change")]
 build profile:
     #!/usr/bin/env bash
     set -euo pipefail
     case {{quote(profile)}} in
       debug)
-        tools/build/build-plak.sh --no-install
+        tools/build/build-plak.sh
         ;;
       release)
-        tools/build/build-plak.sh --release --no-install
+        tools/build/build-plak.sh --release
         ;;
       maintainer)
-        tools/build/build-plak.sh --maintainer --no-install
+        tools/build/build-plak.sh --maintainer
         ;;
       profiling)
         cargo build --locked --profile profiling -p plak
@@ -80,6 +87,7 @@ build profile:
 
 # Install an immutable snapshot and point ~/.local/bin at it.
 # flavor: release (plain release) or maintainer (dogfood profile).
+[doc("release or maintainer immutable snapshot on PATH")]
 install flavor:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -88,7 +96,7 @@ install flavor:
         tools/build/build-plak.sh --install
         ;;
       maintainer)
-        tools/build/build-plak.sh --maintainer
+        tools/build/build-plak.sh --install-maintainer
         ;;
       *)
         echo "usage: just install release|maintainer" >&2

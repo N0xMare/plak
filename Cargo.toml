@@ -399,9 +399,9 @@ codegen-units = 1
 lto = "fat"
 strip = "symbols"
 
-# Dogfood profile (`just build maintainer`; installed by `just install maintainer`):
-# release codegen without LTO so
-# rebuilds stay incremental, with line tables for panics and backtraces.
+# Dogfood profile (`just build maintainer`, installed by `just install maintainer`):
+# release codegen without LTO so rebuilds stay incremental, with line tables
+# for panics and backtraces.
 [profile.maintainer]
 inherits = "release"
 lto = false

@@ -1,6 +1,10 @@
 # Offline performance and size. Not a gate. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+[private]
+default:
+    @just --justfile "{{justfile()}}" --list perf
+
 # Profiling binary: release codegen, full symbols, no LTO (target/profiling/plak).
 _profiling:
     cargo build --locked --profile profiling -p plak
@@ -8,6 +12,7 @@ _profiling:
 # Offline performance smoke over the scripted model, not in any gate tier. It reports
 # six metrics and compares them against this machine's seed row in
 # tests/performance/baselines/offline-perf-smoke.json. See docs/spec/05.
+[doc("offline performance smoke against this machine's seed row; not a gate")]
 smoke *ARGS:
     scripts/perf-smoke.sh {{ARGS}}
 

@@ -1,8 +1,13 @@
 # Local TUI review. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+[private]
+default:
+    @just --justfile "{{justfile()}}" --list tui
+
 # Drive one declarative offline story through the real Plak PTY and write a
 # normalized private trace. The default story covers settings and one turn.
+[doc("drive one offline TUI story and write a normalized trace")]
 story story="bin/plak/tests/stories/offline-control-center.json" trace="target/plak-test-tmp/tui-story-trace.json":
     #!/usr/bin/env bash
     set -euo pipefail

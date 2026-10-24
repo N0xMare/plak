@@ -1,6 +1,10 @@
 # Linux x86_64 musl qualification. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+[private]
+default:
+    @just --justfile "{{justfile()}}" --list musl
+
 # Linux x86_64 with the rustup musl target and musl-gcc; defaults to platform.
 native *ARGS:
     bash scripts/musl-native.sh {{ARGS}}

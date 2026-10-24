@@ -640,9 +640,9 @@ done
             self.assertEqual(result.stdout, "")
             checker.write_text(checker_source)
 
-            # A maintainer build may replace the release links and back again;
+            # A maintainer install may replace the release links and back again;
             # both snapshots are retained.
-            result = run("--maintainer")
+            result = run("--install-maintainer")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("--features plak/maintainer --profile maintainer", log.read_text())
             maintainer = (home / ".local/bin/plak").resolve()
@@ -662,30 +662,31 @@ done
 
             result = run("--bogus")
             self.assertEqual(result.returncode, 2)
-            self.assertIn("--install", result.stderr)
+            self.assertIn("--install-maintainer", result.stderr)
+            self.assertNotIn("--no-install", result.stderr)
 
             # Build-only leaves PATH and snapshots alone, including from a
             # linked worktree. Install still refuses that layout.
-            result = run("--no-install")
+            result = run()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("cargo build --locked -p plak --features plak/maintainer\n", log.read_text())
             self.assertNotIn("--profile", log.read_text())
             self.assertNotIn("strip ", log.read_text())
             self.assertEqual((home / ".local/bin/plak").read_text(), "foreign")
-            result = run("--release", "--no-install")
+            result = run("--release")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("--features plak/maintainer --profile release", log.read_text())
             self.assertNotIn("strip ", log.read_text())
             self.assertEqual((home / ".local/bin/plak").read_text(), "foreign")
-            result = run("--install", "--no-install")
+            result = run("--install", "--release")
             self.assertEqual(result.returncode, 2)
             (repo / ".git").rmdir()
             (repo / ".git").write_text("gitdir: /unused\n")
-            result = run("--maintainer", "--no-install")
+            result = run("--maintainer")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("--features plak/maintainer --profile maintainer", log.read_text())
             self.assertEqual((home / ".local/bin/plak").read_text(), "foreign")
-            result = run("--maintainer")
+            result = run("--install-maintainer")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("linked worktree", result.stderr)
 
@@ -701,11 +702,12 @@ done
         self.assertNotIn("\nplak:\n", justfile)
         self.assertNotIn("\nplak-dev:\n", justfile)
         self.assertNotIn("\nplak-minimal:\n", justfile)
-        self.assertIn("tools/build/build-plak.sh --no-install", justfile)
-        self.assertIn("tools/build/build-plak.sh --release --no-install", justfile)
-        self.assertIn("tools/build/build-plak.sh --maintainer --no-install", justfile)
-        self.assertIn("tools/build/build-plak.sh --install", justfile)
+        self.assertIn("tools/build/build-plak.sh\n", justfile)
+        self.assertIn("tools/build/build-plak.sh --release\n", justfile)
         self.assertIn("tools/build/build-plak.sh --maintainer\n", justfile)
+        self.assertIn("tools/build/build-plak.sh --install\n", justfile)
+        self.assertIn("tools/build/build-plak.sh --install-maintainer\n", justfile)
+        self.assertNotIn("--no-install", justfile)
         self.assertIn("--profile profiling", justfile)
 
     def test_maintainer_build_ships_js_host_without_official_v8(self) -> None:

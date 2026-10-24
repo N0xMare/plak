@@ -1,8 +1,13 @@
 # Maintainer playground, coverage and opt-in sweeps. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+[private]
+default:
+    @just --justfile "{{justfile()}}" --list dev
+
 # Symlink ~/.local/bin/plak-dev (repairing a stale one) and seed the isolated
 # ~/plak-dev-home playground.
+[doc("symlink ~/.local/bin/plak-dev and seed the isolated playground")]
 home-install:
     scripts/plak-dev.sh --dev-install
 
@@ -14,6 +19,7 @@ home-reset:
 # carry-forward in disposable homes. --wait-idle retries three idle export refusals at
 # 15 s intervals (--interval S overrides), avoiding large-store backup thrash;
 # --detach --log <path> survives the caller's turn; --install installs on success.
+[doc("offline reload preflight on a private backup")]
 reload-rehearsal uuid *ARGS:
     bash scripts/reload-rehearsal.sh {{quote(uuid)}} {{ARGS}}
 
@@ -21,6 +27,7 @@ reload-rehearsal uuid *ARGS:
 # Needs: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov
 # Writes target/llvm-cov/html/html/index.html and target/llvm-cov/coverage.json.
 # Uses its own CARGO_TARGET_DIR so it never invalidates the normal build.
+[doc("line coverage for the parallel and serial lanes, in its own target dir")]
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail

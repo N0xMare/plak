@@ -2,6 +2,10 @@
 # gate tier. See eval/README.md. Runs from the repository root.
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+[private]
+default:
+    @just --justfile "{{justfile()}}" --list harbor
+
 # Zero-inference adapter contracts for the Harbor plane.
 test:
     python3 -m unittest discover -s eval/tests -t eval/tests
