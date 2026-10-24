@@ -603,6 +603,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/store/tree.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/database.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows.rs"): {"params"},
+    ("plakous-recursive-subagents-store", "src/rows/codec.rs"): {"params"},
     ("plakous-recursive-subagents", "src/epoch.rs"): {"json"},
     ("plakous-recursive-subagents", "src/hub.rs"): {"error", "info", "pin", "select", "warn"},
     # Bounded VCS refusal detail, once per workspace/detail change; never file content.
