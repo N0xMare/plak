@@ -690,7 +690,7 @@ done
             self.assertIn("linked worktree", result.stderr)
 
     def test_justfile_exposes_build_and_install(self) -> None:
-        justfile = (ROOT / "justfile").read_text(encoding="utf-8")
+        justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
         self.assertIn("\nbuild profile:", justfile)
         self.assertIn("debug|release|maintainer|profiling", justfile)
         self.assertIn("\ninstall flavor:", justfile)

@@ -106,7 +106,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         dev = (ROOT / "dev.just").read_text()
         self.assertEqual(dev.count('TMPDIR="$(bash scripts/test-tmpdir.sh)"'), 1)
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', dev)
-        justfile = (ROOT / "justfile").read_text()
+        justfile = (ROOT / "Justfile").read_text()
         self.assertNotIn('TMPDIR="$PWD/target/plak-test-tmp"', justfile)
         self.assertNotIn("\ntest:\n", justfile)
 
