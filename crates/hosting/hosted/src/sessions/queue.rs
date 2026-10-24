@@ -185,6 +185,7 @@ pub(crate) enum Refusal {
     TooManyImages,
     ImageTooLarge,
     NotAnImage,
+    MessageTooLarge(crate::attachments::MessageBudgetExceeded),
     ImagesFull,
 }
 
@@ -205,6 +206,7 @@ pub(crate) fn enqueue(
         return Err(Refusal::Full);
     }
     validate_images(&draft.images)?;
+    crate::attachments::check_message_budget(t, &draft.images).map_err(Refusal::MessageTooLarge)?;
     let queued: usize = pending.iter().map(|item| image_bytes(&item.images)).sum();
     if queued.saturating_add(image_bytes(&draft.images)) > MAX_PENDING_QUEUE_IMAGE_BYTES {
         return Err(Refusal::ImagesFull);
@@ -440,6 +442,25 @@ mod tests {
             ),
             Refusal::ImageTooLarge
         );
+        let four = vec![png(plakous::agent::MAX_USER_IMAGE_BYTES - 64); 4];
+        let refusal = refused(Draft::new("x".into(), four), &mut pending);
+        assert!(
+            matches!(refusal, Refusal::MessageTooLarge(error)
+                if error.to_string().contains("16 MiB per-message budget")),
+            "{refusal:?}"
+        );
+        // Text counts as runtime admission encodes it: quotes and newlines
+        // escape to two bytes each.
+        let three = || vec![png(plakous::agent::MAX_USER_IMAGE_BYTES - 64); 3];
+        let escaped = "\"\n".repeat(300_000);
+        let refusal = refused(Draft::new(escaped.clone(), three()), &mut pending);
+        assert!(
+            matches!(refusal, Refusal::MessageTooLarge(_)),
+            "{refusal:?}"
+        );
+        let plain = enqueue(&mut pending, Draft::new("x".repeat(escaped.len()), three())).unwrap();
+        assert_eq!((plain.text.len(), plain.images.len()), (escaped.len(), 3));
+        pending.retain(|item| item.id != plain.id);
         let mut mislabeled = png(0);
         mislabeled.media_type = "image/jpeg".into();
         assert_eq!(
@@ -454,9 +475,9 @@ mod tests {
         // The session's queued images share one aggregate bound.
         let large = || png(plakous::agent::MAX_USER_IMAGE_BYTES - 64);
         let mut full = Vec::new();
-        while enqueue(&mut full, Draft::new("x".into(), vec![large(); 8])).is_ok() {}
+        while enqueue(&mut full, Draft::new("x".into(), vec![large(); 3])).is_ok() {}
         assert_eq!(
-            refused(Draft::new("x".into(), vec![large(); 8]), &mut full),
+            refused(Draft::new("x".into(), vec![large(); 3]), &mut full),
             Refusal::ImagesFull
         );
         assert!(

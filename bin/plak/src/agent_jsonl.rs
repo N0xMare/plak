@@ -327,6 +327,12 @@ fn parse_prompt(id: String, value: &Map<String, Value>) -> ParseOutcome {
             message: "prompt exceeds the maximum supported size".to_owned(),
         };
     }
+    if let Err(error) = plakous_hosted::attachments::check_message_budget(&text, &images) {
+        return ParseOutcome::Diagnostic {
+            id: Some(id),
+            message: format!("prompt refused: {error}"),
+        };
+    }
     let steer = matches!(value.get("steer"), Some(Value::Bool(true)));
     ParseOutcome::Command(AgentCommand::Prompt {
         id,
@@ -605,6 +611,20 @@ mod tests {
         };
         assert_eq!((draft.text.as_str(), draft.images.len()), ("", 2));
 
+        let largest = dir.path().join("largest.png");
+        let header = plakous_hosted::attachments::png(4, 3, 0).len();
+        std::fs::write(
+            &largest,
+            plakous_hosted::attachments::png(
+                4,
+                3,
+                plakous_hosted::attachments::MAX_IMAGE_BYTES - header,
+            ),
+        )
+        .unwrap();
+        let parsed = line(serde_json::json!({"images": [&largest, &largest, &largest]}));
+        assert!(matches!(parsed, ParseOutcome::Command(_)), "{parsed:?}");
+
         for (fields, needle) in [
             (serde_json::json!({"images": []}), "text or images"),
             (
@@ -618,6 +638,10 @@ mod tests {
             (
                 serde_json::json!({"text": "x", "images": [dir.path().join("gone.png")]}),
                 "gone.png",
+            ),
+            (
+                serde_json::json!({"images": [&largest, &largest, &largest, &largest]}),
+                "over the 16 MiB per-message budget",
             ),
         ] {
             let parsed = line(fields);

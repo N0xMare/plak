@@ -45,7 +45,9 @@ Processes, even while the root is idle; only the count text is the button.
 ### Attaching images
 
 There are three ways to attach a png, jpeg, gif or webp image to the message
-you are writing (at most 8 per message):
+you are writing (at most 8 per message, and at most 16 MiB per message once
+encoded: about 12 MiB of images, which is three maximum-size images or eight
+typical screenshots):
 
 - Drop image files on the terminal, or paste their paths. Absolute, `~/...`
   and relative paths, backslash-escaped spaces, quoted paths, `file://` URLs
@@ -59,7 +61,8 @@ you are writing (at most 8 per message):
 
 Each attachment appears in your text at the cursor as a token such as
 `[image #1]`, at once, while the image is read in the background (dimmed
-until it is ready); a file that cannot be attached disappears again with a
+until it is ready); a file that cannot be attached, or an image that would
+take the message past its 16 MiB per-message budget, disappears again with a
 note saying why. Refer to images by their tokens ("compare [image #1] with
 [image #2]"). `Backspace` right after a token, or `Delete` right before it,
 removes it and its image. The composer's bottom border lists the

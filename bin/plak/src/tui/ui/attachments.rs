@@ -246,6 +246,17 @@ impl App {
             return;
         };
         self.mark_dirty();
+        // The draft's other ready images and this one must fit one message.
+        let outcome = outcome.and_then(|image| {
+            let attached = self
+                .attachments
+                .referenced(&self.input)
+                .into_iter()
+                .filter_map(|number| self.attachments.get(number)?.image.as_ref());
+            image_attachments::check_message_budget("", attached.chain([&image]))
+                .map_err(|error| error.to_string())
+                .map(|()| image)
+        });
         match outcome {
             Ok(image) => self.attachments.entries[index].image = Some(image),
             Err(error) => {
@@ -552,6 +563,36 @@ mod tests {
         app.settle_attachments();
         assert_eq!(app.input, "look ");
         assert_eq!(app.attachment_count(), 0);
+    }
+
+    #[test]
+    fn an_image_past_the_per_message_budget_is_not_attached_and_names_it() {
+        use super::super::test_support::launch_basic;
+
+        let maximum = || DraftImage {
+            bytes: image_attachments::png(
+                4,
+                3,
+                image_attachments::MAX_IMAGE_BYTES - image_attachments::png(4, 3, 0).len(),
+            ),
+            ..image("big.png")
+        };
+        let mut app = App::new(launch_basic(), true);
+        for _ in 0..3 {
+            app.begin_attachment(move || Ok(maximum()));
+            app.settle_attachments();
+        }
+        assert_eq!(app.attachment_count(), 3);
+        app.begin_attachment(move || Ok(maximum()));
+        app.settle_attachments();
+        assert_eq!(app.attachment_count(), 3);
+        assert_eq!(app.input, "[image #1] [image #2] [image #3] ");
+        assert!(
+            app.pane.blocks.iter().any(|block| matches!(block,
+                ScrollBlock::System(text) if text.starts_with("not attached: ")
+                    && text.contains("over the 16 MiB per-message budget"))),
+            "the refusal names the per-message budget"
+        );
     }
 
     #[test]

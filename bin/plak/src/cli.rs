@@ -1413,6 +1413,9 @@ impl RunPrompt {
                 plakous_hosted::attachments::read_image(path).map_err(|error| error.to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let text = self.words.join(" ");
+        plakous_hosted::attachments::check_message_budget(&text, &images)
+            .map_err(|error| format!("run refused: {error}"))?;
         for image in images
             .iter()
             .filter(|image| image.source_dimensions.is_some())
@@ -1422,7 +1425,7 @@ impl RunPrompt {
                 plakous_hosted::attachments::chip(image)
             );
         }
-        Ok((self.words.join(" "), images))
+        Ok((text, images))
     }
 }
 
@@ -1790,6 +1793,27 @@ mod tests {
         let nine = vec![shot.as_path(); 9];
         let error = run(&nine, "grok").unwrap_err();
         assert!(error.contains("at most 8"), "{error}");
+
+        let largest = dir.path().join("largest.png");
+        let header = plakous_hosted::attachments::png(4, 3, 0).len();
+        std::fs::write(
+            &largest,
+            plakous_hosted::attachments::png(
+                4,
+                3,
+                plakous_hosted::attachments::MAX_IMAGE_BYTES - header,
+            ),
+        )
+        .unwrap();
+        let Ok(Command::Run { prompt, .. }) = run(&[largest.as_path(); 3], "grok") else {
+            panic!("three maximum-size images fit one message")
+        };
+        assert_eq!(prompt.images.len(), 3);
+        let error = run(&[largest.as_path(); 4], "grok").unwrap_err();
+        assert!(
+            error.contains("over the 16 MiB per-message budget"),
+            "{error}"
+        );
     }
 
     #[test]

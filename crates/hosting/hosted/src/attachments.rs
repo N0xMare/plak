@@ -6,7 +6,7 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use plakous::agent::MAX_USER_IMAGE_BYTES;
+use plakous::agent::{MAX_USER_IMAGE_BYTES, MAX_USER_MESSAGE_BYTES};
 use plakous_host_protocol::DraftImage;
 
 /// Most images one message carries.
@@ -17,6 +17,78 @@ pub const MAX_IMAGE_BYTES: usize = MAX_USER_IMAGE_BYTES;
 
 /// Largest image file read for normalizing (64 MiB).
 pub const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Encoding overhead charged per image beside its base64 text.
+const IMAGE_FRAMING_BYTES: usize = 128;
+
+/// Encoding overhead charged for the text part beside its escaped text.
+const TEXT_FRAMING_BYTES: usize = 64;
+
+/// A message's text and images encode past the per-message budget,
+/// [`MAX_USER_MESSAGE_BYTES`] (16 MiB).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MessageBudgetExceeded {
+    encoded_bytes: usize,
+}
+
+impl fmt::Display for MessageBudgetExceeded {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "message sizes stay far below 2^53 and the rendering is display-only"
+        )]
+        let mib = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+        write!(
+            formatter,
+            "the message encodes to {:.1} MiB, over the {:.0} MiB per-message budget (three \
+             maximum-size images fit); attach fewer or smaller images",
+            mib(self.encoded_bytes),
+            mib(MAX_USER_MESSAGE_BYTES)
+        )
+    }
+}
+
+impl std::error::Error for MessageBudgetExceeded {}
+
+/// Checks a message's text and images against the per-message budget,
+/// counting the text as its JSON string and each image as its base64 text,
+/// each with framing. Runtime admission checks the exact encoding; this lets
+/// a frontend refuse an attachment before it is queued.
+///
+/// # Errors
+///
+/// Returns [`MessageBudgetExceeded`] when the message would not fit.
+pub fn check_message_budget<'a>(
+    text: &str,
+    images: impl IntoIterator<Item = &'a DraftImage>,
+) -> Result<(), MessageBudgetExceeded> {
+    let text_bytes = if text.is_empty() {
+        0
+    } else {
+        json_string_bytes(text).saturating_add(TEXT_FRAMING_BYTES)
+    };
+    let encoded_bytes = images.into_iter().fold(text_bytes, |total, image| {
+        total
+            .saturating_add(image.bytes.len().div_ceil(3).saturating_mul(4))
+            .saturating_add(IMAGE_FRAMING_BYTES)
+    });
+    if encoded_bytes > MAX_USER_MESSAGE_BYTES {
+        return Err(MessageBudgetExceeded { encoded_bytes });
+    }
+    Ok(())
+}
+
+/// The length of `text` as a `serde_json` string, quotes included: `"` and
+/// `\\` and the short-form controls take two bytes, other controls six.
+fn json_string_bytes(text: &str) -> usize {
+    text.bytes().fold(2_usize, |total, byte| {
+        total.saturating_add(match byte {
+            b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 0x08 | 0x0c => 2,
+            0x00..=0x1f => 6,
+            _ => 1,
+        })
+    })
+}
 
 mod normalize;
 
@@ -197,5 +269,68 @@ mod tests {
         let error = read_image(&big).unwrap_err();
         assert!(matches!(error, ImageFileError::Unusable { .. }));
         assert!(error.to_string().contains("big.png") && error.to_string().contains("decoded"));
+    }
+
+    #[test]
+    fn three_maximum_images_fit_the_message_budget_and_four_do_not() {
+        let maximum = || DraftImage {
+            bytes: png(2, 3, MAX_IMAGE_BYTES - png(2, 3, 0).len()),
+            ..draft_image()
+        };
+        let three = vec![maximum(); 3];
+        assert_eq!(check_message_budget("look at these", &three), Ok(()));
+        let typical = vec![
+            DraftImage {
+                bytes: png(1280, 720, 1_400 * 1024),
+                ..draft_image()
+            };
+            MAX_IMAGES
+        ];
+        assert_eq!(check_message_budget("", &typical), Ok(()));
+
+        let error = check_message_budget("", &vec![maximum(); 4]).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("20.0 MiB, over the 16 MiB per-message budget"),
+            "{message}"
+        );
+        assert!(
+            message.contains("three maximum-size images fit"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn text_counts_as_its_json_string() {
+        for text in [
+            "plain",
+            "a \"quoted\" \\ path\n\ttab",
+            "\u{1}\u{1f}\u{8}\u{c}\r",
+            "é ✓",
+        ] {
+            assert_eq!(
+                json_string_bytes(text),
+                serde_json::to_string(text).unwrap().len(),
+                "{text:?}"
+            );
+        }
+        // Escaping, not raw length, decides whether text beside three
+        // maximum-size images fits.
+        let maximum = || DraftImage {
+            bytes: png(2, 3, MAX_IMAGE_BYTES - png(2, 3, 0).len()),
+            ..draft_image()
+        };
+        let three = vec![maximum(); 3];
+        assert_eq!(check_message_budget(&"x".repeat(600_000), &three), Ok(()));
+        assert!(check_message_budget(&"\"\n".repeat(300_000), &three).is_err());
+    }
+
+    fn draft_image() -> DraftImage {
+        DraftImage {
+            name: "shot.png".into(),
+            media_type: "image/png".into(),
+            bytes: png(2, 3, 0),
+            source_dimensions: None,
+        }
     }
 }

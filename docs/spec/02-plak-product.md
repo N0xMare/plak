@@ -4936,8 +4936,17 @@ A prompt can carry images, attached to the draft three ways:
   note.
 
 The type of a file is sniffed from the bytes, never the extension. The bounds
-are the library's admission bounds (chapter 01): at most 8 images per message
-and 3.75 MiB raw per image. Every attached image (a dropped or pasted path,
+are the library's admission bounds (chapter 01): at most 8 images per message,
+3.75 MiB raw per image, and the 16 MiB per-message budget for the encoded
+message, in which an image counts as its base64 text (about 12 MiB of images:
+three maximum-size images or eight of up to about 1.4 MiB). The TUI does not
+attach an image that would take the draft's ready images past the budget: the
+token leaves the draft with a system note, `not attached: the message encodes
+to 20.0 MiB, over the 16 MiB per-message budget (three maximum-size images
+fit); attach fewer or smaller images`. `plak run --image` (exit 2), a JSONL
+`prompt` (a diagnostic) and queue admission (a notice) refuse such a message
+with the same sentence, counting its text as its JSON-escaped string; runtime
+admission remains the exact check (chapter 01 §3.1). Every attached image (a dropped or pasted path,
 `/image`, `Ctrl+V`, `plak run --image` and the JSONL `prompt.images`) passes
 one normalizer in `plakous-hosted`:
 

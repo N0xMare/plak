@@ -319,6 +319,7 @@ pub(super) fn queue_refusal<P: plakous_host_protocol::ProtocolExtension>(
         queue::Refusal::NotAnImage => {
             "an attachment is not a png, jpeg, gif or webp image".to_owned()
         }
+        queue::Refusal::MessageTooLarge(error) => error.to_string(),
         queue::Refusal::ImagesFull => format!(
             "queued prompts already hold {} MiB of images",
             crate::sessions::MAX_PENDING_QUEUE_IMAGE_BYTES / (1024 * 1024)
