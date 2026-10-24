@@ -1308,6 +1308,14 @@ pub struct AdoptOutcome {
     pub target_after: String,
     /// Files the landing touched.
     pub files_changed: u32,
+    /// Changed paths, `"M src/lib.rs"` or `"R old.rs -> new.rs"`, at most 64.
+    /// Absent on a receipt from a build that did not list them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// `files` omitted paths past the 64-entry bound. `files_changed` is the
+    /// full count either way.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub files_truncated: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

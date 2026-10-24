@@ -980,15 +980,15 @@ pub(crate) mod suite {
     const COMPACTION_WIRE_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root",
-            "952c4c9f873333db897375c2a8255a5800a81e0792e3e07bbc4d2ecd95e1fd6f",
+            "f2b1c1239d2cbe7007445c4882df05bfa95d8f15a92f13ba9fce70aa84b007ac",
         ),
         (
             "grok.direct.root",
-            "a6c5534c65efc229954f5929caf1423919b01f482776d6d3a8b86765838ad445",
+            "7a598e54b44b4db666fc88fe84b42af4b6517fef3de973753bad307ebabdfd4b",
         ),
         (
             "claude.direct.root",
-            "81a93551eab963132605373fe7b3ac603b1d2ed1f38d9dc1ad0370b419ff6596",
+            "a009816632b67c752d59a1c7a4ce9ae26ef39949a83e37a1a580db31344ec6fc",
         ),
         (
             "openrouter-chat.direct.root",
@@ -996,11 +996,11 @@ pub(crate) mod suite {
         ),
         (
             "openrouter-responses.direct.root",
-            "ced1169acd4e18435aedbc94b83feda1d47f637f3734213ddbfa86e097291425",
+            "e6ca33239a29f33bafe7f2c1c346e572bcb94233ac0d272ceb6d283f0da8370b",
         ),
         (
             "openrouter-messages.direct.root",
-            "dfb061d941f9d3c30bdc394979b0aafc11b621a64257dabe9068918e6483fa70",
+            "33434e7ba459c3b406de09cd91f7fd014d015ceb1a784ad15236e0d0b3d3abaf",
         ),
         (
             "openai-api.direct.root.single-agent",

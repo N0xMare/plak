@@ -222,12 +222,18 @@ mod round_trip_tests {
                 "evidence": ["a2-a1"],
             }),
         );
+    }
+
+    #[test]
+    fn adopt_outcome_round_trips_without_its_empty_file_list() {
         round_trip(
             &AdoptOutcome {
                 candidate_id: CandidateId::from_persisted("c1".to_owned()),
                 target_before: "deadbeef".into(),
                 target_after: "cafebabe".into(),
                 files_changed: 3,
+                files: Vec::new(),
+                files_truncated: false,
             },
             json!({
                 "candidate_id": "c1",

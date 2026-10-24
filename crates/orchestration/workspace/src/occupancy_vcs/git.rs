@@ -3,8 +3,8 @@
 use std::process::{Command, Output};
 
 use super::{
-    AdoptFailure, AdoptLanding, GIT_CLI_ENABLED, Path, VcsError, VcsErrorKind, VcsSnapshot,
-    create_private, mint_error, private_scratch, wait_bounded,
+    AdoptFailure, AdoptLanding, ChangeKind, ChangedPath, GIT_CLI_ENABLED, Path, VcsError,
+    VcsErrorKind, VcsSnapshot, create_private, mint_error, private_scratch, wait_bounded,
 };
 
 /// Ceiling on a `git` read: status, rev-parse, counts, name lists.
@@ -381,7 +381,9 @@ pub(super) fn git_adopt(
             "diff",
             "--no-ext-diff",
             "--no-textconv",
-            "--name-only",
+            "--name-status",
+            "-z",
+            "-M",
             target.content.as_str(),
             merged_tree,
         ],
@@ -392,18 +394,14 @@ pub(super) fn git_adopt(
             "git diff refused the merged tree".to_owned(),
         ));
     }
-    let files_changed = u32::try_from(
-        String::from_utf8_lossy(&names.stdout)
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .count(),
-    )
-    .unwrap_or(u32::MAX);
+    let files = parse_name_status(&names.stdout)?;
+    let files_changed = u32::try_from(files.len()).unwrap_or(u32::MAX);
     if files_changed == 0 {
         return Ok(AdoptLanding {
             target_before: target.commit.clone(),
             target_after: target.commit,
             files_changed: 0,
+            files,
             child_base: None,
         });
     }
@@ -451,8 +449,84 @@ pub(super) fn git_adopt(
         target_before: target.commit,
         target_after: after.commit,
         files_changed,
+        files,
         child_base: None,
     })
+}
+
+/// `git diff --name-status -z -M`: one record is `<status> NUL <path> NUL`,
+/// and a rename is `<Rscore> NUL <old> NUL <new> NUL`.
+fn parse_name_status(stdout: &[u8]) -> Result<Vec<ChangedPath>, AdoptFailure> {
+    let mut parts = stdout.split(|byte| *byte == 0).collect::<Vec<_>>();
+    if parts.last().is_some_and(|part| part.is_empty()) {
+        parts.pop();
+    }
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < parts.len() {
+        let status = std::str::from_utf8(parts[index]).map_err(|_| {
+            AdoptFailure::Unavailable("git diff name-status was not utf-8".to_owned())
+        })?;
+        let kind = status.as_bytes().first().copied().ok_or_else(|| {
+            AdoptFailure::Unavailable("git diff name-status was empty".to_owned())
+        })?;
+        // A rename carries the old path. A copy (`-C`, or a repo that detects
+        // copies) is an added destination; the source is unchanged, and the
+        // receipt vocabulary has no copy letter.
+        if matches!(kind, b'R' | b'C') {
+            if index + 2 >= parts.len() {
+                return Err(AdoptFailure::Unavailable(
+                    "git diff name-status rename was truncated".to_owned(),
+                ));
+            }
+            let from = utf8_path(parts[index + 1]);
+            let path = utf8_path(parts[index + 2]);
+            if kind == b'C' {
+                files.push(ChangedPath {
+                    status: ChangeKind::Added,
+                    path,
+                    from: None,
+                });
+            } else {
+                files.push(ChangedPath {
+                    status: ChangeKind::Renamed,
+                    path,
+                    from: Some(from),
+                });
+            }
+            index += 3;
+            continue;
+        }
+        let parsed = match kind {
+            b'A' => ChangeKind::Added,
+            b'M' => ChangeKind::Modified,
+            b'D' => ChangeKind::Deleted,
+            b'T' => ChangeKind::TypeChanged,
+            _ => {
+                return Err(AdoptFailure::Unavailable(format!(
+                    "git diff name-status {status} is not a landing status"
+                )));
+            }
+        };
+        if index + 1 >= parts.len() {
+            return Err(AdoptFailure::Unavailable(
+                "git diff name-status record was truncated".to_owned(),
+            ));
+        }
+        files.push(ChangedPath {
+            status: parsed,
+            path: utf8_path(parts[index + 1]),
+            from: None,
+        });
+        index += 2;
+    }
+    Ok(files)
+}
+
+/// A non-UTF-8 path is lossy so the landing still records the file. Git's
+/// `-z` record is bytes; refusing the adopt for one path would drop the rest.
+fn utf8_path(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// Applies the merged-tree patch to the target's working copy. The patch goes

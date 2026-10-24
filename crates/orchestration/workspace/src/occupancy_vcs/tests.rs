@@ -819,6 +819,125 @@ fn adopt_ignores_external_diff_and_textconv() {
     );
 }
 
+/// The receipt names each landed path with its status, and stops at 64
+/// entries while `files_changed` keeps the full count.
+#[test]
+fn adopt_receipt_lists_changed_files_with_status_and_bounds_at_64() {
+    let repo = git_repo();
+    for (name, body) in [
+        ("0-keep.txt", "keep\n"),
+        ("1-gone.txt", "gone\n"),
+        ("2-old.txt", "same body\n"),
+        ("3-mode.txt", "mode\n"),
+    ] {
+        std::fs::write(repo.path().join(name), body).unwrap();
+    }
+    git_in(repo.path(), &["add", "."]);
+    git_in(repo.path(), &["commit", "-q", "-m", "base files"]);
+
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(minted.path.join("0-keep.txt"), "keep\nchanged\n").unwrap();
+    std::fs::remove_file(minted.path.join("1-gone.txt")).unwrap();
+    std::fs::rename(minted.path.join("2-old.txt"), minted.path.join("2-new.txt")).unwrap();
+    std::fs::remove_file(minted.path.join("3-mode.txt")).unwrap();
+    std::os::unix::fs::symlink("0-keep.txt", minted.path.join("3-mode.txt")).unwrap();
+    std::fs::write(minted.path.join("4-added.txt"), "added\n").unwrap();
+    for index in 0..70 {
+        std::fs::write(
+            minted.path.join(format!("9-extra-{index:02}")),
+            format!("extra {index}\n"),
+        )
+        .unwrap();
+    }
+
+    let candidate = SystemVcs
+        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .unwrap();
+    let landing = SystemVcs
+        .adopt(
+            repo.path(),
+            &minted.path,
+            &minted.base.commit,
+            None,
+            &candidate,
+            None,
+        )
+        .unwrap();
+    let (files, truncated) = landing.receipt_files();
+    assert_eq!(landing.files_changed, 75, "{files:?}");
+    assert!(truncated);
+    assert_eq!(files.len(), ADOPT_RECEIPT_FILE_LIMIT);
+    for line in [
+        "M 0-keep.txt",
+        "D 1-gone.txt",
+        "R 2-old.txt -> 2-new.txt",
+        "T 3-mode.txt",
+        "A 4-added.txt",
+    ] {
+        assert!(
+            files.iter().any(|got| got == line),
+            "missing {line} in {files:?}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("0-keep.txt")).unwrap(),
+        "keep\nchanged\n"
+    );
+    assert!(!repo.path().join("1-gone.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("2-new.txt")).unwrap(),
+        "same body\n"
+    );
+    assert!(!repo.path().join("2-old.txt").exists());
+    assert!(repo.path().join("4-added.txt").is_file());
+}
+
+#[test]
+fn adopt_receipt_uses_lossy_names_without_losing_non_utf8_files() {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let repo = git_repo();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    let name = std::ffi::OsStr::from_bytes(b"non-utf8-\xff.txt");
+    std::fs::write(minted.path.join(name), "work\n").unwrap();
+    let candidate = SystemVcs
+        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .unwrap();
+    let landing = SystemVcs
+        .adopt(
+            repo.path(),
+            &minted.path,
+            &minted.base.commit,
+            None,
+            &candidate,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        landing.receipt_files(),
+        (vec!["A non-utf8-\u{fffd}.txt".into()], false)
+    );
+    assert_eq!(std::fs::read(repo.path().join(name)).unwrap(), b"work\n");
+}
+
 /// A copy whose directory and registration are already gone (an earlier
 /// removal, or by hand) unmints cleanly: only its branch is left to drop,
 /// and a repeat is a no-op. A directory that is still present and

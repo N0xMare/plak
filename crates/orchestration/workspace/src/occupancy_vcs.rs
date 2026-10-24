@@ -122,10 +122,82 @@ pub struct AdoptLanding {
     pub target_after: String,
     /// How many files the landing touched.
     pub files_changed: u32,
+    /// Every path the landing touched, in diff order. The receipt keeps at
+    /// most [`ADOPT_RECEIPT_FILE_LIMIT`] of them.
+    pub files: Vec<ChangedPath>,
     /// A replacement child base if a backend changes the child's tree while
     /// adopting. The Git and native JJ backends leave the tree unchanged and
     /// return `None`, so the adopted candidate is the next baseline.
     pub child_base: Option<VcsSnapshot>,
+}
+
+/// How many changed paths an adopt receipt names. `files_changed` stays the
+/// full count.
+pub const ADOPT_RECEIPT_FILE_LIMIT: usize = 64;
+
+/// Added, modified, deleted, renamed, or a type change.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChangeKind {
+    /// The path was added.
+    Added,
+    /// The path's contents changed.
+    Modified,
+    /// The path was removed.
+    Deleted,
+    /// The path was renamed. `from` names the old path.
+    Renamed,
+    /// The path changed type.
+    TypeChanged,
+}
+
+/// One path a landing changed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChangedPath {
+    /// What happened to the path.
+    pub status: ChangeKind,
+    /// The path after the change.
+    pub path: String,
+    /// The previous path of a rename.
+    pub from: Option<String>,
+}
+
+impl ChangeKind {
+    fn letter(self) -> char {
+        match self {
+            Self::Added => 'A',
+            Self::Modified => 'M',
+            Self::Deleted => 'D',
+            Self::Renamed => 'R',
+            Self::TypeChanged => 'T',
+        }
+    }
+}
+
+impl ChangedPath {
+    /// `"M src/lib.rs"` or `"R old.rs -> new.rs"`.
+    #[must_use]
+    pub fn receipt_line(&self) -> String {
+        if self.status == ChangeKind::Renamed {
+            let from = self.from.as_deref().unwrap_or("");
+            return format!("R {from} -> {}", self.path);
+        }
+        format!("{} {}", self.status.letter(), self.path)
+    }
+}
+
+impl AdoptLanding {
+    /// Receipt file lines, cut at [`ADOPT_RECEIPT_FILE_LIMIT`].
+    #[must_use]
+    pub fn receipt_files(&self) -> (Vec<String>, bool) {
+        let truncated = self.files.len() > ADOPT_RECEIPT_FILE_LIMIT;
+        let files = self
+            .files
+            .iter()
+            .take(ADOPT_RECEIPT_FILE_LIMIT)
+            .map(ChangedPath::receipt_line)
+            .collect();
+        (files, truncated)
+    }
 }
 
 /// Why a VCS operation did not run. Deliberately not a

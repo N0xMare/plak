@@ -254,6 +254,7 @@ impl VcsOps for FakeVcs {
             target_before: "target-before".to_owned(),
             target_after: candidate.commit.clone(),
             files_changed: 1,
+            files: Vec::new(),
             child_base: None,
         })
     }

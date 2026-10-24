@@ -455,6 +455,7 @@ pub(super) fn adopt(
                 target_before: before.token(),
                 target_after: description(&updated).token(),
                 files_changed: files,
+                files: Vec::new(),
                 child_base: None,
             }))
         }

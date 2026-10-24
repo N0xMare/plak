@@ -521,6 +521,8 @@ fn wire_identity_topology_payloads_are_pinned() {
             target_before: "0".repeat(40),
             target_after: "1".repeat(40),
             files_changed: 3,
+            files: Vec::new(),
+            files_truncated: false,
         }),
     );
 
@@ -690,4 +692,21 @@ fn wire_identity_closed_vocabularies_are_pinned() {
         &rows,
         &failures,
     );
+}
+
+/// A receipt from a build that did not list changed files still decodes.
+/// `files` and `files_truncated` stay at their defaults.
+#[test]
+fn adopt_outcome_golden_without_files_decodes() {
+    let golden = TOPOLOGY_PAYLOAD_PINS
+        .iter()
+        .find(|(name, _)| *name == "adopt_outcome")
+        .map(|(_, bytes)| *bytes)
+        .expect("adopt_outcome pin");
+    let decoded: AdoptOutcome = serde_json::from_str(golden).unwrap();
+    assert_eq!(decoded.files, Vec::<String>::new());
+    assert!(!decoded.files_truncated);
+    assert_eq!(decoded.files_changed, 3);
+    let again = serde_json::to_string(&decoded).unwrap();
+    assert_eq!(again, golden);
 }

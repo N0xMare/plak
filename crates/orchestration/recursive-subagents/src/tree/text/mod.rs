@@ -80,7 +80,7 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "topology.topology_adopt_description_template",
         PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE,
-        "cd863ea693132abc226812465b3de9d34bddc3ff3bc76e441653cc6bfe6c3942",
+        "1a62376d09e342ef500740a30f5edc671a7ba3a4ab9c12ddb91e6b608e999dd4",
     ),
     PromptPin::new(
         "topology.topology_discard_description",
@@ -158,7 +158,7 @@ pub const PLAK_TOPOLOGY_RECOVER_DESCRIPTION: &str = "Recover a child whose list_
 
 /// `adopt_candidate` tool description on nodes granted `may_adopt`; `{await}`
 /// is the presented await tool.
-pub const PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE: &str = "Integrate a sealed candidate from your subtree into your own workspace by candidate_id, as working-tree changes with no commit. A forked child's edits are not in your checkout until this succeeds. merge_conflict is a failed result and keeps the child copy; target_changed means your copy moved since expected_target. A {await} or list_agents row names the candidate once the child has sealed.";
+pub const PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE: &str = "Integrate a sealed candidate from your subtree into your own workspace by candidate_id, as working-tree changes with no commit. A forked child's edits are not in your checkout until this succeeds. merge_conflict is a failed result and keeps the child copy; target_changed means your copy moved since expected_target. A {await} or list_agents row names the candidate once the child has sealed. The receipt lists the changed files.";
 
 /// `discard_workspace` tool description on spawn-capable owners.
 pub const PLAK_TOPOLOGY_DISCARD_DESCRIPTION: &str = "Drop a child fork by workspace_id, giving up its unadopted candidates and their pins without adopting anything from it.";

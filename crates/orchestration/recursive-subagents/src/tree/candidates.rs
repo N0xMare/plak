@@ -820,11 +820,14 @@ impl ProductAgentTree {
                 self.bump();
                 // A closed child's copy was only waiting on this landing.
                 self.prune_closed_copies();
+                let (files, files_truncated) = landing.receipt_files();
                 Ok(AdoptOutcome {
                     candidate_id: ticket.candidate.candidate_id.clone(),
                     target_before: landing.target_before,
                     target_after: landing.target_after,
                     files_changed: landing.files_changed,
+                    files,
+                    files_truncated,
                 })
             }
             Err(failure) => {

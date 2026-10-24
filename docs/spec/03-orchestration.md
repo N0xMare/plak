@@ -991,8 +991,12 @@ the copy is sealed.
 ### 4.7 `adopt_candidate`
 
 `{ candidate_id, expected_target?, evidence?: [attempt_id] }`. Receipt:
-`{ candidate_id, target_before, target_after, files_changed }`. Section 7 owns
-the semantics.
+`{ candidate_id, target_before, target_after, files_changed, files?,
+files_truncated? }`. `files` names at most 64 paths as `"M src/lib.rs"` or
+`"R old.rs -> new.rs"`; `files_changed` is the full count and
+`files_truncated` is set when the list was cut. A receipt from an older build
+omits both. Non-UTF-8 file names use replacement characters in the receipt;
+the landing still preserves the original name bytes. Section 7 owns the semantics.
 
 Adoption succeeds when the caller has running jobs, with a warning line naming
 the processes still using the checkout.
@@ -1667,8 +1671,10 @@ Admission runs under the tree lock, the VCS landing runs unlocked under an
 `adopting` workspace status, and the outcome is recorded on re-lock. A reopen
 observing `adopting` is `recovery_required` and MUST NOT auto-retry.
 
-Receipt: `{ candidate_id, target_before, target_after, files_changed }`, plus
-`warning` when running processes still use the checkout. The warning is JSON
+Receipt: `{ candidate_id, target_before, target_after, files_changed, files?,
+files_truncated? }`, plus `warning` when running processes still use the
+checkout. `files` lists at most 64 changed paths (`"M src/lib.rs"`,
+`"R old.rs -> new.rs"`); `files_changed` remains the full count. The warning is JSON
 inside the stored receipt and replays verbatim, not a fresh observation.
 The candidate durably records `merged_at`, the commit component of
 `target_after`, alongside its adopter and evidence. `list_agents` exposes this
@@ -1689,8 +1695,9 @@ full token, the commit alone, or the content alone. A mismatch is
 1. Snapshot the target. A failure here is `mint_unavailable`.
 2. Check `expected_target`.
 3. `git merge-tree --write-tree --merge-base=<base_commit> <target_commit> <candidate_commit>`.
-4. `git diff --no-ext-diff --no-textconv --name-only <target_tree> <merged_tree>`
-   gives `files_changed`. A zero count lands nothing and reports
+4. `git diff --no-ext-diff --no-textconv --name-status -z -M <target_tree>
+   <merged_tree>` gives `files_changed` and the receipt's `files`. A rename is
+   `R <old> -> <new>`. A zero count lands nothing and reports
    `target_after == target_before`.
 5. `git diff --no-ext-diff --no-textconv --binary -M <target_tree> <merged_tree>`
    produces the patch; a repository-configured diff driver or textconv filter
