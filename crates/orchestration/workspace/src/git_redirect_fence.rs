@@ -174,7 +174,7 @@ fn git_fence_body(copy: &Path) -> String {
     }
     discover_real_git().ok().as_deref().map_or_else(
         || "#!/bin/sh\nprintf 'Git CLI is not installed; native workspace operations remain available\\n' >&2\nexit 127\n".to_owned(),
-        |real_git| shim_script(copy, real_git),
+        |real_git| shim_script(copy, real_git, &own_branch(copy)),
     )
 }
 
@@ -272,6 +272,11 @@ fn parse_git_globals(cwd: &Path, args: &[impl AsRef<OsStr>]) -> ParsedGitGlobals
             index += 1;
             continue;
         }
+        if let Some(path) = text.strip_prefix("-C") {
+            cwd = resolve_against(&cwd, path);
+            index += 1;
+            continue;
+        }
         if let Some(path) = text.strip_prefix("--work-tree=") {
             work_tree = Some(path.to_owned());
             index += 1;
@@ -310,7 +315,12 @@ fn parse_git_globals(cwd: &Path, args: &[impl AsRef<OsStr>]) -> ParsedGitGlobals
             index += 1;
             continue;
         }
-        if text == "--exec-path" || text == "--namespace" {
+        if let Some(value) = text.strip_prefix("--config-env=") {
+            core_worktree |= assigns_core_worktree(value);
+            index += 1;
+            continue;
+        }
+        if matches!(text, "--namespace" | "--attr-source" | "--super-prefix") {
             index += 2;
             continue;
         }
@@ -508,11 +518,93 @@ fn jj_shim_script(allowed: &Path, real_jj: &Path, base: &str) -> String {
     )
 }
 
-fn shim_script(allowed: &Path, real_git: &Path) -> String {
+/// `plak/<copy directory>` when the mint created that branch, and empty for a
+/// detached snapshot. The branch ref is the record, not HEAD, so a child that
+/// switches branch still owns the same name. Does not run git.
+fn own_branch(copy: &Path) -> String {
+    let Some(id) = copy.file_name().and_then(|name| name.to_str()) else {
+        return String::new();
+    };
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return String::new();
+    }
+    let minted = format!("plak/{id}");
+    if branch_ref_exists(copy, &minted) {
+        minted
+    } else {
+        String::new()
+    }
+}
+
+fn branch_ref_exists(copy: &Path, branch: &str) -> bool {
+    let Some(common) = git_common_dir(copy) else {
+        return false;
+    };
+    if common.join("refs/heads").join(branch).is_file() {
+        return true;
+    }
+    let Ok(packed) = std::fs::read_to_string(common.join("packed-refs")) else {
+        return false;
+    };
+    let needle = format!("refs/heads/{branch}");
+    packed.lines().any(|line| {
+        let line = line.trim();
+        !line.is_empty()
+            && !line.starts_with('#')
+            && !line.starts_with('^')
+            && line.split_whitespace().nth(1) == Some(needle.as_str())
+    })
+}
+
+fn git_common_dir(copy: &Path) -> Option<PathBuf> {
+    let git_dir = git_dir_of(copy)?;
+    let commondir = git_dir.join("commondir");
+    if let Ok(text) = std::fs::read_to_string(&commondir) {
+        let raw = text.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        let path = Path::new(raw);
+        return Some(if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            git_dir.join(path)
+        });
+    }
+    Some(git_dir)
+}
+
+fn git_dir_of(copy: &Path) -> Option<PathBuf> {
+    let git = copy.join(".git");
+    if git.is_dir() {
+        return Some(git);
+    }
+    let text = std::fs::read_to_string(&git).ok()?;
+    let raw = text
+        .lines()
+        .find_map(|line| line.strip_prefix("gitdir:"))?
+        .trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let path = Path::new(raw);
+    Some(if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        copy.join(path)
+    })
+}
+
+fn shim_script(allowed: &Path, real_git: &Path, own_branch: &str) -> String {
     format!(
         include_str!("git_redirect_fence/git_shim.sh"),
         allowed = sh_single_quote(&allowed.display().to_string()),
         real_git = sh_single_quote(&real_git.display().to_string()),
+        own_branch = sh_single_quote(own_branch),
     )
 }
 

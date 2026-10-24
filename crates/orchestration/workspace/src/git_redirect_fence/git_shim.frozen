@@ -1,13 +1,61 @@
 #!/bin/sh
 # Plak occupancy git-redirect fence. Basename git only.
-# Parse globals for admission, then exec real git with the original argv.
+# Parse globals for admission, refuse coordination writes, then exec real git.
 ALLOWED='/occ/copy'
 REAL_GIT='/usr/bin/git'
+OWN_BRANCH='plak/copy'
+
+query_parameters=$GIT_CONFIG_PARAMETERS
+retention_now=0
+check_config() {
+  config_key=$(printf '%s' "${1%%=*}" | tr '[:upper:]' '[:lower:]')
+  config_value=$(printf '%s' "${1#*=}" | tr '[:upper:]' '[:lower:]')
+  case "$config_key" in
+    core.worktree) printf '%s\n' "plak: git-redirect refused: core.worktree escapes occupancy copy" >&2; exit 128 ;;
+    gc.pruneexpire|gc.reflogexpire*)
+      [ "$config_value" != now ] || retention_now=1 ;;
+  esac
+}
+record_config() {
+  check_config "$1"
+  config_quoted=$(printf '%s' "$1" | sed "s/'/'\\\\''/g")
+  if [ -n "$query_parameters" ]; then
+    query_parameters="$query_parameters '$config_quoted'"
+  else
+    query_parameters="'$config_quoted'"
+  fi
+}
+record_config_env() {
+  config_env_key=${1%%=*}
+  config_env_name=${1#*=}
+  config_env_value=$(printenv "$config_env_name" 2>/dev/null || true)
+  record_config "$config_env_key=$config_env_value"
+}
+query_git() {
+  GIT_CONFIG_PARAMETERS=$query_parameters "$REAL_GIT" -C "$cwd" "$@"
+}
+
+# Git already forwards indexed configuration to queries; inspect it without
+# appending it above GIT_CONFIG_PARAMETERS or command-line overrides.
+case "$GIT_CONFIG_COUNT" in
+  ''|*[!0-9]*) ;;
+  *)
+    config_index=0
+    while [ "$config_index" -lt "$GIT_CONFIG_COUNT" ]; do
+      indexed_key=$(printenv "GIT_CONFIG_KEY_$config_index" 2>/dev/null || true)
+      indexed_value=$(printenv "GIT_CONFIG_VALUE_$config_index" 2>/dev/null || true)
+      check_config "$indexed_key=$indexed_value"
+      config_index=$((config_index + 1))
+    done ;;
+esac
+
 cwd=`pwd -P 2>/dev/null || pwd`
 worktree=$GIT_WORK_TREE
 gitdir=$GIT_DIR
 skip=0
 prev=""
+command_index=0
+arg_index=0
 sub1=""
 sub2=""
 sub3=""
@@ -18,7 +66,10 @@ case "$lc" in
     exit 128
     ;;
 esac
+retention_parameters=$(printf '%s' "$lc" | tr -d "'")
+case "$retention_parameters" in *gc.pruneexpire*=now*|*gc.reflogexpire*=now*) retention_now=1 ;; esac
 for arg in "$@"; do
+  arg_index=$((arg_index + 1))
   if [ -n "$sub1" ]; then
     case "$arg" in
       -*) ;;
@@ -44,6 +95,7 @@ for arg in "$@"; do
       --work-tree) worktree=$arg ;;
       --git-dir) gitdir=$arg ;;
       -c|--config-env)
+        if [ "$prev" = -c ]; then record_config "$arg"; else record_config_env "$arg"; fi
         lc=`printf '%s' "$arg" | tr '[:upper:]' '[:lower:]'`
         case "$lc" in
           *core.worktree*)
@@ -59,12 +111,23 @@ for arg in "$@"; do
   fi
   case "$arg" in
     --) break ;;
-    -C|--work-tree|--git-dir|-c|--config-env|--exec-path|--namespace)
+    -C|--work-tree|--git-dir|-c|--config-env|--namespace|--attr-source|--super-prefix)
       prev=$arg
       skip=1
       ;;
     --work-tree=*)
       worktree=${arg#--work-tree=}
+      ;;
+    -C?*)
+      arg_dir=${arg#-C}
+      case "$arg_dir" in /*) cwd=$arg_dir ;; *) cwd=$cwd/$arg_dir ;; esac
+      cwd=$(cd "$cwd" 2>/dev/null && pwd -P) || true
+      ;;
+    -c?*) record_config "${arg#-c}" ;;
+    --config-env=*)
+      record_config_env "${arg#--config-env=}"
+      lc=$(printf '%s' "${arg#--config-env=}" | tr '[:upper:]' '[:lower:]')
+      case "$lc" in *core.worktree*) echo "plak: git-redirect refused: core.worktree escapes occupancy copy" >&2; exit 128 ;; esac
       ;;
     --git-dir=*)
       gitdir=${arg#--git-dir=}
@@ -73,6 +136,7 @@ for arg in "$@"; do
       ;;
     *)
       sub1=$arg
+      command_index=$arg_index
       ;;
   esac
 done
@@ -142,4 +206,899 @@ if [ -n "$gitdir" ]; then
     exit 128
   fi
 fi
+# A name Plak keeps for itself: every refs/plak pin, the stash, and any
+# plak/* branch other than this copy's own. Printing is the caller's job.
+is_protected() {
+  # Compare folded case. APFS and HFS keep `refs/PLAK` and `Plak/c2` as the
+  # same ref `refs/plak` and `plak/c2`.
+  _n=`printf '%s' "$1" | tr '[:upper:]' '[:lower:]'`
+  _own=`printf '%s' "$OWN_BRANCH" | tr '[:upper:]' '[:lower:]'`
+  case "$_n" in
+    main-worktree/*|worktrees/*|refs/plak|refs/plak/*|refs/stash|stash) return 0 ;;
+  esac
+  case "$_n" in
+    *\**)
+      _prefix=${_n%%\**}
+      for _protected in refs/plak/ refs/heads/plak/ heads/plak/ plak/ refs/stash; do
+        case "$_protected" in "$_prefix"*) return 0 ;; esac
+      done ;;
+  esac
+  _b=$_n
+  case "$_b" in
+    refs/heads/*) _b=${_b#refs/heads/} ;;
+    heads/*) _b=${_b#heads/} ;;
+  esac
+  case "$_b" in
+    plak|plak/*)
+      if [ -n "$_own" ] && [ "$_b" = "$_own" ]; then
+        return 1
+      fi
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+remedy_for() {
+  _remedy_name=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$_remedy_name" in
+    refs/plak|refs/plak/*|refs/stash|stash)
+      echo "git show $1 reads it"
+      ;;
+    *)
+      if [ -n "$OWN_BRANCH" ]; then
+        echo "work on $OWN_BRANCH"
+      else
+        echo "work on your own branch"
+      fi
+      ;;
+  esac
+}
+
+guard_refuse() {
+  echo "plak: git-guard refused: $1 would change Plak coordination state ($2); $3" >&2
+  exit 128
+}
+
+# True when refs/heads/<b> is the HEAD of some worktree other than this copy.
+checked_out_elsewhere() {
+  _want=`printf '%s' "$1" | tr '[:upper:]' '[:lower:]'`
+  case "$_want" in
+    refs/heads/*) ;;
+    *) return 1 ;;
+  esac
+  if [ "$worktree_cache_loaded" != 1 ]; then
+    worktree_cache_loaded=1
+    worktree_cache=$("$REAL_GIT" -C "$ALLOWED" worktree list --porcelain 2>/dev/null) || worktree_cache=
+  fi
+  [ -n "$worktree_cache" ] || return 0
+  _cur=
+  _hit=1
+  while IFS= read -r _worktree_line; do
+    case "$_worktree_line" in
+      "worktree "*) _cur=${_worktree_line#worktree } ;;
+      "branch "*)
+        _got=$(printf '%s' "${_worktree_line#branch }" | tr '[:upper:]' '[:lower:]')
+        if [ "$_got" = "$_want" ]; then
+          _cur_res=$(cd "$_cur" 2>/dev/null && pwd -P) || _cur_res=$_cur
+          [ "$_cur_res" = "$ALLOWED" ] || _hit=0
+        fi ;;
+    esac
+  done <<EOF
+$worktree_cache
+EOF
+  return "$_hit"
+}
+
+full_head_ref() {
+  _head=`printf '%s' "$1" | tr '[:upper:]' '[:lower:]'`
+  case "$_head" in
+    refs/*) printf '%s\n' "$_head" ;;
+    heads/*) printf 'refs/%s\n' "$_head" ;;
+    *) printf 'refs/heads/%s\n' "$_head" ;;
+  esac
+}
+
+# Stdin is copied to completion before any admitted byte is exec'd. A short
+# read refuses the call; it is not a partial script left in the pipe.
+guard_update_ref_stdin() {
+  _in=`mktemp 2>/dev/null || true`
+  if [ -z "$_in" ]; then
+    guard_refuse update-ref stdin "private stdin buffering is unavailable; retry"
+  fi
+  if ! cat > "$_in"; then
+    rm -f "$_in"
+    guard_refuse update-ref stdin "stdin buffering failed; retry"
+  fi
+  _scan=$_in
+  if [ "$_zero" -eq 1 ]; then
+    _scan=`mktemp 2>/dev/null || true`
+    if [ -z "$_scan" ]; then
+      rm -f "$_in"
+      guard_refuse update-ref stdin "private stdin buffering is unavailable; retry"
+    fi
+    tr '\000' '\n' < "$_in" > "$_scan"
+  fi
+  _bad=
+  _why=
+  _symref_next=0
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    if [ "$_symref_next" -eq 1 ]; then
+      _symref_next=0
+      if is_protected "$_line" || checked_out_elsewhere "$(full_head_ref "$_line")"; then
+        _bad=$_line
+        _why=`remedy_for "$_line"`
+        break
+      fi
+      continue
+    fi
+    case "$_line" in
+      ''|[#]*) continue ;;
+    esac
+    _cmd=${_line%% *}
+    _rest=${_line#* }
+    _ref=${_rest%% *}
+    _target=
+    case "$_rest" in
+      *" "*) _target=${_rest#* }; _target=${_target%% *} ;;
+    esac
+    case "$_cmd" in
+      update|create|delete|verify|symref-delete|symref-verify) ;;
+      symref-create|symref-update) ;;
+      *) continue ;;
+    esac
+    case "$_ref" in
+      \"*) _bad=$_ref; _why="use -z --stdin for literal ref names"; break ;;
+    esac
+    case "$_cmd" in
+      symref-create|symref-update)
+        if [ "$_zero" -eq 1 ]; then
+          _symref_next=1
+        fi
+        case "$_target" in
+          \"*) _bad=$_target; _why="use -z --stdin for literal ref names"; break ;;
+        esac
+        if is_protected "$_target" || checked_out_elsewhere "$(full_head_ref "$_target")"; then
+          _bad=$_target
+          _why=`remedy_for "$_target"`
+          break
+        fi
+        ;;
+    esac
+    if is_protected "$_ref"; then
+      _bad=$_ref
+      _why=`remedy_for "$_ref"`
+      break
+    fi
+    _full=`full_head_ref "$_ref"`
+    if checked_out_elsewhere "$_full"; then
+      _bad=$_ref
+      if [ -n "$OWN_BRANCH" ]; then
+        _why="that branch is checked out in another copy; work on $OWN_BRANCH"
+      else
+        _why="that branch is checked out in another copy"
+      fi
+      break
+    fi
+  done < "$_scan"
+  if [ -n "$_bad" ]; then
+    rm -f "$_in" "$_scan"
+    guard_refuse update-ref "$_bad" "$_why"
+  fi
+  exec 3< "$_in"
+  rm -f "$_in" "$_scan"
+  exec "$REAL_GIT" "$@" <&3
+}
+
+guard_update_ref() {
+  _seen=$command_index
+  _stdin=0
+  _zero=0
+  _positional=
+  _skipval=0
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    if [ "$_skipval" -eq 1 ]; then
+      _skipval=0
+      continue
+    fi
+    case "$_arg" in
+      --stdin) _stdin=1 ;;
+      -z) _zero=1 ;;
+      -m|--message) _skipval=1 ;;
+      -*) ;;
+      *)
+        if [ -z "$_positional" ]; then
+          _positional=$_arg
+        fi
+        ;;
+    esac
+  done
+  if [ "$_stdin" -eq 1 ]; then
+    guard_update_ref_stdin "$@"
+  fi
+  if [ -n "$_positional" ]; then
+    if is_protected "$_positional"; then
+      guard_refuse update-ref "$_positional" "`remedy_for "$_positional"`"
+    fi
+    _full=`full_head_ref "$_positional"`
+    if checked_out_elsewhere "$_full"; then
+      if [ -n "$OWN_BRANCH" ]; then
+        guard_refuse update-ref "$_positional" "that branch is checked out in another copy; work on $OWN_BRANCH"
+      else
+        guard_refuse update-ref "$_positional" "that branch is checked out in another copy"
+      fi
+    fi
+  fi
+}
+
+guard_symbolic_ref() {
+  _seen=$command_index
+  _skipval=0
+  _delete=0
+  _refs=
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    if [ "$_skipval" -eq 1 ]; then
+      _skipval=0
+      continue
+    fi
+    case "$_arg" in
+      -d|--delete) _delete=1 ;;
+      -m|--message) _skipval=1 ;;
+      --message=*|-m*) ;;
+      -*) ;;
+      *) _refs="$_refs $_arg" ;;
+    esac
+  done
+  _count=0
+  for _ref in $_refs; do
+    _count=`expr "$_count" + 1`
+  done
+  if [ "$_count" -ge 2 ] || { [ "$_delete" -eq 1 ] && [ "$_count" -ge 1 ]; }; then
+    for _ref in $_refs; do
+      if is_protected "$_ref" || checked_out_elsewhere "`full_head_ref "$_ref"`"; then
+        guard_refuse symbolic-ref "$_ref" "`remedy_for "$_ref"`"
+      fi
+    done
+  fi
+}
+
+guard_branch() {
+  _seen=$command_index
+  _all_names=0
+  _listing=0
+  _skipval=0
+  _skipopt=0
+  _pos=
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    if [ "$_skipval" -eq 1 ]; then
+      _skipval=0
+      continue
+    fi
+    if [ "$_skipopt" -eq 1 ]; then
+      _skipopt=0
+      case "$_arg" in
+        -*) ;;
+        *) continue ;;
+      esac
+    fi
+    case "$_arg" in
+      -d|-D|--delete|-m|-M|--move|-c|-C|--copy)
+        _all_names=1
+        ;;
+      -f|--force) ;;
+      -l|--list|-a|--all|-r|--remotes|--show-current|--merged|--no-merged)
+        _listing=1
+        case "$_arg" in
+          --merged|--no-merged) _skipopt=1 ;;
+        esac
+        ;;
+      --contains|--no-contains|--points-at|--format|--sort|-u|--set-upstream-to)
+        _skipval=1
+        case "$_arg" in
+          --contains|--no-contains|--points-at) _listing=1 ;;
+        esac
+        ;;
+      --merged=*|--no-merged=*|--contains=*|--no-contains=*|--points-at=*)
+        _listing=1
+        ;;
+      --color|--format=*|--sort=*|--color=*|--set-upstream-to=*)
+        ;;
+      -v|-vv|--verbose|--no-verbose|--no-color|--no-track|--no-abbrev|--no-column|--no-recurse-submodules) ;;
+      --no-*) guard_refuse branch "$_arg" "use an explicit --list read or positive branch options" ;;
+      --) ;;
+      --*) ;;
+      -*)
+        case "$_arg" in
+          -*[dDmMcC]*) _all_names=1 ;;
+        esac
+        case "$_arg" in
+          -*[lar]*) _listing=1 ;;
+        esac
+        ;;
+      *) _pos="$_pos $_arg" ;;
+    esac
+  done
+  _names=
+  _index=0
+  for _arg in $_pos; do
+    _index=`expr "$_index" + 1`
+    if [ "$_all_names" -eq 0 ] && [ "$_index" -gt 1 ]; then
+      continue
+    fi
+    if is_protected "$_arg"; then
+      _names="$_names $_arg"
+    fi
+  done
+  if [ "$_all_names" -eq 1 ] || { [ "$_listing" -eq 0 ] && [ -n "$_names" ]; }; then
+    for _name in $_names; do
+      guard_refuse branch "$_name" "`remedy_for "$_name"`"
+    done
+  fi
+}
+
+guard_switch() {
+  shift "$command_index"
+  checkout_paths=0
+  checkout_separator=0
+  take_name=0
+  skip_value=0
+  creates=0
+  first_branch=
+  for switch_arg in "$@"; do
+    if [ "$checkout_separator" -eq 1 ]; then
+      [ -z "$switch_arg" ] || checkout_paths=1
+      continue
+    fi
+    if [ "$skip_value" -eq 1 ]; then skip_value=0; continue; fi
+    if [ "$take_name" -eq 1 ]; then
+      guard_branch_target "$switch_arg"
+      take_name=0
+      continue
+    fi
+    case "$switch_arg" in
+      --) checkout_separator=1 ;;
+      --ignore-other-worktrees) guard_refuse "$sub1" "$switch_arg" "leave other copies' branches alone" ;;
+      --orphan=*|--create=*|--force-create=*) creates=1; guard_branch_target "${switch_arg#*=}" ;;
+      --orphan|--create|--force-create) creates=1; take_name=1 ;;
+      --conflict) skip_value=1 ;;
+      --pathspec-from-file) checkout_paths=1; skip_value=1 ;;
+      --pathspec-from-file=*) checkout_paths=1 ;;
+      --*) ;;
+      -*)
+        switch_cluster=${switch_arg#-}
+        while [ -n "$switch_cluster" ]; do
+          switch_letter=${switch_cluster%"${switch_cluster#?}"}
+          switch_cluster=${switch_cluster#?}
+          case "$switch_letter" in
+            b|B|c|C)
+              creates=1
+              if [ -n "$switch_cluster" ]; then guard_branch_target "$switch_cluster"; else take_name=1; fi
+              break ;;
+          esac
+        done ;;
+      *) [ -n "$first_branch" ] || first_branch=$switch_arg ;;
+    esac
+  done
+  # Only a pathspec exempts a tree read, never explicit branch creation.
+  if [ "$creates" -eq 0 ] && [ -n "$first_branch" ] && { [ "$sub1" != checkout ] || [ "$checkout_paths" -eq 0 ]; }; then
+    guard_branch_target "$first_branch"
+  fi
+}
+
+guard_branch_target() {
+  if is_protected "$1" || checked_out_elsewhere "$(full_head_ref "$1")"; then
+    guard_refuse "$sub1" "$1" "$(remedy_for "$1")"
+  fi
+}
+
+guard_rebase() {
+  shift "$command_index"
+  rebase_skip=0
+  rebase_count=0
+  rebase_root=0
+  rebase_no_update_refs=0
+  rebase_last=
+  for rebase_arg in "$@"; do
+    if [ "$rebase_skip" -eq 1 ]; then rebase_skip=0; continue; fi
+    case "$rebase_arg" in
+      --onto|--exec|-x|--strategy|-s|--strategy-option|-X|--empty|--whitespace) rebase_skip=1 ;;
+      --update-refs) guard_refuse rebase "$rebase_arg" "rebase only your own branch without updating other refs" ;;
+      --no-update-refs) rebase_no_update_refs=1 ;;
+      --root) rebase_root=1 ;;
+      -*) ;;
+      *) rebase_last=$rebase_arg; rebase_count=$((rebase_count + 1)) ;;
+    esac
+  done
+  if [ "$rebase_no_update_refs" -eq 0 ] && [ "$(query_git config --bool rebase.updateRefs 2>/dev/null || true)" = true ]; then
+    guard_refuse rebase rebase.updateRefs "pass --no-update-refs to rebase only your own branch"
+  fi
+  if [ "$rebase_count" -ge 2 ] || { [ "$rebase_root" -eq 1 ] && [ "$rebase_count" -ge 1 ]; }; then
+    guard_branch_target "$rebase_last"
+  fi
+}
+
+dst_of() {
+  _dst=${1#*:}
+  case "$_dst" in
+    +*) _dst=${_dst#+} ;;
+  esac
+  printf '%s\n' "$_dst"
+}
+
+# A remote is local when it resolves to this copy's git common dir: `.`,
+# `./`, an absolute path, or a file:// URL of the copy or the launch checkout.
+remote_is_local() {
+  _r=$1
+  [ -n "$_r" ] || return 1
+  case "$_r" in
+    file://localhost/*) _r=/${_r#file://localhost/} ;;
+    file:///*) _r=${_r#file://} ;;
+    file://*) return 1 ;;
+  esac
+  case "$_r" in
+    .) _path=$ALLOWED ;;
+    /*) _path=$_r ;;
+    *) _path=$cwd/$_r ;;
+  esac
+  _resolved=`(cd "$_path" 2>/dev/null && pwd -P) || true`
+  if [ -z "$_resolved" ] && [ -f "$_path" ]; then
+    _raw=`sed -n 's/^gitdir:[[:space:]]*//p' "$_path" | head -n 1`
+    case "$_raw" in
+      /*) _resolved=`(cd "$_raw" 2>/dev/null && pwd -P) || true` ;;
+      ?*) _resolved=`(cd "$(dirname "$_path")/$_raw" 2>/dev/null && pwd -P) || true` ;;
+    esac
+  fi
+  [ -n "$_resolved" ] || return 1
+  _common=`env -u GIT_DIR -u GIT_WORK_TREE "$REAL_GIT" -C "$ALLOWED" rev-parse --git-common-dir 2>/dev/null || true`
+  [ -n "$_common" ] || return 1
+  case "$_common" in
+    /*) ;;
+    *) _common=$ALLOWED/$_common ;;
+  esac
+  _common=`(cd "$_common" 2>/dev/null && pwd -P) || echo "$_common"`
+  _their=`env -u GIT_DIR -u GIT_WORK_TREE "$REAL_GIT" -C "$_resolved" rev-parse --git-common-dir 2>/dev/null || true`
+  if [ -n "$_their" ]; then
+    case "$_their" in
+      /*) ;;
+      *) _their=$_resolved/$_their ;;
+    esac
+    _their=`(cd "$_their" 2>/dev/null && pwd -P) || echo "$_their"`
+    if [ "$_their" = "$_common" ]; then
+      return 0
+    fi
+  fi
+  [ "$_resolved" = "$_common" ]
+}
+
+guard_refspec() {
+  case "$1" in
+    *:*)
+      _dst=`dst_of "$1"`
+      if is_protected "$_dst"; then
+        guard_refuse "$sub1" "$_dst" "$(remedy_for "$_dst")"
+      fi
+      if [ "$prune_refs" = 1 ]; then
+        case "$_dst" in
+          *\**)
+            _remote_namespace=$(printf '%s' "$_dst" | tr '[:upper:]' '[:lower:]')
+            case "$_remote_namespace" in
+              refs/remotes/*/*)
+                _remote_component=${_remote_namespace#refs/remotes/}
+                _remote_component=${_remote_component%%/*}
+                case "$_remote_component" in *\**|'') guard_refuse "$sub1" "$_dst" "prune only a named refs/remotes/<name>/ namespace" ;; esac ;;
+              *) guard_refuse "$sub1" "$_dst" "prune only a named refs/remotes/<name>/ namespace" ;;
+            esac ;;
+        esac
+      fi
+      ;;
+  esac
+}
+
+guard_fetch_remote() {
+  prune_refs=$fetch_prune_override
+  if [ -z "$prune_refs" ]; then
+    prune_refs=$(query_git config --bool --get "remote.$1.prune" 2>/dev/null || true)
+    [ -n "$prune_refs" ] || prune_refs=$(query_git config --bool --get fetch.prune 2>/dev/null || true)
+    case "$prune_refs" in true) prune_refs=1 ;; *) prune_refs=0 ;; esac
+  fi
+  fetch_mappings=$(query_git config --get-all "remote.$1.fetch" 2>/dev/null || true)
+  while IFS= read -r fetch_mapping; do guard_refspec "$fetch_mapping"; done <<EOF
+$fetch_mappings
+EOF
+}
+
+guard_fetch_group() {
+  fetch_group=$(query_git config --get-all "remotes.$1" 2>/dev/null || true)
+  if [ -n "$fetch_group" ]; then
+    for fetch_member in $fetch_group; do guard_fetch_remote "$fetch_member"; done
+  else
+    guard_fetch_remote "$1"
+  fi
+}
+
+guard_fetch() {
+  shift "$command_index"
+  fetch_prune_override=
+  multiple_remotes=0
+  fetch_skip=0
+  refmap_next=0
+  repository=
+  fetch_remotes=
+  fetch_refspecs=
+  for fetch_arg in "$@"; do
+    if [ "$fetch_skip" -eq 1 ]; then
+      fetch_skip=0
+      if [ "$refmap_next" -eq 1 ]; then refmap_next=0; fetch_refspecs="$fetch_refspecs
+$fetch_arg"; fi
+      continue
+    fi
+    case "$fetch_arg" in
+      --refmap) fetch_skip=1; refmap_next=1 ;;
+      --refmap=*) fetch_refspecs="$fetch_refspecs
+${fetch_arg#*=}" ;;
+      --prune|--prune-tags|-p) fetch_prune_override=1 ;;
+      --no-prune) fetch_prune_override=0 ;;
+      --multiple|--all) multiple_remotes=1 ;;
+      -o|--upload-pack|--filter|--server-option|--depth|--shallow-since|--shallow-exclude|--recurse-submodules-default) fetch_skip=1 ;;
+      -*) ;;
+      *)
+        if [ "$multiple_remotes" -eq 1 ]; then fetch_remotes="$fetch_remotes $fetch_arg"
+        elif [ -z "$repository" ]; then repository=$fetch_arg; fetch_remotes=$fetch_arg
+        else fetch_refspecs="$fetch_refspecs
+$fetch_arg"; fi ;;
+    esac
+  done
+  if [ "$multiple_remotes" -eq 1 ] && [ -z "$fetch_remotes" ]; then fetch_remotes=$(query_git remote 2>/dev/null || true); fi
+  if [ "$multiple_remotes" -eq 0 ] && [ -z "$repository" ]; then
+    fetch_branch=$(query_git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    fetch_remotes=$(query_git config --get "branch.$fetch_branch.remote" 2>/dev/null || true)
+    fetch_remotes=${fetch_remotes:-origin}
+  fi
+  for fetch_remote in $fetch_remotes; do
+    guard_fetch_group "$fetch_remote"
+  done
+  while IFS= read -r fetch_refspec; do guard_refspec "$fetch_refspec"; done <<EOF
+$fetch_refspecs
+EOF
+}
+
+guard_remote() {
+  shift "$command_index"
+  remote_action=
+  remote_targets=
+  fetch_prune_override=
+  remote_dry_run=0
+  for remote_arg in "$@"; do
+    case "$remote_arg" in
+      --prune|-p) fetch_prune_override=1 ;;
+      --no-prune) fetch_prune_override=0 ;;
+      --dry-run|-n) remote_dry_run=1 ;;
+      --no-dry-run) remote_dry_run=0 ;;
+      -*) ;;
+      *)
+        if [ -z "$remote_action" ]; then remote_action=$remote_arg
+        else remote_targets="$remote_targets $remote_arg"; fi ;;
+    esac
+  done
+  case "$remote_action" in
+    prune)
+      [ "$remote_dry_run" -eq 0 ] || return
+      fetch_prune_override=1
+      for remote_target in $remote_targets; do guard_fetch_remote "$remote_target"; done ;;
+    update)
+      if [ -n "$remote_targets" ]; then
+        for remote_target in $remote_targets; do guard_fetch_group "$remote_target"; done
+      elif [ -n "$(query_git config --get-all remotes.default 2>/dev/null || true)" ]; then
+        guard_fetch_group default
+      else
+        remote_targets=$(query_git remote 2>/dev/null || true)
+        for remote_target in $remote_targets; do
+          [ "$(query_git config --bool --get "remote.$remote_target.skipDefaultUpdate" 2>/dev/null || true)" != true ] || continue
+          guard_fetch_remote "$remote_target"
+        done
+      fi ;;
+  esac
+}
+
+guard_push() {
+  shift "$command_index"
+  push_skip=0
+  push_repo_next=0
+  push_repo_option=
+  push_remote=
+  push_delete=0
+  prune_refs=0
+  for push_arg in "$@"; do
+    if [ "$push_skip" -eq 1 ]; then
+      push_skip=0
+      if [ "$push_repo_next" -eq 1 ]; then push_repo_option=$push_arg; push_repo_next=0; fi
+      continue
+    fi
+    case "$push_arg" in
+      --delete|-d) push_delete=1 ;;
+      --prune) prune_refs=1 ;;
+      --repo) push_skip=1; push_repo_next=1 ;;
+      --repo=*) push_repo_option=${push_arg#*=} ;;
+      -o|--push-option|--receive-pack|--exec) push_skip=1 ;;
+      --*) ;;
+      -*) case "$push_arg" in -*d*) push_delete=1 ;; esac ;;
+      *) [ -n "$push_remote" ] || push_remote=$push_arg ;;
+    esac
+  done
+  # push.c uses the first positional repository, falling back to --repo.
+  push_remote=${push_remote:-$push_repo_option}
+  push_branch=$(query_git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  [ -n "$push_remote" ] || push_remote=$(query_git config --get "branch.$push_branch.pushRemote" 2>/dev/null || true)
+  [ -n "$push_remote" ] || push_remote=$(query_git config --get remote.pushDefault 2>/dev/null || true)
+  [ -n "$push_remote" ] || push_remote=$(query_git config --get "branch.$push_branch.remote" 2>/dev/null || true)
+  [ -n "$push_remote" ] || push_remote=origin
+  # remote get-url does not recognize command-line-only remote definitions.
+  push_urls=$(query_git config --get-all "remote.$push_remote.pushurl" 2>/dev/null || true)
+  if [ -z "$push_urls" ]; then push_urls=$(query_git remote get-url --push --all "$push_remote" 2>/dev/null || true); fi
+  if [ -z "$push_urls" ]; then push_urls=$(query_git ls-remote --get-url "$push_remote" 2>/dev/null) || return; fi
+  push_local=0
+  while IFS= read -r push_url; do
+    push_expanded=$(query_git ls-remote --get-url "$push_url" 2>/dev/null) || push_expanded=$push_url
+    if remote_is_local "$push_expanded"; then push_local=1; fi
+  done <<EOF
+$push_urls
+EOF
+  [ "$push_local" -eq 1 ] || return
+  push_mirror=$(query_git config --bool --get "remote.$push_remote.mirror" 2>/dev/null || true)
+  [ "$push_mirror" != true ] || guard_refuse push mirror "push explicit refs outside Plak's namespaces"
+  push_skip=0
+  push_skip_repository=1
+  for push_arg in "$@"; do
+    if [ "$push_skip" -eq 1 ]; then push_skip=0; continue; fi
+    case "$push_arg" in
+      --repo|-o|--push-option|--receive-pack|--exec) push_skip=1 ;;
+      --mirror) guard_refuse push mirror "push explicit refs outside Plak's namespaces" ;;
+      --all|--stdin)
+        [ "$sub1" != send-pack ] || guard_refuse send-pack "$push_arg" "send explicit refs outside Plak's namespaces" ;;
+      -*) ;;
+      *)
+        if [ "$push_skip_repository" -eq 1 ]; then push_skip_repository=0; continue; fi
+        case "$push_arg" in
+          *:*) guard_refspec "$push_arg" ;;
+          *) if { [ "$push_delete" -eq 1 ] || [ "$sub1" = send-pack ]; } && is_protected "$push_arg"; then guard_refuse "$sub1" "$push_arg" "$(remedy_for "$push_arg")"; fi ;;
+        esac ;;
+    esac
+  done
+  push_mappings=$(query_git config --get-all "remote.$push_remote.push" 2>/dev/null || true)
+  while IFS= read -r push_mapping; do guard_refspec "$push_mapping"; done <<EOF
+$push_mappings
+EOF
+}
+
+guard_stash() {
+  _seen=$command_index
+  _first=
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    case "$_arg" in
+      -*)
+        if [ -z "$_first" ]; then
+          guard_refuse stash "$_arg" "`stash_remedy`"
+        fi
+        ;;
+      *)
+        if [ -z "$_first" ]; then
+          _first=$_arg
+        fi
+        ;;
+    esac
+  done
+  case "$_first" in
+    list|show|apply|create) ;;
+    '') guard_refuse stash stash "`stash_remedy`" ;;
+    *) guard_refuse stash "$_first" "`stash_remedy`" ;;
+  esac
+}
+
+stash_remedy() {
+  if [ -n "$OWN_BRANCH" ]; then
+    printf 'commit WIP on %s\n' "$OWN_BRANCH"
+  else
+    printf '%s\n' "use git stash create and git show <object>, or keep the file in this copy"
+  fi
+}
+
+guard_gc() {
+  _seen=$command_index
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    case "$_arg" in
+      --prune|--prune=*)
+        guard_refuse gc prune "leave object retention to Plak"
+        ;;
+    esac
+  done
+}
+
+guard_prune() {
+  _seen=$command_index
+  _dry=0
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    case "$_arg" in
+      -n|--dry-run) _dry=1 ;;
+      --no-dry-run) _dry=0 ;;
+    esac
+  done
+  if [ "$_dry" -eq 0 ]; then
+    guard_refuse prune prune "leave object retention to Plak"
+  fi
+}
+
+guard_reflog() {
+  _seen=$command_index
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    case "$_arg" in
+      -*) ;;
+      expire|delete|drop)
+        guard_refuse reflog "$_arg" "leave object retention to Plak"
+        ;;
+      *) return ;;
+    esac
+  done
+}
+
+guard_worktree() {
+  _seen=$command_index
+  _sub=
+  _paths=0
+  _skip_reason=0
+  _prune_dry=0
+  for _arg in "$@"; do
+    if [ "$_seen" -gt 0 ]; then
+      _seen=$((_seen - 1))
+      continue
+    fi
+    if [ "$_skip_reason" -eq 1 ]; then _skip_reason=0; continue; fi
+    if [ -z "$_sub" ]; then
+      case "$_arg" in
+        -*) ;;
+        *) _sub=$_arg ;;
+      esac
+      continue
+    fi
+    case "$_sub" in
+      prune)
+        case "$_arg" in -n|--dry-run) _prune_dry=1 ;; --no-dry-run) _prune_dry=0 ;; esac
+        continue ;;
+      remove|move|lock|unlock|repair) ;;
+      *) return ;;
+    esac
+    case "$_arg" in
+      --reason) _skip_reason=1 ;;
+      -*) ;;
+      *)
+        _paths=1
+        case "$_arg" in
+          /*) _resolved=$_arg ;;
+          *) _resolved=$cwd/$_arg ;;
+        esac
+        _resolved=`(cd "$_resolved" 2>/dev/null && pwd -P) || echo "$_resolved"`
+        if [ "$_resolved" != "$ALLOWED" ]; then
+          guard_refuse worktree "$_sub" "leave other copies alone"
+        fi
+        ;;
+    esac
+  done
+  if [ "$_sub" = prune ] && [ "$_prune_dry" -eq 0 ]; then
+    guard_refuse worktree prune "leave other copies' registrations alone"
+  fi
+  if [ "$_sub" = "repair" ] && [ "$_paths" -eq 0 ]; then
+    guard_refuse worktree repair "leave other copies alone"
+  fi
+}
+
+guard_option_spellings() {
+  shift "$command_index"
+  case "$sub1" in
+    update-ref) guarded_options="stdin no-deref create-reflog batch-updates" ;;
+    symbolic-ref) guarded_options="delete quiet recurse no-recurse" ;;
+    branch) guarded_options="delete move copy force list all remotes verbose show-current merged no-merged contains no-contains points-at format sort set-upstream-to color track no-track edit-description unset-upstream" ;;
+    checkout|switch) guarded_options="create force-create orphan ignore-other-worktrees detach quiet conflict track no-track merge pathspec-from-file pathspec-file-nul" ;;
+    rebase) guarded_options="onto root interactive continue abort skip quit empty whitespace update-refs no-update-refs" ;;
+    fetch|pull) guarded_options="refmap prune no-prune prune-tags multiple all upload-pack filter server-option depth shallow-since shallow-exclude" ;;
+    remote) guarded_options="prune no-prune dry-run no-dry-run verbose" ;;
+    push|send-pack) guarded_options="delete repo prune mirror force force-with-lease push-option receive-pack exec all tags follow-tags stdin" ;;
+    gc) guarded_options="prune" ;;
+    prune) guarded_options="dry-run no-dry-run expire" ;;
+    worktree) guarded_options="reason force lock dry-run no-dry-run expire" ;;
+    repack) guarded_options="delete" ;;
+    *) return ;;
+  esac
+  guarded_skip_value=0
+  for guarded_arg in "$@"; do
+    if [ "$guarded_skip_value" -eq 1 ]; then guarded_skip_value=0; continue; fi
+    case "$sub1:$guarded_arg" in
+      update-ref:-m|update-ref:--message|symbolic-ref:-m|symbolic-ref:--message|worktree:--reason|\
+      branch:--format|branch:--sort|branch:--points-at|branch:--set-upstream-to|branch:-u|\
+      checkout:--conflict|checkout:--pathspec-from-file|switch:--conflict|\
+      push:--repo|push:-o|push:--push-option|push:--receive-pack|push:--exec|\
+      send-pack:--receive-pack|send-pack:--exec|\
+      fetch:--refmap|fetch:-o|fetch:--upload-pack|fetch:--filter|fetch:--server-option|fetch:--depth|fetch:--shallow-since|fetch:--shallow-exclude|\
+      pull:--refmap|pull:-o|pull:--upload-pack|pull:--filter|pull:--server-option|pull:--depth|pull:--shallow-since|pull:--shallow-exclude|\
+      rebase:--onto|rebase:--exec|rebase:-x|rebase:--strategy|rebase:-s|rebase:--strategy-option|rebase:-X|rebase:--empty|rebase:--whitespace)
+        guarded_skip_value=1; continue ;;
+    esac
+    case "$guarded_arg" in --) break ;; --*) ;; *) continue ;; esac
+    guarded_name=${guarded_arg%%=*}; guarded_name=${guarded_name#--}
+    guarded_exact=0
+    for guarded_full in $guarded_options; do [ "$guarded_name" != "$guarded_full" ] || guarded_exact=1; done
+    [ "$guarded_exact" -eq 0 ] || continue
+    for guarded_full in $guarded_options; do
+      case "$guarded_full" in "$guarded_name"*)
+        guard_refuse "$sub1" "$guarded_arg" "spell the guarded option in full (--$guarded_full)" ;;
+      esac
+    done
+  done
+}
+
+guard_repack() {
+  shift "$command_index"
+  repack_all=0
+  repack_delete=0
+  for repack_arg in "$@"; do
+    case "$repack_arg" in
+      --delete) repack_delete=1 ;;
+      --*) ;;
+      -*)
+        case "$repack_arg" in -*[aA]*) repack_all=1 ;; esac
+        case "$repack_arg" in -*d*) repack_delete=1 ;; esac ;;
+    esac
+  done
+  if [ "$repack_all" -eq 1 ] && [ "$repack_delete" -eq 1 ]; then
+    guard_refuse repack repack "leave unreachable-object retention to Plak"
+  fi
+}
+
+guard_option_spellings "$@"
+case "$sub1" in
+  gc|maintenance)
+    [ "$retention_now" -eq 0 ] || guard_refuse "$sub1" retention "leave immediate object and reflog retention to Plak" ;;
+esac
+case "$sub1" in
+  update-ref) guard_update_ref "$@" ;;
+  symbolic-ref) guard_symbolic_ref "$@" ;;
+  branch) guard_branch "$@" ;;
+  checkout|switch) guard_switch "$@" ;;
+  rebase) guard_rebase "$@" ;;
+  fetch|pull) guard_fetch "$@" ;;
+  remote) guard_remote "$@" ;;
+  push|send-pack) guard_push "$@" ;;
+  stash) guard_stash "$@" ;;
+  gc) guard_gc "$@" ;;
+  prune) guard_prune "$@" ;;
+  reflog) guard_reflog "$@" ;;
+  repack) guard_repack "$@" ;;
+  worktree) guard_worktree "$@" ;;
+esac
 exec "$REAL_GIT" "$@"

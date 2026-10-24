@@ -2367,6 +2367,112 @@ A worktree copy's git shim refuses, with exit 128:
   `GIT_WORK_TREE` — outside the copy;
 - a `--git-dir` or `GIT_DIR` that is not this copy's git directory.
 
+Global parsing records the command's argument index once. Every guard starts
+after that index, even when a global option's value equals a command name.
+Separate-value globals include `-C`, `-c`, `--git-dir`, `--work-tree`,
+`--namespace`, `--config-env`, `--attr-source`, and `--super-prefix`;
+stuck `-C`/`-c` and `--config-env=...` are inspected too. Abbreviations of
+guarded long options are refused with a full-spelling remedy; they cannot
+fall through as unknown options. Checkout/switch short clusters are scanned
+for their branch-creation option and attached name. Optional `--color` takes
+no following value.
+
+After that admission, and before exec, the same shim refuses a write to Plak
+coordination state. Exit 128, `plak: git-guard refused: <op> would change Plak
+coordination state (<name>); <remedy>`. The copy's own branch is
+`plak/<copy directory>` when that branch ref exists (a fork; the mint records
+it, and a later `switch` does not drop it) and empty for a detached snapshot.
+Names are compared case-insensitively. Protected names are `refs/plak/**`,
+`refs/stash` and `stash`, and `refs/heads/plak/*`, `heads/plak/*`, `plak/*`
+other than that own branch. The guard refuses:
+
+- `update-ref` of a protected ref (including `main-worktree/*` and
+  `worktrees/*`), or of `refs/heads/<b>` checked out in
+  another worktree. `update-ref --stdin` is copied to completion, then
+  inspected in both newline and NUL modes, including `symref-create`, `symref-update`, `symref-delete` and
+  `symref-verify`, and, when admitted, exec'd from that copy so the caller's
+  bytes are unchanged. Buffering waits for EOF before Git starts; interactive
+  transaction acknowledgements are unavailable through the shim. Both scratch
+  files use private `mktemp` names, and buffering failure refuses the call;
+  worktree registrations are listed once for the entire invocation, and quoted
+  textual ref names are refused with a remedy to use NUL mode;
+- `symbolic-ref` writes whose name or target is protected or checked out in
+  another worktree; the message value
+  of `-m` is skipped (a one-argument read passes);
+- `branch` delete, move, copy, force, or a bare create of a protected name.
+  A start point is not a written name. `--merged` and `--no-merged` list.
+  Verbosity (`-v`/`--verbose`) alone does not make a branch command a read.
+  Unrecognized branch `--no-*` combinations are refused rather than allowing
+  cancellation of a listing action to expose a write; the explicit
+  `--no-merged` and `--no-contains` filters still list.
+  Only a single-dash argument is a cluster of short options (listing passes);
+- `checkout` and `switch` creating a protected name, including
+  `-b`/`-B`/`-c`/`-C` (separate or stuck to the name), `--orphan`,
+  `--create` and `--force-create`, and the `=` forms;
+- checkout/switch of another copy's protected branch (including a branch not
+  currently checked out), explicit rebase branch targets, and
+  `--ignore-other-worktrees`. `checkout <tree> -- <paths>` remains a read;
+  an empty trailing `--` does not exempt a branch switch. A non-empty pathspec
+  after `--`, or `--pathspec-from-file`, exempts only a tree read, never
+  explicit branch creation. Rebase skips values
+  of `--empty` and `--whitespace` when locating its branch target, and
+  `--update-refs` is refused because it can rewrite other protected branches.
+  Effective `rebase.updateRefs=true`, including repository config and `-c`,
+  is also refused unless `--no-update-refs` is explicit;
+- a destination refspec of `fetch` or `pull`, including the value of
+  `--refmap` and configured remote fetch mappings. The repository positional
+  is not a refspec; with `--multiple`/`--all`, all positionals are remotes.
+  Without a repository positional, the current branch's configured remote
+  (otherwise `origin`) supplies the mappings. `remote update` checks named
+  remotes or groups, the default group, or all non-skipped remotes;
+  `remote prune <name>` checks that remote's mappings (dry-run stays a read).
+  Effective `fetch.prune` and per-remote `prune` apply to the pruning scope
+  check, with the per-remote setting and explicit command options taking
+  precedence over the global setting.
+  `fetch --stdin` is residual;
+- wildcard destinations whose literal prefix before `*` covers a protected
+  namespace, including `refs/*`, `refs/heads/*` and `*`. Pruning with a glob
+  destination outside a named `refs/remotes/<name>/` namespace is refused;
+- `push` of a destination refspec, and under `--delete`/`-d` every refspec,
+  only when the remote resolves to this copy's or the launch checkout's git
+  common dir (`.`, `./`, an absolute path, or a `file://` URL). Named remotes,
+  push URLs and `url.insteadOf` are resolved with effective command-line
+  configuration before comparing locality, including remotes defined only by
+  `-c` (whose push URLs require a config query, not `remote get-url` alone);
+  local mirrors are refused.
+  `--force-with-lease` takes no following argument.
+  The first positional repository wins over `--repo`; only its absence uses
+  `--repo`, then the configured push remote. Push to any other remote is not guarded;
+- `send-pack` uses the same local-repository and destination checks. Local
+  `--all`, `--mirror` and `--stdin` are refused; an explicit destination on
+  another repository stays admitted;
+- `stash` with no subcommand, or `push`, `save`, `pop`, `drop`, `clear`,
+  `store`, `branch`, or a leading option (`list`, `show`, `apply`, `create`
+  pass; the remedy is `commit WIP on <own branch>`, or `git stash create`
+  followed by `git show <object>`, or retaining the file, when the snapshot
+  has no branch);
+- `gc --prune=<date>`, `prune` other than `-n`/`--dry-run`, `reflog expire`,
+  `reflog delete`, `reflog drop`, and `repack -a/-A -d` (including clusters).
+  `gc` and `maintenance` are refused when `-c`, `--config-env` or
+  `GIT_CONFIG_PARAMETERS` or indexed `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/
+  `GIT_CONFIG_VALUE_n` explicitly sets `gc.pruneExpire` or `gc.reflogExpire*`
+  to `now` (including separately quoted key/value encoding). Indexed config
+  also participates in the `core.worktree` admission refusal;
+- `worktree remove`, `move`, `lock`, `unlock`, or `repair` of any path other than this
+  copy (`repair` with no path would touch every copy), and mutating
+  `worktree prune` (`-n`/`--dry-run` passes).
+  A later `--no-dry-run` cancels dry-run admission for either prune command.
+  A separate `--reason` value is a reason, not a worktree path.
+
+A pin is read with `git show <ref>`. Any other protected branch is answered
+with `work on <own branch>`. Push to a real remote and PR creation are not guarded.
+Immediate pruning (`gc --prune=now` and mutating `prune`) is permanently
+refused because it races in-flight object writes. Reflog expiry and deletion
+are refused while provenance objects remain unpinned.
+Reftable repositories, or deleting the minted branch after switching away,
+can make OWN_BRANCH empty and reclamation conservatively treat the old shim
+as unmanaged. This retains the copy; it does not grant another branch.
+
 A JJ copy has no Git directory: its Git shim admits only `git --version`,
 `git version` and `git help`; everything else exits 128 and directs the child
 to JJ instead of discovering the launch checkout. Hosted construction also
@@ -2440,8 +2546,16 @@ then faults.
 `/usr/bin/git` or `PATH=/usr/bin git` with an explicit repository path or
 deliberately cleared discovery ceiling, raw `gix::discover` in a custom
 binary (only environment-aware gix discovery honors the ceiling), a
-`git worktree add` outside the copy, and a hostile overwrite of the shim itself are all residual. Isolation
-remains host-level; the shim is a guard rail, not a boundary.
+`git worktree add` outside the copy, `git replace`, `git filter-branch --all`,
+`git repack --unpack-unreachable`, `git fetch --stdin`, an alias that expands
+to a guarded verb, and a hostile overwrite of the shim itself are all residual.
+Isolation remains host-level; the shim is a guard rail, not a boundary.
+Retention driven by repository/global config, or ordinary
+`git maintenance run --task=gc` without an explicit `now` override, remains
+residual; the guard does not evaluate every effective expiry policy or date
+spelling. Direct-URL `url.pushInsteadOf` rewrites and pre-existing symbolic-ref
+indirection beyond the explicitly guarded worktree refs are also residual.
+These are not covered by the lexical ref and explicit-option checks above.
 
 ## 13. `on_mint`
 
