@@ -229,9 +229,9 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "8d89be2d61b38520db99c47b40eb2d2b57754595c5ae17d838c64a1015b61530",
     "plakous-js-runtime": "56acf881acfc85486cd83ed122c0c3c3b4349b39785c15ddbd59fa815d5adbb6",
-    "plakous": "c2902b532482c48ab9c291903389c6b304294679778f85022c1bc5a7ce48be51",
+    "plakous": "74ec4362a3af9c3553203ce49acb95664d3cfdd6e386e90c5d5a3efe55b4a977",
     "plakous-agent": "e818ef48182ef75e455ed0af1d13c8aec12d9fa23c423db844f2557f2c62416f",
-    "plakous-anthropic": "96a540b6595b12572e9a95f317405b9035dc7ef9bc255932fd5287fc14e291d1",
+    "plakous-anthropic": "2b5706d014327cfb790b56a5aade9ecc92b4483dc411b54bbc8d71be161fb555",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
     "plakous-auth": "742413d1a421cae95994a0be6fe1b0f7b3dda38ec87ea1a87cc4173914dd08cd",
     "plakous-code-mode": "55d345667ad5bed05fda32a4c2daac6848058f1878dd98b894205c2046670537",
@@ -256,7 +256,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-responses-dialect": "87c82cbbd98ded7dceeb4d2bbec480905da27084ee6ea8dba00e5c92f8212d8e",
     "plakous-store": "64f90ad9ab7d4143c47844d30dfcc4ce41fe06a980d80d6bfba681a3ae378015",
     "plakous-tools": "1140b910a06b7b83f425d6e0ed50a9466d7adc8e2da6a07b4885d4a3c0a737a0",
-    "plakous-xai": "32739880fd16f23482e7e98a0e42f8f40c956c26f10aed00a2aba14c020a2db6",
+    "plakous-xai": "2add014ed0d25e21fa4b0418425c4512b95b0a5bdcf14ea0af29c3181bd2656f",
 }
 
 
@@ -343,7 +343,13 @@ def validate_test_only_dependency_features() -> list[str]:
                     )
             if feature not in resolved_dependency_features(package, (gate,), dependency):
                 errors.append(f"{package} [{gate}]: no longer enables {dependency}/{feature}")
-    for package in ("plakous", "plakous-openai", "plakous-openrouter"):
+    for package in (
+        "plakous",
+        "plakous-anthropic",
+        "plakous-openai",
+        "plakous-openrouter",
+        "plakous-xai",
+    ):
         for profile in ((), ("full",)) if package == "plakous" else ((),):
             if "test-clock" in resolved_dependency_features(package, profile, package):
                 errors.append(f"{package} [{','.join(profile) or 'default'}]: test-clock is test-only")

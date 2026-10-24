@@ -557,7 +557,8 @@ class FeatureGateTests(unittest.TestCase):
 
     def test_test_clock_cannot_enter_supported_closures(self) -> None:
         def features(package, profile, dependency):
-            return {"test-clock"} if dependency in {"plakous", "plakous-openai", "plakous-openrouter"} else set()
+            clocked = {"plakous", "plakous-anthropic", "plakous-openai", "plakous-openrouter", "plakous-xai"}
+            return {"test-clock"} if dependency in clocked else set()
 
         with mock.patch.object(feature_gate, "resolved_dependency_features", side_effect=features):
             errors = feature_gate.validate_test_only_dependency_features()
@@ -565,6 +566,8 @@ class FeatureGateTests(unittest.TestCase):
             self.assertTrue(any(f"{name}/test-clock" in error for error in errors))
         self.assertTrue(any("plak [maintainer]" in error for error in errors))
         self.assertTrue(any("plakous [full]" in error for error in errors))
+        for name in ("plakous-anthropic", "plakous-xai"):
+            self.assertIn(f"{name} [default]: test-clock is test-only", errors)
         self.assertNotIn("test-clock", feature_gate.optional_features({"features": {"test-clock": [], "auth": []}}))
 
     def test_the_real_plak_gates_fault_injection_behind_test_hooks(self) -> None:

@@ -2816,8 +2816,11 @@ and `NativeSubscriptions` clock seams for offline fixtures; it is not a
 supported facade API. Consent, catalog, side requests and token time checks
 share that test clock. Refresh-lead fixtures advance from a fixed review
 epoch using monotonic elapsed time. Production constructors remain clock-free
-and use the system clock. OpenAI and xAI Platform fixtures use each surface's
-own review window; Anthropic hosted clock coverage is deferred to CLOCK2.
+and use the system clock. The Grok and Claude native-auth managers read a
+crate-private subscription clock that the same feature, and their own unit
+tests, anchor at the compiled review (spec 05 §2). OpenAI and xAI Platform
+fixtures use each surface's own review window; the Anthropic API surface has no
+calendar expiry, so its hosted fixtures may use the system clock.
 Authenticated catalog
 `use_responses_lite` evidence selects the request mode and binds its identity.
 No Codex request carries a top-level `instructions` string: instructions travel

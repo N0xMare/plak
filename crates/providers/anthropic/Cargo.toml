@@ -19,6 +19,9 @@ class = "published-internal"
 
 [features]
 default = []
+# Repository-only: anchors the subscription clock at the compiled review for
+# offline tests (spec 05 sec. 2). Never enabled by a supported build.
+test-clock = []
 native-auth = [
     "dep:plakous-auth",
     "dep:thiserror",

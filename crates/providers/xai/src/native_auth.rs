@@ -34,7 +34,7 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use futures_util::lock::Mutex as AsyncMutex;
 use jsonwebtoken::jwk::{
@@ -3233,10 +3233,52 @@ fn system_unix_seconds() -> Result<u64, XaiNativeAuthError> {
     system_unix_elapsed().map(|value| value.as_secs())
 }
 
+/// The clock the Grok compatibility profile, its credentials and its catalog
+/// receipts are checked against.
+///
+/// Supported builds read the system clock. Offline tests and `test-clock`
+/// builds read a clock that starts one minute after the compiled review and
+/// advances with elapsed monotonic time, so they never change with the
+/// calendar (spec 05 sec. 2).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SubscriptionClock;
+
+impl plakous_model::Clock for SubscriptionClock {
+    fn now(&self) -> Timestamp {
+        system_unix_elapsed()
+            .ok()
+            .and_then(|elapsed| Timestamp::new(elapsed.as_secs(), elapsed.subsec_nanos()).ok())
+            .unwrap_or_else(|| plakous_model::Clock::now(&plakous_model::SystemClock))
+    }
+}
+
 fn system_unix_elapsed() -> Result<Duration, XaiNativeAuthError> {
-    SystemTime::now()
+    subscription_time::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| XaiNativeAuthError::CompatibilityInactive)
+}
+
+/// Supported builds: the system clock.
+#[cfg(not(any(test, feature = "test-clock")))]
+mod subscription_time {
+    pub(super) fn now() -> std::time::SystemTime {
+        std::time::SystemTime::now()
+    }
+}
+
+/// Offline tests and `test-clock` builds: one minute after the compiled
+/// review, advancing with elapsed monotonic time.
+#[cfg(any(test, feature = "test-clock"))]
+mod subscription_time {
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    pub(super) fn now() -> SystemTime {
+        static START: OnceLock<Instant> = OnceLock::new();
+        UNIX_EPOCH
+            + Duration::from_secs(super::COMPATIBILITY_REVIEWED_UNIX + 60)
+            + START.get_or_init(Instant::now).elapsed()
+    }
 }
 
 #[cfg(test)]

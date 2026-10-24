@@ -989,6 +989,23 @@ runs `cargo doc --workspace --no-deps --all-features --locked` under
 `RUSTDOCFLAGS="-D warnings"` between clippy and nextest, so a stale intra-doc
 link fails the gate instead of rotting unnoticed.
 
+**Compiled review windows never decide an offline test.** A subscription
+profile expires 90 days after its review (spec 01 §7.1), so a test that checks
+a compiled pin against the wall clock would turn red on that date. Codex and
+the facade inject a clock derived from the compiled review dates (the hidden
+`test-clock` seams). The Grok and Claude native-auth managers read one
+crate-private subscription clock: the system clock in supported builds, and
+in their own unit tests and `test-clock` builds a clock that starts one minute
+after that crate's compiled review and advances with elapsed monotonic time.
+The facade enables `plakous-xai/test-clock` and `plakous-anthropic/test-clock`
+only as dev-dependencies, so no supported or `test-hooks` build enables them.
+SuperGrok id-token expiry is checked against that clock, not the JWT
+library's wall clock. A facade test that hands its fixed-clock acceptance to
+the Grok or Claude manager assumes those subscriptions share their latest
+review date; re-dating one alone fails such a test at review time, never on a
+calendar date. Product commands inject a fixed clock (spec 02 §8.6) and API
+surfaces carry no calendar expiry.
+
 ### 2.1 Placement
 
 Test code has one home per kind, and production behavior is never moved into

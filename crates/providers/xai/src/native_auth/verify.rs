@@ -177,11 +177,16 @@ impl ManagerCore {
         validation.set_required_spec_claims(&["iss", "aud", "sub", "exp"]);
         validation.leeway = TOKEN_CLOCK_LEEWAY_SECONDS;
         validation.reject_tokens_expiring_in_less_than = 0;
+        // Expiry is checked below against the subscription clock, not
+        // jsonwebtoken's wall clock.
+        validation.validate_exp = false;
         let data = decode::<IdClaims>(token, &key, &validation)
             .map_err(|error| invalid(jwt_failure_reason(&error)))?;
         let mut claims = data.claims;
         let leeway_now = now.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS);
-        let failed = if claims.iss != XAI_ISSUER {
+        let failed = if claims.exp.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS) < now {
+            Some(CredentialRefreshFailureReason::IdTokenExp)
+        } else if claims.iss != XAI_ISSUER {
             Some(CredentialRefreshFailureReason::IdTokenIss)
         } else if !claims.aud.is_exact(XAI_PUBLIC_CLIENT_ID) {
             Some(CredentialRefreshFailureReason::IdTokenAud)
@@ -290,7 +295,6 @@ struct IdClaims {
     aud: Audience,
     azp: Option<String>,
     sub: String,
-    #[expect(dead_code, reason = "validated by jsonwebtoken decode leeway")]
     exp: u64,
     iat: u64,
     nbf: Option<u64>,

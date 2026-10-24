@@ -2,7 +2,6 @@
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 use plakous_auth::subscription_limit::SubscriptionRequestPermit;
 use plakous_http::{Client, Origin};
@@ -15,11 +14,11 @@ use plakous_model::{
     ModelPreparationErrorKind, PreparedCacheUse, PreparedCallRecord, PreparedModelCall,
     PreparedModelProjection, PreparedOutputLimit, PreparedTokenProjection, ProtocolId,
     ResolvedModelDescriptor, RuntimeModelAuthority, RuntimeModelAuthorityError,
-    RuntimeModelAuthorityOperation, SessionLineage, Support, SystemClock, Timestamp,
-    ValidatedRequestPlan,
+    RuntimeModelAuthorityOperation, SessionLineage, Support, Timestamp, ValidatedRequestPlan,
 };
 
 use crate::http::AnthropicDispatchAuthorization;
+use crate::native_auth::SubscriptionClock;
 use crate::oauth::{
     CLAUDE_OAUTH_ADAPTER_REVISION, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
     CLAUDE_OAUTH_EXPIRES_AT_UNIX, CLAUDE_OAUTH_REVIEWED_AT_UNIX, CLAUDE_OAUTH_SOURCE_REVISION,
@@ -146,7 +145,7 @@ impl ClaudeOAuthLanguageModel {
         self: &Arc<Self>,
         input_bound: u64,
     ) -> Result<(String, crate::ClaudeOAuthRequestIdentity), AnthropicError> {
-        let checked_at = SystemClock.now();
+        let checked_at = SubscriptionClock.now();
         self.resolved
             .ensure_current_admission(checked_at)
             .map_err(|_| oauth_retry_error())?;
@@ -336,7 +335,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
         let credentials = self.credentials.clone();
         let client = self.client.clone();
         let route = self.resolved.route().clone();
-        let clock = Arc::new(SystemClock);
+        let clock = Arc::new(SubscriptionClock);
         let ids = Arc::new(plakous_model::SystemIdGenerator);
         let input_bound = wire_size.max(1);
         let expected_account_binding = self.authority.account_binding();
@@ -414,7 +413,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                             let retry_model = Arc::clone(&retry_model);
                             let identity = retry_model.identity.clone();
                             Box::pin(async move {
-                                let checked_at = SystemClock.now();
+                                let checked_at = SubscriptionClock.now();
                                 retry_model
                                     .resolved
                                     .ensure_current_admission(checked_at)
@@ -427,7 +426,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                                     refresh_then_reserve_inference(&credentials, input_bound)
                                         .await
                                         .map_err(|_| oauth_retry_error())?;
-                                let checked_at = SystemClock.now();
+                                let checked_at = SubscriptionClock.now();
                                 retry_model
                                     .resolved
                                     .ensure_current_admission(checked_at)
@@ -576,7 +575,7 @@ impl ClaudeNativeAuthManager {
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
         let route = AnthropicPlatformRoute::claude_oauth(key, account)
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
-        let now = timestamp_now().map_err(|_| ClaudeNativeAuthError::CompatibilityInactive)?;
+        let now = SubscriptionClock.now();
         let expires_at = pin_expires_at(now)?;
         let account_binding = digest_binding(
             b"claude-oauth-grant-lineage-account",
@@ -672,7 +671,7 @@ impl ClaudeCredentialRenewal for ClaudeForcedRenewal {
             // target before reserving another inference request.
             self.model
                 .resolved
-                .ensure_current_admission(SystemClock.now())
+                .ensure_current_admission(SubscriptionClock.now())
                 .map_err(|_| renewal_error())?;
             let gate = self.credentials.request_gate().ok_or_else(renewal_error)?;
             let permit = gate
@@ -690,7 +689,7 @@ impl ClaudeCredentialRenewal for ClaudeForcedRenewal {
             if identity != self.identity || account_binding != self.expected_account_binding {
                 return Err(renewal_error());
             }
-            let checked_at = SystemClock.now();
+            let checked_at = SubscriptionClock.now();
             self.model
                 .resolved
                 .ensure_current_admission(checked_at)
@@ -796,14 +795,6 @@ fn digest_binding(label: &[u8], value: &[u8]) -> Result<Digest, ClaudeNativeAuth
         .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)
 }
 
-fn timestamp_now() -> Result<Timestamp, ClaudeNativeAuthError> {
-    let duration = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|_| ClaudeNativeAuthError::CompatibilityInactive)?;
-    Timestamp::new(duration.as_secs(), duration.subsec_nanos())
-        .map_err(|_| ClaudeNativeAuthError::CompatibilityInactive)
-}
-
 fn pin_expires_at(now: Timestamp) -> Result<Timestamp, ClaudeNativeAuthError> {
     let expires_at = Timestamp::new(CLAUDE_OAUTH_EXPIRES_AT_UNIX, 0)
         .map_err(|_| ClaudeNativeAuthError::CompatibilityInactive)?;
@@ -905,7 +896,7 @@ fn oauth_resolved_target(
                 .map_err(configuration_identity)?,
             expires_at,
         },
-        Arc::new(SystemClock),
+        Arc::new(SubscriptionClock),
     )
 }
 

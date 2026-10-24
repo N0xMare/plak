@@ -388,7 +388,7 @@ mod shared_host_model {
         ModelPreparationErrorKind, PreparedCacheUse, PreparedCallRecord, PreparedModelCall,
         PreparedModelProjection, PreparedOutputLimit, PreparedTokenProjection, ProtocolId,
         ReasoningPolicy, ResolvedModelDescriptor, RuntimeModelAuthority,
-        RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, SystemClock, Timestamp,
+        RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, Timestamp,
         ValidatedRequestPlan,
     };
     use plakous_responses::{
@@ -704,7 +704,7 @@ mod shared_host_model {
                 config,
                 attempt_data,
                 descriptor,
-                clock: Arc::new(SystemClock),
+                clock: Arc::new(crate::native_auth::SubscriptionClock),
                 #[cfg(test)]
                 request_gate: None,
             })

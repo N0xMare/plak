@@ -1469,7 +1469,7 @@ async fn pre_w3_b_grok_ptc_session_reopen_fails_closed() {
 
 pub(super) fn review_clock_for(provider: PlatformProvider) -> Arc<dyn plakous::model::Clock> {
     let expiry = match provider {
-        // CLOCK2: Anthropic hosted fixtures still use wall time, outside H1.
+        // Anthropic API admission has no calendar expiry, so wall time is safe.
         PlatformProvider::Anthropic => return Arc::new(plakous::model::SystemClock),
         PlatformProvider::OpenAi => {
             plakous::openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS
