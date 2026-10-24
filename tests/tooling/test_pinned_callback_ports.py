@@ -91,10 +91,11 @@ class PinnedCallbackPortTests(unittest.TestCase):
         self.assertIn("bind_loopback_listener(self.endpoints.loopback_ports)", codex)
         self.assertIn("refuse_pinned_test_loopback(self.endpoints.loopback_ports);", codex)
         self.assertIn("ports, CODEX_OAUTH.loopback_ports,", codex)
-        xai = read("crates/providers/xai/src/native_auth.rs")
+        xai = read("crates/providers/xai/src/native_auth/manager.rs")
         self.assertIn("bind_loopback_listener(self.core.endpoints.loopback_ports)", xai)
         self.assertIn("refuse_pinned_test_loopback(self.core.endpoints.loopback_ports);", xai)
-        self.assertIn("ports, XAI_OAUTH.loopback_ports,", xai)
+        xai_pins = read("crates/providers/xai/src/native_auth.rs")
+        self.assertIn("ports, XAI_OAUTH.loopback_ports,", xai_pins)
         facade = read("crates/plakous/src/subscriptions.rs")
         self.assertRegex(
             facade,
