@@ -127,9 +127,10 @@ def segment_evidence(capture_dir: Path, diagnostics: Path,
 def prepare_repo(cache: Path, work: Path) -> Path:
     if not (cache / ".git").exists():
         subprocess.run(["git", "clone", "-q", REPO_URL, str(cache)], check=True)
-    subprocess.run(["git", "clone", "-q", "--local", str(cache), str(work)], check=True)
+    env = live.fixture_git_env()
+    subprocess.run(["git", "clone", "-q", "--local", str(cache), str(work)], check=True, env=env)
     subprocess.run(["git", "-c", "advice.detachedHead=false", "checkout", "-q", REPO_COMMIT],
-                   cwd=work, check=True)
+                   cwd=work, check=True, env=env)
     return work
 
 

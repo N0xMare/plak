@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "live"))
 
 import live  # noqa: E402
+import long_session  # noqa: E402
 import qualification  # noqa: E402
 import smoke  # noqa: E402
 import soak  # noqa: E402
@@ -1070,6 +1071,19 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(record.outcome, "model")
         self.assertFalse(record.dead_end)
         self.assertEqual(agent.prompt.call_count, 1)
+
+    def test_fixture_git_ignores_the_operators_global_signing_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            operator = base / "operator.gitconfig"
+            operator.write_text("[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n")
+            with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(operator)}):
+                live.git_repo(base / "repo", {"a.txt": "a\n"})
+                (base / "repo" / "b.txt").write_text("b\n")
+                long_session.commit_extra(base / "repo", "more")
+            log = soak.subprocess.run(["git", "log", "--format=%G?", "-n", "2"], cwd=base / "repo",
+                                      check=True, capture_output=True, text=True).stdout.split()
+            self.assertEqual(log, ["N", "N"])
 
     def test_plant_resets_a_differently_fixed_function_and_keeps_later_code(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -94,6 +94,8 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              plak_home=os.environ.get('PLAK_HOME'),
                              rustdocflags=os.environ.get('RUSTDOCFLAGS'),
                              rustflags=os.environ.get('RUSTFLAGS'),
+                             git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
+                             git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'),
                              target_rustflags=os.environ.get(
                                  'CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'))) + '\n')
 failure = json.loads(os.environ.get('GATE_CARGO_FAILURES', '{}')).get(args[0], 0)
@@ -117,7 +119,8 @@ if args[0] == 'test':
 if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
-    log.write(json.dumps(dict(python=sys.argv[1:])) + '\n')
+    log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
+                              git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
 failure = json.loads(os.environ.get('GATE_PYTHON_FAILURES', '{}')).get(
     os.path.basename(sys.argv[1]), 0)
 if failure:
@@ -144,6 +147,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result = subprocess.run(['bash', str(self.root / 'scripts/dev-check.sh'), *args],
                                 env=self.env, text=True, capture_output=True, timeout=15)
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+        self.python_calls = [c for c in calls if 'python' in c]
         return result, [c for c in calls if 'args' in c], [c['python'] for c in calls if 'python' in c]
 
     def commit_fixture(self):
@@ -384,6 +388,21 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(supported, set(SUPPORTED))
         self.assertIn(f"supported_packages=({' '.join(SUPPORTED)})",
                       (ROOT / 'scripts/dev-check.sh').read_text())
+
+    def test_tests_and_tooling_run_with_an_isolated_git_config(self):
+        result, calls, _ = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        scratch = self.root / 'test-tmp'
+        # Everything after the toolchain probe: the tooling suite and the checkers.
+        isolated = [*self.lanes(calls), *(c for c in calls if c['args'][0] == 'test'),
+                    *(c for c in self.python_calls if c['python'][0].endswith('.py'))]
+        self.assertTrue(any(c.get('python', [''])[0].endswith('run_tooling_tests.py')
+                            for c in self.python_calls))
+        for call in isolated:
+            with self.subTest(call=call.get('args', call.get('python'))[:3]):
+                self.assertEqual(call['git_global'], str(scratch.resolve() / 'gitconfig'))
+                self.assertEqual(call['git_nosystem'], '1')
+        self.assertEqual((scratch / 'gitconfig').read_text(), '')
 
     def test_build_target_is_explicit_for_every_compile_and_test_invocation(self):
         result, calls, _ = self.run_gate('--full')

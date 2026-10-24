@@ -647,8 +647,20 @@ The same scripts export `PLAK_HOME` to `$TMPDIR/plak-isolated-home` (mode
 `~/.plak`. Product home resolution consults `PLAK_HOME` before `$HOME/.plak`,
 so a test, or a `plak` it spawns, that forgets to choose a home writes that
 scratch directory instead of the real one. `HOME` stays the operator's, because
-Cargo and git read it. A hand-run `cargo nextest` does not set `PLAK_HOME`;
+Cargo reads it. A hand-run `cargo nextest` does not set `PLAK_HOME`;
 export it to an absolute scratch directory first, the same way as `TMPDIR`.
+
+Git in tests reads no operator or system configuration. The same entry points
+(and `scripts/jj-tools.py compat`) export `GIT_CONFIG_GLOBAL` to an empty
+`$TMPDIR/gitconfig`, truncated at start, and `GIT_CONFIG_NOSYSTEM=1`;
+`dev-check.sh` exports them for every group, so the nextest lanes, the crash
+sweep and the Python tooling suite inherit them. An operator's global
+`commit.gpgsign`, hooks path, aliases or identity cannot reach a fixture. A test
+that commits sets its identity on its own command (`-c user.name=...
+-c user.email=...`) or in its fixture repository's local config, never through
+the global config. The live drivers give their own fixture git the same
+isolation (`GIT_CONFIG_GLOBAL=/dev/null`), while the `plak` under test keeps
+the operator's environment. A hand-run `cargo nextest` exports both as well.
 
 | Layer | Command | What it proves |
 | --- | --- | --- |
@@ -3260,6 +3272,7 @@ the environmental assumption, never to weaken the assertion.
 | Class | Cause | Fix in force |
 | --- | --- | --- |
 | Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `scripts/test-tmpdir.sh`, set by `dev-check.sh` and the test recipes, and required for hand-run nextest |
+| Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
 | Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | The durability lane (§2.3): platform and full run these alone with `--test-threads=1`, under a 240-second slow timeout. `just check` does not run them |

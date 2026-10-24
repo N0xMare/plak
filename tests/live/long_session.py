@@ -1431,9 +1431,10 @@ def require_completed(turn: live.Turn, what: str) -> None:
 
 
 def commit_extra(repo: Path, message: str) -> None:
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    env = live.fixture_git_env()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
     subprocess.run(["git", "-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid",
-                    "commit", "-qm", message], cwd=repo, check=True)
+                    "commit", "-qm", message], cwd=repo, check=True, env=env)
 
 
 def close_agent(agent: live.Agent) -> None:

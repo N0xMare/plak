@@ -57,6 +57,10 @@ def compat(prefix: Path) -> None:
     env['TMPDIR'] = subprocess.check_output(['bash', 'scripts/test-tmpdir.sh'], cwd=root, text=True).strip()
     env['PLAK_HOME'] = str(Path(env['TMPDIR']) / 'plak-isolated-home')
     Path(env['PLAK_HOME']).mkdir(mode=0o700, exist_ok=True)
+    git_config = Path(env['TMPDIR']) / 'gitconfig'
+    git_config.write_text('')
+    env['GIT_CONFIG_GLOBAL'] = str(git_config)
+    env['GIT_CONFIG_NOSYSTEM'] = '1'
     for version in VERSIONS:
         binary = (prefix / 'jj' / version / 'jj').resolve()
         if not binary.is_file():

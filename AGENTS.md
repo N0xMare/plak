@@ -101,8 +101,10 @@ filter and the `offline` exclusion. Contract fixture builds use a persistent
 load breaks process deadlines, and under `/private/tmp` on macOS, outside
 `HOME`; `PLAK_TEST_TMPDIR` overrides) and `PLAK_HOME=$TMPDIR/plak-isolated-home`
 (mode 0700) for nextest, so a test that forgets a product home cannot create the
-operator's `~/.plak`. Set both yourself if you run `cargo nextest` by hand:
-`TMPDIR="$(bash scripts/test-tmpdir.sh)"`. There is no CI: the only workflow,
+operator's `~/.plak`, plus `GIT_CONFIG_GLOBAL=$TMPDIR/gitconfig` (empty) and
+`GIT_CONFIG_NOSYSTEM=1`, so fixture git never reads the operator's git config;
+a test that commits sets its own identity. Set all four yourself if you run
+`cargo nextest` by hand: `TMPDIR="$(bash scripts/test-tmpdir.sh)"`. There is no CI: the only workflow,
 `.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag
 (`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
 

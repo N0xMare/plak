@@ -52,6 +52,11 @@ export TMPDIR
 isolated_home="$TMPDIR/plak-isolated-home"
 mkdir -p "$isolated_home"
 chmod 700 "$isolated_home"
+# Git in test fixtures must not read the operator's global or system config
+# (a global commit.gpgsign made fixture commits spawn gpg). A test that needs
+# an identity sets it on its own command or repository.
+: >"$TMPDIR/gitconfig"
+export GIT_CONFIG_GLOBAL="$TMPDIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
 
 # Supported packages (spec 06 §3). Each also builds alone in the builds group:
 # Cargo resolves features per selected package set, so `cargo build -p plak`

@@ -19,6 +19,9 @@ cd "$(dirname "$0")/.."
 
 TMPDIR="$(bash scripts/test-tmpdir.sh)"
 export TMPDIR
+# Fixture git reads no operator config (spec 05 §1, test isolation).
+: >"$TMPDIR/gitconfig"
+export GIT_CONFIG_GLOBAL="$TMPDIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
 
 # A `python3` on PATH may be a shim that cannot run (this repository has met
 # one). Pick the first candidate that actually executes.

@@ -1745,6 +1745,15 @@ def pin_composition(home: Path, composition: str) -> None:
         path.write_text(text.replace(needle, f'composition = "{composition}"\n'))
 
 
+def fixture_git_env() -> dict[str, str]:
+    """The harness's own fixture git reads no operator or system config.
+
+    An operator's global `commit.gpgsign` or hooks would otherwise run inside
+    fixture setup. The `plak` under test keeps the operator's environment.
+    """
+    return dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+
+
 def git_repo(path: Path, files: dict[str, str]) -> Path:
     """A committed git checkout holding `files`."""
     path.mkdir(parents=True)
@@ -1753,7 +1762,7 @@ def git_repo(path: Path, files: dict[str, str]) -> Path:
     for argv in (["init", "-q"], ["add", "."],
                  ["-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid",
                   "commit", "-qm", "seed"]):
-        subprocess.run(["git", *argv], cwd=path, check=True)
+        subprocess.run(["git", *argv], cwd=path, check=True, env=fixture_git_env())
     return path
 
 

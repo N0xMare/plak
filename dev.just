@@ -40,6 +40,8 @@ coverage:
     mkdir -p "$isolated_home"
     chmod 700 "$isolated_home"
     export PLAK_HOME="$isolated_home"
+    : >"$TMPDIR/gitconfig"
+    export GIT_CONFIG_GLOBAL="$TMPDIR/gitconfig" GIT_CONFIG_NOSYSTEM=1
     export CARGO_TARGET_DIR="$PWD/target/llvm-cov"
     export CARGO_INCREMENTAL=0
     cargo llvm-cov clean --workspace

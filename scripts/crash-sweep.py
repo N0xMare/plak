@@ -20,7 +20,11 @@ def main() -> int:
                                   capture_output=True, text=True).stdout.strip())
     home = scratch / "plak-isolated-home"
     home.mkdir(mode=0o700, exist_ok=True)
+    # Fixture git reads no operator config: no global identity or signing.
+    git_config = scratch / "gitconfig"
+    git_config.write_text("")
     env = dict(os.environ, TMPDIR=str(scratch), PLAK_HOME=str(home),
+               GIT_CONFIG_GLOBAL=str(git_config), GIT_CONFIG_NOSYSTEM="1",
                PLAK_CRASH_SWEEP_SHAPES=args.shapes,
                PLAK_CRASH_SWEEP_JOBS=str(args.jobs),
                PLAK_CRASH_SWEEP_REPEAT=str(args.repeat),
