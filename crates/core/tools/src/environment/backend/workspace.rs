@@ -1,8 +1,10 @@
 //! Workspace execution backend responsibilities.
 
 use plakous_model::{Digest, DigestDomain};
+#[cfg(test)]
+use rustix::fs::Dir;
 use rustix::fs::{
-    AtFlags, Dir, Mode, OFlags, RenameFlags, mkdirat, open, openat, renameat_with, unlinkat,
+    AtFlags, Mode, OFlags, RenameFlags, mkdirat, open, openat, renameat_with, unlinkat,
 };
 #[cfg(target_os = "linux")]
 use rustix::fs::{ResolveFlags, openat2};
@@ -17,20 +19,25 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 
 use std::io::Write;
-use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+use std::os::unix::fs::MetadataExt;
 
-use super::workspace_types::compile_query_regex;
 use super::{
     ExecutionBackendError, ExecutionBackendErrorKind, ExecutionBackendFuture,
     ExecutionOperationControl, ExecutionWorkspace, MAX_WORKSPACE_FILE_BYTES, RepositoryMatchCase,
-    RepositoryQuery, RepositoryQueryMatch, RepositoryQueryResult, RepositoryQueryStopReason,
+    RepositoryQuery, RepositoryQueryResult, RepositoryQueryStopReason,
     WORKSPACE_CONTENT_IDENTITY_REVISION, WorkspaceContentIdentity, WorkspaceExpectedFileState,
     WorkspaceMutationDisposition, WorkspaceMutationResultItem, WorkspaceMutationTransaction,
     WorkspaceMutationTransactionResult, WorkspaceReadCursor, WorkspaceReadSlice,
     WorkspaceReadSliceRequest, WorkspaceReplacement, backend_error, conflict_error, io_error, lock,
-    recovery_required_error, resource_error, validate_path_bytes, validate_relative_path,
-    workspace_error,
+    recovery_required_error, resource_error, validate_relative_path, workspace_error,
 };
+mod query;
+
+use query::{
+    RepositoryQueryWalk, list_repository_query_paths, retain_repository_query_glob_matches,
+    scan_repository_query_files, walk_repository_query_directories,
+};
+
 pub(super) fn verified_workspace_root(
     workspace: &ExecutionWorkspace,
 ) -> Result<fs::File, ExecutionBackendError> {
@@ -495,10 +502,6 @@ pub(super) fn read_workspace_sync(
     })
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "bounded traversal, scan, ordering, and result accounting remain one visible semantic operation"
-)]
 pub(super) fn query_repository_sync(
     workspace: &ExecutionWorkspace,
     query: &RepositoryQuery,
@@ -506,7 +509,6 @@ pub(super) fn query_repository_sync(
 ) -> Result<RepositoryQueryResult, ExecutionBackendError> {
     control.check_cancelled()?;
     let limits = query.limits();
-    let mut entries_skipped = 0_usize;
     // A glob with a literal leading directory prefix can only match
     // beneath that prefix, so the walk starts there instead of at the
     // query root. Pruning changes only what is visited: every path is
@@ -530,8 +532,6 @@ pub(super) fn query_repository_sync(
     let mut pending = BTreeMap::new();
     let root_ignores = ancestor_ignores(workspace, &walk_root);
     let mut files = Vec::new();
-    let mut tree_entries = 0_usize;
-    let mut stop_reason = None;
     if start_metadata.is_file() {
         files.push((
             walk_root.clone(),
@@ -548,284 +548,36 @@ pub(super) fn query_repository_sync(
             "repository query root is not a regular file or directory",
         ));
     }
-    while let Some((directory_path, (directory, parent_ignores))) = pending.pop_first() {
-        control.check_cancelled()?;
-        let ignores = directory_ignores(&directory, &directory_path, &parent_ignores);
-        let remaining = limits.max_tree_entries.saturating_sub(tree_entries);
-        let mut children = Vec::with_capacity(remaining.min(256));
-        let Ok(mut entries) = Dir::read_from(&directory) else {
-            entries_skipped = entries_skipped.saturating_add(1);
-            continue;
-        };
-        for entry in &mut entries {
-            control.check_cancelled()?;
-            if children.len() == remaining {
-                stop_reason = Some(RepositoryQueryStopReason::TreeEntries);
-                break;
-            }
-            let Ok(entry) = entry else {
-                entries_skipped = entries_skipped.saturating_add(1);
-                continue;
-            };
-            let name = entry.file_name().to_bytes();
-            // Version-control metadata is never repository content. Other
-            // dot entries (`.github`, `.cargo`) are walked unless ignored.
-            if matches!(name, b"." | b".." | b".git" | b".jj") {
-                continue;
-            }
-            if query_entry_kind_is_walkable(entry.file_type()) == Some(false) {
-                entries_skipped = entries_skipped.saturating_add(1);
-                continue;
-            }
-            let child_name = PathBuf::from(std::ffi::OsStr::from_bytes(name));
-            let is_directory = entry.file_type() == rustix::fs::FileType::Directory;
-            if is_ignored(&ignores, &directory_path.join(&child_name), is_directory) {
-                continue;
-            }
-            children.push(child_name);
-        }
-        if stop_reason.is_some() {
-            break;
-        }
-        tree_entries = tree_entries.saturating_add(children.len());
-        children.sort();
-        for child_name in children {
-            control.check_cancelled()?;
-            let relative = directory_path.join(&child_name);
-            validate_path_bytes(&relative)?;
-            let child = match open_directory_entry_for_query(&directory, &child_name) {
-                RepositoryQueryEntry::Opened(child) => child,
-                RepositoryQueryEntry::Vanished | RepositoryQueryEntry::Symlink => continue,
-                RepositoryQueryEntry::Skipped => {
-                    entries_skipped = entries_skipped.saturating_add(1);
-                    continue;
-                }
-            };
-            let Ok(metadata) = child.metadata() else {
-                entries_skipped = entries_skipped.saturating_add(1);
-                continue;
-            };
-            if metadata.is_dir() {
-                pending.insert(relative, (child, Arc::clone(&ignores)));
-            } else if metadata.is_file() {
-                files.push((
-                    relative,
-                    metadata.len(),
-                    FileObservation::capture(&metadata),
-                    child,
-                ));
-            } else {
-                // An unknown-kind entry that opened as a socket, fifo or
-                // device has no contents this walk can survey.
-                entries_skipped = entries_skipped.saturating_add(1);
-            }
-        }
-    }
-    files.sort_by(|left, right| left.0.cmp(&right.0));
-    if let Some(glob) = query.path_glob.as_deref() {
-        let matcher = PathGlob::new(glob)?;
-        files.retain(|(relative, _, _, _)| {
-            // A file root is matched by its own path; anything beneath a
-            // directory root by its path relative to that root.
-            let within = relative
-                .strip_prefix(query.root())
-                .ok()
-                .filter(|within| !within.as_os_str().is_empty())
-                .unwrap_or(relative);
-            matcher.matches(within)
-        });
-    }
-
+    let RepositoryQueryWalk {
+        mut files,
+        entries_skipped,
+        mut stop_reason,
+    } = walk_repository_query_directories(control, limits, pending, files)?;
+    retain_repository_query_glob_matches(query, &mut files)?;
     let files_considered = files.len().min(limits.max_files);
     if files.len() > files_considered {
         stop_reason = Some(RepositoryQueryStopReason::Files);
     }
     if query.list_only {
-        let mut matches = Vec::new();
-        let empty = WorkspaceContentIdentity::from_bytes(&[])?;
-        for (relative, _, _, _) in files.into_iter().take(files_considered) {
-            control.check_cancelled()?;
-            if matches.len() == limits.max_matches {
-                stop_reason = Some(RepositoryQueryStopReason::Matches);
-                break;
-            }
-            matches.push(RepositoryQueryMatch {
-                path: relative,
-                line: 1,
-                column: 1,
-                bytes: Arc::from([]),
-                truncated: false,
-                content: empty,
-            });
-        }
-        return Ok(RepositoryQueryResult {
-            matches: matches.into(),
+        return list_repository_query_paths(
+            control,
+            limits,
+            files,
             files_considered,
-            files_scanned: 0,
-            bytes_scanned: 0,
-            skipped_binary: 0,
-            skipped_oversize: 0,
-            skipped_changed: 0,
             entries_skipped,
             stop_reason,
-        });
+        );
     }
-    let mut matches = Vec::new();
-    let mut files_scanned = 0_usize;
-    let mut bytes_scanned = 0_u64;
-    let mut skipped_binary = 0_usize;
-    let mut skipped_oversize = 0_usize;
-    let mut skipped_changed = 0_usize;
-    let mut result_bytes = format!("matches={} incomplete=true\n", limits.max_matches).len();
-    let pattern = RepositoryLiteralMatcher::new(query.literal(), query.match_case());
-    let regex = query
-        .regex
-        .as_deref()
-        .map(|pattern| compile_query_regex(pattern, query.match_case()))
-        .transpose()?;
-    'files: for (relative, reported_bytes, discovered, mut file) in
-        files.into_iter().take(files_considered)
-    {
-        control.check_cancelled()?;
-        if reported_bytes > limits.max_file_bytes {
-            skipped_oversize = skipped_oversize.saturating_add(1);
-            continue;
-        }
-        if reported_bytes > limits.max_total_bytes.saturating_sub(bytes_scanned) {
-            stop_reason = Some(RepositoryQueryStopReason::ScannedBytes);
-            break;
-        }
-        let bytes = match read_unchanged_query_file(&mut file, discovered, limits.max_file_bytes)? {
-            QueryFileRead::Changed => {
-                skipped_changed = skipped_changed.saturating_add(1);
-                continue;
-            }
-            QueryFileRead::Oversize => {
-                skipped_oversize = skipped_oversize.saturating_add(1);
-                continue;
-            }
-            QueryFileRead::Bytes(bytes) => bytes,
-        };
-        let observed = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if observed > limits.max_file_bytes {
-            skipped_oversize = skipped_oversize.saturating_add(1);
-            continue;
-        }
-        if observed > limits.max_total_bytes.saturating_sub(bytes_scanned) {
-            stop_reason = Some(RepositoryQueryStopReason::ScannedBytes);
-            break;
-        }
-        bytes_scanned = bytes_scanned.saturating_add(observed);
-        files_scanned = files_scanned.saturating_add(1);
-        if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
-            skipped_binary = skipped_binary.saturating_add(1);
-            continue;
-        }
-        let content = WorkspaceContentIdentity::from_bytes(&bytes)?;
-        let mut line_number = 1_u64;
-        let mut line_start = 0_usize;
-        while line_start <= bytes.len() {
-            let line_end = bytes[line_start..]
-                .iter()
-                .position(|byte| *byte == b'\n')
-                .map_or(bytes.len(), |offset| line_start.saturating_add(offset));
-            let line = &bytes[line_start..line_end];
-            if let Some(regex) = regex.as_ref() {
-                // A regular expression reports a line once, as grep does.
-                if let Some(found) = regex.find(line) {
-                    let column = found.start();
-                    let retained = utf8_prefix_len(line, line.len().min(limits.max_match_bytes));
-                    let truncated = retained < line.len();
-                    let row_bytes =
-                        repository_row_bytes(&relative, line_number, column, retained, truncated);
-                    if matches.len() == limits.max_matches
-                        || row_bytes > limits.max_result_bytes.saturating_sub(result_bytes)
-                    {
-                        stop_reason = Some(if matches.len() == limits.max_matches {
-                            RepositoryQueryStopReason::Matches
-                        } else {
-                            RepositoryQueryStopReason::ResultBytes
-                        });
-                        break 'files;
-                    }
-                    matches.push(RepositoryQueryMatch {
-                        path: relative.clone(),
-                        line: line_number,
-                        column: u64::try_from(column.saturating_add(1)).unwrap_or(u64::MAX),
-                        bytes: line[..retained].to_vec().into(),
-                        truncated,
-                        content,
-                    });
-                    result_bytes = result_bytes.saturating_add(row_bytes);
-                }
-                if line_end == bytes.len() {
-                    break;
-                }
-                line_start = line_end.saturating_add(1);
-                line_number = line_number.saturating_add(1);
-                continue;
-            }
-            let mut prefix_len = 0_usize;
-            for (index, byte) in line.iter().copied().enumerate() {
-                if index.is_multiple_of(65_536) {
-                    control.check_cancelled()?;
-                }
-                while prefix_len > 0 && !pattern.matches(byte, prefix_len) {
-                    prefix_len = pattern.failure[prefix_len - 1];
-                }
-                if pattern.matches(byte, prefix_len) {
-                    prefix_len = prefix_len.saturating_add(1);
-                }
-                if prefix_len != pattern.needle.len() {
-                    continue;
-                }
-                let column = index.saturating_add(1).saturating_sub(pattern.needle.len());
-                let retained_bound = line.len().min(limits.max_match_bytes);
-                let retained = utf8_prefix_len(line, retained_bound);
-                let truncated = retained < line.len();
-                let row_bytes =
-                    repository_row_bytes(&relative, line_number, column, retained, truncated);
-                if matches.len() == limits.max_matches
-                    || row_bytes > limits.max_result_bytes.saturating_sub(result_bytes)
-                {
-                    stop_reason = Some(if matches.len() == limits.max_matches {
-                        RepositoryQueryStopReason::Matches
-                    } else {
-                        RepositoryQueryStopReason::ResultBytes
-                    });
-                    break 'files;
-                }
-                matches.push(RepositoryQueryMatch {
-                    path: relative.clone(),
-                    line: line_number,
-                    column: u64::try_from(column.saturating_add(1)).unwrap_or(u64::MAX),
-                    bytes: line[..retained].to_vec().into(),
-                    truncated,
-                    content,
-                });
-                result_bytes = result_bytes.saturating_add(row_bytes);
-                prefix_len = 0;
-            }
-            if line_end == bytes.len() {
-                break;
-            }
-            line_start = line_end.saturating_add(1);
-            line_number = line_number.saturating_add(1);
-        }
-    }
-    Ok(RepositoryQueryResult {
-        matches: matches.into(),
+    scan_repository_query_files(
+        query,
+        control,
+        limits,
+        files,
         files_considered,
-        files_scanned,
-        bytes_scanned,
-        skipped_binary,
-        skipped_oversize,
-        skipped_changed,
         entries_skipped,
         stop_reason,
-    })
+    )
 }
-
 /// One admitted repository-query file as read for scanning.
 #[derive(Debug, Eq, PartialEq)]
 enum QueryFileRead {

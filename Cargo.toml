@@ -499,7 +499,7 @@ feature-ceiling = 2
 reason = "Existing placement debt; ratchet down as module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-tools]
-env-sites = ["src/environment/backend.rs", "src/environment/backend/process.rs"]
+env-sites = ["src/environment/backend.rs", "src/environment/backend/process/host_context.rs"]
 reason = "Reviewed child-process/VCS environment construction reads; passed-in environment remains a later refactor."
 
 [workspace.metadata.plakous.cfg.plakous-workspace]
