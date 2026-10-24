@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trimmed from a real `just check` offline-lane nextest JUnit report: three suites, two cases each. -->
+<testsuites name="nextest-run" tests="6" failures="0" errors="0" uuid="9e9a7669-a4e3-4136-b171-3001a67f5647" timestamp="2026-10-24T05:17:38.691-04:00" time="166.044">
+    <testsuite name="plak" tests="2" disabled="0" errors="0" failures="0">
+        <testcase name="agent_jsonl::tests::a_terminal_tool_line_reaches_the_wire_with_its_duration" classname="plak" timestamp="2026-10-24T05:17:38.698-04:00" time="0.021">
+        </testcase>
+        <testcase name="agent_jsonl::tests::fork_maps_to_user_action" classname="plak" timestamp="2026-10-24T05:17:38.698-04:00" time="0.021">
+        </testcase>
+    </testsuite>
+    <testsuite name="plak::integration" tests="2" disabled="0" errors="0" failures="0">
+        <testcase name="crash_sweep::coverage::each_submission_view_cut_requires_its_own_row" classname="plak::integration" timestamp="2026-10-24T05:17:52.058-04:00" time="0.014">
+        </testcase>
+        <testcase name="crash_sweep::driver::capacity_cut_selection_uses_facts_not_transaction_ordinals" classname="plak::integration" timestamp="2026-10-24T05:17:52.063-04:00" time="0.012">
+        </testcase>
+    </testsuite>
+    <testsuite name="plakous-xai" tests="2" disabled="0" errors="0" failures="0">
+        <testcase name="api_models::live_tests::loopback_list_sends_the_bearer_and_rejects_a_cursor" classname="plakous-xai" timestamp="2026-10-24T05:19:52.996-04:00" time="0.012">
+        </testcase>
+        <testcase name="api_models::tests::a_live_window_or_effort_above_the_table_needs_review" classname="plakous-xai" timestamp="2026-10-24T05:19:53.037-04:00" time="0.006">
+        </testcase>
+    </testsuite>
+</testsuites>

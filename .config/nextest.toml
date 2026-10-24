@@ -257,3 +257,14 @@ default-filter = '''
   | test(bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit)
   | test(sigkill_gc_cuts_preserve_queue_counters_and_oracle)
 '''
+
+# Per-test timing: each lane writes target/nextest/<profile>/junit.xml
+# (gitignored). `just dev test-timing` summarizes them; nothing gates on it.
+[profile.offline.junit]
+path = "junit.xml"
+
+[profile.serial.junit]
+path = "junit.xml"
+
+[profile.durability.junit]
+path = "junit.xml"

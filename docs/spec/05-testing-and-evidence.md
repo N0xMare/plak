@@ -1101,6 +1101,17 @@ never its serial ones. `fail-fast` is off. The workspace slow timeout is 60
 seconds with termination after the second period; `serial` and `durability`
 raise theirs to 240 seconds.
 
+Each lane profile writes a JUnit report to `target/nextest/<profile>/junit.xml`
+(the store directory, gitignored), overwritten by the next run of that
+profile, including the `offline` and `serial` runs of `just dev coverage`.
+`just dev test-timing [LANE...]` (`tools/perf/nextest_timing.py`) reads the
+reports present and prints, per lane, the test count, wall time, summed test
+time, effective parallelism, failed, flaky and retried tests, the longest
+test and the test span (first test start to last finish, from per-test
+timestamps; without them, the longest test as a lower bound), then the
+slowest tests and the per-binary and per-package totals. It is informational:
+no gate reads it.
+
 The `default` profile sets `leak-timeout = { period = "5s", result = "fail" }`;
 the lane profiles inherit it.
 After a test process exits, nextest waits up to five seconds to observe EOF on

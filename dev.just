@@ -26,6 +26,7 @@ reload-rehearsal uuid *ARGS:
 # Line/region/function coverage for the parallel and serial lanes, merged.
 # Needs: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov
 # Writes target/llvm-cov/html/html/index.html and target/llvm-cov/coverage.json.
+# Its nextest runs also overwrite target/nextest/{offline,serial}/junit.xml.
 # Uses its own CARGO_TARGET_DIR so it never invalidates the normal build.
 [doc("line coverage for the parallel and serial lanes, in its own target dir")]
 coverage:
@@ -49,6 +50,12 @@ coverage:
     cargo llvm-cov report --html --output-dir "$CARGO_TARGET_DIR/html"
     cargo llvm-cov report --json --output-path "$CARGO_TARGET_DIR/coverage.json"
     cargo llvm-cov report --summary-only
+
+# Slowest tests, per-binary and per-package totals and each lane's test span,
+# from the JUnit reports the last nextest lanes wrote. Informational.
+[doc("per-test timing from the last lanes' nextest JUnit reports")]
+test-timing *ARGS:
+    python3 tools/perf/nextest_timing.py {{ARGS}}
 
 # Opt-in indexed SQLite crash-point sweep of the real offline binary.
 crash-sweep *ARGS:
