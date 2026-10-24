@@ -2808,9 +2808,9 @@ dispatch. The backend keys prompt caching on this header, not the body field.
 A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
 does not borrow client identity: `originator=plak` and the truthful Plak user
 agent remain unchanged. Its compiled compatibility
-profile was reviewed on 2026-10-22 and expires at 2026-11-21T23:59:59Z; an
-acceptance recorded before the review date is not current, so the operator
-accepts the notice again without a new login (§7.2).
+profile was reviewed on 2026-10-22 and expires at 2027-01-20T00:00:00Z, 90 days
+after the review (§7.1); a re-review that changes no contract keeps every
+earlier acceptance current (§7.2).
 The hidden, non-default `test-clock` feature alone exposes the Codex manager
 and `NativeSubscriptions` clock seams for offline fixtures; it is not a
 supported facade API. Consent, catalog, side requests and token time checks
@@ -3510,7 +3510,13 @@ catalog and inference. The built-in subscription routes use immutable
 revision-pinned provider-owned profiles. Codex and SuperGrok expose
 `PinnedCompatibility` provenance: observed compatibility, not provider
 authorization or endorsement. Claude's profile carries its exact source,
-review, expiry and notice revisions (§7.2).
+review, expiry and notice revisions (§7.2). Every subscription profile has
+one hard window: it expires, exclusive, at 00:00Z exactly 90 days after its
+review date (`SUBSCRIPTION_REVIEW_WINDOW_SECONDS` in `plakous-auth`), and at
+or after that instant, or while the clock reads before the review date, the
+route refuses construction, refresh and every revalidation. The documented
+public API surfaces (OpenAI Platform, xAI Platform, Anthropic API, OpenRouter
+Chat) have no such window; their review-due dates only warn (§6).
 
 ### 7.2 The three OAuth verticals
 
@@ -3519,13 +3525,40 @@ recovery markers, their locks and quarantine, and offline catalog persistence. L
 workflows call named state operations; the catalog codec performs no I/O.
 A cleared login-recovery marker binds the login to the consent generation of
 the acceptance receipt it was made under. A receipt that is no longer current
-(a re-reviewed, expired or killed profile) is reported as compatibility state
+(a changed contract revision, an expired or a killed profile) is reported as compatibility state
 only: the login is still judged against the stored receipt's generation and
 is not quarantined. Explicitly accepting the current notice mints a new
 generation and, under the same compatibility lock, moves a cleared marker
 bound to exactly the replaced receipt (with a matching epoch and no
 process-local quarantine) onto it, so the login stays usable. An armed,
 mismatched or ambiguous marker is never moved and stays fail-closed.
+
+Consent binds the profile's contract revision: the tuple of profile id, source
+revision, secondary source revision, notice revision, provenance and kill-switch
+revision. The receipt (schema 2) still records the review and expiry dates the
+operator was shown, but they are informational and are not compared; an
+acceptance is current while the profile is active, the tuple matches and the
+acceptance time is not after the clock. Each provider applies the same law to
+the acceptance it is handed. What a pin change requires follows from that:
+
+- An OAuth client id, scope, endpoint, callback, grant or originator/identity
+  contract change is a new profile id (the new contract pin date, or `r<N+1>`
+  on the same date) with new notice and kill-switch revisions. The stored login
+  was written under another profile, so it needs a new login, which replaces
+  it, and the notice is accepted again (chapter 04 §3.3).
+- A notice wording or risk-statement change is a new notice revision: the
+  operator accepts again, and the login is rebound as above without a new
+  login.
+- An inference wire fact (the Codex reference client version and catalog
+  contract, the Claude costume and betas, the Grok client version) changes
+  adapter or reference revisions only, never consent.
+- A review that changes only the review date changes nothing the operator sees:
+  the profile id, notice and receipt stay current. Installed builds that apply
+  this law read each other's receipts for one profile as current whatever their
+  review dates. An older build that still compares review dates (0.0.2) asks
+  once to accept the notice for a receipt a newer build wrote, and the receipt
+  it then writes stays current for the newer builds.
+
 `NativeSubscriptions::status` reports a provider without storage as signed out
 without creating anything. Once the layout exists it takes the provider's
 exclusive compatibility lock, the same lock model resolution holds across its

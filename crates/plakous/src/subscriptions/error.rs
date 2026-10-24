@@ -275,6 +275,9 @@ pub(super) fn map_codex_error(
         plakous_openai::NativeCodexAuthError::WrittenByNewerBuild => {
             NativeSubscriptionError::CredentialWrittenByNewerBuild
         }
+        plakous_openai::NativeCodexAuthError::ProfileChanged => {
+            NativeSubscriptionError::CredentialProfileChanged
+        }
         // A login stored by an earlier build (no selection epoch) needs a new login.
         plakous_openai::NativeCodexAuthError::Unavailable
         | plakous_openai::NativeCodexAuthError::LoginRequired => {

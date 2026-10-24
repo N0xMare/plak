@@ -227,9 +227,10 @@ pub const CLAUDE_OAUTH_KILL_SWITCH_REVISION: &str = "anthropic.claude.oauth.kill
 /// UTC review time for the Claude OAuth pin table.
 #[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_790_035_200;
-/// Exclusive expiry for the Claude OAuth pin table.
+/// Exclusive expiry for the Claude OAuth pin table, 00:00Z.
 #[cfg(feature = "native-auth")]
-pub(crate) const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 = 1_821_571_200;
+pub(crate) const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 =
+    CLAUDE_OAUTH_REVIEWED_AT_UNIX + plakous_auth::oauth_pins::SUBSCRIPTION_REVIEW_WINDOW_SECONDS;
 /// Protocol identity shared with the Messages kernel.
 pub const CLAUDE_OAUTH_PROTOCOL_ID: &str = "anthropic.messages";
 /// Adapter revision for Claude OAuth lowering.

@@ -2078,7 +2078,21 @@ fn status_report(backend: &mut FakeBackend, paths: &product_paths::PlakPaths) ->
         &mut commands::login_flow::TestLoginUi::default(),
     );
     assert_eq!(result.unwrap(), ProcessOutcome::Success);
-    String::from_utf8(stdout).unwrap()
+    let report = String::from_utf8(stdout).unwrap();
+    report
+        .strip_prefix(&test_clock_review_warnings())
+        .expect("status starts with the compiled review warnings")
+        .to_owned()
+}
+
+/// The compiled review warnings at the injected test clock, which every
+/// status form prints before its report; their text is pinned in
+/// `review_expiry`.
+fn test_clock_review_warnings() -> String {
+    let now = plakous::model::Clock::now(&*commands::application::test_clock()).seconds();
+    let mut warnings = Vec::new();
+    review_expiry::write_warnings(&mut warnings, now).unwrap();
+    String::from_utf8(warnings).unwrap()
 }
 
 #[test]
@@ -2758,7 +2772,7 @@ fn local_compatibility_notice_exposes_exact_compiled_facts_for_each_provider() {
                 "notice_revision=xai.grok.compat.notice.2026-07-31.r1\n",
                 "provenance=pinned_compatibility\n",
                 "reviewed_at=1785456000\n",
-                "expires_at=1801353600\n",
+                "expires_at=1793232000\n",
                 "kill_switch_revision=xai.grok.compat.kill.2026-07-31.r1\n",
                 "killed=false\n",
             ),
@@ -3208,8 +3222,11 @@ fn status_and_local_logout_never_select_a_network_action() {
         vec![Call::Status(NativeProvider::Xai)]
     );
     assert_eq!(
-        stdout,
-        b"grok: compatibility=acceptance-required, credential=refresh-required; run plak refresh grok\n"
+        String::from_utf8(stdout).unwrap(),
+        format!(
+            "{}grok: compatibility=acceptance-required, credential=refresh-required; run plak refresh grok\n",
+            test_clock_review_warnings()
+        )
     );
     assert_eq!(stderr, [] as [u8; 0]);
 

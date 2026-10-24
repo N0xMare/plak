@@ -237,6 +237,10 @@ impl AcceptanceReceipt {
         }
     }
 
+    /// Consent binds the contract revision: profile, sources, notice,
+    /// provenance and kill switch. The stored review and expiry dates record
+    /// what the operator was shown and are not compared, so a re-review that
+    /// changes no contract keeps the receipt current.
     fn validate(
         &self,
         notice: CompatibilityNotice,
@@ -249,8 +253,6 @@ impl AcceptanceReceipt {
             || self.secondary_source_revision.as_deref() != notice.secondary_source_revision
             || self.notice_revision != notice.notice_revision
             || self.provenance != notice.provenance
-            || self.reviewed_at != notice.reviewed_at
-            || self.expires_at != notice.expires_at
             || self.kill_switch_revision != notice.kill_switch_revision
             || !valid_generation(&self.generation)
         {
@@ -267,7 +269,7 @@ fn validate_notice_time(
     now: u64,
 ) -> Result<(), NativeSubscriptionError> {
     validate_profile_time(notice, now)?;
-    if accepted_at < notice.reviewed_at || accepted_at >= notice.expires_at || accepted_at > now {
+    if accepted_at > now {
         return Err(NativeSubscriptionError::AcceptanceRequired);
     }
     Ok(())

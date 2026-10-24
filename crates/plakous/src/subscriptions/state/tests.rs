@@ -1439,13 +1439,52 @@ fn exact_receipt_round_trip_and_drift_rejection() -> Result<(), Box<dyn Error>> 
         load_acceptance(&paths, notice, 1_800_000_002)?,
         1_800_000_001
     );
-    let drifted = CompatibilityNotice {
-        source_revision: "different-source",
+    for drifted in [
+        CompatibilityNotice {
+            source_revision: "different-source",
+            ..notice
+        },
+        CompatibilityNotice {
+            profile_id: "fixture.other-profile",
+            ..notice
+        },
+        CompatibilityNotice {
+            notice_revision: "different-notice",
+            ..notice
+        },
+        CompatibilityNotice {
+            kill_switch_revision: "different-kill",
+            ..notice
+        },
+    ] {
+        assert_eq!(
+            load_acceptance(&paths, drifted, 1_800_000_002),
+            Err(NativeSubscriptionError::AcceptanceRequired)
+        );
+    }
+    // Review and expiry dates are not part of the contract: a later review
+    // of the same contract keeps the earlier acceptance current.
+    let re_reviewed = CompatibilityNotice {
+        reviewed_at: 1_800_000_001,
+        expires_at: 1_800_020_000,
         ..notice
     };
     assert_eq!(
-        load_acceptance(&paths, drifted, 1_800_000_002),
-        Err(NativeSubscriptionError::AcceptanceRequired)
+        load_acceptance(&paths, re_reviewed, 1_800_000_002)?,
+        1_800_000_001
+    );
+    let later_review = CompatibilityNotice {
+        reviewed_at: 1_800_000_002,
+        ..re_reviewed
+    };
+    store_acceptance(&paths, notice, 1_800_000_001)?;
+    assert_eq!(
+        load_acceptance(&paths, later_review, 1_800_000_003)?,
+        1_800_000_001
+    );
+    assert_eq!(
+        load_acceptance(&paths, later_review, 1_800_000_001),
+        Err(NativeSubscriptionError::ProfileInactive)
     );
     let metadata = fs::metadata(paths.receipt_path(NativeProvider::Codex))?;
     assert_eq!(metadata.permissions().mode() & 0o7777, 0o600);
@@ -2386,14 +2425,14 @@ async fn status_on_absent_storage_is_signed_out_and_creates_nothing() -> Result<
     Ok(())
 }
 
-/// A profile re-review moves `reviewed_at`, so a receipt recorded under the
-/// previous review is no longer current. That is acceptance-required, not a
-/// fenced credential: the stored login is not quarantined, the operator
-/// accepts the notice again without logging in, and the login stays admitted
-/// under the new acceptance, for every native vertical.
+/// A re-review that changes no contract moves only the compiled review and
+/// expiry dates. A receipt accepted under the previous review, before this
+/// build's review date, stays current: no prompt, no rewrite, and the login
+/// is untouched, for every native vertical. This is also how this build reads
+/// a receipt the previous release wrote for the same profile.
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
-async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
+async fn a_re_review_with_an_unchanged_contract_keeps_consent_and_the_login()
 -> Result<(), Box<dyn Error>> {
     for provider in [
         NativeProvider::Codex,
@@ -2407,10 +2446,82 @@ async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
         clear_login_recovery(&paths, provider, &operation, 3)?;
 
         let notice = NativeSubscriptions::notice(provider);
+        let previous_review = notice.reviewed_at() - 30 * 86_400;
         let receipt_path = paths.receipt_path(provider);
         let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
-        receipt["reviewed_at"] = serde_json::Value::from(notice.reviewed_at() - 864_000);
-        receipt["expires_at"] = serde_json::Value::from(notice.expires_at() - 864_000);
+        receipt["reviewed_at"] = serde_json::Value::from(previous_review);
+        receipt["expires_at"] = serde_json::Value::from(previous_review + 90 * 86_400);
+        receipt["accepted_at"] = serde_json::Value::from(previous_review + 1);
+        let receipt_bytes = serde_json::to_vec(&receipt)?;
+        write_private_atomic(&receipt_path, &receipt_bytes)?;
+        let record_bytes = fs::read(paths.provider_record(provider))?;
+
+        let accepted = load_acceptance_exact(&paths, notice, test_now())?;
+        assert_eq!(accepted.accepted_at, previous_review + 1, "{provider:?}");
+        assert_eq!(accepted.generation, consent_generation, "{provider:?}");
+        assert!(
+            !receipt_written_by_newer_build(&paths, notice)?,
+            "{provider:?}"
+        );
+        assert!(
+            !login_recovery_required_for_status(
+                &paths,
+                provider,
+                Some(&accepted.generation),
+                NativeAuthStatus::Ready,
+            )?,
+            "{provider:?}: a re-review must not fence the stored login"
+        );
+
+        if provider == NativeProvider::Codex {
+            // The fixture's opaque secret is a login only to the store; Codex
+            // reads it as login-required without fencing it.
+            let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+                plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+            ));
+            assert_eq!(
+                subscriptions.status(provider).await?,
+                NativeSubscriptionStatus {
+                    compatibility: CompatibilityStatus::Current,
+                    credential: NativeAuthStatus::LoginRequired,
+                }
+            );
+        }
+        assert_eq!(fs::read(&receipt_path)?, receipt_bytes, "{provider:?}");
+        assert_eq!(
+            fs::read(paths.provider_record(provider))?,
+            record_bytes,
+            "{provider:?}"
+        );
+        fs::remove_dir_all(root)?;
+    }
+    Ok(())
+}
+
+/// A changed notice revision makes a receipt recorded under the previous
+/// notice stale. That is acceptance-required, not a fenced credential: the
+/// stored login is not quarantined, the operator accepts the notice again
+/// without logging in, and the login stays admitted under the new
+/// acceptance, for every native vertical.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_changed_notice_revision_requires_acceptance_and_keeps_the_ready_login()
+-> Result<(), Box<dyn Error>> {
+    for provider in [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ] {
+        let root = unique_test_root(&format!("notice-revision-{}", provider.as_str()))?;
+        let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+        let consent_generation = install_ready_login_fixture(&paths, provider, 3)?;
+        let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
+        clear_login_recovery(&paths, provider, &operation, 3)?;
+
+        let notice = NativeSubscriptions::notice(provider);
+        let receipt_path = paths.receipt_path(provider);
+        let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
+        receipt["notice_revision"] = serde_json::Value::from("previous.notice.revision");
         write_private_atomic(&receipt_path, &serde_json::to_vec(&receipt)?)?;
         assert_eq!(
             load_acceptance_exact(&paths, notice, test_now()).err(),
@@ -2457,7 +2568,7 @@ async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
                 Some(&accepted.generation),
                 NativeAuthStatus::Ready,
             )?,
-            "{provider:?}: accepting the re-reviewed notice must keep the login"
+            "{provider:?}: accepting the revised notice must keep the login"
         );
         if provider == NativeProvider::Codex {
             let current = NativeSubscriptions::new(paths.clone())
@@ -2475,6 +2586,85 @@ async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
                 )
             );
         }
+        fs::remove_dir_all(root)?;
+    }
+    Ok(())
+}
+
+/// A contract change bumps the profile id. A login and receipt from the
+/// previous profile are older, not newer: the receipt asks for acceptance,
+/// the stored login needs a new login, and local logout retires it, for
+/// every native vertical.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_profile_id_change_requires_acceptance_and_a_new_login() -> Result<(), Box<dyn Error>> {
+    for provider in [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ] {
+        let root = unique_test_root(&format!("profile-change-{}", provider.as_str()))?;
+        let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+        paths.prepare()?;
+        let notice = NativeSubscriptions::notice(provider);
+        let (prefix, _) = notice
+            .profile_id()
+            .rsplit_once(".compat.")
+            .ok_or("profile grammar")?;
+        let previous_profile = format!("{prefix}.compat.2026-01-01.r1");
+        let old_profile = plakous_auth::SubscriptionIntegrationProfileId::new(&previous_profile)?;
+        let old_store = plakous_auth::PrivateCredentialStore::open_slot(
+            paths.provider_record(provider),
+            old_profile.clone(),
+            plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+        )?;
+        old_store.initialize_selected(&plakous_auth::CredentialRecord::new(
+            old_profile,
+            plakous_auth::AccountBinding::new("previous-profile-account")?,
+            plakous_auth::CredentialGeneration::new(1)?,
+            plakous_auth::CredentialStatus::Ready,
+            plakous_auth::SecretBytes::new(b"previous-profile-credential".to_vec()),
+        )?)?;
+        store_acceptance(&paths, notice, test_now())?;
+        let receipt_path = paths.receipt_path(provider);
+        let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
+        receipt["profile_id"] = serde_json::Value::from(previous_profile.as_str());
+        write_private_atomic(&receipt_path, &serde_json::to_vec(&receipt)?)?;
+
+        assert_eq!(
+            load_acceptance_exact(&paths, notice, test_now()).err(),
+            Some(NativeSubscriptionError::AcceptanceRequired),
+            "{provider:?}"
+        );
+        assert!(
+            !receipt_written_by_newer_build(&paths, notice)?,
+            "{provider:?}"
+        );
+
+        let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+            plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+        ));
+        subscriptions
+            .acknowledge_exact(provider, notice.notice_revision())
+            .await?;
+        assert_eq!(
+            subscriptions.status(provider).await,
+            Err(NativeSubscriptionError::CredentialProfileChanged),
+            "{provider:?}"
+        );
+        assert_eq!(
+            subscriptions.logout_local(provider).await?,
+            NativeAuthStatus::Revoked,
+            "{provider:?}"
+        );
+        assert_eq!(
+            subscriptions.status(provider).await?,
+            NativeSubscriptionStatus {
+                compatibility: CompatibilityStatus::Current,
+                credential: NativeAuthStatus::Revoked,
+            },
+            "{provider:?}"
+        );
         fs::remove_dir_all(root)?;
     }
     Ok(())

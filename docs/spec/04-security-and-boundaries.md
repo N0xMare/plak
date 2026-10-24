@@ -671,7 +671,8 @@ records live under the XDG state home (`plak/subscriptions/<account>/`), not
 under a build's state-key directory, so every installed build reads and writes
 the same files. Each record kind is therefore versioned and refused, never
 converted, when it is not current: the selected-slot credential record is bound
-to its compatibility profile id (another profile reads as profile-changed); the
+to its compatibility profile id (another profile reads as profile-changed on
+every vertical, and `plak login` replaces it); the
 SuperGrok and Claude payloads carry an explicit version (3; earlier versions
 are retired format); the Codex payload is identified by its exact shape
 (a payload without the current login selection reads as login-required); the
@@ -688,7 +689,13 @@ and counts as 1; the next build that changes the Codex payload writes
 `"version": 2`, and a present version of 1 or less is malformed), the
 compatibility profile id `<vendor>.<product>.compat.<YYYY-MM-DD>.r<N>` by date
 then revision for the same `<vendor>.<product>` (an id this build cannot place
-in that order is newer), the receipt by its schema and profile id, and the
+in that order is newer; its date is the contract pin date, never a review
+date, so a review that changes no contract keeps the id; builds that bind
+consent to the contract read each other's state as current whatever their
+review dates, while an older build that compares review dates (0.0.2) asks
+once for acceptance and writes a receipt that stays current for newer builds,
+chapter 01 §7.2),
+the receipt by its schema and profile id, and the
 recovery marker and epoch by version. A newer one is *written by a newer
 build*: status, the usage read, refresh, model runs and remote logout refuse it
 before any lease, claim, quarantine, tombstone or receipt write, leaving every
@@ -1490,7 +1497,7 @@ its last granted fence is unchanged, the store still holds the host-local claim
 it took with the lease, and the clock domain is unchanged; a reboot, any
 intervening acquire, or a store reopened since refuses (chapter 01 §5.1).
 
-Compiled review expiry and credential time checks always use the system clock
-in supported builds. Hidden clock injection is restricted to the non-default
+Compiled subscription expiry and credential time checks always use the system
+clock in supported builds; documented API review dates never refuse a route. Hidden clock injection is restricted to the non-default
 `test-clock` feature for offline fixtures; default, maintainer and release
 closures must not enable it. It is not an embedder-supported authority override.

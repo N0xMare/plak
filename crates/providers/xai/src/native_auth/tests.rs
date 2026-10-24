@@ -611,16 +611,33 @@ fn profile_is_exact_expiring_and_truthfully_attributed() -> TestResult {
     )?;
     assert!(!format!("{accepted:?}").contains(XAI_OPENCODE_SOURCE_REVISION));
     assert_profile_revision_rejections(accepted_at);
+    // Consent binds the contract revisions: an acceptance made before this
+    // review stays current; the clock must not read before the review.
+    let before_review = XaiCompatibilityAcceptance::accept_exact(
+        XAI_GROK_COMPATIBILITY_PROFILE,
+        XAI_OPENCODE_SOURCE_REVISION,
+        XAI_GROK_BUILD_SOURCE_REVISION,
+        XAI_GROK_COMPATIBILITY_NOTICE_REVISION,
+        XAI_GROK_KILL_SWITCH_REVISION,
+        Timestamp::new(COMPATIBILITY_REVIEWED_UNIX - 1, 0)?,
+    )?;
+    assert!(validate_acceptance(&before_review, COMPATIBILITY_REVIEWED_UNIX).is_ok());
     assert!(matches!(
-        XaiCompatibilityAcceptance::accept_exact(
-            XAI_GROK_COMPATIBILITY_PROFILE,
-            XAI_OPENCODE_SOURCE_REVISION,
-            XAI_GROK_BUILD_SOURCE_REVISION,
-            XAI_GROK_COMPATIBILITY_NOTICE_REVISION,
-            XAI_GROK_KILL_SWITCH_REVISION,
-            Timestamp::new(COMPATIBILITY_REVIEWED_UNIX - 1, 0)?,
-        ),
+        validate_acceptance(&before_review, COMPATIBILITY_REVIEWED_UNIX - 2),
         Err(XaiNativeAuthError::CompatibilityNotAccepted)
+    ));
+    assert!(matches!(
+        validate_acceptance(&before_review, COMPATIBILITY_REVIEWED_UNIX - 1),
+        Err(XaiNativeAuthError::CompatibilityInactive)
+    ));
+    assert_eq!(
+        COMPATIBILITY_EXPIRES_UNIX,
+        COMPATIBILITY_REVIEWED_UNIX + 90 * 86_400
+    );
+    assert!(validate_acceptance(&before_review, COMPATIBILITY_EXPIRES_UNIX - 1).is_ok());
+    assert!(matches!(
+        validate_acceptance(&before_review, COMPATIBILITY_EXPIRES_UNIX),
+        Err(XaiNativeAuthError::CompatibilityInactive)
     ));
     let pkce = PkceS256::generate()?;
     let callback = CallbackBinding::generate()?;

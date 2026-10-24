@@ -6,6 +6,13 @@
 //! closed value shapes and provider-neutral validation laws consumed by the
 //! shared auth workflow.
 
+/// Seconds in one UTC day.
+pub const DAY_SECONDS: u64 = 86_400;
+
+/// Hard window of every subscription compatibility profile: a profile
+/// expires, exclusive, at 00:00Z this long after its review.
+pub const SUBSCRIPTION_REVIEW_WINDOW_SECONDS: u64 = 90 * DAY_SECONDS;
+
 /// Pure OAuth client, endpoint, and loopback pins for a subscription dialect.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SubscriptionOAuthPins {
@@ -100,6 +107,10 @@ pub(crate) const fn oidc_test_pins() -> SubscriptionOAuthPins {
 }
 
 /// Pure compatibility-profile identity and lifecycle pins.
+///
+/// Consent binds the contract revision (profile, source, notice and
+/// kill-switch revisions), never the review or expiry dates: a re-review that
+/// changes no contract keeps every earlier acceptance current.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CompatibilityProfilePins {
     /// Immutable subscription-integration profile identifier.
@@ -129,8 +140,9 @@ impl CompatibilityProfilePins {
 
     /// Returns whether an acceptance is current against this profile at `now_unix`.
     ///
-    /// Fail-closed when killed, past hard expiry, before the reviewed lower
-    /// bound, or when `accepted_at_unix` is in the future relative to `now_unix`.
+    /// Fail-closed when killed, past hard expiry, when the clock reads before
+    /// the review, or when `accepted_at_unix` is in the future relative to
+    /// `now_unix`. An acceptance made before the review stays current.
     #[must_use]
     pub const fn is_acceptance_current(self, accepted_at_unix: u64, now_unix: u64) -> bool {
         self.is_acceptance_current_at(accepted_at_unix, now_unix, self.killed)
@@ -148,7 +160,7 @@ impl CompatibilityProfilePins {
     ) -> bool {
         !killed
             && now_unix < self.expires_at_unix
-            && accepted_at_unix >= self.reviewed_at_unix
+            && now_unix >= self.reviewed_at_unix
             && accepted_at_unix <= now_unix
     }
 
@@ -165,7 +177,7 @@ impl CompatibilityProfilePins {
     ) -> bool {
         !self.killed
             && now_unix < expires_at_unix
-            && accepted_at_unix >= self.reviewed_at_unix
+            && now_unix >= self.reviewed_at_unix
             && accepted_at_unix <= now_unix
     }
 }
@@ -193,12 +205,11 @@ mod tests {
     }
 
     #[test]
-    fn profile_acceptance_current_checks_kill_expiry_reviewed_and_future() {
+    fn profile_acceptance_current_checks_kill_expiry_clock_and_future() {
         let pins = profile_pins();
         let now = pins.reviewed_at_unix + 1;
         assert!(pins.is_active(now));
         assert!(pins.is_acceptance_current(pins.reviewed_at_unix, now));
-        assert!(!pins.is_acceptance_current(pins.reviewed_at_unix.saturating_sub(1), now));
         assert!(!pins.is_acceptance_current(now + 1, now));
         assert!(!pins.is_acceptance_current(pins.reviewed_at_unix, pins.expires_at_unix));
         assert!(!pins.is_acceptance_current_at(pins.reviewed_at_unix, now, true));
@@ -208,5 +219,30 @@ mod tests {
             now.saturating_sub(1).max(1)
         ));
         assert!(pins.is_acceptance_current_until(pins.reviewed_at_unix, now, pins.expires_at_unix));
+    }
+
+    #[test]
+    fn acceptance_made_before_the_review_stays_current() {
+        let pins = profile_pins();
+        let earlier = pins.reviewed_at_unix - 50;
+        let now = pins.reviewed_at_unix + 1;
+        assert!(pins.is_acceptance_current(earlier, now));
+        assert!(pins.is_acceptance_current_at(earlier, now, false));
+        assert!(pins.is_acceptance_current_until(earlier, now, pins.expires_at_unix));
+    }
+
+    #[test]
+    fn clock_before_the_review_is_not_current() {
+        let pins = profile_pins();
+        let now = pins.reviewed_at_unix - 1;
+        assert!(!pins.is_acceptance_current(now, now));
+        assert!(!pins.is_acceptance_current_at(now, now, false));
+        assert!(!pins.is_acceptance_current_until(now, now, pins.expires_at_unix));
+    }
+
+    #[test]
+    fn subscription_window_is_ninety_days() {
+        assert_eq!(super::SUBSCRIPTION_REVIEW_WINDOW_SECONDS, 90 * 86_400);
+        assert_eq!(super::DAY_SECONDS, 86_400);
     }
 }

@@ -364,6 +364,10 @@ pub enum NativeCodexAuthError {
     /// rewrites it.
     #[error("native Codex login was written by a newer build")]
     WrittenByNewerBuild,
+    /// The stored login was written under another compatibility profile;
+    /// only a new login replaces it.
+    #[error("native Codex login was written under another compatibility profile")]
+    ProfileChanged,
     /// The selected login changed (a new login) under an admitted receipt.
     #[error("native Codex login selection changed")]
     SelectionChanged,
@@ -431,14 +435,18 @@ impl CodexSubscriptionLocalAdmin {
     /// Opens the exact application-selected `primary` slot for the pinned
     /// native Codex profile without consulting ambient state or the network.
     ///
-    /// Existing state is reloaded during open so a foreign profile, slot scope,
-    /// malformed record, or unsafe path fails before the facade is returned.
-    /// Current compatibility acceptance, expiry, and kill-switch state are
-    /// deliberately irrelevant to this local cleanup authority.
+    /// Existing state is reloaded during open. A record written by a newer
+    /// build, or under another (older) compatibility profile, opens, so
+    /// [`Self::status`] can name it (`WrittenByNewerBuild` or
+    /// `ProfileChanged`) and [`Self::logout_local`] can retire it. A foreign
+    /// slot scope, malformed record or unsafe path fails before the facade is
+    /// returned. Current compatibility acceptance, expiry, and kill-switch
+    /// state are deliberately irrelevant to this local cleanup authority.
     ///
     /// # Errors
     ///
-    /// Rejects relative or unsafe paths and any foreign or malformed record.
+    /// Rejects relative or unsafe paths and any malformed or foreign-slot
+    /// record.
     pub async fn open(slot_path: impl Into<PathBuf>) -> Result<Self, NativeCodexAuthError> {
         let slot_path = slot_path.into();
         let store = run_blocking(move || {
@@ -450,10 +458,13 @@ impl CodexSubscriptionLocalAdmin {
                 PrivateCredentialStore::open_slot(&slot_path, profile, slot)
                     .map_err(|_| NativeCodexAuthError::Store)?,
             );
-            // A newer build's record is opened so status can name it and
+            // A newer build's record, or one written under another
+            // compatibility profile, is opened so status can name it and
             // local logout can retire it.
             match store.load() {
-                Ok(_) | Err(PrivateStoreError::WrittenByNewerBuild) => {}
+                Ok(_)
+                | Err(PrivateStoreError::WrittenByNewerBuild | PrivateStoreError::ForeignProfile) =>
+                    {}
                 Err(_) => return Err(NativeCodexAuthError::Store),
             }
             Ok(store)
@@ -601,6 +612,7 @@ impl CodexSubscriptionCredentialManager {
         );
         let existing = store.load().map_err(|error| match error {
             PrivateStoreError::WrittenByNewerBuild => NativeCodexAuthError::WrittenByNewerBuild,
+            PrivateStoreError::ForeignProfile => NativeCodexAuthError::ProfileChanged,
             _ => NativeCodexAuthError::Store,
         })?;
         let selected = SelectedAccount {
@@ -1038,7 +1050,8 @@ fn map_oauth_workflow_error(error: OAuthWorkflowError) -> NativeCodexAuthError {
 }
 
 /// Local lifecycle without network I/O. A Ready record whose payload this
-/// build cannot parse (an earlier build's login) is `LoginRequired`; a record
+/// build cannot parse (an earlier build's login) is `LoginRequired`, one
+/// written under another compatibility profile is `ProfileChanged`; a record
 /// whose lease is busy keeps its stored status.
 fn local_credential_status(
     store: &PrivateCredentialStore,
@@ -1048,6 +1061,7 @@ fn local_credential_status(
         Err(PrivateStoreError::WrittenByNewerBuild) => {
             return Ok(OfflineCredentialLifecycle::WrittenByNewerBuild);
         }
+        Err(PrivateStoreError::ForeignProfile) => return Err(NativeCodexAuthError::ProfileChanged),
         Err(_) => return Err(NativeCodexAuthError::Store),
     };
     if fence.is_some()
@@ -2517,6 +2531,7 @@ fn renewal_error(error: NativeCodexAuthError) -> RuntimeModelAuthorityError {
         NativeCodexAuthError::AccountChanged
         | NativeCodexAuthError::SelectionChanged
         | NativeCodexAuthError::LoginRequired
+        | NativeCodexAuthError::ProfileChanged
         | NativeCodexAuthError::WrittenByNewerBuild => RuntimeModelAuthorityError::ForeignAuthority,
         NativeCodexAuthError::Unavailable => RuntimeModelAuthorityError::Unavailable,
         _ => RuntimeModelAuthorityError::Stale,

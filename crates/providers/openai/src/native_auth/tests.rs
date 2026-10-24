@@ -5897,7 +5897,7 @@ async fn offline_admin_survives_expiry_and_kill_without_network() -> TestResult 
 }
 
 #[tokio::test]
-async fn offline_admin_rejects_foreign_profile_and_unsafe_path() -> TestResult {
+async fn offline_admin_names_a_foreign_profile_and_rejects_an_unsafe_path() -> TestResult {
     let (_directory, slot_path) = private_slot()?;
     // An older revision of this profile; an id this build cannot place in
     // its revision order would read as written by a newer build instead.
@@ -5918,10 +5918,18 @@ async fn offline_admin_rejects_foreign_profile_and_unsafe_path() -> TestResult {
     drop(record);
     drop(foreign);
 
+    // A login under another compatibility profile is named, never used, and
+    // local logout retires it so a new login can replace it.
+    let admin = CodexSubscriptionLocalAdmin::open(&slot_path).await?;
     assert!(matches!(
-        CodexSubscriptionLocalAdmin::open(&slot_path).await,
-        Err(NativeCodexAuthError::Store)
+        admin.status().await,
+        Err(NativeCodexAuthError::ProfileChanged)
     ));
+    assert_eq!(
+        admin.logout_local().await?,
+        OfflineCredentialLifecycle::Revoked
+    );
+    assert_eq!(admin.status().await?, OfflineCredentialLifecycle::Revoked);
     assert!(matches!(
         CodexSubscriptionLocalAdmin::open(PathBuf::from("relative-slot.json")).await,
         Err(NativeCodexAuthError::Store)
@@ -6373,14 +6381,35 @@ async fn browser_login_redirect_and_host_follow_the_bound_test_port() -> TestRes
     reason = "one table-sized test covers independent profile, JOSE, RSA, and catalog rejection axes"
 )]
 fn acceptance_jose_jwk_and_catalog_negative_matrix_is_strict() -> TestResult {
-    let too_early = CodexCompatibilityAcceptance::accept_exact(
+    // Consent binds the contract revisions: an acceptance made before this
+    // review stays current, a clock before the review or an acceptance from
+    // the future does not, and the profile expires at review + 90 days.
+    let before_review = CodexCompatibilityAcceptance::accept_exact(
         OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
         OPENAI_CODEX_SOURCE_REVISION,
         OPENAI_CODEX_COMPATIBILITY_NOTICE_REVISION,
         Timestamp::new(PROFILE_REVIEWED_AT - 1, 0)?,
     )?;
     assert_eq!(
-        validate_profile(&too_early, PROFILE_REVIEWED_AT),
+        validate_profile(&before_review, PROFILE_REVIEWED_AT),
+        Ok(())
+    );
+    assert_eq!(
+        validate_profile(&before_review, PROFILE_REVIEWED_AT - 1),
+        Err(NativeCodexAuthError::ProfileNotCurrent)
+    );
+    assert_eq!(
+        validate_profile(&before_review, PROFILE_REVIEWED_AT - 2),
+        Err(NativeCodexAuthError::ProfileNotCurrent)
+    );
+    assert_eq!(PROFILE_EXPIRES_AT, PROFILE_REVIEWED_AT + 90 * 86_400);
+    assert_eq!(PROFILE_EXPIRES_AT % 86_400, 0);
+    assert_eq!(
+        validate_profile(&before_review, PROFILE_EXPIRES_AT - 1),
+        Ok(())
+    );
+    assert_eq!(
+        validate_profile(&before_review, PROFILE_EXPIRES_AT),
         Err(NativeCodexAuthError::ProfileNotCurrent)
     );
 

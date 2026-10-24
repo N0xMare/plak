@@ -192,7 +192,9 @@ impl ClaudeCompatibilityAcceptance {
     ///
     /// # Errors
     ///
-    /// Rejects any alias, omitted revision, or older review timestamp.
+    /// Rejects any alias or omitted revision. The acceptance time is checked
+    /// against the clock when the acceptance is used, never against the
+    /// review date.
     pub fn accept_exact(
         profile_id: &str,
         source_revision: &str,
@@ -204,7 +206,6 @@ impl ClaudeCompatibilityAcceptance {
             || source_revision != CLAUDE_OAUTH_SOURCE_REVISION
             || notice_revision != CLAUDE_OAUTH_NOTICE_REVISION
             || kill_switch_revision != CLAUDE_OAUTH_KILL_SWITCH_REVISION
-            || accepted_at.seconds() < CLAUDE_OAUTH_REVIEWED_AT_UNIX
         {
             return Err(ClaudeNativeAuthError::CompatibilityNotAccepted);
         }
@@ -1476,7 +1477,7 @@ fn validate_acceptance(
     now: u64,
 ) -> Result<(), ClaudeNativeAuthError> {
     if !(CLAUDE_OAUTH_REVIEWED_AT_UNIX..CLAUDE_OAUTH_EXPIRES_AT_UNIX).contains(&now)
-        || acceptance.accepted_at < CLAUDE_OAUTH_REVIEWED_AT_UNIX
+        || acceptance.accepted_at > now
     {
         return Err(ClaudeNativeAuthError::CompatibilityInactive);
     }
@@ -1788,6 +1789,34 @@ mod tests {
         .unwrap();
         store.initialize_selected(&record).unwrap();
         store
+    }
+
+    #[test]
+    fn acceptance_binds_the_contract_and_expires_ninety_days_after_review() {
+        assert_eq!(
+            CLAUDE_OAUTH_EXPIRES_AT_UNIX,
+            CLAUDE_OAUTH_REVIEWED_AT_UNIX + 90 * 86_400
+        );
+        let before_review = ClaudeCompatibilityAcceptance::accept_exact(
+            CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
+            CLAUDE_OAUTH_SOURCE_REVISION,
+            CLAUDE_OAUTH_NOTICE_REVISION,
+            CLAUDE_OAUTH_KILL_SWITCH_REVISION,
+            Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX - 1, 0).unwrap(),
+        )
+        .unwrap();
+        assert!(validate_acceptance(&before_review, CLAUDE_OAUTH_REVIEWED_AT_UNIX).is_ok());
+        assert!(validate_acceptance(&before_review, CLAUDE_OAUTH_EXPIRES_AT_UNIX - 1).is_ok());
+        for now in [
+            CLAUDE_OAUTH_REVIEWED_AT_UNIX - 1,
+            CLAUDE_OAUTH_EXPIRES_AT_UNIX,
+            CLAUDE_OAUTH_REVIEWED_AT_UNIX - 2,
+        ] {
+            assert!(matches!(
+                validate_acceptance(&before_review, now),
+                Err(ClaudeNativeAuthError::CompatibilityInactive)
+            ));
+        }
     }
 
     #[test]

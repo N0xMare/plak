@@ -1,4 +1,6 @@
-use plakous_auth::oauth_pins::{CompatibilityProfilePins, SubscriptionOAuthPins};
+use plakous_auth::oauth_pins::{
+    CompatibilityProfilePins, SUBSCRIPTION_REVIEW_WINDOW_SECONDS, SubscriptionOAuthPins,
+};
 
 // Review date is the single release-cut input; the compatibility contract is unchanged.
 const CODEX_REVIEWED_AT_UNIX: u64 = 1_792_627_200;
@@ -32,7 +34,7 @@ pub(crate) const CODEX_PROFILE: CompatibilityProfilePins = CompatibilityProfileP
     notice_revision: "openai.codex.compat.notice.2026-07-31.r1",
     kill_switch_revision: "openai.codex.compat.kill.2026-07-31.r1",
     reviewed_at_unix: CODEX_REVIEWED_AT_UNIX,
-    expires_at_unix: CODEX_REVIEWED_AT_UNIX + 30 * 86_400 + 86_399,
+    expires_at_unix: CODEX_REVIEWED_AT_UNIX + SUBSCRIPTION_REVIEW_WINDOW_SECONDS,
     killed: false,
 };
 
@@ -74,7 +76,7 @@ mod tests {
                 notice_revision: "openai.codex.compat.notice.2026-07-31.r1",
                 kill_switch_revision: "openai.codex.compat.kill.2026-07-31.r1",
                 reviewed_at_unix: CODEX_REVIEWED_AT_UNIX,
-                expires_at_unix: CODEX_REVIEWED_AT_UNIX + 30 * 86_400 + 86_399,
+                expires_at_unix: CODEX_REVIEWED_AT_UNIX + 90 * 86_400,
                 killed: false,
             }
         );

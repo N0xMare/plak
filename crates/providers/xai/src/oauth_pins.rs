@@ -1,4 +1,9 @@
-use plakous_auth::oauth_pins::{CompatibilityProfilePins, SubscriptionOAuthPins};
+use plakous_auth::oauth_pins::{
+    CompatibilityProfilePins, SUBSCRIPTION_REVIEW_WINDOW_SECONDS, SubscriptionOAuthPins,
+};
+
+/// Review date of the Grok compatibility profile (00:00Z).
+const XAI_REVIEWED_AT_UNIX: u64 = 1_785_456_000;
 
 const XAI_LOOPBACK_PORTS: &[u16] = &[56121];
 
@@ -30,14 +35,14 @@ pub(crate) const XAI_PROFILE: CompatibilityProfilePins = CompatibilityProfilePin
     ),
     notice_revision: "xai.grok.compat.notice.2026-07-31.r1",
     kill_switch_revision: "xai.grok.compat.kill.2026-07-31.r1",
-    reviewed_at_unix: 1_785_456_000,
-    expires_at_unix: 1_801_353_600,
+    reviewed_at_unix: XAI_REVIEWED_AT_UNIX,
+    expires_at_unix: XAI_REVIEWED_AT_UNIX + SUBSCRIPTION_REVIEW_WINDOW_SECONDS,
     killed: false,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::{XAI_OAUTH, XAI_PROFILE};
+    use super::{XAI_OAUTH, XAI_PROFILE, XAI_REVIEWED_AT_UNIX};
     use plakous_auth::oauth_pins::{CompatibilityProfilePins, SubscriptionOAuthPins};
 
     #[test]
@@ -74,8 +79,8 @@ mod tests {
                 ),
                 notice_revision: "xai.grok.compat.notice.2026-07-31.r1",
                 kill_switch_revision: "xai.grok.compat.kill.2026-07-31.r1",
-                reviewed_at_unix: 1_785_456_000,
-                expires_at_unix: 1_801_353_600,
+                reviewed_at_unix: XAI_REVIEWED_AT_UNIX,
+                expires_at_unix: XAI_REVIEWED_AT_UNIX + 90 * 86_400,
                 killed: false,
             }
         );

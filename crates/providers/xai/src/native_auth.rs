@@ -423,6 +423,8 @@ impl XaiCompatibilityAcceptance {
     /// # Errors
     ///
     /// Rejects any alias, omitted revision, older revision, or future revision.
+    /// The acceptance time is checked against the clock when the acceptance
+    /// is used, never against the review date.
     pub fn accept_exact(
         profile_id: &str,
         source_revision: &str,
@@ -436,7 +438,6 @@ impl XaiCompatibilityAcceptance {
             || official_model_source_revision != XAI_GROK_BUILD_SOURCE_REVISION
             || notice_revision != XAI_GROK_COMPATIBILITY_NOTICE_REVISION
             || kill_switch_revision != XAI_GROK_KILL_SWITCH_REVISION
-            || accepted_at.seconds() < COMPATIBILITY_REVIEWED_UNIX
         {
             return Err(XaiNativeAuthError::CompatibilityNotAccepted);
         }
@@ -3201,11 +3202,13 @@ fn validate_acceptance_until(
     now: u64,
     expires_unix: u64,
 ) -> Result<(), XaiNativeAuthError> {
-    // Preserve distinct dialect errors: acceptance range vs kill/expiry.
-    if acceptance.accepted_at > now || acceptance.accepted_at < XAI_PROFILE.reviewed_at_unix {
+    // Preserve distinct dialect errors: acceptance from the future vs
+    // kill/expiry/clock before the review. Consent binds the contract
+    // revisions, so an acceptance made before the review stays current.
+    if acceptance.accepted_at > now {
         return Err(XaiNativeAuthError::CompatibilityNotAccepted);
     }
-    if XAI_PROFILE.killed || now >= expires_unix {
+    if XAI_PROFILE.killed || now < COMPATIBILITY_REVIEWED_UNIX || now >= expires_unix {
         return Err(XaiNativeAuthError::CompatibilityInactive);
     }
     // Matches CompatibilityProfilePins::is_acceptance_current_until with
