@@ -1,10 +1,10 @@
 //! The ten `agent_*` row codecs.
 //!
 //! A whole tree in, a whole tree out, or single keyed rows for a row-level
-//! save, over one `rusqlite` transaction the caller hands in. It owns no connection and no file: which database these
-//! rows live in is the caller's, which is what lets the tables move from
-//! `product.sqlite3` to their own `subagents.sqlite3` without the codec
-//! changing a byte.
+//! save, over one `rusqlite` transaction the caller hands in. It owns no
+//! connection and no file: which database these rows live in is the
+//! caller's, which is what lets the tables move from `product.sqlite3` to
+//! their own `subagents.sqlite3` without the codec changing a byte.
 
 mod codec;
 
@@ -179,16 +179,18 @@ fn insert_rows<R: Row>(
 ) -> Result<(), String> {
     let sql = R::TABLE.insert_sql();
     for (key, row) in rows {
-        write_row(tx, &sql, tree_id, key, row)?;
+        write_row(tx, &sql, "insert", tree_id, key, row)?;
     }
     Ok(())
 }
 
 /// Writes one row with `sql`, an insert or an upsert of `R::TABLE`, and
-/// requires it to change exactly one row.
+/// requires it to change exactly one row. `verb` names the write in the
+/// error: `insert` for the whole-tree path, `upsert` for the row path.
 pub(crate) fn write_row<R: Row>(
     tx: &Transaction<'_>,
     sql: &str,
+    verb: &str,
     tree_id: &str,
     key: &R::Key,
     row: &R,
@@ -196,9 +198,9 @@ pub(crate) fn write_row<R: Row>(
     let noun = R::TABLE.noun;
     let changed = row
         .write(tx, sql, tree_id, key)?
-        .map_err(|_| format!("could not insert {noun} row"))?;
+        .map_err(|_| format!("could not {verb} {noun} row"))?;
     if changed != 1 {
-        return Err(format!("{noun} insert was not exact"));
+        return Err(format!("{noun} {verb} was not exact"));
     }
     Ok(())
 }

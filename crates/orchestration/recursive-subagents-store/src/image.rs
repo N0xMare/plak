@@ -62,7 +62,9 @@ impl TreeImage {
     /// Nodes are upserted first and deleted last, so no foreign key sees a
     /// grant or attempt without its node. Within a table, removed keys go
     /// before changed rows, so a new attempt may reuse a removed attempt's
-    /// request key.
+    /// request key. Two surviving attempts cannot swap keys within one save:
+    /// an attempt's request key is assigned only when the attempt is created
+    /// and never changes.
     pub(crate) fn write_changes<'t>(
         &self,
         tx: &Transaction<'_>,
@@ -150,7 +152,7 @@ impl<'t, R: Row> Changes<'t, R> {
         }
         let sql = R::TABLE.upsert_sql();
         for (key, row) in &self.changed {
-            write_row(tx, &sql, tree_id, *key, *row)?;
+            write_row(tx, &sql, "upsert", tree_id, *key, *row)?;
         }
         Ok(())
     }

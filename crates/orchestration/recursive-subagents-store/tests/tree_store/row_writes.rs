@@ -4,7 +4,8 @@
 //! revision, delete every row of the tree and insert every row again. The
 //! store under test diffs against its last acknowledged save. Generated
 //! mutation sequences drive both, including removals, same-revision saves,
-//! stale handles, refused saves, a reopened store and a second connection
+//! stale handles, refused saves, a deleted and recreated tree, request keys
+//! reissued to a new attempt, a reopened store and a second connection
 //! writing the same tree, and every table must match row for row and column
 //! for column after every step.
 #![cfg(feature = "test-support")]
@@ -104,6 +105,24 @@ impl WholeTree {
         tx.commit().unwrap();
         Ok(())
     }
+
+    /// The store's delete: fenced on the inspected revision.
+    fn delete(&mut self, tree_id: &str, expected: u64) {
+        let tx = self
+            .0
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let stored: i64 = tx
+            .query_row(
+                "SELECT revision FROM agent_trees WHERE tree_id=?1",
+                [tree_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(u64::try_from(stored).unwrap(), expected);
+        rows::delete_agent_tree_rows(&tx, tree_id).unwrap();
+        tx.commit().unwrap();
+    }
 }
 
 /// Record shapes taken from a real spawned child, so the generated rows
@@ -113,6 +132,7 @@ struct Templates {
     node: NodeRecord,
     grant: TopologyGrant,
     attempt: AttemptRecord,
+    keyed_attempt: AttemptRecord,
     workspace: WorkspaceRecord,
 }
 
@@ -136,11 +156,17 @@ impl Templates {
         let grant = tree.grants()[&spawned.agent_id].clone();
         let attempt = tree.attempts()[&spawned.attempt_id].clone();
         let workspace = tree.workspaces()[&node.workspace_id].clone();
+        let mut keyed = SpawnAgentRequest::test_named("implement", Tier::Mutate, "keyed", "task");
+        keyed.request_key = Some("template-key".to_owned());
+        let keyed = tree.spawn_agent(ROOT, &keyed, None).unwrap();
+        let keyed_attempt = tree.attempts()[&keyed.attempt_id].clone();
+        assert!(keyed_attempt.request_key.is_some() && keyed_attempt.spawn_identity.is_some());
         Self {
             tree,
             node,
             grant,
             attempt,
+            keyed_attempt,
             workspace,
         }
     }
@@ -148,6 +174,10 @@ impl Templates {
 
 fn text(label: &str, seed: u32) -> String {
     format!("{label}-{seed}-{}", "x".repeat((seed % 97) as usize))
+}
+
+fn request_key(slot: u8) -> String {
+    format!("key-{slot}")
 }
 
 fn node_id(slot: u8) -> String {
@@ -237,8 +267,21 @@ impl Model {
                     return;
                 }
                 let owner = owners[seed as usize % owners.len()].clone();
-                let mut attempt = templates.attempt.clone();
+                let keyed = seed.is_multiple_of(3);
+                let mut attempt = if keyed {
+                    templates.keyed_attempt.clone()
+                } else {
+                    templates.attempt.clone()
+                };
                 attempt.attempt_id = AttemptId::from_persisted(format!("a{slot}"));
+                if keyed {
+                    attempt.request_key = Some(request_key(slot));
+                    // One holder per key: a keyed spawn retires any other
+                    // attempt holding it.
+                    self.attempts.retain(|id, other| {
+                        *id == attempt.attempt_id || other.request_key != attempt.request_key
+                    });
+                }
                 attempt.agent_id = owner;
                 attempt.status = [
                     AttemptStatus::Running,
@@ -373,8 +416,10 @@ impl Model {
                 self.grants.remove(&node_id(slot));
             }
             2 => {
-                self.attempts
-                    .remove(&AttemptId::from_persisted(format!("a{slot}")));
+                for prefix in ["a", "b"] {
+                    self.attempts
+                        .remove(&AttemptId::from_persisted(format!("{prefix}{slot}")));
+                }
             }
             3 => {
                 self.candidates
@@ -396,6 +441,32 @@ impl Model {
                 self.cursors.remove(&format!("session-{slot}"));
             }
         }
+    }
+
+    /// Removes the attempt holding `slot`'s request key and gives the key to
+    /// a new attempt under the other id, in one save: the row path must
+    /// delete the old holder before it inserts the new one.
+    fn reissue(&mut self, slot: u8, seed: u32) {
+        let key = Some(request_key(slot));
+        let Some(id) = self
+            .attempts
+            .iter()
+            .find(|(_, attempt)| attempt.request_key == key)
+            .map(|(id, _)| id.clone())
+        else {
+            return;
+        };
+        let mut attempt = self.attempts.remove(&id).unwrap();
+        let next = if id.as_str().starts_with('a') {
+            "b"
+        } else {
+            "a"
+        };
+        attempt.attempt_id = AttemptId::from_persisted(format!("{next}{slot}"));
+        attempt.usage.tool_calls = seed % 13;
+        self.attempts
+            .retain(|other, _| *other != attempt.attempt_id);
+        self.attempts.insert(attempt.attempt_id.clone(), attempt);
     }
 
     fn header(&mut self, seed: u32) {
@@ -449,6 +520,10 @@ enum Step {
     Stale { ahead: bool },
     /// Publish a tree whose extra attempt names no node: both stores refuse.
     Broken,
+    /// Give a slot's request key to a new attempt (see `Model::reissue`).
+    Reissue { slot: u8, seed: u32 },
+    /// Delete the tree; the next save recreates it from stored revision 0.
+    Delete,
     /// Drop and reopen the row-level store: its next save has no image.
     Reopen,
     /// Another connection publishes the same tree at the same revision.
@@ -463,6 +538,8 @@ fn step() -> impl Strategy<Value = Step> {
         4 => any::<bool>().prop_map(|bump| Step::Save { bump }),
         1 => any::<bool>().prop_map(|ahead| Step::Stale { ahead }),
         1 => Just(Step::Broken),
+        2 => (0..5_u8, any::<u32>()).prop_map(|(slot, seed)| Step::Reissue { slot, seed }),
+        1 => Just(Step::Delete),
         1 => Just(Step::Reopen),
         1 => any::<u32>().prop_map(|seed| Step::Peer { seed }),
     ]
@@ -561,6 +638,15 @@ impl Harness {
                     .publish(&broken.tree(&self.templates, TREE, self.acknowledged))
                     .unwrap_err();
                 assert_eq!(error.kind, TreeStoreErrorKind::Unavailable, "{error}");
+            }
+            Step::Reissue { slot, seed } => self.model.reissue(*slot, *seed),
+            Step::Delete => {
+                if self.acknowledged == 0 {
+                    return;
+                }
+                self.store.delete(TREE, self.acknowledged).unwrap();
+                self.reference.delete(TREE, self.acknowledged);
+                self.acknowledged = 0;
             }
             Step::Reopen => {
                 self.store = SqliteTreeStore::open(&self.rows_path()).unwrap();
@@ -731,6 +817,52 @@ fn a_refused_save_leaves_rows_and_the_next_save_is_exact() {
         slot: 1,
         seed: 5,
     });
+    let _ = saved(&mut harness, true);
+    harness.assert_loads_model();
+}
+
+#[test]
+fn a_request_key_moves_to_a_new_attempt_in_one_save() {
+    let mut harness = Harness::new();
+    // Seed 3 makes a keyed attempt.
+    harness.run(&Step::Put {
+        table: 2,
+        slot: 1,
+        seed: 3,
+    });
+    let _ = saved(&mut harness, true);
+    let _ = saved(&mut harness, true);
+    harness.run(&Step::Reissue { slot: 1, seed: 4 });
+    let tree = saved(&mut harness, true);
+    let holders = tree
+        .attempts()
+        .values()
+        .filter(|attempt| attempt.request_key.as_deref() == Some("key-1"))
+        .map(|attempt| attempt.attempt_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(holders, ["b1"]);
+    harness.assert_loads_model();
+}
+
+#[test]
+fn a_deleted_tree_is_recreated_from_revision_zero() {
+    let mut harness = Harness::new();
+    harness.run(&Step::Put {
+        table: 5,
+        slot: 0,
+        seed: 1,
+    });
+    let _ = saved(&mut harness, true);
+    let _ = saved(&mut harness, true);
+    harness.run(&Step::Delete);
+    assert!(harness.store.load(TREE).unwrap().is_none());
+    harness.run(&Step::Put {
+        table: 6,
+        slot: 0,
+        seed: 2,
+    });
+    let tree = saved(&mut harness, true);
+    assert_eq!(tree.revision, 1);
     let _ = saved(&mut harness, true);
     harness.assert_loads_model();
 }

@@ -76,7 +76,10 @@ pub(crate) trait Row: Clone + PartialEq {
         key: &Self::Key,
     ) -> Result<rusqlite::Result<usize>, String>;
 
-    /// Whether `self` and `other` encode to the same row.
+    /// Whether `self` and `other` encode to the same row. The default is
+    /// `PartialEq`, which is right only while it compares every persisted
+    /// field, as a derived impl does; a record with a field that is not a
+    /// column overrides it.
     fn same_row(&self, other: &Self) -> bool {
         self == other
     }
