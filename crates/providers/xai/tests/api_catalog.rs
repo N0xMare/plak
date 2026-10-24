@@ -74,7 +74,7 @@ fn every_catalog_effort_constructs_on_the_xai_platform_route() {
                         selection,
                         Arc::new(FixedClock::new(
                             Timestamp::new(
-                                XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+                                XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS - 90 * 86_400 + 60,
                                 0,
                             )
                             .unwrap(),
@@ -130,7 +130,7 @@ fn an_envelope_over_the_shared_context_is_refused() {
                 selection,
                 Arc::new(FixedClock::new(
                     Timestamp::new(
-                        XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+                        XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS - 90 * 86_400 + 60,
                         0,
                     )
                     .unwrap(),
@@ -153,7 +153,7 @@ fn an_envelope_over_the_shared_context_is_refused() {
             selection,
             Arc::new(FixedClock::new(
                 Timestamp::new(
-                    XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+                    XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS - 90 * 86_400 + 60,
                     0,
                 )
                 .unwrap(),

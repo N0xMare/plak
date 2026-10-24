@@ -5,6 +5,47 @@ package shares one version. `0.0.x` releases carry no API, wire or
 persisted-format compatibility promise; the session export document is the
 one cross-build carrier (a build imports its own and the previous version).
 
+## Unreleased
+
+### Pins
+
+- Review windows. The subscription profiles (Codex, Grok, Claude) expire
+  exactly 90 days after their review, at 00:00 UTC; Claude moves from 365
+  days to 90 and Codex drops its end-of-day expiry. This build's expiries
+  (UTC): Codex 2027-01-20T00:00:00Z, Grok 2026-10-29T00:00:00Z, Claude
+  2026-12-21T00:00:00Z.
+- The documented API routes (OpenRouter Chat, OpenAI Platform, xAI Platform,
+  Anthropic API) never refuse on the calendar. Each keeps a review-due date 90
+  days after its review that only drives `plak doctor` and `plak status`
+  notes: OpenRouter Chat, OpenAI and xAI 2027-01-20T00:00:00Z, Anthropic
+  2026-12-21T00:00:00Z. The facade constants are renamed to
+  `*_REVIEW_DUE_AT*`, and `OpenRouterChatBuildError::ProfileNotCurrent`,
+  `XaiPlatformBuildError::Stale` and the OpenAI
+  `ConfigError::PlatformManifestEvidenceExpired` are removed.
+  `XaiPlatformModel::preflight_configuration` no longer takes a clock.
+- Consent binds the contract, not the review: a re-review that changes no
+  profile, source, notice or kill-switch revision keeps every acceptance
+  current, so nobody accepts the notice again. A changed notice asks once and
+  keeps the login; a changed OAuth contract carries a new profile id and needs
+  `plak login`. A Codex login stored under another profile now reads as
+  written under another profile, as on Grok and Claude, instead of as unsafe
+  storage, so `plak login` replaces it (new
+  `NativeCodexAuthError::ProfileChanged`).
+- `plak doctor` and `plak status` print a `Warning:` for a subscription
+  profile within 14 days of its expiry and a `Note:` for API facts within 14
+  days of their review-due date, or past either.
+- Publication dry runs and uploads require more than a third of every review
+  window remaining (more than 30 days of 90) instead of more than 21 days.
+
+### Compatibility
+
+- No persisted format changes: the compatibility receipt stays schema 2 and
+  still records the review and expiry dates the notice showed, which this
+  build no longer compares. A 0.0.2 receipt for the same profile is current
+  here. 0.0.2 still compares those dates, so it asks once to accept the notice
+  again for a receipt this build wrote; the receipt it then writes stays
+  current for this build, and the login is kept.
+
 ## 0.0.2
 
 ### Plak

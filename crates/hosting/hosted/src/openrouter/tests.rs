@@ -2,7 +2,7 @@
 
 fn chat_review_clock() -> Arc<dyn plakous::model::Clock> {
     let now = plakous::model::Timestamp::new(
-        plakous::openrouter::OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 30 * 86_400 + 60,
+        plakous::openrouter::OPENROUTER_CHAT_REVIEW_DUE_AT - 90 * 86_400 + 60,
         0,
     )
     .unwrap();

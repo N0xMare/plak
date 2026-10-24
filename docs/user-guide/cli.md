@@ -126,9 +126,11 @@ unknown refresh outcome still requires credential recovery rather than replay.
 ### `plak status [account]`
 
 Local credential readiness, with no provider request and no secrets. Both
-status forms warn when any compiled provider review expires within 14 days,
-or is already expired, naming the surface and UTC date even if that account
-is not configured. Install a newly reviewed build before expiry; the warning
+status forms warn within 14 days of a subscription profile's expiry, or after
+it, and note within 14 days of an API route's review-due date, or after it,
+naming the surface and UTC date even if that account is not configured. An
+expired subscription profile refuses its route; an API route past its review
+date keeps working. Install a newly reviewed build before expiry; the warning
 does not extend a route's lifetime. Bare `plak status` groups every account:
 
 ```
@@ -293,14 +295,15 @@ plak mcp remove github
 ### Subscription compatibility review deadlines
 
 The first time you use a subscription account — `plak login`, `plak refresh`,
-`plak logout <account>`, `plak models` or `plak run` — and again whenever the build's profile revision
-changes, Plak prints a notice on stderr and asks once:
+`plak logout <account>`, `plak models` or `plak run` — and again whenever the build's profile or notice
+revision changes, Plak prints a notice on stderr and asks once. A build that
+only re-reviews the profile does not ask again:
 
 ```
 codex uses an experimental revision-pinned compatibility integration.
 profile: <profile id>
 reviewed: 2026-10-22 UTC
-expires: 2026-11-21T23:59:59Z; after that this build refuses codex until a newer build replaces the profile
+expires: 2027-01-20 UTC; after that this build refuses codex until a newer build replaces the profile
 Continue? [y/N]
 ```
 
@@ -453,9 +456,10 @@ short id Plak prints when you quit. `plak --resume [uuid]` is the same command.
 
 Local health checks. Everything is offline except one OpenRouter probe: when a
 key and a default model are both set, Plak probes catalog keys with discovery
-GETs only, never inference. Compiled provider reviews within 14 days of expiry
-(or already expired) produce local warnings naming the surface and UTC date.
-They count in the warning total; warnings alone do not change the exit code.
+GETs only, never inference. Compiled provider reviews within 14 days of a
+subscription expiry or an API review-due date (or past it) produce local
+warnings naming the surface and UTC date. They count in the warning total;
+warnings alone do not change the exit code.
 
 ```
 $ plak doctor

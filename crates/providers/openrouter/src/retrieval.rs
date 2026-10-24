@@ -21,7 +21,7 @@ use plakous_http::{
 };
 use plakous_model::{CancellationToken, Clock, Digest, DigestDomain};
 
-use crate::chat::{OPENROUTER_CHAT_COMPLETIONS_PATH, insert_attribution, reviewed_until};
+use crate::chat::{OPENROUTER_CHAT_COMPLETIONS_PATH, insert_attribution};
 use crate::{
     OpenRouterApiKeyGenerationGrant, OpenRouterChatBuildError, OpenRouterChatModelEvidence,
     OpenRouterChatRoute, OpenRouterReasoningFacts, OpenRouterRetentionPolicy,
@@ -58,7 +58,6 @@ impl OpenRouterRetrieval {
         if !evidence.validates(route.identity(), now) {
             return Err(OpenRouterChatBuildError::StaleEvidence);
         }
-        reviewed_until(evidence.expires_at(), now)?;
         let generation = route.current_credential_generation_grant()?;
         let dial_origin = Origin::parse(route.identity().origin().as_str())
             .map_err(|_| OpenRouterChatBuildError::Configuration)?;
@@ -126,9 +125,7 @@ impl OpenRouterRetrieval {
 
     fn authorized(&self, body: &[u8]) -> Result<Request, ChatRetrievalError> {
         let now = self.clock.now();
-        if !self.evidence.validates(self.route.identity(), now)
-            || reviewed_until(self.evidence.expires_at(), now).is_err()
-        {
+        if !self.evidence.validates(self.route.identity(), now) {
             return Err(unauthorized(
                 "side request authority is not current: the model's discovery evidence expired",
             ));

@@ -508,7 +508,7 @@ fn local_authority_rejects_production_and_unported_origins() -> TestResult {
 fn review_clock() -> TestResult<plakous_model::FixedClock> {
     Ok(plakous_model::FixedClock::new(
         plakous_model::Timestamp::new(
-            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400
+            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS - 90 * 86_400
                 + 60,
             0,
         )?,

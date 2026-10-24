@@ -3015,11 +3015,15 @@ a candidate key can be checked against it, so it stays in owner-only files.
 The OpenAI Platform manifest and xAI Platform binding were re-reviewed on
 2026-10-22 against their official model, Responses, tool-calling, reasoning and
 storage documentation. The release-candidate re-review found no change to
-pinned facts on either surface. Their existing 90-day windows end at
-2027-01-20T00:00:00Z; construction and runtime revalidation still refuse stale
-facts without fallback. Each surface derives its expiry from one review-date
-constant, as do the Codex and OpenRouter Chat pins. Re-dating changes no
-profile, request, or persisted encoding.
+pinned facts on either surface. They are documented public APIs, so their
+reviews are due again at 2027-01-20T00:00:00Z (90 days after the review) but
+never refuse on the calendar: construction, preparation and runtime
+revalidation ignore the review date, built-in facts carry no expiry, and a
+skewed clock before the review date refuses nothing. The review-due date drives
+only local warnings and the publish floor (chapters 02 and 06). Each surface
+derives that date from one review-date constant, as do the OpenRouter Chat and
+Anthropic API surfaces. Re-dating changes no profile, request, or persisted
+encoding.
 
 **xAI API-key model catalog.** `plakous::xai` lists models with one bounded
 authenticated `GET /v1/models` on `https://api.x.ai` (the same API key,
@@ -3273,22 +3277,19 @@ final usage chunk that repeats `finish_reason`, `reasoning` and
 `reasoning_details`, tool calls, and the pre-commit JSON and mid-stream
 `error` shapes were last reviewed against the public
 [OpenRouter docs](https://openrouter.ai/docs/api_reference/streaming) on
-2026-10-22, with no change to pinned facts. The pin expires at
-2026-11-21T00:00:00Z. The expiry is enforced
-at runtime exactly like a compiled subscription profile's: target construction
-and every runtime-authority revalidation at or after it refuse the route with
-"OpenRouter Chat compatibility profile is not currently admissible"
-(`RuntimeModelAuthorityError::Stale` on revalidation), and every authority it
-issues expires no later than the pin. Continuing needs a build with a renewed
-review. The test-only `test-clock` feature permits a route clock shared by
+2026-10-22, with no change to pinned facts. The review is due again at
+2027-01-20T00:00:00Z, 90 days later. OpenRouter is a documented public API, so
+the review-due date never refuses the route: an authority's validity is the
+discovery evidence's expiry alone, and the built-in dialect facts carry no
+expiry. The test-only `test-clock` feature permits a route clock shared by
 discovery, target construction, side retrieval and runtime revalidation.
-Offline fixtures use an instant within that surface's own review window and
-test expired-pin refusal explicitly. Supported builds always use the system
-clock for compiled review expiry and credential time checks.
+Offline fixtures use an instant after the review and test construction and
+revalidation long past the review-due date. Supported builds always use the
+system clock for subscription expiry and credential time checks.
 
-Compiled expiry metadata is available for local product warnings and
-maintainer packaging checks (chapters 02 and 06); it confers no credential or
-route authority.
+Compiled review-due and expiry metadata is available for local product warnings
+and maintainer packaging checks (chapters 02 and 06); it confers no credential
+or route authority.
 
 Chat lowering refuses a function name exposed twice. One canonical tool may be
 exposed under several names (pi's `edit` and `write` over the patch tool); such
@@ -3656,13 +3657,16 @@ successor measurements retain the source session affinity for this purpose,
 without attaching the source response's family artifact to changed history.
 API-key Anthropic and OpenRouter semantics are unchanged.
 An enrolled Claude OAuth target carries its pinned source revision, review time,
-and exclusive expiry as reviewed admission through preparation and every
-physical dispatch. It is not a caller-authored target. Retry revalidation uses
-that same review window and the current selected credential authority; a
-missing or expired admission refuses the second dispatch before reserving its
-inference permit. The selected credential authority is checked after the
-reservation and before dispatch, when credential material is available; a
-failed check abandons that permit without authorizing it.
+and exclusive expiry as reviewed subscription admission through preparation and
+every physical dispatch. It is not a caller-authored target. Retry
+revalidation uses that same review window and the current selected credential
+authority; a missing or expired admission refuses the second dispatch before
+reserving its inference permit. The selected credential authority is checked
+after the reservation and before dispatch, when credential material is
+available; a failed check abandons that permit without authorizing it.
+An Anthropic API-key target instead carries reviewed API admission: its
+revision and review time and no expiry, so its facts never refuse on the
+calendar, and an API-key model refuses a subscription admission.
 The native request-ID grammar is `req_` plus 1–36 ASCII alphanumeric, underscore,
 or hyphen characters. The version suffix selects UTF-16 units 4, 7, and 20 from
 the first user text, matching the pinned native JavaScript implementation; body

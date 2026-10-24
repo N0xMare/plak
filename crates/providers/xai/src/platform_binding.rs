@@ -27,7 +27,9 @@ pub(crate) const ACCOUNTING: &str = "responses-wire-bytes-xai-platform-v1";
 // Reviewed 2026-10-22: docs.x.ai/developers/models/grok-4.6,
 // developers/model-capabilities/text/generate-text and developers/tools/function-calling.
 pub(crate) const REVIEWED: u64 = 1_792_627_200;
-pub(crate) const EXPIRES: u64 = REVIEWED + 90 * 86_400;
+// Drives only doctor and status notes and the publish floor; the route never
+// refuses on the calendar.
+pub(crate) const REVIEW_DUE: u64 = REVIEWED + 90 * 86_400;
 
 /// Redaction-safe Platform construction or credential-source failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
@@ -36,9 +38,6 @@ pub enum XaiPlatformBuildError {
     /// The exact model, effort, route, context or selected behavior is invalid.
     #[error("xAI Platform configuration is invalid")]
     Configuration,
-    /// The reviewed route facts are no longer current.
-    #[error("xAI Platform reviewed route facts are stale")]
-    Stale,
     /// The current credential grant is absent, revoked, or changed.
     #[error("xAI Platform credential authority is unavailable or changed")]
     Authentication,
@@ -161,12 +160,6 @@ pub fn xai_platform_selection_for(
     build().map_err(|_| XaiPlatformBuildError::Configuration)
 }
 
-pub(crate) fn current(now: Timestamp) -> Result<(), XaiPlatformBuildError> {
-    if now < timestamp(REVIEWED)? || now >= timestamp(EXPIRES)? {
-        return Err(XaiPlatformBuildError::Stale);
-    }
-    Ok(())
-}
 fn timestamp(seconds: u64) -> Result<Timestamp, XaiPlatformBuildError> {
     Timestamp::new(seconds, 0).map_err(|_| XaiPlatformBuildError::Configuration)
 }
@@ -178,8 +171,7 @@ pub(crate) fn descriptor(
 ) -> Result<ResolvedModelDescriptor, XaiPlatformBuildError> {
     let build = || -> Result<_, Box<dyn std::error::Error>> {
         let observed = timestamp(REVIEWED)?;
-        let expires = timestamp(EXPIRES)?;
-        let provenance = FactProvenance::new(FactSource::BuiltIn, observed, Some(expires));
+        let provenance = FactProvenance::new(FactSource::BuiltIn, observed, None);
         // Every usable reviewed row lists `image` among its input modalities
         // in `GET /v1/language-models`.
         let features = [
@@ -223,7 +215,7 @@ pub(crate) fn descriptor(
                 &maximum.get().to_be_bytes(),
             ],
         )?;
-        let freshness = EvidenceFreshness::new(observed, Some(expires))?;
+        let freshness = EvidenceFreshness::new(observed, None)?;
         let capacity = CapacityCertificate::custom_envelope(
             "xai-platform-caller-input-envelope",
             "v1",

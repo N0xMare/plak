@@ -79,7 +79,7 @@ pub use images::{
     CODEX_IMAGE_EDITS_PATH, CODEX_IMAGE_GENERATIONS_PATH, CODEX_IMAGE_MODEL,
     OPENAI_IMAGE_EDITS_PATH, OPENAI_IMAGE_GENERATIONS_PATH, OPENAI_IMAGE_MODEL, OpenAiImages,
 };
-pub use manifest::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS;
+pub use manifest::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS;
 #[cfg(feature = "native-auth")]
 pub use model::{OpenAiLanguageModel, compile_codex_subscription_configuration};
 pub use model::{

@@ -57,7 +57,7 @@ fn with_imported_reference(request: &ModelRequest) -> TestResult<ModelRequest> {
 
 fn now() -> Timestamp {
     Timestamp::new(
-        XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+        XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS - 90 * 86_400 + 60,
         0,
     )
     .unwrap()
@@ -861,8 +861,8 @@ async fn cancellation_after_acceptance_closes_and_joins_transport() -> TestResul
     Ok(())
 }
 
-#[test]
-fn unsupported_behavior_and_stale_context_refuse_before_credentials() -> TestResult {
+#[tokio::test]
+async fn unsupported_behavior_refuses_before_credentials_and_reviews_never_expire() -> TestResult {
     let base = selected(ReasoningEffort::Low)?.behavior().clone();
     let mut unsupported = Vec::new();
     let mut behavior = base.clone();
@@ -891,33 +891,26 @@ fn unsupported_behavior_and_stale_context_refuse_before_credentials() -> TestRes
         assert_eq!(source.grants.load(Ordering::SeqCst), 0);
         assert_eq!(source.resolves.load(Ordering::SeqCst), 0);
     }
+    // The reviewed Platform facts never refuse on the calendar: a decade past
+    // their review-due date the route still builds and revalidates.
     let source = Arc::new(Source::new());
-    let stale = Arc::new(FixedClock::new(Timestamp::new(
-        XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS + 86_400,
+    let decade_past_review = Timestamp::new(
+        XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS + 10 * 365 * 86_400,
         0,
-    )?));
-    let preflight_then_grant = || {
-        XaiPlatformModel::preflight_configuration(
-            &selected(ReasoningEffort::Low).unwrap(),
-            stale.as_ref(),
-        )?;
-        source.grant()
-    };
-    assert!(matches!(
-        preflight_then_grant(),
-        Err(XaiPlatformBuildError::Stale)
-    ));
-    assert!(matches!(
-        XaiPlatformModel::new(
-            authority(),
-            source.clone(),
-            NonZeroU64::new(65_536).unwrap(),
-            selected(ReasoningEffort::Low)?,
-            stale
-        ),
-        Err(XaiPlatformBuildError::Stale)
-    ));
+    )?;
+    XaiPlatformModel::preflight_configuration(&selected(ReasoningEffort::Low)?)?;
     assert_eq!(source.grants.load(Ordering::SeqCst), 0);
+    let model = Arc::new(XaiPlatformModel::new(
+        authority(),
+        source.clone(),
+        NonZeroU64::new(65_536).unwrap(),
+        selected(ReasoningEffort::Low)?,
+        Arc::new(FixedClock::new(decade_past_review)),
+    )?);
+    let runtime = model
+        .revalidate_runtime_authority(decade_past_review)
+        .await?;
+    assert_eq!(runtime.valid_until(), None);
     assert!(
         !format!("{:?}", XaiPlatformApiKey::new("synthetic-visible-marker")?)
             .contains("synthetic-visible-marker")

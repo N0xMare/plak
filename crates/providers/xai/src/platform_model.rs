@@ -72,12 +72,10 @@ pub struct XaiPlatformModel {
     service: Arc<ResponsesAttemptService<PlatformExecution, XaiPlatformCredentialGrant>>,
 }
 impl XaiPlatformModel {
-    /// Checks reviewed facts and selection before resolving a source-owned grant.
+    /// Checks the selection before resolving a source-owned grant.
     pub fn preflight_configuration(
         selected: &SelectedProviderConfiguration,
-        clock: &dyn Clock,
     ) -> Result<(), XaiPlatformBuildError> {
-        platform_binding::current(clock.now())?;
         validate_selection(selected)
     }
     /// Constructs the exact official Platform route. No secret is resolved here.
@@ -207,7 +205,7 @@ impl XaiPlatformModel {
         origin: Origin,
         admitted_facts: &[u8],
     ) -> Result<Self, XaiPlatformBuildError> {
-        Self::preflight_configuration(&selected, clock.as_ref())?;
+        Self::preflight_configuration(&selected)?;
         let OutputBoundDisposition::Enforced(output) = selected.behavior().output_bound else {
             return Err(XaiPlatformBuildError::Configuration);
         };
@@ -418,7 +416,6 @@ impl LanguageModel for XaiPlatformModel {
         checked_at: Timestamp,
     ) -> RuntimeModelAuthorityOperation {
         Box::pin(async move {
-            platform_binding::current(checked_at).map_err(|_| RuntimeModelAuthorityError::Stale)?;
             check_grant(&self.execution).map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
             let runtime = runtime_authority(&self.descriptor, &self.execution.grant, checked_at)
                 .map_err(|_| RuntimeModelAuthorityError::ForeignAuthority)?;
@@ -433,8 +430,6 @@ impl LanguageModel for XaiPlatformModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
-        platform_binding::current(self.execution.clock.now())
-            .map_err(|_| rejection("Platform route evidence is stale"))?;
         self.descriptor.validate_plan_binding(&plan)?;
         if plan.request().selected_provider_configuration_id()
             != self.configuration.selected_identity()
@@ -710,7 +705,6 @@ fn runtime_authority(
     .map_err(|_| XaiPlatformBuildError::Configuration)
 }
 fn check_grant(execution: &PlatformExecution) -> Result<(), XaiPlatformBuildError> {
-    platform_binding::current(execution.clock.now())?;
     if execution.source.grant()? != execution.grant {
         return Err(XaiPlatformBuildError::Authentication);
     }

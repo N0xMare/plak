@@ -583,25 +583,31 @@ with a closed stdin asks for the same: answer at a terminal, or
 
 ## `native compatibility profile compiled into this build is inactive`
 
-The compatibility profile compiled into your build passed its review expiry
-date (shown in the message and by `plak status`) or was withdrawn. Logging in
-again cannot renew it; build a newer plak. A re-reviewed build requires the
-current notice to be accepted again; that alone does not discard an existing
-Codex login or require a fresh OAuth login. This build's Codex review is valid
-through 2026-11-21T23:59:59Z.
+The subscription compatibility profile compiled into your build passed its
+expiry (shown in the message and by `plak status`), 90 days after its review,
+or was withdrawn. Logging in again cannot renew it; build a newer plak. A
+re-reviewed build that changes no pinned contract keeps your acceptance and
+your login. A build whose notice changed asks you to accept it again, without
+a new login; a build whose OAuth contract changed carries a new profile and
+needs `plak login <account>`. This build's subscription profiles are valid
+until 2027-01-20T00:00:00Z (Codex), 2026-10-29T00:00:00Z (Grok) and
+2026-12-21T00:00:00Z (Claude).
 
-The built-in OpenRouter Chat dialect is pinned the same way: from its expiry
-(2026-11-21T00:00:00Z for this build) OpenRouter sessions refuse with `OpenRouter Chat
-compatibility profile is not currently admissible`. Build a newer plak.
+The documented API routes (OpenAI and xAI Platform, Anthropic API, OpenRouter
+Chat) never refuse on the calendar. Their reviews are due 90 days after the
+review date (2027-01-20T00:00:00Z for OpenAI, xAI and OpenRouter Chat,
+2026-12-21T00:00:00Z for Anthropic in this build); after that the routes keep
+working and a newer build carries re-reviewed facts.
 
-`plak doctor` and both forms of `plak status` warn 14 days before any compiled
-review expires, naming the surface and UTC expiry, including API-route reviews
-and accounts you have not configured. Expired reviews continue to warn. Install
-a newly reviewed build; neither a warning nor a new login extends the old
-build's review window. Publication dry runs and uploads refuse a build with
-21 days or less remaining on any compiled review; this check is not part of
-the development qualification gates; their package step only reports remaining
-days.
+`plak doctor` and both forms of `plak status` write one line 14 days before
+each compiled deadline and after it, naming the surface and UTC date, including
+accounts you have not configured: a `Warning:` that the build will refuse or
+refuses a subscription route, or a `Note:` that API facts are or were due for
+review. Install a newly reviewed build; neither a warning nor a new login
+extends a subscription profile. Publication dry runs and uploads refuse a build
+with a third of any review window or less remaining (30 days of 90); this
+check is not part of the development qualification gates; their package step
+only reports remaining days.
 
 ## `native subscription storage is unsafe: <path> …`
 

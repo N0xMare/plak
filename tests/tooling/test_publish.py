@@ -109,11 +109,15 @@ class PublishScriptTests(unittest.TestCase):
         checker = self.repo / "tools/release/review_expiry.py"
         source = checker.read_text()
         assert source.count("sys.exit(main(note=args.note))") == 1
-        checker.write_text(source.replace("sys.exit(main(note=args.note))", "sys.exit(main(now=1_000, note=args.note))"))
-        for _, relative, constant in review_expiry.SURFACES:
+        checker.write_text(source.replace("sys.exit(main(note=args.note))", "sys.exit(main(now=100 * 86_400, note=args.note))"))
+        window = self.repo / review_expiry.WINDOW_CONSTANTS
+        window.parent.mkdir(parents=True, exist_ok=True)
+        window.write_text("pub const SUBSCRIPTION_REVIEW_WINDOW_SECONDS: u64 = 90 * 86_400;\n")
+        for _, relative, reviewed, deadline, _ in review_expiry.SURFACES:
             source = self.repo / "crates/providers" / relative
             source.parent.mkdir(parents=True, exist_ok=True)
-            source.write_text(f"const {constant}: u64 = 1_000 + 30 * 86_400;\n")
+            source.write_text(f"const {reviewed}: u64 = 100 * 86_400;\n"
+                              f"const {deadline}: u64 = {reviewed} + SUBSCRIPTION_REVIEW_WINDOW_SECONDS;\n")
         files = {
             "Cargo.toml": (
                 "[workspace]\nresolver = \"2\"\nmembers = [\"crates/zeta\", \"crates/mid\", "
@@ -237,8 +241,10 @@ class PublishScriptTests(unittest.TestCase):
         self.assertEqual(calls[0]["offline"], "true")
 
     def test_publication_refuses_expiring_pins_before_packaging(self) -> None:
+        # Exactly a third of the 90-day window remains at the frozen time.
         source = self.repo / "crates/providers/openai/src/oauth_pins.rs"
-        source.write_text("const expires_at_unix: u64 = 1_000 + 21 * 86_400;\n")
+        source.write_text("const reviewed_at_unix: u64 = 40 * 86_400;\n"
+                          "const expires_at_unix: u64 = 130 * 86_400;\n")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "expiry boundary")
         self.record_evidence(self.git("rev-parse", "HEAD^{tree}"))
@@ -248,11 +254,11 @@ class PublishScriptTests(unittest.TestCase):
                 result, calls = self.publish(*mode)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("Codex OAuth review expires", result.stderr)
-                self.assertIn("more than 21 days remaining", result.stderr)
+                self.assertIn("more than 30 days (a third of the 90-day window) remaining", result.stderr)
                 self.assertEqual(calls, [])
         result, calls = self.publish("--gate")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("21 days remaining (informational)", result.stdout)
+        self.assertIn("30 days remaining; publication requires more than 30 (informational)", result.stdout)
         self.assertEqual(len(calls), 1)
 
     def test_verification_graph_prefetch_is_offline_first(self) -> None:

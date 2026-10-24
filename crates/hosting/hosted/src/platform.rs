@@ -290,7 +290,7 @@ pub(crate) async fn construct_platform_runtime_with(
                 exact_route_retention(&provisional),
             )
             .map_err(api_error)?;
-            plakous::xai::XaiPlatformModel::preflight_configuration(&selected, clock.as_ref())
+            plakous::xai::XaiPlatformModel::preflight_configuration(&selected)
                 .map_err(api_error)?;
             let authority = source.grant().map_err(api_error)?.authority().clone();
             let model = Arc::new(

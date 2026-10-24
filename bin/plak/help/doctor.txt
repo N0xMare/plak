@@ -5,4 +5,5 @@ USAGE:
 
   When an OpenRouter key and default model are set, probes catalog keys via discovery GETs only (no inference).
 
-  Warns when a compiled provider review expires within 14 days or is already expired.
+  Warns within 14 days of a subscription profile's expiry, or after it, and notes
+  when documented API facts are within 14 days of their review-due date, or past it.

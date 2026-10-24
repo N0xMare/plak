@@ -365,7 +365,7 @@ pub mod subscriptions;
 #[cfg(feature = "anthropic")]
 pub mod anthropic {
     pub use crate::anthropic_retrieval::AnthropicRetrievalPort;
-    pub use plakous_anthropic::ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_UNIX_SECONDS;
+    pub use plakous_anthropic::ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_UNIX_SECONDS;
     pub use plakous_anthropic::AnthropicRetrieval;
     pub use plakous_anthropic::{ANTHROPIC_API_HOSTED_RETRIEVAL, CLAUDE_OAUTH_HOSTED_RETRIEVAL};
     pub use plakous_anthropic::{
@@ -563,7 +563,7 @@ pub mod openai {
     #[cfg(feature = "native-subscriptions")]
     pub use crate::responses_retrieval::CodexRetrievalPort;
     pub use crate::responses_retrieval::OpenAiRetrievalPort;
-    pub use plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS;
+    pub use plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS;
     pub use plakous_openai::{
         AccessMode as OpenAiAccessMode, AuthError as OpenAiAuthError, CodexSubscriptionRouteConfig,
         ConfigError as OpenAiConfigError, CredentialAuthorityId, CredentialReference,
@@ -616,7 +616,7 @@ pub mod openai {
 /// ```
 #[cfg(feature = "openrouter")]
 pub mod openrouter {
-    pub use plakous_openrouter::OPENROUTER_CHAT_REVIEW_EXPIRES_AT;
+    pub use plakous_openrouter::OPENROUTER_CHAT_REVIEW_DUE_AT;
     use std::fmt;
     use std::sync::Arc;
 
@@ -1250,7 +1250,7 @@ pub mod tools {
 pub mod xai {
     pub use crate::responses_images::XaiImagePort;
     pub use crate::responses_retrieval::XaiRetrievalPort;
-    pub use plakous_xai::XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS;
+    pub use plakous_xai::XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS;
     pub use plakous_xai::XaiRetrieval;
     pub use plakous_xai::{
         GrokCodingProfile, SUPERGROK_RESPONSES_ORIGIN, SUPERGROK_RESPONSES_PATH,

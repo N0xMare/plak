@@ -899,9 +899,12 @@ fn oauth_resolved_target(
         model,
         profile,
         descriptor,
-        CLAUDE_OAUTH_SOURCE_REVISION,
-        Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).map_err(configuration_identity)?,
-        expires_at,
+        crate::AnthropicResolutionTrust::ReviewedSubscriptionAdmission {
+            revision: CLAUDE_OAUTH_SOURCE_REVISION,
+            reviewed_at: Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0)
+                .map_err(configuration_identity)?,
+            expires_at,
+        },
         Arc::new(SystemClock),
     )
 }

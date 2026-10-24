@@ -2694,7 +2694,7 @@ async fn workflow_unsent_retry_revalidates_authorization_on_every_wire() -> Test
 fn review_clock() -> plakous_model::FixedClock {
     plakous_model::FixedClock::new(
         Timestamp::new(
-            plakous_openrouter::OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 30 * 86_400 + 60,
+            plakous_openrouter::OPENROUTER_CHAT_REVIEW_DUE_AT - 90 * 86_400 + 60,
             0,
         )
         .expect("review time"),

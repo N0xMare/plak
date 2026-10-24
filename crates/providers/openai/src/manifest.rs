@@ -16,8 +16,10 @@ pub(crate) const OPENAI_GPT_56_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-
 pub(crate) const OPENAI_GPT_6_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-6.2026-09-22.r1";
 /// UTC second at which the official model documentation was reviewed.
 pub(crate) const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS: u64 = 1_792_627_200;
-/// Fixed end of the 90-day compatibility window for this review.
-pub const OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS: u64 =
+/// When this review is due for renewal, 90 days after it. It drives only
+/// doctor and status notes and the publish floor; the route never refuses on
+/// the calendar.
+pub const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS: u64 =
     OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS + 90 * 86_400;
 
 const GPT_56_FAMILY_ID: &str = "gpt-5.6";
@@ -109,7 +111,6 @@ pub(crate) fn admit_reviewed_platform_model(
     response_model: &ModelId,
     family: Option<&ModelFamilyId>,
     profile: &ModelAdapterProfileId,
-    now: Timestamp,
 ) -> Result<ReviewedPlatformAdmission, ConfigError> {
     let row_index = REVIEWED_ROWS
         .iter()
@@ -120,7 +121,6 @@ pub(crate) fn admit_reviewed_platform_model(
                 && profile.as_str() == row.profile
         })
         .ok_or(ConfigError::UnknownPlatformManifestTuple)?;
-    ensure_manifest_current(now)?;
     let descriptor = descriptor_for_row(route, REVIEWED_ROWS[row_index])?;
     Ok(ReviewedPlatformAdmission {
         descriptor,
@@ -136,9 +136,7 @@ pub(crate) fn validate_reviewed_platform_witness(
     route: &OpenAiRoute,
     descriptor: &ResolvedModelDescriptor,
     witness: &ReviewedPlatformManifestWitness,
-    now: Timestamp,
 ) -> Result<(), ConfigError> {
-    ensure_manifest_current(now)?;
     let row = REVIEWED_ROWS
         .get(witness.row_index)
         .copied()
@@ -268,8 +266,7 @@ fn descriptor_for_row(
     row: ReviewedPlatformRow,
 ) -> Result<ResolvedModelDescriptor, ConfigError> {
     let observed_at = fixed_timestamp(OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS)?;
-    let expires_at = fixed_timestamp(OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS)?;
-    let provenance = FactProvenance::new(FactSource::BuiltIn, observed_at, Some(expires_at));
+    let provenance = FactProvenance::new(FactSource::BuiltIn, observed_at, None);
     let mut features = BTreeMap::from([
         (
             Capability::Streaming,
@@ -335,7 +332,7 @@ fn descriptor_for_row(
                             .to_owned(),
                     ),
                 ),
-                FactProvenance::new(FactSource::RouteEvidence, observed_at, Some(expires_at)),
+                FactProvenance::new(FactSource::RouteEvidence, observed_at, None),
             ),
         );
     }
@@ -350,7 +347,7 @@ fn descriptor_for_row(
                     None,
                     Some("OpenAI Platform programmatic tool calling; exact gpt-5.6-sol offline profile".to_owned()),
                 ),
-                FactProvenance::new(FactSource::RouteEvidence, observed_at, Some(expires_at)),
+                FactProvenance::new(FactSource::RouteEvidence, observed_at, None),
             ),
         );
     }
@@ -365,15 +362,6 @@ fn descriptor_for_row(
             .map_err(|_| ConfigError::PlatformManifestBinding)?,
         CapabilitySet::new(features, BTreeMap::new()),
     ))
-}
-
-fn ensure_manifest_current(now: Timestamp) -> Result<(), ConfigError> {
-    let reviewed_at = fixed_timestamp(OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS)?;
-    let expires_at = fixed_timestamp(OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS)?;
-    if now < reviewed_at || expires_at <= now {
-        return Err(ConfigError::PlatformManifestEvidenceExpired);
-    }
-    Ok(())
 }
 
 fn fixed_timestamp(seconds: u64) -> Result<Timestamp, ConfigError> {
@@ -406,9 +394,7 @@ pub(crate) fn with_context_envelope(
         )?;
         let freshness = EvidenceFreshness::new(
             fixed_timestamp(OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS)?,
-            Some(fixed_timestamp(
-                OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS,
-            )?),
+            None,
         )?;
         let capacity = CapacityCertificate::custom_envelope(
             "openai-platform-caller-input-envelope",

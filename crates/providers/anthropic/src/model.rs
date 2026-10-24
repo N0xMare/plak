@@ -8,7 +8,6 @@ use crate::{
     AnthropicPlatformCapabilityProfile, AnthropicPlatformModelConfig,
     AnthropicPlatformModelResolver, AnthropicPlatformRoute, MessagesRequestTranslator,
     ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership,
-    config::ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS,
     config::ANTHROPIC_PLATFORM_ADMISSION_REVISION, start_anthropic_messages_model_call,
 };
 use plakous_http::{Client, Limits, Origin};
@@ -237,7 +236,7 @@ impl AnthropicLanguageModel {
                 .map_err(configuration_error)?,
             AnthropicPlatformCapabilityProfile::AdaptiveClientTools,
         )?;
-        crate::config::preflight_platform_admission(&config, SystemClock.now())?;
+        crate::config::preflight_platform_admission(&config)?;
         plakous_messages::validate_messages_api_behavior(&behavior).map_err(configuration_error)?;
         let account_identity = AnthropicAccountIdentity::new(account)?;
         let key = source
@@ -250,14 +249,11 @@ impl AnthropicLanguageModel {
             .ok_or_else(|| configuration_error("Anthropic account binding unavailable"))?;
         let credential_binding = route.credential_binding()?;
         let now = SystemClock.now();
-        let expiry = Timestamp::new(ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS, 0)
-            .map_err(configuration_error)?;
         let context = caller_context(
             account_binding,
             credential_binding,
             maximum_projected_input,
             now,
-            expiry,
         )?;
         let resolved = AnthropicPlatformModelResolver::new(route.clone())
             .resolve(config)?
@@ -270,7 +266,7 @@ impl AnthropicLanguageModel {
             credential_binding,
             1,
             now,
-            Some(expiry),
+            None,
         )
         .map_err(configuration_error)?;
         let selected = SelectedProviderConfiguration::new(
@@ -684,7 +680,6 @@ fn caller_context(
     credential: Digest,
     maximum: NonZeroU64,
     now: Timestamp,
-    expiry: Timestamp,
 ) -> Result<ContextContract, AnthropicError> {
     let authority = RuntimeModelAuthority::authority_class_for(account, credential)
         .map_err(configuration_error)?;
@@ -697,7 +692,7 @@ fn caller_context(
         ],
     )
     .map_err(configuration_error)?;
-    let freshness = EvidenceFreshness::new(now, Some(expiry)).map_err(configuration_error)?;
+    let freshness = EvidenceFreshness::new(now, None).map_err(configuration_error)?;
     let capacity = CapacityCertificate::custom_envelope(
         "anthropic.platform.caller-capacity",
         "v1",
@@ -841,10 +836,14 @@ fn validate_descriptor(
                 ));
             }
         }
-        crate::AnthropicResolutionTrust::ReviewedAdmission {
+        crate::AnthropicResolutionTrust::ReviewedSubscriptionAdmission { .. } => {
+            return Err(descriptor_claim_error(
+                "routable Anthropic API models require a reviewed API admission, not a subscription one",
+            ));
+        }
+        crate::AnthropicResolutionTrust::ReviewedApiAdmission {
             revision,
             reviewed_at,
-            expires_at,
         } => {
             let now = resolved.clock().now();
             resolved.ensure_current_admission(now)?;
@@ -857,7 +856,7 @@ fn validate_descriptor(
                 let provenance = support.provenance();
                 provenance.source() != FactSource::BuiltIn
                     || provenance.observed_at() != reviewed_at
-                    || provenance.expires_at() != Some(expires_at)
+                    || provenance.expires_at().is_some()
                     || provenance.is_expired(now)
             }) {
                 return Err(descriptor_claim_error(

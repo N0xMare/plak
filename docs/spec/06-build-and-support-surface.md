@@ -450,8 +450,9 @@ to distinguish HTTP 401 and 403 and attach product-supplied safe key-source labe
 and remedies; the error is enrolled in the same inventory.
 
 API and gateway agent construction pair an explicit clock with the supported
-`model::SystemIdGenerator`. The provider facade expiry constants expose
-read-only compiled review metadata, never credential or runtime authority.
+`model::SystemIdGenerator`. The provider facade review-due constants
+(`*_REVIEW_DUE_AT*`) expose read-only compiled review metadata, never
+credential or runtime authority.
 Both are pinned by the external facade inventory fixture and permitted by the
 checker for their host/product consumers.
 The facade reexports `openrouter::OPENROUTER_CHAT_PROTOCOL_ID`,
@@ -1113,13 +1114,19 @@ a debug build per crate selection and is roughly 20 GB.
 
 | Invocation | Preconditions | Effect |
 | --- | --- | --- |
-| `scripts/publish.sh` | More than 21 days on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` | Package and verify; nothing uploaded |
+| `scripts/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` | Package and verify; nothing uploaded |
 | `scripts/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification |
 | `scripts/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
 
 Publication dry runs and `--execute` use `tools/release/review_expiry.py` to
-read all seven compiled provider expiries and refuse any with 21 days or less
-remaining, failing closed on unreadable source. The `--gate` package group
+read the review date and deadline of all seven compiled surfaces (the three
+subscription expiries and the four API review-due dates) and refuse any whose
+remaining time is a third of its window or less: more than 30 days of a 90-day
+window must remain, so a release publishes within 60 days of its review. The
+floor applies to API review-due dates too, keeping one review cadence, though
+those dates never refuse a route. It resolves constants from each surface's
+source and the shared window constants in `plakous-auth`, failing closed on
+unreadable source. The `--gate` package group
 prints remaining days as a non-failing informational note instead. Neither
 `just check` nor `just full` has a time-dependent review-window precondition.
 The hidden `test-clock` feature is excluded from supported feature closures

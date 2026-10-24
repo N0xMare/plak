@@ -205,10 +205,7 @@ fn responses_capabilities() -> Result<CapabilitySet, plakous_model::IdentityErro
     let provenance = FactProvenance::new(
         FactSource::BuiltIn,
         Timestamp::new(crate::chat::OPENROUTER_CHAT_REVIEWED_AT, 0)?,
-        Some(Timestamp::new(
-            crate::chat::OPENROUTER_CHAT_REVIEW_EXPIRES_AT,
-            0,
-        )?),
+        None,
     );
     let features = [
         Capability::Streaming,

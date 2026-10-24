@@ -1306,7 +1306,7 @@ async fn semantic_compaction_workflow_retains_source_configuration_and_tools() -
 }
 
 #[tokio::test]
-async fn expired_route_authority_rejects_before_rereading_credentials() -> TestResult {
+async fn route_authority_outlives_its_review_due_date() -> TestResult {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     struct ExpiringClock {
         expired: AtomicBool,
@@ -1322,11 +1322,14 @@ async fn expired_route_authority_rejects_before_rereading_credentials() -> TestR
             }
         }
     }
+    // The reviewed Platform facts never refuse on the calendar: a decade
+    // past their review-due date the route still revalidates.
     let clock = Arc::new(ExpiringClock {
         expired: AtomicBool::new(false),
         fresh: review_clock()?.now(),
         stale: plakous_model::Timestamp::new(
-            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS,
+            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS
+                + 10 * 365 * 86_400,
             0,
         )?,
     });
@@ -1350,16 +1353,12 @@ async fn expired_route_authority_rejects_before_rereading_credentials() -> TestR
     let configured = Arc::new(OpenAiPlatformModel::new(authority, selected)?)
         .configured()
         .await?;
-    let grants_before = source.grants.load(Ordering::SeqCst);
     clock.expired.store(true, Ordering::SeqCst);
-    assert!(
-        configured
-            .model()
-            .revalidate_runtime_authority(clock.now())
-            .await
-            .is_err()
-    );
-    assert_eq!(source.grants.load(Ordering::SeqCst), grants_before);
+    let runtime = configured
+        .model()
+        .revalidate_runtime_authority(clock.now())
+        .await?;
+    assert_eq!(runtime.valid_until(), None);
     assert_eq!(source.resolutions.load(Ordering::SeqCst), 0);
     Ok(())
 }
@@ -1419,7 +1418,7 @@ async fn web_search_side_request_uses_the_session_key_project_and_model() -> Tes
 fn review_clock() -> TestResult<plakous_model::FixedClock> {
     Ok(plakous_model::FixedClock::new(
         plakous_model::Timestamp::new(
-            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400
+            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS - 90 * 86_400
                 + 60,
             0,
         )?,

@@ -23,11 +23,12 @@ pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVISION: &str =
     "anthropic.platform.admission.2026-09-22.v3";
 /// UTC review time of the immutable admission manifest.
 pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS: u64 = 1_790_035_200;
-/// Exclusive UTC expiry of the immutable admission manifest.
+/// When the admission manifest is due for re-review, 90 days after its review.
 ///
-/// A crate release with newly reviewed model facts is required after this time;
-/// resolving the same caller selection again cannot extend it.
-pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS: u64 = 1_821_571_200;
+/// It drives only doctor and status notes and the publish floor; the route
+/// never refuses on the calendar.
+pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_SECONDS: u64 =
+    ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS + 90 * 86_400;
 /// Exact remote model ID admitted by the current reviewed manifest.
 pub const CLAUDE_SONNET_4_6_MODEL_ID: &str = "claude-sonnet-4-6";
 /// Exact family identity admitted for [`CLAUDE_SONNET_4_6_MODEL_ID`].
@@ -157,7 +158,6 @@ struct AdmissionEvidence {
     revision: &'static str,
     source: FactSource,
     observed_at: Timestamp,
-    expires_at: Timestamp,
 }
 
 /// Private authority boundary for production admission facts.
@@ -170,7 +170,6 @@ trait AnthropicAdmissionSource: Send + Sync + 'static {
     fn admit(
         &self,
         config: &AnthropicPlatformModelConfig,
-        now: Timestamp,
     ) -> Result<AdmissionEvidence, AnthropicError>;
 
     fn label(&self) -> &'static str;
@@ -183,18 +182,14 @@ impl AnthropicAdmissionSource for ReviewedManifestAdmissionSource {
     fn admit(
         &self,
         config: &AnthropicPlatformModelConfig,
-        now: Timestamp,
     ) -> Result<AdmissionEvidence, AnthropicError> {
         let record = reviewed_admission(config)?;
         let observed_at = admission_timestamp(ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS)?;
-        let expires_at = admission_timestamp(ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS)?;
-        ensure_manifest_current(now, observed_at, expires_at)?;
         Ok(AdmissionEvidence {
             record,
             revision: ANTHROPIC_PLATFORM_ADMISSION_REVISION,
             source: FactSource::BuiltIn,
             observed_at,
-            expires_at,
         })
     }
 
@@ -316,11 +311,8 @@ pub struct AnthropicPlatformModelResolver {
 
 pub(crate) fn preflight_platform_admission(
     config: &AnthropicPlatformModelConfig,
-    now: Timestamp,
 ) -> Result<(), AnthropicError> {
-    ReviewedManifestAdmissionSource
-        .admit(config, now)
-        .map(|_| ())
+    ReviewedManifestAdmissionSource.admit(config).map(|_| ())
 }
 
 impl AnthropicPlatformModelResolver {
@@ -366,12 +358,8 @@ impl AnthropicPlatformModelResolver {
         &self,
         config: AnthropicPlatformModelConfig,
     ) -> Result<ResolvedAnthropicMessages, AnthropicError> {
-        let evidence = self.admission_source.admit(&config, self.clock.now())?;
-        let provenance = FactProvenance::new(
-            evidence.source,
-            evidence.observed_at,
-            Some(evidence.expires_at),
-        );
+        let evidence = self.admission_source.admit(&config)?;
+        let provenance = FactProvenance::new(evidence.source, evidence.observed_at, None);
         let capabilities = derived_capabilities(
             config.capabilities,
             config
@@ -404,9 +392,10 @@ impl AnthropicPlatformModelResolver {
             model,
             profile,
             descriptor,
-            evidence.revision,
-            evidence.observed_at,
-            evidence.expires_at,
+            crate::AnthropicResolutionTrust::ReviewedApiAdmission {
+                revision: evidence.revision,
+                reviewed_at: evidence.observed_at,
+            },
             Arc::clone(&self.clock),
         )
     }
@@ -520,22 +509,6 @@ fn admission_timestamp(seconds: u64) -> Result<Timestamp, AnthropicError> {
     Timestamp::new(seconds, 0).map_err(configuration_identity)
 }
 
-fn ensure_manifest_current(
-    now: Timestamp,
-    reviewed_at: Timestamp,
-    expires_at: Timestamp,
-) -> Result<(), AnthropicError> {
-    if reviewed_at <= now && now < expires_at {
-        Ok(())
-    } else {
-        Err(AnthropicError::new(
-            AnthropicErrorKind::InvalidConfiguration,
-            AnthropicErrorPhase::Prepare,
-            "Anthropic reviewed admission manifest is expired or not yet valid",
-        ))
-    }
-}
-
 fn configuration_identity(error: impl std::fmt::Display) -> AnthropicError {
     AnthropicError::new(
         AnthropicErrorKind::InvalidConfiguration,
@@ -587,13 +560,7 @@ mod tests {
                 support.provenance().observed_at(),
                 Timestamp::new(ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS, 0)?
             );
-            assert_eq!(
-                support.provenance().expires_at(),
-                Some(Timestamp::new(
-                    ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS,
-                    0
-                )?)
-            );
+            assert_eq!(support.provenance().expires_at(), None);
         }
         for capability in [
             Capability::ParallelTools,
@@ -607,10 +574,10 @@ mod tests {
         assert!(
             target
                 .ensure_current_admission(Timestamp::new(
-                    ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS,
+                    ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_SECONDS,
                     0
                 )?)
-                .is_err()
+                .is_ok()
         );
         assert!(!format!("{resolver:?} {target:?}").contains("sk-ant-resolver-sentinel"));
         Ok(())
@@ -736,18 +703,24 @@ mod tests {
     }
 
     #[test]
-    fn admission_expiry_cannot_be_laundered_by_resolving_again() -> TestResult {
-        let expired = Timestamp::new(ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS, 0)?;
-        let resolver = AnthropicPlatformModelResolver::with_runtime(
-            AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-expired-admission")?)?,
-            Arc::new(FixedClock::new(expired)),
+    fn api_admission_never_refuses_on_the_calendar() -> TestResult {
+        assert_eq!(
+            ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_SECONDS
+                - ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS,
+            90 * 86_400
         );
-        for _ in 0..2 {
-            let error = resolver
-                .resolve(config()?)
-                .err()
-                .ok_or("expired Anthropic admission unexpectedly renewed")?;
-            assert_eq!(error.kind(), AnthropicErrorKind::InvalidConfiguration);
+        for seconds in [
+            ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS - 86_400,
+            ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_SECONDS,
+            ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_SECONDS + 10 * 365 * 86_400,
+        ] {
+            let now = Timestamp::new(seconds, 0)?;
+            let resolver = AnthropicPlatformModelResolver::with_runtime(
+                AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-past-review")?)?,
+                Arc::new(FixedClock::new(now)),
+            );
+            let target = resolver.resolve(config()?)?;
+            assert!(target.ensure_current_admission(now).is_ok());
         }
         Ok(())
     }

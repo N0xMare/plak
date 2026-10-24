@@ -1782,12 +1782,7 @@ impl OpenAiTarget {
     pub(crate) fn validate_current_route_evidence(&self) -> Result<(), ConfigError> {
         match &self.admission {
             TargetAdmission::ReviewedPlatform(witness) => {
-                validate_reviewed_platform_witness(
-                    &self.route,
-                    &self.descriptor,
-                    witness,
-                    self.clock.now(),
-                )?;
+                validate_reviewed_platform_witness(&self.route, &self.descriptor, witness)?;
                 validate_feature_conformance(self.route.conformance(), &self.descriptor)
             }
             #[cfg(feature = "native-auth")]
@@ -2125,9 +2120,6 @@ pub enum ConfigError {
     /// No exact reviewed model/response/family/profile row matched the request.
     #[error("OpenAI Platform model tuple is not present in the reviewed manifest")]
     UnknownPlatformManifestTuple,
-    /// The fixed reviewed-manifest compatibility window is not current.
-    #[error("OpenAI Platform reviewed-model evidence is outside its compatibility window")]
-    PlatformManifestEvidenceExpired,
     /// A retained reviewed-manifest witness no longer matches its descriptor.
     #[error("OpenAI Platform reviewed-model witness does not match the descriptor")]
     PlatformManifestBinding,

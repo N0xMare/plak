@@ -9,7 +9,7 @@
 #              index before its dependents; crates already indexed are skipped
 # PLAK_PUBLISH_INDEX (default https://index.crates.io) and PLAK_PUBLISH_TIMEOUT
 # (seconds per crate, default 600) shape the index wait.
-# Publication modes require more than 21 days remaining on every compiled review.
+# Publication modes require more than a third of every compiled review window remaining.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"

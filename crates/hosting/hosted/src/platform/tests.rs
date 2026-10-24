@@ -1472,9 +1472,9 @@ pub(super) fn review_clock_for(provider: PlatformProvider) -> Arc<dyn plakous::m
         // CLOCK2: Anthropic hosted fixtures still use wall time, outside H1.
         PlatformProvider::Anthropic => return Arc::new(plakous::model::SystemClock),
         PlatformProvider::OpenAi => {
-            plakous::openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS
+            plakous::openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS
         }
-        PlatformProvider::Xai => plakous::xai::XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS,
+        PlatformProvider::Xai => plakous::xai::XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS,
     };
     Arc::new(plakous::model::FixedClock::new(
         plakous::model::Timestamp::new(expiry - 90 * 86_400 + 60, 0).unwrap(),

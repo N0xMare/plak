@@ -653,7 +653,7 @@ _NOT_MACRO_KEYWORDS = {"else", "if", "in", "match", "return", "while"}
 # is a one-row edit here.
 _SHARED_PLAKOUS_SYMBOLS = {
     "openai": {
-        "OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS",
+        "OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS",
         "CredentialAuthorityId", "CredentialReference", "EndpointOrigin", "OpenAiApiKey",
         "OpenAiApiKeyGenerationGrant", "OpenAiApiModel", "OpenAiApiModelStatus",
         "OpenAiAuthError", "OpenAiListedModel", "OpenAiPlatformModel",
@@ -663,7 +663,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "openai_api_key_fingerprint", "openai_api_models",
     },
     "anthropic": {
-        "ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_UNIX_SECONDS",
+        "ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_UNIX_SECONDS",
         "AnthropicApiKey", "AnthropicApiKeySource", "AnthropicLanguageModel", "AnthropicError",
         "AnthropicErrorKind", "AnthropicErrorPhase", "claude_max_output_tokens",
         "CLAUDE_ENROLLMENTS", "AnthropicApiModel", "AnthropicApiModelStatus",
@@ -671,7 +671,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "anthropic_api_models", "list_anthropic_api_models",
     },
     "xai": {
-        "XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS",
+        "XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS",
         "XaiApiModel", "XaiApiModelError", "XaiApiModelStatus", "XaiListedModel",
         "XaiPlatformApiKey", "XaiPlatformApiKeyAuthority", "XaiPlatformApiKeySource",
         "XaiPlatformBuildError", "XaiPlatformCredentialGrant", "XaiPlatformModel",
@@ -684,7 +684,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "ConnectionUse", "ExchangeObserver", "ExchangeObservation", "ExchangeTerminal",
     },
     "openrouter": {
-        "OPENROUTER_CHAT_REVIEW_EXPIRES_AT",
+        "OPENROUTER_CHAT_REVIEW_DUE_AT",
         "OPENROUTER_CHAT_PROTOCOL_ID",
         "OPENROUTER_MESSAGES_PROTOCOL_ID",
         "OPENROUTER_RESPONSES_PROTOCOL_ID",

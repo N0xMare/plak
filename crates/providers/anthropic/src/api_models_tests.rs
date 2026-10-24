@@ -303,15 +303,13 @@ fn config_admission_refuses_an_unreviewed_pattern_match_and_a_raised_output_boun
             crate::AnthropicPlatformCapabilityProfile::AdaptiveClientTools,
         )
     };
-    let now = plakous_model::Clock::now(&plakous_model::SystemClock);
     assert!(
-        crate::config::preflight_platform_admission(&config("claude-sonnet-77", 128_000)?, now)
-            .is_err(),
+        crate::config::preflight_platform_admission(&config("claude-sonnet-77", 128_000)?).is_err(),
         "claude-sonnet-77 (no table row) passed the reviewed admission on its pattern"
     );
-    crate::config::preflight_platform_admission(&config("claude-sonnet-5-5", 128_000)?, now)?;
+    crate::config::preflight_platform_admission(&config("claude-sonnet-5-5", 128_000)?)?;
     assert!(
-        crate::config::preflight_platform_admission(&config("claude-sonnet-5-5", 128_001)?, now)
+        crate::config::preflight_platform_admission(&config("claude-sonnet-5-5", 128_001)?)
             .is_err()
     );
     Ok(())

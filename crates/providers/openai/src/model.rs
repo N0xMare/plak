@@ -393,14 +393,8 @@ impl OpenAiPlatformModelBuilder {
         let route =
             OpenAiPlatformRouteConfig::new(origin, credential, storage, project)?.resolve(source);
         let (model, family, profile) = facts.identity();
-        let admission = admit_reviewed_platform_model(
-            &route,
-            &model,
-            &model,
-            Some(&family),
-            &profile,
-            clock.now(),
-        )?;
+        let admission =
+            admit_reviewed_platform_model(&route, &model, &model, Some(&family), &profile)?;
         let admission = if let Some(maximum) = context_envelope {
             crate::manifest::with_context_envelope(admission, &route, maximum)?
         } else {
@@ -440,14 +434,8 @@ impl OpenAiPlatformModelBuilder {
             OpenAiPlatformRouteConfig::new_local_fixture(origin, credential, storage, project)?
                 .resolve(source);
         let (model, family, profile) = facts.identity();
-        let admission = admit_reviewed_platform_model(
-            &route,
-            &model,
-            &model,
-            Some(&family),
-            &profile,
-            clock.now(),
-        )?;
+        let admission =
+            admit_reviewed_platform_model(&route, &model, &model, Some(&family), &profile)?;
         let admission = if let Some(maximum) = context_envelope {
             crate::manifest::with_context_envelope(admission, &route, maximum)?
         } else {
@@ -523,7 +511,6 @@ impl OpenAiPlatformConfigurationAuthority {
                 .ok_or(ConfigError::LocalFixtureContext)?,
             descriptor.model_family(),
             descriptor.profile(),
-            clock.now(),
         )?;
         if let Some(context) = descriptor.context_contract()
             && let CapacityRule::ProviderReservedInput {

@@ -3853,4 +3853,5 @@ macOS requires Docker Desktop host networking for the loopback URL identities.
 
 Compiled-review time is never a qualification precondition: `just full`'s
 package group reports remaining days without failing. Publication dry runs
-and uploads separately require more than 21 days remaining (chapter 06).
+and uploads separately require more than a third of each compiled review
+window remaining (chapter 06).

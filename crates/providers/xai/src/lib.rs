@@ -86,8 +86,9 @@ pub use platform_binding::{
 };
 pub use platform_model::XaiPlatformModel;
 
-/// Hard UTC expiry of the compiled Platform API review.
-pub const XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS: u64 = platform_binding::EXPIRES;
+/// UTC date the compiled Platform API facts are due for re-review; it drives
+/// warnings only and never refuses the route.
+pub const XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS: u64 = platform_binding::REVIEW_DUE;
 #[cfg(feature = "native-auth")]
 pub use responses_dialect::compile_supergrok_subscription_configuration;
 pub use responses_dialect::{

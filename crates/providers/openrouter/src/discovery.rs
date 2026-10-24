@@ -2364,7 +2364,13 @@ mod tests {
             Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
             expiry,
         )?;
-        let past_review = Timestamp::new(crate::chat::OPENROUTER_CHAT_REVIEW_EXPIRES_AT + 1, 0)?;
+        // The reviewed Chat facts never refuse on the calendar: a decade past
+        // their review-due date the route builds, and its authority is
+        // bounded by discovery evidence alone.
+        let past_review = Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEW_DUE_AT + 10 * 365 * 86_400,
+            0,
+        )?;
         let future_route = route
             .clone()
             .with_clock(Arc::new(plakous_model::FixedClock::new(past_review)));
@@ -2379,9 +2385,24 @@ mod tests {
             past_review,
             Timestamp::new(past_review.seconds() + 60, 0)?,
         )?;
+        let future_evidence_expiry = future_evidence.expires_at();
+        let future_target =
+            OpenRouterChatTarget::gateway_managed(future_route, future_evidence, context.clone())?;
+        let future_selected = selected_for(&future_target)?;
+        let future_model = Arc::new(OpenRouterChatLanguageModel::new(
+            future_target,
+            future_selected,
+            Client::new(Limits::default())?,
+        )?);
+        let authority = Arc::clone(&future_model)
+            .revalidate_runtime_authority(past_review)
+            .await?;
+        assert_eq!(authority.valid_until(), Some(future_evidence_expiry));
         assert!(matches!(
-            OpenRouterChatTarget::gateway_managed(future_route, future_evidence, context.clone()),
-            Err(OpenRouterChatBuildError::ProfileNotCurrent)
+            future_model
+                .revalidate_runtime_authority(future_evidence_expiry)
+                .await,
+            Err(plakous_model::RuntimeModelAuthorityError::Stale)
         ));
         let target = OpenRouterChatTarget::gateway_managed(route, fresh, context)?;
         let selected = selected_for(&target)?;

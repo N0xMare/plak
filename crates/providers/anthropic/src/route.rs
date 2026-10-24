@@ -750,7 +750,18 @@ impl fmt::Debug for AnthropicReviewedAdmissionGrant {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AnthropicResolutionTrust {
     CallerAuthored,
-    ReviewedAdmission {
+    /// Documented API admission: it never expires on the calendar.
+    ReviewedApiAdmission {
+        revision: &'static str,
+        reviewed_at: plakous_model::Timestamp,
+    },
+    /// A subscription compatibility profile, current from its review until
+    /// its exclusive expiry.
+    #[allow(
+        dead_code,
+        reason = "constructed only by the native-auth Claude OAuth target"
+    )]
+    ReviewedSubscriptionAdmission {
         revision: &'static str,
         reviewed_at: plakous_model::Timestamp,
         expires_at: plakous_model::Timestamp,
@@ -821,27 +832,26 @@ impl ResolvedAnthropicMessages {
         self.lineage
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the trusted constructor keeps every exact target identity, bounded admission fact, and its clock adjacent"
-    )]
+    /// Binds a trusted target to its reviewed admission (API or
+    /// subscription) and the clock every admission check reads.
     pub(crate) fn new_reviewed_admission(
         dialect: AnthropicMessagesDialect,
         route: AnthropicPlatformRoute,
         model: AnthropicModel,
         profile: ClaudeProfile,
         descriptor: ResolvedModelDescriptor,
-        revision: &'static str,
-        reviewed_at: plakous_model::Timestamp,
-        expires_at: plakous_model::Timestamp,
+        trust: AnthropicResolutionTrust,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, AnthropicError> {
+        if trust == AnthropicResolutionTrust::CallerAuthored {
+            return Err(AnthropicError::new(
+                AnthropicErrorKind::InvalidConfiguration,
+                AnthropicErrorPhase::Prepare,
+                "a reviewed admission requires a reviewed trust",
+            ));
+        }
         let mut resolved = Self::new(dialect, route, model, profile, descriptor)?;
-        resolved.resolution_trust = AnthropicResolutionTrust::ReviewedAdmission {
-            revision,
-            reviewed_at,
-            expires_at,
-        };
+        resolved.resolution_trust = trust;
         resolved.reviewed_admission_grant = Some(AnthropicReviewedAdmissionGrant::new());
         resolved.clock = clock;
         Ok(resolved)
@@ -901,16 +911,19 @@ impl ResolvedAnthropicMessages {
         now: plakous_model::Timestamp,
     ) -> Result<(), AnthropicError> {
         match self.resolution_trust {
-            AnthropicResolutionTrust::ReviewedAdmission {
+            AnthropicResolutionTrust::ReviewedApiAdmission { .. } => Ok(()),
+            AnthropicResolutionTrust::ReviewedSubscriptionAdmission {
                 reviewed_at,
                 expires_at,
                 ..
             } if reviewed_at <= now && now < expires_at => Ok(()),
-            AnthropicResolutionTrust::ReviewedAdmission { .. } => Err(AnthropicError::new(
-                AnthropicErrorKind::InvalidConfiguration,
-                AnthropicErrorPhase::Prepare,
-                "Anthropic reviewed admission is expired or not yet valid",
-            )),
+            AnthropicResolutionTrust::ReviewedSubscriptionAdmission { .. } => {
+                Err(AnthropicError::new(
+                    AnthropicErrorKind::InvalidConfiguration,
+                    AnthropicErrorPhase::Prepare,
+                    "Anthropic reviewed admission is expired or not yet valid",
+                ))
+            }
             AnthropicResolutionTrust::CallerAuthored => Err(AnthropicError::new(
                 AnthropicErrorKind::InvalidConfiguration,
                 AnthropicErrorPhase::Prepare,

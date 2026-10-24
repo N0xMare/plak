@@ -68,7 +68,10 @@ const OPENROUTER_CHAT_AUTH_REVISION: &str = "openrouter-platform-api-key-v1";
 const OPENROUTER_CHAT_AUTHORITY_CLASS: &str = "platform-api-key";
 const OPENROUTER_CHAT_CREDENTIAL_SELECTION: &str = "openrouter-product-key-generation";
 pub(crate) const OPENROUTER_CHAT_REVIEWED_AT: u64 = 1_792_627_200;
-pub(crate) const OPENROUTER_CHAT_REVIEW_EXPIRES_AT: u64 = OPENROUTER_CHAT_REVIEWED_AT + 30 * 86_400;
+/// When the reviewed Chat Completions facts are due for re-review. It drives
+/// only doctor and status notes and the publish floor; the route never
+/// refuses on the calendar.
+pub(crate) const OPENROUTER_CHAT_REVIEW_DUE_AT: u64 = OPENROUTER_CHAT_REVIEWED_AT + 90 * 86_400;
 
 /// Provider-owned exact reasoning-detail replay selection.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -451,7 +454,6 @@ impl OpenRouterChatTarget {
         if !evidence.validates(route.identity(), now) {
             return Err(OpenRouterChatBuildError::StaleEvidence);
         }
-        reviewed_until(evidence.expires_at(), now)?;
         if matches!(routing, OpenRouterChatRoutingPolicy::StrictPinned(_)) {
             return Err(OpenRouterChatBuildError::StrictPinnedUnavailable);
         }
@@ -539,7 +541,6 @@ impl OpenRouterChatTarget {
         if !self.evidence.validates(self.route.identity(), checked_at) {
             return Err(OpenRouterChatBuildError::StaleEvidence);
         }
-        let valid_until = reviewed_until(self.evidence.expires_at(), checked_at)?;
         let grant = self.route.current_credential_generation_grant()?;
         RuntimeModelAuthority::new(
             &self.descriptor,
@@ -547,24 +548,10 @@ impl OpenRouterChatTarget {
             self.route.identity().credential_authority_binding(),
             generation_number(grant),
             checked_at,
-            Some(valid_until),
+            Some(self.evidence.expires_at()),
         )
         .map_err(|_| OpenRouterChatBuildError::Configuration)
     }
-}
-
-/// Bounds an authority by the reviewed Chat Completions pin: once the pin
-/// expires the route is refused, as an expired compiled profile is.
-pub(crate) fn reviewed_until(
-    evidence_expires_at: Timestamp,
-    checked_at: Timestamp,
-) -> Result<Timestamp, OpenRouterChatBuildError> {
-    let review_expires_at = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT, 0)
-        .map_err(|_| OpenRouterChatBuildError::Configuration)?;
-    if checked_at >= review_expires_at {
-        return Err(OpenRouterChatBuildError::ProfileNotCurrent);
-    }
-    Ok(evidence_expires_at.min(review_expires_at))
 }
 
 fn openrouter_chat_dialect_capabilities(
@@ -573,7 +560,7 @@ fn openrouter_chat_dialect_capabilities(
     let provenance = FactProvenance::new(
         FactSource::BuiltIn,
         Timestamp::new(OPENROUTER_CHAT_REVIEWED_AT, 0)?,
-        Some(Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT, 0)?),
+        None,
     );
     let mut features = BTreeMap::new();
     if let Some(image) = image_input_fact(evidence) {
@@ -849,10 +836,7 @@ impl LanguageModel for OpenRouterChatLanguageModel {
             self.target
                 .runtime_authority(checked_at)
                 .map_err(|error| match error {
-                    OpenRouterChatBuildError::StaleEvidence
-                    | OpenRouterChatBuildError::ProfileNotCurrent => {
-                        RuntimeModelAuthorityError::Stale
-                    }
+                    OpenRouterChatBuildError::StaleEvidence => RuntimeModelAuthorityError::Stale,
                     OpenRouterChatBuildError::Authentication(_) => {
                         RuntimeModelAuthorityError::Unavailable
                     }
@@ -1850,9 +1834,6 @@ pub enum OpenRouterChatBuildError {
     /// Discovery evidence expired.
     #[error("OpenRouter Chat discovery evidence is stale")]
     StaleEvidence,
-    /// The reviewed Chat Completions pin expired.
-    #[error("OpenRouter Chat compatibility profile is not currently admissible")]
-    ProfileNotCurrent,
     /// The descriptor did not carry CustomEnvelope context authority.
     #[error("OpenRouter Chat requires CustomEnvelope context authority")]
     NonCustomContextAuthority,
@@ -2830,30 +2811,18 @@ mod tests {
     }
 
     #[test]
-    fn reviewed_chat_pin_bounds_authority_and_refuses_after_expiry()
+    fn reviewed_chat_facts_carry_a_review_due_date_and_no_expiry()
     -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(
-            OPENROUTER_CHAT_REVIEW_EXPIRES_AT - OPENROUTER_CHAT_REVIEWED_AT,
-            30 * 86_400
+            OPENROUTER_CHAT_REVIEW_DUE_AT - OPENROUTER_CHAT_REVIEWED_AT,
+            90 * 86_400
         );
-        let expiry = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT, 0)?;
-        let before = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 60, 0)?;
-        let short = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 30, 0)?;
-        let long = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT + 3_600, 0)?;
-        assert_eq!(reviewed_until(short, before)?, short);
-        assert_eq!(reviewed_until(long, before)?, expiry);
-        for at in [expiry, long] {
-            let refused = reviewed_until(long, at);
-            assert!(matches!(
-                refused,
-                Err(OpenRouterChatBuildError::ProfileNotCurrent)
-            ));
-            assert_eq!(
-                refused.err().map(|error| error.to_string()),
-                Some(
-                    "OpenRouter Chat compatibility profile is not currently admissible".to_owned()
-                )
-            );
+        let capabilities = openrouter_chat_dialect_capabilities(&admission_fixture()?)?;
+        assert!(!capabilities.features().is_empty());
+        for (capability, support) in capabilities.features() {
+            if support.provenance().source() == FactSource::BuiltIn {
+                assert_eq!(support.provenance().expires_at(), None, "{capability:?}");
+            }
         }
         Ok(())
     }
