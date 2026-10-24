@@ -834,7 +834,7 @@ impl Driver {
                 return Err(cancelled_error());
             }
             if !std::mem::take(&mut segment_limit_checked)
-                && let Some(refusal) = self.segment_limit_refusal()
+                && let Some(refusal) = self.segment_limit_refusal(command.turn_id)
             {
                 self.finalize_hosted_continuation(command.turn_id, continuation_baton)
                     .await?;
@@ -1210,7 +1210,7 @@ impl Driver {
     async fn append_turn_prompt(&mut self, command: &PromptCommand) -> Result<(), AgentError> {
         self.maybe_compact_before_turn_prompt(command).await?;
         // Refused before the prompt appends, so a refused turn adds no segment.
-        if let Some(refusal) = self.segment_limit_refusal() {
+        if let Some(refusal) = self.segment_limit_refusal(command.turn_id) {
             return Err(refusal);
         }
         let prompt_entry = self.entry_id()?;

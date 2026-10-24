@@ -170,6 +170,173 @@ fn capacity_auto_compact_sees_the_terminal_head_binding() {
     host.release().unwrap();
 }
 
+/// A capacity terminal after a fold that failed after dispatch pays for no
+/// capacity-recovery compaction: the segment-limit refusal whose turn-fence
+/// fold failed, and the refusal of the next prompt, start none, and the
+/// operator gets the guidance instead of "compacting once".
+#[test]
+fn capacity_auto_compact_waits_after_a_failed_paid_fold() {
+    use crate::runtime::host_loop::HostLoop;
+    use crate::runtime::test_kit::TestExtension;
+    use crate::runtime::test_support::fresh_injected_attached_host;
+    use crate::runtime::{Sender, TurnHostOutcome};
+    use crate::surface_protocol::HostEvent;
+    use plakous::model::{
+        Actor, ContentBlock, ConversationItem, EntryId, HistorySegment, HistorySegmentKind,
+        ModelId, Provenance, TextBlock,
+    };
+    use plakous_offline_crash_harness::{BoundaryController, protocol::CrashBoundary};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let workspace = config.cwd.clone();
+    let controller = BoundaryController::quiet_from_evidence_path(
+        CrashBoundary::None,
+        root.path().join("failed-fold.jsonl"),
+    )
+    .unwrap();
+    let script: Arc<plakous_offline_crash_harness::script::ScriptPlan> = Arc::new(
+        serde_json::from_value(serde_json::json!({
+            "version": 1, "scheduled_compaction": true, "fold": "fail"
+        }))
+        .unwrap(),
+    );
+    crate::runtime::test_kit::scripted_mut(&mut config).runtime = Arc::new(move |_| {
+        plakous_offline_crash_harness::scripted_runtime_binding(
+            &workspace,
+            controller.clone(),
+            Arc::clone(&script),
+        )
+        .map_err(|error| error.to_string())
+    });
+    let host_compacts = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&host_compacts);
+    crate::runtime::test_kit::scripted_mut(&mut config).observe =
+        Arc::new(move |workflow, boundary| {
+            if workflow == super::HostWorkflow::Compact && boundary == super::HostBoundary::Prepared
+            {
+                counted.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+    // At the refusal limit of 4,032: the turn fence pays for one segment fold,
+    // which fails, and the turn is refused before its prompt appends.
+    let segments = (0..4_032_u128)
+        .map(|index| {
+            let (actor, provenance, kind) = if index % 2 == 0 {
+                (
+                    Actor::User,
+                    Provenance::UserInput,
+                    HistorySegmentKind::RecentIntent,
+                )
+            } else {
+                (
+                    Actor::Assistant,
+                    Provenance::ModelOutput,
+                    HistorySegmentKind::Conversation,
+                )
+            };
+            HistorySegment::new(
+                kind,
+                vec![
+                    ConversationItem::new(
+                        EntryId::try_from(uuid::Uuid::from_u128(0x5e6_0000 + index)).unwrap(),
+                        actor,
+                        vec![ContentBlock::Text(
+                            TextBlock::new(format!("small turn {index}"), None).unwrap(),
+                        )],
+                        provenance,
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap()
+        })
+        .collect();
+    config.seed_history = Some(plakous::sessions::PortableSessionHistory::new(
+        segments,
+        "synthetic-no-replay".into(),
+        ModelId::new("offline-loopback-v1").unwrap(),
+    ));
+    let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    host.config.compaction_enabled = true;
+    host.config.store.save(&mut host.config.session).unwrap();
+    for attempt in 0..2 {
+        let submission = host
+            .executor
+            .block_on(
+                host.opened
+                    .agent()
+                    .unwrap()
+                    .prompt(format!("refused {attempt}")),
+            )
+            .unwrap()
+            .unwrap();
+        let result = host
+            .executor
+            .block_on(submission.result())
+            .unwrap()
+            .unwrap();
+        let outcome = crate::runtime::turn::terminal_turn_outcome(&result);
+        assert!(
+            matches!(
+                outcome,
+                TurnHostOutcome::ContextCapacity {
+                    recovery: plakous_host_protocol::ContextCapacityRecovery::Compactable,
+                    ..
+                }
+            ),
+            "attempt {attempt}: {:?}",
+            result.outcome()
+        );
+        assert!(host.opened.paid_fold_failed_since_last_round());
+        host.publish_terminal(
+            Ok(outcome),
+            super::Instant::now(),
+            super::TerminalErrorPresentation::Events,
+        );
+    }
+    assert_eq!(host_compacts.load(Ordering::SeqCst), 0);
+    let notes = events
+        .try_iter()
+        .filter_map(|event| match event {
+            HostEvent::Row(row) => row.text().map(str::to_owned),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !notes.iter().any(|note| note.contains("compacting once")),
+        "{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .filter(|note| note.contains("-segment limit"))
+            .count()
+            >= 2,
+        "{notes:?}"
+    );
+    // The guidance is the segment limit's, not token or tool-growth advice.
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|note| note.as_str() == crate::runtime::CONTEXT_CAPACITY_SEGMENT_LIMIT_GUIDANCE)
+            .count(),
+        2,
+        "{notes:?}"
+    );
+    assert!(
+        !notes
+            .iter()
+            .any(|note| note.as_str() == crate::runtime::CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE),
+        "{notes:?}"
+    );
+    host.release().unwrap();
+}
+
 #[test]
 fn completed_terminal_projector_publishes_once_and_tracks_head() {
     use crate::runtime::host_loop::HostLoop;

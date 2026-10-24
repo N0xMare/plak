@@ -63,6 +63,25 @@ impl OpenedSession {
         plakous_agent::internal::facade_support::last_operator_input_unix_ms(&self.agent)
     }
 
+    /// Unsupported host seam: whether the newest finalized provider call is a
+    /// fold that failed after dispatch, read from the current checkpoint. A
+    /// host does not pay for another fold of that source before a model round
+    /// runs or a compaction commits.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn paid_fold_failed_since_last_round(&self) -> bool {
+        plakous_agent::internal::facade_support::paid_fold_failed_since_last_round(&self.agent)
+    }
+
+    /// Unsupported host seam: whether the committed history holds at least the
+    /// segment count at which the next round is refused, read from the current
+    /// checkpoint, so a host can choose segment-specific guidance.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn segment_limit_reached(&self) -> bool {
+        plakous_agent::internal::facade_support::segment_limit_reached(&self.agent)
+    }
+
     /// Returns the exact historical binding view.
     #[must_use]
     pub const fn binding(&self) -> &SessionBindingReport {

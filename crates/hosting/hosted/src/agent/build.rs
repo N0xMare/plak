@@ -1990,6 +1990,22 @@ impl AttachedCodingSession {
             .and_then(OpenedSession::last_operator_input_unix_ms)
     }
 
+    /// Whether the attached session's newest finalized provider call is a
+    /// fold that failed after dispatch; false when detached.
+    pub(crate) fn paid_fold_failed_since_last_round(&self) -> bool {
+        self.opened
+            .as_ref()
+            .is_some_and(OpenedSession::paid_fold_failed_since_last_round)
+    }
+
+    /// Whether the attached session's committed history holds at least the
+    /// segment count at which the next round is refused; false when detached.
+    pub(crate) fn segment_limit_reached(&self) -> bool {
+        self.opened
+            .as_ref()
+            .is_some_and(OpenedSession::segment_limit_reached)
+    }
+
     pub fn locator(&self) -> SessionLocator {
         self.opened
             .as_ref()

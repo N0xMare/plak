@@ -160,6 +160,37 @@ fn failed_paid_fold(workflow: crate::SessionWorkflowId, record: &DurableOperatio
         })
 }
 
+/// Whether `checkpoint`'s newest finalized provider call is a fold that failed
+/// after dispatch. The same source would fail the same way, so neither a turn
+/// fence nor the host pays for another fold before a model round runs or a fold
+/// commits. A placeholder successor makes no provider call and leaves it set; a
+/// fold a lost process abandoned does not set it.
+pub(crate) fn paid_fold_failed_since_last_round(checkpoint: &RuntimeCheckpoint) -> bool {
+    ledger_paid_fold_failed_since_last_round(checkpoint.manifest().ledger())
+}
+
+/// [`paid_fold_failed_since_last_round`] over a ledger. Quiescent retention
+/// keeps the newest finalized provider record, so retention never changes it.
+pub(crate) fn ledger_paid_fold_failed_since_last_round(
+    ledger: &crate::RuntimeOperationLedger,
+) -> bool {
+    let operations = ledger.operations();
+    for record in operations.iter().rev() {
+        if !matches!(record.state(), DurableOperationState::Finalized(_)) {
+            continue;
+        }
+        match record.kind() {
+            DurableOperationKind::Provider {
+                root: ModelOperationRoot::SessionWorkflow(workflow),
+                ..
+            } => return failed_paid_fold(*workflow, record),
+            DurableOperationKind::Provider { .. } => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn has_zero_headroom(status: &ContextStatus) -> bool {
     use plakous_model::ContextHeadroom;
     match status.kind() {
@@ -433,21 +464,18 @@ impl Driver {
             .await
     }
 
-    pub(super) fn segment_limit_reached(&self) -> bool {
-        self.committed_segment_count() >= SEGMENT_REFUSAL_SEGMENTS
-    }
-
     /// Refuses the next round once the committed head holds
     /// [`SEGMENT_REFUSAL_SEGMENTS`] segments. The margin under
     /// [`MAX_RUNTIME_RECORDS`] holds what one round and the refused turn's
     /// terminal append, so the refusal itself always publishes.
-    pub(super) fn segment_limit_refusal(&self) -> Option<AgentError> {
-        if !self.segment_limit_reached() {
+    pub(super) fn segment_limit_refusal(&mut self, turn_id: TurnId) -> Option<AgentError> {
+        if self.committed_segment_count() < SEGMENT_REFUSAL_SEGMENTS {
             return None;
         }
+        self.segment_refused_turn = Some(turn_id);
         let segments = self.committed_segment_count();
         let remedy = if self.config.scheduled_compaction_enabled {
-            "compact the session or fork it"
+            "compact the session or fork from an earlier checkpoint"
         } else {
             "compact the session, or enable scheduled compaction"
         };
@@ -488,22 +516,7 @@ impl Driver {
     /// dispatch: the same source would fail the same way, so the occupancy
     /// trigger waits for a model round instead of paying again.
     fn paid_fold_failed_since_last_round(&self) -> bool {
-        let checkpoint = self.authority.checkpoint();
-        let operations = checkpoint.manifest().ledger().operations();
-        for record in operations.iter().rev() {
-            if !matches!(record.state(), DurableOperationState::Finalized(_)) {
-                continue;
-            }
-            match record.kind() {
-                DurableOperationKind::Provider {
-                    root: ModelOperationRoot::SessionWorkflow(workflow),
-                    ..
-                } => return failed_paid_fold(*workflow, record),
-                DurableOperationKind::Provider { .. } => return false,
-                _ => {}
-            }
-        }
-        false
+        paid_fold_failed_since_last_round(&self.authority.checkpoint())
     }
 
     /// Compacts after the provider refused a round's input as over its window.

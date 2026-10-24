@@ -18,7 +18,7 @@ use crate::{
 pub use config::AgentRequestPolicy;
 pub use config::RUNTIME_EXECUTOR_STACK_BYTES;
 pub use driver::OPERATION_BUDGET_WRAP_UP_NOTE;
-pub(crate) use driver::last_operator_input_unix_ms;
+pub(crate) use driver::{last_operator_input_unix_ms, paid_fold_failed_since_last_round};
 pub(crate) use observation::{
     history_tool_call_observation, history_tool_result_observation_with_subject,
     normalized_tool_failure,

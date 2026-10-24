@@ -34,8 +34,8 @@ use super::{
     COMPACT_NO_ELIGIBLE_RANGE_DETAIL, COMPACT_NOT_NEEDED_DETAIL, COMPACT_PROVIDER_QUIET_NOTE,
     COMPACT_RECOVERY_REQUIRED_DETAIL, COMPACT_UNAVAILABLE_DETAIL,
     CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE, CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE,
-    CONTEXT_CAPACITY_PROTECTED_GUIDANCE, CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE, HostConfig,
-    HostEvent, RuntimeRole, Sender, queue,
+    CONTEXT_CAPACITY_PROTECTED_GUIDANCE, CONTEXT_CAPACITY_SEGMENT_LIMIT_GUIDANCE,
+    CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE, HostConfig, HostEvent, RuntimeRole, Sender, queue,
 };
 use super::{HostBoundary, HostWorkflow};
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -1035,10 +1035,13 @@ fn emit_compact_meter<P: plakous_host_protocol::ProtocolExtension>(
     }
 }
 
+/// `segment_limit`: the attached head holds at least the segment count at
+/// which Plakous refuses the next round (chapter 01 §10.3).
 pub(super) const fn context_capacity_recovery_guidance(
     recovery: plakous_host_protocol::ContextCapacityRecovery,
     exact_source: bool,
     native_compact_facet: bool,
+    segment_limit: bool,
 ) -> &'static str {
     use plakous_host_protocol::ContextCapacityRecovery;
     match recovery {
@@ -1048,6 +1051,9 @@ pub(super) const fn context_capacity_recovery_guidance(
         ContextCapacityRecovery::Protected => CONTEXT_CAPACITY_PROTECTED_GUIDANCE,
         ContextCapacityRecovery::Compactable if !exact_source => {
             CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE
+        }
+        ContextCapacityRecovery::Compactable if segment_limit => {
+            CONTEXT_CAPACITY_SEGMENT_LIMIT_GUIDANCE
         }
         ContextCapacityRecovery::Compactable if native_compact_facet => {
             CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE

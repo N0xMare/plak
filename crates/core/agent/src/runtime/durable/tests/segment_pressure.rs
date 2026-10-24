@@ -47,10 +47,30 @@ fn small_turns(segments: usize, entry_base: u128) -> TestResult<CanonicalHistory
 
 struct Seeded {
     sessions: DurableSessionRuntime,
+    store: Arc<TestCreateStore>,
     agent: Agent,
     model: Arc<ArtifactModel>,
     workspace: Arc<WorkspacePolicy>,
     _directory: tempfile::TempDir,
+}
+
+/// What a seeded session runs on.
+struct Route {
+    compaction: bool,
+    tool_rounds: &'static [usize],
+    facet: bool,
+    ceiling: u64,
+}
+
+impl Route {
+    const fn new(compaction: bool, tool_rounds: &'static [usize]) -> Self {
+        Self {
+            compaction,
+            tool_rounds,
+            facet: false,
+            ceiling: CEILING,
+        }
+    }
 }
 
 /// A durable session seeded with `segments` small-turn groups.
@@ -58,51 +78,93 @@ async fn seeded(
     name: &str,
     segments: usize,
     compaction: bool,
-    tool_rounds: &[usize],
+    tool_rounds: &'static [usize],
 ) -> TestResult<Seeded> {
-    seeded_on(name, segments, compaction, tool_rounds, false).await
+    seeded_on(name, segments, Route::new(compaction, tool_rounds)).await
 }
 
-/// [`seeded`] on a route whose native compaction facet is enrolled when `facet`.
-async fn seeded_on(
-    name: &str,
-    segments: usize,
-    compaction: bool,
-    tool_rounds: &[usize],
-    facet: bool,
-) -> TestResult<Seeded> {
+async fn seeded_on(name: &str, segments: usize, route: Route) -> TestResult<Seeded> {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let (builder, model) = placeholder_fixture(
         Arc::clone(&workspace),
         0x5e6_0000,
-        CEILING,
-        &[200; 4],
-        tool_rounds,
-        facet,
+        route.ceiling,
+        &[200; 16],
+        route.tool_rounds,
+        route.facet,
         LocalDurabilityDisposition::DurableRequired,
     )?;
     model.script_tool_rounds_around_compactions();
+    let store = Arc::new(TestCreateStore::default());
     let sessions = DurableSessionRuntime::current(
-        Arc::new(TestCreateStore::default()),
+        store.clone(),
         RuntimeDurability::Required,
         NonZeroU64::new(30).ok_or("lease")?,
     )?;
     let agent = sessions
         .create_seeded(
             name,
-            builder.with_scheduled_compaction_enabled(compaction),
+            builder.with_scheduled_compaction_enabled(route.compaction),
             small_turns(segments, 0x5e6_0000_0000)?,
         )
         .await?;
     assert_eq!(head_segments(&agent.checkpoint()), segments);
     Ok(Seeded {
         sessions,
+        store,
         agent,
         model,
         workspace,
         _directory: directory,
     })
+}
+
+/// Reopens `head` on `sessions` with compaction disabled.
+async fn reopen(
+    sessions: &DurableSessionRuntime,
+    workspace: &Arc<WorkspacePolicy>,
+    head: &RuntimeCheckpoint,
+    name: &str,
+) -> TestResult<(Agent, Arc<ArtifactModel>)> {
+    let topology = head.manifest().topology();
+    let (builder, model) = placeholder_fixture(
+        Arc::clone(workspace),
+        0x5e7_0000,
+        CEILING,
+        &[],
+        &[],
+        false,
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    let DurableRuntimeOpen::Opened(reopened) = sessions
+        .open(
+            name,
+            DurableSessionAddress::new(
+                topology.session_id,
+                topology.branch_id,
+                topology.checkpoint_id,
+            ),
+            builder.with_scheduled_compaction_enabled(false),
+        )
+        .await?
+    else {
+        return Err(format!("{name}: the session did not reopen").into());
+    };
+    Ok((reopened, model))
+}
+
+/// The export precondition: a quiescent head with no unsettled job.
+fn assert_exportable(checkpoint: &RuntimeCheckpoint) {
+    assert_quiescent(checkpoint);
+    assert!(
+        checkpoint
+            .manifest()
+            .jobs()
+            .rows()
+            .iter()
+            .all(|row| row.terminal.is_some())
+    );
 }
 
 fn head_segments(checkpoint: &RuntimeCheckpoint) -> usize {
@@ -130,7 +192,7 @@ fn assert_segment_refusal(result: &TurnResult, compaction: bool) {
         "{error:?}"
     );
     let remedy = if compaction {
-        "compact the session or fork it"
+        "compact the session or fork from an earlier checkpoint"
     } else {
         "compact the session, or enable scheduled compaction"
     };
@@ -189,9 +251,10 @@ async fn segment_pressure_uses_the_harness_cut_on_a_native_route() -> TestResult
     let seeded = seeded_on(
         "segment-pressure:native",
         SEGMENT_PRESSURE_SEGMENTS,
-        true,
-        &[],
-        true,
+        Route {
+            facet: true,
+            ..Route::new(true, &[])
+        },
     )
     .await?;
     let result = seeded.agent.prompt("one more").await?.result().await?;
@@ -212,10 +275,7 @@ async fn segment_pressure_uses_the_harness_cut_on_a_native_route() -> TestResult
         .compaction_provenance()
         .ok_or("provenance")?
         .strategy();
-    assert_ne!(
-        strategy,
-        RuntimeCompactionStrategy::NativeResponsesTriggerV1
-    );
+    assert_eq!(strategy, RuntimeCompactionStrategy::SemanticSummaryPrefixV1);
     assert!(head_segments(result.checkpoint()) < 16);
     seeded.agent.shutdown().await?;
     Ok(())
@@ -248,26 +308,36 @@ async fn segment_pressure_folds_at_the_tool_group_fence() -> TestResult {
     Ok(())
 }
 
-/// A failed segment fold neither commits a placeholder successor, which would
-/// keep every segment, nor pays again in the same turn.
+/// Failed segment folds follow the paid-fold backoff of one long turn: the
+/// fold before the prompt fails and the next is due only two rounds later.
+/// Neither commits a placeholder successor, which would keep every segment.
+/// The later doubling and the per-turn cap are pinned by the long-turn
+/// compaction tests.
 #[tokio::test]
-async fn failed_segment_fold_commits_no_placeholders_and_pays_once_per_turn() -> TestResult {
+async fn failed_segment_folds_follow_the_paid_fold_backoff() -> TestResult {
+    const TOOL_ROUNDS: &[usize] = &[0, 1, 2];
     let seeded = seeded(
-        "segment-pressure:failed-fold",
+        "segment-pressure:failed-folds",
         SEGMENT_PRESSURE_SEGMENTS + 1,
         true,
-        &[0],
+        TOOL_ROUNDS,
     )
     .await?;
     seeded.model.fail_compaction_call();
-    let result = seeded.agent.prompt("probe once").await?.result().await?;
+    let result = seeded.agent.prompt("probe often").await?.result().await?;
     assert!(
         matches!(result.outcome(), TurnResultOutcome::Completed(_)),
         "{:?}",
         result.outcome()
     );
-    assert_eq!(result.model_rounds(), 2);
-    assert_eq!(*lock_mutex(&seeded.model.paid_compaction_rounds), vec![0]);
+    assert_eq!(result.model_rounds(), TOOL_ROUNDS.len() + 1);
+    // Ordinary rounds finished before each paid fold: 0 at the turn's own
+    // fence, then 2 rounds of backoff; the second failure's 4 rounds outlast
+    // the turn.
+    assert_eq!(
+        *lock_mutex(&seeded.model.paid_compaction_rounds),
+        vec![0, 2]
+    );
     let checkpoint = result.checkpoint();
     assert!(
         !checkpoint
@@ -278,8 +348,11 @@ async fn failed_segment_fold_commits_no_placeholders_and_pays_once_per_turn() ->
             .iter()
             .any(|segment| segment.kind() == HistorySegmentKind::Compaction)
     );
-    // Prompt, tool group and answer: nothing replaced or rewritten.
-    assert_eq!(head_segments(checkpoint), SEGMENT_PRESSURE_SEGMENTS + 4);
+    // Prompt, every tool group and the answer: nothing replaced or rewritten.
+    assert_eq!(
+        head_segments(checkpoint),
+        SEGMENT_PRESSURE_SEGMENTS + 1 + TOOL_ROUNDS.len() + 2
+    );
     seeded.agent.shutdown().await?;
     Ok(())
 }
@@ -308,32 +381,15 @@ async fn segment_refusal_without_compaction_leaves_the_head_reopenable() -> Test
     }
     assert_eq!(seeded.model.calls.load(Ordering::Acquire), 0);
     let source = seeded.agent.checkpoint();
+    assert_exportable(&source);
     seeded.agent.shutdown().await?;
-    let topology = source.manifest().topology();
-    let (builder, model) = placeholder_fixture(
-        Arc::clone(&seeded.workspace),
-        0x5e7_0000,
-        CEILING,
-        &[],
-        &[],
-        false,
-        LocalDurabilityDisposition::DurableRequired,
-    )?;
-    let DurableRuntimeOpen::Opened(reopened) = seeded
-        .sessions
-        .open(
-            "open:segment-refusal",
-            DurableSessionAddress::new(
-                topology.session_id,
-                topology.branch_id,
-                topology.checkpoint_id,
-            ),
-            builder.with_scheduled_compaction_enabled(false),
-        )
-        .await?
-    else {
-        return Err("a refused session did not reopen".into());
-    };
+    let (reopened, model) = reopen(
+        &seeded.sessions,
+        &seeded.workspace,
+        &source,
+        "open:segment-refusal",
+    )
+    .await?;
     assert_quiescent(&reopened.checkpoint());
     assert_segment_refusal(
         &reopened.prompt("still refused").await?.result().await?,
@@ -403,7 +459,161 @@ async fn segment_refusal_stops_the_next_round_of_a_running_turn() -> TestResult 
     let again = seeded.agent.prompt("refused").await?.result().await?;
     assert_segment_refusal(&again, false);
     assert_eq!(head_segments(again.checkpoint()), ended);
+    let source = seeded.agent.checkpoint();
+    assert_exportable(&source);
     seeded.agent.shutdown().await?;
+    let (reopened, model) = reopen(
+        &seeded.sessions,
+        &seeded.workspace,
+        &source,
+        "open:segment-refusal:mid-turn",
+    )
+    .await?;
+    assert_exportable(&reopened.checkpoint());
+    assert_eq!(head_segments(&reopened.checkpoint()), ended);
+    assert_segment_refusal(&reopened.prompt("refused").await?.result().await?, false);
+    assert_eq!(model.calls.load(Ordering::Acquire), 0);
+    reopened.shutdown().await?;
+    Ok(())
+}
+
+/// With compaction enabled but its folds failing, a running turn is refused
+/// at the limit too: the fold before the prompt is paid once, backoff keeps
+/// the tool-group fence from paying again, and the refusal names the
+/// compaction-enabled remedy.
+#[tokio::test]
+async fn segment_refusal_stops_a_running_turn_with_compaction_enabled() -> TestResult {
+    let seeded = seeded(
+        "segment-refusal:mid-turn-compaction",
+        SEGMENT_REFUSAL_SEGMENTS - 1,
+        true,
+        &[0],
+    )
+    .await?;
+    seeded.model.fail_compaction_call();
+    let result = seeded.agent.prompt("probe once").await?.result().await?;
+    assert_segment_refusal(&result, true);
+    assert_eq!(*lock_mutex(&seeded.model.paid_compaction_rounds), vec![0]);
+    assert_eq!(
+        head_segments(result.checkpoint()),
+        SEGMENT_REFUSAL_SEGMENTS + 2
+    );
+    assert_exportable(result.checkpoint());
+    seeded.agent.shutdown().await?;
+    Ok(())
+}
+
+/// The refusal never withholds a prompt, but a genuine token overflow just
+/// under the limit still does: the history fits without the prompt, so the
+/// prompt is replaced by its note and the remedy is to resend it shorter.
+#[tokio::test]
+async fn an_oversized_prompt_just_under_the_limit_is_still_withheld() -> TestResult {
+    let segments = SEGMENT_REFUSAL_SEGMENTS - 1;
+    let history_tokens =
+        u64::try_from(small_turns(segments, 0x5e6_0000_0000)?.retained_bytes_upper_bound())?
+            .div_ceil(4);
+    let ceiling = history_tokens + 10_000;
+    let seeded = seeded_on(
+        "segment-limit:withheld",
+        segments,
+        Route {
+            ceiling,
+            ..Route::new(false, &[])
+        },
+    )
+    .await?;
+    // The fixture counts a request's history at a quarter of its retained
+    // bytes, and a text group retains about twice its text.
+    let oversized = "x".repeat(160_000);
+    let result = seeded.agent.prompt(oversized).await?.result().await?;
+    let TurnResultOutcome::Failed(error) = result.outcome() else {
+        return Err(format!("expected a capacity failure: {:?}", result.outcome()).into());
+    };
+    assert_eq!(error.model_kind(), Some(ModelErrorKind::ContextLimit));
+    assert!(!error.message().contains("-segment limit"), "{error:?}");
+    assert_eq!(
+        result.context_overflow_remedy(),
+        Some(crate::ContextOverflowRemedy::ResendShorter)
+    );
+    assert_eq!(seeded.model.calls.load(Ordering::Acquire), 0);
+    // The note took the prompt's place.
+    assert_eq!(head_segments(result.checkpoint()), segments + 1);
+    seeded.agent.shutdown().await?;
+    Ok(())
+}
+
+/// A process lost right after the tool group that reaches the limit leaves a
+/// Working head under the bound. Reopening closes the turn with its
+/// abandonment note, still under the bound, and the next prompt is refused
+/// cleanly.
+#[tokio::test]
+async fn a_crash_after_the_tool_group_at_the_limit_reopens() -> TestResult {
+    let seeded = seeded(
+        "segment-refusal:crash",
+        SEGMENT_REFUSAL_SEGMENTS - 1,
+        false,
+        &[0],
+    )
+    .await?;
+    // Prompt then tool group: the store keeps nothing after that commit.
+    seeded
+        .store
+        .halt_at_history_segments
+        .store(SEGMENT_REFUSAL_SEGMENTS + 1, Ordering::Release);
+    let turn = seeded.agent.prompt("probe once").await?;
+    // The refused turn's terminal cannot publish: the store keeps nothing
+    // after the tool group, so the turn ends recovery-required in memory.
+    let outcome = tokio::time::timeout(Duration::from_secs(5), turn.result())
+        .await
+        .map_err(|_| "the halted turn never ended")??;
+    assert!(
+        matches!(outcome.outcome(), TurnResultOutcome::RecoveryRequired(_)),
+        "{:?}",
+        outcome.outcome()
+    );
+    let head = seeded.agent.checkpoint();
+    assert_eq!(head_segments(&head), SEGMENT_REFUSAL_SEGMENTS + 1);
+    assert!(matches!(
+        head.manifest().lifecycle(),
+        RuntimeLifecycle::Working { .. }
+    ));
+    // The exact durable prefix survives as a SIGKILL would leave it.
+    let crashed = Arc::new(TestCreateStore::default());
+    *lock_mutex(&crashed.state) = lock_mutex(&seeded.store.state).clone();
+    *lock_mutex(&crashed.genesis) = lock_mutex(&seeded.store.genesis).clone();
+    *lock_mutex(&crashed.feed_records) = lock_mutex(&seeded.store.feed_records).clone();
+    crashed.feed_retained_from.store(
+        seeded.store.feed_retained_from.load(Ordering::Acquire),
+        Ordering::Release,
+    );
+    lock_mutex(&crashed.state).active_lease = None;
+    seeded.agent.begin_abandon();
+    seeded.agent.abort_driver_for_test();
+    drop(seeded.agent);
+    let sessions = DurableSessionRuntime::current(
+        crashed,
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let (reopened, model) = reopen(
+        &sessions,
+        &seeded.workspace,
+        &head,
+        "open:segment-refusal:crash",
+    )
+    .await?;
+    let recovered = reopened.checkpoint();
+    assert_exportable(&recovered);
+    let recovered_segments = head_segments(&recovered);
+    assert!(
+        (SEGMENT_REFUSAL_SEGMENTS + 1..MAX_RUNTIME_RECORDS).contains(&recovered_segments),
+        "{recovered_segments}"
+    );
+    let refused = reopened.prompt("refused").await?.result().await?;
+    assert_segment_refusal(&refused, false);
+    assert_eq!(head_segments(refused.checkpoint()), recovered_segments);
+    assert_eq!(model.calls.load(Ordering::Acquire), 0);
+    reopened.shutdown().await?;
     Ok(())
 }
 

@@ -177,12 +177,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     .target
                     .native_provider()
                     .is_some_and(native_compact_facet);
+                let segment_limit = self.opened.segment_limit_reached();
+                // A fold that failed after dispatch, at the turn's fence or in
+                // an earlier capacity recovery, would fail the same way on the
+                // same source: the operator gets the guidance instead.
                 let auto_compact = matches!(
                     recovery,
                     plakous_host_protocol::ContextCapacityRecovery::Compactable
                 ) && exact_source
                     && self.config.compaction_enabled
-                    && should_schedule_compaction(ContextDisposition::WouldOverflow);
+                    && should_schedule_compaction(ContextDisposition::WouldOverflow)
+                    && !self.opened.paid_fold_failed_since_last_round();
                 let saved = commit_session_update(
                     &*self.config.store,
                     &self.config.home,
@@ -237,8 +242,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             }
                         }
                         Err(compact_error) => {
-                            let guidance =
-                                context_capacity_recovery_guidance(recovery, exact_source, native);
+                            let guidance = context_capacity_recovery_guidance(
+                                recovery,
+                                exact_source,
+                                native,
+                                segment_limit,
+                            );
                             if matches!(error_presentation, TerminalErrorPresentation::Events) {
                                 let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
                                     NoticeScope::Turn,
@@ -258,8 +267,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         }
                     }
                 } else {
-                    let guidance =
-                        context_capacity_recovery_guidance(recovery, exact_source, native);
+                    let guidance = context_capacity_recovery_guidance(
+                        recovery,
+                        exact_source,
+                        native,
+                        segment_limit,
+                    );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
                         let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
                             NoticeScope::Turn,

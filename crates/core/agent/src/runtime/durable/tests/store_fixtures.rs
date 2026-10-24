@@ -36,6 +36,9 @@ pub(super) struct TestCreateStore {
     /// Halts every commit after the n-th (1-based) accepted one, as a crash
     /// right after that commit would.
     pub(super) halt_after_accepted_commit: AtomicUsize,
+    /// Halts commits after accepting a checkpoint whose history holds at
+    /// least this many segments; zero never halts.
+    pub(super) halt_at_history_segments: AtomicUsize,
     pub(super) validate_candidate_children: AtomicBool,
     pub(super) block_after_completed_nested_effect: AtomicBool,
     pub(super) block_after_prepared_nested_child: AtomicBool,
@@ -965,6 +968,13 @@ impl SessionStore for TestCreateStore {
                         accepted.len()
                     };
                     if accepted == self.halt_after_accepted_commit.load(Ordering::Acquire) {
+                        self.commits_halted.store(true, Ordering::Release);
+                    }
+                    let halt_segments = self.halt_at_history_segments.load(Ordering::Acquire);
+                    if halt_segments > 0
+                        && checkpoint.manifest().canonical().history().segments().len()
+                            >= halt_segments
+                    {
                         self.commits_halted.store(true, Ordering::Release);
                     }
                     let promoted_hosted = matches!(

@@ -4189,6 +4189,20 @@ the operator to shorten and explicitly resend the restored draft, `Compact`
 offers compaction without replaying the failed turn, and `ClearOrFork` asks
 for a larger model, a fork, or `/clear`. An unverified source presents
 protected recovery without a compact action.
+With auto compaction on, a `Compact` terminal on the exact attached head
+compacts once (a CapacityRecovery pass) unless the session's newest finalized
+provider call is a fold that failed after dispatch, read from the attached
+checkpoint: the same source would fail the same way, so the host shows the
+guidance instead and pays for nothing until a model round runs or a fold
+commits (chapter 01 §10.3). The segment-limit refusal of chapter 01 §10.3 is a
+`ContextLimit` failure with the `Compact` remedy. Its headline stays the
+generic context-limit one, since the typed model kind is the only classifier
+the host reads, and its diagnostic line names the segment limit. When the
+attached head holds at least the refusal limit's 4,032 segments, read from the
+attached checkpoint in memory and never persisted, the guidance names the
+segment limit instead of token or tool growth, on native routes too: `/compact`
+compacts this session's earlier history, `/fork-then-compact` compacts a fork
+and leaves this session unchanged, and `/clear` starts a new conversation.
 These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu

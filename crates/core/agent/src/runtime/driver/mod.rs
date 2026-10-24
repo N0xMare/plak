@@ -67,6 +67,9 @@ mod operator_input;
 mod reresolution;
 mod turn;
 pub(in crate::runtime) mod turn_position;
+#[cfg(test)]
+pub(crate) use compaction::ledger_paid_fold_failed_since_last_round;
+pub(crate) use compaction::paid_fold_failed_since_last_round;
 pub(crate) use operator_input::last_operator_input_unix_ms;
 pub use turn::OPERATION_BUDGET_WRAP_UP_NOTE;
 
@@ -168,6 +171,9 @@ struct Driver {
     /// The entry this root appended as its prompt, unknown for a resumed
     /// continuation whose prompt an earlier frame appended.
     appended_prompt: Option<EntryId>,
+    /// The turn the segment limit refused (spec 01 §10.3). Its prompt is never
+    /// withheld: a note in the prompt's place keeps the segment count.
+    segment_refused_turn: Option<TurnId>,
 }
 
 impl Driver {

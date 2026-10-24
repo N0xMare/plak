@@ -197,6 +197,29 @@ pub fn last_operator_input_unix_ms(agent: &Agent) -> Option<u64> {
     crate::runtime::last_operator_input_unix_ms(agent.checkpoint().manifest().canonical().history())
 }
 
+/// Whether `agent`'s newest finalized provider call is a fold that failed after
+/// dispatch: no further paid fold is due on that source before a model round
+/// runs or a compaction commits.
+#[must_use]
+pub fn paid_fold_failed_since_last_round(agent: &Agent) -> bool {
+    crate::runtime::paid_fold_failed_since_last_round(&agent.checkpoint())
+}
+
+/// Whether `agent`'s committed history holds at least the segment count at
+/// which the next round is refused (spec 01 §10.3), read from its current
+/// checkpoint.
+#[must_use]
+pub fn segment_limit_reached(agent: &Agent) -> bool {
+    agent
+        .checkpoint()
+        .manifest()
+        .canonical()
+        .history()
+        .segments()
+        .len()
+        >= crate::SEGMENT_REFUSAL_SEGMENTS
+}
+
 /// Attaches to `agent`'s live view and returns the committed history at the
 /// attachment's cursor with its checkpoint's topology and ledger, atomically.
 ///

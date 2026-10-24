@@ -7172,25 +7172,39 @@ fence (a) and fence (b) schedule a pressure-forced paid fold even below the
 token trigger. It is admitted like any pressure-forced fold: it spends the
 pressure guard and is subject to the failed-fold backoff and per-turn cap, and,
 like the occupancy trigger, it waits for another model round when the newest
-finalized provider call is a fold that failed after dispatch. It uses the
+finalized provider call is a fold that failed after dispatch. Only a model
+round or a committed fold or native successor clears that; a placeholder
+successor makes no provider call and does not, and a fold a lost process
+abandoned (§10.5) never holds back the next pass. Quiescent retention keeps
+the newest finalized provider record, so it never clears it either. It uses the
 sealed harness cut even on a route with a native facet, because a native
-successor keeps every newest user message its token budget admits. A
-placeholder or replay-omission successor keeps every segment and never counts
-as relief, so this pass never commits one: when no paid fold is admissible, no
-eligible cut exists, or the fold fails, it commits nothing and the turn goes
-on. A committed fold resets the count.
-At 4,032 segments (the bound minus 64) the next round is refused before
-anything commits, with or without scheduled compaction. A turn whose prompt
-has not appended fails before the append, after fence (a); a running turn
-fails before its next model round. The failure is a typed `ContextLimit` model
-error in the preparation phase with the Compact remedy, and its message names
-what to do: compact the session or fork it, or with scheduled compaction
-disabled, compact the session or enable scheduled compaction. A refused prompt
-adds no segment, and the margin holds what one round and the refused turn's
-failure note append, so the refusal always publishes its terminal: the session
-stays quiescent, reopens, exports, and compacts through the idle endpoint.
-The prompt is never withheld at the limit, since a note in its place keeps the
-count.
+successor keeps every newest user message its token budget admits, which in a
+session of short turns may be most of its user groups. A placeholder or
+replay-omission successor never reduces the segment count (it keeps every
+group and appends a notice and a note), so this pass never commits one: when no
+paid fold is admissible, no eligible cut exists, or the fold fails, it commits
+nothing and the turn goes on. A committed fold resets the count.
+At 4,032 segments (the bound minus 64) the next round is refused, with or
+without scheduled compaction. A turn whose prompt has not appended fails after
+fence (a) and before the append, so a refused prompt adds no segment. A running
+turn fails before its next round dispatches or appends anything; what it had
+already committed stays, its tool group included, and its terminal appends the
+failure note. The failure is a typed `ContextLimit` model error in the
+preparation phase with the Compact remedy, and its message names what to do:
+compact the session or fork from an earlier checkpoint, or with scheduled
+compaction disabled, compact the session or enable scheduled compaction. The
+64-segment margin holds everything that can follow a passed check before the
+next one or a terminal: the prompt and its notice batch, a wrap-up note, a tool
+group, a fence-(b) successor's notice and note, a notice batch with steering,
+and the terminal's note, or instead a recovery finish. So every refused turn
+publishes its terminal and the session stays quiescent, reopens, exports, and
+compacts through the idle endpoint. The refusal never withholds the prompt: the
+prompt's size is not its cause, so the remedy is compaction, not a shorter
+resend. A genuine token overflow near the limit still withholds its prompt as
+in §3.5. A host that compacts once after a Compactable capacity terminal does
+not when the newest finalized provider call is a fold that failed after
+dispatch (chapter 02 §5.4), so a refusal after a failed segment fold pays for
+no second fold of the same source.
 
 `ProtectedOverflow` requests compaction on **every** route at both fences.
 Before overflow recovery dispatches a harness fold, a legal semantic cut or
@@ -8071,6 +8085,13 @@ The doc-hidden `OpenedSession::close_admission` host seam closes turn and proces
 admission before canonical release; it does not stop owned work and
 must be followed by release or abandonment. It adds no public Agent method and
 does not change transfer shutdown's job disposition.
+The doc-hidden `OpenedSession::paid_fold_failed_since_last_round` and
+`OpenedSession::segment_limit_reached` host seams read the attached agent's
+current checkpoint in memory, without a store load, lease or write. The first
+reports whether the newest finalized provider call is a fold that failed after
+dispatch; it clears when a model round or a fold commits (§10.3). The second
+reports whether the committed history holds at least the 4,032 segments at
+which the next round is refused.
 
 
 Every feature that links `plakous-http` (`anthropic`, `openai`, `xai`,

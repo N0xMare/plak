@@ -112,23 +112,31 @@ fn protected_overflow_asks_for_capacity_recovery_on_every_route() {
         None
     );
     assert_eq!(
-        context_capacity_recovery_guidance(Compactable, true, false),
+        context_capacity_recovery_guidance(Compactable, true, false, false),
         CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE
     );
     assert_eq!(
-        context_capacity_recovery_guidance(Compactable, true, true),
+        context_capacity_recovery_guidance(Compactable, true, true, false),
         CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE
     );
     assert_eq!(
-        context_capacity_recovery_guidance(Protected, true, true),
+        context_capacity_recovery_guidance(Protected, true, true, false),
         CONTEXT_CAPACITY_PROTECTED_GUIDANCE
     );
     assert_eq!(
-        context_capacity_recovery_guidance(Compactable, false, true),
+        context_capacity_recovery_guidance(Compactable, false, true, false),
+        CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE
+    );
+    assert_eq!(
+        context_capacity_recovery_guidance(Compactable, true, true, true),
+        CONTEXT_CAPACITY_SEGMENT_LIMIT_GUIDANCE
+    );
+    assert_eq!(
+        context_capacity_recovery_guidance(Compactable, false, false, true),
         CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE
     );
     assert!(
-        context_capacity_recovery_guidance(ResendShorter, true, true)
+        context_capacity_recovery_guidance(ResendShorter, true, true, false)
             .contains("shorten the restored draft")
     );
     assert!(
