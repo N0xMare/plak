@@ -1,11 +1,11 @@
-//! Tool verbs and titles, run-state and duration labels, and tool rows.
+//! Tool verbs and titles, run-state labels, and tool and approval rows.
 
-#![allow(
-    clippy::wildcard_imports,
-    reason = "a split of the blocks module that shares its vocabulary"
-)]
+#[cfg(test)]
+use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_width::UnicodeWidthStr as _;
 
-use super::*;
+use crate::tui::blocks::{SUBMILLISECOND_ELAPSED, wrap_plain};
+use crate::tui::presentation::{ActivityKind, McpCall};
 
 /// Humanize a canonical tool name (`run_process` → `run process`).
 #[must_use]
@@ -384,56 +384,8 @@ pub fn tool_duration_label(state: &str) -> Option<&str> {
     (!timing.is_empty()).then_some(timing)
 }
 
-/// What a row paints when the host measured a positive but sub-millisecond
-/// elapsed: `0ms` claims a call that did work took no time at all,
-/// which is the one thing the measurement cannot mean.
-pub const SUBMILLISECOND_ELAPSED: &str = "<1ms";
-
-/// Compact elapsed label shared by live running tools and completed `done:` state.
-///
-/// A call whose start and terminal events land inside the same
-/// millisecond used to paint `0ms`. The row reports the floor of what it can
-/// resolve — `<1ms` — instead of asserting a zero it never observed.
-#[must_use]
-pub fn format_tool_elapsed(elapsed: Duration) -> String {
-    if elapsed.as_secs() > 0 {
-        format!(
-            "{}.{:01}s",
-            elapsed.as_secs(),
-            elapsed.subsec_millis() / 100
-        )
-    } else if elapsed.as_millis() == 0 {
-        SUBMILLISECOND_ELAPSED.to_owned()
-    } else {
-        format!("{}ms", elapsed.as_millis())
-    }
-}
-
-/// The one whole-second duration ladder (spec 02 §5.4): `45s` under a
-/// minute, then zero-padded `1m05s`, then `1h05m`.
-#[must_use]
-pub(crate) fn format_duration_secs(secs: u64) -> String {
-    match secs {
-        0..60 => format!("{secs}s"),
-        60..3600 => format!("{}m{:02}s", secs / 60, secs % 60),
-        _ => format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60),
-    }
-}
-
-/// A group's or a background job's elapsed time: `12.3s` under a minute,
-/// then `1m02s`, `1h05m`.
-#[must_use]
-pub fn format_group_elapsed(ms: u64) -> String {
-    let secs = ms / 1000;
-    if secs >= 60 {
-        format_duration_secs(secs)
-    } else {
-        format_tool_elapsed(Duration::from_millis(ms))
-    }
-}
-
-/// True for the exact shapes [`format_tool_elapsed`] produces (`12ms`, `1.2s`,
-/// `<1ms`).
+/// True for the exact shapes [`crate::tui::blocks::format_tool_elapsed`]
+/// produces (`12ms`, `1.2s`, `<1ms`).
 fn is_elapsed_label(text: &str) -> bool {
     if text == SUBMILLISECOND_ELAPSED {
         return true;
@@ -560,6 +512,8 @@ pub fn format_tool_summary(
     subject: Option<&str>,
     expanded: bool,
 ) -> String {
+    use crate::tui::blocks::{DisplayMode, RowPlan};
+
     let mode = if expanded {
         DisplayMode::Expanded
     } else {
@@ -583,9 +537,11 @@ pub fn format_tool_row(
     state: &str,
     kind: ActivityKind,
     subject: Option<&str>,
-    mode: DisplayMode,
-    plan: &RowPlan,
+    mode: crate::tui::blocks::DisplayMode,
+    plan: &crate::tui::blocks::RowPlan,
 ) -> String {
+    use crate::tui::blocks::{DisplayMode, row_indent};
+
     let verb = tool_verb(name, kind);
     let grouped = plan.group_count >= 2;
     let label = if grouped {
@@ -637,4 +593,66 @@ pub const fn subject_separator(verb: ToolVerb) -> &'static str {
         ToolVerb::Compact => "  ",
         _ => " ",
     }
+}
+
+/// The open approval row's clickable chip that allows it.
+pub const APPROVAL_ALLOW_CHIP: &str = "[allow]";
+
+/// The open approval row's clickable chip that denies it.
+pub const APPROVAL_DENY_CHIP: &str = "[deny]";
+
+/// The open approval's chips in its header wrapped at `width`: the row
+/// within the block, the display column and the chip, `[allow]` first. The
+/// status that carries them ends the header, after the model-written
+/// subject, so each chip is its label's last occurrence in the header rows;
+/// the prompt rows below are never searched.
+#[must_use]
+pub fn approval_chip_cells(
+    tool_name: &str,
+    subject: Option<&str>,
+    width: usize,
+) -> Vec<(usize, usize, &'static str)> {
+    let Some(header) = format_approval_block(tool_name, subject, None, None)
+        .into_iter()
+        .next()
+    else {
+        return Vec::new();
+    };
+    let rows = wrap_plain(&header, width);
+    [APPROVAL_ALLOW_CHIP, APPROVAL_DENY_CHIP]
+        .into_iter()
+        .filter_map(|label| {
+            rows.iter().enumerate().rev().find_map(|(row, text)| {
+                text.rfind(label).map(|at| (row, text[..at].width(), label))
+            })
+        })
+        .collect()
+}
+
+/// Plain rows for one §5.2 approval block.
+#[must_use]
+pub fn format_approval_block(
+    tool_name: &str,
+    subject: Option<&str>,
+    prompt: Option<&str>,
+    resolution: Option<&str>,
+) -> Vec<String> {
+    let glyph = match resolution {
+        None => "◆",
+        Some("allowed") => "✓",
+        Some(_) => "⊘",
+    };
+    let status = resolution.unwrap_or("awaiting decision · [allow] Alt+A · [deny] Alt+D");
+    let mut header = format!("  {glyph} Approval  {}", humanize_tool(tool_name));
+    if let Some(subject) = subject.filter(|subject| !subject.is_empty()) {
+        header.push(' ');
+        header.push_str(subject);
+    }
+    header.push_str(" · ");
+    header.push_str(status);
+    let mut lines = vec![header];
+    if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
+        lines.push(format!("  └ {prompt}"));
+    }
+    lines
 }

@@ -16,6 +16,7 @@ fn wrapped_limit_reset_rows_keep_the_source_indent() {
         }
     }
 }
+
 use super::{
     CONTEXT_GRID_CELLS, GRID_OCCUPIED, GRID_RESERVED, LIMIT_BAR_CELL, LIMIT_BAR_CELLS,
     LimitsChrome, SessionLive, SessionRow, cells_for, context_lines, fmt_tok, is_context_grid_line,

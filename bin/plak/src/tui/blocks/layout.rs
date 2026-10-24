@@ -1,11 +1,11 @@
 //! Fold plans, the plain line layout and its anchors, and row geometry.
 
-#![allow(
-    clippy::wildcard_imports,
-    reason = "a split of the blocks module that shares its vocabulary"
-)]
-
-use super::*;
+use crate::tui::blocks::{
+    DisplayMode, PROMPT_PREFIX, RenderPrefs, ScrollBlock, mail_parts, milestone_has_detail,
+    thinking_has_detail, tool_is_running, wrap_plain,
+};
+use crate::tui::markdown::RowCopy;
+use crate::tui::presentation::ActivityKind;
 
 /// Layout metadata: for each visual line, which block index produced it (for sticky).
 #[derive(Clone, Debug, Default)]
@@ -581,4 +581,126 @@ pub(super) fn block_span(layout: &LineLayout, block: usize) -> Option<(usize, us
             .take_while(|owner| **owner == Some(block))
             .count();
     Some((start, end))
+}
+
+pub(super) fn mail_lines(block: &ScrollBlock, plan: &RowPlan, width: usize) -> Vec<String> {
+    let ScrollBlock::Mail {
+        text,
+        open,
+        group_open,
+    } = block
+    else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    let available = width.saturating_sub(4).max(1);
+    if let Some(summary) = &plan.mail_summary {
+        rows.push(format!(
+            "  {} {}",
+            if *group_open { "▾" } else { "▸" },
+            crate::tui::picker::clip(summary, available)
+        ));
+    }
+    if plan.group_folded {
+        return rows;
+    }
+    let first = text.lines().next().unwrap_or_default();
+    rows.push(format!(
+        "  {} {}",
+        if *open { "▾" } else { "▸" },
+        crate::tui::picker::clip(first, available)
+    ));
+    if *open {
+        let body = mail_parts(text).map_or(text.as_str(), |(_, _, body)| body);
+        rows.extend(
+            wrap_plain(body, available)
+                .into_iter()
+                .map(|line| format!("    {line}")),
+        );
+    }
+    rows
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub(super) fn block_plain_lines(
+    block: &ScrollBlock,
+    plan: &RowPlan,
+    content_width: usize,
+    prefs: RenderPrefs,
+    blocks: &[ScrollBlock],
+) -> Vec<String> {
+    use crate::tui::blocks::{discarded_label, format_approval_block};
+
+    if plan.hidden {
+        return Vec::new();
+    }
+    match block {
+        ScrollBlock::User { text, .. } | ScrollBlock::Steer { text, .. } => {
+            // Gutter wrap; sticky uses `›` — body layout uses gutter for plain export
+            let w = content_width.saturating_sub(2).max(1);
+            wrap_plain(text, w)
+                .into_iter()
+                .map(|l| format!("┃ {l}"))
+                .collect()
+        }
+        ScrollBlock::Assistant(text) => {
+            let w = content_width.saturating_sub(2).max(1);
+            wrap_plain(text, w)
+                .into_iter()
+                .map(|line| format!("  {line}"))
+                .collect()
+        }
+        ScrollBlock::System(text) | ScrollBlock::Error(text) | ScrollBlock::Header(text) => {
+            wrap_plain(text, content_width.saturating_sub(2).max(1))
+                .into_iter()
+                .map(|line| format!("  {line}"))
+                .collect()
+        }
+        ScrollBlock::Discarded { thinking: true, .. } if !prefs.show_thinking => Vec::new(),
+        ScrollBlock::Discarded { text, thinking } => {
+            let w = content_width.saturating_sub(2).max(1);
+            std::iter::once(format!("  {}", discarded_label(*thinking)))
+                .chain(
+                    wrap_plain(text, w)
+                        .into_iter()
+                        .map(|line| format!("  {line}")),
+                )
+                .collect()
+        }
+        ScrollBlock::Approval {
+            tool_name,
+            subject,
+            prompt,
+            resolution,
+            ..
+        } => format_approval_block(
+            tool_name,
+            subject.as_deref(),
+            prompt.as_deref(),
+            resolution.as_deref(),
+        )
+        .into_iter()
+        .flat_map(|line| wrap_plain(&line, content_width))
+        .collect(),
+        ScrollBlock::Tool { .. }
+        | ScrollBlock::Item { .. }
+        | ScrollBlock::Thinking { .. }
+        | ScrollBlock::Milestone { .. }
+        | ScrollBlock::Mail { .. } => {
+            let mut rows = super::render::block_lines_with(
+                block,
+                plan,
+                &crate::tui::theme::Theme::dark(),
+                content_width,
+                prefs,
+                blocks,
+            );
+            if rows.last().is_some_and(|row| row.to_string().is_empty()) {
+                rows.pop();
+            }
+            rows.into_iter()
+                .map(|row| row.to_string().trim_end().to_owned())
+                .collect()
+        }
+    }
 }

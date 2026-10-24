@@ -4,7 +4,8 @@
 //! never terminal-buffer coordinates.  That keeps an anchor stable while the
 //! viewport scrolls or redraws and lets OSC52 copy include off-screen rows.
 
-use crate::tui::blocks::{LineLayout, RowCopy, layout_anchor, resolve_layout_anchor};
+use crate::tui::blocks::{LineLayout, layout_anchor, resolve_layout_anchor};
+use crate::tui::markdown::RowCopy;
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;

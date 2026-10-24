@@ -1,11 +1,7 @@
 //! Cell-width wrapping of plain text.
 
-#![allow(
-    clippy::wildcard_imports,
-    reason = "a split of the blocks module that shares its vocabulary"
-)]
-
-use super::*;
+use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_width::UnicodeWidthStr as _;
 
 pub(crate) enum CellItem<T> {
     Grapheme {

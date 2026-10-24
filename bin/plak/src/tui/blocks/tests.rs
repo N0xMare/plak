@@ -1,8 +1,16 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
+use std::borrow::Cow;
+use std::time::Duration;
+
+use unicode_width::UnicodeWidthStr as _;
+
 use super::*;
-use plakous_host_protocol::views::SourceLink;
-use plakous_host_protocol::views::transcript::AutoContinue;
+use crate::tui::presentation::ActivityKind;
+use plakous_host_protocol::views::transcript::{
+    AutoContinue, ProcessNotice, ProcessOutcome, ToolItem, TranscriptRow,
+};
+use plakous_host_protocol::views::{CallDetailOutcome, SourceLink};
 
 #[test]
 fn a_compact_result_indents_like_serde_pretty_and_keeps_key_order() {

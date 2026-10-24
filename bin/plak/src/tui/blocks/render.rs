@@ -4,6 +4,8 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;
 
 use super::{LineLayout, ScrollBlock};
+use crate::tui::markdown::RowCopy;
+use crate::tui::presentation::ActivityKind;
 use crate::tui::theme::Theme;
 
 fn wrap_styled_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
@@ -185,7 +187,7 @@ const OVERSIZED_BLOCK_PROJECTION_BYTES: usize = TRANSCRIPT_RENDER_CACHE_BYTES / 
 
 /// Bytes one projected row retains: styled spans, the plain copy, and an
 /// unclipped code source when the row carries one.
-fn row_bytes(line: &Line<'static>, plain: &str, copy: &super::RowCopy) -> usize {
+fn row_bytes(line: &Line<'static>, plain: &str, copy: &RowCopy) -> usize {
     plain.len()
         + line
             .spans
@@ -390,10 +392,8 @@ pub(super) fn estimate_block_rows(
             };
             let header = usize::from(plan.activity_summary.is_some());
             let item_detail = if plan.group_folded
-                || matches!(
-                    kind,
-                    super::ActivityKind::Compact | super::ActivityKind::Compose
-                ) {
+                || matches!(kind, ActivityKind::Compact | ActivityKind::Compose)
+            {
                 0
             } else {
                 usize::from(plan.members_open).saturating_add(match mode {
@@ -406,7 +406,7 @@ pub(super) fn estimate_block_rows(
             };
             let action = if plan.group_folded {
                 0
-            } else if *kind == super::ActivityKind::Compact {
+            } else if *kind == ActivityKind::Compact {
                 let action =
                     crate::tui::activity::action(name, state, *kind, subject.as_deref(), plan);
                 estimate_wrapped_rows(
@@ -1006,7 +1006,7 @@ impl TranscriptRenderCache {
                 // allocation and evict nothing the allocator can reuse.
                 *line = Line::default();
                 *plain = String::new();
-                *copy = super::RowCopy::default();
+                *copy = RowCopy::default();
             }
             self.evicted.insert(block);
             #[cfg(test)]
@@ -1205,7 +1205,7 @@ impl TranscriptRenderCache {
             self.render.lines.push(Line::from(""));
             self.render.layout.plain.push(String::new());
             self.render.layout.block_index.push(None);
-            self.render.layout.copy.push(super::RowCopy::default());
+            self.render.layout.copy.push(RowCopy::default());
         }
         let tail_start = self.render.lines.len();
         self.tail_row_start = Some(tail_start);
@@ -1246,7 +1246,7 @@ impl TranscriptRenderCache {
         &mut self,
         tail_index: usize,
         styled: Vec<Line<'static>>,
-        copy: Vec<super::RowCopy>,
+        copy: Vec<RowCopy>,
     ) {
         #[cfg(test)]
         {
@@ -1418,10 +1418,10 @@ const fn assistant_markdown_width(content_width: usize) -> u16 {
 /// markdown row's own rail width.
 fn assistant_rows(
     lines: Vec<Line<'static>>,
-    copies: Vec<super::RowCopy>,
+    copies: Vec<RowCopy>,
     theme: &Theme,
     content_width: usize,
-) -> (Vec<Line<'static>>, Vec<super::RowCopy>) {
+) -> (Vec<Line<'static>>, Vec<RowCopy>) {
     let mut out_lines = Vec::with_capacity(lines.len());
     let mut out_copy = Vec::with_capacity(lines.len());
     for (mut line, mut copy) in lines.into_iter().zip(copies) {
@@ -1446,7 +1446,7 @@ fn assistant_rows(
         }
         for extra in wrapped {
             out_lines.push(extra);
-            out_copy.push(super::RowCopy::default());
+            out_copy.push(RowCopy::default());
         }
     }
     (out_lines, out_copy)
@@ -1526,7 +1526,7 @@ fn assistant_block(
     text: &str,
     theme: &Theme,
     content_width: usize,
-) -> (Vec<Line<'static>>, Vec<super::RowCopy>) {
+) -> (Vec<Line<'static>>, Vec<RowCopy>) {
     // Markdown is parsed only for presentation. Source remains the
     // durable assistant text and malformed input stays inert.
     let (lines, copy) = crate::tui::markdown::render_markdown_rows(
@@ -1545,7 +1545,7 @@ fn block_rows(
     content_width: usize,
     prefs: super::RenderPrefs,
     blocks: &[ScrollBlock],
-) -> (Vec<Line<'static>>, Vec<super::RowCopy>) {
+) -> (Vec<Line<'static>>, Vec<RowCopy>) {
     if plan.hidden {
         return (Vec::new(), Vec::new());
     }
@@ -1553,7 +1553,7 @@ fn block_rows(
         return assistant_block(text, theme, content_width);
     }
     let mut lines = block_content_lines(block, plan, theme, content_width, prefs);
-    let mut copy = vec![super::RowCopy::default(); lines.len()];
+    let mut copy = vec![RowCopy::default(); lines.len()];
     if !plan.group_folded && !plan.cell_tails.is_empty() {
         if lines.last().is_some_and(|row| row.width() == 0) {
             lines.pop();
@@ -1566,7 +1566,7 @@ fn block_rows(
         }
         if super::tool_block_closes_with_blank(plan) {
             lines.push(Line::from(""));
-            copy.push(super::RowCopy::default());
+            copy.push(RowCopy::default());
         }
     }
     (lines, copy)
@@ -1702,7 +1702,7 @@ fn block_content_lines(
             logical
         }
         ScrollBlock::Tool {
-            kind: super::ActivityKind::Compact,
+            kind: ActivityKind::Compact,
             name,
             state,
             subject,
@@ -1720,7 +1720,7 @@ fn block_content_lines(
             let action = crate::tui::activity::action(
                 name,
                 state,
-                super::ActivityKind::Compact,
+                ActivityKind::Compact,
                 subject.as_deref(),
                 plan,
             );
@@ -1752,7 +1752,7 @@ fn block_content_lines(
                 .map(|lead| lead.line(theme, content_width))
                 .collect();
             if !plan.group_folded {
-                if *kind != super::ActivityKind::Compose && *mode == super::DisplayMode::Expanded {
+                if *kind != ActivityKind::Compose && *mode == super::DisplayMode::Expanded {
                     let rail = leads.last().map_or("  ", |lead| lead.rail);
                     push_item_detail(
                         &mut logical,
@@ -1987,13 +1987,13 @@ pub(crate) fn lead_rows(block: &ScrollBlock, plan: &super::RowPlan, theme: &Them
             mode,
             wait,
             ..
-        } if *kind != super::ActivityKind::Compact => {
+        } if *kind != ActivityKind::Compact => {
             let mut rows = Vec::new();
             rows.extend(summary_row(plan, theme));
             if plan.group_folded {
                 return rows;
             }
-            let merged = plan.activity_action.is_some() && *kind != super::ActivityKind::Compose;
+            let merged = plan.activity_action.is_some() && *kind != ActivityKind::Compose;
             let item = |plan: &super::RowPlan, caret| {
                 let glyph = crate::tui::activity::item_glyph(state, *kind, plan);
                 let glyph_style = match glyph {
@@ -2182,7 +2182,7 @@ fn cell_footer_rows(
     blocks: &[ScrollBlock],
     theme: &Theme,
     width: usize,
-) -> (Vec<Line<'static>>, Vec<super::RowCopy>) {
+) -> (Vec<Line<'static>>, Vec<RowCopy>) {
     let Some(ScrollBlock::Tool {
         name,
         kind,
@@ -2222,7 +2222,7 @@ fn cell_footer_rows(
         );
         line.alignment = Some(ratatui::layout::Alignment::Center);
         rows.push(line);
-        copy.push(super::RowCopy::default());
+        copy.push(RowCopy::default());
     }
     if !mode.shows_detail() {
         return (rows, copy);
@@ -2261,9 +2261,9 @@ fn cell_footer_rows(
     ));
     output.alignment = Some(ratatui::layout::Alignment::Right);
     rows.push(output);
-    copy.push(super::RowCopy {
+    copy.push(RowCopy {
         decoration: cells_u16(rail.width()),
-        ..super::RowCopy::default()
+        ..RowCopy::default()
     });
     if view.output_open {
         let first = rows.len();
@@ -2281,10 +2281,7 @@ fn cell_footer_rows(
             theme,
             width,
         );
-        copy.extend(std::iter::repeat_n(
-            super::RowCopy::default(),
-            rows.len() - first,
-        ));
+        copy.extend(std::iter::repeat_n(RowCopy::default(), rows.len() - first));
     }
     (rows, copy)
 }
@@ -2292,7 +2289,7 @@ fn cell_footer_rows(
 /// One tool item's fields the detail reads.
 struct ItemFacts<'a> {
     name: &'a str,
-    kind: super::ActivityKind,
+    kind: ActivityKind,
     state: &'a str,
     subject: Option<&'a str>,
     detail: Option<&'a str>,
@@ -2340,7 +2337,7 @@ fn detail_text<'a>(item: &'a ItemFacts<'a>) -> DetailText<'a> {
     let running = super::tool_is_running(item.state);
     // A cell's retained detail is its source, drawn above; it has no
     // output preview.
-    let (input, output) = if item.kind == super::ActivityKind::Compose {
+    let (input, output) = if item.kind == ActivityKind::Compose {
         ("", "")
     } else if running {
         (item.detail.or(item.subject).unwrap_or_default(), "")
@@ -2395,7 +2392,7 @@ fn push_item_detail(
     }
     let verb = super::subject_tool_verb(item.name, item.kind, item.subject);
     // A code cell's source is already drawn above its detail.
-    if item.kind != super::ActivityKind::Compose {
+    if item.kind != ActivityKind::Compose {
         for line in input_lines(verb, text.input, theme) {
             push(logical, line);
         }
@@ -2872,7 +2869,7 @@ fn render_transcript_windowed(
                 lines.push(Line::from(""));
                 plain.push(String::new());
                 block_index.push(None);
-                copy.push(super::RowCopy::default());
+                copy.push(RowCopy::default());
             }
             let block_plain = styled
                 .iter()
@@ -2894,13 +2891,13 @@ fn render_transcript_windowed(
             lines.push(Line::from(""));
             plain.push(String::new());
             block_index.push(None);
-            copy.push(super::RowCopy::default());
+            copy.push(RowCopy::default());
         }
         estimated.insert(bi);
         block_index.extend(std::iter::repeat_n(Some(bi), rows));
         lines.extend(std::iter::repeat_n(Line::default(), rows));
         plain.extend(std::iter::repeat_n(String::new(), rows));
-        copy.extend(std::iter::repeat_n(super::RowCopy::default(), rows));
+        copy.extend(std::iter::repeat_n(RowCopy::default(), rows));
     }
     TranscriptRender {
         lines,

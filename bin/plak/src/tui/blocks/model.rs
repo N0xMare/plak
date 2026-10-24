@@ -1,12 +1,15 @@
-//! The transcript block model: blocks, render preferences and the text
-//! their notice, mail, milestone and approval rows carry.
+//! The transcript block model: blocks, render preferences, and the text
+//! and duration labels their notice, mail and milestone rows carry.
 
-#![allow(
-    clippy::wildcard_imports,
-    reason = "a split of the blocks module that shares its vocabulary"
-)]
+use std::borrow::Cow;
+use std::time::Duration;
 
-use super::*;
+use crate::tui::presentation::{ActivityKind, ActivityState};
+use plakous_host_protocol::views::CallDetailOutcome;
+use plakous_host_protocol::views::transcript::{
+    AgentMilestone, MilestoneEvent, NoticePlacement, NoticeScope, NoticeTone, ProcessNotice,
+    ProcessOutcome, ToolItem, TranscriptRow, WaitFacts,
+};
 
 /// Grok Build / expandable-indicator prompt glyph (compressed `>` lookalike).
 #[cfg(test)]
@@ -711,44 +714,6 @@ pub(crate) fn mail_parts(text: &str) -> Option<(&str, &str, &str)> {
     Some((purpose, agent, body))
 }
 
-pub(super) fn mail_lines(block: &ScrollBlock, plan: &RowPlan, width: usize) -> Vec<String> {
-    let ScrollBlock::Mail {
-        text,
-        open,
-        group_open,
-    } = block
-    else {
-        return Vec::new();
-    };
-    let mut rows = Vec::new();
-    let available = width.saturating_sub(4).max(1);
-    if let Some(summary) = &plan.mail_summary {
-        rows.push(format!(
-            "  {} {}",
-            if *group_open { "▾" } else { "▸" },
-            crate::tui::picker::clip(summary, available)
-        ));
-    }
-    if plan.group_folded {
-        return rows;
-    }
-    let first = text.lines().next().unwrap_or_default();
-    rows.push(format!(
-        "  {} {}",
-        if *open { "▾" } else { "▸" },
-        crate::tui::picker::clip(first, available)
-    ));
-    if *open {
-        let body = mail_parts(text).map_or(text.as_str(), |(_, _, body)| body);
-        rows.extend(
-            wrap_plain(body, available)
-                .into_iter()
-                .map(|line| format!("    {line}")),
-        );
-    }
-    rows
-}
-
 fn truncate_string_tail(text: &mut String, limit: usize) {
     if text.len() <= limit {
         return;
@@ -1079,64 +1044,147 @@ pub fn thinking_detail_rows(text: &str, mode: DisplayMode) -> Vec<String> {
     }
 }
 
-/// The open approval row's clickable chip that allows it.
-pub const APPROVAL_ALLOW_CHIP: &str = "[allow]";
+/// What a row paints when the host measured a positive but sub-millisecond
+/// elapsed: `0ms` claims a call that did work took no time at all,
+/// which is the one thing the measurement cannot mean.
+pub const SUBMILLISECOND_ELAPSED: &str = "<1ms";
 
-/// The open approval row's clickable chip that denies it.
-pub const APPROVAL_DENY_CHIP: &str = "[deny]";
-
-/// The open approval's chips in its header wrapped at `width`: the row
-/// within the block, the display column and the chip, `[allow]` first. The
-/// status that carries them ends the header, after the model-written
-/// subject, so each chip is its label's last occurrence in the header rows;
-/// the prompt rows below are never searched.
+/// Compact elapsed label shared by live running tools and completed `done:` state.
+///
+/// A call whose start and terminal events land inside the same
+/// millisecond used to paint `0ms`. The row reports the floor of what it can
+/// resolve — `<1ms` — instead of asserting a zero it never observed.
 #[must_use]
-pub fn approval_chip_cells(
-    tool_name: &str,
-    subject: Option<&str>,
-    width: usize,
-) -> Vec<(usize, usize, &'static str)> {
-    let Some(header) = format_approval_block(tool_name, subject, None, None)
-        .into_iter()
-        .next()
-    else {
-        return Vec::new();
-    };
-    let rows = wrap_plain(&header, width);
-    [APPROVAL_ALLOW_CHIP, APPROVAL_DENY_CHIP]
-        .into_iter()
-        .filter_map(|label| {
-            rows.iter().enumerate().rev().find_map(|(row, text)| {
-                text.rfind(label).map(|at| (row, text[..at].width(), label))
-            })
-        })
-        .collect()
+pub fn format_tool_elapsed(elapsed: Duration) -> String {
+    if elapsed.as_secs() > 0 {
+        format!(
+            "{}.{:01}s",
+            elapsed.as_secs(),
+            elapsed.subsec_millis() / 100
+        )
+    } else if elapsed.as_millis() == 0 {
+        SUBMILLISECOND_ELAPSED.to_owned()
+    } else {
+        format!("{}ms", elapsed.as_millis())
+    }
 }
 
-/// Plain rows for one §5.2 approval block.
+/// The one whole-second duration ladder (spec 02 §5.4): `45s` under a
+/// minute, then zero-padded `1m05s`, then `1h05m`.
 #[must_use]
-pub fn format_approval_block(
-    tool_name: &str,
-    subject: Option<&str>,
-    prompt: Option<&str>,
-    resolution: Option<&str>,
-) -> Vec<String> {
-    let glyph = match resolution {
-        None => "◆",
-        Some("allowed") => "✓",
-        Some(_) => "⊘",
+pub(crate) fn format_duration_secs(secs: u64) -> String {
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m{:02}s", secs / 60, secs % 60),
+        _ => format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60),
+    }
+}
+
+/// A group's or a background job's elapsed time: `12.3s` under a minute,
+/// then `1m02s`, `1h05m`.
+#[must_use]
+pub fn format_group_elapsed(ms: u64) -> String {
+    let secs = ms / 1000;
+    if secs >= 60 {
+        format_duration_secs(secs)
+    } else {
+        format_tool_elapsed(Duration::from_millis(ms))
+    }
+}
+
+pub(super) fn offset_at(zone: &jiff::tz::TimeZone, unix_ms: u64) -> i32 {
+    let Ok(seconds) = i64::try_from(unix_ms / 1_000) else {
+        return 0;
     };
-    let status = resolution.unwrap_or("awaiting decision · [allow] Alt+A · [deny] Alt+D");
-    let mut header = format!("  {glyph} Approval  {}", humanize_tool(tool_name));
-    if let Some(subject) = subject.filter(|subject| !subject.is_empty()) {
-        header.push(' ');
-        header.push_str(subject);
+    let Ok(timestamp) = jiff::Timestamp::from_second(seconds) else {
+        return 0;
+    };
+    zone.to_offset(timestamp).seconds()
+}
+
+pub(super) fn local_moment(unix_ms: u64, offset_seconds: i32) -> Option<time::OffsetDateTime> {
+    let offset =
+        time::UtcOffset::from_whole_seconds(offset_seconds).unwrap_or(time::UtcOffset::UTC);
+    let seconds = i64::try_from(unix_ms / 1_000).ok()?;
+    time::OffsetDateTime::from_unix_timestamp(seconds)
+        .ok()
+        .map(|moment| moment.to_offset(offset))
+}
+
+/// A submitted result as indented lines when it is one line of compact
+/// JSON, the host's cut line (`… cut at 16 KiB of 40 KiB`) kept under it.
+/// A cut result is not valid JSON, so the indent follows the tokens rather
+/// than parsing, and keeps the child's key order.
+pub(super) fn indent_result(text: &str) -> Cow<'_, str> {
+    let (body, cut) = match text.rsplit_once('\n') {
+        Some((body, cut)) if cut.starts_with("… cut at ") => (body, Some(cut)),
+        _ => (text, None),
+    };
+    let body = body.trim();
+    if !(body.starts_with('{') || body.starts_with('[')) || body.contains('\n') {
+        return Cow::Borrowed(text);
     }
-    header.push_str(" · ");
-    header.push_str(status);
-    let mut lines = vec![header];
-    if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
-        lines.push(format!("  └ {prompt}"));
+    let mut indented = indent_json(body);
+    if let Some(cut) = cut {
+        indented.push('\n');
+        indented.push_str(cut);
     }
-    lines
+    Cow::Owned(indented)
+}
+
+/// Compact JSON re-indented by two spaces per level, `serde_json`'s pretty
+/// layout for valid input; strings are copied as they are.
+pub(super) fn indent_json(json: &str) -> String {
+    fn break_line(out: &mut String, depth: usize) {
+        out.push('\n');
+        out.extend(std::iter::repeat_n("  ", depth));
+    }
+    let mut out = String::with_capacity(json.len().saturating_mul(2));
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut chars = json.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '{' | '[' => {
+                out.push(c);
+                while chars.next_if(|next| next.is_whitespace()).is_some() {}
+                let close = if c == '{' { '}' } else { ']' };
+                if let Some(close) = chars.next_if_eq(&close) {
+                    out.push(close);
+                } else {
+                    depth += 1;
+                    break_line(&mut out, depth);
+                }
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                break_line(&mut out, depth);
+                out.push(c);
+            }
+            ',' => {
+                out.push(c);
+                break_line(&mut out, depth);
+            }
+            ':' => out.push_str(": "),
+            c if c.is_whitespace() => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
