@@ -180,6 +180,9 @@ pub mod agent {
         ProductExtensionEvidence, ProductExtensionLimits, attach_local_composition,
         codex_minimal_local_code_mode_sidecar,
     };
+    // The one compaction-scheduling rule (spec 01 §10.3), from the
+    // unsupported internal tier: a host's idle fence reads it.
+    pub use plakous_agent::internal::{CompactionMeasure, CompactionVerdict, MeasuredFit};
     pub use plakous_agent::{
         AbandonedTurnClaim,
         AbandonedTurnReport,

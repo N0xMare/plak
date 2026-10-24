@@ -711,98 +711,43 @@ pub fn project_context_status(status: &ContextStatus) -> ContextProjection {
     }
 }
 
-/// Input headroom Plakous keeps ahead of tool observations. A prompt that
-/// reaches this boundary must compact before dispatch. This observation
-/// reserve also acts independently of the capacity-derived token trigger.
-pub const OBSERVATION_HEADROOM_RESERVE_TOKENS: u64 = 4_096;
-
 impl ContextProjection {
-    /// Whether the admitted input envelope has reached the tool-observation
-    /// reserve. This guards admission, so it compares the admission bound to
-    /// the admitted ceiling, never occupancy to the advertised window.
+    /// The scheduling verdict Plakous's one rule gives this measure (chapter
+    /// 01 §10.3): an overflow disposition; anchored occupancy at the compact
+    /// trigger; or an admission bound within the tool-observation reserve of
+    /// the admitted ceiling. An unanchored measure reaches neither fit ground;
+    /// the reserve reads the admission bound, never occupancy, and a measure
+    /// admitted only on the unanchored estimate has no bound to read.
     #[must_use]
-    pub fn observation_headroom_requires_compaction(self) -> bool {
-        if self.disposition != ContextDisposition::Fits || self.unanchored_estimate {
-            return false;
-        }
-        let Some(bound) = self.prepared_input.map(PreparedInputCount::tokens) else {
-            return false;
-        };
-        let Some(ceiling) = self.safe_admitted_input_ceiling else {
-            return false;
-        };
-        ceiling.tokens().saturating_sub(bound) <= OBSERVATION_HEADROOM_RESERVE_TOKENS
-    }
-}
-
-/// Reports whether product policy may request compaction for this status.
-///
-/// `ProtectedOverflow` schedules on every route. Latest-intent tool growth is
-/// protected against the semantic cut, and only Codex remote compact used to
-/// be able to drop tool material, so every other route refused the turn. The
-/// placeholder rung now replaces the oldest tool-result bodies offline on any
-/// route, so the disposition alone decides that a compact runs; which rung
-/// acts is the ladder's business, not this predicate's.
-#[must_use]
-pub const fn should_schedule_compaction(disposition: ContextDisposition) -> bool {
-    matches!(
-        disposition,
-        ContextDisposition::WouldOverflow | ContextDisposition::ProtectedOverflow
-    )
-}
-
-/// Whether occupancy has reached this projection's compact trigger.
-///
-/// Grok OAuth publishes `auto_compact_input` (400k of a 500k window). Other
-/// routes use the ceiling-minus-headroom token trigger. An unanchored measure (before
-/// the session's first completed round, which includes a session carried
-/// forward from another build, and after a compaction or branch transition)
-/// never fires the occupancy fence: its whole-request
-/// estimate can overstate the provider's count several times over, and the
-/// compaction it would schedule is paid. Only an overflow disposition acts
-/// before the first round anchors.
-#[must_use]
-pub fn occupancy_requires_scheduled_compact(projection: ContextProjection) -> bool {
-    match projection.disposition() {
-        ContextDisposition::WouldOverflow | ContextDisposition::ProtectedOverflow => true,
-        ContextDisposition::Fits => {
-            if projection.context_anchor.is_none() {
-                return false;
+    pub fn compaction_verdict(self) -> plakous::agent::CompactionVerdict {
+        use plakous::agent::{CompactionMeasure, CompactionVerdict, MeasuredFit};
+        let fit = match self.disposition {
+            ContextDisposition::Fits => MeasuredFit::Fits,
+            ContextDisposition::WouldOverflow | ContextDisposition::ProtectedOverflow => {
+                MeasuredFit::Overflows
             }
-            let Some(occupied) = projection.occupied_tokens() else {
-                return false;
-            };
-            projection
-                .auto_compact_trigger()
-                .is_some_and(|trigger| occupied >= trigger)
-        }
-        _ => false,
+            ContextDisposition::Unavailable | ContextDisposition::RecoveryRequired => {
+                MeasuredFit::Unmeasured
+            }
+        };
+        let input_headroom = if self.unanchored_estimate {
+            None
+        } else {
+            self.prepared_input
+                .zip(self.safe_admitted_input_ceiling)
+                .map(|(bound, ceiling)| ceiling.tokens().saturating_sub(bound.tokens()))
+        };
+        CompactionVerdict::of(CompactionMeasure {
+            fit,
+            occupancy: self.context_anchor.and(self.occupied_tokens()),
+            trigger: self.auto_compact_trigger(),
+            input_headroom,
+        })
     }
 }
 
 /// At most one extra scheduled compact after a committed compact still triggers.
 pub const SCHEDULED_COMPACT_FOLLOW_ON_LIMIT: u32 = 1;
-
-/// True when a committed scheduled compact may start one new-op follow-on.
-#[must_use]
-pub const fn scheduled_compact_should_follow_on(
-    follow_ons_used: u32,
-    disposition: ContextDisposition,
-) -> bool {
-    follow_ons_used < SCHEDULED_COMPACT_FOLLOW_ON_LIMIT
-        && !matches!(disposition, ContextDisposition::Fits)
-        && should_schedule_compaction(disposition)
-}
-
-/// Overflow parks the queued prompt when scheduled compact is disabled.
-/// Fits above its token trigger still dispatches; it does not invent an overflow park.
-#[must_use]
-pub const fn scheduled_compaction_parks_when_disabled(disposition: ContextDisposition) -> bool {
-    matches!(
-        disposition,
-        ContextDisposition::WouldOverflow | ContextDisposition::ProtectedOverflow
-    )
-}
 
 /// Operator note when scheduled compact would fire but `compaction.enabled=false`.
 #[must_use]
@@ -917,6 +862,28 @@ fn project_evidence(
             Some(NonGuarantee::CustomCallerOperatingEnvelope),
         )),
         _ => None,
+    }
+}
+
+/// The verdict questions the context and compaction tests ask of a projection.
+#[cfg(test)]
+pub(crate) mod test_verdicts {
+    use super::{ContextDisposition, ContextProjection, PreparedInputCount};
+
+    /// Whether the idle fence's occupancy question schedules a compact:
+    /// overflow or anchored occupancy at the trigger.
+    pub(crate) fn idle_fence_schedules(projection: ContextProjection) -> bool {
+        let verdict = projection.compaction_verdict();
+        verdict.overflow() || verdict.occupancy()
+    }
+
+    /// The verdict of a measure far below every fit trigger, with
+    /// `disposition`: only an overflow schedules it.
+    pub(crate) fn disposition_schedules(disposition: ContextDisposition) -> bool {
+        ContextProjection::test_fits(PreparedInputCount::Exact(1_000), 100_000, 100_000, None)
+            .with_disposition(disposition)
+            .compaction_verdict()
+            .is_due()
     }
 }
 

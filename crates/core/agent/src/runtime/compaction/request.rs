@@ -1,5 +1,6 @@
 //! Exact compaction requests, admission and source-cache affinity.
 
+use crate::compaction_verdict::input_headroom_tokens;
 use crate::runtime::AgentBuilder;
 use crate::runtime::admission::sealed_runtime_admission;
 use crate::runtime::compaction::fold::{compact_diagnostic, measure_compaction_successor};
@@ -13,10 +14,10 @@ use crate::runtime::compaction::{
 };
 use crate::runtime::continuation::runtime_manifest_error;
 use crate::runtime::durable::branch::validate_durable_builder;
-use crate::runtime::observation::budget::observation_bytes_from_headroom;
 use crate::{
-    AgentError, AgentErrorKind, AgentSessionEndpointError, ContextEvaluationAudit,
-    RuntimeCheckpoint, RuntimeDurability, RuntimeManifest, SessionWorkflowId,
+    AgentError, AgentErrorKind, AgentSessionEndpointError, CompactionMeasure, CompactionVerdict,
+    ContextEvaluationAudit, MeasuredFit, RuntimeCheckpoint, RuntimeDurability, RuntimeManifest,
+    SessionWorkflowId,
 };
 use plakous_model::{
     Actor, CanonicalHistory, CapacityRule, Clock, CompiledProviderConfiguration, ContentBlock,
@@ -172,24 +173,23 @@ pub(in crate::runtime) fn apply_completed_model_round_occupancy(
     *nested_committed = 0;
 }
 
-/// Whether the tool-group boundary should schedule a compact: on an overflow
-/// disposition, on exhausted observation headroom, or once the anchored
-/// occupancy reaches the compaction trigger. The ladder decides which rung acts.
-pub(in crate::runtime) fn should_schedule_mid_turn_compaction_with_trigger(
+/// The tool-group boundary's verdict: on an overflow disposition, on
+/// exhausted observation headroom, or once the anchored occupancy reaches the
+/// compaction trigger. The ladder decides which rung acts.
+pub(in crate::runtime) fn tool_group_fence_verdict(
     kind: &ContextStatusKind,
-    occupied: Option<u64>,
+    occupancy: Option<u64>,
     trigger: Option<u64>,
-) -> bool {
-    matches!(
-        kind,
-        ContextStatusKind::WouldOverflow(_) | ContextStatusKind::ProtectedOverflow(_)
-    ) || matches!(kind, ContextStatusKind::Fits { headroom }
-        if observation_bytes_from_headroom(*headroom) == 0)
-        || (matches!(kind, ContextStatusKind::Fits { .. })
-            && match (occupied, trigger) {
-                (Some(occupied), Some(trigger)) => occupied >= trigger,
-                _ => false,
-            })
+) -> CompactionVerdict {
+    CompactionVerdict::of(CompactionMeasure {
+        fit: MeasuredFit::of(kind),
+        occupancy,
+        trigger,
+        input_headroom: match kind {
+            ContextStatusKind::Fits { headroom } => Some(input_headroom_tokens(*headroom)),
+            _ => None,
+        },
+    })
 }
 
 /// The harness summary's generation limits: the turn's bound narrowed to

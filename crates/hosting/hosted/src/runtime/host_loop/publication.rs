@@ -1,12 +1,11 @@
 //! Commit the terminal product projection before advertising completion.
 
 use super::{
-    ContextDisposition, ExceptionalTerminalProjection, HostEvent, HostLoop, Instant,
-    InterruptWatch, SessionEvent, SessionQueueDrainState, TurnHostOutcome,
-    commit_definite_failure_projection, commit_exceptional_terminal_projection,
-    commit_session_update, context_capacity_recovery_guidance, elapsed_ms_since,
-    emit_unavailable_context, handle_compact, log_ev, native_compact_facet, report_context,
-    sessions, should_schedule_compaction,
+    ExceptionalTerminalProjection, HostEvent, HostLoop, Instant, InterruptWatch, SessionEvent,
+    SessionQueueDrainState, TurnHostOutcome, commit_definite_failure_projection,
+    commit_exceptional_terminal_projection, commit_session_update,
+    context_capacity_recovery_guidance, elapsed_ms_since, emit_unavailable_context, handle_compact,
+    log_ev, native_compact_facet, report_context, sessions,
 };
 use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -186,7 +185,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     plakous_host_protocol::ContextCapacityRecovery::Compactable
                 ) && exact_source
                     && self.config.compaction_enabled
-                    && should_schedule_compaction(ContextDisposition::WouldOverflow)
                     && !self.opened.paid_fold_failed_since_last_round();
                 let saved = commit_session_update(
                     &*self.config.store,

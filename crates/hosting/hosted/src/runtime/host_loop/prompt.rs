@@ -6,9 +6,8 @@ use super::{
     TerminalPhase, TurnHostOutcome, commit_session_update, drive_one_turn, durable_tree_id,
     emit_context_projection, emit_queue_snapshot, emit_terminal_status, emit_unavailable_context,
     host_outcome_blocks_continuation, last_enrolled_source_bytes, log_ev, observe_compact, persist,
-    prompt_requires_scheduled_compaction, query_context, queue, queue_persist_failed, reject_draft,
-    run_scheduled_compaction_until_fits, scheduled_compaction_disabled_note,
-    scheduled_compaction_parks_when_disabled, send_session_info, sessions, topology_state,
+    query_context, queue, queue_persist_failed, reject_draft, run_scheduled_compaction_until_fits,
+    scheduled_compaction_disabled_note, send_session_info, sessions, topology_state,
 };
 use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::runtime::admission::{QueuePersistAction, log_queue_persist_failed};
@@ -295,7 +294,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.session.context_counters(),
             enrolled_source_bytes,
         );
-        if !host_authored && prompt_requires_scheduled_compaction(pending_context) {
+        if !host_authored && pending_context.compaction_verdict().is_due() {
             if self.config.compaction_enabled {
                 // A scheduled compact is one paid round-trip the host blocks
                 // on; without the busy row the TUI paints idle while every
@@ -371,7 +370,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         return Ok(HostStep::Continue);
                     }
                 }
-            } else if scheduled_compaction_parks_when_disabled(pending_context.disposition())
+            } else if pending_context.compaction_verdict().overflow()
                 && !self.send_bare_without_mail(
                     &mut canonical_command,
                     &mut selected_mail,
@@ -692,7 +691,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         ) else {
             return false;
         };
-        if scheduled_compaction_parks_when_disabled(bare.disposition()) {
+        if bare.compaction_verdict().overflow() {
             return false;
         }
         *selected_mail = None;

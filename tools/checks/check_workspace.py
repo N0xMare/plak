@@ -803,6 +803,11 @@ _SHARED_PLAKOUS_SYMBOLS = {
         # hosted note and the `compact.finished` record render both.
         "CompactionRung",
         "CompactionSummary",
+        # The host's idle fence asks Plakous's one scheduling verdict
+        # (spec 01 section 10.3) instead of keeping its own predicates.
+        "CompactionMeasure",
+        "CompactionVerdict",
+        "MeasuredFit",
         "DurabilityAttemptKind",
         "DurabilityAttemptOutcome",
         "TelemetryContext",

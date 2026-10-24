@@ -2515,6 +2515,11 @@ queue is empty and no workflow request lacks a fact, nothing is paused: a prompt
 or follow-up the operator types in this process starts a live batch and drains
 when the root is idle.
 
+The host decides whether a prompt needs a scheduled pass, whether a fitting
+remeasure is sendable, and whether a committed pass follows on (at most once)
+from Plakous's one scheduling verdict on the projected measure (chapter 01
+§10.3); it keeps no scheduling predicate of its own. With compaction disabled,
+a prompt whose measure overflows parks with the disabled note.
 A scheduled pass qualifies, folds and remeasures on the exact command the host
 would admit: the prompt with its child-mail batch (chapter 03 §8). A pass
 whose command already fits below the trigger reports `already fits`, and a pass

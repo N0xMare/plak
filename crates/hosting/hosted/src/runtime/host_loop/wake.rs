@@ -382,12 +382,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             &self.opened,
             super::ContextQuery::WithPendingUserInput(command.clone()),
         )?;
-        if !super::prompt_requires_scheduled_compaction(context) {
+        if !context.compaction_verdict().is_due() {
             self.child_wake.prepared_context = Some(context);
             return Ok(true);
         }
         if !self.config.compaction_enabled {
-            if super::scheduled_compaction_parks_when_disabled(context.disposition()) {
+            if context.compaction_verdict().overflow() {
                 return Err(CliFailure::new(super::scheduled_compaction_disabled_note(
                     context.disposition(),
                 )));

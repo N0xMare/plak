@@ -6,8 +6,7 @@
 use crate::runtime::compaction::fold::nested_observation_token_upper_bound;
 use crate::runtime::compaction::request::{
     apply_completed_model_round_occupancy, compaction_fence_base_tokens, occupancy_gauge_percent,
-    should_schedule_mid_turn_compaction_with_trigger, tool_group_fence_occupied_tokens,
-    total_context_window_tokens,
+    tool_group_fence_occupied_tokens, tool_group_fence_verdict, total_context_window_tokens,
 };
 use plakous_model::{
     Actor, CallId, CapacityRule, ContentBlock, ContextAnchor, ContextHeadroom, ContextOverflow,
@@ -71,14 +70,8 @@ fn tool_group_fence_occupied_tokens_adds_nested_local_composition_observations()
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits, None, None,
-    ));
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        occupied,
-        Some(232_000),
-    ));
+    assert!(!tool_group_fence_verdict(&fits, None, None,).is_due());
+    assert!(tool_group_fence_verdict(&fits, occupied, Some(232_000),).is_due());
 }
 
 /// While the measure is unanchored (before a session's first completed
@@ -93,15 +86,9 @@ fn an_unanchored_measure_never_schedules_the_tool_group_fence() {
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        unanchored,
-        Some(800_000),
-    ));
+    assert!(!tool_group_fence_verdict(&fits, unanchored, Some(800_000),).is_due());
     let overflow = ContextStatusKind::WouldOverflow(fixture_overflow());
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &overflow, unanchored, None,
-    ));
+    assert!(tool_group_fence_verdict(&overflow, unanchored, None,).is_due());
 }
 
 /// The telemetry case: the provider counted 298,468 input tokens for a
@@ -127,20 +114,14 @@ fn tool_group_fence_is_anchored_on_the_last_provider_input() {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
     let anchored = tool_group_fence_occupied_tokens(Some(estimate), anchor, 0);
-    assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits, anchored, trigger,
-    ));
+    assert!(!tool_group_fence_verdict(&fits, anchored, trigger,).is_due());
     // The same estimate on the anchor's own scale would have fired it.
     let identity = ContextAnchor::new(850_715, 850_715);
     let whole = tool_group_fence_occupied_tokens(Some(estimate), identity, 0);
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &fits, whole, trigger,
-    ));
+    assert!(tool_group_fence_verdict(&fits, whole, trigger,).is_due());
     // Growth past the trigger on the anchored scale still fires it.
     let grown = tool_group_fence_occupied_tokens(Some(850_715 + 110_000), anchor, 0);
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &fits, grown, trigger,
-    ));
+    assert!(tool_group_fence_verdict(&fits, grown, trigger,).is_due());
 }
 
 /// The actionable meter uses the tighter of the reported window and the admitted
@@ -213,46 +194,28 @@ fn fence_base_is_the_tighter_of_window_and_admitted_ceiling() {
 #[test]
 fn should_schedule_mid_turn_compaction_matches_spec_thresholds() {
     let overflow = fixture_overflow();
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &ContextStatusKind::WouldOverflow(overflow),
-        None,
-        None,
-    ));
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &ContextStatusKind::ProtectedOverflow(overflow),
-        None,
-        None,
-    ));
+    assert!(
+        tool_group_fence_verdict(&ContextStatusKind::WouldOverflow(overflow), None, None,).is_due()
+    );
+    assert!(
+        tool_group_fence_verdict(&ContextStatusKind::ProtectedOverflow(overflow), None, None,)
+            .is_due()
+    );
     // The ladder gained the placeholder rung, so protected overflow schedules on
     // a route with no native facet too; the rung, not the fence, decides what
     // can actually be done with it.
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &ContextStatusKind::ProtectedOverflow(overflow),
-        None,
-        None,
-    ));
+    assert!(
+        tool_group_fence_verdict(&ContextStatusKind::ProtectedOverflow(overflow), None, None,)
+            .is_due()
+    );
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits, None, None,
-    ));
-    assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits, None, None,
-    ));
-    assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits, None, None
-    ));
-    assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        Some(400_000),
-        Some(400_000),
-    ));
-    assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        Some(399_000),
-        Some(400_000),
-    ));
+    assert!(!tool_group_fence_verdict(&fits, None, None,).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None,).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None).is_due());
+    assert!(tool_group_fence_verdict(&fits, Some(400_000), Some(400_000),).is_due());
+    assert!(!tool_group_fence_verdict(&fits, Some(399_000), Some(400_000),).is_due());
 }
 
 #[test]
@@ -265,7 +228,7 @@ fn exhausted_admission_headroom_fences_even_below_anchored_occupancy() {
         };
         for occupied in [None, Some(346_950)] {
             assert_eq!(
-                should_schedule_mid_turn_compaction_with_trigger(&fits, occupied, Some(850_000),),
+                tool_group_fence_verdict(&fits, occupied, Some(850_000),).is_due(),
                 remaining <= 4_096,
             );
         }

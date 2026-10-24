@@ -19,8 +19,8 @@ use crate::runtime::compaction::request::{
     exact_compaction_runtime, harness_compaction_input, harness_compaction_input_at_depth,
     harness_compaction_prefix, harness_compaction_reduction_count,
     native_compaction_dispatch_prefix, native_compaction_facet_enrolled,
-    portable_compaction_history, should_schedule_mid_turn_compaction_with_trigger,
-    tool_group_fence_occupied_tokens, unmeasured_native_compact_audit,
+    portable_compaction_history, tool_group_fence_occupied_tokens, tool_group_fence_verdict,
+    unmeasured_native_compact_audit,
 };
 use crate::runtime::compaction::{
     CompactOrigin, CompactionCompletionError, DurableCompactionIdentity,
@@ -48,10 +48,11 @@ use crate::runtime::{ArtifactTransition, OperationId, PromptCommand};
 use crate::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason, AgentError,
     AgentErrorKind, AgentEventKind, AgentSessionEndpointError, CheckpointId,
-    CompactionEventOutcome, CompactionEventReason, ContextEvaluationAudit, DurableOperationKind,
-    DurableOperationRecord, DurableOperationState, DurableOperationTransition, EventContext,
-    MAX_RUNTIME_RECORDS, RuntimeCheckpoint, RuntimeComponentKind, RuntimeLifecycle,
-    SEGMENT_PRESSURE_SEGMENTS, SEGMENT_REFUSAL_SEGMENTS, StoreAdmission, TelemetryObservationKind,
+    CompactionEventOutcome, CompactionEventReason, CompactionMeasure, CompactionVerdict,
+    ContextEvaluationAudit, DurableOperationKind, DurableOperationRecord, DurableOperationState,
+    DurableOperationTransition, EventContext, MAX_RUNTIME_RECORDS, MeasuredFit, RuntimeCheckpoint,
+    RuntimeComponentKind, RuntimeLifecycle, SEGMENT_PRESSURE_SEGMENTS, SEGMENT_REFUSAL_SEGMENTS,
+    StoreAdmission, TelemetryObservationKind,
 };
 use futures_util::StreamExt;
 use plakous_model::{
@@ -420,9 +421,12 @@ impl Driver {
             }
             return self.compact_for_segment_pressure(command, None).await;
         };
-        let occupied = self.anchored_occupied_tokens(&status);
-        let trigger = status.compaction_trigger_tokens();
-        if !should_schedule_mid_turn_compaction_with_trigger(status.kind(), occupied, trigger) {
+        let verdict = tool_group_fence_verdict(
+            status.kind(),
+            self.anchored_occupied_tokens(&status),
+            status.compaction_trigger_tokens(),
+        );
+        if !verdict.is_due() {
             if pressure {
                 return self
                     .run_turn_fence_compaction(command, FenceTrigger::CapacityPressure)
@@ -563,10 +567,6 @@ impl Driver {
                 .await?;
             return Ok(());
         };
-        let overflow = matches!(
-            status.kind(),
-            ContextStatusKind::WouldOverflow(_) | ContextStatusKind::ProtectedOverflow(_)
-        );
         // A session without a host idle fence (a child) is compacted here at the
         // same anchored occupancy trigger. A host fence that already folded left
         // the successor unanchored, and one that failed after dispatch is not
@@ -574,17 +574,20 @@ impl Driver {
         // A seeded genesis has no provider usage anchor yet. Measure it on
         // the destination route instead of sending an above-trigger first turn.
         let unmeasured_seed = std::mem::take(&mut self.seed_compaction_pending);
-        let occupied = self.anchored_occupied_tokens(&status).or_else(|| {
-            unmeasured_seed
-                .then(|| status.unanchored_occupancy_tokens())
-                .flatten()
+        // This fence keeps no observation reserve: the prompt is not yet
+        // appended, and the round's own admission measures it.
+        let verdict = CompactionVerdict::of(CompactionMeasure {
+            fit: MeasuredFit::of(status.kind()),
+            occupancy: self.anchored_occupied_tokens(&status).or_else(|| {
+                unmeasured_seed
+                    .then(|| status.unanchored_occupancy_tokens())
+                    .flatten()
+            }),
+            trigger: status.compaction_trigger_tokens(),
+            input_headroom: None,
         });
-        let occupancy = matches!(status.kind(), ContextStatusKind::Fits { .. })
-            && occupied
-                .zip(status.compaction_trigger_tokens())
-                .is_some_and(|(occupied, trigger)| occupied >= trigger)
-            && !self.paid_fold_failed_since_last_round();
-        if !overflow && !occupancy {
+        let occupancy = verdict.occupancy() && !self.paid_fold_failed_since_last_round();
+        if !verdict.overflow() && !occupancy {
             self.compact_for_segment_pressure(command, pending_user_input())
                 .await?;
             return Ok(());

@@ -10,10 +10,7 @@ use std::time::{Duration, Instant};
 use plakous::application::ApplicationExecutor;
 use plakous::sessions::ContextQuery;
 
-use crate::context::{
-    ContextDisposition, occupancy_requires_scheduled_compact, scheduled_compaction_disabled_note,
-    scheduled_compaction_parks_when_disabled, should_schedule_compaction,
-};
+use crate::context::{ContextDisposition, scheduled_compaction_disabled_note};
 use crate::interrupt::{InterruptWatch, InterruptWatchState};
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions::{
@@ -72,11 +69,6 @@ pub(super) fn run_host_loop<P: plakous_host_protocol::ProtocolExtension>(
     startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
 ) -> CliResult<()> {
     run(config, actions, events, startup, None)
-}
-
-fn prompt_requires_scheduled_compaction(projection: crate::context::ContextProjection) -> bool {
-    occupancy_requires_scheduled_compact(projection)
-        || projection.observation_headroom_requires_compaction()
 }
 
 pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(

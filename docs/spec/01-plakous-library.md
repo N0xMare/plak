@@ -7147,7 +7147,20 @@ uses the existing one-recovery-per-root-turn backstop, never a compaction loop.
 Portable projection has the single authorization rule in §10.2; merely
 preparing an unchanged successor does not prove that it fits.
 
-There are two fences.
+There are two fences. Both, and a host's idle fence, read one scheduling rule,
+`CompactionVerdict` over a `CompactionMeasure` (unsupported `plakous-agent`
+internal tier, re-exported under `plakous::agent` for the host): a measure
+schedules compaction when it overflows, when it fits and anchored occupancy is
+at or over the trigger, or when it fits and its remaining admitted input is at
+or under the 4,096-token observation reserve. An unanchored measure supplies no
+occupancy, so it never reaches the occupancy ground, except a nonempty root
+genesis seed's first fold at fence (a), above. Fence (b) reads the
+reserve from its status headroom; fence (a) reads no reserve, since the prompt
+is not yet appended; a host's idle fence reads it from the admission bound
+under the admitted ceiling, never from occupancy, and only for a measure
+admitted on a bound rather than the unanchored estimate. The fences add their
+own guards (the pressure guard, backoff, a failed fold before another round);
+the verdict decides only what the measure asks.
 
 - **Fence (a), idle pre-dispatch.** The host schedules a compact before
   dispatching new user intent. The driver also checks the committed history

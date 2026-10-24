@@ -64,6 +64,7 @@
 )]
 
 mod checkpoint_bundle;
+mod compaction_verdict;
 mod context_source;
 mod control;
 mod error;
@@ -94,6 +95,7 @@ pub mod internal {
         RuntimeCheckpointCodec, RuntimeCheckpointInspection, RuntimeObject, RuntimeObjectAddress,
         RuntimeObjectKind,
     };
+    pub use crate::compaction_verdict::{CompactionMeasure, CompactionVerdict, MeasuredFit};
     pub use crate::context_source::{
         ContextSourceCatalog, ContextSourceResolver, RegisteredContextSource,
     };
@@ -229,6 +231,9 @@ pub mod internal {
     }
 }
 
+pub(crate) use crate::compaction_verdict::{
+    CompactionMeasure, CompactionVerdict, MeasuredFit, OBSERVATION_HEADROOM_RESERVE_TOKENS,
+};
 pub(crate) use crate::manifest::{
     MAX_RUNTIME_CHECKPOINT_BYTES, MAX_RUNTIME_RECORDS, SEGMENT_PRESSURE_SEGMENTS,
     SEGMENT_REFUSAL_SEGMENTS,

@@ -872,9 +872,7 @@ impl plakous_http::ExchangeObserver for ExchangeStarts {
 /// reported count; together the routes cover every cell.
 #[tokio::test]
 async fn api_working_window_is_measured_in_provider_tokens() {
-    use crate::context::{
-        ContextDisposition, occupancy_requires_scheduled_compact, project_context_status,
-    };
+    use crate::context::{ContextDisposition, project_context_status};
     for (provider, model, cells) in [
         (PlatformProvider::Anthropic, "claude-haiku-5-5", [0, 1]),
         (PlatformProvider::OpenAi, "gpt-5.6-luna", [3, 2]),
@@ -983,7 +981,10 @@ async fn api_working_window_is_measured_in_provider_tokens() {
             );
             assert!(projection.context_anchor().is_some(), "{label}: unanchored");
             assert_eq!(
-                occupancy_requires_scheduled_compact(projection),
+                {
+                    let verdict = projection.compaction_verdict();
+                    verdict.overflow() || verdict.occupancy()
+                },
                 compacts,
                 "{label}: occupied {occupied}, trigger {:?}, disposition {:?}",
                 projection.auto_compact_trigger(),

@@ -1,3 +1,4 @@
+use super::test_verdicts::{disposition_schedules, idle_fence_schedules};
 use super::*;
 
 fn projection(
@@ -175,7 +176,7 @@ fn occupancy_is_the_plakous_context_measure_not_the_bound() {
     let utilization = projected.actionable_utilization().unwrap();
     assert_eq!(utilization.display_percent(), 30);
     assert_eq!(utilization.ceiling_excess(), None);
-    assert!(!occupancy_requires_scheduled_compact(projected));
+    assert!(!idle_fence_schedules(projected));
     let on_its_own_scale = projection(
         PreparedInputCount::UpperBound(850_715),
         1_000_000,
@@ -188,7 +189,7 @@ fn occupancy_is_the_plakous_context_measure_not_the_bound() {
             .display_percent(),
         85
     );
-    assert!(!occupancy_requires_scheduled_compact(on_its_own_scale));
+    assert!(!idle_fence_schedules(on_its_own_scale));
     let mut unavailable = projected;
     unavailable.disposition = ContextDisposition::Unavailable;
     assert_eq!(unavailable.occupied_tokens(), None);
@@ -213,18 +214,18 @@ fn an_unanchored_measure_never_fires_the_idle_occupancy_fence() {
         unanchored.actionable_utilization().unwrap().gauge_percent(),
         100
     );
-    assert!(!occupancy_requires_scheduled_compact(unanchored));
+    assert!(!idle_fence_schedules(unanchored));
     let mut triggered = unanchored;
     triggered.auto_compact_input = Some(800_000);
-    assert!(!occupancy_requires_scheduled_compact(triggered));
+    assert!(!idle_fence_schedules(triggered));
     assert!(
-        unanchored.observation_headroom_requires_compaction(),
+        unanchored.compaction_verdict().observation_headroom(),
         "the reserve reads the admission bound, not the measure"
     );
     let mut overflow = unanchored;
     overflow.disposition = ContextDisposition::WouldOverflow;
-    assert!(occupancy_requires_scheduled_compact(overflow));
-    assert!(occupancy_requires_scheduled_compact(
+    assert!(idle_fence_schedules(overflow));
+    assert!(idle_fence_schedules(
         unanchored.with_anchored_occupied_tokens(997_000)
     ));
 }
@@ -265,12 +266,8 @@ fn every_vertical_meters_the_working_envelope_and_fences_at_its_token_trigger() 
             "{}",
             fixture.name
         );
-        assert!(
-            !occupancy_requires_scheduled_compact(below),
-            "{}",
-            fixture.name
-        );
-        assert!(occupancy_requires_scheduled_compact(at), "{}", fixture.name);
+        assert!(!idle_fence_schedules(below), "{}", fixture.name);
+        assert!(idle_fence_schedules(at), "{}", fixture.name);
         assert_eq!(
             at.actionable_utilization().unwrap().ceiling_excess(),
             None,
@@ -353,11 +350,11 @@ fn grok_shaped_envelope_schedules_at_400k_of_500k() {
     assert_eq!(utilization.gauge_percent(), 76);
     assert_eq!(utilization.display_percent(), 76);
     assert_eq!(utilization.ceiling_excess(), None);
-    assert!(!occupancy_requires_scheduled_compact(under));
+    assert!(!idle_fence_schedules(under));
     let mut at = projection(PreparedInputCount::Exact(400_000), 500_000, 500_000);
     at.auto_compact_input = Some(400_000);
     assert_eq!(at.actionable_utilization().unwrap().gauge_percent(), 80);
-    assert!(occupancy_requires_scheduled_compact(at));
+    assert!(idle_fence_schedules(at));
 }
 
 #[test]
@@ -367,7 +364,7 @@ fn occupancy_advances_chrome_and_idle_gauge_without_changing_excess() {
     assert_eq!(envelope.gauge_percent(), 38);
     assert_eq!(envelope.display_percent(), 38);
     assert_eq!(envelope.ceiling_excess(), None);
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
 
     let occupancy = projected
         .with_occupied_tokens(Some(110_000))
@@ -376,10 +373,8 @@ fn occupancy_advances_chrome_and_idle_gauge_without_changing_excess() {
     assert_eq!(occupancy.display_percent(), 90);
     assert_eq!(occupancy.gauge_percent(), 90);
     assert_eq!(occupancy.ceiling_excess(), None);
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
-    assert!(!scheduled_compaction_parks_when_disabled(
-        ContextDisposition::Fits
-    ));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
 }
 
 #[test]
@@ -543,37 +538,30 @@ fn observation_headroom_schedules_before_a_small_admitted_envelope_starves_tools
     // Chrome uses the 20k working envelope, so this is 80%, not 2% of the
     // 1M advertised window. The observation reserve acts without a token trigger.
     assert_eq!(at.actionable_utilization().unwrap().gauge_percent(), 80);
-    assert!(!should_schedule_compaction(at.disposition()));
-    assert!(!below.observation_headroom_requires_compaction());
-    assert!(at.observation_headroom_requires_compaction());
+    assert!(!disposition_schedules(at.disposition()));
+    assert!(!below.compaction_verdict().observation_headroom());
+    assert!(at.compaction_verdict().observation_headroom());
     // The reserve guards admission: a low context measure does not hide
     // a bound that is about to reach the ceiling.
     assert!(
         at.with_occupied_tokens(Some(5_000))
-            .observation_headroom_requires_compaction()
+            .compaction_verdict()
+            .observation_headroom()
     );
 }
 
 #[test]
 fn compaction_without_a_token_trigger_schedules_only_on_typed_overflow() {
-    assert!(should_schedule_compaction(
-        ContextDisposition::WouldOverflow
-    ));
+    assert!(disposition_schedules(ContextDisposition::WouldOverflow));
     // Protected overflow schedules on every route now: the ladder's
     // placeholder rung can act where the semantic cut cannot.
-    assert!(should_schedule_compaction(
-        ContextDisposition::ProtectedOverflow
-    ));
-    assert!(should_schedule_compaction(
-        ContextDisposition::ProtectedOverflow
-    ));
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
-    assert!(should_schedule_compaction(
-        ContextDisposition::ProtectedOverflow
-    ));
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
+    assert!(disposition_schedules(ContextDisposition::ProtectedOverflow));
+    assert!(disposition_schedules(ContextDisposition::ProtectedOverflow));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
+    assert!(disposition_schedules(ContextDisposition::ProtectedOverflow));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
     assert_eq!(
         scheduled_compaction_disabled_note(ContextDisposition::WouldOverflow),
         "authoritative context would overflow; scheduled compaction is disabled"
@@ -582,32 +570,10 @@ fn compaction_without_a_token_trigger_schedules_only_on_typed_overflow() {
         scheduled_compaction_disabled_note(ContextDisposition::Fits),
         "scheduled compaction is disabled at the context trigger"
     );
-    assert!(!should_schedule_compaction(ContextDisposition::Unavailable));
-    assert!(scheduled_compaction_parks_when_disabled(
-        ContextDisposition::WouldOverflow
-    ));
-    assert!(scheduled_compaction_parks_when_disabled(
-        ContextDisposition::ProtectedOverflow
-    ));
-    assert!(!scheduled_compaction_parks_when_disabled(
-        ContextDisposition::Fits
-    ));
-    assert!(scheduled_compact_should_follow_on(
-        0,
-        ContextDisposition::WouldOverflow
-    ));
-    assert!(!scheduled_compact_should_follow_on(
-        0,
-        ContextDisposition::Fits
-    ));
-    assert!(!scheduled_compact_should_follow_on(
-        SCHEDULED_COMPACT_FOLLOW_ON_LIMIT,
-        ContextDisposition::WouldOverflow
-    ));
-    assert!(!scheduled_compact_should_follow_on(
-        0,
-        ContextDisposition::Fits
-    ));
+    assert!(!disposition_schedules(ContextDisposition::Unavailable));
+    assert!(disposition_schedules(ContextDisposition::WouldOverflow));
+    assert!(disposition_schedules(ContextDisposition::ProtectedOverflow));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
 }
 
 #[test]

@@ -10,9 +10,9 @@ use crate::runtime::*;
 
 use crate::runtime::events::*;
 
+use crate::context::test_verdicts::{disposition_schedules, idle_fence_schedules};
 use crate::context::{
-    ContextDisposition, scheduled_compaction_disabled_note,
-    scheduled_compaction_parks_when_disabled, should_schedule_compaction,
+    ContextDisposition, ContextProjection, PreparedInputCount, scheduled_compaction_disabled_note,
 };
 use crate::interrupt::{InterruptWatch, InterruptWatchState};
 use crate::runtime::test_support::*;
@@ -25,35 +25,25 @@ use std::cell::RefCell;
 
 #[test]
 fn scheduled_compaction_without_a_token_trigger_requires_overflow() {
-    assert!(should_schedule_compaction(
-        ContextDisposition::WouldOverflow
-    ));
-    assert!(should_schedule_compaction(
-        ContextDisposition::ProtectedOverflow
-    ));
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
+    assert!(disposition_schedules(ContextDisposition::WouldOverflow));
+    assert!(disposition_schedules(ContextDisposition::ProtectedOverflow));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
     // The placeholder rung acts on a protected-only tail without a facet.
-    assert!(should_schedule_compaction(
-        ContextDisposition::ProtectedOverflow
-    ));
-    assert!(!scheduled_compaction_parks_when_disabled(
-        ContextDisposition::Fits
-    ));
-    assert!(scheduled_compaction_parks_when_disabled(
-        ContextDisposition::WouldOverflow
-    ));
+    assert!(disposition_schedules(ContextDisposition::ProtectedOverflow));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
+    assert!(disposition_schedules(ContextDisposition::WouldOverflow));
     for disposition in [
         ContextDisposition::Fits,
         ContextDisposition::Unavailable,
         ContextDisposition::RecoveryRequired,
     ] {
-        assert!(!should_schedule_compaction(disposition));
+        assert!(!disposition_schedules(disposition));
     }
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
     // Occupancy gauge, not envelope-only: 38% envelope would skip; 88%
     // provider occupancy must schedule.
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
-    assert!(!should_schedule_compaction(ContextDisposition::Fits));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
+    assert!(!disposition_schedules(ContextDisposition::Fits));
     assert_eq!(
         scheduled_compaction_disabled_note(ContextDisposition::WouldOverflow),
         "authoritative context would overflow; scheduled compaction is disabled"
@@ -210,15 +200,15 @@ fn capacity_recovery_queue_resumes_only_after_compacted_and_fresh_exact_fit() {
 /// resend-shorter remedy, never the misleading "retry compaction" guidance.
 #[test]
 fn a_scheduled_pass_with_nothing_eligible_sends_the_prompt() {
-    let triggered = crate::context::ContextProjection::test_fits(
-        crate::context::PreparedInputCount::UpperBound(99_000),
+    let triggered = ContextProjection::test_fits(
+        PreparedInputCount::UpperBound(99_000),
         100_000,
         100_000,
         None,
     )
     .with_anchored_occupied_tokens(99_000);
-    assert!(triggered.observation_headroom_requires_compaction());
-    assert!(occupancy_requires_scheduled_compact(triggered));
+    assert!(triggered.compaction_verdict().observation_headroom());
+    assert!(idle_fence_schedules(triggered));
     let note = SCHEDULED_COMPACT_NOTHING_ELIGIBLE_NOTE;
     for projection in [
         triggered,
@@ -294,8 +284,8 @@ fn a_scheduled_pass_with_nothing_eligible_sends_the_prompt() {
 /// the paid-retry note.
 #[test]
 fn a_definite_scheduled_failure_sends_a_fitting_prompt_and_parks_one_that_does_not() {
-    let triggered = crate::context::ContextProjection::test_fits(
-        crate::context::PreparedInputCount::UpperBound(99_000),
+    let triggered = ContextProjection::test_fits(
+        PreparedInputCount::UpperBound(99_000),
         100_000,
         100_000,
         None,
@@ -384,8 +374,8 @@ fn a_definite_scheduled_failure_sends_a_fitting_prompt_and_parks_one_that_does_n
 /// command measuring `with_mail` and the bare prompt `bare`.
 fn run_scripted_scheduled_loop(
     passes: Vec<CompactPass>,
-    with_mail: crate::context::ContextProjection,
-    bare: Option<crate::context::ContextProjection>,
+    with_mail: ContextProjection,
+    bare: Option<ContextProjection>,
 ) -> (ScheduledPrompt, usize, Vec<String>, SessionQueueDrainState) {
     let dir = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(dir.path());
@@ -434,8 +424,8 @@ fn run_scripted_scheduled_loop(
 /// (a wake, or a replayed batch) the same measures park.
 #[test]
 fn a_fitting_prompt_is_sent_without_mail_that_no_pass_can_fit() {
-    let fits = crate::context::ContextProjection::test_fits(
-        crate::context::PreparedInputCount::UpperBound(10_000),
+    let fits = ContextProjection::test_fits(
+        PreparedInputCount::UpperBound(10_000),
         100_000,
         100_000,
         None,
@@ -504,8 +494,8 @@ fn a_fitting_prompt_is_sent_without_mail_that_no_pass_can_fit() {
 /// measure the same again.
 #[test]
 fn an_unchanged_pass_never_follows_on() {
-    let fits = crate::context::ContextProjection::test_fits(
-        crate::context::PreparedInputCount::UpperBound(10_000),
+    let fits = ContextProjection::test_fits(
+        PreparedInputCount::UpperBound(10_000),
         100_000,
         100_000,
         None,
@@ -636,8 +626,8 @@ fn scheduled_compaction_admits_a_fitting_successor_above_the_occupancy_trigger()
     queue::enqueue(&mut config.session.pending_queue, user_text.clone()).unwrap();
     config.session.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
     let source = opened.locator();
-    let after = crate::context::ContextProjection::test_fits(
-        crate::context::PreparedInputCount::UpperBound(20_000),
+    let after = ContextProjection::test_fits(
+        PreparedInputCount::UpperBound(20_000),
         100_000,
         100_000,
         None,
@@ -645,8 +635,8 @@ fn scheduled_compaction_admits_a_fitting_successor_above_the_occupancy_trigger()
     .with_anchored_occupied_tokens(90_000)
     .with_auto_compact_input(Some(80_000));
     assert_eq!(after.disposition(), ContextDisposition::Fits);
-    assert!(!after.observation_headroom_requires_compaction());
-    assert!(occupancy_requires_scheduled_compact(after));
+    assert!(!after.compaction_verdict().observation_headroom());
+    assert!(idle_fence_schedules(after));
     let (events, rx) = host_event_sink();
     let (_actions, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let interrupt_state = RefCell::new(InterruptWatchState::default());

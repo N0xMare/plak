@@ -9,9 +9,7 @@ use plakous::sessions::{
 };
 
 use crate::agent::AttachedCodingSession;
-use crate::context::{
-    ContextDisposition, occupancy_requires_scheduled_compact, scheduled_compact_should_follow_on,
-};
+use crate::context::ContextDisposition;
 use crate::interrupt::{InterruptWatch, run_watched};
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions::{self, QueueDrainState as SessionQueueDrainState, SessionRecord};
@@ -121,7 +119,7 @@ pub(super) fn run_scheduled_compaction_until_fits<P: plakous_host_protocol::Prot
 /// Whether a remeasured prompt goes to admission without another fold.
 fn scheduled_prompt_sendable(projection: crate::context::ContextProjection) -> bool {
     projection.disposition() == ContextDisposition::Fits
-        && !projection.observation_headroom_requires_compaction()
+        && !projection.compaction_verdict().observation_headroom()
 }
 
 fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolExtension>(
@@ -175,13 +173,11 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
                 // which restores the draft with the resend-shorter remedy;
                 // that remedy is then the one note, so "sent as is" is said
                 // only of a prompt that is.
-                let mut over_window =
-                    crate::context::should_schedule_compaction(after.disposition());
+                let mut over_window = after.compaction_verdict().overflow();
                 let drop_mail = over_window && bare_fallback;
                 if drop_mail {
-                    over_window = bare(|_| true)?.is_none_or(|projection| {
-                        crate::context::should_schedule_compaction(projection.disposition())
-                    });
+                    over_window = bare(|_| true)?
+                        .is_none_or(|projection| projection.compaction_verdict().overflow());
                 }
                 if !over_window {
                     let _ = events.notice(TranscriptRow::info(
@@ -245,12 +241,9 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
         }
         // Only a pass that changed the head can make a follow-on worth paying
         // for; an unchanged one would measure the same again.
-        let observation_headroom_low = after.observation_headroom_requires_compaction();
-        let still_triggered = occupancy_requires_scheduled_compact(after);
         if pass == CompactPass::Committed
-            && (((still_triggered || observation_headroom_low)
-                && follow_ons_used < crate::context::SCHEDULED_COMPACT_FOLLOW_ON_LIMIT)
-                || scheduled_compact_should_follow_on(follow_ons_used, after.disposition()))
+            && follow_ons_used < crate::context::SCHEDULED_COMPACT_FOLLOW_ON_LIMIT
+            && after.compaction_verdict().is_due()
         {
             let _ = events.notice(TranscriptRow::info(NoticeScope::Compaction,
                 "successor still meets the idle compact trigger; compacting once more with a new operation"
@@ -392,8 +385,7 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
     if reason == sessions::ProductCompactReason::Scheduled {
         if let Ok(projection) = query_context(executor, opened, qualification) {
             if projection.disposition() == ContextDisposition::Fits
-                && !occupancy_requires_scheduled_compact(projection)
-                && !projection.observation_headroom_requires_compaction()
+                && !projection.compaction_verdict().is_due()
             {
                 publish_compact_row(
                     config,

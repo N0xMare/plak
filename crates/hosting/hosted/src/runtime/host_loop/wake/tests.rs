@@ -1245,7 +1245,7 @@ fn prompt_whose_mail_alone_overflows(
     // compaction at all.
     let text = "q".repeat(low.saturating_sub(5_000));
     assert!(
-        !super::super::prompt_requires_scheduled_compaction(project(&text)),
+        !project(&text).compaction_verdict().is_due(),
         "precondition: the bare prompt needs no compaction"
     );
     let (with_mail, batch) = super::super::super::result_mail::select(

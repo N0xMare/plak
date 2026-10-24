@@ -1,9 +1,10 @@
 //! Pure observation byte policy and structure-preserving text clipping.
 
+use crate::OBSERVATION_HEADROOM_RESERVE_TOKENS as OBSERVATION_BUDGET_RESERVE_TOKENS;
+use crate::compaction_verdict::input_headroom_tokens;
 use crate::runtime::prompts;
 use plakous_model::ContextHeadroom;
 use serde::{Deserialize, Serialize};
-const OBSERVATION_BUDGET_RESERVE_TOKENS: u64 = 4_096;
 pub(in crate::runtime) const CANONICAL_RESULT_BYTES: usize =
     plakous_model::SemanticJsonV1::maximum_string_bytes() - 4_096;
 pub(super) const OBSERVATION_EXHAUSTED: &str = prompts::PLAKOUS_RUNTIME_OBSERVATION_EXHAUSTED;
@@ -86,14 +87,7 @@ impl ObservationBudget {
 }
 
 pub(in crate::runtime) fn observation_bytes_from_headroom(headroom: ContextHeadroom) -> usize {
-    let input = match headroom {
-        ContextHeadroom::ProviderReservedInput { input }
-        | ContextHeadroom::Shared(input)
-        | ContextHeadroom::Separate { input, .. } => input.value(),
-        ContextHeadroom::SharedWithOutputCap { shared, .. } => shared.value(),
-        _ => 0,
-    };
-    let usable = input.saturating_sub(OBSERVATION_BUDGET_RESERVE_TOKENS);
+    let usable = input_headroom_tokens(headroom).saturating_sub(OBSERVATION_BUDGET_RESERVE_TOKENS);
     usize::try_from(usable).unwrap_or(usize::MAX)
 }
 
