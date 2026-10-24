@@ -71,11 +71,23 @@ fn assert_bounded(started: Instant) {
 }
 
 fn join_all_with_bounded_retries(sessions: &JoinedProcessSessions) -> Result<(), TestError> {
-    for _ in 0..20 {
+    // `join_all` spends one cleanup window on every session that is still
+    // active. A supervisor that is not scheduled inside that window consumes
+    // it without retiring the child, so under load an attempt retires at most
+    // one session. A fixed attempt count stops short of the session limit.
+    // Wait until the service is drained, for two windows per admitted session.
+    let windows = u32::try_from(MAX_JOINED_PROCESS_SESSIONS)
+        .unwrap_or(u32::MAX)
+        .saturating_mul(2);
+    let deadline = Instant::now() + CLEANUP_DURATION.saturating_mul(windows);
+    loop {
         match sessions.join_all() {
             Ok(()) => return Ok(()),
             Err(error) if error.kind() == ExecutionBackendErrorKind::CleanupUnresolved => {
                 assert!(!sessions.is_drained());
+                if Instant::now() >= deadline {
+                    break;
+                }
             }
             Err(error) => return Err(error.into()),
         }
