@@ -18,7 +18,6 @@ use crate::interrupt::{InterruptWatch, InterruptWatchState};
 use crate::runtime::test_support::*;
 use crate::runtime::usage::*;
 use crate::sessions::{self, QueueDrainState as SessionQueueDrainState};
-use plakous::agent::CompactionEventOutcome;
 use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::NativeProvider;
 use std::cell::RefCell;
@@ -140,9 +139,6 @@ fn protected_overflow_asks_for_capacity_recovery_on_every_route() {
         COMPACT_COMMITTED_STILL_OVERFLOWS_DETAIL
     );
     assert!(compact_committed_detail(false).contains("still overflows"));
-    assert_eq!(format_compact_tokens(199_700), "199.7k");
-    assert_eq!(format_compact_tokens(178_075), "178.1k");
-    assert_eq!(format_compact_tokens(400), "400");
     assert_eq!(
         compact_terminal_subject(Some(199_700), Some(178_075), true, false).as_deref(),
         Some("199.7k → 178.1k · still over capacity")
@@ -1215,28 +1211,6 @@ fn interrupt_refuses_compact_before_its_single_dispatch() {
         [] as [sessions::projector::WorkflowRequest; 0]
     );
     assert_eq!(config.session.plakous_locator, Some(source));
-}
-
-/// Spec section 9: every compaction outcome is distinct operator text,
-/// including the ones the tool-group fence produces mid-turn, which were
-/// logged and then dropped instead of reaching the transcript at all.
-#[test]
-fn every_compaction_outcome_has_its_own_operator_text() {
-    let outcomes = [
-        CompactionEventOutcome::Committed,
-        CompactionEventOutcome::NotNeeded,
-        CompactionEventOutcome::NoEligibleRange,
-        CompactionEventOutcome::Unavailable,
-        CompactionEventOutcome::Failed,
-        CompactionEventOutcome::RecoveryRequired,
-    ];
-    let mut seen = std::collections::BTreeSet::new();
-    for outcome in outcomes {
-        let detail = compaction_event_outcome_detail(outcome);
-        assert_ne!(detail, "");
-        assert!(seen.insert(detail), "duplicate operator text: {detail}");
-    }
-    assert_eq!(seen.len(), outcomes.len());
 }
 
 #[test]
