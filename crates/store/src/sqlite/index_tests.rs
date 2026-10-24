@@ -75,7 +75,7 @@ fn every_foreign_key_child_probe_searches_an_index() -> TestResult {
 #[test]
 fn prune_candidate_query_probes_only_indexes() -> TestResult {
     let c = reference()?;
-    let details = plan(&c, PRUNE_CANDIDATES)?;
+    let details = plan(&c, ops::PRUNE_CANDIDATES)?;
     assert!(
         scans(&details).is_empty(),
         "prune candidates scan: {details:#?}"
@@ -101,9 +101,9 @@ fn prune_candidate_query_probes_only_indexes() -> TestResult {
 #[test]
 fn session_delete_scopes_its_per_session_rows_by_index() -> TestResult {
     let c = reference()?;
-    let statements = [SESSION_FOREIGN_DEPENDENCY]
+    let statements = [ops::SESSION_FOREIGN_DEPENDENCY]
         .into_iter()
-        .chain(SESSION_ROW_DELETES)
+        .chain(ops::SESSION_ROW_DELETES)
         .chain([
             "DELETE FROM checkpoints WHERE session_id=?1",
             "DELETE FROM sessions WHERE session_id=?1",
