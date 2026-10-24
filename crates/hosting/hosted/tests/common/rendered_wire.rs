@@ -980,39 +980,39 @@ pub(crate) mod suite {
     const COMPACTION_WIRE_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root",
-            "a5f5687f99b33e95e5234193eee4009186b53a89825a5146a1b08e2ef7ec9ffa",
+            "253168b93b6b338ed136e163d6179685087fcee35b4004f04d7639381e61a8c9",
         ),
         (
             "grok.direct.root",
-            "c39f5f67b2b33bcdde49502de8e896f8297867860423029c0b93e14789294f6f",
+            "aa46c97393fbc31206490763141cbbd301cd7766c7dedb0457f501921cbc9b08",
         ),
         (
             "claude.direct.root",
-            "96b06750d4efd619a3b22a056e96fb7ac1113263cd07dae3bba1dd394b71c57c",
+            "70c5598e70268b33d673a852dd7a0c0c431b9fae6c614a46eacdc6a5b168e63e",
         ),
         (
             "openrouter-chat.direct.root",
-            "517cb2bb1290188681fa9f3218306c3ca3eb8d77d79ca10775c9cad4615d6e2c",
+            "ad7cd348d0a7a1125360215513ef0df0c04a861d176dd0538044a61ff142a5e5",
         ),
         (
             "openrouter-responses.direct.root",
-            "25330da980b328305f2170b509ee75721cb1224951904caf83f59669b0d14c13",
+            "9073f6eb5b21c774b24fd66500c512e4da04bb3f266dc5b8d2c7feadd80b4666",
         ),
         (
             "openrouter-messages.direct.root",
-            "4e620a9aeee545f3ceceb51d4cc2515a0b44ca408b9a6c55386de13ff8c6a253",
+            "cfddc831694cdefa2eb0987d8a08c0f41c34385da0775a95ac3ab5d7f9c5121a",
         ),
         (
             "openai-api.direct.root.single-agent",
-            "b5dbea3d259d56403fbdcaa716e1760d63773cf94170ea1e491ad9efd3512959",
+            "611d41db6cf6a8436c2509ca2504038d2e2dfec64be044d1423d65a2ac880e7d",
         ),
         (
             "xai-api.direct.root.single-agent",
-            "f72df713f4c339e60d6eadd92bd74524153e22ce7d215d2bddc399eb09bbff51",
+            "9c8b1dfa71f67bad3cf787af20a78b3578c694ee8d0b1d25a3f60f1094b2f46c",
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "92f146bac4bfed50104dec5f26dde42aa2104adbbf48dcc28d4c697ac2ea489a",
+            "8c2d143e004cc7f60beb96ab51484582de6b984aefbc90357a6a3fc203c9ccbb",
         ),
     ];
 

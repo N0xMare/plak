@@ -9,6 +9,16 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plakous
 
+- The harness compaction instruction asks for fixed sections (Requests,
+  Constraints, Values, Work done, Decisions, Open errors, Plan, Next step),
+  each written once. Standing user constraints from any request stay quoted exactly. Only
+  the three newest requests not in progress are quoted, up to about 150 words
+  each, keeping every requirement in the user's own words for longer requests;
+  earlier ones get one line, finished ones merge into at most 10 lines, and
+  a finished request keeps the values it produced, moving them to Values rather than dropping
+  them to meet the line cap. An earlier summary is merged rather than
+  carried forward whole, and the summary aims under about 2,000 words to
+  curb growth across folds. The live matrix has not been rerun on it.
 - `plakous-js-eval` is renamed `plakous-cell` and replaces its JSONL sidecar
   protocol with the cell protocol: length-prefixed JSON frames, a worker
   `Hello` checked before the one `Configure`, and per-cell nested-result

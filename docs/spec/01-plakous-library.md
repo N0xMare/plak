@@ -6907,17 +6907,31 @@ by this bound instead. A Messages manual thinking budget stays strictly below
 the bound. **A summary that stops for `Length` is rejected**: it lost whatever it
 would have said last, usually the open work and the next step, so the fold is a
 definite failure that publishes nothing (§10.5), and mid-turn it falls to the
-placeholder rung like any failed paid fold. The instruction is a short
-checklist — goal and constraints with the user's requirements verbatim,
-every value the remaining work still needs copied exactly (identifiers, tokens,
-numbers, short file contents, text to write or report later), decisions, files
-with paths, commands and their results, open errors, the plan with each item's
-status, and the next step. It tells the model that the summary replaces the
-conversation and any earlier summary in its own context and is not a reply, so
-a user's rule about what a reply may show does not license dropping a value the
-work depends on, and that whatever still applies from an earlier summary
-carries forward: repeated folds see only the previous summary, so a value it
-omits is unrecoverable.
+placeholder rung like any failed paid fold. The instruction
+(`SEMANTIC_COMPACTION_INSTRUCTION`) asks for fixed sections, each written once
+in order: Requests, Constraints, Values, Work done, Decisions, Open errors,
+Plan and Next step. Requests lists the user's requests oldest first, quotes
+the three newest that are not in progress (up to about 150 words verbatim
+each, keeping every requirement in the user's own words for longer requests),
+gives each earlier one a line and merges earlier finished ones into at most
+10 lines, marks each done, interrupted, unanswered or in progress, and copies exactly
+the values a done request produced; a request still in progress is named but
+not quoted, since the latest intent is retained verbatim after the cut
+(§10.1). Constraints quotes exactly every user-set rule, preference or
+requirement from any request that still applies, including older requests
+whose entries were shortened or merged. A finished request's values move to
+Values if its line cannot hold them: no value is dropped to meet a line cap.
+Values copies exactly every value the remaining work still needs
+(identifiers, tokens, numbers, short file contents, text to write or report
+later); Work done gives files with paths and commands with their results one
+line each. The whole summary aims under about 2,000 words, and no request,
+section or list is repeated. The instruction tells the model that the summary
+replaces the conversation and any earlier summary in its own context and is
+not a reply, so a user's rule about what a reply may show does not license
+dropping a value the work depends on, and that an earlier summary is merged
+into the sections rather than copied: repeated folds see only the previous
+summary, so a value it omits is unrecoverable, while finished requests shrink
+to their one-line entries to bound growth across folds.
 
 **The plan survives compaction.** An `AgentBuilder` may carry a
 post-compaction note: a function of the source and successor histories that
