@@ -188,7 +188,7 @@ v7 document with 0.0.2 (§2.5.1 of chapter 02).
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **25** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **30** (inline media bytes as canonical padded base64, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **30** (inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **8** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |

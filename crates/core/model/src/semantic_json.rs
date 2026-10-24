@@ -770,6 +770,25 @@ fn normalize_numbers(value: Value) -> Result<Value, SemanticJsonError> {
     }
 }
 
+/// Rewrites every number in `value` the way canonical identities spell it, so
+/// an owned value and its identity never disagree on a number's spelling.
+pub(crate) fn with_canonical_numbers(value: Value) -> Value {
+    match value {
+        // A serde_json number is finite, so the portable form always exists.
+        Value::Number(number) => Value::Number(portable_json_number(&number).unwrap_or(number)),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(with_canonical_numbers).collect())
+        }
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, with_canonical_numbers(value)))
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
 /// Keep int53-range whole numbers as JSON integers.
 ///
 /// `Number::from_f64(1.0)` serializes as `1.0`. xAI Responses then rejects

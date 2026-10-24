@@ -2668,6 +2668,26 @@ capability, policy mode, capacity guarantee, replay or storage contract, or
 qualification. Unknown or ambiguous rows and fields fail closed until an owning
 revision-pinned integration admits their semantics.
 
+**Request plans.** Validating a request against a descriptor yields a
+`ValidatedRequestPlan`: the capability decisions and a plan digest
+(`RequestPlan` revision 4) over the request identity, the committed-history
+identity, the working-projection limits, the descriptor binding digest, the
+decisions and the validation mode. The request identity is a digest of
+JCS-normalized canonical JSON (RFC 8785; whole numbers in the safe-integer
+range are spelled as integers), so the plan digest binds the request in that
+normalized form. It commits to the stable prefix identity (every prefix
+field), the conversation view identity (every segment's kind and every item's
+complete canonical encoding, inline media bytes and replay envelopes
+included) and the request metadata. `NativeOptions` values take that number
+spelling when constructed or decoded (`1.0` is held as `1`, `1e2` as `100`),
+so options that compare unequal never share an identity. The
+committed-history identity and the working limits add which segments are
+committed and the working bounds, the two parts of the request's encoding the
+view identity leaves out. Plan validation therefore never re-serializes the
+request or its history. The plan digest is recorded in prepared-call and
+response records and re-derived on recovery, so it is part of runtime
+checkpoint format epoch 30.
+
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
 `plak agent`, TUI new-session/attach and an explicit model rebind (`/model`).

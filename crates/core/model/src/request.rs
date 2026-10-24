@@ -1411,9 +1411,25 @@ impl RequestMetadata {
 }
 
 /// Advanced namespaced options kept outside portable policy.
+///
+/// Numbers are kept as the request identity spells them (`1.0` becomes `1`,
+/// `1e2` becomes `100`), so two options that compare unequal never share a
+/// request identity.
 #[derive(Clone, Default, Deserialize, PartialEq, Serialize)]
+#[serde(from = "NativeOptionsWire")]
 pub struct NativeOptions {
     entries: BTreeMap<NamespaceId, Value>,
+}
+
+#[derive(Deserialize)]
+struct NativeOptionsWire {
+    entries: BTreeMap<NamespaceId, Value>,
+}
+
+impl From<NativeOptionsWire> for NativeOptions {
+    fn from(wire: NativeOptionsWire) -> Self {
+        Self::new(wire.entries)
+    }
 }
 
 impl fmt::Debug for NativeOptions {
@@ -1427,10 +1443,21 @@ impl fmt::Debug for NativeOptions {
 }
 
 impl NativeOptions {
-    /// Creates options from namespace-keyed JSON values.
+    /// Creates options from namespace-keyed JSON values, numbers in their
+    /// canonical spelling.
     #[must_use]
     pub fn new(entries: BTreeMap<NamespaceId, Value>) -> Self {
-        Self { entries }
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|(namespace, value)| {
+                    (
+                        namespace,
+                        crate::semantic_json::with_canonical_numbers(value),
+                    )
+                })
+                .collect(),
+        }
     }
 
     /// Returns immutable namespace-keyed values.
@@ -2707,6 +2734,30 @@ mod tests {
         let second = SemanticJsonV1::from_value(second)?;
         assert_eq!(first.canonical_bytes(), second.canonical_bytes());
         assert_eq!(first.canonical_bytes().as_ref(), br#"{"a":true,"b":[2,1]}"#);
+        Ok(())
+    }
+
+    #[test]
+    fn native_option_numbers_take_their_identity_spelling() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let namespace = NamespaceId::new("plakous.test")?;
+        let options =
+            |value: Value| NativeOptions::new(BTreeMap::from([(namespace.clone(), value)]));
+        let spelled = options(serde_json::json!({"t": 1.0, "n": [1e2, 0.5], "s": "1.0"}));
+        let canonical = options(serde_json::json!({"t": 1, "n": [100, 0.5], "s": "1.0"}));
+        assert_eq!(spelled, canonical);
+        assert_eq!(
+            serde_json::to_string(&spelled)?,
+            r#"{"entries":{"plakous.test":{"n":[100,0.5],"s":"1.0","t":1}}}"#
+        );
+        let decoded: NativeOptions = serde_json::from_str(
+            r#"{"entries":{"plakous.test":{"t":1.0,"n":[1e2,0.5],"s":"1.0"}}}"#,
+        )?;
+        assert_eq!(decoded, canonical);
+        assert_ne!(
+            options(serde_json::json!({"t": 1.5})),
+            options(serde_json::json!({"t": 1}))
+        );
         Ok(())
     }
 

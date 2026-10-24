@@ -18,9 +18,11 @@ one cross-build carrier (a build imports its own and the previous version).
 
 - Runtime format epoch 30: inline image bytes are stored as canonical padded
   base64 instead of an array of JSON numbers, so a stored image is about 1.33
-  times its size instead of about 3.6. State key `r25.e30.p33.t8`: 0.0.2 state
-  is not opened or migrated; carry a session with `/reload` or export and
-  import. Export document version 8 is unchanged.
+  times its size instead of about 3.6. Request-plan digests bind the request
+  identity instead of re-serializing and hashing the whole request on each of
+  the five validations per turn. State key `r25.e30.p33.t8`: 0.0.2 state is
+  not opened or migrated; carry a session with `/reload` or export and import.
+  Export document version 8 is unchanged.
 
 ### Pins
 

@@ -966,10 +966,20 @@ impl ResolvedModelDescriptor {
             });
         }
 
-        let request_bytes =
-            serde_json::to_vec(&request).map_err(|error| ValidationError::Serialization {
-                reason: error.to_string(),
-            })?;
+        // The request identity commits to every prefix field, every segment
+        // kind and complete item encoding (media bytes and replay included)
+        // and the metadata. The committed-history identity and the working
+        // limits add what it leaves out: which segments are committed and the
+        // working bounds. History is never re-serialized here.
+        let input = request.input();
+        let limits = input.working().limits();
+        let working_limits = [
+            limits.max_segments(),
+            limits.max_items(),
+            limits.max_retained_bytes(),
+        ]
+        .map(|bound| u64::try_from(bound).unwrap_or(u64::MAX).to_be_bytes())
+        .concat();
         let decision_bytes =
             serde_json::to_vec(&decisions).map_err(|error| ValidationError::Serialization {
                 reason: error.to_string(),
@@ -980,9 +990,11 @@ impl ResolvedModelDescriptor {
         };
         let digest = Digest::sha256(
             DigestDomain::RequestPlan,
-            3,
+            4,
             &[
-                &request_bytes,
+                request.identity().bytes(),
+                input.history().identity().bytes(),
+                &working_limits,
                 binding_digest.bytes(),
                 &decision_bytes,
                 mode_bytes,
@@ -1297,10 +1309,18 @@ mod tests {
     fn request(
         requirement: CapabilityRequirement,
     ) -> Result<ModelRequest, Box<dyn std::error::Error>> {
+        request_with(requirement, ConversationView::default(), 3)
+    }
+
+    fn request_with(
+        requirement: CapabilityRequirement,
+        input: ConversationView,
+        attempt: u128,
+    ) -> Result<ModelRequest, Box<dyn std::error::Error>> {
         let metadata = RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(1))?,
             TurnId::try_from(Uuid::from_u128(2))?,
-            AttemptId::try_from(Uuid::from_u128(3))?,
+            AttemptId::try_from(Uuid::from_u128(attempt))?,
             Timestamp::new(1, 0)?,
         );
         let selected = SelectedProviderConfigurationId::new(Digest::sha256(
@@ -1313,14 +1333,12 @@ mod tests {
             5,
             &[b"descriptor-test-effective"],
         )?)?;
-        Ok(
-            ModelRequest::builder(selected, effective, ConversationView::default(), metadata)
-                .reasoning(ReasoningPolicy::Enabled {
-                    effort: Some(crate::ReasoningEffort::Low),
-                    requirement,
-                })
-                .build()?,
-        )
+        Ok(ModelRequest::builder(selected, effective, input, metadata)
+            .reasoning(ReasoningPolicy::Enabled {
+                effort: Some(crate::ReasoningEffort::Low),
+                requirement,
+            })
+            .build()?)
     }
 
     #[test]
@@ -1347,6 +1365,104 @@ mod tests {
         assert_eq!(plan.decisions()[1].outcome(), CapabilityOutcome::Dropped);
         assert_eq!(plan.diagnostics().len(), 1);
         assert_eq!(plan.digest().domain(), DigestDomain::RequestPlan);
+        Ok(())
+    }
+
+    /// A view of one committed text segment and one image segment, the image
+    /// committed or still working.
+    fn image_view(
+        image: &[u8],
+        image_committed: bool,
+        limits: crate::WorkingProjectionLimits,
+    ) -> Result<ConversationView, Box<dyn std::error::Error>> {
+        use crate::{
+            Actor, CanonicalHistory, ContentBlock, ConversationItem, EntryId, HistorySegment,
+            HistorySegmentKind, ImageBlock, MediaSource, Provenance, TextBlock, WorkingProjection,
+        };
+        let item = |id: u128, block: ContentBlock| {
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(id))?,
+                Actor::User,
+                vec![block],
+                Provenance::UserInput,
+            )
+            .map_err(Box::<dyn std::error::Error>::from)
+        };
+        let text = HistorySegment::new(
+            HistorySegmentKind::Conversation,
+            vec![item(10, ContentBlock::Text(TextBlock::new("look", None)?))?],
+        )?;
+        let picture = HistorySegment::new(
+            HistorySegmentKind::Conversation,
+            vec![item(
+                11,
+                ContentBlock::Image(ImageBlock::new(
+                    "image/png",
+                    MediaSource::bytes(image.to_vec())?,
+                )?),
+            )?],
+        )?;
+        let (committed, working) = if image_committed {
+            (vec![text, picture], Vec::new())
+        } else {
+            (vec![text], vec![picture])
+        };
+        Ok(ConversationView::from_shared(
+            CanonicalHistory::new(committed)?,
+            WorkingProjection::new(working, limits)?,
+        ))
+    }
+
+    #[test]
+    fn plan_digest_binds_request_content_without_reserializing_it()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let descriptor = descriptor(Support::Native)?;
+        let limits = crate::WorkingProjectionLimits::default();
+        let plan = |input: ConversationView, attempt: u128| {
+            descriptor
+                .validate_request(
+                    request_with(CapabilityRequirement::Required, input, attempt)?,
+                    ValidationMode::Strict,
+                )
+                .map(|plan| plan.digest())
+                .map_err(Box::<dyn std::error::Error>::from)
+        };
+        let image = b"\x89PNG\r\n\x1a\n\x00\x01";
+        let base = plan(image_view(image, true, limits)?, 3)?;
+        assert_eq!(base.domain(), DigestDomain::RequestPlan);
+        assert_eq!(base.version(), 4);
+        assert_eq!(
+            base.to_string(),
+            "0dbb6ad2a1c08772367f672c758845efa803207c36af3e6d59596e1fc8ce8e55",
+            "the plan digest is part of the runtime format epoch"
+        );
+        assert_eq!(plan(image_view(image, true, limits)?, 3)?, base);
+
+        let mut flipped = *image;
+        flipped[9] ^= 1;
+        assert_ne!(plan(image_view(&flipped, true, limits)?, 3)?, base);
+        assert_ne!(plan(image_view(image, false, limits)?, 3)?, base);
+        let narrower = crate::WorkingProjectionLimits::new(8, 64, 1024 * 1024)?;
+        assert_ne!(
+            plan(image_view(image, false, narrower)?, 3)?,
+            plan(image_view(image, false, limits)?, 3)?
+        );
+        assert_ne!(plan(image_view(image, true, limits)?, 4)?, base);
+
+        let request = request_with(
+            CapabilityRequirement::Required,
+            image_view(image, false, narrower)?,
+            3,
+        )?;
+        let restored: ModelRequest = serde_json::from_slice(&serde_json::to_vec(&request)?)?;
+        assert_eq!(
+            descriptor
+                .validate_request(restored, ValidationMode::Strict)?
+                .digest(),
+            descriptor
+                .validate_request(request, ValidationMode::Strict)?
+                .digest()
+        );
         Ok(())
     }
 
