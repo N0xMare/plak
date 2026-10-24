@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 /// Content-free resource snapshot.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ProcessResourceUsage {
     pub user_cpu_ns: u64,
     pub system_cpu_ns: u64,

@@ -1,11 +1,65 @@
 //! `QuickJS` runtime for the isolated `plakous-js-host` worker.
 
-use plakous_js_eval::RuntimeEvent;
-#[cfg(test)]
-use {plakous_js_eval::DEFAULT_YIELD_TIME_MS, serde_json::Value, std::collections::HashMap};
+use std::collections::HashMap;
+
+use serde_json::Value;
 
 mod embedded;
 pub use embedded::EmbeddedHost;
+
+/// Default cooperative yield interval (`CODEX_NATIVE_CODE_MODE_DEFAULT_YIELD_MS_V1`).
+pub const DEFAULT_YIELD_TIME_MS: u64 = 10_000;
+
+/// Events emitted by one cell on the evaluator thread.
+#[derive(Debug)]
+pub enum RuntimeEvent {
+    /// Nested tool request. Answer through the active evaluator host.
+    ToolCall {
+        /// Cell execution id.
+        cell_id: u64,
+        /// Tool call id local to the cell.
+        id: u64,
+        /// Nested tool name.
+        name: String,
+        /// JSON arguments.
+        input: Value,
+    },
+    /// `notify(...)` from the cell.
+    Notify {
+        /// Cell execution id.
+        cell_id: u64,
+        /// Notification text.
+        text: String,
+    },
+    /// `text` / `image` / `audio` helper output.
+    Content {
+        /// Cell execution id.
+        cell_id: u64,
+        /// Helper payload.
+        content: Value,
+    },
+    /// `yield_control()` or cooperative yield timeout.
+    Yielded {
+        /// Cell execution id.
+        cell_id: u64,
+    },
+    /// Cell completed.
+    Done {
+        /// Cell execution id.
+        cell_id: u64,
+        /// `store` writes in this cell.
+        stored: HashMap<String, Value>,
+    },
+    /// Cell failed.
+    Error {
+        /// Cell execution id.
+        cell_id: u64,
+        /// Error text.
+        message: String,
+        /// `store` writes before failure.
+        stored: HashMap<String, Value>,
+    },
+}
 
 #[cfg(test)]
 #[allow(

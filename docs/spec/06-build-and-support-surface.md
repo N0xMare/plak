@@ -95,7 +95,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 `plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
 `plakous-chat-completions`, `plakous-code-mode`, `plakous-codex-code-mode-protocol`,
 `plakous-compose`, `plakous-exchange`,
-`plakous-http`, `plakous-js-eval`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
+`plakous-http`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`, `plakous-py-eval`,
 `plakous-responses`, `plakous-responses-dialect`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
@@ -120,7 +120,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
 | `crates/common/` | attempt, http, auth | common |
-| `crates/runtimes/` | js-eval, js-runtime, py-eval, py-worker, code-mode | engine |
+| `crates/runtimes/` | cell, js-runtime, py-eval, py-worker, code-mode | engine |
 | `crates/protocols/` | Responses, its shared dialect, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
 | `crates/store/` | session-store implementations | store |
@@ -554,7 +554,7 @@ intra-doc links. On the Clippy side, `all` and `pedantic` are warnings while
 denied and `allow_attributes_without_reason` warns. Packages inherit this table with `[lints] workspace = true`, except for the
 explicit local lint table described below.
 
-`plakous-js-eval` maintains local documentation/Clippy defaults but still sets
+`plakous-cell` maintains local documentation/Clippy defaults but still sets
 `unsafe_code = "forbid"`; `plakous-js-runtime` inherits the workspace lints.
 The sidecar client and evaluator use
 safe Rust interfaces. Unsafe implementation inside upstream binding crates does
@@ -707,7 +707,7 @@ Output streams to the caller and ends with `EXIT <status>`; the script returns
 that same status. Record the source revision/diff and both nextest lane counts
 with the result; the image name alone is not evidence for the current tree.
 
-`plakous-js-eval` contains only the protocol and sidecar client.
+`plakous-cell` contains only the cell protocol, worker client and session.
 `plakous-js-runtime` owns QuickJS and the JavaScript worker. Selecting that
 package alongside Plak cannot enable an in-process runtime feature in Plak.
 The Monty worker is a thin Rust process entry point over `monty-proto`'s

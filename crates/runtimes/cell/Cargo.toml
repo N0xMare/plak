@@ -1,15 +1,15 @@
 [package]
-name = "plakous-js-eval"
-description = "Code Mode evaluator protocol and sidecar client"
+name = "plakous-cell"
+description = "Cell protocol, worker client and session for isolated interpreter workers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation = "https://docs.rs/plakous-js-eval"
+documentation = "https://docs.rs/plakous-cell"
 readme = "README.md"
-keywords = ["llm", "agent", "javascript", "quickjs"]
+keywords = ["llm", "agent", "javascript", "sandbox"]
 categories = ["development-tools"]
 exclude.workspace = true
 
@@ -24,6 +24,7 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "process
 nix = { workspace = true, features = ["process", "resource", "signal"] }
 
 [dev-dependencies]
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints.rust]

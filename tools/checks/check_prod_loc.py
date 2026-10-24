@@ -123,7 +123,7 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("plakous-agent", "src/"),
         ("plakous-attempt", "src/"),
         ("plakous-code-mode", "src/"),
-        ("plakous-js-eval", "src/"),
+        ("plakous-cell", "src/"),
         ("plakous-js-runtime", "src/"),
         ("plakous-py-eval", "src/"),
         ("plakous-py-worker", "src/"),

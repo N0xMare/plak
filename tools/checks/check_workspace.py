@@ -2687,7 +2687,7 @@ def validate_local_production_lints(
     """Require the repository's unsafe prohibition for every local production crate."""
     errors = []
     for name, manifest in workspace_manifests.items():
-        if name in ("plakous-js-eval", VENDOR_PACKAGE):
+        if name in ("plakous-cell", VENDOR_PACKAGE):
             unsafe_code = manifest.get("lints", {}).get("rust", {}).get("unsafe_code")
             if unsafe_code != "forbid":
                 errors.append(f'{name}: unsafe_code must be explicitly "forbid"')

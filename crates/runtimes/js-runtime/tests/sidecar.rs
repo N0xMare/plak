@@ -9,16 +9,192 @@
 
 use std::{collections::HashMap, path::Path, time::Duration};
 
-use plakous_js_eval::{DEFAULT_YIELD_TIME_MS, RuntimeEvent, SidecarHost};
+use plakous_cell::{
+    CellClient, CellEvent, CellOutcome, CellPrelude, CellValue, ChildProcessUsage, EngineConfig,
+    NestedDeliveryOutcome, OutputItem, QUICKJS_WORKER as WORKER, WorkerFrame,
+};
+use plakous_js_runtime::{DEFAULT_YIELD_TIME_MS, RuntimeEvent};
 use serde_json::Value;
 
 fn host_bin() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_plakous-js-host"))
 }
 
+/// The worker through `CellClient`, in the evaluator's event and delivery
+/// vocabulary, so one contract runs against both transports.
+struct Worker(CellClient);
+
+impl Worker {
+    async fn spawn(program: &Path) -> Result<Self, String> {
+        CellClient::spawn(program, WORKER, EngineConfig::QUICKJS)
+            .await
+            .map(Self)
+    }
+
+    fn child_id(&self) -> Option<u32> {
+        self.0.child_id()
+    }
+
+    fn start_cell(
+        &self,
+        cell: u64,
+        source: &str,
+        stored: HashMap<String, Value>,
+        tools: Vec<Value>,
+        window: u64,
+    ) -> Result<(), String> {
+        self.0.start_cell(
+            cell,
+            source,
+            CellPrelude::Quickjs { tools, stored },
+            Some(window),
+        )
+    }
+
+    fn resume(&self, cell: u64, window: u64) -> Result<(), String> {
+        self.0.resume(cell, window)
+    }
+
+    fn interrupt(&self) {
+        self.0.cancel(1);
+    }
+
+    #[allow(
+        clippy::similar_names,
+        reason = "cell and call are the protocol's own field names"
+    )]
+    async fn deliver_tool_result(
+        &self,
+        cell: u64,
+        call: u64,
+        value: Value,
+        success: bool,
+    ) -> NestedDeliveryOutcome {
+        let outcome = if success {
+            Ok(CellValue::from(value))
+        } else {
+            Err(match value {
+                Value::String(reason) => reason,
+                other => other.to_string(),
+            })
+        };
+        self.0.deliver(cell, call, outcome).await
+    }
+
+    #[allow(
+        clippy::similar_names,
+        reason = "cell and call are the protocol's own field names"
+    )]
+    async fn send_tool_result(
+        &self,
+        cell: u64,
+        call: u64,
+        value: Value,
+        success: bool,
+    ) -> Result<(), String> {
+        match self
+            .deliver_tool_result(cell, call, value, success)
+            .await
+            .message()
+        {
+            None => Ok(()),
+            Some(message) => Err(message.to_owned()),
+        }
+    }
+
+    async fn read_event(&self) -> Result<RuntimeEvent, String> {
+        Ok(match self.0.read_event().await? {
+            CellEvent::NestedCall {
+                cell,
+                call,
+                name,
+                input,
+            } => RuntimeEvent::ToolCall {
+                cell_id: cell,
+                id: call,
+                name,
+                input: Value::try_from(input)?,
+            },
+            CellEvent::Output { cell, item } => match item {
+                OutputItem::Notify { text } => RuntimeEvent::Notify {
+                    cell_id: cell,
+                    text,
+                },
+                OutputItem::Text { text } => RuntimeEvent::Content {
+                    cell_id: cell,
+                    content: serde_json::json!({"type": "input_text", "text": text}),
+                },
+                OutputItem::Image { url, .. } => RuntimeEvent::Content {
+                    cell_id: cell,
+                    content: serde_json::json!({"type": "input_image", "image_url": url}),
+                },
+                OutputItem::Audio { url } => RuntimeEvent::Content {
+                    cell_id: cell,
+                    content: serde_json::json!({"type": "input_audio", "audio_url": url}),
+                },
+            },
+            CellEvent::Yielded { cell } => RuntimeEvent::Yielded { cell_id: cell },
+            CellEvent::Done {
+                cell,
+                outcome: CellOutcome::Completed { stored, .. },
+            } => RuntimeEvent::Done {
+                cell_id: cell,
+                stored,
+            },
+            CellEvent::Done {
+                cell,
+                outcome:
+                    CellOutcome::Failed {
+                        message, stored, ..
+                    },
+            } => RuntimeEvent::Error {
+                cell_id: cell,
+                message,
+                stored,
+            },
+        })
+    }
+
+    async fn terminate(&self) -> Result<Option<ChildProcessUsage>, String> {
+        self.0.terminate().await
+    }
+}
+
+/// A scripted worker in `directory`: it says hello, then runs `body` as `sh`.
+/// `frames` are encoded into `frames.bin` beside it for the body to replay.
+fn scripted_worker(directory: &Path, body: &str, frames: &[WorkerFrame]) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    let hello = WorkerFrame::Hello {
+        revision: plakous_cell::CELL_PROTOCOL_REVISION.to_owned(),
+        engine: WORKER.engine.to_owned(),
+        adapter: WORKER.adapter.to_owned(),
+    };
+    let hello = plakous_cell::encode_frame(&hello).expect("hello frame");
+    let mut after = Vec::new();
+    for frame in frames {
+        after.extend(plakous_cell::encode_frame(frame).expect("frame"));
+    }
+    std::fs::write(directory.join("hello.bin"), &hello).expect("hello bytes");
+    std::fs::write(directory.join("frames.bin"), &after).expect("frame bytes");
+    let program = directory.join("worker.sh");
+    let staging = directory.join("worker.pending");
+    std::fs::write(
+        &staging,
+        format!(
+            "#!/bin/sh\ncat '{}'\n{body}",
+            directory.join("hello.bin").display()
+        ),
+    )
+    .expect("program");
+    std::fs::rename(staging, &program).expect("publish program");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700))
+        .expect("permissions");
+    program
+}
+
 #[tokio::test]
 async fn sidecar_text_helper_round_trip() {
-    let host = SidecarHost::spawn(host_bin()).expect("spawn sidecar");
+    let host = Worker::spawn(host_bin()).await.expect("spawn sidecar");
     host.start_cell(
         1,
         r#"text("sidecar-ok")"#,
@@ -55,7 +231,7 @@ async fn sidecar_text_helper_round_trip() {
 
 #[tokio::test]
 async fn sidecar_yield_then_wait_then_content() {
-    let host = SidecarHost::spawn(host_bin()).expect("spawn sidecar");
+    let host = Worker::spawn(host_bin()).await.expect("spawn sidecar");
     host.start_cell(
         2,
         r#"
@@ -103,7 +279,7 @@ text("after-yield");
 
 #[tokio::test]
 async fn sidecar_nested_tool_then_text() {
-    let host = SidecarHost::spawn(host_bin()).expect("spawn sidecar");
+    let host = Worker::spawn(host_bin()).await.expect("spawn sidecar");
     host.start_cell(
         3,
         r"const r = await tools.echo({x: 1}); text(String(r.x));",
@@ -146,7 +322,7 @@ async fn sidecar_nested_tool_then_text() {
 
 #[tokio::test]
 async fn sidecar_timers_do_not_fire_while_yielded() {
-    let host = SidecarHost::spawn(host_bin()).expect("spawn sidecar");
+    let host = Worker::spawn(host_bin()).await.expect("spawn sidecar");
     host.start_cell(
         4,
         r#"
@@ -196,7 +372,7 @@ await yield_control();
 
 #[tokio::test]
 async fn sidecar_auto_yield_then_resume() {
-    let host = SidecarHost::spawn(host_bin()).expect("spawn sidecar");
+    let host = Worker::spawn(host_bin()).await.expect("spawn sidecar");
     host.start_cell(
         5,
         r#"
@@ -241,7 +417,7 @@ text("done");
 
 #[tokio::test]
 async fn killing_sidecar_does_not_kill_parent() {
-    let host = SidecarHost::spawn(host_bin()).expect("spawn sidecar");
+    let host = Worker::spawn(host_bin()).await.expect("spawn sidecar");
     host.terminate()
         .await
         .expect("sidecar acknowledged shutdown");
@@ -260,7 +436,6 @@ async fn killing_sidecar_does_not_kill_parent() {
 /// left waiting on it, and the outcome must not be claimed joined.
 #[tokio::test]
 async fn sidecar_that_never_acknowledges_shutdown_is_killed_and_reported_lost() {
-    use std::os::unix::fs::PermissionsExt as _;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
     let directory = std::env::temp_dir().join(format!(
@@ -271,11 +446,10 @@ async fn sidecar_that_never_acknowledges_shutdown_is_killed_and_reported_lost() 
             .map_or(0, |since| since.as_nanos())
     ));
     std::fs::create_dir_all(&directory).expect("scratch directory");
-    let program = directory.join("never-ack.sh");
-    std::fs::write(&program, "#!/bin/sh\nexec sleep 60\n").expect("write program");
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
-        .expect("executable program");
-    let host = SidecarHost::spawn(&program).expect("spawn never-ack worker");
+    let program = scripted_worker(&directory, "exec sleep 60\n", &[]);
+    let host = Worker::spawn(&program)
+        .await
+        .expect("spawn never-ack worker");
     let pid = host.child_id().expect("worker pid");
 
     let started = Instant::now();
@@ -285,12 +459,12 @@ async fn sidecar_that_never_acknowledges_shutdown_is_killed_and_reported_lost() 
         .expect_err("an unacknowledged shutdown is a loss, not a join");
     let elapsed = started.elapsed();
     assert!(
-        loss.contains("plakous-js-host sidecar did not acknowledge shutdown"),
+        loss.contains("cell worker did not acknowledge shutdown"),
         "the loss must name the sidecar: {loss}"
     );
     assert!(
-        elapsed >= plakous_js_eval::SIDECAR_SHUTDOWN_SETTLE_TIMEOUT
-            && elapsed < plakous_js_eval::SIDECAR_SHUTDOWN_SETTLE_TIMEOUT + Duration::from_secs(3),
+        elapsed >= plakous_cell::WORKER_SHUTDOWN_SETTLE_TIMEOUT
+            && elapsed < plakous_cell::WORKER_SHUTDOWN_SETTLE_TIMEOUT + Duration::from_secs(3),
         "terminate must settle inside its bound, took {elapsed:?}"
     );
     assert_eq!(
@@ -307,16 +481,10 @@ async fn sidecar_that_never_acknowledges_shutdown_is_killed_and_reported_lost() 
 #[cfg(unix)]
 #[tokio::test]
 async fn nonreading_stdin_cannot_block_start_or_cancel() {
-    use std::os::unix::fs::PermissionsExt;
     let directory = std::env::temp_dir().join(format!("plak-js-full-pipe-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("directory");
-    let program = directory.join("worker.sh");
-    let staging = directory.join("worker.pending");
-    std::fs::write(&staging, "#!/bin/sh\nexec sleep 60\n").expect("program");
-    std::fs::rename(staging, &program).expect("publish program");
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700))
-        .expect("permissions");
-    let host = SidecarHost::spawn(&program).expect("host");
+    let program = scripted_worker(&directory, "exec sleep 60\n", &[]);
+    let host = Worker::spawn(&program).await.expect("host");
     let pid = host.child_id().expect("pid");
     let start = std::time::Instant::now();
     host.start_cell(1, &" ".repeat(256 * 1024), HashMap::new(), vec![], 10_000)
@@ -344,17 +512,25 @@ async fn nonreading_stdin_cannot_block_start_or_cancel() {
 #[cfg(unix)]
 #[tokio::test]
 async fn written_nested_result_is_not_accepted_without_worker_acknowledgement() {
-    use std::os::unix::fs::PermissionsExt;
     let directory =
         std::env::temp_dir().join(format!("plak-js-no-result-ack-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("directory");
-    let program = directory.join("worker.sh");
-    let staging = directory.join("worker.pending");
-    std::fs::write(&staging, "#!/bin/sh\nIFS= read -r start\nprintf '%s\\n' '{\"op\":\"tool_call\",\"cell_id\":1,\"id\":1,\"name\":\"echo\",\"input\":{}}'\nIFS= read -r result\n").expect("program");
-    std::fs::rename(staging, &program).expect("publish");
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700))
-        .expect("permissions");
-    let host = SidecarHost::spawn(&program).expect("host");
+    // The worker reads nothing it is sent: it emits one nested call and, a
+    // moment after the result is written, ends without a delivery verdict.
+    let program = scripted_worker(
+        &directory,
+        &format!(
+            "cat '{}'\nsleep 0.5\n",
+            directory.join("frames.bin").display()
+        ),
+        &[WorkerFrame::NestedCall {
+            cell: 1,
+            call: 1,
+            name: "echo".into(),
+            input: CellValue::Dict(Vec::new()),
+        }],
+    );
+    let host = Worker::spawn(&program).await.expect("host");
     host.start_cell(1, "await tools.echo({})", HashMap::new(), vec![], 10_000)
         .expect("start");
     assert!(matches!(
@@ -386,7 +562,7 @@ macro_rules! nested_failure_contract {
                 ("text('before'); await tools.echo({}); text('unreachable');", false, "before", true),
                 ("const [r] = await Promise.allSettled([tools.echo({})]); text(r.status);", false, "rejected", false),
             ] {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(1, source, HashMap::new(), vec![serde_json::json!({
                     "name": "echo", "tool_name": "echo", "kind": "function", "description": "echo"
                 })], DEFAULT_YIELD_TIME_MS).expect("start");
@@ -416,14 +592,10 @@ macro_rules! nested_failure_contract {
     };
 }
 
-nested_failure_contract!(
-    sidecar_nested_failure_contract,
-    SidecarHost::spawn(host_bin())
-);
-nested_failure_contract!(
-    embedded_nested_failure_contract,
+nested_failure_contract!(sidecar_nested_failure_contract, Worker::spawn(host_bin()));
+nested_failure_contract!(embedded_nested_failure_contract, async {
     plakous_js_runtime::EmbeddedHost::spawn()
-);
+});
 
 // One pending call stays below every resource bound. Hold its result until an
 // observed cell boundary, so neither outcome depends on a sleep or scheduling.
@@ -433,7 +605,7 @@ macro_rules! finite_single_delayed_call_contract {
         async fn $name() {
             for awaited in [false, true] {
                 tokio::time::timeout(Duration::from_secs(5), async {
-                    let host = $spawn.expect("spawn");
+                    let host = $spawn.await.expect("spawn");
                     let source = if awaited {
                         "const pending = tools.echo({x: 1}); await yield_control(); text(await pending);"
                     } else {
@@ -500,7 +672,7 @@ macro_rules! parallel_promise_all_defers_terminal_until_settled {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-            let host = $spawn.expect("spawn");
+            let host = $spawn.await.expect("spawn");
             let source = "try { await Promise.all([tools.echo({a:1}), tools.echo({b:2}).then(v => { text('late'); store('late', v); return v; })]); text('ok'); } catch { text('err'); store('caught', 1); }";
             host.start_cell(
                 1,
@@ -551,11 +723,11 @@ macro_rules! parallel_promise_all_defers_terminal_until_settled {
 
 parallel_promise_all_defers_terminal_until_settled!(
     embedded_parallel_promise_all_defers_terminal,
-    plakous_js_runtime::EmbeddedHost::spawn()
+    async { plakous_js_runtime::EmbeddedHost::spawn() }
 );
 parallel_promise_all_defers_terminal_until_settled!(
     sidecar_parallel_promise_all_defers_terminal,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 macro_rules! late_callbacks_do_not_survive_script_completion {
@@ -563,7 +735,7 @@ macro_rules! late_callbacks_do_not_survive_script_completion {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(
                     1,
                     $source,
@@ -646,56 +818,56 @@ macro_rules! late_callbacks_do_not_survive_script_completion {
 
 late_callbacks_do_not_survive_script_completion!(
     embedded_late_callbacks_are_discarded,
-    plakous_js_runtime::EmbeddedHost::spawn(),
+    async { plakous_js_runtime::EmbeddedHost::spawn() },
     "store('before', 7); tools.echo({}).then(v => { store('late', v); text('late'); tools.echo({late:true}); }); setTimeout(() => text('late timer'), 0);",
     true,
     None
 );
 late_callbacks_do_not_survive_script_completion!(
     sidecar_late_callbacks_are_discarded,
-    SidecarHost::spawn(host_bin()),
+    Worker::spawn(host_bin()),
     "store('before', 7); tools.echo({}).then(v => { store('late', v); text('late'); tools.echo({late:true}); }); setTimeout(() => text('late timer'), 0);",
     true,
     None
 );
 late_callbacks_do_not_survive_script_completion!(
     embedded_late_rejection_callbacks_are_discarded,
-    plakous_js_runtime::EmbeddedHost::spawn(),
+    async { plakous_js_runtime::EmbeddedHost::spawn() },
     "store('before', 7); tools.echo({}).catch(() => { store('late', 1); text('late'); tools.echo({late:true}); });",
     false,
     None
 );
 late_callbacks_do_not_survive_script_completion!(
     sidecar_late_rejection_callbacks_are_discarded,
-    SidecarHost::spawn(host_bin()),
+    Worker::spawn(host_bin()),
     "store('before', 7); tools.echo({}).catch(() => { store('late', 1); text('late'); tools.echo({late:true}); });",
     false,
     None
 );
 late_callbacks_do_not_survive_script_completion!(
     embedded_late_callbacks_after_exit_are_discarded,
-    plakous_js_runtime::EmbeddedHost::spawn(),
+    async { plakous_js_runtime::EmbeddedHost::spawn() },
     "store('before', 7); tools.echo({}).then(() => text('late')); exit(); text('unreachable');",
     true,
     None
 );
 late_callbacks_do_not_survive_script_completion!(
     sidecar_late_callbacks_after_exit_are_discarded,
-    SidecarHost::spawn(host_bin()),
+    Worker::spawn(host_bin()),
     "store('before', 7); tools.echo({}).then(() => text('late')); exit(); text('unreachable');",
     true,
     None
 );
 late_callbacks_do_not_survive_script_completion!(
     embedded_late_callbacks_after_error_are_discarded,
-    plakous_js_runtime::EmbeddedHost::spawn(),
+    async { plakous_js_runtime::EmbeddedHost::spawn() },
     "store('before', 7); tools.echo({}).then(() => text('late')); throw new Error('expected script failure');",
     true,
     Some("expected script failure")
 );
 late_callbacks_do_not_survive_script_completion!(
     sidecar_late_callbacks_after_error_are_discarded,
-    SidecarHost::spawn(host_bin()),
+    Worker::spawn(host_bin()),
     "store('before', 7); tools.echo({}).then(() => text('late')); throw new Error('expected script failure');",
     true,
     Some("expected script failure")
@@ -709,7 +881,7 @@ macro_rules! settling_cell_yields_again_on_every_resume {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(
                     1,
                     "store('before', 7); tools.echo({});",
@@ -760,11 +932,11 @@ macro_rules! settling_cell_yields_again_on_every_resume {
 
 settling_cell_yields_again_on_every_resume!(
     embedded_settling_cell_yields_again_on_every_resume,
-    plakous_js_runtime::EmbeddedHost::spawn()
+    async { plakous_js_runtime::EmbeddedHost::spawn() }
 );
 settling_cell_yields_again_on_every_resume!(
     sidecar_settling_cell_yields_again_on_every_resume,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 /// The command queue holds a full nested-call budget delivered at once.
@@ -783,7 +955,7 @@ macro_rules! a_full_nested_budget_delivered_at_once_is_accepted {
         async fn $name() {
             const BURST: usize = 16;
             tokio::time::timeout(Duration::from_secs(20), async {
-                let host = std::sync::Arc::new($spawn.expect("spawn"));
+                let host = std::sync::Arc::new($spawn.await.expect("spawn"));
                 host.start_cell(
                     1,
                     "const calls = [];
@@ -827,7 +999,7 @@ macro_rules! a_full_nested_budget_delivered_at_once_is_accepted {
                 while let Some(joined) = deliveries.join_next().await {
                     assert_eq!(
                         joined.expect("delivery task"),
-                        plakous_js_eval::NestedDeliveryOutcome::Accepted,
+                        NestedDeliveryOutcome::Accepted,
                         "a full-budget burst is neither a refusal nor evaluator loss"
                     );
                     accepted += 1;
@@ -874,11 +1046,11 @@ macro_rules! a_full_nested_budget_delivered_at_once_is_accepted {
 
 a_full_nested_budget_delivered_at_once_is_accepted!(
     embedded_a_full_nested_budget_delivered_at_once_is_accepted,
-    plakous_js_runtime::EmbeddedHost::spawn()
+    async { plakous_js_runtime::EmbeddedHost::spawn() }
 );
 a_full_nested_budget_delivered_at_once_is_accepted!(
     sidecar_a_full_nested_budget_delivered_at_once_is_accepted,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 macro_rules! awaited_storage_propagates_to_next_cell {
@@ -886,7 +1058,7 @@ macro_rules! awaited_storage_propagates_to_next_cell {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-            let host = $spawn.expect("spawn");
+            let host = $spawn.await.expect("spawn");
             host.start_cell(
                 1,
                 "const v = await tools.echo({}); store('before', v); text(v);",
@@ -948,22 +1120,20 @@ macro_rules! awaited_storage_propagates_to_next_cell {
     };
 }
 
-awaited_storage_propagates_to_next_cell!(
-    embedded_awaited_storage_propagates_to_next_cell,
+awaited_storage_propagates_to_next_cell!(embedded_awaited_storage_propagates_to_next_cell, async {
     plakous_js_runtime::EmbeddedHost::spawn()
-);
+});
 awaited_storage_propagates_to_next_cell!(
     sidecar_awaited_storage_propagates_to_next_cell,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
-finite_single_delayed_call_contract!(
-    embedded_finite_single_delayed_call_contract,
+finite_single_delayed_call_contract!(embedded_finite_single_delayed_call_contract, async {
     plakous_js_runtime::EmbeddedHost::spawn()
-);
+});
 finite_single_delayed_call_contract!(
     sidecar_finite_single_delayed_call_contract,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 /// An unawaited request that is still outstanding when the script completes
@@ -974,7 +1144,7 @@ macro_rules! terminate_during_settlement_has_one_outcome {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(
                     1,
                     "store('before', 7); tools.echo({});",
@@ -1023,11 +1193,11 @@ macro_rules! terminate_during_settlement_has_one_outcome {
 
 terminate_during_settlement_has_one_outcome!(
     embedded_terminate_during_settlement_has_one_outcome,
-    plakous_js_runtime::EmbeddedHost::spawn()
+    async { plakous_js_runtime::EmbeddedHost::spawn() }
 );
 terminate_during_settlement_has_one_outcome!(
     sidecar_terminate_during_settlement_has_one_outcome,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 /// Core cancellation reaches the evaluator as a rejection-shaped result. It is
@@ -1038,7 +1208,7 @@ macro_rules! cancelled_result_settles_frozen_terminal {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(
                     1,
                     "store('before', 7); tools.echo({}).catch((reason) => { store('late', reason); text('late'); });",
@@ -1083,11 +1253,11 @@ macro_rules! cancelled_result_settles_frozen_terminal {
 
 cancelled_result_settles_frozen_terminal!(
     embedded_cancelled_result_settles_frozen_terminal,
-    plakous_js_runtime::EmbeddedHost::spawn()
+    async { plakous_js_runtime::EmbeddedHost::spawn() }
 );
 cancelled_result_settles_frozen_terminal!(
     sidecar_cancelled_result_settles_frozen_terminal,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 /// One request id settles once. A repeated acknowledgement is refused and adds
@@ -1097,7 +1267,7 @@ macro_rules! duplicate_result_is_refused_after_one_terminal {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(
                     1,
                     "store('before', 7); tools.echo({});",
@@ -1147,11 +1317,11 @@ macro_rules! duplicate_result_is_refused_after_one_terminal {
 
 duplicate_result_is_refused_after_one_terminal!(
     embedded_duplicate_result_is_refused_after_one_terminal,
-    plakous_js_runtime::EmbeddedHost::spawn()
+    async { plakous_js_runtime::EmbeddedHost::spawn() }
 );
 duplicate_result_is_refused_after_one_terminal!(
     sidecar_duplicate_result_is_refused_after_one_terminal,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 /// A result the cell never asked for - an unissued id, or a foreign cell id -
@@ -1163,7 +1333,7 @@ macro_rules! foreign_result_is_refused_without_disturbing_the_cell {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(
                     1,
                     "store('before', 7); tools.echo({});",
@@ -1217,11 +1387,11 @@ macro_rules! foreign_result_is_refused_without_disturbing_the_cell {
 
 foreign_result_is_refused_without_disturbing_the_cell!(
     embedded_foreign_result_is_refused_without_disturbing_the_cell,
-    plakous_js_runtime::EmbeddedHost::spawn()
+    async { plakous_js_runtime::EmbeddedHost::spawn() }
 );
 foreign_result_is_refused_without_disturbing_the_cell!(
     sidecar_foreign_result_is_refused_without_disturbing_the_cell,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
 
 /// Every cell gets a fresh `QuickJS` runtime: neither a global written by the
@@ -1231,7 +1401,7 @@ macro_rules! each_cell_gets_a_fresh_runtime {
         #[tokio::test]
         async fn $name() {
             tokio::time::timeout(Duration::from_secs(5), async {
-                let host = $spawn.expect("spawn");
+                let host = $spawn.await.expect("spawn");
                 host.start_cell(
                     1,
                     "globalThis.leak = 1; setTimeout(() => text('cell1 timer'), 0); tools.echo({});",
@@ -1289,11 +1459,126 @@ macro_rules! each_cell_gets_a_fresh_runtime {
     };
 }
 
-each_cell_gets_a_fresh_runtime!(
-    embedded_each_cell_gets_a_fresh_runtime,
+each_cell_gets_a_fresh_runtime!(embedded_each_cell_gets_a_fresh_runtime, async {
     plakous_js_runtime::EmbeddedHost::spawn()
-);
+});
 each_cell_gets_a_fresh_runtime!(
     sidecar_each_cell_gets_a_fresh_runtime,
-    SidecarHost::spawn(host_bin())
+    Worker::spawn(host_bin())
 );
+
+/// A cell that sends `echo` an object nested `depth` levels and prints how
+/// the call ended.
+fn deep_call_cell(depth: usize) -> String {
+    format!(
+        "let v = 1; for (let i = 0; i < {depth}; i++) v = {{a: v}};
+try {{ const r = await tools.echo(v); text('ok:' + r); }}
+catch (e) {{ text('refused:' + String((e && e.message) || e)); }}"
+    )
+}
+
+#[tokio::test]
+async fn nested_inputs_cross_up_to_the_value_depth_and_deeper_ones_are_refused_in_cell() {
+    let host = Worker::spawn(host_bin()).await.expect("spawn sidecar");
+    let echo = vec![serde_json::json!({
+        "name": "echo", "tool_name": "echo", "kind": "function", "description": "echo"
+    })];
+    for (cell, depth) in [(1_u64, 40_usize), (2, 50)] {
+        host.start_cell(
+            cell,
+            &deep_call_cell(depth),
+            HashMap::new(),
+            echo.clone(),
+            DEFAULT_YIELD_TIME_MS,
+        )
+        .expect("start");
+        let mut printed = None;
+        loop {
+            match host.read_event().await.expect("the worker survives") {
+                RuntimeEvent::ToolCall { id, input, .. } => {
+                    assert_eq!(depth, 40, "a too-deep input must not reach the host");
+                    assert_eq!(plakous_cell::json_depth(&input), 40);
+                    host.send_tool_result(cell, id, serde_json::json!(7), true)
+                        .await
+                        .expect("result");
+                }
+                RuntimeEvent::Content { content, .. } => {
+                    printed = content["text"].as_str().map(str::to_owned);
+                }
+                RuntimeEvent::Done { .. } => break,
+                RuntimeEvent::Error { message, .. } => panic!("{message}"),
+                _ => {}
+            }
+        }
+        let printed = printed.expect("the cell reports its call");
+        if depth == 40 {
+            assert_eq!(printed, "ok:7");
+        } else {
+            assert!(printed.contains("nests deeper than 40 levels"), "{printed}");
+        }
+    }
+    host.terminate()
+        .await
+        .expect("sidecar acknowledged shutdown");
+}
+
+/// Reads the worker's frames until it exits, then its exit status.
+fn worker_exchange(frames: &[plakous_cell::HostFrame]) -> (Vec<WorkerFrame>, bool) {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(host_bin())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("worker starts");
+    let mut stdin = child.stdin.take().expect("stdin");
+    for frame in frames {
+        stdin
+            .write_all(&plakous_cell::encode_frame(frame).expect("frame"))
+            .expect("write frame");
+    }
+    let mut stdout = child.stdout.take().expect("stdout");
+    let mut received = Vec::new();
+    while let Some(frame) =
+        plakous_cell::read_frame_blocking(&mut stdout, plakous_cell::MAX_FRAME_BYTES)
+            .expect("frame")
+    {
+        received.push(serde_json::from_slice(&frame).expect("worker frame"));
+    }
+    drop(stdin);
+    let status = child.wait().expect("worker exits");
+    (received, status.success())
+}
+
+#[test]
+fn the_worker_refuses_other_limits_and_a_repeated_configure() {
+    let configure = |engine| plakous_cell::HostFrame::Configure {
+        revision: plakous_cell::CELL_PROTOCOL_REVISION.to_owned(),
+        engine,
+    };
+    let other = EngineConfig::Quickjs {
+        heap_bytes: 128 * 1024 * 1024,
+        stack_bytes: 512 * 1024,
+    };
+    for frames in [
+        vec![configure(other)],
+        vec![
+            configure(EngineConfig::QUICKJS),
+            configure(EngineConfig::QUICKJS),
+        ],
+    ] {
+        let (received, success) = worker_exchange(&frames);
+        assert!(matches!(received.first(), Some(WorkerFrame::Hello { .. })));
+        assert!(
+            matches!(
+                received.last(),
+                Some(WorkerFrame::HostLost {
+                    class: plakous_cell::LossClass::ProtocolViolation,
+                    ..
+                })
+            ),
+            "{received:?}"
+        );
+        assert!(!success, "a refused configure ends the worker with failure");
+    }
+}

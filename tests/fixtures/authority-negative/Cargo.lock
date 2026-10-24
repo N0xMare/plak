@@ -1522,10 +1522,10 @@ dependencies = [
  "plakous-agent",
  "plakous-anthropic",
  "plakous-auth",
+ "plakous-cell",
  "plakous-code-mode",
  "plakous-compose",
  "plakous-http",
- "plakous-js-eval",
  "plakous-mcp",
  "plakous-model",
  "plakous-openai",
@@ -1623,6 +1623,16 @@ dependencies = [
  "plakous-host-protocol",
  "plakous-hosted",
  "plakous-tools",
+]
+
+[[package]]
+name = "plakous-cell"
+version = "0.0.2"
+dependencies = [
+ "nix",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1734,16 +1744,6 @@ dependencies = [
  "tokio-rustls",
  "webpki-roots 1.0.9",
  "zeroize",
-]
-
-[[package]]
-name = "plakous-js-eval"
-version = "0.0.2"
-dependencies = [
- "nix",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1860,7 +1860,7 @@ dependencies = [
  "monty-proto",
  "monty-types",
  "plakous-agent",
- "plakous-js-eval",
+ "plakous-cell",
  "serde_json",
  "tokio",
 ]

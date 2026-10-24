@@ -1,17 +1,24 @@
-//! Process worker for Plak Code Mode (`exec`/`wait`) and js-ptc: JSONL over stdin/stdout.
+//! Cell worker for Plak Code Mode (`exec`/`wait`) and js-ptc: the cell
+//! protocol over stdin/stdout.
 
 #![allow(
     missing_docs,
-    reason = "binary entrypoint; protocol types are documented in plakous-js-eval"
+    reason = "binary entrypoint; protocol types are documented in plakous-cell"
 )]
 
 use std::{
-    io::{self, BufRead, Read, Write},
+    io::{self, Write},
     thread,
 };
 
-use plakous_js_eval::{ClientOp, HostOp, NestedDeliveryOutcome, encode_frame, sample_self_rusage};
-use plakous_js_runtime::EmbeddedHost;
+use plakous_cell::{
+    CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict, EngineConfig,
+    HostFrame, LossClass, MAX_CELL_VALUE_DEPTH, MAX_FRAME_BYTES, NestedDeliveryOutcome, OutputItem,
+    QUICKJS_WORKER, WorkerFrame, json_depth, read_frame_blocking, sample_self_rusage,
+    write_frame_blocking,
+};
+use plakous_js_runtime::{DEFAULT_YIELD_TIME_MS, EmbeddedHost, RuntimeEvent};
+use serde_json::Value;
 use tokio::sync::mpsc;
 
 fn main() {
@@ -29,133 +36,294 @@ fn run() -> Result<(), String> {
     runtime.block_on(async_run())
 }
 
+fn write(stdout: &mut impl Write, frame: &WorkerFrame) -> Result<(), String> {
+    write_frame_blocking(stdout, frame)
+}
+
 /// A refusal is a per-result answer that leaves the cell undisturbed, and a
 /// non-delivery says the interpreter never saw the result at all; only a
 /// genuine failure to settle a pending promise is reported as a host loss.
-async fn tool_result_frame(
+#[allow(
+    clippy::similar_names,
+    reason = "cell and call are the protocol's own field names"
+)]
+async fn delivery_frame(
     host: &EmbeddedHost,
-    execution_id: u64,
-    id: u64,
-    value: serde_json::Value,
-    success: bool,
-) -> HostOp {
-    match host
-        .deliver_tool_result(execution_id, id, value, success)
-        .await
-    {
-        NestedDeliveryOutcome::Accepted => HostOp::ToolResultAccepted { execution_id, id },
-        NestedDeliveryOutcome::Refused(message) => HostOp::ToolResultRefused {
-            execution_id,
-            id,
-            message,
+    cell: u64,
+    call: u64,
+    outcome: Result<CellValue, String>,
+) -> WorkerFrame {
+    let (value, success) = match outcome {
+        Ok(value) => match Value::try_from(value) {
+            Ok(value) => (value, true),
+            Err(error) => {
+                return WorkerFrame::Delivery {
+                    cell,
+                    call,
+                    verdict: DeliveryVerdict::NotDelivered(error),
+                };
+            }
         },
-        NestedDeliveryOutcome::NotDelivered(message) => HostOp::ToolResultNotDelivered {
-            execution_id,
-            id,
-            message,
-        },
-        NestedDeliveryOutcome::Lost(message) => HostOp::HostLost { message },
+        Err(reason) => (Value::String(reason), false),
+    };
+    let verdict = match host.deliver_tool_result(cell, call, value, success).await {
+        NestedDeliveryOutcome::Accepted => DeliveryVerdict::Accepted,
+        NestedDeliveryOutcome::Refused(message) => DeliveryVerdict::Refused(message),
+        NestedDeliveryOutcome::NotDelivered(message) => DeliveryVerdict::NotDelivered(message),
+        NestedDeliveryOutcome::Lost(message) => {
+            return WorkerFrame::HostLost {
+                class: LossClass::of(&message),
+                message,
+            };
+        }
+    };
+    WorkerFrame::Delivery {
+        cell,
+        call,
+        verdict,
     }
 }
 
-async fn async_run() -> Result<(), String> {
-    let host = EmbeddedHost::spawn()?;
-    let (cmd_tx, mut cmd_rx) = mpsc::channel(plakous_js_eval::COMMAND_QUEUE_ITEMS);
+fn output_item(content: &Value) -> OutputItem {
+    let field = |name: &str| {
+        content
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    match content.get("type").and_then(Value::as_str) {
+        Some("input_image") => OutputItem::Image {
+            url: field("image_url"),
+            detail: None,
+        },
+        Some("input_audio") => OutputItem::Audio {
+            url: field("audio_url"),
+        },
+        _ => OutputItem::Text {
+            text: field("text"),
+        },
+    }
+}
+
+fn worker_frame(event: RuntimeEvent) -> WorkerFrame {
+    match event {
+        RuntimeEvent::ToolCall {
+            cell_id,
+            id,
+            name,
+            input,
+        } => WorkerFrame::NestedCall {
+            cell: cell_id,
+            call: id,
+            name,
+            input: CellValue::from(input),
+        },
+        RuntimeEvent::Notify { cell_id, text } => WorkerFrame::Output {
+            cell: cell_id,
+            item: OutputItem::Notify { text },
+        },
+        RuntimeEvent::Content { cell_id, content } => WorkerFrame::Output {
+            cell: cell_id,
+            item: output_item(&content),
+        },
+        RuntimeEvent::Yielded { cell_id } => WorkerFrame::Yielded { cell: cell_id },
+        RuntimeEvent::Done { cell_id, stored } => WorkerFrame::CellDone {
+            cell: cell_id,
+            outcome: CellOutcome::Completed {
+                value: None,
+                stored,
+            },
+        },
+        RuntimeEvent::Error {
+            cell_id,
+            message,
+            stored,
+        } => WorkerFrame::CellDone {
+            cell: cell_id,
+            outcome: CellOutcome::Failed {
+                message,
+                stored,
+                generation_lost: false,
+            },
+        },
+    }
+}
+
+/// Reads `Configure` and checks it names this protocol and these limits.
+fn configure(stdin: &mut impl io::Read) -> Result<(), String> {
+    let frame = read_frame_blocking(stdin, MAX_FRAME_BYTES)?
+        .ok_or_else(|| "parent closed before configure".to_owned())?;
+    match serde_json::from_slice::<HostFrame>(&frame) {
+        Ok(HostFrame::Configure { revision, engine })
+            if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::QUICKJS =>
+        {
+            Ok(())
+        }
+        Ok(HostFrame::Configure { .. }) => Err("configure names another revision or limits".into()),
+        _ => Err("first parent frame is not configure".into()),
+    }
+}
+
+/// Reads host frames on their own thread. A full queue blocks the reader
+/// rather than ending the host: it is back pressure, not a lost worker, and
+/// the select loop drains it as soon as the delivery in hand is acknowledged.
+/// Only a closed receiver, which means the loop has finished, or the end of
+/// the parent's stream ends this thread.
+fn spawn_command_reader(commands: mpsc::Sender<HostFrame>) -> Result<(), String> {
     thread::Builder::new()
         .name("plakous-js-host-stdin".into())
         .spawn(move || {
-            let stdin = io::stdin();
-            let mut reader = stdin.lock();
-            loop {
-                let mut line = String::new();
-                let Ok(n) = reader
-                    .by_ref()
-                    .take(8 * 1024 * 1024 + 1)
-                    .read_line(&mut line)
-                else {
+            let mut stdin = io::stdin().lock();
+            while let Ok(Some(frame)) = read_frame_blocking(&mut stdin, MAX_FRAME_BYTES) {
+                let Ok(frame) = serde_json::from_slice::<HostFrame>(&frame) else {
                     break;
                 };
-                if n == 0 || !line.ends_with('\n') {
-                    break;
-                }
-                if line.is_empty() {
-                    continue;
-                }
-                let Ok(op) = serde_json::from_str::<ClientOp>(&line) else {
-                    break;
-                };
-                // Block rather than end the host. A full queue is back
-                // pressure on the reader, not a lost worker: the select loop
-                // drains it as soon as the delivery in hand is acknowledged.
-                // Only a closed receiver, which means the loop has finished,
-                // ends this thread.
-                if cmd_tx.blocking_send(op).is_err() {
+                if commands.blocking_send(frame).is_err() {
                     break;
                 }
             }
         })
-        .map_err(|error| error.to_string())?;
-    let mut stdout = io::stdout();
-    loop {
-        tokio::select! {
-            command = cmd_rx.recv() => {
-                let Some(command) = command else {
-                    break;
-                };
-                match command {
-                    ClientOp::Start {
-                        execution_id,
-                        source,
-                        tools,
-                        stored,
-                        yield_time_ms,
-                    } => host.start_cell(execution_id, &source, stored, tools, yield_time_ms)?,
-                    ClientOp::ToolResult {
-                        execution_id,
-                        id,
-                        value,
-                        success,
-                    } => {
-                        let frame = tool_result_frame(&host, execution_id, id, value, success).await;
-                        let encoded = encode_frame(&frame)?;
-                        stdout.write_all(&encoded).map_err(|error| error.to_string())?;
-                        stdout.flush().map_err(|error| error.to_string())?;
-                    },
-                    ClientOp::Resume {
-                        execution_id,
-                        yield_time_ms,
-                    } => host.resume(execution_id, yield_time_ms)?,
-                    ClientOp::Interrupt => host.interrupt(),
-                    ClientOp::Shutdown => {
-                        let usage = sample_self_rusage();
-                        let encoded = encode_frame(&HostOp::ResourceReport {
-                            user_cpu_ns: usage.user_cpu_ns,
-                            system_cpu_ns: usage.system_cpu_ns,
-                            peak_rss_bytes: usage.peak_rss_bytes,
-                            rss_bytes: usage.rss_bytes,
-                            threads: usage.threads,
-                            fds: usage.fds,
-                        })?;
-                        stdout.write_all(&encoded).map_err(|error| error.to_string())?;
-                        stdout.flush().map_err(|error| error.to_string())?;
-                        break;
-                    }
-                }
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
+/// What the loop does after one host command or engine event.
+enum Step {
+    Continue,
+    Stop,
+}
+
+/// Applies one host command to the engine.
+async fn command(
+    host: &EmbeddedHost,
+    stdout: &mut impl Write,
+    command: HostFrame,
+) -> Result<Step, String> {
+    match command {
+        HostFrame::StartCell {
+            cell,
+            source,
+            prelude: CellPrelude::Quickjs { tools, stored },
+            window,
+        } => host.start_cell(
+            cell,
+            &source,
+            stored,
+            tools,
+            window.unwrap_or(DEFAULT_YIELD_TIME_MS),
+        )?,
+        HostFrame::NestedResult {
+            cell,
+            call,
+            outcome,
+        } => {
+            let frame = delivery_frame(host, cell, call, outcome).await;
+            write(stdout, &frame)?;
+        }
+        HostFrame::Resume { cell, window } => host.resume(cell, window)?,
+        HostFrame::Cancel { .. } => host.interrupt(),
+        HostFrame::Shutdown => {
+            write(
+                stdout,
+                &WorkerFrame::ResourceReport {
+                    usage: sample_self_rusage(),
+                },
+            )?;
+            return Ok(Step::Stop);
+        }
+        HostFrame::Configure { .. } => {
+            let message = "repeated configure".to_owned();
+            write(
+                stdout,
+                &WorkerFrame::HostLost {
+                    class: LossClass::ProtocolViolation,
+                    message: message.clone(),
+                },
+            )?;
+            return Err(message);
+        }
+    }
+    Ok(Step::Continue)
+}
+
+/// Forwards one engine event. A nested call whose input nests too deep for
+/// a frame is refused for that one call, inside the cell, rather than
+/// losing the worker.
+async fn event(
+    host: &EmbeddedHost,
+    stdout: &mut impl Write,
+    event: Result<RuntimeEvent, String>,
+) -> Result<Step, String> {
+    let lost = match event {
+        Ok(RuntimeEvent::ToolCall {
+            cell_id, id, input, ..
+        }) if json_depth(&input) > MAX_CELL_VALUE_DEPTH => {
+            let refusal =
+                format!("nested call input nests deeper than {MAX_CELL_VALUE_DEPTH} levels");
+            match host
+                .deliver_tool_result(cell_id, id, Value::String(refusal), false)
+                .await
+            {
+                NestedDeliveryOutcome::Lost(message) => message,
+                _ => return Ok(Step::Continue),
             }
-            event = host.read_event() => {
-                match event {
-                    Ok(event) => {
-                        let encoded = encode_frame(&HostOp::from(event))?;
-                        stdout.write_all(&encoded).map_err(|error| error.to_string())?;
-                        stdout.flush().map_err(|error| error.to_string())?;
-                    }
-                    Err(message) => {
-                        let encoded = encode_frame(&HostOp::HostLost { message })?;
-                        stdout.write_all(&encoded).map_err(|error| error.to_string())?;
-                        stdout.flush().map_err(|error| error.to_string())?;
-                        break;
-                    },
-                }
+        }
+        Ok(event) => {
+            write(stdout, &worker_frame(event))?;
+            return Ok(Step::Continue);
+        }
+        Err(message) => message,
+    };
+    write(
+        stdout,
+        &WorkerFrame::HostLost {
+            class: LossClass::of(&lost),
+            message: lost,
+        },
+    )?;
+    Ok(Step::Stop)
+}
+
+async fn async_run() -> Result<(), String> {
+    let mut stdout = io::stdout();
+    write(
+        &mut stdout,
+        &WorkerFrame::Hello {
+            revision: CELL_PROTOCOL_REVISION.to_owned(),
+            engine: QUICKJS_WORKER.engine.to_owned(),
+            adapter: QUICKJS_WORKER.adapter.to_owned(),
+        },
+    )?;
+    let mut stdin = io::stdin().lock();
+    if let Err(message) = configure(&mut stdin) {
+        let _ = write(
+            &mut stdout,
+            &WorkerFrame::HostLost {
+                class: LossClass::ProtocolViolation,
+                message: message.clone(),
+            },
+        );
+        return Err(message);
+    }
+    drop(stdin);
+    let host = EmbeddedHost::spawn()?;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel(plakous_cell::COMMAND_QUEUE_ITEMS);
+    spawn_command_reader(cmd_tx)?;
+    loop {
+        let step = tokio::select! {
+            received = cmd_rx.recv() => match received {
+                Some(received) => command(&host, &mut stdout, received).await,
+                None => Ok(Step::Stop),
+            },
+            received = host.read_event() => event(&host, &mut stdout, received).await,
+        };
+        match step {
+            Ok(Step::Continue) => {}
+            Ok(Step::Stop) => break,
+            Err(message) => {
+                let _ = host.terminate().await;
+                return Err(message);
             }
         }
     }

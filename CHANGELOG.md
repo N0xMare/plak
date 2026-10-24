@@ -9,6 +9,13 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plakous
 
+- `plakous-js-eval` is renamed `plakous-cell` and replaces its JSONL sidecar
+  protocol with the cell protocol: length-prefixed JSON frames, a worker
+  `Hello` checked before the one `Configure`, and per-cell nested-result
+  delivery verdicts. `SidecarHost` is replaced by `CellClient` and
+  `CellSession`. The `plakous-js-host` worker speaks only the new protocol, so
+  a stale worker is refused at its hello.
+
 - The context meter counts each image on Claude routes at 4,784 tokens,
   Anthropic's current high-resolution maximum (`ceil(w/28) * ceil(h/28)`
   after resizing), instead of 3,279 from the retired `w * h / 750` rule.
@@ -16,6 +23,13 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Persisted formats
 
+- Runtime format epoch 31: the JavaScript worker speaks the cell protocol
+  (`plakous-cell-protocol.v1`, length-prefixed frames checked in the worker's
+  hello) instead of JSONL, and the recorded engine contract and Code Mode
+  descriptor identities name the cell worker revision. A session recorded
+  under the previous engine contract is refused as incompatible before any
+  inference. State key `r25.e31.p33.t8`; carry a session with `/reload` or
+  export and import. Export document version 8 is unchanged.
 - Runtime format epoch 30: inline image bytes are stored as canonical padded
   base64 instead of an array of JSON numbers, so a stored image is about 1.33
   times its size instead of about 3.6. Request-plan digests bind the request

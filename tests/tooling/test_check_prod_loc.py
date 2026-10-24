@@ -99,7 +99,7 @@ class ResponsibilityReportTests(unittest.TestCase):
         cases = {
             ("plakous-agent", "src/runtime/driver/mod.rs"): "runtime",
             ("plakous-agent", "src/event/projection.rs"): "event/presentation",
-            ("plakous-js-eval", "src/lib.rs"): "runtime",
+            ("plakous-cell", "src/lib.rs"): "runtime",
             ("plakous-code-mode", "src/lib.rs"): "runtime",
             ("plakous-agent", "src/manifest.rs"): "checkpoint/rehydration",
             ("plakous-agent", "src/session.rs"): "session/facade",
@@ -114,7 +114,7 @@ class ResponsibilityReportTests(unittest.TestCase):
             ("plakous-xai", "src/native_auth/manager.rs"): "auth",
             ("plak", "src/lib.rs"): "product",
             ("plakous-hosted", "src/runtime.rs"): "product",
-            ("plakous-js-eval", "src/bin/plakous-js-host.rs"): "runtime",
+            ("plakous-js-runtime", "src/bin/plakous-js-host.rs"): "runtime",
             ("plakous-host-protocol", "src/lib.rs"): "product",
         }
         for (name, relative), expected in cases.items():

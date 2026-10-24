@@ -42,7 +42,7 @@ use plakous_agent::internal::{
     LocalCompositionShutdownResult, LocalCompositionStartedCell, LocalCompositionTerminateResult,
     LocalCompositionWaitOutcome, LocalCompositionWaitRequest,
 };
-use plakous_js_eval::{ChildReapBounds, ChildReapEscalation};
+use plakous_cell::{ChildReapBounds, ChildReapEscalation};
 use serde_json::Value;
 use tokio::{
     sync::{Mutex, mpsc, oneshot, watch},
@@ -201,7 +201,7 @@ fn session_bundle_within(
                 Err(error) => Some(format!("Python tool bootstrap failed: {error}")),
             };
             if let Some(failure) = failure {
-                let before = plakous_js_eval::sample_children_rusage();
+                let before = plakous_cell::sample_children_rusage();
                 drop(checkout);
                 let exit = reap_checkout_pid(pid, before).await;
                 return Err(if exit.escalation == ChildExitEscalation::Unreaped {
@@ -632,7 +632,7 @@ async fn reap_lost_generation(
     pid: Option<u32>,
 ) -> Option<ChildProcessExit> {
     let checkout = checkout.lock().await.take()?;
-    let before = plakous_js_eval::sample_children_rusage();
+    let before = plakous_cell::sample_children_rusage();
     drop(checkout);
     Some(reap_checkout_pid(pid, before).await)
 }
@@ -645,14 +645,14 @@ async fn sample_and_drop_checkout(checkout: &Mutex<Option<Checkout>>) -> Option<
     let mut guard = checkout.lock().await;
     let checkout = guard.take()?;
     let pid = checkout.pid();
-    let before = plakous_js_eval::sample_children_rusage();
+    let before = plakous_cell::sample_children_rusage();
     drop(checkout);
     Some(reap_checkout_pid(pid, before).await)
 }
 
 async fn reap_checkout_pid(
     pid: Option<u32>,
-    before: plakous_js_eval::ProcessResourceUsage,
+    before: plakous_cell::ProcessResourceUsage,
 ) -> ChildProcessExit {
     match pid {
         Some(pid) => reap_child_exit(pid, before).await,
@@ -667,10 +667,7 @@ async fn reap_checkout_pid(
     }
 }
 
-async fn reap_child_exit(
-    pid: u32,
-    before: plakous_js_eval::ProcessResourceUsage,
-) -> ChildProcessExit {
+async fn reap_child_exit(pid: u32, before: plakous_cell::ProcessResourceUsage) -> ChildProcessExit {
     reap_child_exit_within(pid, before, ChildReapBounds::DEFAULT).await
 }
 
@@ -682,21 +679,21 @@ async fn reap_child_exit(
 /// silently blocks on a worker that will not exit.
 async fn reap_child_exit_within(
     pid: u32,
-    before: plakous_js_eval::ProcessResourceUsage,
+    before: plakous_cell::ProcessResourceUsage,
     bounds: ChildReapBounds,
 ) -> ChildProcessExit {
     let reap =
-        tokio::task::spawn_blocking(move || plakous_js_eval::reap_child_pid_bounded(pid, bounds));
+        tokio::task::spawn_blocking(move || plakous_cell::reap_child_pid_bounded(pid, bounds));
     finish_reap(reap, before).await
 }
 
 async fn finish_reap(
     reap: JoinHandle<ChildReapEscalation>,
-    before: plakous_js_eval::ProcessResourceUsage,
+    before: plakous_cell::ProcessResourceUsage,
 ) -> ChildProcessExit {
     let escalation = reap.await.unwrap_or(ChildReapEscalation::Unreaped);
-    let after = plakous_js_eval::sample_children_rusage();
-    let delta = plakous_js_eval::children_rusage_delta(before, after);
+    let after = plakous_cell::sample_children_rusage();
+    let delta = plakous_cell::children_rusage_delta(before, after);
     ChildProcessExit {
         child: ChildProcessKind::PythonWorker,
         user_cpu: Duration::from_nanos(delta.user_cpu_ns),
@@ -1235,7 +1232,7 @@ impl LocalCompositionNestedResponder for MontyNestedResponder {
 mod missing_pid_tests {
     #[tokio::test]
     async fn checkout_without_pid_cannot_certify_reaping() {
-        let exit = super::reap_checkout_pid(None, plakous_js_eval::sample_children_rusage()).await;
+        let exit = super::reap_checkout_pid(None, plakous_cell::sample_children_rusage()).await;
         assert_eq!(exit.escalation, super::ChildExitEscalation::Unreaped);
     }
 }

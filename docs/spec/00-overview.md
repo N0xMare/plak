@@ -102,7 +102,7 @@ classes and directory policy.
 | `plakous-attempt` | `crates/common/attempt` | `common` | Family-agnostic attempt lifecycle: phase transitions, observation ledger, pure acceptance outcomes |
 | `plakous-http` | `crates/common/http` | `common` | Provider-blind bounded HTTP transport and SSE framing. One fresh connection per execute unless the client is explicitly pooled; no redirect, proxy, retry, or auth semantics |
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
-| `plakous-js-eval` | `crates/runtimes/js-eval` | `engine` | Evaluator protocol and sidecar client; never links the QuickJS engine |
+| `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v1`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | Thin `monty` subprocess entry point over the pinned upstream interpreter and wire state machine |
 | `plakous-py-eval` | `crates/runtimes/py-eval` | `engine` | monty-pool py-ptc session: cell lifecycle, nested-call delivery, JSON/Monty codec, py-ptc refusal strings |
@@ -188,7 +188,7 @@ v7 document with 0.0.2 (§2.5.1 of chapter 02).
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **25** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **30** (inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **31** (cell-protocol engine contracts and the Code Mode descriptor identities that name the cell worker revision, inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **8** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
@@ -196,7 +196,7 @@ v7 document with 0.0.2 (§2.5.1 of chapter 02).
 
 Tree schema 8's canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Runtime epoch
-30 moves the whole state key, so no older t8 shape is opened. Export v8 carries
+31 moves the whole state key, so no older t8 shape is opened. Export v8 carries
 conversation history and CarryBinding, not tree seal outcomes. Its v8
 history encoding also preserves exact account/model replay scope; the v7
 importer keeps accountless material unbound rather than retagging it.
@@ -208,7 +208,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r25.e30.p33.t8`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r25.e31.p33.t8`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

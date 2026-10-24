@@ -261,7 +261,7 @@ keep the stop name process-allowlist gated without changing its effect tag.
 The job-ledger fixture carries a promoted row across later turns and their operation-only and
 terminal commits, copies terminal evidence in a history-unchanged Quiescent
 checkpoint, and proves repeated recording is a no-op. Manifest round trips pin
-the row/terminal bounds, same-batch consumption, clear counter and epoch 30.
+the row/terminal bounds, same-batch consumption, clear counter and epoch 31.
 Fresh-service reopen retains exit-code and output-tail answers until consumption;
 stop on an already terminal snapshot preserves its original outcome. Row-cap
 fixtures keep foreground retention separate from promoted, unconsumed jobs.
@@ -677,7 +677,12 @@ the operator's environment. A hand-run `cargo nextest` exports both as well.
 Nested-failure regressions cover exact successful string delivery, caught and
 uncaught JavaScript rejection, `Promise.allSettled`, retained earlier output,
 correlated acceptance, and joined shutdown through both embedded and sidecar
-engines. The private-driver scheduler additionally exercises failed read-only
+engines, all through the `plakous-cell` client. The cell protocol has its own
+offline suite: frame round trips, lengths refused before allocation, truncated
+and unterminated frames, and scripted workers proving that every interleaving
+of nested calls, delivery verdicts, output and terminals ends a cell with
+exactly one terminal and reports `Accepted` only on the worker's own verdict.
+The private-driver scheduler additionally exercises failed read-only
 and partially effective mutating children, later successful mutation, rejected
 invalid arguments, finalized child records, and joined cancellation. Canonical
 projection tests distinguish ordinary tool failure from infrastructure failure.

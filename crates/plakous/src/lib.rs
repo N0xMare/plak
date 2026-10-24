@@ -48,8 +48,6 @@ pub mod exchange_observation {
 mod local_composition;
 #[cfg(feature = "composition-python")]
 pub(crate) use plakous_py_eval as monty_python;
-#[cfg(feature = "composition")]
-mod js_code_mode;
 
 /// The Plakous library version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

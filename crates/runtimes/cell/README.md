@@ -1,6 +1,6 @@
-# plakous-js-eval
+# plakous-cell
 
-Code Mode evaluator protocol and sidecar client. This crate is part of
+Cell protocol, worker client and session for isolated interpreter workers. This crate is part of
 [Plak](https://github.com/N0xMare/plak), an embeddable single-agent
 multi-provider harness library (Plakous) and the command-line and terminal
 product built on it. It is a published-internal package: it releases in the

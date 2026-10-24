@@ -935,7 +935,7 @@ async fn a_worker_that_ignores_sigterm_is_killed_inside_the_shutdown_bound() {
     let started = Instant::now();
     let exit = reap_child_exit_within(
         pid,
-        plakous_js_eval::sample_children_rusage(),
+        plakous_cell::sample_children_rusage(),
         TEST_REAP_BOUNDS,
     )
     .await;
@@ -967,7 +967,7 @@ async fn a_worker_that_exits_on_its_own_is_never_signalled() {
     let pid = cooperative.id();
     let exit = reap_child_exit_within(
         pid,
-        plakous_js_eval::sample_children_rusage(),
+        plakous_cell::sample_children_rusage(),
         TEST_REAP_BOUNDS,
     )
     .await;
@@ -1306,7 +1306,7 @@ async fn failed_reap_task_join_cannot_certify_joined_cleanup() {
     use super::*;
     let task = tokio::spawn(std::future::pending::<ChildReapEscalation>());
     task.abort();
-    let exit = finish_reap(task, plakous_js_eval::sample_children_rusage()).await;
+    let exit = finish_reap(task, plakous_cell::sample_children_rusage()).await;
     assert_eq!(exit.escalation, ChildExitEscalation::Unreaped);
     let session = session_with_exit(exit);
     assert!(matches!(

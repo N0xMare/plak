@@ -333,12 +333,13 @@ fn python_ptc_definition_error(error: impl std::error::Error + 'static) -> ToolR
 pub const CODEX_NATIVE_CODE_MODE_RELEASE_V1: &str = "rust-v0.153.3";
 /// Exact peeled release commit for this presentation contract.
 pub const CODEX_NATIVE_CODE_MODE_COMMIT_V1: &str = "b1a547b1f73ce86205d9222ac19cff334b3b7a2e";
-/// rquickjs sidecar engine revision mixed into Code Mode identity.
+/// `QuickJS` cell worker revision mixed into Code Mode identity: engine,
+/// cell protocol and worker adapter.
 ///
 /// Official V8 ELF digest is not live identity. Presentation text still names
 /// a V8 isolate because that is the frozen 0.153.3 model-visible contract.
 pub const CODEX_NATIVE_CODE_MODE_ENGINE_REVISION_V1: &str =
-    "rquickjs-host/plakous-js-eval-bootstrap.v5";
+    "quickjs/plakous-cell-protocol.v1/plakous-js-host-bootstrap.v6";
 /// Canonical driver marker name and provider-visible custom-tool name.
 pub const CODEX_NATIVE_CODE_MODE_EXEC_NAME_V1: &str = "exec";
 /// Canonical driver marker name and provider-visible function-tool name.

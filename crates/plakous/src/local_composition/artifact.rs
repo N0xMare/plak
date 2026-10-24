@@ -148,7 +148,7 @@ impl LocalCompositionEngineArtifact {
                 environment_identity,
             },
             artifact_identity,
-            engine_contract_identity: rquickjs_sidecar_engine_contract_identity()?,
+            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
             host_identity,
             containment,
         })
@@ -213,14 +213,20 @@ pub(super) fn validate_engine_contract_binding(
     Ok(())
 }
 
-pub(super) fn rquickjs_sidecar_engine_contract_identity() -> Result<Digest, AgentError> {
+/// The engine contract a cell worker build carries: its engine, engine
+/// version, cell protocol revision and adapter revision.
+pub(super) fn cell_engine_contract_identity(
+    worker: &plakous_cell::WorkerIdentity,
+) -> Result<Digest, AgentError> {
     Digest::sha256(
         DigestDomain::ExecutionEnvironment,
         1,
         &[
-            b"plakous.local-composition.product-javascript.v1",
-            b"rquickjs-host",
-            plakous_js_eval::BOOTSTRAP_REVISION.as_bytes(),
+            b"plakous.cell-engine-contract.v1",
+            worker.engine.as_bytes(),
+            worker.version.as_bytes(),
+            plakous_cell::CELL_PROTOCOL_REVISION.as_bytes(),
+            worker.adapter.as_bytes(),
         ],
     )
     .map_err(|error| AgentError::new(AgentErrorKind::Identity, error.to_string()))
@@ -250,7 +256,7 @@ pub(crate) fn restore_stored_artifact(
     };
     // Product PTC appends one evidence digest; Code Mode does not. Select the
     // framing by the recorded artifact digest, never by probing candidate files.
-    let evidence_len = rquickjs_sidecar_engine_contract_identity()?
+    let evidence_len = cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?
         .identity_bytes()
         .len();
     let host = [
@@ -415,11 +421,12 @@ mod artifact_recovery_tests {
                 unreachable!("constructor always produces a JavaScript artifact")
             }
         };
-        let integration = crate::js_code_mode::RquickjsCodeModeIntegration {
+        let integration = JavaScriptCellIntegration {
+            worker: path.clone(),
             identity,
-            profile: CodexIntegrationProfile::MinimalCore,
-            nested_catalog: Vec::new(),
-            sidecar: path.clone(),
+            presentation: JavaScriptPresentation::CodexMinimal {
+                nested_catalog: Vec::new(),
+            },
         };
         std::fs::write(path, b"changed sidecar bytes")?;
         let error = integration
@@ -555,6 +562,93 @@ mod artifact_recovery_tests {
             .identity_bytes();
             assert!(restore_stored_artifact(&disagreement).is_err());
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod quickjs_upgrade_tests {
+    use super::*;
+
+    /// The engine contract the previous build recorded for the `QuickJS`
+    /// sidecar: the JSONL bootstrap v5, before the cell protocol.
+    fn previous_quickjs_contract() -> Result<Digest, AgentError> {
+        Digest::sha256(
+            DigestDomain::ExecutionEnvironment,
+            1,
+            &[
+                b"plakous.local-composition.product-javascript.v1",
+                b"rquickjs-host",
+                b"plakous-js-eval-bootstrap.v5",
+            ],
+        )
+        .map_err(identity_error)
+    }
+
+    #[test]
+    fn the_contract_names_engine_version_protocol_and_adapter() -> Result<(), AgentError> {
+        let expected = Digest::sha256(
+            DigestDomain::ExecutionEnvironment,
+            1,
+            &[
+                b"plakous.cell-engine-contract.v1",
+                b"quickjs",
+                b"rquickjs-0.12",
+                b"plakous-cell-protocol.v1",
+                b"plakous-js-host-bootstrap.v6",
+            ],
+        )
+        .map_err(identity_error)?;
+        assert_eq!(
+            cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
+            expected
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_javascript_record_under_the_previous_contract_is_a_typed_refusal()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("plakous-js-host");
+        std::fs::write(&path, b"offline worker")?;
+        let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path.canonicalize()?)?;
+        let environment_identity = match &artifact.kind {
+            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
+                environment_identity,
+                ..
+            } => environment_identity,
+            #[cfg(feature = "composition-python")]
+            LocalCompositionEngineArtifactKind::MontyPythonPtcV1 { .. } => {
+                return Err("JavaScript artifact".into());
+            }
+        };
+        let previous = previous_quickjs_contract()?;
+        assert_ne!(previous, artifact.engine_contract_identity());
+        // A self-consistent record of the same worker bytes, bound under the
+        // previous contract: only the contract disagrees with this build.
+        let stored = plakous_agent::internal::facade_support::StoredCompositionArtifact {
+            profile_identity: previous.identity_bytes(),
+            artifact_identity: artifact.identity().identity_bytes(),
+            binding_identity: attachment_binding_identity(
+                previous,
+                artifact.identity(),
+                previous,
+                None,
+            )?
+            .identity_bytes(),
+            engine_contract_identity: previous.identity_bytes(),
+            host: environment_identity.clone(),
+        };
+        let Err(refusal) = restore_stored_artifact(&stored) else {
+            return Err("a previous-contract record must not reopen".into());
+        };
+        assert_eq!(refusal.kind(), AgentErrorKind::IncompatibleSession);
+        assert!(
+            refusal.message().contains("no inference was dispatched"),
+            "{}",
+            refusal.message()
+        );
         Ok(())
     }
 }

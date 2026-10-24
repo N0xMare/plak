@@ -950,7 +950,7 @@ that spells the string with escapes is refused because decoding a segment
 requires its bytes to equal their re-encoding. Canonical segment bytes and
 identities are therefore a function of the media bytes alone. The encoded
 text is bounded before decoding, and inline media bytes are bounded at 16 MiB
-like every canonical block. This is runtime checkpoint format epoch 30.
+like every canonical block. This is runtime checkpoint format epoch 31.
 
 Reconstructive components have a 4 MiB byte budget except `Operation`, whose
 budget is 64 MiB because it retains complete requests and outcomes. This is a
@@ -1782,7 +1782,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 30 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 31 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -2731,7 +2731,7 @@ committed and the working bounds, the two parts of the request's encoding the
 view identity leaves out. Plan validation therefore never re-serializes the
 request or its history. The plan digest is recorded in prepared-call and
 response records and re-derived on recovery, so it is part of runtime
-checkpoint format epoch 30.
+checkpoint format epoch 31.
 
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
@@ -4273,7 +4273,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 30.
+runtime checkpoint format epoch 31.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -5693,7 +5693,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 30.
+runtime checkpoint format epoch 31.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -6178,14 +6178,18 @@ There are exactly three local PTC deployments plus `direct` (no PTC):
 
 | Selector | Owner | Outer tools | Engine |
 | --- | --- | --- | --- |
-| `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the JSONL client that `composition` links |
+| `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the cell client that `composition` links |
 | `js-ptc` | Product | `exec_js`, `wait_js`, JSON field `source` | rquickjs in the sidecar `plakous-js-host`, one process per agent |
 | `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.2.0` via monty-pool in `plakous-py-eval`, one checkout per agent incarnation |
 | `direct` | — | none | — |
 
-The engine contract includes the deployment identity —
-`rquickjs-host/<digest>` or `monty-pool/<worker digest>` — and checkpoints do
-not resume across engines. The official V8 `codex-code-mode-host` is **not
+The host identity carries the deployment — `rquickjs-host/<digest>` or
+`monty-pool/<worker digest>` — and checkpoints do not resume across engines.
+The JavaScript engine contract is the five-part recipe
+`sha256(ExecutionEnvironment, 1, ["plakous.cell-engine-contract.v1", engine,
+engine version, cell protocol revision, adapter revision])`, today
+`quickjs`, `rquickjs-0.12`, `plakous-cell-protocol.v1` and
+`plakous-js-host-bootstrap.v6`. The official V8 `codex-code-mode-host` is **not
 an evaluator**, and no host is embedded by `include_bytes`.
 
 Hosted and Plak locate workers by environment variable or as a sibling of the
@@ -6205,8 +6209,8 @@ interrupt cycles plus a wall bound, with no `console`, `WebAssembly`,
 `SharedArrayBuffer`, or `Atomics`. V1 bounds source, catalog, calls, yields,
 output, and wall time and joins timeout, termination, kill, and cleanup, but
 makes **no whole-process memory or OS-sandbox claim**. rquickjs is linked only
-by `plakous-js-runtime`; `plakous-js-eval` owns the engine-free protocol and
-sidecar client.
+by `plakous-js-runtime`; `plakous-cell` owns the engine-free cell protocol,
+client and session.
 
 Each JavaScript cell admits at most 8 MiB of generated callback payloads and
 4,096 callback items, with at most 64 pending nested calls and 64 timers.
@@ -6224,24 +6228,36 @@ drops it and the cell completes with its remaining output. Only genuinely
 unrepresentable content — an over-bound block, an undecodable media URL —
 fails the projection.
 
-The sidecar protocol caps each JSONL frame at 8 MiB before deserialization,
-including an unterminated frame. Its parent queues at most 32 command
+The sidecar speaks the cell protocol (`plakous-cell-protocol.v1`): each frame
+is a 4-byte big-endian length and one JSON value, capped at 8 MiB before any
+allocation, so a truncated length, an oversize length and an unterminated
+body are all loss. The worker opens with a `Hello` naming the protocol
+revision, engine and adapter; the client refuses any other worker before it
+sends its one `Configure` (the engine's heap and stack limits), and a worker
+that says nothing within 10 s is refused, killed and reaped within the
+two-second settle bound. A worker refuses a `Configure` naming other limits,
+and a repeated one, with `HostLost{ProtocolViolation}` and exits. Every later
+frame names its cell. A nested-call input or result nests at most 40
+containers deep, so its tagged frame stays within the JSON decoder's
+recursion limit; a deeper value is refused for that one call, inside the
+cell, and the worker survives. Its parent queues at most 32 command
 frames (`COMMAND_QUEUE_ITEMS`, shared with the embedded host and the child
 binary) and 64 event frames, with a separate 16 MiB queued-event byte budget.
 The parent retains the cancelable async reader and writer tasks and the child.
 Shutdown has a two-second voluntary wait and a two-second final kill/reap
 wait, then joins both I/O tasks. Drop never writes synchronously to a pipe.
 Nested-result delivery is Accepted only after the owning interpreter resolves
-the exact call; the sidecar carries a correlated `tool_result_accepted` control
-frame, and a correlated `tool_result_refused` frame when the result named no
-pending request. Enqueuing a command or writing it to a pipe does not prove acceptance.
-EOF, malformed frames and the explicit `host_lost` control frame resolve the
+the exact call; the worker answers each `NestedResult` with a correlated
+`Delivery` frame, `Accepted`, `Refused` when the result named no pending
+request, or `NotDelivered` when the evaluator never received it. Enqueuing a command or writing it to a pipe does not prove acceptance.
+EOF, malformed frames and the explicit `HostLost` frame resolve the
 cell completion as loss; the facade retains and joins its cell pump.
 Forced or unreaped sidecar cleanup remains Lost on repeated termination and
 shutdown; a later wait cannot relabel that observation as voluntary.
 No uncertain start or resource loss authorizes source replay. This resource, control and
-nested-failure contract is `plakous-js-eval-bootstrap.v5`; incompatible engine-bound
-sessions fail closed, without migration or source replay.
+nested-failure contract is the engine contract above; a session recorded under
+another engine contract (the JSONL `plakous-js-eval-bootstrap.v5` included)
+fails closed as incompatible, without migration or source replay.
 
 A JavaScript cell has separate script-execution and nested-settlement phases.
 When its top-level script completes, its outcome and stored writes are fixed and
@@ -8068,8 +8084,8 @@ description constants directly; `plakous-code-mode` is only its dev-dependency
 for offline protocol comparisons.
 
 `composition` is the evaluator capability on its own: the `plakous::agent`
-local composition attachment seam, the Code Mode presentation, and the JSONL sidecar client. It links
-`plakous-code-mode` and `plakous-js-eval` and no other optional Plakous crate,
+local composition attachment seam, the Code Mode presentation, and the cell client. It links
+`plakous-code-mode` and `plakous-cell` and no other optional Plakous crate,
 so it reaches neither `plakous-auth` nor `plakous-http` nor `plakous-py-eval`,
 and it does not link rquickjs. `composition-python` adds the Monty-backed Python PTC
 projection over that same attach path and implies `composition`.

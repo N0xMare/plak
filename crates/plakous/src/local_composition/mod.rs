@@ -71,14 +71,17 @@ const PYTHON_SOURCE_MAX_BYTES: usize = 256 * 1024;
 mod artifact;
 mod attach;
 mod evidence;
+mod integration;
 mod javascript;
 #[cfg(feature = "composition-python")]
 mod python;
+mod session;
 mod validate;
 
 pub use artifact::*;
 pub use attach::*;
 pub use evidence::*;
+use integration::{JavaScriptCellIntegration, JavaScriptPresentation, ProductJavaScript};
 pub(crate) use javascript::*;
 #[cfg(feature = "composition-python")]
 use python::{attach_python, neutral_python_descriptor};
@@ -103,14 +106,14 @@ mod shutdown_tests {
     use super::python::{PythonStructuredRunInput, truncate_python_items};
     use super::{
         Digest, DigestDomain, LocalCompositionContentItem, LocalCompositionEngineArtifact,
-        ProductExtensionLimits, attachment_binding_identity, monty_engine_contract_identity,
-        product_javascript_limits_are_exact, python_extension_limits,
-        rquickjs_sidecar_engine_contract_identity, validate_engine_contract_binding,
+        ProductExtensionLimits, attachment_binding_identity, cell_engine_contract_identity,
+        monty_engine_contract_identity, product_javascript_limits_are_exact,
+        python_extension_limits, validate_engine_contract_binding,
     };
 
     #[test]
     fn engine_contract_binding_accepts_exact_identity_and_rejects_neighbors() {
-        let Ok(exact) = rquickjs_sidecar_engine_contract_identity() else {
+        let Ok(exact) = cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER) else {
             panic!("exact engine identity must construct");
         };
         assert!(validate_engine_contract_binding(exact, exact).is_ok());
@@ -135,7 +138,7 @@ mod shutdown_tests {
     #[test]
     fn python_and_javascript_engine_contracts_are_closed_cross_pairs()
     -> Result<(), Box<dyn std::error::Error>> {
-        let codex = rquickjs_sidecar_engine_contract_identity()?;
+        let codex = cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?;
         let monty = monty_engine_contract_identity()?;
         assert_ne!(codex, monty);
         assert!(validate_engine_contract_binding(monty, monty).is_ok());

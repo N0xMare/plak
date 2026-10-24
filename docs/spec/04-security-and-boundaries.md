@@ -1362,7 +1362,8 @@ upstream bindings may use unsafe internally. The evaluator's heap and stack
 limits are construction-time bounds, **not an OS sandbox**.
 
 JavaScript's Rust-side callback payloads, event queues, accumulated output and
-JSONL transport frames have the independent hard limits in chapter 01 §9.4.
+cell protocol frames (`plakous-cell-protocol.v1`) have the independent hard
+limits in chapter 01 §9.4.
 Queue saturation is terminal evaluator loss; cancellation and loss control
 remain available under backpressure. The parent owns cancelable pipe tasks and
 bounded kill/reap escalation, so a worker that stops reading stdin cannot block
@@ -1411,7 +1412,7 @@ The vendored snapshot (package `plakous-codex-code-mode-protocol`, upstream
 `codex-code-mode-protocol`) is upstream version 0.153.3
 at an exact Git revision. Plakous uses its protocol and presentation types;
 there is no vendored remote-session client or upstream evaluator host. Code Mode
-execution uses the `plakous-js-eval` protocol/client and `plakous-js-runtime`
+execution uses the `plakous-cell` protocol/client and `plakous-js-runtime`
 worker or optional embedded runtime.
 
 The local interpreter override retains upstream provenance and license; its

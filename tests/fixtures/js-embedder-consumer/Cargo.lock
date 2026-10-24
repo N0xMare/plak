@@ -445,9 +445,9 @@ name = "plakous"
 version = "0.0.2"
 dependencies = [
  "plakous-agent",
+ "plakous-cell",
  "plakous-code-mode",
  "plakous-compose",
- "plakous-js-eval",
  "plakous-model",
  "plakous-prompts",
  "plakous-store",
@@ -477,6 +477,16 @@ dependencies = [
  "time",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "plakous-cell"
+version = "0.0.2"
+dependencies = [
+ "nix",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -517,16 +527,6 @@ version = "0.0.0"
 dependencies = [
  "plakous",
  "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "plakous-js-eval"
-version = "0.0.2"
-dependencies = [
- "nix",
- "serde",
- "serde_json",
  "tokio",
 ]
 

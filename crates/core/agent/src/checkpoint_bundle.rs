@@ -36,9 +36,9 @@ use wire::{
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
 /// the per-component revision constants inside the graph are frozen.
-// Epoch 30 encodes inline media bytes as canonical padded standard base64 and binds request-plan
-// digests to the request identity.
-pub const RUNTIME_FORMAT_EPOCH: u32 = 30;
+// Epoch 31 records cell-protocol engine contracts and the Code Mode descriptor identities that
+// name the cell worker revision.
+pub const RUNTIME_FORMAT_EPOCH: u32 = 31;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize = MAX_RUNTIME_RECORDS * 8 + 64;

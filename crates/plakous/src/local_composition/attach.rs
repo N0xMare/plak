@@ -52,7 +52,7 @@ impl LocalCompositionProfile {
         Ok(Self {
             kind: LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(descriptor.clone()),
             profile_identity: descriptor.identity(),
-            engine_contract_identity: rquickjs_sidecar_engine_contract_identity()?,
+            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
         })
     }
 
@@ -67,7 +67,7 @@ impl LocalCompositionProfile {
         Ok(Self {
             kind: LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(descriptor.clone()),
             profile_identity: descriptor.identity(),
-            engine_contract_identity: rquickjs_sidecar_engine_contract_identity()?,
+            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
         })
     }
 
@@ -82,7 +82,7 @@ impl LocalCompositionProfile {
         Ok(Self {
             kind: LocalCompositionProfileKind::ProductJavaScriptV1(descriptor.clone()),
             profile_identity: descriptor.identity(),
-            engine_contract_identity: rquickjs_sidecar_engine_contract_identity()?,
+            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
         })
     }
 
@@ -478,13 +478,11 @@ fn attach_codex_native_local_code_mode(
     sidecar: PathBuf,
     attachment: LocalCompositionAttachmentIdentity,
 ) -> Result<AgentBuilder, AgentError> {
-    let integration: Arc<dyn LocalCompositionIntegration> =
-        Arc::new(crate::js_code_mode::RquickjsCodeModeIntegration {
-            identity,
-            profile: CodexIntegrationProfile::ExactReference,
-            nested_catalog: Vec::new(),
-            sidecar,
-        });
+    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(JavaScriptCellIntegration {
+        worker: sidecar,
+        identity,
+        presentation: JavaScriptPresentation::CodexExact,
+    });
     let descriptor = neutral_descriptor(descriptor)
         .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
     builder.local_programmatic_composition(LocalCompositionConstruction {
@@ -506,13 +504,11 @@ fn attach_codex_minimal_local_code_mode(
         .iter()
         .map(|tool| tool.exposed_name().clone())
         .collect();
-    let integration: Arc<dyn LocalCompositionIntegration> =
-        Arc::new(crate::js_code_mode::RquickjsCodeModeIntegration {
-            identity,
-            profile: CodexIntegrationProfile::MinimalCore,
-            nested_catalog,
-            sidecar,
-        });
+    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(JavaScriptCellIntegration {
+        worker: sidecar,
+        identity,
+        presentation: JavaScriptPresentation::CodexMinimal { nested_catalog },
+    });
     let descriptor = neutral_minimal_descriptor(descriptor)
         .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
     builder.local_programmatic_composition(LocalCompositionConstruction {
@@ -520,10 +516,4 @@ fn attach_codex_minimal_local_code_mode(
         integration,
         attachment,
     })
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum CodexIntegrationProfile {
-    ExactReference,
-    MinimalCore,
 }

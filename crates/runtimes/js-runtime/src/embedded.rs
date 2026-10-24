@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use plakous_js_eval::NestedDeliveryOutcome;
+use plakous_cell::NestedDeliveryOutcome;
 use rquickjs::{
     CatchResultExt, Context, Ctx, Exception, Function, Persistent, Promise, Runtime,
     function::Func, promise::PromiseState,
@@ -174,7 +174,7 @@ impl EmbeddedHost {
     }
 
     fn spawn_with_limits(limits: EvalLimits) -> Result<Self, String> {
-        let (command_tx, command_rx) = std_mpsc::sync_channel(plakous_js_eval::COMMAND_QUEUE_ITEMS);
+        let (command_tx, command_rx) = std_mpsc::sync_channel(plakous_cell::COMMAND_QUEUE_ITEMS);
         let (event_tx, events) = mpsc::channel(256);
         let (loss_tx, loss) = watch::channel(None);
         let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
@@ -240,7 +240,7 @@ impl EmbeddedHost {
             #[cfg(test)]
             before_start: None,
         };
-        plakous_js_eval::encode_frame(&start)?;
+        plakous_cell::encode_frame(&start)?;
         self.command_tx
             .try_send(HostCommand::Start(start))
             .map_err(|_| "resource limit: QuickJS command queue unavailable".into())
@@ -292,7 +292,7 @@ impl EmbeddedHost {
     ) -> NestedDeliveryOutcome {
         // Both refusals below happen before anything is queued, so the
         // evaluator never learns of the result and cannot have acted on it.
-        if let Err(error) = plakous_js_eval::encode_frame(&value) {
+        if let Err(error) = plakous_cell::encode_frame(&value) {
             return NestedDeliveryOutcome::NotDelivered(error);
         }
         let (accepted, acknowledgement) = oneshot::channel();
@@ -402,8 +402,12 @@ fn new_runtime(
 ) -> Result<Runtime, String> {
     let runtime = Runtime::new()
         .map_err(|error| format!("failed to initialize embedded QuickJS runtime: {error}"))?;
-    runtime.set_memory_limit(64 * 1024 * 1024);
-    runtime.set_max_stack_size(512 * 1024);
+    let plakous_cell::EngineConfig::Quickjs {
+        heap_bytes,
+        stack_bytes,
+    } = plakous_cell::EngineConfig::QUICKJS;
+    runtime.set_memory_limit(usize::try_from(heap_bytes).unwrap_or(usize::MAX));
+    runtime.set_max_stack_size(usize::try_from(stack_bytes).unwrap_or(usize::MAX));
     let interrupt_signal = Arc::clone(interrupted);
     let stop_signal = Arc::clone(stopped);
     runtime.set_interrupt_handler(Some(Box::new(move || {

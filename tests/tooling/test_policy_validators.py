@@ -1078,7 +1078,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-code-mode",
                 "plakous-codex-code-mode-protocol",
                 "plakous-exchange",
-                "plakous-js-eval",
+                "plakous-cell",
                 "plakous-js-runtime",
                 "plakous-mcp",
                 "plakous-py-eval",
@@ -1293,11 +1293,11 @@ class RepositoryPolicyTests(unittest.TestCase):
         self.assertTrue(any("plakous-code-mode" in error for error in errors), errors)
 
         weakened_js = copy.deepcopy(workspace_manifests)
-        weakened_js["plakous-js-eval"]["lints"]["rust"]["unsafe_code"] = "allow"
+        weakened_js["plakous-cell"]["lints"]["rust"]["unsafe_code"] = "allow"
         errors = workspace_policy.validate_local_production_lints(
             weakened_js
         )
-        self.assertTrue(any("plakous-js-eval" in error for error in errors), errors)
+        self.assertTrue(any("plakous-cell" in error for error in errors), errors)
 
     def test_supported_compile_fixture_inventory_and_dependencies_are_exact(self) -> None:
         fixtures = workspace_policy.supported_compile_fixtures(self.workspace)
@@ -2251,7 +2251,7 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plakous-store"], 2**3 + 1)
         # git-cli, jj, maintainer, otel, test-hooks, test-support.
         self.assertEqual(profile_counts["plak"], 2**6 + 1)
-        self.assertNotIn("plakous-js-eval", profile_counts)
+        self.assertNotIn("plakous-cell", profile_counts)
         self.assertNotIn("plakous-js-runtime", profile_counts)
         for count in profile_counts.values():
             self.assertLessEqual(count, 2**feature_policy.MAX_OPTIONAL_FEATURES + 2)
@@ -2280,13 +2280,13 @@ class FeaturePolicyTests(unittest.TestCase):
             "plakous", ("native-subscriptions",), False, manifests
         )
         self.assertIn("plakous-code-mode", native)
-        self.assertIn("plakous-js-eval", native)
+        self.assertIn("plakous-cell", native)
         self.assertIn("plakous-auth", native)
         self.assertNotIn("plakous-openrouter", native)
         store = feature_policy.expected_closure("plakous-store", ("sqlite",), False, manifests)
         self.assertEqual(store, {"plakous-store", "plakous-agent", "plakous-model", "plakous-tools"})
-        sidecar = feature_policy.expected_closure("plakous-js-eval", ("embedded",), False, manifests)
-        self.assertEqual(sidecar, {"plakous-js-eval"})
+        cell = feature_policy.expected_closure("plakous-cell", (), False, manifests)
+        self.assertEqual(cell, {"plakous-cell"})
         self.assertIn("plakous-hosted", feature_policy.expected_closure("plak", (), True, manifests))
 
 

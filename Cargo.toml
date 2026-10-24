@@ -15,7 +15,7 @@ members = [
     "crates/providers/anthropic",
     "crates/common/attempt",
     "crates/common/auth",
-    "crates/runtimes/js-eval",
+    "crates/runtimes/cell",
     "crates/runtimes/js-runtime",
     "crates/runtimes/py-worker",
     "crates/runtimes/py-eval",
@@ -127,6 +127,7 @@ plakous-agent = { version = "0.0.2", path = "crates/core/agent", default-feature
 plakous-anthropic = { version = "0.0.2", path = "crates/providers/anthropic", default-features = false }
 plakous-attempt = { version = "0.0.2", path = "crates/common/attempt", default-features = false }
 plakous-auth = { version = "0.0.2", path = "crates/common/auth", default-features = false }
+plakous-cell = { version = "0.0.2", path = "crates/runtimes/cell", default-features = false }
 plakous-chat-completions = { version = "0.0.2", path = "crates/protocols/chat-completions", default-features = false }
 plakous-code-mode = { version = "0.0.2", path = "crates/runtimes/code-mode", default-features = false }
 plakous-compose = { version = "0.0.2", path = "crates/harness/compose", default-features = false }
@@ -134,7 +135,6 @@ plakous-exchange = { version = "0.0.2", path = "crates/protocols/exchange", defa
 plakous-host-protocol = { version = "0.0.2", path = "crates/hosting/host-protocol", default-features = false }
 plakous-hosted = { version = "0.0.2", path = "crates/hosting/hosted", default-features = false }
 plakous-http = { version = "0.0.2", path = "crates/common/http", default-features = false }
-plakous-js-eval = { version = "0.0.2", path = "crates/runtimes/js-eval", default-features = false }
 plakous-mcp = { version = "0.0.2", path = "crates/harness/mcp", default-features = false }
 plakous-messages = { version = "0.0.2", path = "crates/protocols/messages", default-features = false }
 plakous-model = { version = "0.0.2", path = "crates/core/model", default-features = false }
