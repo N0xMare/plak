@@ -44,7 +44,11 @@ fn agent_builder_default_policy_remains_read_only() -> TestResult {
 }
 
 #[test]
-fn harness_compaction_prefix_preserves_exact_processing_tier() -> TestResult {
+fn harness_compaction_prefix_matches_rendered_summary_request_contract() -> TestResult {
+    use plakous_model::{
+        HostedTool, InstructionBlock, InstructionSource, semantic_compaction_output_bound,
+    };
+
     let registry = one_mutating_tool_registry()?;
     let configured =
         configured_native_compact_model("test.route", Timestamp::new(1, 0)?, 1, &registry)?;
@@ -58,21 +62,65 @@ fn harness_compaction_prefix_preserves_exact_processing_tier() -> TestResult {
         selected,
         effective,
         priority.clone(),
-        Vec::new(),
+        vec![InstructionBlock::new(
+            InstructionSource::Profile,
+            "Keep the standing workspace rules.",
+        )?],
         behavior.tools.clone(),
-        Vec::new(),
+        vec![HostedTool::CodeInterpreter],
         OutputPolicy::default(),
-        ReasoningPolicy::default(),
+        ReasoningPolicy::Enabled {
+            effort: Some(ReasoningEffort::High),
+            requirement: CapabilityRequirement::Required,
+        },
         ToolChoice::Auto,
-        behavior.cache,
-        GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
+        CachePolicy::Enabled {
+            requirement: CapabilityRequirement::Required,
+        },
+        GenerationLimits::new(NonZeroU32::new(128), vec!["stop here".to_owned()])?,
         NativeOptions::default(),
-        None,
+        Some(Digest::sha256(
+            DigestDomain::ResolvedHarnessPlan,
+            1,
+            &[b"summary-plan"],
+        )?),
     )?
-    .with_context_admission_requirement(ContextAdmissionRequirement::AnyBounded)?;
+    .with_context_admission_requirement(ContextAdmissionRequirement::ReleaseVerifiedRequired)?;
+    let source = source.with_tool_projection(summary_projection(&source)?)?;
 
     let prefix = harness_compaction_prefix(&source, selected, effective)?;
 
+    // The hosted rendered-wire fixture constructs this same closed field set.
+    // Compare it with the production helper so a fixture copy cannot hide drift.
+    let expected = StableRequestPrefix::new(
+        source.selected_provider_configuration_id(),
+        source.effective_provider_configuration_id(),
+        source.processing_tier().clone(),
+        source.instructions().to_vec(),
+        source.tools().to_vec(),
+        source.hosted_tools().to_vec(),
+        source.output().clone(),
+        source.reasoning(),
+        ToolChoice::None,
+        source.cache(),
+        GenerationLimits::new(
+            Some(semantic_compaction_output_bound(
+                source.limits().max_output_tokens(),
+                source.reasoning(),
+            )),
+            Vec::new(),
+        )?,
+        source.native().clone(),
+        source.resolved_harness_plan_identity(),
+    )?
+    .with_context_admission_requirement(source.context_admission_requirement())?
+    .with_tool_projection(
+        source
+            .tool_projection()
+            .ok_or("source projection missing")?
+            .clone(),
+    )?;
+    assert_eq!(prefix.identity(), expected.identity());
     assert_eq!(prefix.processing_tier(), &priority);
     assert_eq!(prefix.selected_provider_configuration_id(), selected);
     assert_eq!(prefix.effective_provider_configuration_id(), effective);
@@ -81,6 +129,46 @@ fn harness_compaction_prefix_preserves_exact_processing_tier() -> TestResult {
     assert_eq!(prefix.limits().max_output_tokens(), NonZeroU32::new(128));
     assert_eq!(prefix.instructions(), source.instructions());
     Ok(())
+}
+
+fn summary_projection(
+    source: &StableRequestPrefix,
+) -> TestResult<plakous_model::CompiledToolProjectionV2> {
+    use plakous_model::{
+        CompiledToolProjectionV2, IntegrationClass, PortableToolSchemaV2,
+        ProjectedToolDefinitionV2, ToolProjectionTargetV2,
+    };
+
+    let identity = Digest::sha256(DigestDomain::ToolDefinition, 2, &[b"summary-projection"])?;
+    let canonical = source.tools()[0].definition().name().clone();
+    let schema = PortableToolSchemaV2::new(serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object", "properties": {}, "required": [], "additionalProperties": false
+    }))?;
+    Ok(CompiledToolProjectionV2::new(
+        ToolProjectionTargetV2::new(
+            IntegrationClass::Custom,
+            "test.protocol",
+            "test.route",
+            "test.profile",
+            "test.family",
+            "model",
+            "model",
+            source.effective_provider_configuration_id(),
+            1,
+        )?,
+        identity,
+        identity,
+        vec![ProjectedToolDefinitionV2::new(
+            canonical.clone(),
+            vec![canonical.clone()],
+            canonical,
+            "projected tool",
+            schema.clone(),
+            schema,
+            identity,
+        )?],
+    )?)
 }
 
 #[test]

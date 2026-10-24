@@ -957,6 +957,419 @@ pub(crate) mod suite {
         serde_json::from_slice(&compact).expect("wire body json")
     }
 
+    /// One route per product wire for the summary-request surface: what a
+    /// summary request carries depends on the wire and its policy, not on the
+    /// composition or topology.
+    const COMPACTION_WIRE_ROUTES: &[&str] = &[
+        "codex.direct.root",
+        "grok.direct.root",
+        "claude.direct.root",
+        "openrouter-chat.direct.root",
+        "openrouter-responses.direct.root",
+        "openrouter-messages.direct.root",
+        "openai-api.direct.root.single-agent",
+        "xai-api.direct.root.single-agent",
+        "anthropic-api.direct.root.single-agent",
+    ];
+
+    /// sha256 of each route's compact summary-request body. An instruction,
+    /// prefix or lowering change shows up here as a pin diff.
+    ///
+    /// Re-pin with:
+    /// `PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_compaction_wire -- --nocapture`
+    const COMPACTION_WIRE_PINS: &[(&str, &str)] = &[
+        (
+            "codex.direct.root",
+            "a5f5687f99b33e95e5234193eee4009186b53a89825a5146a1b08e2ef7ec9ffa",
+        ),
+        (
+            "grok.direct.root",
+            "c39f5f67b2b33bcdde49502de8e896f8297867860423029c0b93e14789294f6f",
+        ),
+        (
+            "claude.direct.root",
+            "96b06750d4efd619a3b22a056e96fb7ac1113263cd07dae3bba1dd394b71c57c",
+        ),
+        (
+            "openrouter-chat.direct.root",
+            "517cb2bb1290188681fa9f3218306c3ca3eb8d77d79ca10775c9cad4615d6e2c",
+        ),
+        (
+            "openrouter-responses.direct.root",
+            "25330da980b328305f2170b509ee75721cb1224951904caf83f59669b0d14c13",
+        ),
+        (
+            "openrouter-messages.direct.root",
+            "4e620a9aeee545f3ceceb51d4cc2515a0b44ca408b9a6c55386de13ff8c6a253",
+        ),
+        (
+            "openai-api.direct.root.single-agent",
+            "b5dbea3d259d56403fbdcaa716e1760d63773cf94170ea1e491ad9efd3512959",
+        ),
+        (
+            "xai-api.direct.root.single-agent",
+            "f72df713f4c339e60d6eadd92bd74524153e22ce7d215d2bddc399eb09bbff51",
+        ),
+        (
+            "anthropic-api.direct.root.single-agent",
+            "92f146bac4bfed50104dec5f26dde42aa2104adbbf48dcc28d4c697ac2ea489a",
+        ),
+    ];
+
+    /// The summary request a semantic fold of this route's first exchange
+    /// sends. It mirrors `harness_compaction_prefix` and
+    /// `harness_compaction_input` in `plakous-agent`: the turn's prefix with
+    /// `ToolChoice::None` and the compaction output bound, and the standard
+    /// instruction as one trailing user `RecentIntent` item.
+    /// Keep this field set aligned with `runtime/compaction/request.rs`;
+    /// the agent's `harness_compaction_prefix_matches_rendered_summary_request_contract`
+    /// test compares it with production, including a nonempty tool projection.
+    fn compaction_model_request(turn: &ModelRequest) -> ModelRequest {
+        let source = turn.stable_prefix();
+        let bound = plakous_model::semantic_compaction_output_bound(
+            source.limits().max_output_tokens(),
+            source.reasoning(),
+        );
+        let limits = GenerationLimits::new(Some(bound), Vec::new()).expect("compaction limits");
+        let mut prefix = plakous_model::StableRequestPrefix::new(
+            source.selected_provider_configuration_id(),
+            source.effective_provider_configuration_id(),
+            source.processing_tier().clone(),
+            source.instructions().to_vec(),
+            source.tools().to_vec(),
+            source.hosted_tools().to_vec(),
+            source.output().clone(),
+            source.reasoning(),
+            plakous_model::ToolChoice::None,
+            source.cache(),
+            limits,
+            source.native().clone(),
+            source.resolved_harness_plan_identity(),
+        )
+        .and_then(|prefix| {
+            prefix.with_context_admission_requirement(source.context_admission_requirement())
+        })
+        .expect("compaction prefix");
+        if let Some(projection) = source.tool_projection() {
+            prefix = prefix
+                .with_tool_projection(projection.clone())
+                .expect("compaction tool projection");
+        }
+        let reply = ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(0x11)).expect("reply entry"),
+            Actor::Assistant,
+            vec![ContentBlock::Text(
+                TextBlock::new("I read the workspace instructions.", None).expect("reply text"),
+            )],
+            Provenance::ModelOutput,
+        )
+        .expect("reply item");
+        let instruction = ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(0x12)).expect("instruction entry"),
+            Actor::User,
+            vec![ContentBlock::Text(
+                TextBlock::new(plakous_model::SEMANTIC_COMPACTION_INSTRUCTION, None)
+                    .expect("instruction text"),
+            )],
+            Provenance::UserInput,
+        )
+        .expect("instruction item");
+        let history = turn
+            .input()
+            .history()
+            .clone()
+            .append(
+                plakous_model::HistorySegment::new(
+                    plakous_model::HistorySegmentKind::Conversation,
+                    vec![reply],
+                )
+                .expect("reply segment"),
+            )
+            .and_then(|history| {
+                history.append(
+                    plakous_model::HistorySegment::new(
+                        plakous_model::HistorySegmentKind::RecentIntent,
+                        vec![instruction],
+                    )
+                    .expect("instruction segment"),
+                )
+            })
+            .expect("summary history");
+        let input = ConversationView::from_shared(history, turn.input().working().clone());
+        ModelRequest::from_parts(prefix, input, turn.metadata()).expect("summary request")
+    }
+
+    /// The route's first-turn body and the compact summary-request body.
+    fn compaction_wire(
+        spec: &prompts::RouteSpec,
+        home: &Path,
+        root: &Path,
+        cwd: &Path,
+        tools: &prompts::OccupancyTools,
+    ) -> (Value, u32, Vec<u8>) {
+        let extras = prompts::extras_for(spec, tools);
+        let (profile, facts) = prompts::assemble_profile(spec, &extras, home, root, cwd);
+        let turn = build_model_request(spec, &extras, &profile, &facts);
+        let summary = compaction_model_request(&turn);
+        let bound = summary
+            .stable_prefix()
+            .limits()
+            .max_output_tokens()
+            .expect("summary output bound")
+            .get();
+        let (turn_body, _) = lower_body(spec, turn);
+        let (summary_body, _) = lower_body(spec, summary);
+        (
+            serde_json::from_slice(&turn_body).expect("turn body json"),
+            bound,
+            summary_body,
+        )
+    }
+
+    fn content_text(content: &Value) -> Option<String> {
+        match content {
+            Value::String(text) => Some(text.clone()),
+            Value::Array(parts) => parts
+                .iter()
+                .rev()
+                .find_map(|part| part.get("text").and_then(Value::as_str))
+                .map(str::to_owned),
+            _ => None,
+        }
+    }
+
+    fn compaction_system_prefix(spec: &prompts::RouteSpec, body: &Value) -> Value {
+        let mut prefix = body
+            .get("system")
+            .or_else(|| body.get("instructions"))
+            .cloned()
+            .unwrap_or_else(|| {
+                Value::Array(
+                    body.get("input")
+                        .or_else(|| body.get("messages"))
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter(|item| {
+                            matches!(item["role"].as_str(), Some("system" | "developer"))
+                        })
+                        .cloned()
+                        .collect(),
+                )
+            });
+        if matches!(spec.provider, prompts::ProviderKind::Claude)
+            && let Some(text) = prefix[0]["text"].as_str()
+        {
+            // The attestation and logical prompt identity belong to this request,
+            // not the cache-affine instructional prefix.
+            let normalized = text
+                .split("; ")
+                .map(|field| {
+                    if field.starts_with("cch=") {
+                        "cch=<derived>"
+                    } else if field.starts_with("cc_prompt_id=") {
+                        "cc_prompt_id=<request>"
+                    } else {
+                        field
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            prefix[0]["text"] = Value::String(normalized);
+        }
+        prefix
+    }
+
+    /// What the summary request on one wire must carry, per design: the
+    /// instruction as the last user message, tools kept with selection
+    /// withdrawn (or both omitted where the Chat policy says so), the
+    /// compaction output bound, the turn's reasoning, OpenRouter's plugins and
+    /// parameter requirement, and the Messages cache breakpoint on the last
+    /// message.
+    fn compaction_wire_failures(
+        spec: &prompts::RouteSpec,
+        turn: &Value,
+        bound: u32,
+        summary: &Value,
+    ) -> Vec<String> {
+        let stem = &spec.file_stem;
+        let mut failures = Vec::new();
+        let mut check = |ok: bool, what: &str| {
+            if !ok {
+                failures.push(format!("{stem}: {what}"));
+            }
+        };
+        let instruction = plakous_model::SEMANTIC_COMPACTION_INSTRUCTION;
+        let (messages_key, tool_choice, output_key, reasoning_key) = match spec.provider {
+            prompts::ProviderKind::Claude
+            | prompts::ProviderKind::Platform(PlatformProvider::Anthropic)
+            | prompts::ProviderKind::OpenRouter {
+                wire: ProductResolvedProtocol::Messages,
+            } => (
+                "messages",
+                Some(serde_json::json!({"type": "none"})),
+                "max_tokens",
+                "thinking",
+            ),
+            prompts::ProviderKind::OpenRouter {
+                wire: ProductResolvedProtocol::Chat,
+            } => ("messages", None, "max_tokens", "reasoning"),
+            _ => (
+                "input",
+                Some(Value::String("none".to_owned())),
+                "max_output_tokens",
+                "reasoning",
+            ),
+        };
+        let last = summary[messages_key]
+            .as_array()
+            .and_then(|items| items.last());
+        check(
+            last.is_some_and(|item| item["role"] == "user"),
+            "the last message is not the user's",
+        );
+        check(
+            last.and_then(|item| content_text(&item["content"]))
+                .as_deref()
+                == Some(instruction),
+            "the last message does not end with the exact instruction",
+        );
+        if let Some(choice) = &tool_choice {
+            check(
+                summary["tools"]
+                    .as_array()
+                    .is_some_and(|tools| !tools.is_empty()),
+                "tools are not kept",
+            );
+            check(
+                summary["tools"] == turn["tools"],
+                "tools differ from the turn's",
+            );
+            check(&summary["tool_choice"] == choice, "tool_choice is not none");
+        } else {
+            // The OpenRouter Chat policy omits tools under `none`.
+            check(summary.get("tools").is_none(), "Chat tools are not omitted");
+            check(
+                summary.get("tool_choice").is_none(),
+                "Chat tool_choice is not omitted",
+            );
+        }
+        if matches!(spec.provider, prompts::ProviderKind::Codex) {
+            check(
+                summary.get(output_key).is_none(),
+                "Codex must omit the request output bound",
+            );
+        } else {
+            check(
+                summary.get(output_key).and_then(Value::as_u64) == Some(u64::from(bound)),
+                &format!("{output_key} is not the compaction bound {bound}"),
+            );
+        }
+        check(
+            summary.get(reasoning_key) == turn.get(reasoning_key),
+            "reasoning differs from the turn's",
+        );
+        check(
+            compaction_system_prefix(spec, summary) == compaction_system_prefix(spec, turn),
+            "system/instructions prefix differs from the turn's",
+        );
+        if matches!(spec.provider, prompts::ProviderKind::OpenRouter { .. }) {
+            // Chat and Messages disable OpenRouter's context compression;
+            // the Responses route sends no plugins.
+            let wants_plugins = !matches!(
+                spec.provider,
+                prompts::ProviderKind::OpenRouter {
+                    wire: ProductResolvedProtocol::Responses,
+                }
+            );
+            check(
+                summary.get("plugins").is_some() == wants_plugins
+                    && summary.get("plugins") == turn.get("plugins"),
+                "OpenRouter plugins differ from the turn's",
+            );
+            if wants_plugins {
+                check(
+                    summary["plugins"]
+                        == serde_json::json!([{"id": "context-compression", "enabled": false}]),
+                    "OpenRouter context compression is not disabled",
+                );
+            }
+            check(
+                summary["provider"]["require_parameters"] == turn["provider"]["require_parameters"],
+                "OpenRouter require_parameters differs from the turn's",
+            );
+            check(
+                summary["provider"]["require_parameters"] == Value::Bool(true),
+                "OpenRouter does not require parameters",
+            );
+        }
+        if messages_key == "messages" && tool_choice.is_some() {
+            check(
+                last.and_then(|item| item["content"].as_array())
+                    .and_then(|parts| parts.last())
+                    .is_some_and(|part| part.get("cache_control").is_some()),
+                "the Messages cache breakpoint is not on the last message",
+            );
+        }
+        failures
+    }
+
+    #[test]
+    fn rendered_compaction_wire_matches_pins() {
+        let (_tmp, home, root, cwd) = prompts::instruction_fixture();
+        let tools = prompts::occupancy_tools(&root);
+        let update = std::env::var("PLAK_UPDATE_GOLDENS").is_ok_and(|value| value == "1");
+        let wire_dir = prompts::wire_dir().join("compaction");
+        if update {
+            std::fs::create_dir_all(&wire_dir).expect("create compaction wire artifact dir");
+        }
+        let pins = COMPACTION_WIRE_PINS
+            .iter()
+            .copied()
+            .collect::<BTreeMap<_, _>>();
+        let routes = prompts::routes()
+            .into_iter()
+            .filter(|route| COMPACTION_WIRE_ROUTES.contains(&route.file_stem.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            routes.len(),
+            COMPACTION_WIRE_ROUTES.len(),
+            "every compaction wire route is in the matrix"
+        );
+        let mut failures = Vec::new();
+        let mut rows = Vec::new();
+        for spec in routes {
+            let (turn, bound, compact) = compaction_wire(&spec, &home, &root, &cwd, &tools);
+            let summary: Value = serde_json::from_slice(&compact).expect("summary body json");
+            failures.extend(compaction_wire_failures(&spec, &turn, bound, &summary));
+            if update {
+                std::fs::write(
+                    wire_dir.join(format!("{}.request.json", spec.file_stem)),
+                    serde_json::to_vec_pretty(&summary).expect("summary body json"),
+                )
+                .expect("write compaction wire artifact");
+            }
+            let digest = prompts::render_digest(std::str::from_utf8(&compact).expect("utf-8 body"));
+            match pins.get(spec.file_stem.as_str()) {
+                Some(pinned) if *pinned == digest => {}
+                Some(pinned) => failures.push(format!(
+                    "{}: summary request changed (pinned {pinned}, rendered {digest})",
+                    spec.file_stem
+                )),
+                None => failures.push(format!("{}: route has no pinned digest", spec.file_stem)),
+            }
+            rows.push(format!("        (\"{}\", \"{digest}\"),", spec.file_stem));
+        }
+        if prompts::print_pins_requested() {
+            println!("COMPACTION_WIRE_PINS:\n{}", rows.join("\n"));
+        }
+        assert!(
+            failures.is_empty(),
+            "summary request drift (re-pin with PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_compaction_wire -- --nocapture):\n\n{}",
+            failures.join("\n\n")
+        );
+    }
+
     fn responses_message_text(message: &Value) -> Option<&str> {
         let content = message.get("content")?;
         match content {

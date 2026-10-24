@@ -1323,8 +1323,8 @@ present. The full inventory:
 ### 2.5 Prompt renders are pinned in code, not in files
 
 What a model sees on each product route — harness costume, identity, enrolled
-`AGENTS.md`, every tool name and description, and the first-turn HTTP request
-body — is pinned by sha256 tables in `crates/hosting/hosted/tests/common/rendered_prompts.rs`
+`AGENTS.md`, every tool name and description, the first-turn HTTP request
+body, and each wire's compaction summary request body — is pinned by sha256 tables in `crates/hosting/hosted/tests/common/rendered_prompts.rs`
 and `rendered_lifecycle.rs`, with the wire lowering in `rendered_wire.rs`.
 Review headers assert the Plak User-Agent shape `plak/<semver>` separately and
 normalize its release version to `plak/<version>` before rendering and hashing;

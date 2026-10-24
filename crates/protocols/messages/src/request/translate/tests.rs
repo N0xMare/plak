@@ -275,6 +275,25 @@ fn lowering_fixture_with_customer_tool() -> TestResult<(ValidatedRequestPlan, Me
 fn lowering_fixture_with_tool_choice(
     tool_choice: ToolChoice,
 ) -> TestResult<(ValidatedRequestPlan, MessagesRequestPolicy)> {
+    lowering_fixture_with_tool_choice_and_history(
+        tool_choice,
+        vec![ConversationItem::new(
+            TestEntryId::try_from(TestUuid::from_u128(4))?,
+            Actor::User,
+            vec![ContentBlock::Text(TestTextBlock::new("hello", None)?)],
+            Provenance::UserInput,
+        )?],
+        plakous_model::GenerationLimits::default(),
+        ReasoningPolicy::Disabled,
+    )
+}
+
+fn lowering_fixture_with_tool_choice_and_history(
+    tool_choice: ToolChoice,
+    history: Vec<ConversationItem>,
+    limits: plakous_model::GenerationLimits,
+    reasoning: ReasoningPolicy,
+) -> TestResult<(ValidatedRequestPlan, MessagesRequestPolicy)> {
     let selected = selected_id(b"selected-tool-choice")?;
     let effective = effective_id(b"effective-tool-choice")?;
     let provenance = FactProvenance::new(
@@ -282,19 +301,23 @@ fn lowering_fixture_with_tool_choice(
         Timestamp::new(1_700_000_000, 0)?,
         None,
     );
-    let features = [Capability::Streaming, Capability::Tools]
-        .into_iter()
-        .map(|capability| {
-            (
-                capability,
-                FeatureSupport::new(
-                    Support::Native,
-                    CapabilityConstraints::default(),
-                    provenance,
-                ),
-            )
-        })
-        .collect();
+    let features = [
+        Capability::Streaming,
+        Capability::Tools,
+        Capability::Reasoning,
+    ]
+    .into_iter()
+    .map(|capability| {
+        (
+            capability,
+            FeatureSupport::new(
+                Support::Native,
+                CapabilityConstraints::default(),
+                provenance,
+            ),
+        )
+    })
+    .collect();
     let descriptor = ResolvedModelDescriptor::new_custom(
         ProtocolId::new("messages.test")?,
         RouteId::new("messages-test")?,
@@ -326,12 +349,7 @@ fn lowering_fixture_with_tool_choice(
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::from_items(vec![ConversationItem::new(
-            TestEntryId::try_from(TestUuid::from_u128(4))?,
-            Actor::User,
-            vec![ContentBlock::Text(TestTextBlock::new("hello", None)?)],
-            Provenance::UserInput,
-        )?])?,
+        ConversationView::from_items(history)?,
         RequestMetadata::for_turn(
             RunId::try_from(TestUuid::from_u128(1))?,
             TurnId::try_from(TestUuid::from_u128(2))?,
@@ -341,6 +359,8 @@ fn lowering_fixture_with_tool_choice(
     )
     .tools(vec![tool])
     .tool_choice(tool_choice)
+    .limits(limits)
+    .reasoning(reasoning)
     .build()?;
     let plan = descriptor.validate_request(request, ValidationMode::Strict)?;
     let policy = MessagesRequestPolicy::new(
@@ -352,8 +372,12 @@ fn lowering_fixture_with_tool_choice(
         Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"])?,
         selected,
         effective,
-        8_192,
-        None,
+        if reasoning == ReasoningPolicy::Disabled {
+            8_192
+        } else {
+            32_768
+        },
+        (reasoning != ReasoningPolicy::Disabled).then_some(1_024),
         "2023-06-01",
         "",
     );
@@ -367,6 +391,138 @@ fn tool_choice_none_with_tools_emits_none() -> TestResult {
     let body: Value = serde_json::from_slice(lowered.body())?;
     assert_eq!(body["tools"].as_array().map(Vec::len), Some(1));
     assert_eq!(body["tool_choice"], serde_json::json!({"type": "none"}));
+    Ok(())
+}
+
+/// A harness summary request ends on the exact instruction as the last user
+/// message, keeps its tools under `{"type": "none"}`, and carries the cache
+/// breakpoint on that last message.
+#[test]
+fn summary_request_ends_on_the_cached_instruction_with_tools_kept() -> TestResult {
+    let bound = plakous_model::semantic_compaction_output_bound(
+        std::num::NonZeroU32::new(8_192),
+        ReasoningPolicy::Disabled,
+    );
+    let text = |id: u128, actor: Actor, body: &str, provenance: Provenance| {
+        ConversationItem::new(
+            TestEntryId::try_from(TestUuid::from_u128(id))?,
+            actor,
+            vec![ContentBlock::Text(TestTextBlock::new(body, None)?)],
+            provenance,
+        )
+        .map_err(Into::<Box<dyn std::error::Error>>::into)
+    };
+    let (plan, policy) = lowering_fixture_with_tool_choice_and_history(
+        ToolChoice::None,
+        vec![
+            text(4, Actor::User, "fix the parser", Provenance::UserInput)?,
+            text(5, Actor::Assistant, "fixed", Provenance::ModelOutput)?,
+            text(
+                6,
+                Actor::User,
+                plakous_model::SEMANTIC_COMPACTION_INSTRUCTION,
+                Provenance::UserInput,
+            )?,
+        ],
+        plakous_model::GenerationLimits::new(Some(bound), Vec::new())?,
+        ReasoningPolicy::Disabled,
+    )?;
+    let lowered = lower_request(
+        &plan,
+        &policy
+            .with_prompt_cache(true)
+            .with_top_level_prompt_cache(false)
+            .with_plugins(OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS)
+            .with_router_policy(MessagesRouterPolicy::gateway_managed(None, None)?),
+        ToolOwnership::default(),
+    )?;
+    let body: Value = serde_json::from_slice(lowered.body())?;
+    assert_eq!(body["tools"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["tool_choice"], serde_json::json!({"type": "none"}));
+    let last = body["messages"]
+        .as_array()
+        .and_then(|messages| messages.last())
+        .ok_or("summary request has no messages")?;
+    assert_eq!(last["role"], "user");
+    assert_eq!(body["max_tokens"], bound.get());
+    assert_eq!(body["thinking"], serde_json::json!({"type": "disabled"}));
+    assert_eq!(body["provider"]["require_parameters"], true);
+    assert_eq!(
+        body["plugins"],
+        serde_json::json!([{"id": "context-compression", "enabled": false}])
+    );
+    let block = last["content"]
+        .as_array()
+        .and_then(|blocks| blocks.last())
+        .ok_or("last message content")?;
+    assert_eq!(
+        block["text"],
+        plakous_model::SEMANTIC_COMPACTION_INSTRUCTION
+    );
+    assert_eq!(
+        block["cache_control"],
+        serde_json::json!({"type": "ephemeral"})
+    );
+    Ok(())
+}
+
+#[test]
+fn summary_request_manual_thinking_respects_the_configured_cap() -> TestResult {
+    let budget = std::num::NonZeroU32::new(4_096).ok_or("budget")?;
+    let reasoning = ReasoningPolicy::Enabled {
+        effort: Some(ReasoningEffort::TokenBudget(budget)),
+        requirement: CapabilityRequirement::Required,
+    };
+    for configured in [32_768, 4_096, 2_048] {
+        let bound = plakous_model::semantic_compaction_output_bound(
+            std::num::NonZeroU32::new(configured),
+            reasoning,
+        );
+        let (plan, policy) = lowering_fixture_with_tool_choice_and_history(
+            ToolChoice::None,
+            vec![ConversationItem::new(
+                TestEntryId::try_from(TestUuid::from_u128(44))?,
+                Actor::User,
+                vec![ContentBlock::Text(TestTextBlock::new(
+                    plakous_model::SEMANTIC_COMPACTION_INSTRUCTION,
+                    None,
+                )?)],
+                Provenance::UserInput,
+            )?],
+            plakous_model::GenerationLimits::new(Some(bound), Vec::new())?,
+            reasoning,
+        )?;
+        let lowered = lower_request(&plan, &policy, ToolOwnership::default());
+        if bound <= budget {
+            let error = lowered
+                .err()
+                .ok_or("invalid thinking budget was accepted")?;
+            assert_eq!(error.kind(), MessagesRequestErrorKind::InvalidRequest);
+            assert!(error.message().contains("below max_tokens"));
+            let (turn, turn_policy) = lowering_fixture_with_tool_choice_and_history(
+                ToolChoice::Auto,
+                plan.request().input().items().iter().cloned().collect(),
+                plakous_model::GenerationLimits::new(
+                    std::num::NonZeroU32::new(configured),
+                    Vec::new(),
+                )?,
+                reasoning,
+            )?;
+            let turn_error = lower_request(&turn, &turn_policy, ToolOwnership::default())
+                .err()
+                .ok_or("invalid live-turn thinking budget was accepted")?;
+            assert_eq!(error.kind(), turn_error.kind());
+            assert_eq!(error.message(), turn_error.message());
+        } else {
+            assert_eq!(
+                bound.get(),
+                budget.get() + plakous_model::SEMANTIC_COMPACTION_SUMMARY_TOKENS
+            );
+            let body: Value = serde_json::from_slice(lowered?.body())?;
+            assert_eq!(body["max_tokens"], bound.get());
+            assert_eq!(body["thinking"]["budget_tokens"], budget.get());
+        }
+    }
     Ok(())
 }
 

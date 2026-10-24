@@ -1703,6 +1703,96 @@ fn tool_choice_none_omits_tools_when_omit_knob_on() -> TestResult {
     Ok(())
 }
 
+/// A harness summary request: the exchange so far, then the instruction as
+/// the trailing user message, under `ToolChoice::None` with the turn's tools.
+fn summary_request_plan(fixture: &Fixture) -> TestResult<ValidatedRequestPlan> {
+    let bound = plakous_model::semantic_compaction_output_bound(
+        NonZeroU32::new(512),
+        ReasoningPolicy::Disabled,
+    );
+    let request = ModelRequest::builder(
+        fixture.selected,
+        fixture.effective,
+        ConversationView::from_items(vec![
+            item(
+                41,
+                Actor::User,
+                vec![ContentBlock::Text(TextBlock::new("fix the parser", None)?)],
+            )?,
+            item(
+                42,
+                Actor::Assistant,
+                vec![ContentBlock::Text(TextBlock::new("fixed", None)?)],
+            )?,
+            item(
+                43,
+                Actor::User,
+                vec![ContentBlock::Text(TextBlock::new(
+                    plakous_model::SEMANTIC_COMPACTION_INSTRUCTION,
+                    None,
+                )?)],
+            )?,
+        ])?,
+        RequestMetadata::for_turn(
+            RunId::try_from(Uuid::from_u128(1))?,
+            TurnId::try_from(Uuid::from_u128(2))?,
+            AttemptId::try_from(Uuid::from_u128(3))?,
+            Timestamp::new(1_700_000_001, 0)?,
+        ),
+    )
+    .tools(fixture.tools.clone())
+    .tool_choice(ToolChoice::None)
+    .limits(plakous_model::GenerationLimits::new(
+        Some(bound),
+        Vec::new(),
+    )?)
+    .build()?;
+    Ok(fixture
+        .descriptor
+        .validate_request(request, ValidationMode::Strict)?)
+}
+
+/// The summary request ends on the exact instruction as a user message under
+/// either tool-omission setting; the setting decides only whether the tools
+/// travel with `tool_choice: "none"` or both are omitted.
+#[test]
+fn summary_request_ends_on_the_instruction_under_either_tool_policy() -> TestResult {
+    let fixture = Fixture::new()?;
+    let plan = summary_request_plan(&fixture)?;
+    for omit in [false, true] {
+        let mut policy = fixture
+            .policy(&plan)?
+            .with_tool_choice_none_omits_tools(omit)
+            .with_plugins(OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS);
+        policy.router = Some(ChatRouterPolicy::gateway_managed(None, None)?);
+        let body: Value = serde_json::from_slice(lower_request(&plan, &policy)?.body())?;
+        let last = body["messages"]
+            .as_array()
+            .and_then(|messages| messages.last())
+            .ok_or("summary request has no messages")?;
+        assert_eq!(last["role"], "user");
+        assert_eq!(body["max_completion_tokens"], 512);
+        assert_eq!(body["provider"]["require_parameters"], true);
+        assert!(body.get("reasoning").is_none());
+        assert_eq!(
+            body["plugins"],
+            serde_json::json!([{"id": "context-compression", "enabled": false}])
+        );
+        assert_eq!(
+            last["content"],
+            plakous_model::SEMANTIC_COMPACTION_INSTRUCTION
+        );
+        if omit {
+            assert!(body.get("tools").is_none());
+            assert!(body.get("tool_choice").is_none());
+        } else {
+            assert_eq!(body["tool_choice"], "none");
+            assert_eq!(body["tools"].as_array().map(Vec::len), Some(2));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn tool_choice_auto_omission_is_dialect_controlled() -> TestResult {
     let fixture = Fixture::new()?;

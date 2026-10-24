@@ -1039,6 +1039,60 @@ fn openrouter_tools_emit_documented_null_strict_and_serial_authority() -> TestRe
     Ok(())
 }
 
+/// A harness summary request ends on the exact instruction as the last user
+/// message, keeps its tools under `tool_choice: "none"`, and sends its output
+/// bound.
+#[test]
+fn summary_request_ends_on_the_instruction_with_tools_kept() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let bound = plakous_model::semantic_compaction_output_bound(None, ReasoningPolicy::Disabled);
+    let reply = ConversationItem::new(
+        id::<EntryId>(12)?,
+        Actor::Assistant,
+        vec![ContentBlock::Text(TextBlock::new("fixed", None)?)],
+        Provenance::ModelOutput,
+    )?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![
+            user(11, "fix the parser")?,
+            reply,
+            user(13, plakous_model::SEMANTIC_COMPACTION_INSTRUCTION)?,
+        ])?,
+        metadata()?,
+    )
+    .tools(vec![tool("lookup", false)?])
+    .tool_choice(ToolChoice::None)
+    .limits(GenerationLimits::new(Some(bound), Vec::new())?)
+    .build()?;
+    let lowered = lower_responses_request(
+        &request,
+        ResponsesRequestConfig::new(
+            &protocol,
+            Some(&family),
+            &model,
+            ResponsesRequestPolicy::openrouter_stateless(),
+            None,
+        ),
+    )?
+    .with_router_policy(&ResponsesRouterPolicy::gateway_managed(None, None)?)?;
+    let body = lowered.body();
+    assert_eq!(body["tool_choice"], "none");
+    assert_eq!(body["tools"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["max_output_tokens"], bound.get());
+    assert_eq!(body["provider"]["require_parameters"], true);
+    let last = body["input"]
+        .as_array()
+        .and_then(|items| items.last())
+        .ok_or("summary request has no input")?;
+    assert_eq!(last["role"], "user");
+    let text = last["content"]
+        .as_array()
+        .and_then(|parts| parts.last())
+        .and_then(|part| part["text"].as_str());
+    assert_eq!(text, Some(plakous_model::SEMANTIC_COMPACTION_INSTRUCTION));
+    Ok(())
+}
+
 fn target_values() -> Result<(ProtocolId, ModelFamilyId, ModelId), Box<dyn std::error::Error>> {
     Ok((
         ProtocolId::new("openai.responses")?,
