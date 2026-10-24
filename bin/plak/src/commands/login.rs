@@ -438,8 +438,8 @@ fn read_exact_compatibility_response(
     .and_then(|()| {
         writeln!(
             stderr,
-            "expires: {} UTC; after that this build refuses {account} until a newer build replaces the profile",
-            profile_date(notice.expires_at)
+            "expires: {}; after that this build refuses {account} until a newer build replaces the profile",
+            crate::presentation::format_unix_seconds(notice.expires_at)
         )
     })
     .and_then(|()| write!(stderr, "Continue? [y/N] "))

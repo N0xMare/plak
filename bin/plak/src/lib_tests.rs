@@ -274,7 +274,7 @@ fn compatibility_prompt_states_its_dates_and_a_closed_stdin_refuses_with_the_rem
         "codex uses an experimental revision-pinned compatibility integration.\n\
              profile: fixture-profile\n\
              reviewed: 2026-07-31 UTC\n\
-             expires: 2026-10-31 UTC; after that this build refuses codex until a newer build replaces the profile\n\
+             expires: 2026-10-29T00:00:00Z; after that this build refuses codex until a newer build replaces the profile\n\
              Continue? [y/N] \n"
     );
     assert_eq!(backend.calls, vec![Call::Status(NativeProvider::Codex)]);
@@ -788,7 +788,7 @@ impl AccountOps for FakeBackend {
             profile_id: "fixture-profile",
             notice_revision: "exact-review",
             reviewed_at: 1_785_456_000,
-            expires_at: 1_793_491_199,
+            expires_at: 1_793_232_000,
         }
     }
 

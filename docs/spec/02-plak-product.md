@@ -2034,10 +2034,11 @@ and its parents are directories they own and can write.
   they admit is the one the turn runs with; its warnings go to stderr through
   the multi-line sanitizer of §3.5.
 - **The subscription compatibility notice is answered on stdin.** Before an
-  account's first use (and again after a profile revision), `plak login`,
-  `plak refresh`, `plak logout <account>`, `plak models` and `plak run` print
-  the account, the compiled profile id, its review date and its expiry date
-  (UTC, with the consequence of expiry) to stderr and read one line: `y`, `yes`
+  account's first use (and again after a profile or notice revision), `plak
+  login`, `plak refresh`, `plak logout <account>`, `plak models` and `plak run`
+  print the account, the compiled profile id, its review date (UTC) and its
+  exclusive expiry instant (RFC 3339, with the consequence of expiry) to stderr
+  and read one line: `y`, `yes`
   or the exact notice revision accepts. When stdin is not a terminal, or no
   answer could be read, stderr ends the prompt line itself. A non-interactive
   `plak run` accepts by piping `y` on stdin (the prompt itself follows `--`,
