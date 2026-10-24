@@ -314,6 +314,20 @@ pub(crate) fn copy_layout_kind(path: &Path) -> Option<SessionVcs> {
     }
 }
 
+impl SessionVcs {
+    /// The copy's directory decides the backend. `.plak/worktrees/` is git and
+    /// `.plak/workspaces/` is jj even after the launch checkout is colocated.
+    /// The layout is the leaf's grandparent and parent, not an earlier
+    /// `.plak` directory the path happens to contain. Anything else is
+    /// [`detect_vcs`].
+    pub(crate) fn of_copy(path: &Path) -> Result<Self, VcsError> {
+        if let Some(kind) = copy_layout_kind(path) {
+            return Ok(kind);
+        }
+        detect_vcs(path)
+    }
+}
+
 pub(crate) fn detect_vcs(launch: &Path) -> Result<SessionVcs, VcsError> {
     if launch.join(".jj").exists() && super::native_jj::ENABLED {
         Ok(SessionVcs::Jj)
@@ -379,7 +393,7 @@ pub(crate) fn seal_candidate(
     namespace: &str,
     candidate_id: &str,
 ) -> Result<VcsSnapshot, VcsError> {
-    let vcs = detect_vcs(child_path).or_else(|_| detect_parent_vcs(child_path))?;
+    let vcs = SessionVcs::of_copy(child_path)?;
     let _namespace_guard = if vcs == SessionVcs::Git {
         let output = git_query(child_path, &["rev-parse", "--git-common-dir"])
             .map_err(|error| VcsError::seal_failed(error.to_string()))?;
@@ -393,7 +407,10 @@ pub(crate) fn seal_candidate(
     } else {
         None
     };
-    let sealed = snapshot(child_path, candidate_id)?;
+    let sealed = match vcs {
+        SessionVcs::Git => git_snapshot(child_path, candidate_id),
+        SessionVcs::Jj => jj_snapshot(child_path),
+    }?;
     if vcs == SessionVcs::Git {
         let reference = candidate_ref(namespace, candidate_id);
         let mut args = vec!["update-ref", reference.as_str(), sealed.commit.as_str()];
@@ -443,7 +460,7 @@ pub(crate) fn unpin_candidate(
     namespace: &str,
     candidate_id: &str,
 ) -> Result<(), VcsError> {
-    match detect_vcs(child_path).or_else(|_| detect_parent_vcs(child_path))? {
+    match SessionVcs::of_copy(child_path)? {
         SessionVcs::Jj => crate::native_jj::pin(child_path, namespace, candidate_id, None),
         SessionVcs::Git => {
             let reference = candidate_ref(namespace, candidate_id);
@@ -479,6 +496,11 @@ pub(crate) fn adopt_candidate(
     match detect_vcs(target_path).or_else(|_| detect_parent_vcs(target_path)) {
         Ok(SessionVcs::Git) => {
             git_adopt(target_path, base_commit, &candidate.commit, expected_target)
+        }
+        Ok(SessionVcs::Jj) if matches!(SessionVcs::of_copy(child_path), Ok(SessionVcs::Git)) => {
+            Err(AdoptFailure::Unavailable(
+                "git candidate into a jj target: not yet supported".to_owned(),
+            ))
         }
         Ok(SessionVcs::Jj) => jj_adopt(
             target_path,
@@ -527,7 +549,7 @@ pub(crate) fn unmint_copy(launch: &Path, path: &Path) -> Result<(), VcsError> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| VcsError::mint_unavailable("workspace path has no identity"))?;
-    match detect_vcs(launch)? {
+    match SessionVcs::of_copy(path)? {
         SessionVcs::Jj => {
             crate::native_jj::forget(launch, agent_id)?;
             std::fs::remove_dir_all(path)
@@ -608,15 +630,16 @@ pub(crate) fn unmint_copy(launch: &Path, path: &Path) -> Result<(), VcsError> {
 }
 
 pub(crate) fn copy_is_dirty(path: &Path) -> bool {
-    match detect_vcs(path).or_else(|_| detect_parent_vcs(path)) {
+    match SessionVcs::of_copy(path) {
         Ok(SessionVcs::Jj) => jj_workspace_dirty(path),
         _ => git_worktree_dirty(path),
     }
 }
 
 /// `(ahead, behind)` of `child` relative to `parent`. Omit from list JSON when `None`.
+/// The child's layout chooses the backend, not the parent's current VCS.
 pub(crate) fn ahead_behind(child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)> {
-    match detect_vcs(parent).or_else(|_| detect_vcs(child)) {
+    match SessionVcs::of_copy(child) {
         Ok(SessionVcs::Jj) => jj_ahead_behind(child, parent, base),
         Ok(SessionVcs::Git) => git_ahead_behind(child, parent, base),
         Err(_) => None,
@@ -650,7 +673,7 @@ fn detect_parent_vcs(path: &Path) -> Result<SessionVcs, VcsError> {
 
 /// Display label for `list_agents` `branch` (git branch or jj workspace name).
 pub(crate) fn workspace_label(path: &Path) -> Option<String> {
-    match detect_vcs(path).or_else(|_| detect_parent_vcs(path)) {
+    match SessionVcs::of_copy(path) {
         Ok(SessionVcs::Jj) => {
             let name = path.file_name()?.to_str()?;
             if path

@@ -549,6 +549,226 @@ fn secret_only_changes_count_nothing() {
     assert_eq!(ahead_behind(&minted.path, repo.path(), None), None);
 }
 
+fn colocate_jj(repo: &Path) {
+    assert!(
+        Command::new(std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into()))
+            .args([
+                "--no-pager",
+                "--config",
+                "user.name=plak",
+                "--config",
+                "user.email=plak@local",
+                "git",
+                "init",
+                "--colocate",
+            ])
+            .env("JJ_CONFIG", "/dev/null")
+            .current_dir(repo)
+            .status()
+            .unwrap()
+            .success(),
+        "jj git init --colocate failed"
+    );
+}
+
+#[test]
+fn git_worktree_copy_unmints_through_git_after_colocation() {
+    if !jj_available() {
+        return;
+    }
+    let repo = git_repo();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "t-c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    colocate_jj(repo.path());
+    assert_eq!(detect_vcs(repo.path()).unwrap(), SessionVcs::Jj);
+    SystemVcs.unmint(repo.path(), &minted.path).unwrap();
+    assert!(!minted.path.exists());
+    assert!(
+        !git_run(
+            repo.path(),
+            &["show-ref", "--verify", "--quiet", "refs/heads/plak/t-c1"],
+        )
+        .unwrap()
+        .status
+        .success()
+    );
+}
+
+#[test]
+fn git_fork_seals_after_launch_colocation() {
+    if !jj_available() {
+        return;
+    }
+    let repo = git_repo();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(minted.path.join("H.txt"), "child\n").unwrap();
+    colocate_jj(repo.path());
+    std::fs::create_dir(minted.path.join(".jj")).unwrap();
+    let refused =
+        maintenance::inspect(repo.path(), std::slice::from_ref(&minted.path), &[]).unwrap_err();
+    assert!(
+        refused.detail.contains("UNADOPTED COMMITS"),
+        "{}",
+        refused.detail
+    );
+    let namespace = digest_text("fixture");
+    let sealed = SystemVcs.seal(&minted.path, &namespace, "cand-1").unwrap();
+    let reference = candidate_ref(&namespace, "cand-1");
+    assert!(
+        git_run(
+            repo.path(),
+            &["show-ref", "--verify", "--quiet", reference.as_str()],
+        )
+        .unwrap()
+        .status
+        .success(),
+        "seal did not pin {reference}"
+    );
+    let refused = SystemVcs
+        .adopt(
+            repo.path(),
+            &minted.path,
+            &minted.base.commit,
+            None,
+            &sealed,
+            None,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(refused, AdoptFailure::Unavailable(ref reason) if reason.contains("git candidate into a jj target")),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn colocated_launch_keeps_all_copy_queries_and_maintenance_on_git() {
+    if !jj_available() {
+        return;
+    }
+    let repo = git_repo();
+    std::fs::write(repo.path().join(".gitignore"), "target/\n").unwrap();
+    git_in(repo.path(), &["add", ".gitignore"]);
+    git_in(repo.path(), &["commit", "-qm", "ignore build cache"]);
+    let copy = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(copy.path.join("WIP.txt"), "work\n").unwrap();
+    colocate_jj(repo.path());
+    let namespace = digest_text("colocation");
+    let sealed = SystemVcs.seal(&copy.path, &namespace, "candidate").unwrap();
+    assert!(SystemVcs.dirty(&copy.path));
+    assert_eq!(SystemVcs.label(&copy.path).as_deref(), Some("plak/c1"));
+    assert_eq!(
+        SystemVcs.ahead_behind(&copy.path, repo.path(), Some(&copy.base.commit)),
+        Some((1, 0))
+    );
+    assert!(maintenance::dirty(&copy.path).unwrap());
+    std::fs::create_dir(copy.path.join("target")).unwrap();
+    std::fs::write(copy.path.join("target/cache"), "disposable\n").unwrap();
+    maintenance::check_reclaimable(&copy.path, Some(&sealed)).unwrap();
+    assert!(maintenance::trim_disposable_target(&copy.path).unwrap());
+    assert!(!copy.path.join("target").exists());
+    let refused =
+        maintenance::inspect(repo.path(), std::slice::from_ref(&copy.path), &[]).unwrap_err();
+    assert!(
+        refused.detail.contains("UNADOPTED COMMITS"),
+        "{}",
+        refused.detail
+    );
+    let refused = SystemVcs
+        .adopt(
+            repo.path(),
+            &copy.path,
+            &copy.base.commit,
+            None,
+            &sealed,
+            None,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(refused, AdoptFailure::Unavailable(reason) if reason.contains("git candidate into a jj target: not yet supported"))
+    );
+    SystemVcs
+        .unpin(&copy.path, &namespace, "candidate")
+        .unwrap();
+    assert!(
+        !git_run(
+            repo.path(),
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &candidate_ref(&namespace, "candidate")
+            ]
+        )
+        .unwrap()
+        .status
+        .success()
+    );
+}
+
+#[test]
+fn jj_adoption_omits_file_listing_even_when_files_changed_is_nonzero() {
+    if !jj_available() {
+        return;
+    }
+    let repo = jj_repo();
+    let copy = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(copy.path.join("WORK.txt"), "work\n").unwrap();
+    let sealed = SystemVcs
+        .seal(&copy.path, &digest_text("jj-receipt"), "candidate")
+        .unwrap();
+    let landing = SystemVcs
+        .adopt(
+            repo.path(),
+            &copy.path,
+            &copy.base.commit,
+            copy.base.change_id.as_deref(),
+            &sealed,
+            None,
+        )
+        .unwrap();
+    assert_ne!(landing.files_changed, 0);
+    assert_eq!(landing.receipt_files(), (Vec::new(), false));
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("WORK.txt")).unwrap(),
+        "work\n"
+    );
+}
+
 #[test]
 fn git_only_build_snapshots_colocated_repository_and_nested_paths() {
     if cfg!(feature = "jj-lib") || !cfg!(feature = "git-cli") {

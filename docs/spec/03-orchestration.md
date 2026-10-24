@@ -1026,6 +1026,8 @@ files_truncated? }`. `files` names at most 64 paths as `"M src/lib.rs"` or
 `files_truncated` is set when the list was cut. A receipt from an older build
 omits both. Non-UTF-8 file names use replacement characters in the receipt;
 the landing still preserves the original name bytes. Section 7 owns the semantics.
+JJ receipts currently omit `files` and `files_truncated` even when
+`files_changed` is nonzero; listing changed paths is currently Git-only.
 
 Adoption succeeds when the caller has running jobs, with a warning line naming
 the processes still using the checkout.
@@ -1345,6 +1347,16 @@ snapshot; process tools are allowed, Plak file writes are not.
 The single VCS primitive is `snapshot(path) -> { commit, content, change_id }`.
 It computes the base at mint and the candidate at seal, so a copy and its
 candidate are always compared on the same identity.
+
+Copy operations other than mint and the adopt target dispatch by artifact
+layout, not by the launch checkout's current VCS. The exact root
+`<launch>/.plak/worktrees/<id>` is git; `<launch>/.plak/workspaces/<id>` is jj.
+Only the leaf's parent and grandparent classify a copy, through one shared
+layout helper; nested or unrelated paths are detected from that path.
+After `jj git init --colocate`, a git copy
+still seals, unpins, unmints, and reports dirty and ahead/behind through git.
+Adopting a git candidate into a checkout that now detects as jj is
+`mint_unavailable` (`git candidate into a jj target: not yet supported`).
 
 ### 6.1 git
 

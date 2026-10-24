@@ -11,7 +11,7 @@ use super::{ReclamationRefusal, VcsError, git_query, git_run};
 /// merely because a checkout is idle. Only exact minted fences and the local
 /// build cache are disposable; uncertainty retains the entire checkout.
 pub fn check_reclaimable(path: &Path, sealed: Option<&super::VcsSnapshot>) -> Result<(), VcsError> {
-    if super::detect_vcs(path)? != super::SessionVcs::Git {
+    if super::SessionVcs::of_copy(path)? != super::SessionVcs::Git {
         return Err(VcsError::reclamation_refused(
             ReclamationRefusal::StaticCoverage,
             "workspace coverage inspection unavailable for JJ",
@@ -119,7 +119,8 @@ pub fn trim_disposable_target(path: &Path) -> Result<bool, VcsError> {
     let Ok(metadata) = std::fs::symlink_metadata(&target) else {
         return Ok(false);
     };
-    if !metadata.file_type().is_dir() || super::detect_vcs(path)? != super::SessionVcs::Git {
+    if !metadata.file_type().is_dir() || super::SessionVcs::of_copy(path)? != super::SessionVcs::Git
+    {
         return Ok(false);
     }
     if contains_repository(&target)
@@ -182,7 +183,7 @@ fn contains_repository(path: &Path) -> std::io::Result<bool> {
 
 /// A read-only changes probe; callers retain unresolved work on probe failure.
 pub fn dirty(path: &Path) -> Result<bool, VcsError> {
-    match super::detect_vcs(path)? {
+    match super::SessionVcs::of_copy(path)? {
         // The ordinary JJ occupancy probe snapshots and publishes its working
         // copy. Export is read-only, so uncertainty stays an inert reference.
         super::SessionVcs::Jj => Err(VcsError::mint_unavailable(
@@ -226,9 +227,13 @@ pub fn inspect(
     worktrees: &[PathBuf],
     references: &[String],
 ) -> Result<Vec<bool>, VcsError> {
-    if matches!(super::detect_vcs(launch), Ok(super::SessionVcs::Jj))
-        || worktrees.iter().any(|path| path.join(".jj").exists())
-    {
+    let git_copy = worktrees
+        .iter()
+        .any(|path| matches!(super::SessionVcs::of_copy(path), Ok(super::SessionVcs::Git)));
+    let jj_copy = worktrees
+        .iter()
+        .any(|path| matches!(super::SessionVcs::of_copy(path), Ok(super::SessionVcs::Jj)));
+    if jj_copy || (matches!(super::detect_vcs(launch), Ok(super::SessionVcs::Jj)) && !git_copy) {
         return Err(VcsError::mint_unavailable(
             "JJ artifacts retained: read-only ownership and reachability inspection unavailable",
         ));

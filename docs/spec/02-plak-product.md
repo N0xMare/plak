@@ -753,6 +753,9 @@ It also reports `unowned worktree` directories and their sizes, informationally,
 under the home, current project and readable ownership inventories' launch
 `.plak/worktrees` roots. A copy absent from all readable tree rows and tombstones
 is unowned, not a removal target; pruning never deletes it automatically.
+Maintenance classifies a recorded copy by its directory: `.plak/worktrees/`
+stays git after the launch is colocated with jj, and `.plak/workspaces/`
+stays jj.
 Doctor's legacy-entry and unowned-worktree recursive sizing shares its own 2 s
 deadline, separate from the startup notice's 20 ms budget. Exhausted sizing
 reports `size unavailable: size inspection budget exhausted` informationally,
