@@ -1,14 +1,17 @@
+use super::object::object_address;
 use super::*;
 use crate::RuntimeComponentKind;
 use crate::SessionWorkflowId;
 use crate::manifest::{
-    BindingReference, DurableCommandDisposition, DurableOperationKind, DurableOperationState,
-    DurableOperationTransition, ModelRouteBinding, PROCESS_SESSION_ID_BYTES,
-    PendingEffectDecisionState, ProcessSessionId, ProcessSessionOwnerGeneration,
-    ProducerProvenance, RecoveryAction, RecoveryHandlerSignature, RecoveryObligation,
-    RecoveryObligationKind, RevalidationFact, RuntimeDurability, RuntimeLifecycle, RuntimeManifest,
-    RuntimeOperationRoot, RuntimeTopology, RuntimeWorkingRoot, ToolRuntimeManifest,
-    WorkingRecoveryPhase, encode_bundle_operation_record,
+    BindingReference, DurableCommandDisposition, DurableCommandRecord, DurableOperationKind,
+    DurableOperationRecord, DurableOperationState, DurableOperationTransition, FamilyArtifact,
+    ModelRouteBinding, PROCESS_SESSION_ID_BYTES, PendingEffectDecisionState, ProcessSessionId,
+    ProcessSessionOwnerGeneration, ProducerProvenance, ReconstructiveComponent, RecoveryAction,
+    RecoveryHandlerSignature, RecoveryObligation, RecoveryObligationKind, RevalidationFact,
+    RuntimeCanonicalState, RuntimeContextState, RuntimeDurability, RuntimeLifecycle,
+    RuntimeManifest, RuntimeOperationLedger, RuntimeOperationRoot, RuntimeTopology,
+    RuntimeWorkingRoot, ToolRuntimeManifest, WorkingRecoveryPhase, encode_bundle_component,
+    encode_bundle_history_segment, encode_bundle_operation_record,
 };
 use crate::{
     CompilerModelFacts, CompilerRuntimeFacts, CompilerToolFacts, FeatureSupportFact,
@@ -16,27 +19,28 @@ use crate::{
     HarnessProfileCompiler, HarnessProfileId, HarnessProfileSpecBuilder,
 };
 use plakous_model::{
-    Actor, BranchId, CachePolicy, CallId, CapabilitySet, ContentBlock, ContextAdmissionRequirement,
-    ConversationItem, CredentialSelectionId, DataClassification, EffectiveProviderConfiguration,
-    EntryId, FamilyPolicyEnvelope, GenerationLimits, HistorySegmentKind,
-    LocalDurabilityDisposition, ModelAdapterProfileId, ModelFamilyId, ModelId,
-    ModelImplementationIdentity, NativeOptions, OutputBoundDisposition, OutputPolicy,
-    ParallelToolDisposition, ProtocolId, Provenance, ProviderAuthorityClassId,
-    ProviderBehaviorConfiguration, ProviderProfileRevisionId, ProviderRouteSelection,
-    ProviderSemanticEvidence, ProviderStorageDisposition, ReasoningBlock,
+    Actor, BranchId, CachePolicy, CallId, CanonicalHistory, CapabilitySet,
+    CompiledProviderConfiguration, ContentBlock, ContextAdmissionRequirement, ConversationItem,
+    CredentialSelectionId, DataClassification, EffectiveProviderConfiguration, EntryId,
+    FamilyPolicyEnvelope, GenerationLimits, HistorySegmentKind, LocalDurabilityDisposition,
+    ModelAdapterProfileId, ModelFamilyId, ModelId, ModelImplementationIdentity, NativeOptions,
+    OutputBoundDisposition, OutputPolicy, ParallelToolDisposition, ProtocolId, Provenance,
+    ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
+    ProviderRouteSelection, ProviderSemanticEvidence, ProviderStorageDisposition, ReasoningBlock,
     ReasoningEffortDisposition, ReasoningIncludeDisposition, ReasoningPolicy,
     ReasoningSummaryDisposition, ReasoningVisibility, ReplayDisposition, ReplayEnvelope,
     ReplayKindId, ReplayScope, ResolvedModelDescriptor, ResolvedProviderAuthorityBinding,
     ResponseStateDisposition, RetentionDisposition, RouteId, RuntimeModelAuthority,
-    SelectedProviderConfiguration, SessionId, TextBlock, Timestamp, ToolCallBlock, ToolCallState,
-    ToolChoice, ToolCorrelation, ToolExecutionOwner, ToolName, ToolResultBlock, ToolResultKind,
-    ToolResultPart, TurnId,
+    SelectedProviderConfiguration, SessionId, StableRequestPrefix, TextBlock, Timestamp,
+    ToolCallBlock, ToolCallState, ToolChoice, ToolCorrelation, ToolExecutionOwner, ToolName,
+    ToolResultBlock, ToolResultKind, ToolResultPart, TurnId, WorkingProjection,
 };
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+pub(super) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-fn replace_supplied(bundle: &mut CheckpointObjectBundle, objects: Vec<RuntimeObject>) {
+pub(super) fn replace_supplied(bundle: &mut CheckpointObjectBundle, objects: Vec<RuntimeObject>) {
     let objects: Arc<[RuntimeObject]> = objects.into();
     bundle.objects = objects.clone();
     bundle.layers = Arc::new(ObjectLayer {
@@ -57,7 +61,7 @@ fn digest(domain: DigestDomain, label: &[u8]) -> TestResult<Digest> {
     Ok(Digest::sha256(domain, 1, &[label])?)
 }
 
-fn component(
+pub(super) fn component(
     kind: RuntimeComponentKind,
     revision: u32,
     label: &[u8],
@@ -310,7 +314,7 @@ fn plan_component(
     ))
 }
 
-fn fixture(
+pub(super) fn fixture(
     history_count: usize,
     checkpoint_number: u128,
     working: bool,
@@ -1635,7 +1639,7 @@ fn append_shared_ledger_publication_work_and_transfer_are_log_bounded() -> TestR
 
 /// Terminal records that together carry every component-bearing state, each
 /// with distinct evidence, so the graph must resolve every reference shape.
-fn every_state_operation_records() -> TestResult<Vec<DurableOperationRecord>> {
+pub(super) fn every_state_operation_records() -> TestResult<Vec<DurableOperationRecord>> {
     let turn_id = id::<TurnId>(7_001)?;
     let attempt_id = id(8_002)?;
     let call_id = id(8_003)?;
@@ -1749,7 +1753,7 @@ fn every_state_operation_records() -> TestResult<Vec<DurableOperationRecord>> {
     ])
 }
 
-const EVERY_STATE_EVIDENCE: [&[u8]; 13] = [
+pub(super) const EVERY_STATE_EVIDENCE: [&[u8]; 13] = [
     b"provider-request",
     b"prepared-locator",
     b"dispatched-locator",
@@ -1765,7 +1769,7 @@ const EVERY_STATE_EVIDENCE: [&[u8]; 13] = [
     b"continuation-closed",
 ];
 
-fn every_state_checkpoint() -> TestResult<RuntimeCheckpoint> {
+pub(super) fn every_state_checkpoint() -> TestResult<RuntimeCheckpoint> {
     fixture_with_history_and_ledger(
         CanonicalHistory::new(vec![history_segment(0)?])?,
         81,
@@ -1778,179 +1782,10 @@ fn every_state_checkpoint() -> TestResult<RuntimeCheckpoint> {
     )
 }
 
-fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+pub(super) fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
-}
-
-#[test]
-fn operation_records_reference_every_state_component_and_reopen_exactly() -> TestResult {
-    let checkpoint = every_state_checkpoint()?;
-    let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
-    let records = bundle
-        .objects()
-        .iter()
-        .filter(|object| object.address().kind() == RuntimeObjectKind::OperationRecord)
-        .collect::<Vec<_>>();
-    assert_eq!(records.len(), 4);
-    for record in &records {
-        assert!(
-            record
-                .children()
-                .iter()
-                .all(|child| child.kind() == RuntimeObjectKind::ReconstructiveComponent)
-        );
-        for evidence in EVERY_STATE_EVIDENCE {
-            assert!(
-                !contains(record.canonical_bytes(), evidence),
-                "record inlines {}",
-                String::from_utf8_lossy(evidence)
-            );
-        }
-    }
-    for evidence in EVERY_STATE_EVIDENCE {
-        let address = component_address(&component(RuntimeComponentKind::Operation, 1, evidence)?)?;
-        assert!(
-            records
-                .iter()
-                .any(|record| record.children().contains(&address)),
-            "no record references {}",
-            String::from_utf8_lossy(evidence)
-        );
-    }
-    assert_eq!(RuntimeCheckpointCodec::materialize(&bundle)?, checkpoint);
-    let reopened = CheckpointObjectBundle::from_store(
-        bundle.checkpoint_id(),
-        bundle.checkpoint_integrity(),
-        bundle.root(),
-        bundle.objects().to_vec(),
-    )?;
-    assert_eq!(reopened.validated_checkpoint()?.as_ref(), &checkpoint);
-    Ok(())
-}
-
-#[test]
-fn a_missing_or_tampered_referenced_component_fails_closed() -> TestResult {
-    let checkpoint = every_state_checkpoint()?;
-    let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
-    let claim = component_address(&component(
-        RuntimeComponentKind::Operation,
-        1,
-        b"effect-claim",
-    )?)?;
-    let position = bundle
-        .objects()
-        .iter()
-        .position(|object| object.address() == claim)
-        .ok_or("claim component object is absent")?;
-    let reopen = |objects: Vec<RuntimeObject>| {
-        CheckpointObjectBundle::from_store(
-            bundle.checkpoint_id(),
-            bundle.checkpoint_integrity(),
-            bundle.root(),
-            objects,
-        )
-        .and_then(|reopened| reopened.validated_checkpoint().map(|_| ()))
-    };
-
-    let mut objects = bundle.objects().to_vec();
-    objects.remove(position);
-    assert_eq!(
-        reopen(objects.clone()),
-        Err(CheckpointBundleError::MissingObject)
-    );
-    let mut missing = bundle.clone();
-    replace_supplied(&mut missing, objects);
-    assert_eq!(
-        RuntimeCheckpointCodec::materialize(&missing),
-        Err(CheckpointBundleError::MissingObject)
-    );
-
-    let forged = encode_bundle_component(&component(
-        RuntimeComponentKind::Operation,
-        1,
-        b"forged-claim",
-    )?)?;
-    let mut objects = bundle.objects().to_vec();
-    objects[position].canonical_bytes = forged.clone().into();
-    assert_eq!(
-        RuntimeObject::from_store(claim, forged, Vec::new()),
-        Err(CheckpointBundleError::InvalidAddress)
-    );
-    let mut tampered = bundle.clone();
-    replace_supplied(&mut tampered, objects);
-    assert_eq!(
-        RuntimeCheckpointCodec::materialize(&tampered),
-        Err(CheckpointBundleError::InvalidAddress)
-    );
-
-    let record = bundle
-        .objects()
-        .iter()
-        .find(|object| object.children().contains(&claim))
-        .ok_or("no record references the claim")?;
-    let mut redirected = record.children().to_vec();
-    for child in &mut redirected {
-        if *child == claim {
-            *child = component_address(&component(
-                RuntimeComponentKind::Operation,
-                1,
-                b"effect-unknown",
-            )?)?;
-        }
-    }
-    assert_eq!(
-        RuntimeObject::from_store(
-            record.address(),
-            record.canonical_bytes().to_vec(),
-            redirected
-        ),
-        Err(CheckpointBundleError::NonCanonical)
-    );
-    Ok(())
-}
-
-#[test]
-fn an_operation_reference_to_non_operation_evidence_fails_closed() -> TestResult {
-    let records = every_state_operation_records()?;
-    let mut builder = BundleBuilder {
-        objects: BTreeMap::new(),
-        visited: 0,
-    };
-    let foreign = builder.component(&component(
-        RuntimeComponentKind::Command,
-        1,
-        b"not-operation-evidence",
-    )?)?;
-    let mut request = true;
-    let mut children = Vec::new();
-    let wire = OperationRecordWire::new(&records[1], |component| {
-        let address = if std::mem::take(&mut request) {
-            foreign
-        } else {
-            builder.component(component)?
-        };
-        children.push(address);
-        Ok::<_, CheckpointBundleError>(address.digest())
-    })?;
-    let address = builder.insert(RuntimeObjectKind::OperationRecord, wire.encode()?, children)?;
-    let index = ObjectIndex {
-        decoded: BTreeMap::new(),
-        objects: builder
-            .objects
-            .iter()
-            .map(|(address, object)| (*address, object))
-            .collect(),
-    };
-    let object = index.object(address, RuntimeObjectKind::OperationRecord)?;
-    assert_eq!(
-        materialize_operation(&index, object),
-        Err(CheckpointBundleError::Manifest(
-            RuntimeManifestError::ComponentKind
-        ))
-    );
-    Ok(())
 }
 
 #[test]
@@ -2590,52 +2425,5 @@ fn diagnostic_metadata_inspection_never_loads_history() -> TestResult {
             assert_eq!(identity, operation.request_identity());
         }
     }
-    Ok(())
-}
-
-#[test]
-fn history_and_working_materializers_share_the_decoded_segment() -> TestResult {
-    let checkpoint = fixture(1, 9200, false)?;
-    let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
-    let segment = checkpoint
-        .manifest()
-        .canonical()
-        .history()
-        .segments()
-        .iter()
-        .next()
-        .ok_or("segment")?
-        .clone();
-    let working = WorkingProjection::new(vec![segment], WorkingProjection::default().limits())?;
-    let mut builder = BundleBuilder {
-        objects: BTreeMap::new(),
-        visited: 0,
-    };
-    let working_address = builder.working(&working)?;
-    SEGMENT_DECODES.set(0);
-    let mut index = ObjectIndex::validate(&bundle)?;
-    let decoded = SEGMENT_DECODES.get();
-    index.objects.insert(
-        working_address,
-        builder
-            .objects
-            .get(&working_address)
-            .ok_or("working object")?,
-    );
-    let history = materialize_history(
-        &index,
-        1,
-        bundle.reuse.as_ref().ok_or("reuse")?.history_head,
-    )?;
-    let working = materialize_working(&index, working_address)?;
-    assert!(
-        history
-            .segments()
-            .iter()
-            .next()
-            .ok_or("history segment")?
-            .shares_storage_with(&working.segments()[0])
-    );
-    assert_eq!(SEGMENT_DECODES.get(), decoded);
     Ok(())
 }
