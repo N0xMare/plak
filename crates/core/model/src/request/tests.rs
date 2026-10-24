@@ -1,10 +1,14 @@
+use std::collections::BTreeMap;
 use std::io;
 
 use super::*;
 use crate::{
     Actor, AttemptId, ContentBlock, ConversationItem, EntryId, HistorySegment, HistorySegmentKind,
-    Provenance, RunId, SemanticJsonV1, TextBlock, Timestamp, TurnId, WorkingProjection,
+    ModelOperationRoot, NamespaceId, PortableToolSchemaV2, Provenance, RunId, SemanticJsonV1,
+    SessionWorkflowRootId, TextBlock, Timestamp, ToolCallerDisposition, ToolResourceKey, TurnId,
+    WorkingProjection,
 };
+use serde_json::Value;
 use uuid::Uuid;
 
 #[test]
