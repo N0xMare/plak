@@ -503,7 +503,7 @@ env-sites = ["src/environment/backend.rs", "src/environment/backend/process.rs"]
 reason = "Reviewed child-process/VCS environment construction reads; passed-in environment remains a later refactor."
 
 [workspace.metadata.plakous.cfg.plakous-workspace]
-env-sites = ["src/git_redirect_fence.rs", "src/occupancy_vcs.rs", "src/workspace.rs", "src/vcs_fixtures.rs"]
+env-sites = ["src/git_redirect_fence.rs", "src/occupancy_vcs/git.rs", "src/occupancy_vcs/mint.rs", "src/workspace.rs", "src/vcs_fixtures.rs"]
 feature-ceiling = 5
 test-seam-ceiling = 2
 reason = "Reviewed child-process/VCS environment construction reads; passed-in environment remains a later refactor."

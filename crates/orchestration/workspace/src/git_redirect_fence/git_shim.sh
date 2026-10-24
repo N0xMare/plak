@@ -1,0 +1,145 @@
+#!/bin/sh
+# Plak occupancy git-redirect fence. Basename git only.
+# Parse globals for admission, then exec real git with the original argv.
+ALLOWED={allowed}
+REAL_GIT={real_git}
+cwd=`pwd -P 2>/dev/null || pwd`
+worktree=$GIT_WORK_TREE
+gitdir=$GIT_DIR
+skip=0
+prev=""
+sub1=""
+sub2=""
+sub3=""
+lc=`printf '%s' "$GIT_CONFIG_PARAMETERS" | tr '[:upper:]' '[:lower:]'`
+case "$lc" in
+  *core.worktree*)
+    echo "plak: git-redirect refused: core.worktree escapes occupancy copy" >&2
+    exit 128
+    ;;
+esac
+for arg in "$@"; do
+  if [ -n "$sub1" ]; then
+    case "$arg" in
+      -*) ;;
+      *)
+        if [ -z "$sub2" ]; then
+          sub2=$arg
+        elif [ -z "$sub3" ]; then
+          sub3=$arg
+        fi
+        ;;
+    esac
+    continue
+  fi
+  if [ "$skip" -eq 1 ]; then
+    case "$prev" in
+      -C)
+        case "$arg" in
+          /*) cwd=$arg ;;
+          *) cwd=$cwd/$arg ;;
+        esac
+        cwd=`(cd "$cwd" 2>/dev/null && pwd -P) || echo "$cwd"`
+        ;;
+      --work-tree) worktree=$arg ;;
+      --git-dir) gitdir=$arg ;;
+      -c|--config-env)
+        lc=`printf '%s' "$arg" | tr '[:upper:]' '[:lower:]'`
+        case "$lc" in
+          *core.worktree*)
+            echo "plak: git-redirect refused: core.worktree escapes occupancy copy" >&2
+            exit 128
+            ;;
+        esac
+        ;;
+    esac
+    skip=0
+    prev=""
+    continue
+  fi
+  case "$arg" in
+    --) break ;;
+    -C|--work-tree|--git-dir|-c|--config-env|--exec-path|--namespace)
+      prev=$arg
+      skip=1
+      ;;
+    --work-tree=*)
+      worktree=${{arg#--work-tree=}}
+      ;;
+    --git-dir=*)
+      gitdir=${{arg#--git-dir=}}
+      ;;
+    -*)
+      ;;
+    *)
+      sub1=$arg
+      ;;
+  esac
+done
+case "$sub1" in
+  init|init-db)
+    echo "plak: git-redirect refused: this occupancy copy is already a workspace of the launch repo; 'git init' would make it a standalone repo the launch checkout cannot see" >&2
+    exit 128
+    ;;
+  clone)
+    dest=""
+    if [ -n "$sub3" ]; then
+      dest=$sub3
+    fi
+    if [ -n "$dest" ]; then
+      case "$dest" in
+        /*) resolved=$dest ;;
+        *) resolved=$cwd/$dest ;;
+      esac
+      resolved=`(cd "$resolved" 2>/dev/null && pwd -P) || echo "$resolved"`
+      if [ "$resolved" = "$ALLOWED" ]; then
+        echo "plak: git-redirect refused: this occupancy copy is already a workspace of the launch repo; 'git clone' into the copy root would make it a standalone repo the launch checkout cannot see" >&2
+        exit 128
+      fi
+    fi
+    ;;
+  worktree)
+    if [ "$sub2" = "add" ]; then
+      echo "plak: git-redirect refused: this occupancy copy is already a workspace of the launch repo; 'git worktree add' from inside a copy escapes host mint" >&2
+      exit 128
+    fi
+    ;;
+esac
+target=$cwd
+if [ -n "$worktree" ]; then
+  case "$worktree" in
+    /*) target=$worktree ;;
+    *) target=$cwd/$worktree ;;
+  esac
+fi
+target=`(cd "$target" 2>/dev/null && pwd -P) || echo "$target"`
+case "$target" in
+  "$ALLOWED"|"$ALLOWED"/*) ;;
+  *)
+    echo "plak: git-redirect refused: working tree escapes occupancy copy" >&2
+    exit 128
+    ;;
+esac
+if [ -n "$gitdir" ]; then
+  case "$gitdir" in
+    /*) requested=$gitdir ;;
+    *) requested=$cwd/$gitdir ;;
+  esac
+  requested=`(cd "$requested" 2>/dev/null && pwd -P) || echo "$requested"`
+  expected=""
+  if [ -d "$ALLOWED/.git" ]; then
+    expected=`(cd "$ALLOWED/.git" && pwd -P)`
+  elif [ -f "$ALLOWED/.git" ]; then
+    raw=`sed -n 's/^gitdir:[[:space:]]*//p' "$ALLOWED/.git" | head -n 1`
+    case "$raw" in
+      /*) expected=$raw ;;
+      *) expected=$ALLOWED/$raw ;;
+    esac
+    expected=`(cd "$expected" 2>/dev/null && pwd -P) || echo "$expected"`
+  fi
+  if [ -z "$expected" ] || {{ [ "$requested" != "$expected" ] && [ "$requested" != "$ALLOWED/.git" ]; }}; then
+    echo "plak: git-redirect refused: git-dir is not this occupancy copy" >&2
+    exit 128
+  fi
+fi
+exec "$REAL_GIT" "$@"

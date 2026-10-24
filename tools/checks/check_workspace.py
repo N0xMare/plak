@@ -413,11 +413,14 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
     ],
     # an `on_mint` hook runs with `env_clear()`, so the only
     # host variables that reach a template-authored shell command are these
-    # two — never an exported `*_API_KEY`. `EMAIL` is only tested for
-    # presence, so Plak's own git steps add a fallback identity when it is unset.
-    ("plakous-workspace", "src/occupancy_vcs.rs"): [
+    # two — never an exported `*_API_KEY`.
+    ("plakous-workspace", "src/occupancy_vcs/mint.rs"): [
         ("var", (("string", "PATH"),)),
         ("var", (("string", "HOME"),)),
+    ],
+    # `EMAIL` is only tested for presence, so Plak's own git steps add a
+    # fallback identity when it is unset.
+    ("plakous-workspace", "src/occupancy_vcs/git.rs"): [
         ("var_os", (("string", "EMAIL"),)),
     ],
     # A pasted `~/` image path resolves against the operator's home.
@@ -467,6 +470,8 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     ("plak", "src/capabilities/codex.rs"): ("include_str",) * 4,
     ("plak", "src/capabilities/claude.rs"): ("include_str",) * 4,
     ("plak", "src/capabilities/grok.rs"): ("include_str",) * 4,
+    # Git and jj redirect shims are static text rendered into the copy.
+    ("plakous-workspace", "src/git_redirect_fence.rs"): ("include_str",) * 3,
 }
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]] = {
     # Doctor's one cleared-env, five-second, own-group local version probe.
@@ -514,9 +519,11 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
         ("Command", (("string", "git"),)),
         ("Command", (("string", "git"),)),
     ],
-    ("plakous-workspace", "src/occupancy_vcs.rs"): [
-        # `sh -c` runs a template's `on_mint` hook (with an empty environment).
+    # `sh -c` runs a template's `on_mint` hook (with an empty environment).
+    ("plakous-workspace", "src/occupancy_vcs/mint.rs"): [
         ("Command", (("string", "sh"),)),
+    ],
+    ("plakous-workspace", "src/occupancy_vcs/git.rs"): [
         ("Command", (("string", "git"),)),
     ],
 }
@@ -525,7 +532,8 @@ EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
     ("plak", "src/main.rs"): {"ExitCode"},
     ("plak", "src/lib.rs"): {"ExitCode"},
     ("plak", "src/oauth_ui.rs"): {"Command", "Stdio"},
-    ("plakous-workspace", "src/occupancy_vcs.rs"): {"Command", "Output"},
+    ("plakous-workspace", "src/occupancy_vcs/git.rs"): {"Command", "Output"},
+    ("plakous-workspace", "src/occupancy_vcs/mint.rs"): {"Command"},
     ("plakous-workspace", "src/vcs_fixtures.rs"): {"Command"},
 }
 # Macros any host/bin production source may invoke.
@@ -577,6 +585,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/capabilities/codex.rs"): {"include_str"},
     ("plak", "src/capabilities/claude.rs"): {"include_str"},
     ("plak", "src/capabilities/grok.rs"): {"include_str"},
+    ("plakous-workspace", "src/git_redirect_fence.rs"): {"include_str"},
     ("plak", "src/commands/application.rs"): {"select"},
     ("plak", "src/commands/secret_input.rs"): {"select"},
     # The SIGTERM/SIGHUP watcher thread waits on two signal streams at once.

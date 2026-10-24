@@ -1606,21 +1606,31 @@ fn discover_real_git() {
     let _ = std::env::var_os("PLAK_TEST_JJ");
     let _ = std::env::var_os("PATH");
 }
+fn shims() {
+    let _ = include_str!("git_redirect_fence/git_shim.sh");
+    let _ = include_str!("git_redirect_fence/jj_shim.sh");
+    let _ = include_str!("git_redirect_fence/jj_copy_git_shim.sh");
+}
 """,
                 "src/workspace.rs": """
 fn workspace() {
     let _ = std::env::var_os("HOME");
 }
 """,
-                "src/occupancy_vcs.rs": """
+                "src/occupancy_vcs/git.rs": """
 use std::process::{Command, Output};
 fn vcs() {
-    let _ = Command::new("sh");
     let _ = Command::new("git");
-    let _ = std::env::var("PATH");
-    let _ = std::env::var("HOME");
     let _ = std::env::var_os("EMAIL");
     let _: Option<Output> = None;
+}
+""",
+                "src/occupancy_vcs/mint.rs": """
+use std::process::Command;
+fn hook() {
+    let _ = Command::new("sh");
+    let _ = std::env::var("PATH");
+    let _ = std::env::var("HOME");
 }
 """,
                 "src/vcs_fixtures.rs": """
