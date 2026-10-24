@@ -978,6 +978,8 @@ still counts. Registered external test sources and test-file conventions are
 excluded separately. Other conditional code (including platform branches,
 `test-support`, and test-only instrumentation outside these modules) remains
 conservatively counted. This is a source-size metric, not compiled reachability.
+The gated ratchet on long-function and wide-signature allows and on files over
+1500 non-test lines is separate: chapter 06 §4 owns it.
 
 ## 2. Offline test conventions
 

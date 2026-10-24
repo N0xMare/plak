@@ -18,6 +18,11 @@ layer = "host"
 class = "published-internal"
 neutral = true
 
+[package.metadata.plakous-lint]
+large-file-ceiling = 1
+crate-wide-allows = ["src/lib.rs:too_many_lines"]
+reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
+
 [dependencies]
 plakous-host-protocol.workspace = true
 rustix = { workspace = true, features = ["process"] }

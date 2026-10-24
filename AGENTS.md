@@ -124,6 +124,11 @@ relying on another workspace member's feature unification. The feature checker
 requires locally declared UUID generation features, including for test code.
 The root workspace excludes `.plak` operator state and fork worktrees; the
 workspace checker requires this exclusion without permitting unreviewed ones.
+The workspace checker also ratchets, per package, item-level allows of
+`clippy::too_many_lines` and `clippy::too_many_arguments` and files over 1500
+non-test lines (`[package.metadata.plakous-lint]` in the package's own
+manifest, spec 06 §4): a split that removes debt lowers its ceiling, and no
+new crate-wide allow of either lint is permitted.
 
 Invariants the spec states — single-owner driver with one terminal result per
 admitted root turn, single-agent L0, exact-URL auth that never falls back across

@@ -283,6 +283,34 @@ lowering the ceiling in the same change. Test-only items and test source
 trees are excluded; `cfg(any(test, feature = ...))` still ships under the
 feature and is counted. Comments and literals are not configuration sites.
 
+The same checker ratchets lint and size debt through each package's own
+`[package.metadata.plakous-lint]`, so a split edits only the manifest of the
+package it touches (and `just fast` selects only that package). It reads every
+tracked Rust file of the package, tests included:
+
+- `too-many-lines-ceiling` and `too-many-arguments-ceiling` bound the item-
+  and module-level `allow` and `expect` attributes, and `cfg_attr(...)` forms
+  that apply one, naming `clippy::too_many_lines` or
+  `clippy::too_many_arguments`. A group suppresses its members:
+  `clippy::pedantic` counts as `too_many_lines`, and `clippy::complexity` or
+  `clippy::all` as `too_many_arguments`. Line comments and single-line string
+  contents are not attributes.
+- `crate-wide-allows` lists, as `path:lint`, the inner allows of these lints
+  that remain at the top of a target root, before its first item. An unlisted
+  one fails, so no new crate gains one; a listed one that is gone must be
+  dropped.
+- `large-file-ceiling` bounds the files with more than 1500 non-blank physical
+  lines (comments included) once every `#[cfg(test)]` item is blanked (inline
+  test modules and other cfg(test) items). Files of `tests/` and `benches/`
+  targets and files behind `#[cfg(test)] mod name;` are not counted; a
+  feature-gated support module or an example is.
+- The ceilings were frozen at the counts on main when the ratchet landed,
+  under the `clippy.toml` thresholds the checker pins (`too-many-lines` 100,
+  the clippy default, and `too-many-arguments` 7). They follow the cfg rule:
+  missing means zero, growth fails, a reduction lowers the ceiling in the
+  same change, and nonzero ceilings carry a review reason. A ceiling is not
+  raised without review.
+
 `plakous-hosted::capabilities` owns the complete current route metadata in
 per-route modules and one ordered registry. Plak's private product registry
 adds its labels, recommendation aliases, doctor probe and bundled preset for

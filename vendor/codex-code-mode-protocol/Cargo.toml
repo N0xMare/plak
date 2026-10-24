@@ -21,6 +21,10 @@ categories = ["development-tools"]
 layer = "vendor"
 class = "published-internal"
 
+[package.metadata.plakous-lint]
+crate-wide-allows = ["src/lib.rs:too_many_arguments", "src/lib.rs:too_many_lines"]
+reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
+
 [lib]
 path = "src/lib.rs"
 doctest = false
