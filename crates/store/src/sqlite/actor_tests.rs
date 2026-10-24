@@ -1202,13 +1202,13 @@ async fn commit_cache_seed_is_lazy_and_first_hit_equals_cold() -> TestResult {
         .await?;
     let before = store
         .dispatch_read("commit_cache_seed_is_lazy_and_first_hit_equals_cold", |b| {
-            Ok(b.checkpoint_decodes)
+            Ok(b.checkpoints.decodes)
         })
         .await?;
     let (_, statements, objects) = traced_branch_load(&store, receipt.head().session()).await?;
     let after = store
         .dispatch_read("commit_cache_seed_is_lazy_and_first_hit_equals_cold", |b| {
-            Ok(b.checkpoint_decodes)
+            Ok(b.checkpoints.decodes)
         })
         .await?;
     assert_eq!(after, before, "post-commit load performs zero decodes");
@@ -1250,20 +1250,123 @@ fn forked_head_seed_respects_the_existing_cache_budget() -> TestResult {
         };
         let mut graph = BTreeMap::new();
         let forked = gc_tests::fork_branch(&source, &mut backend, &mut graph, 200_000)?;
-        let before = backend.checkpoint_decodes;
-        assert_eq!(backend.checkpoints.normalizations, 0);
+        let before = backend.checkpoints.decodes;
+        // A target over the whole budget was normalized by the fork itself;
+        // within budget the seed normalizes on its first hit.
+        assert_eq!(backend.checkpoints.normalizations, usize::from(budget == 1));
         let loaded = backend.load_branch(forked.head.session())?;
-        assert_eq!(backend.checkpoints.normalizations, usize::from(budget > 1));
+        assert_eq!(backend.checkpoints.normalizations, 1);
         assert_eq!(loaded.head(), forked.head);
-        assert_eq!(
-            backend.checkpoint_decodes,
-            before + usize::from(budget == 1)
-        );
+        assert_eq!(backend.checkpoints.decodes, before);
         backend.checkpoints.clear();
         let cold = backend.load_branch(forked.head.session())?;
         assert_eq!(loaded.checkpoint(), cold.checkpoint());
         assert_eq!(loaded.checkpoint().bundle(), cold.checkpoint().bundle());
     }
+    Ok(())
+}
+
+/// A fork after an attach verifies its source once: the fork reads the head
+/// the attach retained, and a target over the whole budget is retained by the
+/// fork itself, so reading it back verifies nothing again.
+#[test]
+fn a_fork_verifies_its_retained_source_head_once() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut backend = gc_tests::backend(&directory.path().join("runtime.sqlite3"))?;
+    backend.checkpoints = CheckpointCache::new(1);
+    let request = gc_tests::seed(110_000)?;
+    let bundle = request.initial().clone();
+    let created = create(&mut backend, &request)?;
+    let source = gc_tests::Branch {
+        head: created.branch(),
+        lease: created.lease().clone(),
+        bundle,
+        value: 1,
+    };
+    let attached = backend.load_branch(source.head.session())?;
+    assert_eq!(backend.checkpoints.decodes, 1);
+    let mut graph = BTreeMap::new();
+    let forked = gc_tests::fork_branch(&source, &mut backend, &mut graph, 210_000)?;
+    assert_eq!(backend.checkpoints.decodes, 1, "the fork reread its source");
+    let target = backend.load_branch(forked.head.session())?;
+    assert_eq!(
+        backend.checkpoints.decodes, 1,
+        "the target was verified again"
+    );
+    assert_eq!(target.head(), forked.head);
+    backend.checkpoints.clear();
+    let cold = backend.load_branch(forked.head.session())?;
+    assert_eq!(target.checkpoint(), cold.checkpoint());
+    assert_eq!(target.checkpoint().bundle(), cold.checkpoint().bundle());
+    assert_eq!(
+        attached.checkpoint().reference(),
+        backend
+            .load_branch(source.head.session())?
+            .checkpoint()
+            .reference()
+    );
+    Ok(())
+}
+
+/// A head that moved after it was retained is not the retained checkpoint:
+/// the fork cold-loads the head it actually forks. (A retained entry whose
+/// reference differs from the head's row is `Corrupt`, never served.)
+#[test]
+fn a_fork_of_an_unretained_head_cold_loads_it() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut backend = gc_tests::backend(&directory.path().join("runtime.sqlite3"))?;
+    backend.checkpoints = CheckpointCache::new(1);
+    let request = gc_tests::seed(120_000)?;
+    let bundle = request.initial().clone();
+    let created = create(&mut backend, &request)?;
+    let mut source = gc_tests::Branch {
+        head: created.branch(),
+        lease: created.lease().clone(),
+        bundle,
+        value: 1,
+    };
+    backend.load_branch(source.head.session())?;
+    let mut graph = BTreeMap::new();
+    gc_tests::advance_branch(&mut source, &mut backend, &mut graph, 220_000)?;
+    let before = backend.checkpoints.decodes;
+    gc_tests::fork_branch(&source, &mut backend, &mut graph, 230_000)?;
+    assert_eq!(backend.checkpoints.decodes, before + 1);
+    Ok(())
+}
+
+/// An over-budget target whose normalization fails retains nothing, and its
+/// first read is one cold load that is then retained.
+#[test]
+fn a_failed_over_budget_fork_normalization_retains_nothing() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut backend = gc_tests::backend(&directory.path().join("runtime.sqlite3"))?;
+    backend.checkpoints = CheckpointCache::new(1);
+    let request = gc_tests::seed(130_000)?;
+    let bundle = request.initial().clone();
+    let created = create(&mut backend, &request)?;
+    let source = gc_tests::Branch {
+        head: created.branch(),
+        lease: created.lease().clone(),
+        bundle,
+        value: 1,
+    };
+    backend.load_branch(source.head.session())?;
+    backend.checkpoints.fail_normalization = true;
+    let mut graph = BTreeMap::new();
+    let forked = gc_tests::fork_branch(&source, &mut backend, &mut graph, 240_000)?;
+    backend.checkpoints.fail_normalization = false;
+    assert_eq!(backend.checkpoints.normalizations, 1);
+    assert!(
+        backend
+            .checkpoints
+            .get(forked.head.checkpoint().checkpoint_id())
+            .is_none()
+    );
+    let before = backend.checkpoints.decodes;
+    backend.load_branch(forked.head.session())?;
+    assert_eq!(backend.checkpoints.decodes, before + 1);
+    backend.load_branch(forked.head.session())?;
+    assert_eq!(backend.checkpoints.decodes, before + 1);
     Ok(())
 }
 
@@ -1394,7 +1497,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
     let objects = prior.stats().object_count();
     let before = store
         .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
-            Ok(b.checkpoint_decodes)
+            Ok(b.checkpoints.decodes)
         })
         .await?;
     let started = Instant::now();
@@ -1403,7 +1506,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
     let warm_us = started.elapsed().as_micros();
     let after = store
         .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
-            Ok(b.checkpoint_decodes)
+            Ok(b.checkpoints.decodes)
         })
         .await?;
     assert_eq!(before, after);
@@ -1418,7 +1521,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
     let cold_us = started.elapsed().as_micros();
     let cold_decodes = store
         .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
-            Ok(b.checkpoint_decodes)
+            Ok(b.checkpoints.decodes)
         })
         .await?;
     assert_eq!(cold_decodes, after + 1);
@@ -1442,9 +1545,9 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
     let burst_us = started.elapsed().as_micros();
     assert_eq!(
         store
-            .dispatch_read("measure_large_session_turn_boundary_reads", |b| Ok(
-                b.checkpoint_decodes
-            ))
+            .dispatch_read("measure_large_session_turn_boundary_reads", |b| Ok(b
+                .checkpoints
+                .decodes))
             .await?,
         cold_decodes
     );
@@ -1782,7 +1885,7 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
             store.load_branch(head.session()).await?;
             store
                 .dispatch("reset_measure_counters", |b| {
-                    b.checkpoint_decodes = 0;
+                    b.checkpoints.decodes = 0;
                     b.checkpoints.normalizations = 0;
                     Ok(())
                 })
@@ -1859,7 +1962,7 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
             }
             store
                 .dispatch_read("measure_seed_arm_counters", move |b| {
-                    assert_eq!(b.checkpoint_decodes, 40 * usize::from(!enabled));
+                    assert_eq!(b.checkpoints.decodes, 40 * usize::from(!enabled));
                     assert_eq!(b.checkpoints.normalizations, 40 * usize::from(enabled));
                     Ok(())
                 })

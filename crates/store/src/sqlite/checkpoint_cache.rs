@@ -1,6 +1,6 @@
 use super::{
-    BTreeMap, CheckpointId, CheckpointObjectBundle, CheckpointObjectRef, SessionRef,
-    StoredCheckpoint,
+    BTreeMap, CheckpointId, CheckpointObjectBundle, CheckpointObjectRef, CheckpointRow, Connection,
+    SessionRef, SessionStoreError, StoredCheckpoint, load_checkpoint_contents,
 };
 
 enum Value {
@@ -24,6 +24,9 @@ pub(super) struct CheckpointCache {
     pending: BTreeMap<SessionRef, CheckpointId>,
     #[cfg(test)]
     pub(super) normalizations: usize,
+    /// Cold loads: full decodes and verification of a checkpoint's graph.
+    #[cfg(test)]
+    pub(super) decodes: usize,
     #[cfg(test)]
     pub(super) seed_enabled: bool,
     #[cfg(test)]
@@ -41,6 +44,8 @@ impl CheckpointCache {
             pending: BTreeMap::new(),
             #[cfg(test)]
             normalizations: 0,
+            #[cfg(test)]
+            decodes: 0,
             #[cfg(test)]
             seed_enabled: true,
             #[cfg(test)]
@@ -62,6 +67,31 @@ impl CheckpointCache {
         }
         self.clock += 1;
         self.clock
+    }
+
+    /// The validated checkpoint `row` names: the retained one when present
+    /// (`Corrupt` if its reference differs from the row's), else the verified
+    /// cold load, which is then retained. The caller has probed `row` in its
+    /// own read snapshot.
+    pub(super) fn load(
+        &mut self,
+        c: &Connection,
+        id: CheckpointId,
+        row: &CheckpointRow,
+    ) -> Result<StoredCheckpoint, SessionStoreError> {
+        if let Some(checkpoint) = self.get(id) {
+            if checkpoint.reference() != row.reference {
+                return Err(SessionStoreError::corrupt());
+            }
+            return Ok(checkpoint);
+        }
+        #[cfg(test)]
+        {
+            self.decodes += 1;
+        }
+        let checkpoint = load_checkpoint_contents(c, id, row)?;
+        self.insert(checkpoint.clone());
+        Ok(checkpoint)
     }
 
     pub(super) fn get(&mut self, id: CheckpointId) -> Option<StoredCheckpoint> {
@@ -89,16 +119,8 @@ impl CheckpointCache {
                 bundle,
             } => {
                 self.pending.remove(&branch);
-                #[cfg(test)]
-                {
-                    self.normalizations += 1;
-                    if self.fail_normalization {
-                        return None;
-                    }
-                }
                 // Failure discards this optional seed; the caller performs a cold load.
-                let closure = bundle.current_root_closure().ok()?;
-                let checkpoint = StoredCheckpoint::from_store(reference, closure).ok()?;
+                let checkpoint = self.normalize(reference, &bundle)?;
                 self.insert(checkpoint.clone());
                 Some(checkpoint)
             }
@@ -119,7 +141,7 @@ impl CheckpointCache {
         if let Some(id) = self.pending.get(&branch).copied() {
             self.remove(id);
         }
-        let bytes = bundle_weight(bundle).saturating_add(size_of::<(SessionRef, CheckpointId)>());
+        let bytes = pending_charge(bundle);
         let ready_bytes: usize = self
             .entries
             .iter()
@@ -163,6 +185,55 @@ impl CheckpointCache {
             bytes,
         );
         self.pending.insert(branch, reference.checkpoint_id());
+    }
+
+    /// Seeds a fresh fork's target. A target whose pending charge exceeds the
+    /// whole budget can never be a pending seed, so it is normalized now and
+    /// retained as the ready entry under the over-budget rule, evicting every
+    /// other entry including the source head: otherwise its first read would
+    /// verify again every object it shares with the source just read. A target
+    /// that fits the budget alone but not beside the protected source head is
+    /// skipped like any seed, and its first read verifies it once.
+    pub(super) fn seed_fork(
+        &mut self,
+        branch: SessionRef,
+        reference: CheckpointObjectRef,
+        bundle: &CheckpointObjectBundle,
+    ) {
+        #[cfg(test)]
+        if !self.seed_enabled {
+            return;
+        }
+        if pending_charge(bundle) <= self.limit {
+            self.seed(branch, reference, bundle, None);
+            return;
+        }
+        // Failure leaves nothing retained; the first read performs a cold load.
+        if let Some(checkpoint) = self.normalize(reference, bundle) {
+            self.insert(checkpoint);
+        }
+    }
+
+    /// The ready form of a validated publication: its current-root closure
+    /// with a rebuilt CAS index, or `None` when the closure cannot be built.
+    #[allow(
+        clippy::unused_self,
+        reason = "test builds count normalizations and can make them fail"
+    )]
+    fn normalize(
+        &mut self,
+        reference: CheckpointObjectRef,
+        bundle: &CheckpointObjectBundle,
+    ) -> Option<StoredCheckpoint> {
+        #[cfg(test)]
+        {
+            self.normalizations += 1;
+            if self.fail_normalization {
+                return None;
+            }
+        }
+        let closure = bundle.current_root_closure().ok()?;
+        StoredCheckpoint::from_store(reference, closure).ok()
     }
 
     pub(super) fn insert(&mut self, checkpoint: StoredCheckpoint) {
@@ -209,6 +280,11 @@ impl CheckpointCache {
 
 pub(super) fn weight(checkpoint: &StoredCheckpoint) -> usize {
     bundle_weight(checkpoint.bundle())
+}
+
+/// What a pending seed of `bundle` charges against the budget.
+pub(super) fn pending_charge(bundle: &CheckpointObjectBundle) -> usize {
+    bundle_weight(bundle).saturating_add(size_of::<(SessionRef, CheckpointId)>())
 }
 
 pub(super) fn bundle_weight(bundle: &CheckpointObjectBundle) -> usize {

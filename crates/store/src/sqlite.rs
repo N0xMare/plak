@@ -364,8 +364,6 @@ struct Backend {
     wal_pending: bool,
     checkpoints: CheckpointCache,
     #[cfg(test)]
-    checkpoint_decodes: usize,
-    #[cfg(test)]
     job_hook: Option<Box<dyn FnMut(ExecutedJob) + Send>>,
     /// Receives `PRAGMA synchronous` inside each unsynced job and after every
     /// job and background step, with the job's label.
@@ -936,8 +934,6 @@ impl Backend {
             wal_pending: vacuum_pending,
             checkpoints: CheckpointCache::new(CHECKPOINT_CACHE_BYTES),
             #[cfg(test)]
-            checkpoint_decodes: 0,
-            #[cfg(test)]
             job_hook: None,
             #[cfg(test)]
             synchronous_probe: None,
@@ -1043,19 +1039,7 @@ impl Backend {
         id: CheckpointId,
         row: &CheckpointRow,
     ) -> Result<StoredCheckpoint, SessionStoreError> {
-        if let Some(checkpoint) = self.checkpoints.get(id) {
-            if checkpoint.reference() != row.reference {
-                return Err(SessionStoreError::corrupt());
-            }
-            return Ok(checkpoint);
-        }
-        #[cfg(test)]
-        {
-            self.checkpoint_decodes += 1;
-        }
-        let checkpoint = load_checkpoint_contents(&self.connection, id, row)?;
-        self.checkpoints.insert(checkpoint.clone());
-        Ok(checkpoint)
+        self.checkpoints.load(&self.connection, id, row)
     }
 
     fn retry_after_reclaim<T>(

@@ -537,21 +537,21 @@ fn shrinking_successor_charges_only_its_closure_across_sessions() -> TestResult 
     b.load_branch(root.branch().session())?;
     for identity in [850_000, 860_000, 870_000, 880_000] {
         // Keep the warm root newer than the prior child's head.
-        let before = b.checkpoint_decodes;
+        let before = b.checkpoints.decodes;
         b.load_branch(root.branch().session())?;
-        assert_eq!(b.checkpoint_decodes, before);
+        assert_eq!(b.checkpoints.decodes, before);
         branch.value = 0;
         advance_branch(&mut branch, &mut b, &mut graph, identity)?;
         assert!(b.checkpoints.has_pending(branch.head.session()));
-        let before = b.checkpoint_decodes;
+        let before = b.checkpoints.decodes;
         let normalizations = b.checkpoints.normalizations;
         b.load_branch(branch.head.session())?;
         assert_eq!(b.checkpoints.normalizations, normalizations + 1);
-        assert_eq!(b.checkpoint_decodes, before);
+        assert_eq!(b.checkpoints.decodes, before);
         let loaded_root = b.load_branch(root.branch().session())?;
         assert_eq!(loaded_root.checkpoint(), warm_root.checkpoint());
         assert_eq!(
-            b.checkpoint_decodes, before,
+            b.checkpoints.decodes, before,
             "child publication evicted the warm root"
         );
     }
@@ -581,7 +581,7 @@ fn fresh_commits_replace_pending_seeds_without_closure_work() -> TestResult {
         assert!(b.checkpoints.has_pending(branch.head.session()));
         assert!(b.checkpoints.get(previous).is_none());
         assert_eq!(b.checkpoints.normalizations, 0, "commit walked the closure");
-        assert_eq!(b.checkpoint_decodes, 0);
+        assert_eq!(b.checkpoints.decodes, 0);
     }
     b.load_branch(branch.head.session())?;
     assert_eq!(b.checkpoints.normalizations, 1);
@@ -656,12 +656,12 @@ fn background_reclaim_preserves_ready_and_pending_over_real_candidates() -> Test
     }
     assert!(read_stats(&b.connection)?.reclaimed_objects() > reclaimed);
     assert!(b.checkpoints.has_pending(source.head.session()));
-    let before = b.checkpoint_decodes;
+    let before = b.checkpoints.decodes;
     assert_eq!(b.load_branch(warm.head.session())?, ready);
     let normalizations = b.checkpoints.normalizations;
     assert_eq!(b.load_branch(source.head.session())?.head(), receipt.head());
     assert_eq!(b.checkpoints.normalizations, normalizations + 1);
-    assert_eq!(b.checkpoint_decodes, before);
+    assert_eq!(b.checkpoints.decodes, before);
     b.checkpoints.clear();
     assert_eq!(b.load_branch(warm.head.session())?, ready);
     Ok(())
@@ -678,7 +678,7 @@ fn commit_seed_replaces_ready_head_above_half_budget() -> TestResult {
     b.checkpoints = CheckpointCache::new(pending_weight);
     let ready = b.load_branch(source.head.session())?;
     assert!(checkpoint_cache::weight(ready.checkpoint()) > pending_weight / 2);
-    let before = b.checkpoint_decodes;
+    let before = b.checkpoints.decodes;
     let receipt = commit(&mut b, &request)?;
     assert!(b.checkpoints.has_pending(source.head.session()));
     assert!(
@@ -689,7 +689,7 @@ fn commit_seed_replaces_ready_head_above_half_budget() -> TestResult {
     assert_eq!(b.checkpoints.normalizations, 0);
     let warm = b.load_branch(source.head.session())?;
     assert_eq!(warm.head(), receipt.head());
-    assert_eq!(b.checkpoint_decodes, before);
+    assert_eq!(b.checkpoints.decodes, before);
     assert_eq!(b.checkpoints.normalizations, 1);
     b.checkpoints.clear();
     assert_eq!(b.load_branch(source.head.session())?, warm);
@@ -715,11 +715,11 @@ fn failed_normalization_drops_seed_and_cold_load_inserts_ready() -> TestResult {
             .get(receipt.head().checkpoint().checkpoint_id())
             .is_none()
     );
-    let before = b.checkpoint_decodes;
+    let before = b.checkpoints.decodes;
     b.load_branch(source.head.session())?;
-    assert_eq!(b.checkpoint_decodes, before + 1);
+    assert_eq!(b.checkpoints.decodes, before + 1);
     b.load_branch(source.head.session())?;
-    assert_eq!(b.checkpoint_decodes, before + 1);
+    assert_eq!(b.checkpoints.decodes, before + 1);
     assert_eq!(b.checkpoints.normalizations, 1);
     Ok(())
 }
@@ -758,56 +758,78 @@ fn commit_replays_and_refusals_do_not_seed() -> TestResult {
     Ok(())
 }
 
+/// A refused or replayed fork retains nothing for its target, within budget
+/// and with a budget every target exceeds alone (the at-once normalization
+/// path runs only after a fresh publication).
 #[test]
 fn fork_replays_and_refusals_do_not_seed() -> TestResult {
-    let directory = tempfile::tempdir()?;
-    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
-    let source = cache_branch(&mut b, 1_050_000)?;
-    let request = fork_request(&source, &b, 1_060_000)?;
-    let receipt = fork(&mut b, &request)?;
-    b.checkpoints.clear();
-    let target = receipt.target().session();
-    assert_eq!(fork(&mut b, &request)?, receipt);
-    assert_no_seed(&b, target);
-    let conflict = fork_request(&source, &b, 1_070_000)?;
-    fork(&mut b, &conflict)?;
-    b.checkpoints.clear();
-    // Reusing a workflow with the newer session revision changes its exact request.
-    let collision = fork_request(&source, &b, 1_060_000)?;
-    assert_eq!(
-        fork(&mut b, &collision),
-        Err(SessionStoreError::IdentityConflict)
-    );
-    assert_no_seed(&b, target);
-    let stale_revision = fork_request(&source, &b, 1_080_000)?;
-    let intervening = fork_request(&source, &b, 1_090_000)?;
-    fork(&mut b, &intervening)?;
-    b.checkpoints.clear();
-    assert_eq!(
-        fork(&mut b, &stale_revision),
-        Err(SessionStoreError::Conflict)
-    );
-    assert_no_seed(
-        &b,
-        SessionRef::new(
+    for budget in [CHECKPOINT_CACHE_BYTES, 1] {
+        let directory = tempfile::tempdir()?;
+        let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+        b.checkpoints = CheckpointCache::new(budget);
+        let source = cache_branch(&mut b, 1_050_000)?;
+        let request = fork_request(&source, &b, 1_060_000)?;
+        let receipt = fork(&mut b, &request)?;
+        b.checkpoints.clear();
+        let mut normalized = b.checkpoints.normalizations;
+        let target = receipt.target().session();
+        assert_eq!(fork(&mut b, &request)?, receipt);
+        assert_not_retained(&mut b, target, &request, normalized);
+        let conflict = fork_request(&source, &b, 1_070_000)?;
+        fork(&mut b, &conflict)?;
+        b.checkpoints.clear();
+        normalized = b.checkpoints.normalizations;
+        // Reusing a workflow with the newer session revision changes its exact request.
+        let collision = fork_request(&source, &b, 1_060_000)?;
+        assert_eq!(
+            fork(&mut b, &collision),
+            Err(SessionStoreError::IdentityConflict)
+        );
+        assert_not_retained(&mut b, target, &collision, normalized);
+        let stale_revision = fork_request(&source, &b, 1_080_000)?;
+        let intervening = fork_request(&source, &b, 1_090_000)?;
+        fork(&mut b, &intervening)?;
+        b.checkpoints.clear();
+        normalized = b.checkpoints.normalizations;
+        assert_eq!(
+            fork(&mut b, &stale_revision),
+            Err(SessionStoreError::Conflict)
+        );
+        let stale_target = SessionRef::new(
             source.head.session().session_id(),
             stale_revision.target_branch(),
-        ),
-    );
-    let stale_fence = fork_request(&source, &b, 1_100_000)?;
-    release(&mut b, &source.lease)?;
-    assert_eq!(
-        fork(&mut b, &stale_fence),
-        Err(SessionStoreError::FenceSuperseded)
-    );
-    assert_no_seed(
-        &b,
-        SessionRef::new(
+        );
+        assert_not_retained(&mut b, stale_target, &stale_revision, normalized);
+        let stale_fence = fork_request(&source, &b, 1_100_000)?;
+        release(&mut b, &source.lease)?;
+        assert_eq!(
+            fork(&mut b, &stale_fence),
+            Err(SessionStoreError::FenceSuperseded)
+        );
+        let fenced_target = SessionRef::new(
             source.head.session().session_id(),
             stale_fence.target_branch(),
-        ),
-    );
+        );
+        assert_not_retained(&mut b, fenced_target, &stale_fence, normalized);
+    }
     Ok(())
+}
+
+/// Neither a pending seed nor a ready entry exists for `request`'s target, and
+/// nothing was normalized since `normalized`.
+fn assert_not_retained(
+    b: &mut Backend,
+    branch: SessionRef,
+    request: &ForkBranch,
+    normalized: usize,
+) {
+    assert!(!b.checkpoints.has_pending(branch));
+    assert_eq!(b.checkpoints.normalizations, normalized);
+    assert!(
+        b.checkpoints
+            .get(request.target().checkpoint_id())
+            .is_none()
+    );
 }
 
 #[test]
@@ -820,9 +842,9 @@ fn fork_target_pending_seed_survives_source_commit() -> TestResult {
     commit(&mut b, &successor_request(&source, 1_130_000)?)?;
     assert!(b.checkpoints.has_pending(target.session()));
     assert!(b.checkpoints.has_pending(source.head.session()));
-    let before = b.checkpoint_decodes;
+    let before = b.checkpoints.decodes;
     assert_eq!(b.load_branch(target.session())?.head(), target);
-    assert_eq!(b.checkpoint_decodes, before);
+    assert_eq!(b.checkpoints.decodes, before);
     assert!(!b.checkpoints.has_pending(target.session()));
     assert!(b.checkpoints.has_pending(source.head.session()));
     Ok(())
@@ -872,9 +894,9 @@ fn capacity_retry_publications_preserve_other_sessions_ready_roots() -> TestResu
         })?;
         assert_eq!(attempts, 2);
         assert!(b.checkpoints.has_pending(target));
-        let before = b.checkpoint_decodes;
+        let before = b.checkpoints.decodes;
         b.load_branch(warm.head.session())?;
-        assert_eq!(b.checkpoint_decodes, before);
+        assert_eq!(b.checkpoints.decodes, before);
     }
     Ok(())
 }

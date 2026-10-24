@@ -67,12 +67,11 @@ pub(in super::super) fn fork(
     if source.head != r.source() {
         return Err(SessionStoreError::Conflict);
     }
-    let source_cp = load_checkpoint(&tx, source.head.checkpoint().checkpoint_id()).map_err(
-        |error| match error {
-            SessionStoreError::NotFound => SessionStoreError::corrupt(),
-            other => other,
-        },
-    )?;
+    // The source head is usually retained from the attach that preceded this
+    // fork; its row, probed in this transaction, binds the exact head.
+    let source_id = source.head.checkpoint().checkpoint_id();
+    let source_row = checkpoint_row(&tx, source_id)?.ok_or_else(SessionStoreError::corrupt)?;
+    let source_cp = b.checkpoints.load(&tx, source_id, &source_row)?;
     let source_checkpoint = source_cp.checkpoint();
     let t = x.checkpoint.manifest().topology();
     let lineage = ForkLineage {
@@ -203,7 +202,7 @@ pub(in super::super) fn fork(
     )?;
     meta(&tx, 0, 1)?;
     super::lease::commit_claimed(tx, &mut b.holders, target, lease_fence)?;
-    b.checkpoints.seed(target, reference, r.target(), None);
+    b.checkpoints.seed_fork(target, reference, r.target());
     Ok(receipt)
 }
 

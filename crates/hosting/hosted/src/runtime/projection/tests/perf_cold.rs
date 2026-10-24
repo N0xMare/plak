@@ -17,8 +17,11 @@ fn long_lineage_host_ready_fork_and_status() {
     let store = Arc::new(MemoryStore::new());
     config.store = store.clone();
     let database = config.product_home.join("runtime.sqlite3");
-    let payload = "x".repeat(4_600);
-    let segments: Vec<_> = (0..4_096_u64)
+    // `PLAK_PERF_SEGMENTS` and `PLAK_PERF_SEGMENT_BYTES` size the seeded head;
+    // the default is 4096 groups of 4.6 KB.
+    let count = env_or("PLAK_PERF_SEGMENTS", 4_096);
+    let payload = "x".repeat(usize::try_from(env_or("PLAK_PERF_SEGMENT_BYTES", 4_600)).unwrap());
+    let segments: Vec<_> = (0..count)
         .map(|index| {
             HistorySegment::new(
                 HistorySegmentKind::Conversation,
@@ -49,7 +52,7 @@ fn long_lineage_host_ready_fork_and_status() {
     let (source, _) = crate::runtime::startup::create_seeded_session(config).unwrap();
     let objects =
         crate::runtime::test_support::durable_authority_count(&database, "runtime_objects");
-    assert!(objects > 8_000);
+    assert!(u64::try_from(objects).unwrap() > 2 * count);
     let config = reopened(root.path(), &store, &source.id);
     let started = Instant::now();
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
@@ -97,11 +100,21 @@ fn long_lineage_host_ready_fork_and_status() {
     eprintln!(
         "{}",
         serde_json::json!({
-            "kind": "hosted-long-lineage-cold-path", "history_segments": 4096,
+            "kind": "hosted-long-lineage-cold-path", "history_segments": count,
         "history_canonical_bytes": history_canonical_bytes, "objects": objects,
             "resume_host_ready_ns": resume_ready_ns, "fork_now_ns": fork_now_ns,
             "recovery_status_ns": status_ns,
             "scope": "real hosted loop and SQLite runtime; memory product store; status excludes CLI startup",
         })
     );
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "opt-in benchmark sizing; a bad value is a usage error"
+)]
+fn env_or(name: &str, default: u64) -> u64 {
+    std::env::var(name).map_or(default, |value| {
+        value.parse().expect("PLAK_PERF_* must be an integer")
+    })
 }
