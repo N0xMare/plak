@@ -5,7 +5,7 @@
 //! for `Interrupt`, an independently coalesced `Quit` observed only after
 //! accepted ordinary work, and one-in-flight admission for the non-repeatable
 //! session mutations (`ClearSession`, `Compact`, `ForkSession`) released by an
-//! RAII acknowledgement.
+//! RAII acknowledgement. An async consumer waits on [`IntentReceiver::ready`].
 //!
 //! Observations ([`observation_channel`]): a bounded queue that never blocks
 //! the producer. Assistant deltas coalesce, latest-state snapshots supersede
@@ -22,6 +22,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
+use std::task::{Poll, Waker};
 use std::time::{Duration, Instant};
 
 use crate::intent::{Core, ObservationExtension, ProtocolExtension, SessionIntent};
@@ -73,6 +74,9 @@ struct IntentQueue<P: ProtocolExtension> {
     senders: AtomicUsize,
     receiver_alive: AtomicBool,
     ready: Condvar,
+    /// The task awaiting [`IntentReceiver::ready`], woken wherever `ready`
+    /// is notified.
+    waiter: Mutex<Option<Waker>>,
 }
 
 struct QueuedIntent<P: ProtocolExtension> {
@@ -107,6 +111,17 @@ const fn nonrepeatable_index(bit: u8) -> usize {
 }
 
 impl<P: ProtocolExtension> IntentQueue<P> {
+    fn wake_waiter(&self) {
+        let waiter = self
+            .waiter
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(waiter) = waiter {
+            waiter.wake();
+        }
+    }
+
     fn reserve_nonrepeatable(&self, bit: u8) -> Option<NonrepeatableAdmission> {
         if self.nonrepeatable.fetch_or(bit, Ordering::AcqRel) & bit != 0 {
             return None;
@@ -263,6 +278,7 @@ impl<P: ProtocolExtension> Drop for IntentSender<P> {
     fn drop(&mut self) {
         if self.0.senders.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.0.ready.notify_one();
+            self.0.wake_waiter();
         }
     }
 }
@@ -295,6 +311,7 @@ impl<P: ProtocolExtension> IntentSender<P> {
         self.0.abandon_and_release.store(true, Ordering::Release);
         self.0.urgent.fetch_or(PENDING_QUIT, Ordering::Release);
         self.0.ready.notify_one();
+        self.0.wake_waiter();
     }
     /// Enqueue through the bounded mailbox. Interrupt uses a coalescing urgent
     /// lane. Quit is independently coalesced and observed only after accepted
@@ -337,6 +354,7 @@ impl<P: ProtocolExtension> IntentSender<P> {
         if let Some(urgent_bit) = urgent_bit {
             self.0.urgent.fetch_or(urgent_bit, Ordering::Release);
             self.0.ready.notify_one();
+            self.0.wake_waiter();
             return Ok(());
         }
         let nonrepeatable = nonrepeatable_bit(&action);
@@ -371,6 +389,7 @@ impl<P: ProtocolExtension> IntentSender<P> {
             correlation,
         });
         self.0.ready.notify_one();
+        self.0.wake_waiter();
         Ok(())
     }
 }
@@ -379,6 +398,11 @@ impl<P: ProtocolExtension> Drop for IntentReceiver<P> {
     fn drop(&mut self) {
         self.0.receiver_alive.store(false, Ordering::Release);
         self.0.ready.notify_all();
+        self.0
+            .waiter
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
     }
 }
 
@@ -435,6 +459,40 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
     fn take_pending_quit(&self) -> Option<SessionIntent<P>> {
         let previous = self.0.urgent.fetch_and(!PENDING_QUIT, Ordering::AcqRel);
         (previous & PENDING_QUIT != 0).then_some(SessionIntent::Quit)
+    }
+
+    /// Resolves once [`Self::try_recv`] has something to report: an ordinary
+    /// action, the urgent lane, a pending quit, or the last producer gone.
+    /// The waiting task registers before it looks, so an action that arrives
+    /// between the look and the wait still wakes it. One task waits at a
+    /// time: a second concurrent `ready` takes the registration over.
+    pub fn ready(&self) -> impl Future<Output = ()> + '_ {
+        std::future::poll_fn(move |context| {
+            {
+                let mut waiter = self
+                    .0
+                    .waiter
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !waiter
+                    .as_ref()
+                    .is_some_and(|waiter| waiter.will_wake(context.waker()))
+                {
+                    *waiter = Some(context.waker().clone());
+                }
+            }
+            if self.has_ready() {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+    }
+
+    fn has_ready(&self) -> bool {
+        self.0.urgent.load(Ordering::Acquire) != 0
+            || self.0.senders.load(Ordering::Acquire) == 0
+            || !self.0.queue.lock().is_ok_and(|queue| queue.is_empty())
     }
 
     /// Pop one action without waiting.
@@ -563,6 +621,7 @@ pub fn intent_channel<P: ProtocolExtension>() -> (IntentSender<P>, IntentReceive
         senders: AtomicUsize::new(1),
         receiver_alive: AtomicBool::new(true),
         ready: Condvar::new(),
+        waiter: Mutex::new(None),
     });
     (IntentSender(Arc::clone(&shared)), IntentReceiver(shared))
 }

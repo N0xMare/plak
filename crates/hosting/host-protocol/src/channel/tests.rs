@@ -812,3 +812,50 @@ fn a_dropped_receiver_never_calls_its_notifier() {
     drop(sender);
     assert_eq!(fired(&count), 0);
 }
+
+fn wait_ready(receiver: &super::IntentReceiver<Core>, within: std::time::Duration) -> bool {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap()
+        .block_on(async { tokio::time::timeout(within, receiver.ready()).await.is_ok() })
+}
+
+/// An async consumer wakes on an arrival instead of polling for one: an
+/// action, an urgent interrupt, a quit and the last sender leaving each end
+/// the wait, and nothing else does.
+#[test]
+fn intent_readiness_wakes_on_every_arrival_and_on_nothing_else() {
+    let short = std::time::Duration::from_millis(30);
+    let long = std::time::Duration::from_secs(10);
+    let (sender, receiver) = intent_channel::<Core>();
+    assert!(
+        !wait_ready(&receiver, short),
+        "an empty mailbox is not ready"
+    );
+    for action in [
+        SessionIntent::Prompt("arrives later".into()),
+        SessionIntent::Interrupt,
+        SessionIntent::Quit,
+    ] {
+        let late = sender.clone();
+        let arrival = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            late.send(action).unwrap();
+        });
+        assert!(wait_ready(&receiver, long));
+        arrival.join().unwrap();
+        assert!(wait_ready(&receiver, short), "readiness holds until taken");
+        receiver.try_recv().unwrap();
+        assert!(!wait_ready(&receiver, short), "taken means not ready");
+    }
+    let leaving = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        drop(sender);
+    });
+    assert!(
+        wait_ready(&receiver, long),
+        "the last sender leaving wakes it"
+    );
+    leaving.join().unwrap();
+}

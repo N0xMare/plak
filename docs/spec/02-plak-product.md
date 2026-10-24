@@ -156,6 +156,14 @@ answered (§5.4), which never stands in for host state. The binary owns
 `PlakExtension`, the concrete settings/theme vocabulary, and its surface intents
 and observations. Hosted sessions carry these through the generic bounded
 protocol mailboxes and dispatch extension intents to the binary's handler.
+The observation mailbox calls a consumer's notifier on each empty to
+non-empty edge, so the TUI never polls for host observations (§5.8). The
+intent mailbox resolves an async readiness wait that a busy turn selects on
+beside its event stream, so an intent arriving mid-turn is taken at once
+rather than at the next 20 ms delta-coalescing tick; the idle host still
+waits on the intent mailbox with a bounded observe tick between its own
+idle work. Readiness changes no intent
+order: the turn still takes deferred actions first and one action per pass.
 
 The product handler sees immutable phase, attached-one-shot configuration,
 Ready-catalog, queue-length, and immutable session presentation facts (root

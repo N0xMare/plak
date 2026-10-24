@@ -131,6 +131,8 @@ mod control;
 mod delivery;
 mod finish;
 mod queue_projection;
+#[cfg(test)]
+pub(in crate::runtime) mod wake_trace;
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
     fn new(
@@ -229,6 +231,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 break;
             }
 
+            let actions = self.host.actions;
+            let takes_actions = self.takes_actions();
+            let deferred_ready = takes_actions && self.host.deferred.borrow().has_deferred();
             tokio::select! {
                 biased;
                 res = &mut result_fut, if self.turn_result.is_none() => {
@@ -382,7 +387,18 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                         }
                     }
                 }
+                // An intent wakes the loop at once; the next pass takes it.
+                () = actions.ready(), if takes_actions => {
+                    #[cfg(test)]
+                    wake_trace::woke("intent");
+                }
+                () = std::future::ready(()), if deferred_ready => {}
+                // Recreated every pass, so it fires only after 20 ms with no
+                // other wake. Arming it only while deltas are buffered is the
+                // host actor's job (design E1), not this loop's.
                 () = tokio::time::sleep(Duration::from_millis(20)) => {
+                    #[cfg(test)]
+                    wake_trace::woke("tick");
                     // Coalesce window: flush buffered text deltas if due, and take
                     // the one tree observation of this window. The emitter drops
                     // every non-advancing revision, so an idle tree costs a lookup

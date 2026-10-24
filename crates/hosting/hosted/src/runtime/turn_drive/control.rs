@@ -30,6 +30,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         let _ = self.host.events.notice(row);
     }
 
+    /// Whether [`Self::poll_actions`] takes an action: after a quit it no
+    /// longer reads the mailbox, so readiness must not wake the loop.
+    pub(super) const fn takes_actions(&self) -> bool {
+        !self.quit_after_terminal
+    }
+
     pub(super) async fn poll_actions(&mut self) -> bool {
         crate::call_detail::note_attached(&self.host.session.id);
         self.host
@@ -50,7 +56,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         // anything still in the mailbox, and the FIFO `interrupt.rs` documents
         // has to hold across the turn boundary too. Without this a deferred
         // `Quit` (or an earlier `FollowUp`) is invisible for the whole turn.
-        if !self.quit_after_terminal {
+        if self.takes_actions() {
             let mut acknowledgement = None;
             let received = self
                 .host
@@ -154,6 +160,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             emit_prompt_history(self.host.events, self.host.session);
                             accept_draft(self.host.events, action);
                             if let Some(item) = self.host.session.pending_queue.last() {
+                                #[cfg(test)]
+                                super::wake_trace::took(&item.text);
                                 let _ = self
                                     .host
                                     .events
