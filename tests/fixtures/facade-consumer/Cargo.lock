@@ -952,6 +952,7 @@ dependencies = [
  "plakous-cell",
  "plakous-code-mode",
  "plakous-compose",
+ "plakous-exchange",
  "plakous-http",
  "plakous-model",
  "plakous-openai",

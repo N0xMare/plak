@@ -149,6 +149,11 @@ than the workspace's.
 in the same policy table, and `[workspace.metadata.plakous.modules.plak.tui]`
 constrains what the binary's `tui` module may name.
 
+The facade's optional `native-subscriptions` edge to `plakous-exchange` is an
+explicit exception for shared model-lookup backoff policy. It does not move
+catalog transport, parsing or provider admission into the facade or authorize
+direct dependencies on other protocol crates.
+
 ### 3.1 What each supported package promises
 
 Support is limited to five inventories, and each is pinned by code rather than
@@ -337,7 +342,7 @@ called out explicitly.
 | `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
 | `plakous-store` | `commit-trace` | Repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 §2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by Plak through the offline-crash harness under `test-hooks` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` for all three stores. |
 | `plakous-recursive-subagents-store` | `commit-trace` | Optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plak/test-hooks` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release Plak closures. |
-| `plakous-openai` | `test-support` | Implies `native-auth`; exposes the doc-hidden builder that binds Codex browser-login callbacks on an ephemeral port instead of the pinned redirect ports. A dev-dependency of `plakous`, never a production edge |
+| `plakous-openai` | `test-support` | Implies `native-auth`; exposes the doc-hidden builder for ephemeral Codex browser-login callbacks and an explicit catalog fixture origin. A dev-dependency of `plakous`, never a production edge |
 | `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, and scripted `RuntimeFactory` registrations; the construction port itself is always available. A dev-dependency of `plak`, never a production edge |
 | `plakous-host-protocol` | `test-support` | Test-only view constructors; a dev-dependency of `plakous-hosted` and `plak`, never a production edge |
 | `plak` | `git-cli`, `jj` | Defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plak.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |

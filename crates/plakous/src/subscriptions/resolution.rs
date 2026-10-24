@@ -11,6 +11,7 @@ use super::{
 ///
 /// Credential material stays inside the returned [`LanguageModel`].
 pub struct ResolvedNativeModel {
+    pub(crate) service_tiers: Vec<String>,
     pub(crate) selected_model: ModelId,
     pub(crate) descriptor: ResolvedModelDescriptor,
     pub(crate) model: Arc<dyn LanguageModel>,

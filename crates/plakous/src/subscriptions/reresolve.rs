@@ -206,6 +206,7 @@ pub(super) mod tests {
         )?;
         Ok(ResolvedProvider {
             model: ResolvedNativeModel {
+                service_tiers: Vec::new(),
                 selected_model: descriptor.requested_model().clone(),
                 descriptor,
                 model,

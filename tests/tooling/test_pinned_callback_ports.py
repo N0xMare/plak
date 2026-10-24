@@ -99,8 +99,10 @@ class PinnedCallbackPortTests(unittest.TestCase):
         facade = read("crates/plakous/src/subscriptions/codex.rs")
         self.assertRegex(
             facade,
-            r"#\[cfg\(test\)\]\s*\{\s*manager = manager\.with_ephemeral_loopback_for_tests\(\);",
+            r"#\[cfg\(test\)\]\s*\{\s*manager = manager\s*\.with_fixture_endpoints_for_tests\(fixture_transport\.map\(\|\(_, origin\)\| origin\)\);",
         )
+        manager = read("crates/providers/openai/src/native_auth/manager.rs")
+        self.assertIn("self.endpoints.loopback_ports = &[0];", manager)
 
     def test_scanner_finds_pinned_binds_in_every_spelling(self) -> None:
         for source in (

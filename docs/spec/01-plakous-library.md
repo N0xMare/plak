@@ -2757,14 +2757,42 @@ checkpoint format epoch 32.
 **Read-only model lookup exchanges.** The shared bounded GET retry in
 `plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
 `plak agent`, TUI new-session/attach and an explicit model rebind (`/model`).
-No provider owns a second retry copy. Native TUI background catalog refresh and
-native child binding (both its catalog probe and its provider resolution) use
-one physical attempt. OpenRouter discovery and API-key child binding retain
+No provider owns a second retry copy. Native TUI background catalog refresh uses
+one physical attempt. Native child binding has no separate catalog probe: its
+provider resolution obtains fresh exact-route catalog evidence once and uses
+that same row to validate the selected model, native tool mode and named
+processing tier. Enrollment chooses a presentation candidate, never admission
+authority; missing or contradictory authenticated facts fail closed (§7).
+Named processing tiers are validated against the fresh row for every lineage,
+including root binding, attach and re-resolution: Codex may advertise tiers;
+xAI and Claude rows advertise none.
+Child binding uses `resolve_spawned_child_provider` with a caller-owned
+`std::time::Instant` deadline; the generic `resolve_turn_scoped_provider`
+retains its deadline-free signature and does not select the child retry policy.
+Each child resolution operation uses one physical catalog attempt. A transient
+lookup failure, classified by the shared GET policy below, permits one more
+whole resolution operation after 500-750 ms jittered backoff (or the provider's
+longer `Retry-After`). The failed operation must finish and release its
+compatibility flock, lifecycle lock and Ready lease **before** that wait.
+Both operations and backoff nest inside the caller's 120-second startup wait
+for creation, Start acknowledgement and registration (chapter 03 §2.1), never
+restart it. Resolution uses the earlier of its own bound and the caller's
+deadline, reserving ten seconds for startup completion. A retry is allowed only
+when its delay is at most 15 seconds and the remaining startup budget covers
+that delay, one full 30-second catalog attempt and the ten-second margin.
+Otherwise the lookup cause returns immediately without sleeping or redispatching.
+A successful catalog-backed native
+child bind therefore needs one catalog GET, or two if the first fails transiently.
+OpenRouter discovery and API-key child binding retain
 bounded retries: those paths hold no subscription compatibility flock,
 lifecycle lock or Ready lease. In-session Codex and Grok receipt renewals also remain
 single-attempt, including on transient failures: an attached session does not
 hold its compatibility flock, Codex lifecycle lock or Ready credential lease
 through a catalog retry window.
+Single-attempt paths classify transient transport/status failures as
+`ModelLookup` with N=1, preserving a redaction-safe cause rather than a raw
+response or typed transport failure. Their diagnostic uses singular `attempt`;
+classification does not add a retry to background refresh or receipt renewal.
 The lookup inventory is:
 
 | Route | Lookup before binding | Existing cache/credential behavior |
@@ -2808,10 +2836,11 @@ accounting; it changes no persisted encoding.
 
 Native catalog-only and scoped-provider binding operations have a 120-second
 outer bound, including compatibility lock acquisition, credential setup,
-lookup and cleanup. The retrying paths may hold their compatibility flock,
+lookup and cleanup. Foreground retrying paths may hold their compatibility flock,
 Codex lifecycle lock and Ready lease for at most that operation bound; the
 physical catalog phase shares a tighter 60-second cap. Single-attempt paths
-keep the original 30-second exchange deadline and do not sleep between GETs.
+keep the original 30-second exchange deadline and never sleep while retaining
+that operation's authority; child resolution backoff occurs outside the operation.
 Explicit rebind allows 150 seconds per native catalog/resolution stage, leaving
 margin above the inner bound for host-side coordination; it must not cancel a
 stalled first GET at 30 seconds before the retry can start.
@@ -2820,8 +2849,10 @@ An outer 120-second cut reports `ModelLookup` with cause `operation deadline`
 and the number of **charged dispatches** (unsent refunds excluded, possibly
 zero), never a provider timeout claim. It is a harness outcome in live scoring.
 An already-zero lookup budget still returns its plain transport failure, not
-exhausted-retry evidence. Child catalog and provider-resolution errors and both
-rebind stages retain the full lookup attempt count and cause.
+exhausted-retry evidence. Child admission and provider-resolution errors retain
+every `NativeSubscriptionError`'s redaction-safe cause, not just lookup errors;
+exhausted child lookups retain the physical attempt count across both operations.
+Both rebind stages also retain the full lookup attempt count and cause.
 
 401/403 stay with the existing credential/refresh path, without a lookup retry.
 Other 4xx, absent models, malformed/oversized catalogs, invalid media types and

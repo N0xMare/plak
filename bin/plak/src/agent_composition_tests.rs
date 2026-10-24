@@ -607,6 +607,7 @@ async fn mail_start_composition_of_an_openrouter_child_never_takes_the_oauth_spe
         bind.account.as_deref(),
         bind.tuple_id.as_deref(),
         bind.effort.as_deref(),
+        None,
     )
     .await
     .err()
@@ -622,6 +623,7 @@ async fn mail_start_composition_of_an_openrouter_child_never_takes_the_oauth_spe
         &parent,
         &agent_id,
         root.path().to_str().expect("path"),
+        None,
         None,
         None,
         None,

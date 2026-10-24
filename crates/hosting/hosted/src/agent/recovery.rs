@@ -229,6 +229,7 @@ impl ChildSessionPort for ParentSessionPort {
                 accepted.is_some(),
                 fence,
                 created_output_bound,
+                None,
             )
             .await
             {

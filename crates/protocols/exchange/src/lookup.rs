@@ -58,14 +58,21 @@ pub enum LookupError {
         attempts: u8,
         /// The final transient cause.
         cause: LookupCause,
+        /// Provider minimum delay, retained for a retry outside this operation.
+        retry_after: Option<Duration>,
     },
 }
 
 impl LookupError {
     /// Content-free exhausted-attempt summary for higher-level error boundaries.
     #[must_use]
-    pub fn exhaustion(self) -> Option<(u8, &'static str)> {
-        let Self::Exhausted { attempts, cause } = self else {
+    pub fn exhaustion(self) -> Option<(u8, &'static str, Option<Duration>)> {
+        let Self::Exhausted {
+            attempts,
+            cause,
+            retry_after,
+        } = self
+        else {
             return None;
         };
         let label = match cause {
@@ -82,7 +89,7 @@ impl LookupError {
                 _ => "transport stream failure",
             },
         };
-        Some((attempts, label))
+        Some((attempts, label, retry_after))
     }
 }
 
@@ -94,8 +101,15 @@ impl fmt::Display for LookupError {
             Self::MediaType => f.write_str("model lookup has an invalid media type"),
             Self::DispatchDenied => f.write_str("model lookup dispatch was not authorized"),
             Self::NotGet => f.write_str("model lookup requires GET"),
-            Self::Exhausted { attempts, cause } => {
-                write!(f, "model lookup failed after {attempts} attempts: {cause}")
+            Self::Exhausted {
+                attempts, cause, ..
+            } => {
+                let unit = if *attempts == 1 {
+                    "attempt"
+                } else {
+                    "attempts"
+                };
+                write!(f, "model lookup failed after {attempts} {unit}: {cause}")
             }
         }
     }
@@ -261,9 +275,6 @@ where
         if let Err(LookupError::Transport(failure)) = &result {
             dispatch(Some(*failure))?;
         }
-        if maximum_attempts == 1 {
-            return result;
-        }
         let (cause, retry_after) = match result {
             Ok(reply) if LookupCause::Status(reply.status.as_u16()).retryable() => {
                 let delay = reply
@@ -278,9 +289,7 @@ where
             }
             result => return result,
         };
-        let mut jitter = [0];
-        let _ = getrandom::fill(&mut jitter);
-        let delay = retry_delay(attempt, retry_after, jitter[0]);
+        let delay = retry_backoff(attempt, retry_after);
         let remaining = cap.saturating_duration_since(tokio::time::Instant::now());
         let useful_attempt = timeout.min(Duration::from_secs(5));
         if attempt >= maximum_attempts
@@ -294,6 +303,7 @@ where
             return Err(LookupError::Exhausted {
                 attempts: attempt,
                 cause,
+                retry_after,
             });
         }
         notify(attempt + 1, &cause.to_string());
@@ -353,6 +363,15 @@ async fn once(
         headers,
         body: bytes,
     })
+}
+
+/// Jittered lookup backoff, respecting the provider's minimum delay.
+/// The first retry waits 500–750 ms, later retries 2000–2250 ms.
+#[must_use]
+pub fn retry_backoff(attempt: u8, retry_after: Option<Duration>) -> Duration {
+    let mut jitter = [0];
+    let _ = getrandom::fill(&mut jitter);
+    retry_delay(attempt, retry_after, jitter[0])
 }
 
 pub(super) fn retry_delay(attempt: u8, retry_after: Option<Duration>, jitter: u8) -> Duration {

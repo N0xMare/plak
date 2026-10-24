@@ -249,6 +249,32 @@ resolve failure is fail-closed (`model_not_admitted` or binder recovery),
 never a fallback to the caller. A non-empty `spawns` decides only whether a
 node may be a parent; it is independent of the node's tier.
 
+Native child materialization does not independently probe the catalog before
+provider resolution. Source-backed enrollment chooses only the tool-presentation
+candidate; resolution's fresh exact authenticated row must affirm the model,
+native tool mode and any named processing tier before a session is created.
+If the authenticated row's tool mode has drifted from release enrollment, child
+binding fails closed with the model and both modes and asks the caller to choose
+another model. Unlike root `/model` rebind, it does not derive a new presentation
+from that row.
+That resolution performs one catalog GET per operation. On a transient lookup
+failure it may repeat the whole operation once under chapter 01 §6.2's policy.
+Resolution and its retry nest inside the caller's existing 120-second startup
+wait for creation, acknowledgement and registration, starting before startup
+reservation; they do not receive a fresh 120 seconds. The resolver returns at
+least ten seconds before that cut, and retries only if a delay of at most 15
+seconds, a full 30-second lookup and the ten-second startup margin fit. It
+releases the compatibility flock, lifecycle lock and Ready lease before waiting.
+An overlong `Retry-After` returns the lookup cause without sleeping, rather than
+letting the startup cut turn it into recovery-required. Authentication,
+policy, absent-model and invalid-evidence failures never enter that retry.
+Reopen/re-task and recovery resolution have no caller startup deadline: they
+use only chapter 01's 120-second operation bound, with the same ten-second
+reservation.
+Materialization failures preserve the redaction-safe cause, and exhausted
+lookups preserve the total physical attempt count, without exposing response
+prose or credentials.
+
 A child bound to SuperGrok or Codex OAuth outlives its admitted catalog window
 (6 h) the way a root does (chapter 01 §7.4): its runtime carries the host's
 reresolver, so a child started, followed up or woken by mail after the window,

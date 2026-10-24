@@ -67,6 +67,7 @@ full = [
 mcp = ["dep:plakous-mcp", "plakous-tool-web/fetch", "plakous-tool-web/image-gen"]
 # Plak's product closure: both evaluators plus subscription authentication.
 native-subscriptions = [
+    "dep:plakous-exchange",
     "composition",
     "composition-python",
     "dep:plakous-auth",
@@ -88,6 +89,7 @@ sessions-sqlite = ["plakous-store/sqlite"]
 xai = ["dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/fetch", "plakous-tool-web/image-gen"]
 
 [dependencies]
+plakous-exchange = { workspace = true, optional = true }
 plakous-agent.workspace = true
 plakous-anthropic = { workspace = true, optional = true }
 plakous-auth = { workspace = true, optional = true }
@@ -115,6 +117,9 @@ plakous-xai = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 futures-core.workspace = true
 futures-util.workspace = true
 plakous-anthropic = { workspace = true, features = ["test-clock"] }
@@ -125,7 +130,7 @@ rusqlite.workspace = true
 rustix = { workspace = true, features = ["pty", "termios"] }
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
+tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "test-util", "time"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [lints]

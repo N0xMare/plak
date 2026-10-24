@@ -162,6 +162,8 @@ fn native_inference_configs_match_product_budget_without_changing_api_defaults()
 
 use super::super::*;
 use super::*;
+
+mod child_catalog;
 #[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
@@ -2217,6 +2219,7 @@ async fn turn_scoped_prepare_without_root_does_not_start_inference() -> Result<(
     )?;
     let resolved = ResolvedProvider {
         model: ResolvedNativeModel {
+            service_tiers: Vec::new(),
             selected_model: descriptor.requested_model().clone(),
             descriptor: descriptor.clone(),
             model: unwrapped,
@@ -2756,7 +2759,8 @@ async fn model_catalog_outer_deadline_reports_only_charged_dispatches() {
         result,
         Err(NativeSubscriptionError::ModelLookup {
             attempts: 1,
-            cause: "operation deadline"
+            cause: "operation deadline",
+            ..
         })
     ));
 }

@@ -83,6 +83,8 @@ impl NativeSubscriptions {
         }
         #[cfg(any(test, feature = "test-clock"))]
         let clock = self.state.clock();
+        #[cfg(test)]
+        let fixture_transport = self.codex_test_transport.clone();
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -98,6 +100,10 @@ impl NativeSubscriptions {
             // an OAuth POST cannot be retried safely after an H2 stream reset.
             let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
                 .map_err(|_| NativeSubscriptionError::Internal)?;
+            #[cfg(test)]
+            let client = fixture_transport
+                .as_ref()
+                .map_or(client, |(client, _)| client.clone());
             #[cfg(any(test, feature = "test-clock"))]
             let manager = plakous_openai::CodexSubscriptionCredentialManager::new_with_clock(
                 path,
@@ -123,7 +129,8 @@ impl NativeSubscriptions {
             // Unit tests never bind the pinned Codex callback ports.
             #[cfg(test)]
             {
-                manager = manager.with_ephemeral_loopback_for_tests();
+                manager = manager
+                    .with_fixture_endpoints_for_tests(fixture_transport.map(|(_, origin)| origin));
             }
             Ok(CodexOnline {
                 manager: Arc::new(manager),

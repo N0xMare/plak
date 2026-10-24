@@ -1191,6 +1191,7 @@ dependencies = [
  "plakous-cell",
  "plakous-code-mode",
  "plakous-compose",
+ "plakous-exchange",
  "plakous-http",
  "plakous-mcp",
  "plakous-model",

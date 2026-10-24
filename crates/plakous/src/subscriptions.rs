@@ -10,6 +10,7 @@
 //! revalidation before an ordinary run.
 
 mod catalog;
+mod child;
 mod claude;
 mod codex;
 mod compatibility;
@@ -115,6 +116,10 @@ const MODEL_CATALOG_DEADLINE: Duration = Duration::from_secs(120);
 /// provider-native route object.
 #[derive(Clone)]
 pub struct NativeSubscriptions {
+    #[cfg(test)]
+    child_backoff: Option<child::BackoffHook>,
+    #[cfg(test)]
+    codex_test_transport: Option<(plakous_http::Client, plakous_openai::EndpointOrigin)>,
     catalog_retries: bool,
     state: SubscriptionState,
     exchange_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
@@ -123,6 +128,10 @@ pub struct NativeSubscriptions {
 impl NativeSubscriptions {
     fn from_state(state: SubscriptionState) -> Self {
         Self {
+            #[cfg(test)]
+            child_backoff: None,
+            #[cfg(test)]
+            codex_test_transport: None,
             state,
             exchange_observer: None,
             catalog_retries: true,
@@ -132,6 +141,10 @@ impl NativeSubscriptions {
     #[must_use]
     pub const fn new(paths: SubscriptionPaths) -> Self {
         Self {
+            #[cfg(test)]
+            child_backoff: None,
+            #[cfg(test)]
+            codex_test_transport: None,
             state: SubscriptionState::new(paths),
             exchange_observer: None,
             catalog_retries: true,
@@ -147,8 +160,9 @@ impl NativeSubscriptions {
         self
     }
 
-    /// Uses single-attempt model lookups for background refresh or child binding
-    /// while a session is already attached. Receipt renewals are always single-attempt.
+    /// Uses one physical attempt per model lookup, including background refresh.
+    /// Child binding may retry the whole operation after releasing its authority;
+    /// receipt renewals are always single-attempt.
     #[must_use]
     pub fn without_model_lookup_retries(mut self) -> Self {
         self.catalog_retries = false;

@@ -1064,6 +1064,7 @@ mod lookup_retry_tests {
             plakous::subscriptions::NativeSubscriptionError::ModelLookup {
                 attempts: 3,
                 cause: "HTTP 503",
+                retry_after: None,
             },
         );
         assert!(

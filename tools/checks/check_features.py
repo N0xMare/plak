@@ -229,7 +229,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "ebc6183bab0f1f33a2ee8f48c1ee83e5c0db9a33b04c0224d52aec3d1efecfbf",
     "plakous-js-runtime": "dd27d453673485150bacf272c75f6ee70b6993fc95d708ce5e3fadc1c8ac52cd",
-    "plakous": "8043cc39a7ba5e0f9c220d1ffd30b773ad06a8ee7e4f3e4b4922c4ef25591337",
+    "plakous": "bb963524d56d45fa5622006a648391dce1af9825c39af22e6e014dc37c062b56",
     "plakous-agent": "e818ef48182ef75e455ed0af1d13c8aec12d9fa23c423db844f2557f2c62416f",
     "plakous-anthropic": "2b5706d014327cfb790b56a5aade9ecc92b4483dc411b54bbc8d71be161fb555",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",

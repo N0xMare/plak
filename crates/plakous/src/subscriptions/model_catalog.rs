@@ -67,6 +67,8 @@ where
     Ok(models)
 }
 
+pub(super) const OPERATION_DEADLINE_CAUSE: &str = "operation deadline";
+
 pub(super) fn catalog_operation_deadline(
     gate: &dyn SubscriptionRequestGate,
 ) -> NativeSubscriptionError {
@@ -77,7 +79,8 @@ pub(super) fn catalog_operation_deadline(
     });
     NativeSubscriptionError::ModelLookup {
         attempts: u8::try_from(attempts).unwrap_or(u8::MAX),
-        cause: "operation deadline",
+        cause: OPERATION_DEADLINE_CAUSE,
+        retry_after: None,
     }
 }
 

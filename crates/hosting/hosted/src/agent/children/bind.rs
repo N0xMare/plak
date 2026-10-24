@@ -5,10 +5,10 @@ use super::{
     ChildReopenErrorKind, ChildStartFailure, ChildStartup, ChildStartupStage, CommandId,
     CompositionSelection, CreateSessionOutcome, CreateSessionRequest, Duration, Future,
     LiveRelease, ModelId, NativeSubscriptionError, OutputBoundDisposition, Path, PathBuf, Pin,
-    ProcessingTierDisposition, ProductAgentSpec, SessionOperationId, SessionRuntimeBinding,
-    SessionToolFence, SpawnBindError, SpawnParent, coding_session_runtime_binding_for,
-    occupancy_session_fence, product_subscription_request_limits, prompt_agent_tier,
-    prompt_composition, release_startup, require_reconstructed_coding_projection,
+    ProductAgentSpec, SessionOperationId, SessionRuntimeBinding, SessionToolFence, SpawnBindError,
+    SpawnParent, coding_session_runtime_binding_for, occupancy_session_fence,
+    product_subscription_request_limits, prompt_agent_tier, prompt_composition, release_startup,
+    require_reconstructed_coding_projection,
     selected_coding_provider_configuration_with_processing_tier, spawn_child_composition,
     spawn_parent_tree_id, spawn_roster_composition, spawn_roster_processing_tier,
     start_child_turn_owned,
@@ -125,30 +125,32 @@ impl ProductChildSessionBinder {
             let mut worker = StartupWorker::new(runtime.clone(), agent_id.clone(), startup.clone());
             let task = tokio::spawn(async move {
                 let result = async {
-                    let created = match Box::pin(create_spawned_child_session(&parent, &start))
-                        .await
-                    {
-                        Ok(created) => created,
-                        Err(error) => {
-                            worker_runtime
-                                .finish_startup(
-                                    &agent_id,
-                                    &worker_startup,
-                                    LiveRelease {
-                                        feed: None,
-                                        locator: None,
-                                        failure: match &error {
-                                            SpawnBindError::Refused(_) => None,
-                                            SpawnBindError::RecoveryRequired {
-                                                message, ..
-                                            } => Some(message.clone()),
+                    let created =
+                        match Box::pin(create_spawned_child_session(&parent, &start, deadline))
+                            .await
+                        {
+                            Ok(created) => created,
+                            Err(error) => {
+                                worker_runtime
+                                    .finish_startup(
+                                        &agent_id,
+                                        &worker_startup,
+                                        LiveRelease {
+                                            feed: None,
+                                            locator: None,
+                                            failure: match &error {
+                                                SpawnBindError::Refused(_) => None,
+                                                SpawnBindError::RecoveryRequired {
+                                                    message,
+                                                    ..
+                                                } => Some(message.clone()),
+                                            },
                                         },
-                                    },
-                                )
-                                .await;
-                            return Err(error);
-                        }
-                    };
+                                    )
+                                    .await;
+                                return Err(error);
+                            }
+                        };
                     start_spawned_child(&parent, start, created, &worker_startup, &worker_runtime)
                         .await
                         .map_err(|failure| match failure {
@@ -330,6 +332,7 @@ pub(in crate::agent) struct CreatedChild {
 pub(in crate::agent) async fn create_spawned_child_session(
     parent: &SpawnParent,
     start: &crate::agent_tree_tools::SpawnStart,
+    deadline: tokio::time::Instant,
 ) -> Result<CreatedChild, SpawnBindError> {
     let attach_started = std::time::Instant::now();
     let spawned = &start.spawned;
@@ -363,6 +366,7 @@ pub(in crate::agent) async fn create_spawned_child_session(
         // A child being spawned is new; nothing was created under an earlier
         // bound, so it takes the figure its route attests now.
         None,
+        Some(deadline),
     )
     .await?;
     let sessions = parent
@@ -656,6 +660,7 @@ pub(in crate::agent) async fn child_session_runtime_binding(
     // same reason a reopened root is, because the same prefix, projection and
     // admission gates compare the same identity.
     created_output_bound: Option<OutputBoundDisposition>,
+    startup_deadline: Option<tokio::time::Instant>,
 ) -> Result<SessionRuntimeBinding, String> {
     // A new child uses current construction inputs, never a parent's reopen pin.
     let mut scoped_parent = parent.clone();
@@ -683,6 +688,7 @@ pub(in crate::agent) async fn child_session_runtime_binding(
             opening_durable_session,
             fence,
             created_output_bound,
+            startup_deadline,
         })
         .await
 }
@@ -700,6 +706,7 @@ pub(super) async fn production_child_runtime(
         opening_durable_session,
         fence,
         created_output_bound,
+        startup_deadline,
     } = request;
     let account = account.filter(|value| !value.is_empty());
     if account == Some("openrouter")
@@ -720,7 +727,16 @@ pub(super) async fn production_child_runtime(
         )
         .await;
     }
-    let child = spawned_child_spec(parent, agent_id, path, account, tuple_id, effort).await?;
+    let child = spawned_child_spec(
+        parent,
+        agent_id,
+        path,
+        account,
+        tuple_id,
+        effort,
+        startup_deadline,
+    )
+    .await?;
     let mut sink = Vec::new();
     coding_session_runtime_binding_for(
         child,
@@ -912,6 +928,7 @@ pub async fn spawned_child_spec(
     account: Option<&str>,
     tuple_id: Option<&str>,
     effort: Option<&str>,
+    startup_deadline: Option<tokio::time::Instant>,
 ) -> Result<ProductAgentSpec, String> {
     let (tree_id, workspace_root_base, state_roots, parent_composition) = match parent {
         SpawnParent::Native(spec) => (
@@ -985,38 +1002,12 @@ pub async fn spawned_child_spec(
             NativeSubscriptionError::CredentialUnavailable => {
                 "target OAuth account is not Ready".to_string()
             }
-            _ => "target OAuth account status could not be read".to_string(),
+            _ => format!("target OAuth account status could not be read: {error}"),
         })?;
-    let catalog = subscriptions
-        .model_catalog(target_provider)
-        .await
-        .map_err(child_catalog_failure)?;
-    let catalog_entry = catalog
-        .models()
-        .iter()
-        .find(|entry| entry.exact_id() == target_model)
-        .ok_or_else(|| "spawn child model is absent from the authenticated catalog".to_string())?;
-    let native_tool_mode = catalog_entry.native_tool_mode();
-    // the frozen pin carries the template's tier. It is honored
-    // only when this exact authenticated row advertises it; otherwise the
-    // child fails closed rather than silently binding Standard.
-    let processing_tier = match spawn_roster_processing_tier(&tree_id, agent_id) {
-        ProcessingTierDisposition::Standard => ProcessingTierDisposition::Standard,
-        ProcessingTierDisposition::ProviderNamed(named) => {
-            if catalog_entry
-                .service_tiers()
-                .iter()
-                .any(|advertised| advertised.id() == named.as_str())
-            {
-                ProcessingTierDisposition::ProviderNamed(named)
-            } else {
-                return Err(
-                    "spawn child processing tier is absent from the exact authenticated catalog row"
-                        .into(),
-                );
-            }
-        }
-    };
+    // Enrollment chooses only a presentation candidate. Resolution's one
+    // authenticated catalog read must affirm its tool mode and named tier.
+    let native_tool_mode = target_provider.enrolled_tool_mode(&target_model);
+    let processing_tier = spawn_roster_processing_tier(&tree_id, agent_id);
     let model_id = ModelId::new(target_model.clone())
         .map_err(|_| "spawn child model identity is invalid".to_string())?;
     let selected = selected_coding_provider_configuration_with_processing_tier(
@@ -1032,14 +1023,24 @@ pub async fn spawned_child_spec(
         .map_err(|_| "spawn child subscription gate is invalid".to_string())?;
     let resolved = Arc::new(
         subscriptions
-            .resolve_turn_scoped_provider(
+            .resolve_spawned_child_provider(
                 selected,
                 limits,
-                plakous::model::SessionLineage::SpawnedChild,
+                startup_deadline.map_or_else(
+                    || std::time::Instant::now() + SPAWN_MATERIALIZE_TIMEOUT,
+                    tokio::time::Instant::into_std,
+                ),
             )
             .await
             .map_err(|error| child_provider_failure(error.kind()))?,
     );
+    if resolved.native_tool_mode() != native_tool_mode {
+        let row_mode = child_tool_mode_label(resolved.native_tool_mode());
+        let enrolled_mode = child_tool_mode_label(native_tool_mode);
+        return Err(format!(
+            "model {target_model}: authenticated row tool mode {row_mode} differs from its enrolled presentation {enrolled_mode}; choose another model",
+        ));
+    }
 
     Ok(ProductAgentSpec {
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
@@ -1067,6 +1068,16 @@ pub async fn spawned_child_spec(
         },
         topology_enabled: parent.topology_enabled(),
     })
+}
+
+fn child_tool_mode_label(mode: Option<plakous::subscriptions::NativeToolMode>) -> &'static str {
+    use plakous::subscriptions::NativeToolMode;
+    match mode {
+        Some(NativeToolMode::Direct) => "direct",
+        Some(NativeToolMode::CodeMode) => "code-mode",
+        Some(NativeToolMode::CodeModeOnly) => "code-mode-only",
+        None => "none",
+    }
 }
 
 /// Child `WorkspacePolicy` root is that POSIX copy only.
@@ -1122,31 +1133,33 @@ pub(crate) fn assignment_start_prompt(
     .render()
 }
 
-fn child_catalog_failure(error: NativeSubscriptionError) -> String {
-    match error {
-        NativeSubscriptionError::ModelLookup { .. } => {
-            format!("spawn child model catalog could not be read: {error}")
-        }
-        _ => "spawn child model catalog could not be read".to_owned(),
-    }
-}
-
 fn child_provider_failure(error: NativeSubscriptionError) -> String {
-    match error {
-        NativeSubscriptionError::ModelLookup { .. } => {
-            format!("spawn child provider could not be resolved: {error}")
-        }
-        _ => "spawn child provider could not be resolved".to_owned(),
-    }
+    format!("spawn child provider could not be resolved: {error}")
 }
 
 #[cfg(test)]
 mod lookup_failure_tests {
     #[test]
+    fn child_binding_has_no_independent_catalog_probe() {
+        let Some((_, binding)) =
+            include_str!("bind.rs").split_once("pub async fn spawned_child_spec(")
+        else {
+            panic!("native child binder missing");
+        };
+        let Some((binding, _)) = binding.split_once("pub(crate) fn assignment_start_prompt") else {
+            panic!("native child binder boundary missing");
+        };
+        assert!(!binding.contains(".model_catalog("));
+        assert!(binding.contains(".resolve_spawned_child_provider("));
+        assert!(binding.contains("startup_deadline"));
+    }
+
+    #[test]
     fn child_resolution_keeps_lookup_attempt_count_and_cause() {
         let message = super::child_provider_failure(super::NativeSubscriptionError::ModelLookup {
             attempts: 2,
             cause: "operation deadline",
+            retry_after: None,
         });
         assert!(
             message.contains("model lookup failed after 2 attempts: operation deadline"),
@@ -1155,14 +1168,14 @@ mod lookup_failure_tests {
     }
 
     #[test]
-    fn child_binding_keeps_lookup_attempt_count_and_cause() {
-        let message = super::child_catalog_failure(super::NativeSubscriptionError::ModelLookup {
-            attempts: 3,
-            cause: "HTTP 503",
-        });
-        assert!(
-            message.contains("model lookup failed after 3 attempts: HTTP 503"),
-            "{message}"
-        );
+    fn child_binding_keeps_every_redaction_safe_cause() {
+        for error in [
+            super::NativeSubscriptionError::Authentication,
+            super::NativeSubscriptionError::ModelUnavailable,
+            super::NativeSubscriptionError::CatalogDocumentRejected,
+            super::NativeSubscriptionError::Transport(None),
+        ] {
+            assert!(super::child_provider_failure(error).ends_with(&error.to_string()));
+        }
     }
 }

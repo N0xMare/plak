@@ -28,6 +28,21 @@ fn lookup_status_retry_classes() {
 }
 
 #[test]
+fn lookup_failure_display_uses_singular_and_plural_attempts() {
+    for (attempts, unit) in [(1, "attempt"), (2, "attempts")] {
+        let error = LookupError::Exhausted {
+            attempts,
+            cause: LookupCause::Status(503),
+            retry_after: None,
+        };
+        assert_eq!(
+            error.to_string(),
+            format!("model lookup failed after {attempts} {unit}: HTTP 503")
+        );
+    }
+}
+
+#[test]
 fn lookup_transport_retry_classes_ignore_transmission() {
     for (phase, kind) in [
         (Phase::Resolution, ErrorKind::Resolution),
@@ -136,7 +151,8 @@ async fn lookup_retry_exhaustion_counts_real_attempts() {
         result,
         Err(LookupError::Exhausted {
             attempts: 3,
-            cause: LookupCause::Status(503)
+            cause: LookupCause::Status(503),
+            ..
         })
     ));
     assert_eq!(attempts, 3);
@@ -304,7 +320,8 @@ async fn lookup_retry_after_leaves_useful_attempt_time() {
         result,
         Err(LookupError::Exhausted {
             attempts: 1,
-            cause: LookupCause::Status(429)
+            cause: LookupCause::Status(429),
+            ..
         })
     ));
     assert_eq!(tokio::time::Instant::now(), started);
@@ -361,8 +378,14 @@ async fn lookup_single_attempt_renewal_does_not_retry_transient_status() {
         &mut |_| Ok(()),
         1,
     )
-    .await
-    .unwrap();
-    assert_eq!(value.status.as_u16(), 503);
+    .await;
+    assert!(matches!(
+        value,
+        Err(LookupError::Exhausted {
+            attempts: 1,
+            cause: LookupCause::Status(503),
+            ..
+        })
+    ));
     assert_eq!(attempts, 1);
 }

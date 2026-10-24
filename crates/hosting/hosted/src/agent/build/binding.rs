@@ -65,8 +65,8 @@ pub fn selected_coding_provider_configuration(
 }
 
 /// Materializes an exact provider selection with an independently selected
-/// processing tier. Product admission must validate named tiers against the
-/// authenticated catalog before calling this constructor.
+/// processing tier. This constructs a candidate, not admission evidence;
+/// provider resolution must validate named tiers against its authenticated row.
 pub fn selected_coding_provider_configuration_with_processing_tier(
     provider: NativeProvider,
     model: ModelId,

@@ -888,6 +888,7 @@ async fn reopen_spawned_child_at_head(
             true,
             fence,
             Some(created_output_bound),
+            None,
         )
         .await
         .map_err(ChildReopenError::unavailable)?;

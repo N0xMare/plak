@@ -12,6 +12,7 @@ pub(crate) struct ChildRuntimeRequest<'a> {
     pub opening_durable_session: bool,
     pub fence: SessionToolFence,
     pub created_output_bound: Option<OutputBoundDisposition>,
+    pub startup_deadline: Option<tokio::time::Instant>,
 }
 pub(crate) trait ChildRuntimeFactory: Send + Sync {
     fn bind<'a>(&'a self, request: ChildRuntimeRequest<'a>) -> ChildRuntimeFuture<'a>;
@@ -63,6 +64,7 @@ mod tests {
             None,
             opening,
             SessionToolFence::Full,
+            None,
             None,
         )
         .await

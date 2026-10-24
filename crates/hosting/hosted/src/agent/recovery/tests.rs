@@ -2425,8 +2425,12 @@ async fn a_create_refused_before_it_wrote_anything_is_a_definite_spawn_refusal()
         tuple_id: "claude-opus-5-5".into(),
         effort: None,
     };
-    let created =
-        crate::agent::children::create_spawned_child_session(&fixture.parent, &start).await;
+    let created = crate::agent::children::create_spawned_child_session(
+        &fixture.parent,
+        &start,
+        tokio::time::Instant::now() + Duration::from_secs(120),
+    )
+    .await;
     let message = match created {
         Err(crate::agent_tree_tools::SpawnBindError::Refused(message)) => message,
         Err(crate::agent_tree_tools::SpawnBindError::RecoveryRequired { message, .. }) => {
@@ -2805,6 +2809,7 @@ async fn publication_cut_reconstructs_child_before_binding_and_new_children_use_
         false,
         super::super::SessionToolFence::Full,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -2862,6 +2867,7 @@ async fn publication_cut_reconstructs_child_before_binding_and_new_children_use_
                 .await
                 .unwrap(),
         ),
+        None,
     )
     .await
     .unwrap();

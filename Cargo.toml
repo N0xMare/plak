@@ -189,6 +189,8 @@ test = ["*"]
 vendor = []
 
 [workspace.metadata.plakous.edge-exceptions]
+# The facade shares lookup backoff policy, never a second catalog retry copy.
+plakous = ["plakous-exchange"]
 plak = [
     "plakous-host-protocol",
     "plakous-hosted",

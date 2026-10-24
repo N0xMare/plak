@@ -142,13 +142,19 @@ impl CodexSubscriptionCredentialManager {
         })
     }
 
-    /// Binds browser-login callbacks on an ephemeral loopback port instead of
-    /// the pinned redirect ports, so parallel tests never contend for them.
+    /// Binds callbacks on an ephemeral port and optionally serves test catalogs
+    /// at an explicit fixture origin. Never enabled by production edges.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
     #[must_use]
-    pub fn with_ephemeral_loopback_for_tests(mut self) -> Self {
+    pub fn with_fixture_endpoints_for_tests(
+        mut self,
+        catalog_origin: Option<crate::EndpointOrigin>,
+    ) -> Self {
         self.endpoints.loopback_ports = &[0];
+        if let Some(origin) = catalog_origin {
+            self.endpoints.chatgpt_origin = origin;
+        }
         self
     }
 

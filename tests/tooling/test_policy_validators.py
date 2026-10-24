@@ -1230,6 +1230,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         self.assertEqual(
             self.workspace.policy.edge_exceptions,
             {
+                "plakous": ("plakous-exchange",),
                 "plak": (
                     "plakous-host-protocol",
                     "plakous-hosted",
@@ -1471,6 +1472,22 @@ class RepositoryPolicyTests(unittest.TestCase):
 
 class SourceScanTests(unittest.TestCase):
     """Token-aware production source scanning and the security pins."""
+
+    def test_facade_exchange_edge_names_only_the_shared_backoff(self) -> None:
+        workspace = policy_module.load_workspace(ROOT)
+        sources, errors = workspace_policy.production_rust_sources(
+            workspace.packages["plakous"].metadata, ROOT
+        )
+        self.assertEqual(errors, [])
+        names = {
+            re.sub(r"\s+", "", match.group(1))
+            for path in sources
+            for match in re.finditer(
+                r"\bplakous_exchange\s*::\s*([A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)*)",
+                workspace_policy.production_rust_source(path.read_text()),
+            )
+        }
+        self.assertEqual(names, {"lookup::retry_backoff"})
 
     def test_cfg_test_module_does_not_hide_later_production_code(self) -> None:
         source = """

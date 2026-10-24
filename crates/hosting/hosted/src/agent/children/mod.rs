@@ -12,7 +12,7 @@ use std::time::Duration;
 use plakous::agent::{
     CommandId, RecoveredTurnHandle, TurnResult, TurnResultHandle, TurnResultOutcome,
 };
-use plakous::model::{ModelId, OutputBoundDisposition, ProcessingTierDisposition, TurnId};
+use plakous::model::{ModelId, OutputBoundDisposition, TurnId};
 use plakous::sessions::{
     AgentSessionsError, AgentSessionsErrorKind, CreateSessionOutcome, CreateSessionRequest,
     OpenSessionOutcome, OpenSessionRequest, RecoverEffectEvidenceOutcome,

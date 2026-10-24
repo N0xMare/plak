@@ -48,6 +48,15 @@ fn configure_gated_provider(
     authority: RuntimeModelAuthority,
 ) -> Result<ResolvedProvider, NativeModelResolutionError> {
     let requested_model = selected.route().requested_model().clone();
+    if let plakous_model::ProcessingTierDisposition::ProviderNamed(tier) =
+        &selected.behavior().processing_tier
+        && !resolved.service_tiers.iter().any(|id| id == tier.as_str())
+    {
+        return Err(NativeModelResolutionError::after_selection(
+            requested_model,
+            NativeSubscriptionError::ProviderConfigurationPolicyMismatch("processing_tier"),
+        ));
+    }
     let native_tool_mode = resolved
         .evidence
         .codex_exact
@@ -385,6 +394,7 @@ impl NativeSubscriptions {
                     xai_exact: None,
                 };
                 let resolved = ResolvedNativeModel {
+                    service_tiers: Vec::new(),
                     selected_model,
                     descriptor,
                     model,
@@ -525,6 +535,18 @@ impl NativeSubscriptions {
                 };
                 Ok((
                     ResolvedNativeModel {
+                        service_tiers: catalog
+                            .entries()
+                            .iter()
+                            .find(|entry| entry.model_id() == selected_model.as_str())
+                            .map(|entry| {
+                                entry
+                                    .service_tiers()
+                                    .iter()
+                                    .map(|tier| tier.id().to_owned())
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         selected_model,
                         descriptor,
                         model,
@@ -610,6 +632,7 @@ impl NativeSubscriptions {
                 };
                 Ok((
                     ResolvedNativeModel {
+                        service_tiers: Vec::new(),
                         selected_model,
                         descriptor,
                         model,
@@ -703,13 +726,62 @@ impl NativeSubscriptions {
         limits: SubscriptionRequestLimits,
         lineage: SessionLineage,
     ) -> Result<ResolvedProvider, NativeModelResolutionError> {
+        self.resolve_turn_scoped_provider_once(
+            selected,
+            limits,
+            lineage,
+            tokio::time::Instant::now() + MODEL_CATALOG_DEADLINE,
+        )
+        .await
+    }
+
+    /// Resolves a spawned child's provider within its caller's startup deadline.
+    ///
+    /// Uses one catalog GET per operation and retries a transient lookup once,
+    /// releasing the failed operation before backoff. Reserves ten seconds for
+    /// creation, acknowledgement and registration within `startup_deadline`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same typed failures as [`Self::resolve_turn_scoped_provider`],
+    /// retaining the lookup cause when the startup budget cannot fit a retry.
+    pub async fn resolve_spawned_child_provider(
+        &self,
+        selected: SelectedProviderConfiguration,
+        limits: SubscriptionRequestLimits,
+        startup_deadline: std::time::Instant,
+    ) -> Result<ResolvedProvider, NativeModelResolutionError> {
+        let single = self.clone().without_model_lookup_retries();
+        super::child::resolve(
+            |deadline| {
+                single.resolve_turn_scoped_provider_once(
+                    selected.clone(),
+                    limits,
+                    SessionLineage::SpawnedChild,
+                    deadline,
+                )
+            },
+            selected.route().requested_model(),
+            Some(tokio::time::Instant::from_std(startup_deadline)),
+            |delay| self.child_lookup_backoff(delay),
+        )
+        .await
+    }
+
+    async fn resolve_turn_scoped_provider_once(
+        &self,
+        selected: SelectedProviderConfiguration,
+        limits: SubscriptionRequestLimits,
+        lineage: SessionLineage,
+        deadline: tokio::time::Instant,
+    ) -> Result<ResolvedProvider, NativeModelResolutionError> {
         let turn_gate = Arc::new(TurnScopedSubscriptionRequestGate::new(
             limits,
             Arc::new(SystemSubscriptionGateClock::default()),
         ));
         let gate: Arc<dyn SubscriptionRequestGate> = turn_gate.clone();
-        let resolved = tokio::time::timeout(
-            MODEL_CATALOG_DEADLINE,
+        let resolved = tokio::time::timeout_at(
+            deadline,
             self.resolve_gated_provider(selected.clone(), gate, lineage),
         )
         .await
@@ -795,6 +867,30 @@ mod tests {
             );
             assert_eq!(error.selected_model, Some(requested));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_named_tier_requires_the_exact_fresh_catalog_row() -> TestResult {
+        let (selected, resolved, authority) = inputs()?;
+        let mut behavior = selected.behavior().clone();
+        behavior.processing_tier = plakous_model::ProcessingTierDisposition::ProviderNamed(
+            plakous_model::ProviderServiceTierId::new("priority")?,
+        );
+        let selected = SelectedProviderConfiguration::new(selected.route().clone(), behavior)?;
+        let error = configure_gated_provider(&selected, NativeProvider::Codex, resolved, authority)
+            .err()
+            .ok_or("unadvertised tier was admitted")?;
+        assert_eq!(
+            error.kind(),
+            NativeSubscriptionError::ProviderConfigurationPolicyMismatch("processing_tier")
+        );
+        let (_, mut resolved, authority) = inputs()?;
+        resolved.service_tiers.push("priority".into());
+        let error = configure_gated_provider(&selected, NativeProvider::Codex, resolved, authority)
+            .err()
+            .ok_or("fixture without authenticated evidence was admitted")?;
+        assert_eq!(error.kind(), NativeSubscriptionError::Internal);
         Ok(())
     }
 
