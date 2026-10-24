@@ -1318,13 +1318,14 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # Pending-input context queries measure the message with its images.
     ("plakous-hosted", "src/runtime/compact.rs"): {"agent": {"UserInput"}},
     ("plakous-hosted", "src/runtime/host_loop/wake.rs"): {"agent": {"UserInput"}},
-    ("plakous-hosted", "src/agent/build.rs"): {
+    ("plakous-hosted", "src/agent/build/session.rs"): {
         # A scheduled compaction qualifies on the pending message, images included.
         "agent": {"UserInput"},
         "sessions": {"internal"},
-        # A Direct extension's registry owner names its MCP server.
-        "tools": {"ToolOwnerClass"},
     },
+    ("plakous-hosted", "src/agent/build/injected.rs"): {"sessions": {"internal"}},
+    # A Direct extension's registry owner names its MCP server.
+    ("plakous-hosted", "src/agent/build/tools.rs"): {"tools": {"ToolOwnerClass"}},
     ("plakous-hosted", "src/api_runtime.rs"): {"tools": {"RegisteredToolIdentity"}},
     # MCP binding: the facade's MCP client, a host environment for the pool's
     # service processes, and the named-secret value type.

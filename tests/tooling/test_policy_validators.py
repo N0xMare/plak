@@ -1698,7 +1698,7 @@ fn fixtures() {
 
     def test_transient_probe_bridge_and_gate_macros_are_source_specific(self) -> None:
         cases = [
-            ("src/agent/build.rs", "fn x() { plakous::sessions::internal::reachability_probe(&runtime); }"),
+            ("src/agent/build/session.rs", "fn x() { plakous::sessions::internal::reachability_probe(&runtime); }"),
             ("src/agent/children/waiter.rs", "fn x() { tokio::pin!(ready); tokio::select! { value = ready => value } }"),
         ]
         for path, source in cases:
