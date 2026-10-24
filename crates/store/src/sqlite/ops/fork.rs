@@ -202,7 +202,8 @@ pub(in super::super) fn fork(
     )?;
     meta(&tx, 0, 1)?;
     super::lease::commit_claimed(tx, &mut b.holders, target, lease_fence)?;
-    b.checkpoints.seed_fork(target, reference, r.target());
+    b.checkpoints
+        .seed_fork(target, reference, r.target(), source_id);
     Ok(receipt)
 }
 

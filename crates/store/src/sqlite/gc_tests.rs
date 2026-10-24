@@ -246,7 +246,7 @@ pub(super) fn fork_branch(
     })
 }
 
-fn fork_request(source: &Branch, b: &Backend, identity: u128) -> TestResult<ForkBranch> {
+pub(super) fn fork_request(source: &Branch, b: &Backend, identity: u128) -> TestResult<ForkBranch> {
     let selector = source.head.session();
     let target_branch = fixture::id(identity + 6)?;
     let lineage = ForkLineage {

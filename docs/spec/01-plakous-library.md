@@ -1243,9 +1243,12 @@ publication as a pending seed, replacing the previous pending seed for that
 branch. Post-publication seeding of a pending entry does not walk the closure or
 build a CAS index. Pending entries charge all retained ancestral objects conservatively under the same
 budget. They evict other pending entries in LRU order. A commit seed may also
-evict the ready entry of the head it supersedes on its own branch; a pending fork
-seed cannot evict its source head. Other ready entries remain protected, and a seed
-that cannot fit alongside them is skipped. A fork target whose own pending charge
+evict the ready entry of the head it supersedes on its own branch. A pending fork
+seed keeps its source head's ready entry when both fit; when the target fits the
+budget alone but not beside that entry, it may evict it, as a commit seed may for
+the head it supersedes, and the source head's next read is a verified cold load.
+Other ready entries remain protected, and a seed that cannot fit alongside them is
+skipped, the source head then staying retained. A fork target whose own pending charge
 exceeds the whole budget can never be a pending seed: the fork normalizes it at
 once and retains it as a ready entry under the oversized rule below, so its first
 read does not verify again the objects it shares with the source. That entry

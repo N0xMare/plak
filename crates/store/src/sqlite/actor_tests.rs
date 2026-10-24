@@ -1308,6 +1308,56 @@ fn a_fork_verifies_its_retained_source_head_once() -> TestResult {
     Ok(())
 }
 
+/// A target that fits the cache budget alone but not beside its retained
+/// source head takes the source head's slot: the fork verifies the source
+/// once and reading the target back verifies nothing again, with the same
+/// checkpoint a cold load returns. The source head then reloads correctly.
+#[test]
+fn a_mid_size_fork_target_displaces_its_source_head() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut backend = gc_tests::backend(&directory.path().join("runtime.sqlite3"))?;
+    let seeded = gc_tests::seed(140_000)?;
+    let bundle = seeded.initial().clone();
+    let created = create(&mut backend, &seeded)?;
+    let source = gc_tests::Branch {
+        head: created.branch(),
+        lease: created.lease().clone(),
+        bundle,
+        value: 1,
+    };
+    let request = gc_tests::fork_request(&source, &backend, 250_000)?;
+    let charge = checkpoint_cache::pending_charge(request.target());
+    let source_weight =
+        checkpoint_cache::weight(backend.load_branch(source.head.session())?.checkpoint());
+    backend.checkpoints = CheckpointCache::new(charge + source_weight - 1);
+    let attached = backend.load_branch(source.head.session())?;
+    assert_eq!(backend.checkpoints.decodes, 1);
+    let receipt = fork(&mut backend, &request)?;
+    assert_eq!(backend.checkpoints.decodes, 1, "the fork reread its source");
+    let target = backend.load_branch(receipt.target().session())?;
+    assert_eq!(
+        backend.checkpoints.decodes, 1,
+        "the target was verified again"
+    );
+    assert_eq!(backend.checkpoints.normalizations, 1);
+    assert_eq!(target.head(), receipt.target());
+    let reloaded = backend.load_branch(source.head.session())?;
+    assert_eq!(
+        backend.checkpoints.decodes, 2,
+        "the source head left the cache"
+    );
+    assert_eq!(reloaded.checkpoint(), attached.checkpoint());
+    backend.checkpoints.clear();
+    let cold = backend.load_branch(receipt.target().session())?;
+    assert_eq!(target.checkpoint(), cold.checkpoint());
+    assert_eq!(target.checkpoint().bundle(), cold.checkpoint().bundle());
+    assert_eq!(
+        backend.load_branch(source.head.session())?.checkpoint(),
+        attached.checkpoint()
+    );
+    Ok(())
+}
+
 /// A head that moved after it was retained is not the retained checkpoint:
 /// the fork cold-loads the head it actually forks. (A retained entry whose
 /// reference differs from the head's row is `Corrupt`, never served.)

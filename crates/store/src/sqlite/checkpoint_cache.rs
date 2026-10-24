@@ -192,13 +192,15 @@ impl CheckpointCache {
     /// retained as the ready entry under the over-budget rule, evicting every
     /// other entry including the source head: otherwise its first read would
     /// verify again every object it shares with the source just read. A target
-    /// that fits the budget alone but not beside the protected source head is
-    /// skipped like any seed, and its first read verifies it once.
+    /// that fits the budget alone but not beside its source head's ready entry
+    /// may take that slot, as a commit seed may for the head it supersedes; the
+    /// source head stays retained whenever both fit.
     pub(super) fn seed_fork(
         &mut self,
         branch: SessionRef,
         reference: CheckpointObjectRef,
         bundle: &CheckpointObjectBundle,
+        source: CheckpointId,
     ) {
         #[cfg(test)]
         if !self.seed_enabled {
@@ -206,6 +208,9 @@ impl CheckpointCache {
         }
         if pending_charge(bundle) <= self.limit {
             self.seed(branch, reference, bundle, None);
+            if !self.pending.contains_key(&branch) {
+                self.seed(branch, reference, bundle, Some(source));
+            }
             return;
         }
         // Failure leaves nothing retained; the first read performs a cold load.
@@ -326,6 +331,59 @@ mod tests {
         assert_eq!(cache.bytes, ready_weight);
         assert_eq!(cache.get(ready.reference().checkpoint_id()), Some(ready));
         assert_eq!(cache.normalizations, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn a_mid_size_fork_target_takes_only_its_source_heads_slot()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = gc_tests::seed(1_210_000)?;
+        let other = gc_tests::seed(1_220_000)?;
+        let target = gc_tests::seed(1_230_000)?;
+        let ready = |bundle: &CheckpointObjectBundle| -> Result<StoredCheckpoint, Box<dyn std::error::Error>> {
+            Ok(StoredCheckpoint::from_store(
+                bundle_ref(bundle),
+                bundle.current_root_closure()?,
+            )?)
+        };
+        let source_ready = ready(source.initial())?;
+        let source_id = source_ready.reference().checkpoint_id();
+        let target_ref = bundle_ref(target.initial());
+        let charge = pending_charge(target.initial());
+        let source_weight = weight(&source_ready);
+
+        // Fits beside the source head: the head stays retained.
+        let mut roomy = CheckpointCache::new(charge + source_weight);
+        roomy.insert(source_ready.clone());
+        roomy.seed_fork(target.session(), target_ref, target.initial(), source_id);
+        assert!(roomy.has_pending(target.session()));
+        assert_eq!(roomy.bytes, charge + source_weight);
+        assert_eq!(roomy.get(source_id), Some(source_ready.clone()));
+
+        // Fits alone but not beside it: the target takes the source's slot.
+        let mut tight = CheckpointCache::new(charge + source_weight - 1);
+        tight.insert(source_ready.clone());
+        tight.seed_fork(target.session(), target_ref, target.initial(), source_id);
+        assert!(tight.has_pending(target.session()));
+        assert_eq!(tight.bytes, charge);
+        assert!(tight.get(source_id).is_none());
+        let normalized = tight
+            .get(target_ref.checkpoint_id())
+            .ok_or("pending fork target")?;
+        assert_eq!(normalized, ready(target.initial())?);
+        assert_eq!(tight.normalizations, 1);
+
+        // Another branch's ready entry stays protected: nothing is seeded and
+        // the source head is not given up for a seed that still cannot fit.
+        let other_ready = ready(other.initial())?;
+        assert!(charge > source_weight);
+        let mut protected = CheckpointCache::new(weight(&other_ready) + source_weight);
+        protected.insert(other_ready.clone());
+        protected.insert(source_ready.clone());
+        let before = protected.bytes;
+        protected.seed_fork(target.session(), target_ref, target.initial(), source_id);
+        assert!(!protected.has_pending(target.session()));
+        assert_eq!(protected.bytes, before);
         Ok(())
     }
 
