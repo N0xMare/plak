@@ -18,7 +18,7 @@ layer = "bin"
 class = "supported"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 36
+too-many-lines-ceiling = 35
 too-many-arguments-ceiling = 3
 large-file-ceiling = 4
 crate-wide-allows = ["src/lib.rs:too_many_arguments", "src/lib.rs:too_many_lines"]
