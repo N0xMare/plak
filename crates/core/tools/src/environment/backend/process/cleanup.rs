@@ -3,7 +3,7 @@
 #[cfg(target_os = "macos")]
 use super::{Command, Stdio, set_nonblocking};
 use super::{
-    Duration, Errno, ExecutionBackendError, Instant, JoinedSessionShared, LeftoverJob, Mutex, fs,
+    Duration, Errno, ExecutionBackendError, Instant, JoinedSessionShared, LeftoverJob, Mutex,
     io_error, lock, sleep_until_next_poll,
 };
 
@@ -326,7 +326,7 @@ fn live_group_members(group: rustix::process::Pid) -> usize {
 #[cfg(target_os = "linux")]
 fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
     let mut count = 0;
-    for entry in fs::read_dir("/proc").ok()? {
+    for entry in std::fs::read_dir("/proc").ok()? {
         let entry = entry.ok()?;
         if !entry
             .file_name()
@@ -336,7 +336,7 @@ fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
         {
             continue;
         }
-        let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
             continue;
         };
         let (_, fields) = stat.rsplit_once(')')?;
@@ -368,7 +368,7 @@ fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
         let deadline = Instant::now() + Duration::from_millis(100);
         let mut buffer = [0; 4096];
         loop {
-            match stdout.read(&mut buffer) {
+            match std::io::Read::read(&mut stdout, &mut buffer) {
                 Ok(0) => break,
                 Ok(count) => output.extend_from_slice(&buffer[..count]),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
