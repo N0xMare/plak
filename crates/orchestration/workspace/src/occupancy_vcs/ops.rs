@@ -82,6 +82,16 @@ pub trait VcsOps: Send + Sync {
     fn dirty(&self, path: &Path) -> bool;
     /// How far `child` has moved from `parent`, when both are readable.
     fn ahead_behind(&self, child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)>;
+    /// Reuses parent observations for one render, never across probe runs.
+    fn ahead_behind_cached(
+        &self,
+        child: &Path,
+        parent: &Path,
+        base: Option<&str>,
+        _cache: &mut super::ParentBehindCache,
+    ) -> Option<(u64, u64)> {
+        self.ahead_behind(child, parent, base)
+    }
     /// The copy's branch or revision, for presentation only.
     fn label(&self, path: &Path) -> Option<String>;
     /// jj only: whether `path`'s chain carries anything beyond its base.
@@ -183,6 +193,16 @@ impl VcsOps for SystemVcs {
 
     fn ahead_behind(&self, child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)> {
         ahead_behind(child, parent, base)
+    }
+
+    fn ahead_behind_cached(
+        &self,
+        child: &Path,
+        parent: &Path,
+        base: Option<&str>,
+        cache: &mut super::ParentBehindCache,
+    ) -> Option<(u64, u64)> {
+        super::ahead_behind_cached(child, parent, base, cache)
     }
 
     fn label(&self, path: &Path) -> Option<String> {

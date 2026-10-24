@@ -316,10 +316,237 @@ fn jj_candidate_resolution_uses_immutable_commit_identity() {
 }
 
 #[test]
-fn parse_left_right_counts_splits_ahead_behind() {
-    assert_eq!(parse_left_right_counts("3\t5\n"), Some((3, 5)));
-    assert_eq!(parse_left_right_counts("0 0"), Some((0, 0)));
-    assert_eq!(parse_left_right_counts(""), None);
+fn git_untouched_fork_over_dirty_parent_reports_zero_zero() {
+    let repo = git_repo();
+    std::fs::write(repo.path().join("DIRT.txt"), "dirt\n").unwrap();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(&minted.base.commit)),
+        Some((0, 0))
+    );
+}
+
+#[test]
+fn adopted_child_with_uncommitted_work_reports_zero_ahead() {
+    let repo = git_repo();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(minted.path.join("ADOPTED.txt"), "adopted\n").unwrap();
+    std::fs::write(minted.path.join("SEED.txt"), "edited seed\n").unwrap();
+    let candidate = SystemVcs
+        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .unwrap();
+    SystemVcs
+        .adopt(
+            repo.path(),
+            &minted.path,
+            &minted.base.commit,
+            None,
+            &candidate,
+            None,
+        )
+        .unwrap();
+    let base = candidate.commit.as_str();
+    let status = git_in(&minted.path, &["status", "--porcelain"]);
+    assert!(String::from_utf8_lossy(&status.stdout).contains("SEED.txt"));
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(base)),
+        Some((0, 0))
+    );
+    git_in(&minted.path, &["add", "ADOPTED.txt", "SEED.txt"]);
+    git_in(
+        &minted.path,
+        &["commit", "-qm", "commit exactly the adopted work"],
+    );
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(base)),
+        Some((0, 0))
+    );
+    std::fs::write(minted.path.join("ADOPTED.txt"), "edited\n").unwrap();
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(base)),
+        Some((1, 0))
+    );
+    git_in(&minted.path, &["add", "ADOPTED.txt", "SEED.txt"]);
+    git_in(&minted.path, &["commit", "-qm", "continued work"]);
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(base)),
+        Some((1, 0))
+    );
+}
+
+#[test]
+fn child_uncommitted_edit_counts_one_ahead() {
+    let repo = git_repo();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(minted.path.join("AHEAD.txt"), "ahead\n").unwrap();
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(&minted.base.commit)),
+        Some((1, 0))
+    );
+}
+
+#[test]
+fn parent_commit_of_mint_dirt_adds_no_behind() {
+    let repo = git_repo();
+    std::fs::write(repo.path().join("DIRT.txt"), "dirt\n").unwrap();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    git_in(repo.path(), &["add", "DIRT.txt"]);
+    git_in(repo.path(), &["commit", "-q", "-m", "mint dirt"]);
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(&minted.base.commit)),
+        Some((0, 0))
+    );
+    std::fs::write(repo.path().join("DIRT.txt"), "later\n").unwrap();
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(&minted.base.commit)),
+        Some((0, 1))
+    );
+}
+
+#[test]
+fn parent_commit_plus_mint_dirt_counts_one_behind() {
+    let repo = git_repo();
+    std::fs::write(repo.path().join("a"), "mint dirt\n").unwrap();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(repo.path().join("y"), "committed later\n").unwrap();
+    git_in(repo.path(), &["add", "y"]);
+    git_in(repo.path(), &["commit", "-qm", "new file"]);
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(&minted.base.commit)),
+        Some((0, 1))
+    );
+}
+
+#[test]
+fn parent_behind_cache_is_scoped_to_one_probe_and_keyed_by_base() {
+    let repo = git_repo();
+    let first = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    let second = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c2",
+            "c2",
+            repo.path(),
+            WorkspaceMode::Fork,
+            Some(&first.base),
+        )
+        .unwrap();
+    let mut cache = ParentBehindCache::new();
+    assert_eq!(
+        SystemVcs.ahead_behind_cached(
+            &first.path,
+            repo.path(),
+            Some(&first.base.commit),
+            &mut cache
+        ),
+        Some((0, 0))
+    );
+    std::fs::write(repo.path().join("later"), "later\n").unwrap();
+    assert_eq!(
+        SystemVcs.ahead_behind_cached(
+            &second.path,
+            repo.path(),
+            Some(&first.base.commit),
+            &mut cache
+        ),
+        Some((0, 0))
+    );
+    assert_eq!(cache.len(), 1);
+    let changed_base = SystemVcs
+        .seal(repo.path(), &digest_text("cache"), "parent")
+        .unwrap();
+    SystemVcs.ahead_behind_cached(
+        &second.path,
+        repo.path(),
+        Some(&changed_base.commit),
+        &mut cache,
+    );
+    assert_eq!(cache.len(), 2);
+    assert_eq!(
+        SystemVcs.ahead_behind_cached(
+            &second.path,
+            repo.path(),
+            Some(&first.base.commit),
+            &mut ParentBehindCache::new()
+        ),
+        Some((0, 1))
+    );
+}
+
+#[test]
+fn secret_only_changes_count_nothing() {
+    let repo = git_repo();
+    let minted = SystemVcs
+        .mint_from(
+            repo.path(),
+            "c1",
+            "c1",
+            repo.path(),
+            WorkspaceMode::Fork,
+            None,
+        )
+        .unwrap();
+    std::fs::write(minted.path.join(".env"), "CHILD=1\n").unwrap();
+    std::fs::write(repo.path().join(".env"), "PARENT=1\n").unwrap();
+    assert_eq!(
+        ahead_behind(&minted.path, repo.path(), Some(&minted.base.commit)),
+        Some((0, 0))
+    );
+    assert_eq!(ahead_behind(&minted.path, repo.path(), None), None);
 }
 
 #[test]

@@ -1,5 +1,6 @@
 //! Git CLI snapshots, adopts, excludes, and worktree registration.
 
+use std::io::Write;
 use std::process::{Command, Output};
 
 use super::{
@@ -20,15 +21,30 @@ const GIT_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12
 /// Output goes to scratch files, as the mint hook's does: nothing the command
 /// leaves running can hold a pipe this process must drain.
 pub(super) fn output_within(
+    command: Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<Output> {
+    output_within_reading(command, timeout, None)
+}
+
+/// Like [`output_within`], reading `stdin_path` when one is given. The bytes
+/// are a file, not a pipe, so a child that outlives the wait cannot pin this
+/// process on an undrained stdin.
+fn output_within_reading(
     mut command: Command,
     timeout: std::time::Duration,
+    stdin_path: Option<&Path>,
 ) -> std::io::Result<Output> {
     let scratch = private_scratch()?;
     let stdout_path = scratch.path().join("stdout");
     let stderr_path = scratch.path().join("stderr");
     let captured = (|| {
+        let stdin = match stdin_path {
+            Some(path) => std::process::Stdio::from(std::fs::File::open(path)?),
+            None => std::process::Stdio::null(),
+        };
         command
-            .stdin(std::process::Stdio::null())
+            .stdin(stdin)
             .stdout(create_private(&stdout_path)?)
             .stderr(create_private(&stderr_path)?);
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
@@ -191,12 +207,27 @@ pub(super) fn git_run(cwd: &Path, args: &[&str]) -> Result<Output, std::io::Erro
 /// A `git` read, bounded by [`GIT_QUERY_TIMEOUT`]. It takes no optional locks,
 /// so a status poll never contends with the agent's own `git`.
 pub(crate) fn git_query(cwd: &Path, args: &[&str]) -> Result<Output, std::io::Error> {
+    git_query_stdin(cwd, args, None)
+}
+
+fn git_query_stdin(
+    cwd: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+) -> Result<Output, std::io::Error> {
     if !GIT_CLI_ENABLED {
         return Err(std::io::Error::other("Git CLI backend not included"));
     }
+    let scratch = stdin.map(|_| private_scratch()).transpose()?;
+    let input_path = scratch.as_ref().map(|dir| dir.path().join("stdin"));
+    if let (Some(stdin), Some(path)) = (stdin, input_path.as_ref()) {
+        create_private(path)?.write_all(stdin)?;
+    }
     let mut command = git_command(cwd);
     command.args(args).env("GIT_OPTIONAL_LOCKS", "0");
-    output_within(command, GIT_QUERY_TIMEOUT)
+    let output = output_within_reading(command, GIT_QUERY_TIMEOUT, input_path.as_deref());
+    drop(scratch);
+    output
 }
 
 /// `git` with the snapshot's temp index bound. Every index-writing step of
@@ -602,38 +633,290 @@ pub(super) fn git_worktree_dirty(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-pub(super) fn git_ahead_behind(child: &Path, parent: &Path) -> Option<(u64, u64)> {
-    let parent_head = git_query(parent, &["rev-parse", "HEAD"]).ok()?;
-    if !parent_head.status.success() {
+/// `(ahead, behind)` of `child` against `parent` since `base`.
+///
+/// Ahead is child commits in `base..HEAD` whose trees differ from the base,
+/// plus one when the child work
+/// tree differs from `base`. Uncommitted work that already matches `base`
+/// adds nothing. Behind is parent commits since `base` whose tree is not
+/// the base tree, plus one for parent work-tree edits that are in neither
+/// HEAD nor `base`. No base omits the counts. Every read uses
+/// [`git_query`]: 30s, `GIT_OPTIONAL_LOCKS=0`, no object writes.
+pub(super) fn git_ahead_behind(
+    child: &Path,
+    parent: &Path,
+    base: Option<&str>,
+) -> Option<(u64, u64)> {
+    git_ahead_behind_cached(child, parent, base, &mut super::ParentBehindCache::new())
+}
+
+pub(super) fn git_ahead_behind_cached(
+    child: &Path,
+    parent: &Path,
+    base: Option<&str>,
+    cache: &mut super::ParentBehindCache,
+) -> Option<(u64, u64)> {
+    let base = base.filter(|base| !base.is_empty())?;
+    let behind = *cache
+        .entry((parent.to_path_buf(), base.to_owned()))
+        .or_insert_with(|| parent_behind(parent, base));
+    Some((child_ahead(child, base)?, behind?))
+}
+
+fn child_ahead(child: &Path, base: &str) -> Option<u64> {
+    // A sealed/adopted base may descend from HEAD. The range still counts
+    // exactly the child's commits not carried by that base, including later
+    // commits on a diverging branch.
+    let mut ahead = commits_differing_from_base(child, base)?;
+    // Uncommitted work counts only when it differs from the base tree. After
+    // an adopt the child's files are that tree, still dirty against its own
+    // HEAD, and they are not a new step.
+    if worktree_differs_from_base(child, base)? {
+        ahead = ahead.saturating_add(1);
+    }
+    Some(ahead)
+}
+
+fn parent_behind(parent: &Path, base: &str) -> Option<u64> {
+    let mut behind = commits_differing_from_base(parent, base)?;
+    if worktree_differs_from_base(parent, base)? {
+        behind = behind.saturating_add(1);
+    }
+    Some(behind)
+}
+
+fn commits_differing_from_base(root: &Path, base: &str) -> Option<u64> {
+    let spec = format!("{base}^{{tree}}");
+    let base_tree = git_query(root, &["rev-parse", spec.as_str()]).ok()?;
+    if !base_tree.status.success() {
         return None;
     }
-    let parent_sha = String::from_utf8_lossy(&parent_head.stdout)
-        .trim()
-        .to_owned();
-    if parent_sha.is_empty() {
+    let base_content = std::str::from_utf8(&base_tree.stdout).ok()?.trim();
+    if base_content.is_empty() {
         return None;
     }
-    let counted = git_query(
-        child,
+    let range = format!("{base}..HEAD");
+    let listed = git_query(
+        root,
         &[
             "rev-list",
-            "--left-right",
-            "--count",
-            &format!("HEAD...{parent_sha}"),
+            "--no-commit-header",
+            "--format=%T",
+            range.as_str(),
         ],
     )
     .ok()?;
-    if !counted.status.success() {
+    if !listed.status.success() {
         return None;
     }
-    parse_left_right_counts(&String::from_utf8_lossy(&counted.stdout))
+    let mut behind = 0_u64;
+    for tree in std::str::from_utf8(&listed.stdout).ok()?.lines() {
+        let tree = tree.trim();
+        if !tree.is_empty() && tree != base_content {
+            behind = behind.saturating_add(1);
+        }
+    }
+    Some(behind)
 }
 
-pub(super) fn parse_left_right_counts(text: &str) -> Option<(u64, u64)> {
-    let mut parts = text.split_whitespace();
-    let ahead = parts.next()?.parse().ok()?;
-    let behind = parts.next()?.parse().ok()?;
-    Some((ahead, behind))
+/// Work-tree edits that are neither in HEAD nor in `base`. A secret path
+/// does not count. Mint-time dirt that the base already carries does not.
+/// The same question is child ahead and parent behind.
+fn worktree_differs_from_base(root: &Path, base: &str) -> Option<bool> {
+    let changed = status_changes(&status_z(root)?)?;
+    if changed.is_empty() {
+        return Some(false);
+    }
+    // `git diff <base>` reports mint-time untracked dirt as a deletion: the
+    // snapshot tree has the file and the index does not. That content is
+    // already in `base`, so it is not new work.
+    let listed = git_query(root, &["ls-tree", "-r", "-z", base]).ok()?;
+    if !listed.status.success() {
+        return None;
+    }
+    let blobs = ls_tree_blobs(&listed.stdout)?;
+    if tracked_worktree_differs_from_base(root, base, &blobs, &changed)? {
+        return Some(true);
+    }
+    Some(
+        changed
+            .iter()
+            .any(|(path, untracked)| *untracked && !blobs.contains_key(path)),
+    )
+}
+
+/// A tracked difference from `base` that is not mint-time dirt still sitting
+/// in the work tree with the base blob's bytes.
+///
+/// `--no-renames` keeps a rename as a deletion plus an addition, so the new
+/// path counts even when the blob is unchanged. `--no-filters` hashes the
+/// work-tree bytes without executing filters. A filtered file is considered
+/// equal only if its raw bytes equal the stored blob.
+fn tracked_worktree_differs_from_base(
+    root: &Path,
+    base: &str,
+    blobs: &std::collections::BTreeMap<String, String>,
+    changed: &std::collections::BTreeMap<String, bool>,
+) -> Option<bool> {
+    let diff = git_query(
+        root,
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            base,
+            "--",
+        ],
+    )
+    .ok()?;
+    if !diff.status.success() {
+        return None;
+    }
+    let mut parts = diff.stdout.split(|byte| *byte == 0).collect::<Vec<_>>();
+    if parts.last().is_some_and(|part| part.is_empty()) {
+        parts.pop();
+    }
+    let mut sitting = Vec::new();
+    let mut index = 0;
+    while index < parts.len() {
+        let status = std::str::from_utf8(parts[index]).ok()?;
+        let kind = *status.as_bytes().first()?;
+        if index + 1 >= parts.len() {
+            return None;
+        }
+        let path = std::str::from_utf8(parts[index + 1]).ok()?;
+        index += 2;
+        if !changed.contains_key(path) {
+            continue;
+        }
+        if kind == b'D' && root.join(path).is_file() {
+            sitting.push(path.to_owned());
+            continue;
+        }
+        return Some(true);
+    }
+    if sitting.is_empty() {
+        return Some(false);
+    }
+    Some(!worktree_files_match_base_blobs(root, blobs, &sitting)?)
+}
+
+/// Every path's work-tree bytes equal the blob `base` records for it.
+/// `hash-object` has no `-w`, so the read writes no object.
+fn worktree_files_match_base_blobs(
+    root: &Path,
+    blobs: &std::collections::BTreeMap<String, String>,
+    paths: &[String],
+) -> Option<bool> {
+    let hashed = hash_worktree_paths(root, paths)?;
+    Some(
+        paths
+            .iter()
+            .zip(hashed)
+            .all(|(path, hash)| blobs.get(path).is_some_and(|blob| blob == &hash)),
+    )
+}
+
+fn ls_tree_blobs(bytes: &[u8]) -> Option<std::collections::BTreeMap<String, String>> {
+    let mut blobs = std::collections::BTreeMap::new();
+    for record in bytes.split(|byte| *byte == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        let tab = record.iter().position(|byte| *byte == b'\t')?;
+        let meta = std::str::from_utf8(&record[..tab]).ok()?;
+        let hash = meta.split(' ').nth(2)?;
+        if !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let path = std::str::from_utf8(&record[tab + 1..]).ok()?;
+        blobs.insert(path.to_owned(), hash.to_owned());
+    }
+    Some(blobs)
+}
+
+/// `--no-filters` is deliberate: see [`tracked_worktree_differs_from_base`].
+/// A newline or leading quote would require Git's quoted-path encoding in
+/// `--stdin-paths`; hash those exceptional paths on their own.
+fn hash_worktree_paths(root: &Path, paths: &[String]) -> Option<Vec<String>> {
+    let mut hashes = vec![String::new(); paths.len()];
+    let mut batched = Vec::new();
+    for (index, path) in paths.iter().enumerate() {
+        if path.contains('\n') || path.starts_with('"') {
+            hashes[index] = hash_one_worktree_path(root, path)?;
+        } else {
+            batched.push(index);
+        }
+    }
+    if batched.is_empty() {
+        return Some(hashes);
+    }
+    let mut stdin = Vec::new();
+    for index in &batched {
+        stdin.extend(paths[*index].as_bytes());
+        stdin.push(b'\n');
+    }
+    let batch_output = git_query_stdin(
+        root,
+        &["hash-object", "--no-filters", "--stdin-paths"],
+        Some(&stdin),
+    )
+    .ok()?;
+    if !batch_output.status.success() {
+        return None;
+    }
+    let lines = std::str::from_utf8(&batch_output.stdout).ok()?.lines();
+    let mut lines = lines.filter(|line| !line.is_empty());
+    for index in batched {
+        let hash = lines.next()?;
+        if !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        hash.clone_into(&mut hashes[index]);
+    }
+
+    lines.next().is_none().then_some(hashes)
+}
+
+fn hash_one_worktree_path(root: &Path, path: &str) -> Option<String> {
+    let hashed = git_query(root, &["hash-object", "--no-filters", "--", path]).ok()?;
+    if !hashed.status.success() {
+        return None;
+    }
+    let hash = std::str::from_utf8(&hashed.stdout).ok()?.trim();
+    hash.bytes()
+        .all(|byte| byte.is_ascii_hexdigit())
+        .then(|| hash.to_owned())
+        .filter(|hash| !hash.is_empty())
+}
+
+fn status_z(path: &Path) -> Option<Vec<u8>> {
+    let output = git_query(
+        path,
+        &["status", "--porcelain", "--no-renames", "-z", "-uall"],
+    )
+    .ok()?;
+    output.status.success().then_some(output.stdout)
+}
+
+fn status_changes(bytes: &[u8]) -> Option<std::collections::BTreeMap<String, bool>> {
+    let mut changed = std::collections::BTreeMap::new();
+    for record in bytes
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+    {
+        if record.len() < 4 || record[2] != b' ' {
+            return None;
+        }
+        let path = std::str::from_utf8(&record[3..]).ok()?;
+        if !is_secret_git_path(path) {
+            changed.insert(path.to_owned(), &record[..2] == b"??");
+        }
+    }
+    Some(changed)
 }
 
 const SECRET_NAMES: &[&str] = &[

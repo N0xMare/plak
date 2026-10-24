@@ -31,7 +31,7 @@ pub(crate) use git::git_query;
 #[cfg(test)]
 use git::{
     FALLBACK_EMAIL, GIT_QUERY_TIMEOUT, STDERR_EXCERPT_BYTES, git_command, git_text, output_within,
-    parse_left_right_counts, parse_merge_tree_conflicts, stderr_excerpt, strip_git_environment,
+    parse_merge_tree_conflicts, stderr_excerpt, strip_git_environment,
 };
 use git::{
     ensure_plak_mint_excludes, git_adopt, git_ahead_behind, git_branch, git_run, git_snapshot,
@@ -618,8 +618,24 @@ pub(crate) fn copy_is_dirty(path: &Path) -> bool {
 pub(crate) fn ahead_behind(child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)> {
     match detect_vcs(parent).or_else(|_| detect_vcs(child)) {
         Ok(SessionVcs::Jj) => jj_ahead_behind(child, parent, base),
-        Ok(SessionVcs::Git) => git_ahead_behind(child, parent),
+        Ok(SessionVcs::Git) => git_ahead_behind(child, parent, base),
         Err(_) => None,
+    }
+}
+
+/// Parent observations shared only within one occupancy-probe run, by path and base.
+pub type ParentBehindCache = BTreeMap<(PathBuf, String), Option<u64>>;
+
+pub(crate) fn ahead_behind_cached(
+    child: &Path,
+    parent: &Path,
+    base: Option<&str>,
+    cache: &mut ParentBehindCache,
+) -> Option<(u64, u64)> {
+    if copy_layout_kind(child) == Some(SessionVcs::Git) {
+        git::git_ahead_behind_cached(child, parent, base, cache)
+    } else {
+        ahead_behind(child, parent, base)
     }
 }
 

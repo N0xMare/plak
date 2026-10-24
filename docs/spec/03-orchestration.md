@@ -511,6 +511,35 @@ commits in `base-..parent@`, excluding commits whose tree equals the recorded
 F tree: copied mint state is not new parent work. Fresh forks, even over a
 dirty parent, report `(0, 0)`; a subsequent parent edit contributes one behind.
 
+Git ahead counts commits in `<base>..HEAD` on the child whose tree differs
+from the base tree, plus one when
+the child work tree differs from the `<base>` tree: a tracked non-secret
+change whose work-tree bytes are not the base blob, or an untracked
+non-secret path `<base>` does not contain. Uncommitted work that already
+matches `<base>` — an adopted child's files, still dirty against its own
+HEAD — adds nothing, as does a commit of exactly that adopted tree. Work-tree
+comparison considers only paths changed against HEAD, so a committed new path
+cannot be counted again merely because unrelated mint-time dirt remains.
+Git behind counts
+parent commits since `<base>` whose tree differs from the base tree, plus
+one when the parent work tree has a non-secret change that is neither in
+HEAD nor in `<base>`. The same fresh-fork contract holds: a dirty parent
+is `(0, 0)`, one later parent edit is one behind, and a parent commit of
+the mint-time dirt adds nothing. No recorded base omits `ahead` and
+`behind`. Base blobs are read in one `ls-tree -r -z` query and working files
+are hashed in a batch with `hash-object --stdin-paths` (exceptional quoted or
+newline names use individual reads). Hashing never writes objects and uses
+`--no-filters`: raw work-tree bytes must equal the base blob to be considered
+mint-time dirt; clean/smudge transformations are not run by the hash probe.
+The comparison disables rename detection (`--no-renames`).
+Reads use the 30 s query ceiling and `GIT_OPTIONAL_LOCKS=0`,
+and write no objects. Each occupancy-probe run memoizes Git parent observations
+by (parent path, base); the cache is never reused by a later render.
+
+A row that names `candidate` also names non-empty `candidate_commit` and
+`candidate_base` from that record. Compare those immutable snapshots using
+the checkout's VCS (`git diff <candidate_base> <candidate_commit>` on Git).
+
 Arguments, optional booleans: `include_self`, `include_completed`, `include_read`.
 
 Receipt: `{ revision, agents: [...], inbox: [...] }`. Each `inbox[]` row

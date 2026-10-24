@@ -35,13 +35,15 @@ impl OccupancyProbe {
     /// Probes every listed copy with the mutex released.
     #[must_use]
     pub fn run(self, vcs: &dyn VcsOps) -> Occupancy {
+        let mut parents = plakous_workspace::occupancy_vcs::ParentBehindCache::new();
         Occupancy(
             self.rows
                 .into_iter()
                 .map(|(agent_id, path, parent_path, base)| {
                     let dirty = vcs.dirty(&path);
-                    let ahead_behind = parent_path
-                        .and_then(|parent| vcs.ahead_behind(&path, &parent, base.as_deref()));
+                    let ahead_behind = parent_path.and_then(|parent| {
+                        vcs.ahead_behind_cached(&path, &parent, base.as_deref(), &mut parents)
+                    });
                     (
                         agent_id,
                         NodeOccupancy {
@@ -250,12 +252,17 @@ impl ProductAgentTree {
             }
             if let Some(candidate) = &attempt.candidate_id {
                 value["candidate"] = serde_json::Value::String(candidate.to_string());
-                if let Some(commit) = self
-                    .candidates
-                    .get(candidate)
-                    .and_then(|row| row.merged_at.as_ref())
-                {
-                    value["merged_at"] = serde_json::Value::String(commit.clone());
+                if let Some(row) = self.candidates.get(candidate) {
+                    if !row.commit.is_empty() {
+                        value["candidate_commit"] = serde_json::Value::String(row.commit.clone());
+                    }
+                    if !row.base_commit.is_empty() {
+                        value["candidate_base"] =
+                            serde_json::Value::String(row.base_commit.clone());
+                    }
+                    if let Some(commit) = row.merged_at.as_ref() {
+                        value["merged_at"] = serde_json::Value::String(commit.clone());
+                    }
                 }
             }
             if let Some(output) = &attempt.output_json {
@@ -545,6 +552,62 @@ mod tests {
         assert!(child.get("ahead").is_some());
         assert!(child.get("behind").is_some());
         assert!(child["ahead"].as_u64().unwrap_or(0) >= 1);
+    }
+
+    #[test]
+    fn list_row_names_candidate_commit_and_base() {
+        let repo = git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let spawned = tree.spawn_agent("root", &mint_req(), None).unwrap();
+        std::fs::write(
+            tree.node(&spawned.agent_id).unwrap().path.join("H.txt"),
+            "child\n",
+        )
+        .unwrap();
+        tree.record_turn_completed(&spawned.agent_id).unwrap();
+        tree.settle_for_test();
+        let candidate_id = candidate_of(&tree, &spawned.agent_id);
+        let record = tree.candidates().get(&candidate_id).unwrap();
+        let commit = record.commit.clone();
+        let base = record.base_commit.clone();
+        let listed = tree
+            .list_agents(
+                "root",
+                &ListAgentsRequest {
+                    include_read: None,
+                    include_self: Some(false),
+                    include_completed: Some(true),
+                },
+            )
+            .unwrap();
+        let child = listed
+            .agents
+            .iter()
+            .find(|row| row["agent_id"] == spawned.agent_id)
+            .unwrap();
+        assert_eq!(child["candidate"], candidate_id.as_str());
+        assert_eq!(child["candidate_commit"], commit);
+        assert_eq!(child["candidate_base"], base);
+        let record = tree.candidates.get_mut(&candidate_id).unwrap();
+        record.commit.clear();
+        record.base_commit.clear();
+        let listed = tree
+            .list_agents(
+                "root",
+                &ListAgentsRequest {
+                    include_read: None,
+                    include_self: Some(false),
+                    include_completed: Some(true),
+                },
+            )
+            .unwrap();
+        let child = listed
+            .agents
+            .iter()
+            .find(|row| row["agent_id"] == spawned.agent_id)
+            .unwrap();
+        assert!(child.get("candidate_commit").is_none());
+        assert!(child.get("candidate_base").is_none());
     }
 
     #[test]
