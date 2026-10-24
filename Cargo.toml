@@ -423,7 +423,7 @@ feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs"]
 feature-ceiling = 131
 test-seam-ceiling = 75
-env-ceiling = 30
+env-ceiling = 29
 reason = "Capability registry entry sites; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous]

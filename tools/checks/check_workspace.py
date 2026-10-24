@@ -489,7 +489,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
     # destination/config and carry-capacity probes, then the bare state-key
     # fallback) and has a kept
     # maintainer snapshot export a session its own state holds.
-    ("plak", "src/carry.rs"): [
+    ("plak", "src/carry/reload.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
         ("std::process::Command", (("punct", "&"), ("identifier", "target"), ("punct", "."), ("identifier", "executable"))),
         ("std::process::Command", (("identifier", "executable"),)),
@@ -548,7 +548,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Private capture diagnostics use closed metadata, never request bodies.
     ("plak", "src/commands/exchange_capture.rs"): {"env", "warn"},
     # A published export whose directory sync failed is kept and logged.
-    ("plak", "src/carry.rs"): {"warn"},
+    ("plak", "src/carry/document.rs"): {"warn"},
     ("plak", "src/carry/history.rs"): {"tags", "stringify"},
     # A TUI attach refused over an unusable stored login logs the CLI's
     # remedy text, which names no secret.

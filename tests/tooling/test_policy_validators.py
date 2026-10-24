@@ -1575,7 +1575,7 @@ fn paths() {
     let _ = std::env::var_os("PLAK_TEST_TMPDIR");
 }
 """,
-                "src/carry.rs": """
+                "src/carry/reload.rs": """
 fn carry(executable: &str, snapshot: &str) {
     let _ = std::process::Command::new(&executable);
     let _ = std::process::Command::new(&target.executable);

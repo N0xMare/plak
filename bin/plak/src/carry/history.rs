@@ -14,7 +14,7 @@ use plakous::model::{
 use plakous::sessions::PortableSessionHistory;
 use serde::{Deserialize, Serialize};
 
-use super::ImportError;
+use super::document::ImportError;
 
 type Result<T> = std::result::Result<T, ImportError>;
 fn invalid(error: impl std::fmt::Display) -> ImportError {
@@ -760,14 +760,14 @@ impl History {
         history.validate_size()?;
         let mut counter = ByteCounter(0);
         serde_json::to_writer(&mut counter, &history).map_err(invalid)?;
-        super::validate_size("history", counter.0, 128 * 1024 * 1024)?;
+        super::document::validate_size("history", counter.0, 128 * 1024 * 1024)?;
         Ok(history)
     }
     pub(super) fn validate_size(&self) -> Result<()> {
-        super::validate_size("history groups", self.groups.len(), 100_000)?;
+        super::document::validate_size("history groups", self.groups.len(), 100_000)?;
         let count = self.groups.iter().map(|g| g.messages.len()).sum::<usize>();
-        super::validate_size("history messages", count, 100_000)?;
-        super::validate_size(
+        super::document::validate_size("history messages", count, 100_000)?;
+        super::document::validate_size(
             "history blocks and parts",
             self.groups
                 .iter()
@@ -785,7 +785,7 @@ impl History {
                         ..
                     } = block
                     {
-                        super::validate_size(
+                        super::document::validate_size(
                             "user image",
                             bytes
                                 .len()
