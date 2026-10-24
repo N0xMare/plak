@@ -3105,32 +3105,11 @@ impl NativeSubscriptions {
         gate: Arc<dyn SubscriptionRequestGate>,
         lineage: SessionLineage,
     ) -> Result<ResolvedProvider, NativeModelResolutionError> {
-        let requested_model = selected.route().requested_model().clone();
-        let provider = [
-            NativeProvider::Codex,
-            NativeProvider::Xai,
-            NativeProvider::Claude,
-        ]
-        .into_iter()
-        .find(|provider| {
-            native_provider_route_selection(*provider, requested_model.clone())
-                .is_ok_and(|route| &route == selected.route())
-        })
-        .ok_or_else(|| {
-            NativeModelResolutionError::after_selection(
-                requested_model.clone(),
-                NativeSubscriptionError::ProviderConfigurationRejected,
-            )
-        })?;
-        let selector = NativeModelSelector::Exact(requested_model.clone());
+        let (provider, selector) = gated_provider_selection(&selected)?;
         let resolved = self
             .resolve_gated_native_model(provider, &selector, gate, lineage)
             .await?;
-        let native_tool_mode = resolved
-            .evidence
-            .codex_exact
-            .as_ref()
-            .and_then(codex_native_tool_mode);
+        let requested_model = selected.route().requested_model().clone();
         let checked_at = timestamp_now().map_err(|error| {
             NativeModelResolutionError::after_selection(requested_model.clone(), error)
         })?;
@@ -3140,128 +3119,11 @@ impl NativeSubscriptions {
             .await
             .map_err(|_| {
                 NativeModelResolutionError::after_selection(
-                    requested_model.clone(),
+                    requested_model,
                     NativeSubscriptionError::ProviderAuthorityRevalidationRejected,
                 )
             })?;
-        let configuration = match provider {
-            NativeProvider::Codex => {
-                let evidence = resolved.evidence.codex_exact.as_ref().ok_or_else(|| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::Internal,
-                    )
-                })?;
-                plakous_openai::compile_codex_subscription_configuration(
-                    &selected, &authority, evidence,
-                )
-            }
-            NativeProvider::Xai => {
-                let evidence = resolved.evidence.xai_exact.as_ref().ok_or_else(|| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::Internal,
-                    )
-                })?;
-                plakous_xai::compile_supergrok_subscription_configuration(
-                    &selected, &authority, evidence,
-                )
-            }
-            NativeProvider::Claude => {
-                let beta = plakous_anthropic::claude_oauth_beta_header(requested_model.as_str());
-                let evidence = plakous_model::ProviderSemanticEvidence::new(
-                    1,
-                    b"plakous-anthropic/claude-oauth-semantic-evidence-v1".to_vec(),
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::ProviderConfigurationIdentityRejected,
-                    )
-                })?;
-                let binding = ResolvedProviderAuthorityBinding::new(
-                    &resolved.descriptor,
-                    &authority,
-                    evidence,
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::ProviderConfigurationIdentityRejected,
-                    )
-                })?;
-                let configuration = plakous_anthropic::compile_messages_oauth_configuration(
-                    &selected,
-                    resolved.descriptor.clone(),
-                    binding,
-                    plakous_anthropic::ANTHROPIC_API_VERSION,
-                    beta,
-                )
-                .map_err(|error| {
-                    let error = match error {
-                        plakous_anthropic::MessagesProviderConfigurationError::Identity => {
-                            NativeSubscriptionError::ProviderConfigurationIdentityRejected
-                        }
-                        plakous_anthropic::MessagesProviderConfigurationError::PolicyMismatch
-                        | plakous_anthropic::MessagesProviderConfigurationError::Provider(_) => {
-                            NativeSubscriptionError::ProviderConfigurationRejected
-                        }
-                    };
-                    NativeModelResolutionError::after_selection(requested_model.clone(), error)
-                })?;
-                let configured = ConfiguredLanguageModel::new(
-                    &plakous_model::StandardIntegrationAuthority::release_owned(),
-                    resolved.model(),
-                    configuration,
-                    authority,
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::ConfiguredAggregateRejected,
-                    )
-                })?;
-                return Ok(ResolvedProvider {
-                    model: resolved,
-                    configured,
-                    native_tool_mode,
-                    reresolution: None,
-                });
-            }
-        }
-        .map_err(|error| {
-            let error = match error {
-                plakous_openai::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
-                    NativeSubscriptionError::ProviderConfigurationPolicyMismatch(field)
-                }
-                plakous_openai::ResponsesProviderConfigurationError::Identity => {
-                    NativeSubscriptionError::ProviderConfigurationIdentityRejected
-                }
-                plakous_openai::ResponsesProviderConfigurationError::ProviderConfiguration(
-                    error,
-                ) => NativeSubscriptionError::ProviderConfigurationCompileRejected(error),
-                _ => NativeSubscriptionError::ProviderConfigurationRejected,
-            };
-            NativeModelResolutionError::after_selection(requested_model, error)
-        })?;
-        let configured = ConfiguredLanguageModel::new(
-            &plakous_model::StandardIntegrationAuthority::release_owned(),
-            resolved.model(),
-            configuration,
-            authority,
-        )
-        .map_err(|_| {
-            NativeModelResolutionError::after_selection(
-                resolved.selected_model.clone(),
-                NativeSubscriptionError::ConfiguredAggregateRejected,
-            )
-        })?;
-        Ok(ResolvedProvider {
-            model: resolved,
-            configured,
-            native_tool_mode,
-            reresolution: None,
-        })
+        configure_gated_provider(&selected, provider, resolved, authority)
     }
 
     /// Local-first attach variant of [`Self::resolve_gated_provider`].
@@ -3274,150 +3136,11 @@ impl NativeSubscriptions {
         selected: SelectedProviderConfiguration,
         gate: Arc<dyn SubscriptionRequestGate>,
     ) -> Result<ResolvedProvider, NativeModelResolutionError> {
-        let requested_model = selected.route().requested_model().clone();
-        let provider = [
-            NativeProvider::Codex,
-            NativeProvider::Xai,
-            NativeProvider::Claude,
-        ]
-        .into_iter()
-        .find(|provider| {
-            native_provider_route_selection(*provider, requested_model.clone())
-                .is_ok_and(|route| &route == selected.route())
-        })
-        .ok_or_else(|| {
-            NativeModelResolutionError::after_selection(
-                requested_model.clone(),
-                NativeSubscriptionError::ProviderConfigurationRejected,
-            )
-        })?;
-        let selector = NativeModelSelector::Exact(requested_model.clone());
+        let (provider, selector) = gated_provider_selection(&selected)?;
         let (resolved, authority) = self
             .resolve_gated_native_model_for_attach(provider, &selector, gate)
             .await?;
-        let native_tool_mode = resolved
-            .evidence
-            .codex_exact
-            .as_ref()
-            .and_then(codex_native_tool_mode);
-        let configuration = match provider {
-            NativeProvider::Codex => {
-                let evidence = resolved.evidence.codex_exact.as_ref().ok_or_else(|| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::Internal,
-                    )
-                })?;
-                plakous_openai::compile_codex_subscription_configuration(
-                    &selected, &authority, evidence,
-                )
-            }
-            NativeProvider::Xai => {
-                let evidence = resolved.evidence.xai_exact.as_ref().ok_or_else(|| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::Internal,
-                    )
-                })?;
-                plakous_xai::compile_supergrok_subscription_configuration(
-                    &selected, &authority, evidence,
-                )
-            }
-            NativeProvider::Claude => {
-                let beta = plakous_anthropic::claude_oauth_beta_header(requested_model.as_str());
-                let evidence = plakous_model::ProviderSemanticEvidence::new(
-                    1,
-                    b"plakous-anthropic/claude-oauth-semantic-evidence-v1".to_vec(),
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::ProviderConfigurationIdentityRejected,
-                    )
-                })?;
-                let binding = ResolvedProviderAuthorityBinding::new(
-                    &resolved.descriptor,
-                    &authority,
-                    evidence,
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::ProviderConfigurationIdentityRejected,
-                    )
-                })?;
-                let configuration = plakous_anthropic::compile_messages_oauth_configuration(
-                    &selected,
-                    resolved.descriptor.clone(),
-                    binding,
-                    plakous_anthropic::ANTHROPIC_API_VERSION,
-                    beta,
-                )
-                .map_err(|error| {
-                    let error = match error {
-                        plakous_anthropic::MessagesProviderConfigurationError::Identity => {
-                            NativeSubscriptionError::ProviderConfigurationIdentityRejected
-                        }
-                        plakous_anthropic::MessagesProviderConfigurationError::PolicyMismatch
-                        | plakous_anthropic::MessagesProviderConfigurationError::Provider(_) => {
-                            NativeSubscriptionError::ProviderConfigurationRejected
-                        }
-                    };
-                    NativeModelResolutionError::after_selection(requested_model.clone(), error)
-                })?;
-                let configured = ConfiguredLanguageModel::new(
-                    &plakous_model::StandardIntegrationAuthority::release_owned(),
-                    resolved.model(),
-                    configuration,
-                    authority,
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        requested_model.clone(),
-                        NativeSubscriptionError::ConfiguredAggregateRejected,
-                    )
-                })?;
-                return Ok(ResolvedProvider {
-                    model: resolved,
-                    configured,
-                    native_tool_mode,
-                    reresolution: None,
-                });
-            }
-        }
-        .map_err(|error| {
-            let error = match error {
-                plakous_openai::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
-                    NativeSubscriptionError::ProviderConfigurationPolicyMismatch(field)
-                }
-                plakous_openai::ResponsesProviderConfigurationError::Identity => {
-                    NativeSubscriptionError::ProviderConfigurationIdentityRejected
-                }
-                plakous_openai::ResponsesProviderConfigurationError::ProviderConfiguration(
-                    error,
-                ) => NativeSubscriptionError::ProviderConfigurationCompileRejected(error),
-                _ => NativeSubscriptionError::ProviderConfigurationRejected,
-            };
-            NativeModelResolutionError::after_selection(requested_model, error)
-        })?;
-        let configured = ConfiguredLanguageModel::new(
-            &plakous_model::StandardIntegrationAuthority::release_owned(),
-            resolved.model(),
-            configuration,
-            authority,
-        )
-        .map_err(|_| {
-            NativeModelResolutionError::after_selection(
-                resolved.selected_model.clone(),
-                NativeSubscriptionError::ConfiguredAggregateRejected,
-            )
-        })?;
-        Ok(ResolvedProvider {
-            model: resolved,
-            configured,
-            native_tool_mode,
-            reresolution: None,
-        })
+        configure_gated_provider(&selected, provider, resolved, authority)
     }
 
     /// Resolves an ordinary native provider with one nonrenewable inference
@@ -3818,6 +3541,172 @@ impl NativeSubscriptions {
         })
         .await?
     }
+}
+
+/// The pinned native provider whose exact route `selected` names, with the
+/// exact model selector for it.
+fn gated_provider_selection(
+    selected: &SelectedProviderConfiguration,
+) -> Result<(NativeProvider, NativeModelSelector), NativeModelResolutionError> {
+    let requested_model = selected.route().requested_model().clone();
+    let provider = [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ]
+    .into_iter()
+    .find(|provider| {
+        native_provider_route_selection(*provider, requested_model.clone())
+            .is_ok_and(|route| &route == selected.route())
+    })
+    .ok_or_else(|| {
+        NativeModelResolutionError::after_selection(
+            requested_model.clone(),
+            NativeSubscriptionError::ProviderConfigurationRejected,
+        )
+    })?;
+    let selector = NativeModelSelector::Exact(requested_model.clone());
+    Ok((provider, selector))
+}
+
+/// Compiles one resolved native model and its runtime authority into the
+/// provider's configured model, the step both gated resolvers share.
+fn configure_gated_provider(
+    selected: &SelectedProviderConfiguration,
+    provider: NativeProvider,
+    resolved: ResolvedNativeModel,
+    authority: RuntimeModelAuthority,
+) -> Result<ResolvedProvider, NativeModelResolutionError> {
+    let requested_model = selected.route().requested_model().clone();
+    let native_tool_mode = resolved
+        .evidence
+        .codex_exact
+        .as_ref()
+        .and_then(codex_native_tool_mode);
+    let configuration = match provider {
+        NativeProvider::Codex => {
+            let evidence = resolved.evidence.codex_exact.as_ref().ok_or_else(|| {
+                NativeModelResolutionError::after_selection(
+                    requested_model.clone(),
+                    NativeSubscriptionError::Internal,
+                )
+            })?;
+            plakous_openai::compile_codex_subscription_configuration(selected, &authority, evidence)
+        }
+        NativeProvider::Xai => {
+            let evidence = resolved.evidence.xai_exact.as_ref().ok_or_else(|| {
+                NativeModelResolutionError::after_selection(
+                    requested_model.clone(),
+                    NativeSubscriptionError::Internal,
+                )
+            })?;
+            plakous_xai::compile_supergrok_subscription_configuration(
+                selected, &authority, evidence,
+            )
+        }
+        NativeProvider::Claude => {
+            return configure_claude_provider(selected, resolved, authority, native_tool_mode);
+        }
+    }
+    .map_err(|error| {
+        let error = match error {
+            plakous_openai::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
+                NativeSubscriptionError::ProviderConfigurationPolicyMismatch(field)
+            }
+            plakous_openai::ResponsesProviderConfigurationError::Identity => {
+                NativeSubscriptionError::ProviderConfigurationIdentityRejected
+            }
+            plakous_openai::ResponsesProviderConfigurationError::ProviderConfiguration(error) => {
+                NativeSubscriptionError::ProviderConfigurationCompileRejected(error)
+            }
+            _ => NativeSubscriptionError::ProviderConfigurationRejected,
+        };
+        NativeModelResolutionError::after_selection(requested_model, error)
+    })?;
+    let configured = ConfiguredLanguageModel::new(
+        &plakous_model::StandardIntegrationAuthority::release_owned(),
+        resolved.model(),
+        configuration,
+        authority,
+    )
+    .map_err(|_| {
+        NativeModelResolutionError::after_selection(
+            resolved.selected_model.clone(),
+            NativeSubscriptionError::ConfiguredAggregateRejected,
+        )
+    })?;
+    Ok(ResolvedProvider {
+        model: resolved,
+        configured,
+        native_tool_mode,
+        reresolution: None,
+    })
+}
+
+/// The Claude OAuth branch of [`configure_gated_provider`]: Messages policy
+/// compilation bound to the resolved descriptor and authority.
+fn configure_claude_provider(
+    selected: &SelectedProviderConfiguration,
+    resolved: ResolvedNativeModel,
+    authority: RuntimeModelAuthority,
+    native_tool_mode: Option<NativeToolMode>,
+) -> Result<ResolvedProvider, NativeModelResolutionError> {
+    let requested_model = selected.route().requested_model().clone();
+    let beta = plakous_anthropic::claude_oauth_beta_header(requested_model.as_str());
+    let evidence = plakous_model::ProviderSemanticEvidence::new(
+        1,
+        b"plakous-anthropic/claude-oauth-semantic-evidence-v1".to_vec(),
+    )
+    .map_err(|_| {
+        NativeModelResolutionError::after_selection(
+            requested_model.clone(),
+            NativeSubscriptionError::ProviderConfigurationIdentityRejected,
+        )
+    })?;
+    let binding = ResolvedProviderAuthorityBinding::new(&resolved.descriptor, &authority, evidence)
+        .map_err(|_| {
+            NativeModelResolutionError::after_selection(
+                requested_model.clone(),
+                NativeSubscriptionError::ProviderConfigurationIdentityRejected,
+            )
+        })?;
+    let configuration = plakous_anthropic::compile_messages_oauth_configuration(
+        selected,
+        resolved.descriptor.clone(),
+        binding,
+        plakous_anthropic::ANTHROPIC_API_VERSION,
+        beta,
+    )
+    .map_err(|error| {
+        let error = match error {
+            plakous_anthropic::MessagesProviderConfigurationError::Identity => {
+                NativeSubscriptionError::ProviderConfigurationIdentityRejected
+            }
+            plakous_anthropic::MessagesProviderConfigurationError::PolicyMismatch
+            | plakous_anthropic::MessagesProviderConfigurationError::Provider(_) => {
+                NativeSubscriptionError::ProviderConfigurationRejected
+            }
+        };
+        NativeModelResolutionError::after_selection(requested_model.clone(), error)
+    })?;
+    let configured = ConfiguredLanguageModel::new(
+        &plakous_model::StandardIntegrationAuthority::release_owned(),
+        resolved.model(),
+        configuration,
+        authority,
+    )
+    .map_err(|_| {
+        NativeModelResolutionError::after_selection(
+            requested_model.clone(),
+            NativeSubscriptionError::ConfiguredAggregateRejected,
+        )
+    })?;
+    Ok(ResolvedProvider {
+        model: resolved,
+        configured,
+        native_tool_mode,
+        reresolution: None,
+    })
 }
 
 impl fmt::Debug for NativeSubscriptions {
