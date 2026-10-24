@@ -2986,7 +2986,9 @@ passes); unknown fields are ignored. The listing function has no dial-origin
 parameter; an installed exchange observer sees its requests (empty bodies, the
 key header sensitive). The bundled reviewed table (`api_models.json` in the crate, revision
 `anthropic.api-models.2026-10-09.v1`) carries, per id, the published window,
-output limit, effort levels and adaptive-thinking support, the input price
+output limit, effort levels and adaptive-thinking support, the published
+lifecycle with its `deprecated_at` and `retires_at` times (which the bundled
+fallback listing passes to classification like a live list's), the input price
 threshold where the pricing page publishes one (Haiku 5.5: 100,000 tokens) and
 the hosted features its docs list (`featureMetadata.supportedModels`:
 compaction, hosted programmatic tool calling, tool search, web search, web

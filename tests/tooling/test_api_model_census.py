@@ -254,6 +254,8 @@ class RegenerateTests(unittest.TestCase):
             "adaptive_thinking": True,
             "price_threshold_input_tokens": None,
             "lifecycle": "active",
+            "deprecated_at": None,
+            "retires_at": None,
             "hosted_features": [],
         }
         updated, _changes = census.regenerate(

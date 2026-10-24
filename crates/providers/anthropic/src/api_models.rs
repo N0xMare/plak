@@ -417,6 +417,8 @@ struct BundledRow {
     adaptive_thinking: bool,
     price_threshold_input_tokens: Option<u64>,
     lifecycle: String,
+    deprecated_at: Option<String>,
+    retires_at: Option<String>,
     hosted_features: Vec<String>,
 }
 
@@ -452,8 +454,8 @@ pub fn anthropic_api_bundled_listing() -> Result<Vec<AnthropicListedModel>, Anth
             efforts: Some(row.efforts.clone()),
             adaptive_thinking: Some(row.adaptive_thinking),
             lifecycle: Some(row.lifecycle.clone()),
-            deprecated_at: None,
-            retires_at: None,
+            deprecated_at: row.deprecated_at.clone(),
+            retires_at: row.retires_at.clone(),
         })
         .collect())
 }

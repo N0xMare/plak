@@ -86,6 +86,8 @@ ANTHROPIC_FIELDS = (
     "adaptive_thinking",
     "price_threshold_input_tokens",
     "lifecycle",
+    "deprecated_at",
+    "retires_at",
     "hosted_features",
 )
 XAI_FIELDS = ("context_length", "long_context_threshold", "efforts")
@@ -392,6 +394,8 @@ def parse_anthropic_model(row: dict[str, Any]) -> dict[str, Any]:
             if isinstance(value, dict) and value.get("supported") is True:
                 server_features.append(name)
     lifecycle = row.get("lifecycle") if isinstance(row.get("lifecycle"), str) else "active"
+    deprecated_at = row.get("deprecated_at") if isinstance(row.get("deprecated_at"), str) else None
+    retires_at = row.get("retires_at") if isinstance(row.get("retires_at"), str) else None
     return {
         "id": row.get("id") or "",
         "max_input_tokens": int(row.get("max_input_tokens") or 0),
@@ -399,6 +403,8 @@ def parse_anthropic_model(row: dict[str, Any]) -> dict[str, Any]:
         "efforts": [name for name in EFFORT_LADDER if name in names],
         "adaptive_thinking": bool(adaptive),
         "lifecycle": lifecycle,
+        "deprecated_at": deprecated_at,
+        "retires_at": retires_at,
         "server_features": server_features,
     }
 
@@ -849,6 +855,8 @@ def _blank_row(provider: str, model_id: str) -> dict[str, Any]:
             "adaptive_thinking": False,
             "price_threshold_input_tokens": None,
             "lifecycle": "active",
+            "deprecated_at": None,
+            "retires_at": None,
             "hosted_features": [],
         }
     return {
@@ -925,6 +933,8 @@ def observe_anthropic(
             "adaptive_thinking": row["adaptive_thinking"],
             "price_threshold_input_tokens": thresholds.get(model_id),
             "lifecycle": row["lifecycle"],
+            "deprecated_at": row["deprecated_at"],
+            "retires_at": row["retires_at"],
             "hosted_features": features,
         }
     return observed
