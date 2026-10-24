@@ -14,6 +14,16 @@ GROUPS = ('static', 'builds', 'rustdoc', 'tests-parallel', 'tests-serial',
           'tests-durability', 'contracts', 'tooling', 'package')
 CHECK_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'contracts', 'tooling')
 PLATFORM_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'tests-durability')
+SUPPORTED = ('plakous', 'plakous-agent', 'plakous-model', 'plakous-tools', 'plak')
+# The builds group, in order: workspace defaults, each supported package's own
+# resolution, then the maintainer parent build the linkage check reads.
+BUILDS = [
+    ['build', '--locked', '--workspace', '--lib', '--bins', '--target', 'host-triple'],
+    *(['build', '--locked', '-p', package, '--lib', '--bins', '--target', 'host-triple']
+      for package in SUPPORTED),
+    ['build', '--locked', '-p', 'plak', '--features', 'maintainer', '--bins',
+     '--target', 'host-triple'],
+]
 
 
 class DevCheckWorkerTests(unittest.TestCase):
@@ -160,7 +170,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
 
     def assert_feature_builds_deny_warnings(self, calls):
         builds = [c for c in calls if c['args'][0] == 'build']
-        self.assertEqual(len(builds), 2)
+        self.assertEqual(len(builds), len(BUILDS))
         for build in builds:
             self.assertIn('-D warnings', build.get('rustflags') or '')
         ambient = self.env.get('RUSTFLAGS') or ''
@@ -283,11 +293,11 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-                         ['fmt', 'fetch', 'clippy', 'build', 'build', 'test'])
+                         ['fmt', 'fetch', 'clippy', *['build'] * len(BUILDS), 'test'])
         builds = [c['args'] for c in calls if c['args'][0] == 'build']
         self.assertIn('--workspace', builds[0])
         self.assertNotIn('--all-features', builds[0])
-        self.assertEqual(builds[1][builds[1].index('--features') + 1], 'maintainer')
+        self.assertEqual(builds[-1][builds[-1].index('--features') + 1], 'maintainer')
         self.assert_feature_builds_deny_warnings(calls)
         self.assertEqual(self.profiles(calls), ['offline', 'serial'])
         self.assertEqual(self.filtersets(calls), [None, None])
@@ -302,7 +312,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         builds = [c for c in calls if c['args'][0] == 'build']
         self.assertEqual(
             [c['rustflags'] for c in builds],
-            ['-C link-arg=-fuse-ld=mold -D warnings', '-C link-arg=-fuse-ld=mold -D warnings'],
+            ['-C link-arg=-fuse-ld=mold -D warnings'] * len(BUILDS),
         )
         for call in calls:
             if call['args'][0] == 'build':
@@ -317,7 +327,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         builds = [c for c in calls if c['args'][0] == 'build']
         self.assertEqual(
             [c['target_rustflags'] for c in builds],
-            ['-C link-arg=-fuse-ld=mold -D warnings', '-C link-arg=-fuse-ld=mold -D warnings'],
+            ['-C link-arg=-fuse-ld=mold -D warnings'] * len(BUILDS),
         )
         self.assertTrue(all(c['rustflags'] == 'should-not-be-used' for c in builds))
         for call in calls:
@@ -330,7 +340,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
         order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(order, ['fmt', 'fetch', 'clippy', 'build', 'build', 'doc', 'test', 'nextest', 'nextest', 'nextest'])
+        self.assertEqual(order, ['fmt', 'fetch', 'clippy', *['build'] * len(BUILDS), 'doc', 'test',
+                                 'nextest', 'nextest', 'nextest'])
         doc = next(c for c in calls if c['args'][0] == 'doc')
         self.assertEqual(doc['rustdocflags'], '-D warnings')
         for flag in ('--workspace', '--no-deps', '--all-features', '--locked'):
@@ -343,14 +354,11 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--platform')
         self.assertEqual(result.returncode, 0, result.stderr)
         order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(order, ['fmt', 'clippy', 'build', 'build', 'test', 'nextest', 'nextest', 'nextest'])
+        self.assertEqual(order, ['fmt', 'clippy', *['build'] * len(BUILDS), 'test',
+                                 'nextest', 'nextest', 'nextest'])
         self.assertEqual(self.profiles(calls), ['offline', 'serial', 'durability'])
         checks = [c['args'] for c in calls if c['args'][0] == 'build']
-        self.assertEqual(checks, [
-            ['build', '--locked', '--workspace', '--lib', '--bins', '--target', 'host-triple'],
-            ['build', '--locked', '-p', 'plak', '--features', 'maintainer', '--bins',
-             '--target', 'host-triple'],
-        ])
+        self.assertEqual(checks, BUILDS)
         for checker in ('check_public_compile.py', 'check_workspace.py', 'check_features.py',
                         'run_tooling_tests.py'):
             self.assertFalse(any(s[0].endswith(checker) for s in scripts))
@@ -363,11 +371,19 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, _ = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
         checks = [c['args'] for c in calls if c['args'][0] == 'build']
-        self.assertEqual(checks, [
-            ['build', '--locked', '--workspace', '--lib', '--bins', '--target', 'host-triple'],
-            ['build', '--locked', '-p', 'plak', '--features', 'maintainer', '--bins',
-             '--target', 'host-triple'],
-        ])
+        self.assertEqual(checks, BUILDS)
+
+    def test_supported_packages_build_alone_from_the_manifest_classes(self):
+        import tomllib
+        workspace = tomllib.loads((ROOT / 'Cargo.toml').read_text())['workspace']
+        supported = set()
+        for member in workspace['members']:
+            package = tomllib.loads((ROOT / member / 'Cargo.toml').read_text())['package']
+            if package.get('metadata', {}).get('plakous', {}).get('class') == 'supported':
+                supported.add(package['name'])
+        self.assertEqual(supported, set(SUPPORTED))
+        self.assertIn(f"supported_packages=({' '.join(SUPPORTED)})",
+                      (ROOT / 'scripts/dev-check.sh').read_text())
 
     def test_build_target_is_explicit_for_every_compile_and_test_invocation(self):
         result, calls, _ = self.run_gate('--full')

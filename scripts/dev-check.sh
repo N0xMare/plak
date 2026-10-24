@@ -53,8 +53,13 @@ isolated_home="$TMPDIR/plak-isolated-home"
 mkdir -p "$isolated_home"
 chmod 700 "$isolated_home"
 
+# Supported packages (spec 06 §3). Each also builds alone in the builds group:
+# Cargo resolves features per selected package set, so `cargo build -p plak`
+# (the release resolution) can compile a closure no workspace build sees.
+supported_packages=(plakous plakous-agent plakous-model plakous-tools plak)
+
 # Fast narrows only the parallel lane, to the touched packages and their
-# reverse dependencies. Compilation stays workspace all-features everywhere:
+# reverse dependencies. Test compilation stays workspace all-features:
 # -p compilation would resolve a different feature graph.
 scope=''
 if [[ "$tier" == fast ]]; then
@@ -192,6 +197,11 @@ run_group() {
     builds)
       echo "== default features =="
       run_build_denying_warnings cargo build --locked --workspace --lib --bins ${target_args[@]+"${target_args[@]}"}
+      # Before the maintainer build: the linkage check reads that build's plak.
+      for package in "${supported_packages[@]}"; do
+        echo "== $package alone: its own default features =="
+        run_build_denying_warnings cargo build --locked -p "$package" --lib --bins ${target_args[@]+"${target_args[@]}"}
+      done
       echo "== maintainer features =="
       run_build_denying_warnings cargo build --locked -p plak --features maintainer --bins ${target_args[@]+"${target_args[@]}"}
       python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;

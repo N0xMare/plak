@@ -518,7 +518,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | Group (canonical order) | Coverage |
 | --- | --- |
 | `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace clippy |
-| `builds` | Workspace default-feature build; Plak maintainer-feature build. Both deny rustc warnings |
+| `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build. All deny rustc warnings |
 | `rustdoc` | Workspace all-features rustdoc, denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
@@ -591,9 +591,15 @@ Cargo resolves features per selected package set, so a `-p` subset would build
 a second copy of the dependency graph, while the whole workspace rebuilds only
 the touched packages and their dependents. The fast scope narrows the parallel
 lane, not Cargo feature resolution. The `builds` group additionally builds the
-workspace's default features and Plak's maintainer feature set; an
-all-features build cannot prove those smaller closures compile and link, so a
-feature-gated slip fails the gate. Those two builds deny rustc warnings.
+workspace's default features, each supported package alone (chapter 06 §3:
+`plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`), and
+Plak's maintainer feature set. An all-features build cannot prove those
+smaller closures compile and link, and a workspace default build unifies
+features across members, so neither sees the closure a crates.io consumer or
+the release `cargo build -p plak` resolves (for example `plakous-workspace`
+without `jj-lib`); a feature-gated slip in any of them fails the gate. The
+per-package builds run before the maintainer build, whose `plak` the linkage
+check reads. All of these builds deny rustc warnings.
 `-D warnings` is appended to the rustflags Cargo will actually pass
 (`CARGO_TARGET_<triple>_RUSTFLAGS` when that variable is set, otherwise
 `RUSTFLAGS`) and is not exported to later steps, so the all-features test

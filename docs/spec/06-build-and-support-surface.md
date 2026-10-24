@@ -361,7 +361,10 @@ default features off, `native-subscriptions`, `openai`, `anthropic`, `xai`,
 features their own implementations require; Cargo unifies these requirements.
 Every package must declare the dependency features its own Rust targets use;
 features enabled only by another workspace member are not evidence that the
-package builds on its own. The feature checker scans UUID generation
+package builds on its own. The gate's `builds` group therefore also builds each
+supported package alone, `cargo build -p <package>` with its own default
+features, rustc warnings denied (chapter 05 §1); for `plak` that is the release
+build's resolution. The feature checker scans UUID generation
 constructors in package source, tests, benches, examples and build scripts
 (including inline test modules, excluding comments and literals), and requires
 the matching `v1` through `v8` feature in that package's UUID dependency
