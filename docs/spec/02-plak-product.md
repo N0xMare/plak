@@ -150,7 +150,9 @@ The `tui` module of `bin/plak` is inert: typed views in, typed intents out, no
 Plakous and no persistence import — only `plakous-host-protocol`, itself, and
 the named `crate::config` doors, a constraint the workspace policy checks per
 module. It holds no scheduler and paints no optimistic transition — a key emits
-an intent, and the next host snapshot is what is drawn. The binary owns
+an intent, and the next host snapshot is what is drawn. The one exception is
+the marked, reversible `sending…` row of a draft the host has not yet
+answered (§5.4), which never stands in for host state. The binary owns
 `PlakExtension`, the concrete settings/theme vocabulary, and its surface intents
 and observations. Hosted sessions carry these through the generic bounded
 protocol mailboxes and dispatch extension intents to the binary's handler.
@@ -4084,16 +4086,43 @@ roles. When no saved profile matches, the product reports `custom` with the
 known root and frozen cards (no cards if the session has no frozen roster).
 The inert TUI performs no profile matching.
 
-The queue panel is absent when both the durable queue and admitted, unapplied
-steers are empty. It sits on the transcript background with body-text
-previews in every built-in theme, not on the menu surface. `[now]` and `[drop]` retain their identity/revision-based
-keyboard and click actions and highlight on hover without moving focus.
-The focused title's `Enter send now`, and the unfocused title's `Ctrl+S sends now`, live in this panel, not the HUD. A `SteerAck` of `queued`
-keeps an informational `sent · waiting for the current reply` row visible;
-each `applied` acknowledgement retires one row. These are not durable queue
-items, cannot be sent or dropped again, and add no duplicate transcript row.
-When only steers remain, the title advertises neither Tab focus, Enter send now, nor Ctrl+S sends now.
-Turn settlement retires their in-process projection.
+The queue panel is absent when the durable queue, admitted, unapplied steers
+and provisional follow-up and steer rows are all empty. It sits on the
+transcript background with body-text previews in every built-in theme, not on
+the menu surface. `[now]` and `[drop]` retain their identity/revision-based
+keyboard and click actions and highlight on hover without moving focus. The
+focused title's `Enter send now`, and the unfocused title's
+`Ctrl+S sends now`, live in this panel, not the HUD. A `SteerAck` of `queued`
+keeps an informational `sent · waiting for the current reply` row visible; each
+`applied` acknowledgement retires one row. These are not durable queue items,
+cannot be sent or dropped again, and add no duplicate transcript row. When
+only steers remain, the title advertises neither Tab focus, Enter send now,
+nor Ctrl+S sends now. Turn settlement retires their in-process projection.
+
+**Provisional rows.** The hosted face never echoes a draft itself, and the
+host acknowledges one only after its intent commit (§2.6), which can take a
+slow fsync. So that Enter is never followed by nothing, the TUI draws every
+prompt, follow-up and steer the mailbox took and the host has not yet answered
+with its own row as a dim provisional row ending in `sending…`. An idle prompt
+is a dimmed user band on a shelf directly under the transcript; a follow-up is
+` · text · sending…` and a steer ` steer · text · sending…` in the queue
+panel, under the host's rows. Provisional rows carry no `#N` and no chips, and
+never shift the host's numbering: queue numbers stay the host's alone. They
+are drawn from the TUI's pending-draft list, never stored as transcript blocks
+or persisted. A `DraftRejected` removes the row and restores the draft to the
+composer as before. A `DraftAccepted` keeps the row until the host's own row
+is present, so a frame drawn between the acknowledgement and that row never
+loses the text. An idle prompt retires on its `UserMessage` (the one after the
+`PromptStarted` naming its item); a steer on the live steer row. A queued
+prompt retires on the queue snapshot that shows the item its `PromptAdmitted`
+named: at once when the queue already shows it, or else on the next snapshot
+applied, even one the item has left again. The host publishes the snapshot
+holding the item before the admission and the mailbox keeps only the newest
+snapshot, at the back, so that next snapshot is at least as new, and a
+provisional row is never drawn beside its own `#N`. A `PromptCorrelationReset`
+(a receipt lost at saturation) retires every accepted prompt no admission has
+named. A busy edge, a presentation snapshot, `ClearView`, a draft restore or a
+host disconnect retires every acknowledged provisional row.
 
 Compaction is a transcript row, the same grammar as a tool call: `◌ Compact`
 while the paid dispatch runs, then `✓ Compact  199.7k → 12.4k · 29.3s` when

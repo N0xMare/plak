@@ -491,6 +491,9 @@ pub(crate) struct App {
     queue_editing: Option<QueueEdit>,
     /// Text actions accepted by the process-local mailbox but not yet durably acknowledged.
     pending_drafts: VecDeque<UserAction>,
+    /// Drafts the host acknowledged whose own row has not landed yet; they
+    /// stay provisional `sending…` rows until it does.
+    accepted_drafts: VecDeque<provisional::AcceptedDraft>,
     /// Exact queued edit awaiting a durable host disposition.
     pending_queue_edit: Option<(String, String)>,
     /// Prior submitted prompts (newest last).
@@ -869,6 +872,7 @@ impl App {
             queue_selected: 0,
             queue_editing: None,
             pending_drafts: VecDeque::new(),
+            accepted_drafts: VecDeque::new(),
             pending_queue_edit: None,
             prompt_history: Vec::new(),
             recovered_drafts: Vec::new(),
@@ -1144,6 +1148,7 @@ mod plain_key;
 mod processes;
 #[cfg(test)]
 mod processes_tests;
+mod provisional;
 mod queue;
 mod reload;
 mod render;
@@ -1208,6 +1213,13 @@ mod models_tests;
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod pilot_tests;
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "unit tests may assert with unwrap/expect"
+)]
+mod provisional_tests;
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

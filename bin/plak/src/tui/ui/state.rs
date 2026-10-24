@@ -384,6 +384,7 @@ impl App {
     }
 
     pub(super) fn restore_pending_drafts(&mut self) {
+        self.accepted_drafts.clear();
         while let Some(action) = self.pending_drafts.pop_front() {
             if let UserAction::Prompt(draft)
             | UserAction::FollowUp(draft)

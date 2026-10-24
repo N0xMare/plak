@@ -72,7 +72,9 @@ impl App {
         // Transcript-only top; floating chat block at bottom (max ⅓ height).
         let content_w = area.width.saturating_sub(4).max(1);
         let block_h = desired_block_height(area.height, content_w, &self.input);
-        let queue_n = self.local_queue.len() + self.composer_chrome.sent_steers;
+        let queue_n = self.local_queue.len()
+            + self.provisional_queue_rows().count()
+            + self.composer_chrome.sent_steers;
         let desired_queue_h = if queue_n == 0 {
             0
         } else {
@@ -92,6 +94,8 @@ impl App {
             .saturating_sub(bottom_gap);
         let spacer_h = u16::from(remaining > 0);
         remaining = remaining.saturating_sub(spacer_h);
+        let sending_h = self.sending_shelf_height().min(remaining);
+        remaining = remaining.saturating_sub(sending_h);
         let history_h = bounded_panel_height(desired_history_h, remaining);
         remaining = remaining.saturating_sub(history_h);
         let recovery_h = bounded_panel_height(desired_recovery_h, remaining);
@@ -99,6 +103,7 @@ impl App {
         let queue_h = bounded_panel_height(desired_queue_h, remaining);
         let chunks = Layout::vertical([
             Constraint::Fill(1),
+            Constraint::Length(sending_h),
             Constraint::Length(spacer_h),
             Constraint::Length(queue_h),
             Constraint::Length(history_h),
@@ -109,25 +114,28 @@ impl App {
         .split(area);
 
         self.draw_scrollback(frame, chunks[0]);
-        self.draw_jump_to_live_spacer(frame, chunks[1]);
+        if sending_h > 0 {
+            self.draw_sending_shelf(frame, chunks[1]);
+        }
+        self.draw_jump_to_live_spacer(frame, chunks[2]);
         if queue_h > 0 {
-            self.queue_area = Some(chunks[2]);
-            self.draw_queue_panel(frame, chunks[2]);
+            self.queue_area = Some(chunks[3]);
+            self.draw_queue_panel(frame, chunks[3]);
         } else {
             self.queue_area = None;
         }
         if history_h > 0 {
-            self.draw_prompt_history_shelf(frame, chunks[3]);
+            self.draw_prompt_history_shelf(frame, chunks[4]);
         } else {
             self.prompt_history_hits.clear();
         }
         if recovery_h > 0 {
-            self.draw_capacity_recovery(frame, chunks[4]);
+            self.draw_capacity_recovery(frame, chunks[5]);
         } else {
             self.capacity_recovery_action = None;
         }
-        self.draw_floating_block(frame, chunks[5]);
-        self.draw_composer_hint(frame, chunks[6]);
+        self.draw_floating_block(frame, chunks[6]);
+        self.draw_composer_hint(frame, chunks[7]);
     }
 
     /// Braille frame for the §5.4 composer HUD.
@@ -516,7 +524,14 @@ impl App {
 
     pub(super) fn draw_queue_panel(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let paused = self.queue_drain == QueueDrainState::RestoredPaused;
-        let title = if self.local_queue.is_empty() {
+        let provisional = self.provisional_queue_rows().count();
+        let provisional_follow_ups = self
+            .provisional_queue_rows()
+            .filter(|(steer, _)| !steer)
+            .count();
+        let title = if self.local_queue.is_empty() && provisional_follow_ups > 0 {
+            " queue "
+        } else if self.local_queue.is_empty() {
             " sent steers "
         } else if self.queue_editing.is_some() && !self.queue_focused {
             " queue · editing queued follow-up · Enter saves · Esc cancels "
@@ -551,11 +566,9 @@ impl App {
         let mut lines = Vec::new();
         // FIFO display oldest-first with #1 = next to send.
         let n = self.local_queue.len();
-        let visible = if self.composer_chrome.sent_steers > 0 {
-            3
-        } else {
-            4
-        };
+        // Provisional and sent-steer rows sit under the queue's own rows and
+        // leave it at least one.
+        let visible = 4 - (provisional + self.composer_chrome.sent_steers).min(3);
         let start = self
             .queue_selected
             .saturating_sub(visible - 1)
@@ -645,6 +658,12 @@ impl App {
             ));
             lines.push(Line::from(spans));
         }
+        let provisional_lines: Vec<_> = self
+            .provisional_queue_rows()
+            .take(4usize.saturating_sub(lines.len()))
+            .map(|(steer, draft)| self.provisional_queue_line(steer, draft, inner.width))
+            .collect();
+        lines.extend(provisional_lines);
         for _ in 0..self
             .composer_chrome
             .sent_steers

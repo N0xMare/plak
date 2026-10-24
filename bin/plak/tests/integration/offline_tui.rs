@@ -2154,14 +2154,13 @@ fn provider_outcomes(fixture: &Fixture) -> usize {
         .count()
 }
 
-/// Whether `needle` is on a row other than the composer's (the cursor row).
+/// Whether `needle` is on a row other than the composer's (the cursor row)
+/// that is the host's own row, not a provisional `sending…` one.
 fn host_row_shows(terminal: &Terminal, needle: &str) -> bool {
     let (cursor_row, _) = terminal.cursor();
-    terminal
-        .screen()
-        .lines()
-        .enumerate()
-        .any(|(row, line)| row != usize::from(cursor_row) && line.contains(needle))
+    terminal.screen().lines().enumerate().any(|(row, line)| {
+        row != usize::from(cursor_row) && line.contains(needle) && !line.contains("sending…")
+    })
 }
 
 /// Spec 02 §5.8: a parked loop waits on the host mailbox as well as the

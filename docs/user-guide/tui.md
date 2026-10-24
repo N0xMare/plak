@@ -134,6 +134,10 @@ retried every 60 s, so it resumes without a prompt once the store answers.
   [the confirmation pop-up](#activity)). `Ctrl+C` on an empty draft while busy
   opens the same pop-up.
 
+What you send shows at once as a dim row ending in `sending…` until the host
+has saved it: an idle prompt just under the transcript, a follow-up or a
+steer in the queue panel, without a `#` number. The host's own row then
+replaces it; a refused one disappears and its text returns to your draft.
 Queued follow-ups appear above the composer with hover-highlighted `[now]` and
 `[drop]` buttons. A sent steer stays there as `sent · waiting for the current
 reply` until the model receives it; it cannot be sent or dropped again.

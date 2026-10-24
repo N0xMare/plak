@@ -470,12 +470,20 @@ impl App {
                 self.pending_retry = Some((retry, self.now()));
                 self.mark_dirty();
             }
+            HostEvent::PromptAdmitted(item) => {
+                self.note_admitted_draft(item.id);
+                self.mark_dirty();
+            }
+            HostEvent::PromptStarted(Some(item)) => self.note_started_draft(&item.id),
+            HostEvent::PromptCorrelationReset => {
+                self.retire_unnamed_drafts();
+                self.mark_dirty();
+            }
             HostEvent::ToolInvocationOrigin { .. }
-            | HostEvent::PromptAdmitted(_)
-            | HostEvent::PromptStarted(_)
-            | HostEvent::PromptCorrelationReset
+            | HostEvent::PromptStarted(None)
             | HostEvent::IntentStarted(_) => {}
             HostEvent::PresentationSnapshot(snapshot) => {
+                self.accepted_drafts.clear();
                 if let Err(error) = snapshot.validate() {
                     self.pane.blocks.push(ScrollBlock::Error(format!(
                         "invalid presentation snapshot refused: {error:?}"
@@ -527,8 +535,19 @@ impl App {
             | HostEvent::AssistantDone
             | HostEvent::ToolLine { .. }
             | HostEvent::ReasoningDelta { .. }
-            | HostEvent::ReasoningSealed { .. }) => self.apply_live_op(event),
+            | HostEvent::ReasoningSealed { .. }) => {
+                if matches!(
+                    event,
+                    HostEvent::Row(
+                        plakous_host_protocol::views::transcript::TranscriptRow::Steer { .. }
+                    )
+                ) {
+                    self.retire_accepted_steer();
+                }
+                self.apply_live_op(event);
+            }
             HostEvent::UserMessage { text, sent_at_ms } => {
+                self.retire_started_draft();
                 self.push_block(ScrollBlock::User { text, sent_at_ms });
             }
             HostEvent::ModelRefusal { detail } => {
@@ -575,6 +594,7 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::ClearView => {
+                self.accepted_drafts.clear();
                 self.clear_pending = false;
                 self.last_turn = None;
                 self.pane.blocks.clear();
@@ -710,6 +730,7 @@ impl App {
             }
             HostEvent::QueueSnapshot { items, drain } => {
                 self.replace_queue_snapshot(items, drain);
+                self.retire_admitted_drafts();
             }
             HostEvent::ContextCapacityRecovery(recovery) => {
                 self.capacity_recovery = recovery;
@@ -816,7 +837,7 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::DraftAccepted(action) => {
-                let _ = self.remove_pending_draft(&action);
+                self.accept_pending_draft(&action);
                 self.mark_dirty();
             }
             HostEvent::DraftRejected(action) => {
@@ -830,6 +851,7 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::DraftRestored(draft) => {
+                self.accepted_drafts.clear();
                 self.restore_draft(draft);
                 self.mark_dirty();
             }
@@ -894,6 +916,8 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::SetBusy(busy) => {
+                // Every acknowledged draft's own row precedes a busy edge.
+                self.accepted_drafts.clear();
                 if self.busy && !busy {
                     self.composer_chrome.refresh_pending = true;
                     self.composer_chrome.sent_steers = 0;
