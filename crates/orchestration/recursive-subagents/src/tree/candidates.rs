@@ -526,6 +526,145 @@ impl ProductAgentTree {
         }
     }
 
+    /// A candidate whose copy was minted on another candidate this caller has
+    /// not adopted. Landing it three-ways against that input's base and drops
+    /// the input's delta. `None` when there is no such input, or the caller
+    /// already adopted it.
+    fn stacked_input_blocker(
+        &self,
+        caller_id: &str,
+        candidate: &CandidateRecord,
+    ) -> Option<TopologyError> {
+        let blocker = self.candidates.values().find(|other| {
+            if other.commit != candidate.base_commit
+                || other.candidate_id == candidate.candidate_id
+                || other.workspace_id == candidate.workspace_id
+                || other.adopted_by.as_deref() == Some(caller_id)
+                || other.commit.is_empty()
+                || self.input_was_relinquished(other)
+                || self.caller_has_input(caller_id, other)
+            {
+                return false;
+            }
+            // Both mints record the immutable input commit as their base.
+            // Do not walk live jj ancestry under the tree mutex: it can move
+            // after mint, and limiting a candidate scan would miss blockers.
+            true
+        })?;
+        let (which, remedy) = match blocker.adopted_by.as_deref() {
+            Some(adopter)
+                if self
+                    .nodes
+                    .get(adopter)
+                    .is_some_and(|node| self.node_inherits_checkout(node)) =>
+            {
+                (
+                    format!("landed in {adopter}"),
+                    format!(
+                        "ask {adopter} to adopt {} into its checkout",
+                        candidate.candidate_id
+                    ),
+                )
+            }
+            Some(adopter) => (
+                format!("landed in {adopter}"),
+                format!(
+                    "adopt {} first (or {adopter}'s candidate)",
+                    blocker.candidate_id
+                ),
+            ),
+            None => (
+                "is not adopted".to_owned(),
+                format!("adopt {} first", blocker.candidate_id),
+            ),
+        };
+        Some(TopologyError::new(
+            TopologyErrorCode::AdoptNotApplicable,
+            format!(
+                "{} was built on {}, which {which}; {remedy}, or the landing would drop {}'s changes; nothing was adopted",
+                candidate.candidate_id, blocker.candidate_id, blocker.candidate_id
+            ),
+        ))
+    }
+
+    /// Explicit discard gives the input up. Landing a copy that was minted
+    /// over it no longer drops work the caller was still owed.
+    fn input_was_relinquished(&self, input: &CandidateRecord) -> bool {
+        self.workspaces.get(&input.workspace_id).is_some_and(|row| {
+            matches!(
+                row.status,
+                WorkspaceStatus::Discarding | WorkspaceStatus::Discarded
+            )
+        })
+    }
+
+    fn node_inherits_checkout(&self, node: &super::NodeRecord) -> bool {
+        self.workspaces.get(&node.workspace_id).is_some_and(|row| {
+            row.mode == WorkspaceMode::Inherit || row.owner_agent_id != node.agent_id
+        })
+    }
+
+    /// Walk immutable carriers, not just one adopter hop. Inherit nodes land
+    /// directly in their resolved checkout; a later seal of that checkout or
+    /// of the source copy can carry the input onward. Fold orders avoid clocks.
+    fn caller_has_input(&self, caller_id: &str, input: &CandidateRecord) -> bool {
+        let Some(caller) = self.nodes.get(caller_id) else {
+            return false;
+        };
+        let seals: std::collections::BTreeMap<_, _> = self
+            .operations
+            .values()
+            .filter(|op| op.tool_name == SEAL_OUTCOME_KIND)
+            .filter_map(|op| serde_json::from_str::<SealOutcome>(&op.canonical_request).ok())
+            .filter(|outcome| outcome.failure.is_none())
+            .filter_map(|outcome| Some((outcome.candidate_id?, outcome.reserved_at.order)))
+            .collect();
+        let mut pending = vec![input];
+        let mut visited = std::collections::BTreeSet::new();
+        while let Some(current) = pending.pop() {
+            if !visited.insert(&current.candidate_id) {
+                continue;
+            }
+            if current.adopted_by.as_deref() == Some(caller_id) {
+                return true;
+            }
+            let adopter = current
+                .adopted_by
+                .as_ref()
+                .and_then(|id| self.nodes.get(id));
+            if adopter
+                .is_some_and(|node| node.path == caller.path && self.node_inherits_checkout(node))
+            {
+                return true;
+            }
+            let adopted_at = self
+                .attempt_adoption_order(&current.producing_agent_id, &current.producing_attempt_id);
+            for later in self
+                .candidates
+                .values()
+                .filter(|later| !later.commit.is_empty())
+            {
+                let Some(order) = seals.get(&later.candidate_id) else {
+                    continue;
+                };
+                let from_source = later.workspace_id == current.workspace_id
+                    && seals
+                        .get(&current.candidate_id)
+                        .is_some_and(|earlier| order > earlier);
+                let from_adopter = adopter.is_some_and(|node| {
+                    self.nodes
+                        .get(&later.producing_agent_id)
+                        .is_some_and(|producer| producer.path == node.path)
+                        && adopted_at.is_some_and(|adopted| *order > adopted)
+                });
+                if from_source || from_adopter {
+                    pending.push(later);
+                }
+            }
+        }
+        false
+    }
+
     /// Authority, sealing, and freshness checks; marks the candidate's
     /// workspace row `Adopting` and queues the ticket the landing runs on.
     /// The receipt comes back from [`Self::complete`].
@@ -591,7 +730,11 @@ impl ProductAgentTree {
         if let Some((earlier, adopter)) = self
             .candidates
             .values()
-            .filter(|record| record.workspace_id == candidate.workspace_id)
+            .filter(|record| {
+                record.workspace_id == candidate.workspace_id
+                    && record.commit == candidate.base_commit
+                    && !self.caller_has_input(caller_id, record)
+            })
             .find_map(|record| {
                 record
                     .adopted_by
@@ -622,6 +765,9 @@ impl ProductAgentTree {
                 TopologyErrorCode::AdoptNotApplicable,
                 "a node cannot adopt its own copy into itself",
             ));
+        }
+        if let Some(blocked) = self.stacked_input_blocker(caller_id, &candidate) {
+            return Err(blocked);
         }
         let producer_finished = self
             .nodes
@@ -1363,6 +1509,387 @@ mod tests {
         assert_eq!(
             tree.node(&second.agent_id).unwrap().status,
             NodeStatus::Running
+        );
+    }
+
+    /// Seals an input candidate and a second candidate minted on it.
+    fn seal_stacked_pair(tree: &mut ProductAgentTree) -> (CandidateId, CandidateId) {
+        let first = tree.spawn_agent("root", &mint_req(), None).unwrap();
+        let first_path = tree.node(&first.agent_id).unwrap().path.clone();
+        std::fs::write(first_path.join("INPUT.txt"), "input\n").unwrap();
+        tree.record_turn_completed(&first.agent_id).unwrap();
+        tree.settle_for_test();
+        let input = candidate_of(tree, &first.agent_id);
+
+        let mut over = mint_req();
+        over.inputs = Some(vec![input.to_string()]);
+        let second = tree.spawn_agent("root", &over, None).unwrap();
+        let second_path = tree.node(&second.agent_id).unwrap().path.clone();
+        std::fs::write(second_path.join("STACKED.txt"), "stacked\n").unwrap();
+        tree.record_turn_completed(&second.agent_id).unwrap();
+        tree.settle_for_test();
+        (input, candidate_of(tree, &second.agent_id))
+    }
+
+    #[test]
+    fn adopting_a_candidate_stacked_on_an_unadopted_candidate_is_refused_by_name() {
+        let repo = git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let (input, stacked) = seal_stacked_pair(&mut tree);
+        let refused = tree
+            .adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap_err();
+        assert_eq!(refused.code, TopologyErrorCode::AdoptNotApplicable);
+        assert!(
+            refused.message.contains(stacked.as_str())
+                && refused.message.contains(input.as_str())
+                && refused.message.contains("is not adopted")
+                && refused.message.contains("nothing was adopted"),
+            "{}",
+            refused.message
+        );
+        assert!(!repo.path().join("STACKED.txt").exists());
+        assert!(!repo.path().join("INPUT.txt").exists());
+    }
+
+    #[test]
+    fn adopting_a_candidate_stacked_on_an_unadopted_candidate_passes_after_the_input_is_adopted() {
+        let repo = git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let (input, stacked) = seal_stacked_pair(&mut tree);
+        tree.adopt_candidate("root", &adopt_req(&input), None)
+            .unwrap();
+        tree.adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("INPUT.txt")).unwrap(),
+            "input\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("STACKED.txt")).unwrap(),
+            "stacked\n"
+        );
+    }
+
+    #[test]
+    fn stacked_input_adopted_by_an_inherit_hub_in_the_callers_checkout_passes() {
+        let repo = git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let (hub, _child, _workspace, input) = hub_with_sealed_grandchild(&mut tree);
+        tree.adopt_candidate(&hub, &adopt_req(&input), None)
+            .unwrap();
+
+        let mut over = mint_req();
+        over.inputs = Some(vec![input.to_string()]);
+        let stacked_node = tree.spawn_agent("root", &over, None).unwrap();
+        let stacked_path = tree.node(&stacked_node.agent_id).unwrap().path.clone();
+        std::fs::write(stacked_path.join("STACKED.txt"), "stacked\n").unwrap();
+        tree.record_turn_completed(&stacked_node.agent_id).unwrap();
+        tree.settle_for_test();
+        let stacked = candidate_of(&tree, &stacked_node.agent_id);
+
+        tree.adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("ONE.txt")).unwrap(),
+            "one\n",
+            "the hub shares this checkout, so its adopt of the input already landed"
+        );
+        assert!(repo.path().join("STACKED.txt").exists());
+    }
+
+    fn test_hub(
+        tree: &mut ProductAgentTree,
+        parent: &str,
+        name: &str,
+        children: &[&str],
+        fork: bool,
+    ) -> String {
+        for child in children {
+            if !tree
+                .snapshot
+                .roster
+                .contains_key(&TemplateName::parse(child).unwrap())
+            {
+                tree.pin_template(child, RosterBinding::leaf("test-account", "selected-tuple"));
+            }
+        }
+        let mut binding = RosterBinding::leaf("test-account", "selected-tuple");
+        binding.spawns = children
+            .iter()
+            .map(|name| TemplateName::parse(name).unwrap())
+            .collect();
+        binding.may_adopt = true;
+        tree.pin_template(name, binding);
+        let mut request = SpawnAgentRequest::test_named(name, Tier::Mutate, "hub", "coordinate");
+        if fork {
+            request.workspace = SpawnWorkspace::Fork;
+        }
+        let hub = tree.spawn_agent(parent, &request, None).unwrap();
+        tree.grants.get_mut(&hub.agent_id).unwrap().may_spawn = true;
+        tree.grants.get_mut(&hub.agent_id).unwrap().may_adopt = true;
+        hub.agent_id
+    }
+
+    #[test]
+    fn stacked_input_follows_nested_hub_carriers() {
+        for inner_fork in [false, true] {
+            let repo = git_repo();
+            let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+            tree.grants.get_mut("root").unwrap().max_depth = 3;
+            let outer = test_hub(&mut tree, "root", "orchestrate", &["review"], true);
+            let inner = test_hub(&mut tree, &outer, "review", &["implement"], inner_fork);
+            let child = tree.spawn_agent(&inner, &mint_req(), None).unwrap();
+            std::fs::write(
+                tree.node(&child.agent_id).unwrap().path.join("INPUT.txt"),
+                "input\n",
+            )
+            .unwrap();
+            tree.record_turn_completed(&child.agent_id).unwrap();
+            tree.settle_for_test();
+            let input = candidate_of(&tree, &child.agent_id);
+            tree.adopt_candidate(&inner, &adopt_req(&input), None)
+                .unwrap();
+            let mut over = mint_req();
+            over.inputs = Some(vec![input.to_string()]);
+            let stacked = tree.spawn_agent("root", &over, None).unwrap();
+            std::fs::write(
+                tree.node(&stacked.agent_id)
+                    .unwrap()
+                    .path
+                    .join("STACKED.txt"),
+                "stacked\n",
+            )
+            .unwrap();
+            tree.record_turn_completed(&stacked.agent_id).unwrap();
+            tree.settle_for_test();
+            let stacked = candidate_of(&tree, &stacked.agent_id);
+            let refused = tree
+                .adopt_candidate("root", &adopt_req(&stacked), None)
+                .unwrap_err();
+            if !inner_fork {
+                assert!(
+                    refused
+                        .message
+                        .contains(&format!("ask {inner} to adopt {stacked}")),
+                    "{}",
+                    refused.message
+                );
+            }
+            tree.record_turn_completed(&inner).unwrap();
+            tree.settle_for_test();
+            if inner_fork {
+                let carrier = candidate_of(&tree, &inner);
+                tree.adopt_candidate(&outer, &adopt_req(&carrier), None)
+                    .unwrap();
+            }
+            tree.record_turn_completed(&outer).unwrap();
+            tree.settle_for_test();
+            let carrier = candidate_of(&tree, &outer);
+            tree.adopt_candidate("root", &adopt_req(&carrier), None)
+                .unwrap();
+            tree.adopt_candidate("root", &adopt_req(&stacked), None)
+                .unwrap();
+            assert!(repo.path().join("INPUT.txt").exists());
+            assert!(repo.path().join("STACKED.txt").exists());
+        }
+    }
+
+    #[test]
+    fn stacked_input_passes_after_a_later_candidate_from_the_source_copy_lands() {
+        let repo = git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        tree.grants.get_mut("root").unwrap().max_depth = 2;
+        let hub = test_hub(&mut tree, "root", "orchestrate", &["implement"], true);
+        let child = tree.spawn_agent(&hub, &mint_req(), None).unwrap();
+        let path = tree.node(&child.agent_id).unwrap().path.clone();
+        std::fs::write(path.join("INPUT.txt"), "input\n").unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        let input = candidate_of(&tree, &child.agent_id);
+        let mut over = mint_req();
+        over.inputs = Some(vec![input.to_string()]);
+        let stacked = tree.spawn_agent("root", &over, None).unwrap();
+        std::fs::write(
+            tree.node(&stacked.agent_id)
+                .unwrap()
+                .path
+                .join("STACKED.txt"),
+            "stacked\n",
+        )
+        .unwrap();
+        tree.record_turn_completed(&stacked.agent_id).unwrap();
+        tree.settle_for_test();
+        let stacked = candidate_of(&tree, &stacked.agent_id);
+        let mut followup = mail(&child.agent_id, "continue");
+        followup.purpose = Some(MessagePurpose::Followup);
+        tree.send_agent_message(&hub, &followup, None).unwrap();
+        std::fs::write(path.join("LATER.txt"), "later\n").unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        let later = candidate_of(&tree, &child.agent_id);
+        tree.adopt_candidate("root", &adopt_req(&later), None)
+            .unwrap();
+        tree.adopt_candidate(&hub, &adopt_req(&input), None)
+            .unwrap();
+        tree.adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap();
+        assert!(repo.path().join("INPUT.txt").exists());
+        assert!(repo.path().join("LATER.txt").exists());
+        assert!(repo.path().join("STACKED.txt").exists());
+    }
+
+    /// The caller already landed the adopter's later candidate. The adopter is
+    /// a forked hub: an inherit hub shares the root checkout and seals nothing,
+    /// so it cannot be the later candidate the rule looks up.
+    #[test]
+    fn adopting_a_candidate_stacked_on_an_input_passes_once_the_adopters_candidate_landed() {
+        let repo = git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        tree.grants.get_mut("root").unwrap().max_depth = 2;
+        let mut hub_binding = RosterBinding::leaf("test-account", "selected-tuple");
+        hub_binding.spawns = vec![TemplateName::parse("implement").unwrap()];
+        hub_binding.may_adopt = true;
+        tree.pin_template("orchestrate", hub_binding);
+        let mut hub_request =
+            SpawnAgentRequest::test_named("orchestrate", Tier::Mutate, "hub", "coordinate");
+        hub_request.workspace = SpawnWorkspace::Fork;
+        let hub = tree.spawn_agent("root", &hub_request, None).unwrap();
+        tree.grants.get_mut(&hub.agent_id).unwrap().may_spawn = true;
+        tree.grants.get_mut(&hub.agent_id).unwrap().may_adopt = true;
+        let child = tree.spawn_agent(&hub.agent_id, &mint_req(), None).unwrap();
+        let child_path = tree.node(&child.agent_id).unwrap().path.clone();
+        std::fs::write(child_path.join("INPUT.txt"), "input\n").unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        let input = candidate_of(&tree, &child.agent_id);
+        let hub_path = tree.node(&hub.agent_id).unwrap().path.clone();
+        std::fs::write(hub_path.join("HUB.txt"), "hub\n").unwrap();
+        tree.record_turn_completed(&hub.agent_id).unwrap();
+        tree.settle_for_test();
+        let hubs = candidate_of(&tree, &hub.agent_id);
+        tree.adopt_candidate("root", &adopt_req(&hubs), None)
+            .unwrap();
+
+        let mut followup = mail(&hub.agent_id, "carry the input");
+        followup.purpose = Some(MessagePurpose::Followup);
+        tree.send_agent_message("root", &followup, None).unwrap();
+        tree.adopt_candidate(&hub.agent_id, &adopt_req(&input), None)
+            .unwrap();
+
+        let mut over = mint_req();
+        over.inputs = Some(vec![input.to_string()]);
+        let stacked_node = tree.spawn_agent("root", &over, None).unwrap();
+        let stacked_path = tree.node(&stacked_node.agent_id).unwrap().path.clone();
+        std::fs::write(stacked_path.join("STACKED.txt"), "stacked\n").unwrap();
+        tree.record_turn_completed(&stacked_node.agent_id).unwrap();
+        tree.settle_for_test();
+        let stacked = candidate_of(&tree, &stacked_node.agent_id);
+        let refused = tree
+            .adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap_err();
+        assert_eq!(refused.code, TopologyErrorCode::AdoptNotApplicable);
+        assert!(!repo.path().join("INPUT.txt").exists());
+
+        tree.record_turn_completed(&hub.agent_id).unwrap();
+        tree.settle_for_test();
+        let hubs = candidate_of(&tree, &hub.agent_id);
+        tree.adopt_candidate("root", &adopt_req(&hubs), None)
+            .unwrap();
+        tree.adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("STACKED.txt")).unwrap(),
+            "stacked\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("INPUT.txt")).unwrap(),
+            "input\n"
+        );
+    }
+
+    #[test]
+    fn stacked_input_checks_all_jj_candidates_without_repository_probes() {
+        let (root, vcs, mut tree) = fake_tree();
+        let (input, stacked) = seal_stacked_pair(&mut tree);
+        let candidate = tree.candidates[&stacked].clone();
+        tree.workspaces
+            .get_mut(&candidate.workspace_id)
+            .unwrap()
+            .path = root.path().join(".plak/workspaces/stacked");
+        for index in 0..12 {
+            let mut unrelated = tree.candidates[&input].clone();
+            unrelated.candidate_id = CandidateId::from_persisted(format!("aaa-{index}"));
+            unrelated.commit = format!("unrelated-{index}");
+            tree.candidates
+                .insert(unrelated.candidate_id.clone(), unrelated);
+        }
+        assert!(tree.stacked_input_blocker("root", &candidate).is_some());
+        assert!(vcs.calls_of(FakeOp::OverCandidate).is_empty());
+        for kind in ["worktrees", "workspaces"] {
+            let mut same_copy = candidate.clone();
+            same_copy.workspace_id = tree.candidates[&input].workspace_id.clone();
+            tree.workspaces
+                .get_mut(&same_copy.workspace_id)
+                .unwrap()
+                .path = root.path().join(".plak").join(kind).join("input");
+            assert!(tree.stacked_input_blocker("root", &same_copy).is_none());
+        }
+    }
+
+    #[test]
+    fn jj_stacked_input_uses_the_immutable_recorded_mint_base() {
+        if !jj_available() {
+            return;
+        }
+        let repo = jj_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let (input, stacked) = seal_stacked_pair(&mut tree);
+        let refused = tree
+            .adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap_err();
+        assert_eq!(refused.code, TopologyErrorCode::AdoptNotApplicable);
+        assert!(refused.message.contains(input.as_str()));
+    }
+
+    /// An input whose copy was explicitly given up is not a stacked blocker.
+    #[test]
+    fn adopting_a_candidate_stacked_on_a_discarded_input_passes() {
+        let repo = git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let (input, stacked) = seal_stacked_pair(&mut tree);
+        let workspace = tree.candidates()[&input].workspace_id.clone();
+        tree.discard_workspace(
+            "root",
+            &WorkspaceIdRequest {
+                workspace_id: workspace,
+            },
+            None,
+        )
+        .unwrap();
+        tree.settle_for_test();
+        tree.adopt_candidate("root", &adopt_req(&stacked), None)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("STACKED.txt")).unwrap(),
+            "stacked\n"
+        );
+    }
+
+    #[test]
+    fn automatically_reclaimed_input_is_still_a_stacked_blocker() {
+        let (_root, _vcs, mut tree) = fake_tree();
+        let (input, stacked) = seal_stacked_pair(&mut tree);
+        let workspace_id = tree.candidates[&input].workspace_id.clone();
+        tree.workspaces.get_mut(&workspace_id).unwrap().status = WorkspaceStatus::CleanRemoved;
+        assert!(
+            tree.stacked_input_blocker("root", &tree.candidates[&stacked])
+                .is_some()
+        );
+        tree.workspaces.get_mut(&workspace_id).unwrap().status = WorkspaceStatus::Discarded;
+        assert!(
+            tree.stacked_input_blocker("root", &tree.candidates[&stacked])
+                .is_none()
         );
     }
 
@@ -2111,12 +2638,11 @@ mod tests {
         );
     }
 
-    /// A `mutate` child minted over an *unadopted* candidate sits on top of
-    /// that candidate's change. Adoption must land the child's own delta only:
-    /// `parent@..child@` swept in the sibling's commits, landed the sibling's
-    /// file here, and emptied the sibling's `@`.
+    /// A `mutate` child minted over an *unadopted* candidate is stacked on
+    /// it. Adopting the child would land only the child's delta and leave
+    /// the input's changes unadopted, so the landing is refused.
     #[test]
-    fn jj_child_minted_over_a_candidate_adopts_only_its_own_delta() {
+    fn jj_child_minted_over_an_unadopted_candidate_is_refused() {
         if !jj_available() {
             return;
         }
@@ -2142,16 +2668,22 @@ mod tests {
         tree.record_turn_completed(&second.agent_id).unwrap();
         tree.settle_for_test();
         let candidate_id = candidate_of(&tree, &second.agent_id);
-        tree.adopt_candidate("root", &adopt_req(&candidate_id), None)
-            .unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("SECOND.txt")).unwrap(),
-            "second\n"
+        let refused = tree
+            .adopt_candidate("root", &adopt_req(&candidate_id), None)
+            .unwrap_err();
+        assert_eq!(refused.code, TopologyErrorCode::AdoptNotApplicable);
+        assert!(
+            refused.message.contains(candidate_id.as_str())
+                && refused.message.contains(input.as_str())
+                && refused.message.contains("is not adopted")
+                && refused.message.contains("nothing was adopted"),
+            "{}",
+            refused.message
         );
+        assert!(!repo.path().join("SECOND.txt").exists());
         assert!(
             !repo.path().join("FIRST.txt").exists(),
-            "the unadopted input's delta is not this child's to land"
+            "the refused landing did not take the input's delta either"
         );
         assert_eq!(
             std::fs::read_to_string(first_path.join("FIRST.txt")).unwrap(),
@@ -3238,13 +3770,10 @@ mod tests {
         hub_binding.spawns = vec![TemplateName::parse("implement").unwrap()];
         hub_binding.may_adopt = true;
         tree.pin_template("orchestrate", hub_binding);
-        let hub = tree
-            .spawn_agent(
-                "root",
-                &SpawnAgentRequest::test_named("orchestrate", Tier::Mutate, "hub", "coordinate"),
-                None,
-            )
-            .unwrap();
+        let mut request =
+            SpawnAgentRequest::test_named("orchestrate", Tier::Mutate, "hub", "coordinate");
+        request.workspace = SpawnWorkspace::Fork;
+        let hub = tree.spawn_agent("root", &request, None).unwrap();
         tree.grants.get_mut(&hub.agent_id).unwrap().may_spawn = true;
         tree.grants.get_mut(&hub.agent_id).unwrap().may_adopt = true;
         let child = tree.spawn_agent(&hub.agent_id, &mint_req(), None).unwrap();

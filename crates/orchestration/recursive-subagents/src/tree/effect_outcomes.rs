@@ -30,6 +30,26 @@ pub(super) enum Outcome {
 }
 
 impl ProductAgentTree {
+    pub(super) fn attempt_adoption_order(
+        &self,
+        agent_id: &str,
+        attempt_id: &AttemptId,
+    ) -> Option<u64> {
+        self.operations
+            .values()
+            .filter(|operation| {
+                operation.tool_name == ATTEMPT_ADOPTED_KIND
+                    && operation.caller_agent_id == agent_id
+                    && serde_json::from_str::<EffectOutcome>(&operation.canonical_request)
+                        .is_ok_and(|intent| {
+                            intent.attempt_id.as_ref() == Some(attempt_id)
+                                && matches!(intent.outcome, Outcome::AttemptAdopted)
+                        })
+            })
+            .filter_map(|operation| operation.fold.map(|anchor| anchor.order))
+            .max()
+    }
+
     pub(super) fn record_effect_outcome(
         &mut self,
         agent_id: &str,

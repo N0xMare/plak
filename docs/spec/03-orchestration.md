@@ -1754,12 +1754,32 @@ Typed refusals: `not_sealed`, `not_authorized`, `candidate_unknown`,
 `merge_conflict{paths, child_path}`, `mint_unavailable`, and
 `adopt_not_applicable`.
 
-`adopt_not_applicable` covers four cases:
+`adopt_not_applicable` covers five cases:
 
 - an already-adopted candidate;
 - a node adopting its own candidate;
-- a copy whose previous candidate was adopted by a **different** node —
+- a copy whose recorded base is a previous candidate adopted by a **different** node,
+  unless the caller already holds an adopted carrier of that base —
   refused by name rather than silently dropping the earlier delta;
+- a candidate built on another candidate this caller has not adopted. The
+  refusal names that input. When the input landed in another node, it names
+  that node: adopt the input first (or that node's candidate), or the landing
+  would drop the input's changes. On both backends the input is the candidate
+  whose immutable commit is this candidate's recorded `base_commit`; the mint
+  preserves that identity even when jj later rewrites live ancestry. This check
+  performs no repository probes and does not truncate the candidate scan.
+  The caller's own earlier adoption of the input passes.
+  An inherit adopter in the caller's resolved checkout has already landed the
+  input there. Otherwise carriers are followed transitively, including later
+  candidates from the input's own copy and candidates that the input's adopter
+  began sealing after landing the input, as proven by the existing adoption
+  and seal fold orders rather than wall-clock timestamps. For an inherit
+  adopter in a different checkout, the remedy is to ask that adopter to land
+  the stacked candidate there, not to ask for a candidate it cannot seal.
+  An input whose workspace was explicitly discarded
+  or relinquished is not a blocker; automatic clean-copy reclamation does not
+  relinquish the candidate. A candidate from the same workspace is
+  not an input of itself;
 - a jj copy (`.plak/workspaces/`) over which an **unfinished child's copy was
   minted**, because the stale recovery that follows adoption would reset that
   child's uncommitted files. A git copy is not refused: the landing does not
