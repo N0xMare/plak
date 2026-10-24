@@ -1143,7 +1143,8 @@ missing: when an offline step fails because no cached version matches a
 requirement (Cargo's "failed to select a version for"), the named crates' index
 entries are refreshed online with `cargo info`, run in an empty directory
 outside every Cargo workspace so a workspace patch cannot answer from a local
-path, and the offline step is retried once. That avoids an online run of the
+path, on the caller's pinned toolchain (an explicit `RUSTUP_TOOLCHAIN` is kept),
+and the offline step is retried once. That avoids an online run of the
 whole step for a stale entry; any other failure, or a retry that still fails,
 runs that step online (`tools/release/offline_first.py`). Only the cohort siblings are substituted with their
 extracted archives during fetch, so unpublished siblings resolve without

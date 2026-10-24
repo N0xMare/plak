@@ -12,15 +12,20 @@ still fails, runs the command online once.
 
 The refresh runs in an empty directory outside every Cargo workspace: inside
 the staged tree, `cargo info` answers a crate the workspace patches (such as
-`monty-typeshed`) from its local path and never reads the registry entry.
+`monty-typeshed`) from its local path and never reads the registry entry. It
+runs on the caller's pinned toolchain (the channel in the nearest
+`rust-toolchain.toml`), which a rustup proxy would not find from that
+directory; an explicit RUSTUP_TOOLCHAIN is left as it is.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -54,12 +59,30 @@ def outside_workspace_base() -> str:
     raise RuntimeError("no temporary directory outside a Cargo workspace")
 
 
-def refresh_index_entries(names: Sequence[str], runner: Runner) -> bool:
+def pinned_channel(start: Path) -> str | None:
+    """The channel of the nearest `rust-toolchain.toml` at or above START."""
+    for directory in (start, *start.parents):
+        path = directory / "rust-toolchain.toml"
+        if path.is_file():
+            channel = tomllib.loads(path.read_text(encoding="utf-8")).get("toolchain", {}).get("channel")
+            return channel if isinstance(channel, str) else None
+    return None
+
+
+def refresh_environment(start: Path) -> dict[str, str] | None:
+    """The refresh's environment: the caller's pinned toolchain, or None to inherit."""
+    if "RUSTUP_TOOLCHAIN" in os.environ:
+        return None
+    channel = pinned_channel(start)
+    return None if channel is None else {**os.environ, "RUSTUP_TOOLCHAIN": channel}
+
+
+def refresh_index_entries(names: Sequence[str], runner: Runner, env: dict[str, str] | None) -> bool:
     """Read each crate's registry entry online from outside any workspace."""
     with tempfile.TemporaryDirectory(prefix="plak-index-refresh.",
                                      dir=outside_workspace_base()) as empty:
         return all(
-            runner(["cargo", "info", "--quiet", "--", name], cwd=empty,
+            runner(["cargo", "info", "--quiet", "--", name], cwd=empty, env=env,
                    stdout=subprocess.DEVNULL).returncode == 0
             for name in names
         )
@@ -73,7 +96,8 @@ def run(command: Sequence[str], runner: Runner = subprocess.run) -> int:
     if names:
         print(f"offline resolution found stale index entries; refreshing {', '.join(names)}",
               file=sys.stderr)
-        if refresh_index_entries(names, runner) and run_offline(command, runner).returncode == 0:
+        env = refresh_environment(Path.cwd())
+        if refresh_index_entries(names, runner, env) and run_offline(command, runner).returncode == 0:
             print("offline retry succeeded after the index refresh", file=sys.stderr)
             return 0
     return runner(list(command)).returncode
