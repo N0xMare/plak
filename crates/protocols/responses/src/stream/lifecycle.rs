@@ -75,6 +75,12 @@ pub struct LifecycleDialectPolicy {
     /// SuperGrok subscription may end a length-limited response with one
     /// unfinished assistant text item whose terminal snapshot matches deltas.
     pub incomplete_length_text_snapshot: bool,
+    /// Codex subscription streams have labelled a just-added, still-empty
+    /// assistant message `completed` before streaming its text. When true,
+    /// that label is accepted on `output_item.added`; the per-kind checks
+    /// still require the added item to carry no completed material, and
+    /// `output_item.done` still decides completion.
+    pub added_status_completed_label: bool,
 }
 
 impl LifecycleDialectPolicy {
@@ -95,6 +101,7 @@ impl LifecycleDialectPolicy {
             sparse_terminal_model_from_prepared: false,
             sparse_terminal_output_from_completed: false,
             incomplete_length_text_snapshot: false,
+            added_status_completed_label: false,
         }
     }
 
@@ -126,6 +133,7 @@ impl LifecycleDialectPolicy {
             sparse_terminal_model_from_prepared: true,
             sparse_terminal_output_from_completed: true,
             incomplete_length_text_snapshot: false,
+            added_status_completed_label: false,
         }
     }
 
@@ -157,6 +165,7 @@ impl LifecycleDialectPolicy {
             sparse_terminal_model_from_prepared: false,
             sparse_terminal_output_from_completed: false,
             incomplete_length_text_snapshot: false,
+            added_status_completed_label: true,
         }
     }
 
@@ -179,6 +188,7 @@ impl LifecycleDialectPolicy {
             sparse_terminal_model_from_prepared: false,
             sparse_terminal_output_from_completed: false,
             incomplete_length_text_snapshot: false,
+            added_status_completed_label: false,
         }
     }
 
@@ -541,7 +551,7 @@ impl ResponsesLifecycle {
         let kind = object.get("type").and_then(Value::as_str).unwrap_or("");
         let (function_arguments, call_id) = match kind {
             "message" => {
-                require_added_status(item_status(item))?;
+                require_added_status(item_status(item), self.policy.added_status_completed_label)?;
                 let role = object.get("role").and_then(Value::as_str).unwrap_or("");
                 let content_empty = object
                     .get("content")
@@ -555,7 +565,7 @@ impl ResponsesLifecycle {
                 (String::new(), None)
             }
             "reasoning" => {
-                require_added_status(item_status(item))?;
+                require_added_status(item_status(item), self.policy.added_status_completed_label)?;
                 // Summary must start empty. `encrypted_content` may already be
                 // seeded on add (OpenAI Platform); it is opaque seed material,
                 // not streamed summary completion.
@@ -571,7 +581,7 @@ impl ResponsesLifecycle {
                 (String::new(), None)
             }
             "function_call" | "custom_tool_call" => {
-                require_added_status(item_status(item))?;
+                require_added_status(item_status(item), self.policy.added_status_completed_label)?;
                 let call_id = object.get("call_id").and_then(Value::as_str).unwrap_or("");
                 let name = object.get("name").and_then(Value::as_str).unwrap_or("");
                 let args_field = if kind == "custom_tool_call" {
@@ -588,12 +598,12 @@ impl ResponsesLifecycle {
                 (arguments.to_owned(), Some(call_id))
             }
             "compaction" => {
-                require_added_status(item_status(item))?;
+                require_added_status(item_status(item), self.policy.added_status_completed_label)?;
                 (String::new(), None)
             }
             _ => {
                 // Opaque item: optional/in_progress status (OpenAI may omit) + id.
-                require_added_status(item_status(item))?;
+                require_added_status(item_status(item), self.policy.added_status_completed_label)?;
                 required_string(object, "id")?;
                 (String::new(), None)
             }

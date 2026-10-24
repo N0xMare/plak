@@ -4523,6 +4523,14 @@ the exception: its streamed done items are already the terminal authority. xAI,
 SuperGrok, and OpenRouter keep exact terminal items, ciphertext included. The
 persisted item encoding is unchanged.
 
+Codex subscription streams have labelled a just-added, still-empty assistant
+message `completed` on `output_item.added`. The Codex lifecycle accepts that
+label there and nothing more: the added item must still carry no completed
+material (an empty assistant message, an empty reasoning summary, empty call
+arguments), and `output_item.done` still decides completion. Every other route
+requires an absent or `in_progress` status on `output_item.added`. The label
+tolerance is part of the Codex dialect's execution identity.
+
 ### 8.4 Execution, ordering, and approval
 
 Tools are parallel-safe, agent-serial, or exclusive on resource keys. The

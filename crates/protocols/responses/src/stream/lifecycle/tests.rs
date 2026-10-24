@@ -84,6 +84,7 @@ fn openai_policy_requires_create_identity_and_skips_response_id() {
             sparse_terminal_model_from_prepared: false,
             sparse_terminal_output_from_completed: false,
             incomplete_length_text_snapshot: false,
+            added_status_completed_label: true,
         }
     );
     let mut life = ResponsesLifecycle::new(LifecycleDialectPolicy::openai());
@@ -549,6 +550,79 @@ fn platform_terminal_accepts_reencrypted_reasoning_only() {
             err,
             ResponsesLifecycleError::InvalidLifecycle {
                 reason: "terminal response changed a completed provider item"
+            }
+        );
+    }
+}
+
+#[test]
+fn openai_codex_accepts_a_completed_label_on_an_added_empty_message() {
+    let added = json!({
+        "type": "message",
+        "id": "msg_1",
+        "role": "assistant",
+        "status": "completed",
+        "phase": "final_answer",
+        "content": []
+    });
+    let created = json!({
+        "type": "response.created",
+        "response": { "id": "resp_1", "model": "gpt-test", "status": "in_progress" }
+    });
+    let mut codex = ResponsesLifecycle::new(LifecycleDialectPolicy::openai_codex());
+    codex
+        .response_created(
+            created.as_object().unwrap(),
+            Some("resp_1"),
+            Some("gpt-test"),
+            "gpt-test",
+        )
+        .expect("create");
+    codex
+        .output_item_added(0, &added)
+        .expect("Codex labels a fresh message completed");
+
+    let filled = json!({
+        "type": "message",
+        "id": "msg_1",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{ "type": "output_text", "text": "done", "annotations": [] }]
+    });
+    let mut codex = ResponsesLifecycle::new(LifecycleDialectPolicy::openai_codex());
+    codex
+        .response_created(
+            created.as_object().unwrap(),
+            Some("resp_1"),
+            Some("gpt-test"),
+            "gpt-test",
+        )
+        .expect("create");
+    assert_eq!(
+        codex.output_item_added(0, &filled).unwrap_err(),
+        ResponsesLifecycleError::InvalidLifecycle {
+            reason: "added message must be an empty assistant item"
+        },
+        "the label is accepted, completed material is not"
+    );
+
+    for policy in [
+        LifecycleDialectPolicy::openai_platform_api(),
+        LifecycleDialectPolicy::openrouter(),
+        LifecycleDialectPolicy::xai(),
+    ] {
+        let mut life = ResponsesLifecycle::new(policy);
+        life.response_created(
+            created.as_object().unwrap(),
+            Some("resp_1"),
+            Some("gpt-test"),
+            "gpt-test",
+        )
+        .expect("create");
+        assert_eq!(
+            life.output_item_added(0, &added).unwrap_err(),
+            ResponsesLifecycleError::InvalidLifecycle {
+                reason: "added output item status is not in progress"
             }
         );
     }

@@ -47,8 +47,13 @@ pub(super) fn output_item_id(item: &Value) -> Option<&str> {
     item.get("id").and_then(Value::as_str)
 }
 
-pub(super) fn require_added_status(status: Option<&str>) -> Result<(), ResponsesLifecycleError> {
-    if matches!(status, None | Some("in_progress")) {
+pub(super) fn require_added_status(
+    status: Option<&str>,
+    completed_label: bool,
+) -> Result<(), ResponsesLifecycleError> {
+    if matches!(status, None | Some("in_progress"))
+        || (completed_label && status == Some("completed"))
+    {
         Ok(())
     } else {
         Err(invalid_lifecycle(

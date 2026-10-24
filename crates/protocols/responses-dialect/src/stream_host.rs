@@ -339,6 +339,7 @@ impl ResponsesStreamDialectData {
             u8::from(self.lifecycle.sparse_terminal_model_from_prepared),
             u8::from(self.lifecycle.sparse_terminal_output_from_completed),
             u8::from(self.lifecycle.incomplete_length_text_snapshot),
+            u8::from(self.lifecycle.added_status_completed_label),
             u8::from(self.typed_terminal_cutoff),
         ];
         let response_bytes = self.response_limits.max_response_bytes().to_be_bytes();
