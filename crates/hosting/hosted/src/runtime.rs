@@ -716,16 +716,15 @@ const SUBSCRIPTION_USAGE_JOIN_DEADLINE: Duration = Duration::from_millis(250);
 
 /// One bounded native allowance refresh across the three OAuth verticals.
 ///
-/// Every Usage view is derived from a single call: the per-provider
-/// compatibility lock is held once, so an interactive action never queues
-/// behind a second identical read.
+/// Each read has its own deadline. `None` names only that provider's timeout;
+/// observations completed by its siblings remain available.
 #[derive(Clone)]
 enum NativeSubscriptionRefresh {
     Read(
         Box<(
-            plakous::model::SubscriptionUsageRead,
-            plakous::model::SubscriptionUsageRead,
-            plakous::model::SubscriptionUsageRead,
+            Option<plakous::model::SubscriptionUsageRead>,
+            Option<plakous::model::SubscriptionUsageRead>,
+            Option<plakous::model::SubscriptionUsageRead>,
         )>,
     ),
     /// This session has no native subscription store, so no read was attempted.

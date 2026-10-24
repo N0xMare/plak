@@ -982,10 +982,13 @@ impl NativeSubscriptionRefresh {
             Self::NoSubscriptionStore => {
                 Some("no native subscription store is configured for this session")
             }
-            Self::TimedOut => Some("provider allowance refresh timed out; retry to refresh"),
+            Self::TimedOut => Some(SUBSCRIPTION_USAGE_TIMEOUT_REASON),
         }
     }
 }
+
+const SUBSCRIPTION_USAGE_TIMEOUT_REASON: &str =
+    "provider allowance refresh timed out; retry to refresh";
 
 pub(super) fn refresh_native_subscription_usage(
     executor: &ApplicationExecutor,
@@ -995,38 +998,35 @@ pub(super) fn refresh_native_subscription_usage(
     let Some(subscriptions) = subscriptions else {
         return NativeSubscriptionRefresh::NoSubscriptionStore;
     };
-    let read = executor
-        .block_on(async {
-            bounded_subscription_refresh(
-                REFRESH_TIMEOUT,
-                Box::pin(async move {
-                    // Sequential, not joined: every provider's compatibility lock
-                    // shares one parent-directory `flock`, so concurrent reads
-                    // would make the loser miss its non-blocking acquire and
-                    // report `Busy` for what is only a sibling read.
-                    let codex = subscription_usage_after_busy_retries(
-                        &subscriptions,
-                        NativeProvider::Codex,
-                    )
-                    .await;
-                    let grok =
-                        subscription_usage_after_busy_retries(&subscriptions, NativeProvider::Xai)
-                            .await;
-                    let claude = subscription_usage_after_busy_retries(
-                        &subscriptions,
-                        NativeProvider::Claude,
-                    )
-                    .await;
-                    (codex, grok, claude)
-                }),
-            )
-            .await
-        })
-        .ok()
-        .flatten();
-    read.map_or(NativeSubscriptionRefresh::TimedOut, |read| {
-        NativeSubscriptionRefresh::Read(Box::new(read))
-    })
+    executor
+        .block_on(concurrent_native_subscription_refresh(
+            REFRESH_TIMEOUT,
+            subscription_usage_after_busy_retries(&subscriptions, NativeProvider::Codex),
+            subscription_usage_after_busy_retries(&subscriptions, NativeProvider::Xai),
+            subscription_usage_after_busy_retries(&subscriptions, NativeProvider::Claude),
+        ))
+        .unwrap_or(NativeSubscriptionRefresh::TimedOut)
+}
+
+async fn concurrent_native_subscription_refresh(
+    limit: Duration,
+    codex: impl Future<Output = plakous::model::SubscriptionUsageRead>,
+    grok: impl Future<Output = plakous::model::SubscriptionUsageRead>,
+    claude: impl Future<Output = plakous::model::SubscriptionUsageRead>,
+) -> NativeSubscriptionRefresh {
+    // Bound each read, not the join. Busy retries stay inside that provider's
+    // deadline, including genuine contention on the shared directory guard.
+    let deadline = tokio::time::Instant::now() + limit;
+    let reads = tokio::join!(
+        bounded_subscription_refresh(deadline, codex),
+        bounded_subscription_refresh(deadline, grok),
+        bounded_subscription_refresh(deadline, claude),
+    );
+    if reads.0.is_none() && reads.1.is_none() && reads.2.is_none() {
+        NativeSubscriptionRefresh::TimedOut
+    } else {
+        NativeSubscriptionRefresh::Read(Box::new(reads))
+    }
 }
 
 pub(super) fn project_subscription_usage(
@@ -1071,9 +1071,23 @@ pub(super) fn project_usage_limits(
     match native {
         NativeSubscriptionRefresh::Read(read) => {
             let (codex, grok, claude) = *read;
-            observations.push((codex_vertical(), VerticalObservation::Native(codex)));
-            observations.push((supergrok_vertical(), VerticalObservation::Native(grok)));
-            observations.push((claude_vertical(), VerticalObservation::Native(claude)));
+            for (vertical, read) in [
+                (codex_vertical(), codex),
+                (supergrok_vertical(), grok),
+                (claude_vertical(), claude),
+            ] {
+                observations.push((
+                    vertical,
+                    read.map_or_else(
+                        || {
+                            VerticalObservation::Unavailable(
+                                SUBSCRIPTION_USAGE_TIMEOUT_REASON.to_owned(),
+                            )
+                        },
+                        VerticalObservation::Native,
+                    ),
+                ));
+            }
         }
         other => {
             let reason = other
@@ -1150,10 +1164,10 @@ where
 }
 
 pub(super) async fn bounded_subscription_refresh<T>(
-    limit: Duration,
+    deadline: tokio::time::Instant,
     refresh: impl Future<Output = T>,
 ) -> Option<T> {
-    tokio::time::timeout(limit, refresh).await.ok()
+    tokio::time::timeout_at(deadline, refresh).await.ok()
 }
 
 pub(super) fn emit_capacity_recovery<P: plakous_host_protocol::ProtocolExtension>(

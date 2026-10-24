@@ -6144,6 +6144,16 @@ a model, for example) makes every vertical's read `Busy`, and its line names
 that shared lock: `another Plak process or a credential refresh holds the
 subscription lock; nothing was sent, retry in a moment`. The hosted usage read
 retries `Busy`.
+Native allowance reads run concurrently with a separate five-second deadline
+for each provider, including that provider's busy-lock retries. The native
+batch waits at most the same five seconds, not three consecutive budgets.
+A deadline renders `provider allowance refresh timed out; retry to refresh`
+only for that vertical; completed siblings keep their own observations.
+This does not bypass the shared compatibility lock: genuine contention remains
+`Busy`, with the existing last-Ready retention rule. Rate-limited and Busy
+reads retain existing last-known meters; a timeout remains explicitly
+unavailable rather than presenting old numbers as fresh. OpenRouter's separate
+on-demand read is unchanged.
 `Stale` means only "provider reported a usage window that has already ended".
 Unsafe local storage remains a local-state refusal. A settled quarantine names
 `plak login <account>` as its remedy, except for Grok, whose next refresh

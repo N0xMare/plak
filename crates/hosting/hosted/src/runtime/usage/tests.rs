@@ -895,12 +895,161 @@ fn subscription_refresh_timeout_has_a_terminal_outcome() {
     let started = Instant::now();
     let outcome = executor
         .block_on(bounded_subscription_refresh(
-            Duration::from_millis(20),
+            tokio::time::Instant::now() + Duration::from_millis(20),
             std::future::pending::<()>(),
         ))
         .unwrap();
     assert_eq!(outcome, None);
     assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+fn native_usage_fixture(meter: &str, used: f64) -> plakous::model::SubscriptionUsageRead {
+    use plakous::model::{
+        SubscriptionUsageMeter, SubscriptionUsagePercent, SubscriptionUsagePeriod,
+        SubscriptionUsageRead, SubscriptionUsageSnapshot, SubscriptionUsageWindow, Timestamp,
+    };
+    SubscriptionUsageRead::Snapshot(
+        SubscriptionUsageSnapshot::new(
+            Timestamp::new(1_788_000_000, 0).unwrap(),
+            None,
+            vec![
+                SubscriptionUsageMeter::new(
+                    meter.to_owned(),
+                    None,
+                    vec![
+                        SubscriptionUsageWindow::new(
+                            Some("primary".to_owned()),
+                            SubscriptionUsagePercent::new(used).unwrap(),
+                            Some(SubscriptionUsagePeriod::Rolling {
+                                duration_seconds: 18_000,
+                            }),
+                            None,
+                        )
+                        .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+    )
+}
+
+fn native_usage_limits(
+    refresh: NativeSubscriptionRefresh,
+) -> plakous_host_protocol::views::presentation::UsageLimitsView {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    project_usage_limits(
+        refresh,
+        config.state_roots.openrouter_credentials().as_ref(),
+    )
+}
+
+fn assert_native_percent(
+    view: &plakous_host_protocol::views::presentation::UsageLimitsView,
+    index: usize,
+    expected: &str,
+) {
+    use plakous_host_protocol::views::presentation::{UsageMeterReading, VerticalUsageState};
+    let VerticalUsageState::Ready { meters, .. } = &view.verticals[index].state else {
+        panic!("expected ready provider: {:?}", view.verticals[index]);
+    };
+    assert!(
+        matches!(&meters[0].reading, UsageMeterReading::Percent { exact_percent, .. } if exact_percent == expected)
+    );
+}
+
+#[test]
+fn one_native_provider_timeout_keeps_both_siblings_fresh() {
+    use plakous::model::SubscriptionUsageRead;
+    use plakous_host_protocol::views::presentation::VerticalUsageState;
+    let executor = ApplicationExecutor::new().unwrap();
+    // Ready siblings are deterministic; the first provider never completes.
+    let refresh = executor
+        .block_on(concurrent_native_subscription_refresh(
+            Duration::from_millis(20),
+            std::future::pending::<SubscriptionUsageRead>(),
+            std::future::ready(native_usage_fixture("included-credits", 46.4)),
+            std::future::ready(native_usage_fixture("claude", 12.5)),
+        ))
+        .unwrap();
+    let view = native_usage_limits(refresh);
+    assert!(
+        matches!(&view.verticals[0].state, VerticalUsageState::Unavailable { reason }
+        if reason == SUBSCRIPTION_USAGE_TIMEOUT_REASON)
+    );
+    assert_native_percent(&view, 1, "46.4");
+    assert_native_percent(&view, 2, "12.5");
+    let text = crate::subscription_usage::render_limits_text(&view);
+    assert_eq!(text.matches(SUBSCRIPTION_USAGE_TIMEOUT_REASON).count(), 1);
+    assert!(text.contains("SuperGrok") && text.contains("Claude"));
+}
+
+#[test]
+fn one_native_provider_busy_then_ready_is_retried_without_losing_siblings() {
+    use plakous::model::{SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp};
+    let executor = ApplicationExecutor::new().unwrap();
+    let mut attempts = 0;
+    let read = await_usage_not_busy(|| {
+        attempts += 1;
+        std::future::ready(if attempts == 1 {
+            SubscriptionUsageRead::Unavailable {
+                observed_at: Timestamp::new(0, 0).unwrap(),
+                reason: SubscriptionUsageUnavailable::Busy,
+            }
+        } else {
+            native_usage_fixture("codex", 22.9)
+        })
+    });
+    let refresh = executor
+        .block_on(concurrent_native_subscription_refresh(
+            Duration::from_secs(5),
+            read,
+            std::future::ready(native_usage_fixture("included-credits", 46.4)),
+            std::future::ready(native_usage_fixture("claude", 12.5)),
+        ))
+        .unwrap();
+    assert_eq!(attempts, 2);
+    let view = native_usage_limits(refresh);
+    for (index, percent) in ["22.9", "46.4", "12.5"].into_iter().enumerate() {
+        assert_native_percent(&view, index, percent);
+    }
+}
+
+#[test]
+fn concurrent_native_success_preserves_the_existing_usage_projection() {
+    use crate::subscription_usage::{
+        VerticalObservation, claude_vertical, codex_vertical, openrouter_vertical,
+        supergrok_vertical,
+    };
+    let executor = ApplicationExecutor::new().unwrap();
+    let codex = native_usage_fixture("codex", 22.9);
+    let grok = native_usage_fixture("included-credits", 46.4);
+    let claude = native_usage_fixture("claude", 12.5);
+    let refresh = executor
+        .block_on(concurrent_native_subscription_refresh(
+            Duration::from_secs(5),
+            std::future::ready(codex.clone()),
+            std::future::ready(grok.clone()),
+            std::future::ready(claude.clone()),
+        ))
+        .unwrap();
+    let expected = crate::subscription_usage::project_limits(
+        [
+            (codex_vertical(), VerticalObservation::Native(codex)),
+            (supergrok_vertical(), VerticalObservation::Native(grok)),
+            (claude_vertical(), VerticalObservation::Native(claude)),
+            (openrouter_vertical(), VerticalObservation::NotConnected),
+        ],
+        plakous_host_protocol::views::presentation::SessionLedgerView::default(),
+    );
+    let view = native_usage_limits(refresh);
+    assert_eq!(view, expected);
+    assert_eq!(
+        crate::subscription_usage::render_limits_text(&view),
+        crate::subscription_usage::render_limits_text(&expected)
+    );
 }
 
 /// Quit must never wait out an in-flight subscription-usage read: the
