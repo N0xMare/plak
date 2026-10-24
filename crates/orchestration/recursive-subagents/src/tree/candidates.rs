@@ -3,6 +3,8 @@
 
 use std::path::Path;
 
+use plakous_workspace::occupancy_vcs::is_jj_copy_root as jj_layout_copy;
+
 use super::{
     AdoptCandidateRequest, AdoptFailure, AdoptLanding, AdoptOutcome, AdoptTicket, AttemptFailure,
     AttemptId, AttemptStatus, CandidateId, CandidateRecord, NodeStatus, ProductAgentTree,
@@ -648,13 +650,13 @@ impl ProductAgentTree {
                 ),
             ));
         }
-        // A copy minted with `inputs:[<this candidate>]` holds it as its base. Landing
-        // the candidate rewrites that base under a child that is still running,
-        // and on jj the copy goes stale — recovery checks out a fresh divergent
-        // working-copy commit and resets the files with it, so whatever the
-        // child had written and not committed is gone before any host code
-        // runs. Git is harmless here; the rule is applied to both so there is
-        // one shape to learn rather than a backend-conditional one.
+        // A jj copy minted with `inputs:[<this candidate>]` holds it as its
+        // base. Landing the candidate rewrites that base under a child that
+        // is still running, and the copy goes stale — recovery checks out a
+        // fresh divergent working-copy commit and resets the files with it,
+        // so whatever the child had written and not committed is gone before
+        // any host code runs. Git does not rewrite the child copy, so a
+        // worktree under `.plak/worktrees/` is not a dependent.
         let dependent = self.nodes.values().find(|node| {
             if node.status.is_finished() {
                 return false;
@@ -662,7 +664,7 @@ impl ProductAgentTree {
             let Some(row) = self.workspaces.get(&node.workspace_id) else {
                 return false;
             };
-            if row.mode == WorkspaceMode::Inherit {
+            if row.mode == WorkspaceMode::Inherit || !jj_layout_copy(&row.path) {
                 return false;
             }
             // git records the candidate's own commit as the copy's base.
@@ -1320,13 +1322,10 @@ mod tests {
         );
     }
 
-    /// A candidate that a *running* child
-    /// was minted over is not adoptable. Landing it rewrites that child's base
-    /// under it, and on jj the copy then goes stale — recovery resets its files
-    /// and the child's uncommitted writes are gone before any host code runs.
-    /// Git survives it, but the refusal is uniform so there is one rule.
+    /// Git lands a candidate while a child minted over it is still running.
+    /// The landing writes the caller's tree only; the child copy is not rewritten.
     #[test]
-    fn adopt_is_refused_while_a_child_minted_over_the_candidate_runs() {
+    fn git_adopt_proceeds_while_a_child_minted_over_the_candidate_runs() {
         let repo = git_repo();
         let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
         let first = tree.spawn_agent("root", &mint_req(), None).unwrap();
@@ -1339,34 +1338,31 @@ mod tests {
         let mut over = mint_req();
         over.inputs = Some(vec![candidate_id.to_string()]);
         let second = tree.spawn_agent("root", &over, None).unwrap();
-        let refused = tree
-            .adopt_candidate("root", &adopt_req(&candidate_id), None)
-            .unwrap_err();
-        assert_eq!(refused.code, TopologyErrorCode::AdoptNotApplicable);
-        assert!(
-            refused.message.contains(&second.agent_id)
-                && refused.message.contains("wait for it or close it"),
-            "{}",
-            refused.message
-        );
-        assert!(
-            !repo.path().join("H.txt").exists(),
-            "the refused adopt landed nothing"
-        );
+        let second_path = tree.node(&second.agent_id).unwrap().path.clone();
+        std::fs::write(second_path.join("CHILD.txt"), "still running\n").unwrap();
         assert_eq!(
-            tree.workspace(&first.workspace.id).unwrap().status,
-            WorkspaceStatus::Active,
-            "the refused adopt left the candidate's row alone"
+            tree.node(&second.agent_id).unwrap().status,
+            NodeStatus::Running
         );
 
-        // The dependent child finishes; the same adopt is now applicable.
-        tree.record_turn_completed(&second.agent_id).unwrap();
-        tree.settle_for_test();
         tree.adopt_candidate("root", &adopt_req(&candidate_id), None)
             .unwrap();
         assert_eq!(
             std::fs::read_to_string(repo.path().join("H.txt")).unwrap(),
             "first pass\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(second_path.join("H.txt")).unwrap(),
+            "first pass\n",
+            "the running copy was not rewritten"
+        );
+        assert_eq!(
+            std::fs::read_to_string(second_path.join("CHILD.txt")).unwrap(),
+            "still running\n"
+        );
+        assert_eq!(
+            tree.node(&second.agent_id).unwrap().status,
+            NodeStatus::Running
         );
     }
 

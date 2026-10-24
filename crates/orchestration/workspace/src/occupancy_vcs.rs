@@ -295,6 +295,25 @@ pub(crate) enum SessionVcs {
     Jj,
 }
 
+/// Whether this path is exactly a minted JJ copy root, not a nested directory.
+#[must_use]
+pub fn is_jj_copy_root(path: &Path) -> bool {
+    copy_layout_kind(path) == Some(SessionVcs::Jj)
+}
+
+/// Only the leaf's parent and grandparent identify a minted copy.
+pub(crate) fn copy_layout_kind(path: &Path) -> Option<SessionVcs> {
+    let parent = path.parent()?;
+    if path.file_name().is_none() || parent.parent()?.file_name()? != ".plak" {
+        return None;
+    }
+    match parent.file_name()?.to_str()? {
+        "worktrees" => Some(SessionVcs::Git),
+        "workspaces" => Some(SessionVcs::Jj),
+        _ => None,
+    }
+}
+
 pub(crate) fn detect_vcs(launch: &Path) -> Result<SessionVcs, VcsError> {
     if launch.join(".jj").exists() && super::native_jj::ENABLED {
         Ok(SessionVcs::Jj)

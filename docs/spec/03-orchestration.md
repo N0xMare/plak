@@ -1760,9 +1760,10 @@ Typed refusals: `not_sealed`, `not_authorized`, `candidate_unknown`,
 - a node adopting its own candidate;
 - a copy whose previous candidate was adopted by a **different** node —
   refused by name rather than silently dropping the earlier delta;
-- a candidate over which an **unfinished child's copy was minted**, because the
-  stale recovery that follows adoption would reset that child's uncommitted
-  files.
+- a jj copy (`.plak/workspaces/`) over which an **unfinished child's copy was
+  minted**, because the stale recovery that follows adoption would reset that
+  child's uncommitted files. A git copy is not refused: the landing does not
+  rewrite it.
 
 ### 7.5 Review evidence
 

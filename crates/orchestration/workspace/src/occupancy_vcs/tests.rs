@@ -7,6 +7,25 @@ fn git_repo() -> tempfile::TempDir {
     git_repo_with_init(&["init", "-b", "main"])
 }
 
+#[test]
+fn copy_layout_matches_only_the_leaf_parent_and_grandparent() {
+    for (path, expected) in [
+        ("launch/.plak/worktrees/c1", Some(SessionVcs::Git)),
+        ("launch/.plak/workspaces/c1", Some(SessionVcs::Jj)),
+        ("launch/.plak/workspaces/c1/nested", None),
+        ("launch/.plak/worktrees/c1/other/c2", None),
+        ("launch/.plak/workspaces", None),
+        ("launch/workspaces/c1", None),
+    ] {
+        assert_eq!(copy_layout_kind(Path::new(path)), expected, "{path}");
+        assert_eq!(
+            is_jj_copy_root(Path::new(path)),
+            expected == Some(SessionVcs::Jj),
+            "{path}"
+        );
+    }
+}
+
 fn git_repo_with_init(init: &[&str]) -> tempfile::TempDir {
     let root = tempdir().unwrap();
     for args in [
