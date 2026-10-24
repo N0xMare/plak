@@ -9,10 +9,11 @@ use plakous_model::{
     Provenance, ReplayKindId, RequestMetadata, ResolvedModelDescriptor, RouteId, RunId, SessionId,
     Support, Timestamp, ToolCallerDisposition, ToolConcurrency, ToolDefinition, ToolEffect,
     ToolExecutionDisposition, ToolInputContract, ToolName, ToolOutputContract, TurnId,
-    ValidationMode,
+    ValidatedRequestPlan, ValidationMode,
 };
 use uuid::Uuid as TestUuid;
 
+use super::super::*;
 use super::*;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
