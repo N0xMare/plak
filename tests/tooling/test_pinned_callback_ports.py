@@ -20,7 +20,7 @@ CODEX_LOCAL_LOGIN_ARGS = re.compile(r'\[\s*"login"\s*,\s*"codex"\s*(?P<rest>[^\]
 BROWSER_LOGIN_CALLERS = (
     "crates/providers/openai/src/native_auth/",
     "crates/providers/xai/src/native_auth",
-    "crates/plakous/src/subscriptions.rs",
+    "crates/plakous/src/subscriptions/login.rs",
 )
 SCANNED_ROOTS = ("bin", "crates", "tests")
 
@@ -96,7 +96,7 @@ class PinnedCallbackPortTests(unittest.TestCase):
         self.assertIn("refuse_pinned_test_loopback(self.core.endpoints.loopback_ports);", xai)
         xai_pins = read("crates/providers/xai/src/native_auth.rs")
         self.assertIn("ports, XAI_OAUTH.loopback_ports,", xai_pins)
-        facade = read("crates/plakous/src/subscriptions.rs")
+        facade = read("crates/plakous/src/subscriptions/codex.rs")
         self.assertRegex(
             facade,
             r"#\[cfg\(test\)\]\s*\{\s*manager = manager\.with_ephemeral_loopback_for_tests\(\);",
