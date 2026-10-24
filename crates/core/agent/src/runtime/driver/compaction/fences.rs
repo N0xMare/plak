@@ -1,5 +1,4 @@
-//! The turn fences: when a running turn compacts, and the refusal at the
-//! segment limit (spec 01 §10.3).
+//! Turn compaction fences and the segment-limit refusal (spec 01 §10.3).
 
 use super::{
     COMMITTED_PRESSURE_FOLD_CAP, CompactionDetail, FAILED_PAID_FOLD_CAP, PAID_FOLD_BACKOFF_ROUNDS,

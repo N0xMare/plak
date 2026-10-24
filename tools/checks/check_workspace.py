@@ -1318,6 +1318,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/runtime/admission.rs"): {"agent": {"MAX_USER_IMAGES"}},
     # Pending-input context queries measure the message with its images.
     ("plakous-hosted", "src/runtime/compact.rs"): {"agent": {"UserInput"}},
+    ("plakous-hosted", "src/runtime/compact/scheduled.rs"): {"agent": {"UserInput"}},
     ("plakous-hosted", "src/runtime/host_loop/wake.rs"): {"agent": {"UserInput"}},
     ("plakous-hosted", "src/agent/build/session.rs"): {
         # A scheduled compaction qualifies on the pending message, images included.
