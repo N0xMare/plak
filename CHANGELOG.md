@@ -67,12 +67,12 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Compatibility
 
-- No persisted format changes: the compatibility receipt stays schema 2 and
-  still records the review and expiry dates the notice showed, which this
-  build no longer compares. A 0.0.2 receipt for the same profile is current
-  here. 0.0.2 still compares those dates, so it asks once to accept the notice
-  again for a receipt this build wrote; the receipt it then writes stays
-  current for this build, and the login is kept.
+- The subscription compatibility receipt stays schema 2 and still records
+  the review and expiry dates the notice showed, which this build no longer
+  compares. A 0.0.2 receipt for the same profile is current here. 0.0.2
+  still compares those dates, so it asks once to accept the notice again for
+  a receipt this build wrote; the receipt it then writes stays current for
+  this build, and the login is kept.
 
 ### Known limitations
 
