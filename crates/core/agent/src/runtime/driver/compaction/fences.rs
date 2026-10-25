@@ -9,8 +9,8 @@ use crate::input::UserInput;
 use crate::runtime::compaction::fold::nested_observation_token_upper_bound;
 use crate::runtime::compaction::record::compaction_checkpoint_id;
 use crate::runtime::compaction::request::{
-    native_compaction_facet_enrolled, scheduling_input_headroom, tool_group_fence_occupied_tokens,
-    tool_group_fence_verdict,
+    native_compaction_facet_enrolled, native_compaction_scheduling_reserve,
+    scheduling_input_headroom, tool_group_fence_occupied_tokens, tool_group_fence_verdict,
 };
 use crate::runtime::compaction::{CompactOrigin, DurableCompactionIdentity, FenceTrigger};
 use crate::runtime::driver::Driver;
@@ -214,6 +214,7 @@ impl Driver {
             self.anchored_occupied_tokens(&status),
             status.compaction_trigger_tokens(),
             status.uses_unanchored_estimate(),
+            native_compaction_scheduling_reserve(&self.provider_configuration),
         );
         if !verdict.is_due() {
             if pressure {
@@ -380,6 +381,7 @@ impl Driver {
             input_headroom: scheduling_input_headroom(
                 status.kind(),
                 status.uses_unanchored_estimate(),
+                native_compaction_scheduling_reserve(&self.provider_configuration),
             ),
         });
         let failed_paid_fold = self.paid_fold_failed_since_last_round();

@@ -45,7 +45,8 @@ pub struct CompactionMeasure {
     pub occupancy: Option<u64>,
     /// The occupancy compaction trigger, when the envelope has one.
     pub trigger: Option<u64>,
-    /// Remaining admitted input tokens, when a credible measure bounds them.
+    /// Remaining admitted input tokens after any descriptor-derived scheduling
+    /// reserve, when a credible measure bounds them.
     pub input_headroom: Option<u64>,
 }
 

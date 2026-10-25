@@ -7234,6 +7234,18 @@ the provider-usage occupancy trigger. An anchor missing or mismatching the
 current descriptor disables that occupancy trigger, not this admission reserve.
 The reserve applies only when admission rests on a conservative bound: when
 admission fell back to an unanchored estimate, headroom does not trigger it.
+On an enrolled native facet with a ProviderReservedInput descriptor, both
+pre-turn and tool-group fences additionally hold the descriptor's implicit
+native request room: reported context window minus maximum projected input,
+saturating at zero (zero when no window is reported). The 4096-token
+observation reserve applies to the headroom left after holding that room,
+so the native rung starts while its own request can still admit, not only
+after ordinary input fills the ceiling. This is scheduling only: admission
+still compares input against maximum projected input, with no second output
+subtraction or invented OutputReservation. Shared-window admission already
+reserves requested output, and separate input/output limits need no additional
+shared-window reserve. Every native request still prepares and admits
+independently; the reserve is not a fit witness or permission to dispatch twice.
 This lets a conservative byte-derived bound trigger before the next prompt
 would be refused, including when encrypted reasoning/replay is much larger
 than the provider-reported token usage.

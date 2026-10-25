@@ -155,6 +155,7 @@ pub(super) struct ArtifactModel {
     pub(super) context_token_multiplier: AtomicUsize,
     /// Exercises a summary-only envelope tighter than ordinary round input.
     pub(super) summary_context_overhead: AtomicUsize,
+    pub(super) native_context_overhead: AtomicUsize,
     pub(super) summary_capacity_refusal: Mutex<Option<SummaryCapacityRefusal>>,
     pub(super) summary_preparation_errors: Mutex<Vec<ModelPreparationError>>,
     pub(super) ordinary_context_overhead: AtomicUsize,
@@ -281,6 +282,7 @@ impl ArtifactModel {
             byte_derived_context_tokens: false,
             context_token_multiplier: AtomicUsize::new(1),
             summary_context_overhead: AtomicUsize::new(0),
+            native_context_overhead: AtomicUsize::new(0),
             summary_capacity_refusal: Mutex::new(None),
             summary_preparation_errors: Mutex::new(Vec::new()),
             ordinary_context_overhead: AtomicUsize::new(0),
@@ -828,6 +830,10 @@ impl LanguageModel for ArtifactModel {
         if compaction_request {
             counted_tokens = counted_tokens
                 .saturating_add(self.summary_context_overhead.load(Ordering::Acquire) as u64);
+        }
+        if native_compaction_request {
+            counted_tokens = counted_tokens
+                .saturating_add(self.native_context_overhead.load(Ordering::Acquire) as u64);
         }
         if !compaction_request {
             counted_tokens = counted_tokens

@@ -1,11 +1,9 @@
 use super::*;
 
-async fn full_codex_sized_history(
+fn reference_input_descriptor(
     native: bool,
-    entry_base: u128,
-) -> TestResult<(tempfile::TempDir, Agent, Arc<ArtifactModel>)> {
-    let directory = tempfile::tempdir()?;
-    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    rule: CapacityRule,
+) -> TestResult<ResolvedModelDescriptor> {
     let descriptor = placeholder_test_descriptor(272_000, native)?;
     let authority_binding = artifact_authority(&descriptor, 1)?.authority_class_binding()?;
     let freshness = EvidenceFreshness::new(Timestamp::new(1, 0)?, Some(Timestamp::new(20, 0)?))?;
@@ -23,11 +21,7 @@ async fn full_codex_sized_history(
             &plakous_model::StandardIntegrationAuthority::release_owned(),
             "agent-scripted-capacity",
             "driver-reference-v1",
-            CapacityRule::ProviderReservedInput {
-                reported_context_window: Some(272_000),
-                maximum_projected_input: 258_400,
-                auto_compact_input: Some(244_800),
-            },
+            rule,
             authority_binding,
             freshness,
             receipt,
@@ -47,10 +41,27 @@ async fn full_codex_sized_history(
             freshness,
         )?],
     )?;
+    Ok(descriptor.with_context_contract(contract))
+}
+
+async fn full_codex_sized_history(
+    native: bool,
+    entry_base: u128,
+) -> TestResult<(tempfile::TempDir, Agent, Arc<ArtifactModel>)> {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = reference_input_descriptor(
+        native,
+        CapacityRule::ProviderReservedInput {
+            reported_context_window: Some(272_000),
+            maximum_projected_input: 258_400,
+            auto_compact_input: Some(244_800),
+        },
+    )?;
     let (builder, model) = placeholder_fixture_with_descriptor(
         workspace,
         entry_base,
-        descriptor.with_context_contract(contract),
+        descriptor,
         &[],
         &[],
         LocalDurabilityDisposition::Ephemeral,
@@ -154,6 +165,170 @@ async fn unpaid_admission_fold_failure_preserves_overflow_recovery() -> TestResu
                 })
             })
     );
+    agent.shutdown().await?;
+    Ok(())
+}
+
+#[test]
+fn native_scheduling_holds_descriptor_room_without_changing_admission() -> TestResult {
+    use crate::runtime::compaction::request::{
+        native_compaction_scheduling_reserve, tool_group_fence_verdict,
+    };
+    use plakous_model::{ContextHeadroom, ContextStatusKind, QualifiedTokens};
+
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    for (window, ceiling, expected) in [
+        (Some(500_000), 475_000, 25_000),
+        (Some(272_000), 258_400, 13_600),
+        (None, 475_000, 0),
+    ] {
+        for native in [false, true] {
+            let descriptor = reference_input_descriptor(
+                native,
+                CapacityRule::ProviderReservedInput {
+                    reported_context_window: window,
+                    maximum_projected_input: ceiling,
+                    auto_compact_input: None,
+                },
+            )?;
+            let (builder, _) = placeholder_fixture_with_descriptor(
+                workspace.clone(),
+                820_000,
+                descriptor,
+                &[],
+                &[],
+                LocalDurabilityDisposition::Ephemeral,
+                0,
+                &[],
+            )?;
+            let reserve = native_compaction_scheduling_reserve(&builder.provider_configuration);
+            assert_eq!(reserve, if native { expected } else { 0 });
+            let make_fit = |headroom| ContextStatusKind::Fits {
+                headroom: ContextHeadroom::ProviderReservedInput {
+                    input: QualifiedTokens::Exact(headroom),
+                },
+            };
+            assert!(
+                !tool_group_fence_verdict(&make_fit(reserve + 4097), None, None, false, reserve)
+                    .is_due()
+            );
+            assert!(
+                tool_group_fence_verdict(&make_fit(reserve + 4096), None, None, false, reserve)
+                    .observation_headroom()
+            );
+            assert!(!tool_group_fence_verdict(&make_fit(0), None, None, true, reserve).is_due());
+            // Scheduling never changes the descriptor's admitted input envelope.
+            assert_eq!(builder.session_input_window(), Some((window, ceiling)));
+        }
+    }
+    let (builder, _) = placeholder_fixture(
+        workspace,
+        821_000,
+        500_000,
+        &[],
+        &[],
+        true,
+        LocalDurabilityDisposition::Ephemeral,
+    )?;
+    assert_eq!(
+        native_compaction_scheduling_reserve(&builder.provider_configuration),
+        0
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_request_room_schedules_before_the_next_prompt() -> TestResult {
+    Box::pin(native_request_room_case(false)).await
+}
+
+#[tokio::test]
+async fn native_request_room_schedules_after_a_tool_group() -> TestResult {
+    Box::pin(native_request_room_case(true)).await
+}
+
+async fn native_request_room_case(tool_group: bool) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = reference_input_descriptor(
+        true,
+        CapacityRule::ProviderReservedInput {
+            reported_context_window: Some(272_000),
+            maximum_projected_input: 258_400,
+            auto_compact_input: Some(244_800),
+        },
+    )?;
+    let rounds: &[usize] = if tool_group { &[2] } else { &[] };
+    let bodies: &[usize] = if tool_group { &[100] } else { &[] };
+    let (builder, model) = placeholder_fixture_with_descriptor(
+        workspace,
+        830_000,
+        descriptor,
+        bodies,
+        rounds,
+        LocalDurabilityDisposition::Ephemeral,
+        0,
+        &[],
+    )?;
+    let reserve = crate::runtime::compaction::request::native_compaction_scheduling_reserve(
+        &builder.provider_configuration,
+    );
+    model
+        .native_context_overhead
+        .store(usize::try_from(reserve)?, Ordering::Release);
+    let agent = builder.build()?;
+    for prompt in ["older requirement", "latest requirement"] {
+        assert!(matches!(
+            agent.prompt(prompt).await?.result().await?.outcome(),
+            TurnResultOutcome::Completed(_)
+        ));
+    }
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 0);
+    // Below the catalog's occupancy trigger, above the old 4096 reserve,
+    // but within one native request's own descriptor-derived room.
+    let overhead = if tool_group {
+        &model.tool_successor_capacity_loss
+    } else {
+        &model.ordinary_context_overhead
+    };
+    overhead.store(241_000, Ordering::Release);
+    let result = agent
+        .prompt("continue with room to compact")
+        .await?
+        .result()
+        .await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 1);
+    assert_eq!(model.ordinary_capacity_refusals.load(Ordering::Acquire), 0);
+    let checkpoint = agent.checkpoint();
+    assert_eq!(
+        checkpoint
+            .manifest()
+            .canonical()
+            .context()
+            .compaction_provenance()
+            .ok_or("native provenance")?
+            .strategy(),
+        RuntimeCompactionStrategy::NativeResponsesTriggerV1
+    );
+    // ProviderReservedInput remains input-only even on the native request.
+    {
+        let records = lock_mutex(&model.prepared_records);
+        let observed = lock_mutex(&model.observed_provenance);
+        for (record, (plan, context)) in records.iter().zip(observed.iter()) {
+            let status = model.descriptor.context_status(
+                plan,
+                record.projection(),
+                context.prepared_at(),
+            )?;
+            assert!(status.reservation().is_none());
+        }
+    }
     agent.shutdown().await?;
     Ok(())
 }

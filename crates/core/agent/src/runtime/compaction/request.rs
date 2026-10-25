@@ -98,6 +98,31 @@ pub(in crate::runtime) fn native_compaction_facet_enrolled(
         .is_some_and(|fact| fact.support() == Support::Native)
 }
 
+/// Hold the native request's descriptor-owned implicit output room while
+/// scheduling. Admission already uses the provider's input ceiling unchanged.
+pub(in crate::runtime) fn native_compaction_scheduling_reserve(
+    configuration: &CompiledProviderConfiguration,
+) -> u64 {
+    if !native_compaction_facet_enrolled(configuration) {
+        return 0;
+    }
+    match configuration
+        .effective()
+        .descriptor()
+        .context_contract()
+        .map(|contract| contract.capacity().rule())
+    {
+        Some(CapacityRule::ProviderReservedInput {
+            reported_context_window: Some(window),
+            maximum_projected_input,
+            ..
+        }) => window.saturating_sub(maximum_projected_input),
+        // Shared-window admission already reserves the request's output;
+        // separate input/output limits have no shared room to hold back.
+        _ => 0,
+    }
+}
+
 /// The model's total context window. A reference envelope without a reported
 /// window states its own input maximum as the only window.
 pub(in crate::runtime) fn total_context_window_tokens(rule: CapacityRule) -> Option<u64> {
@@ -181,22 +206,24 @@ pub(in crate::runtime) fn tool_group_fence_verdict(
     occupancy: Option<u64>,
     trigger: Option<u64>,
     unanchored_estimate: bool,
+    native_reserve: u64,
 ) -> CompactionVerdict {
     CompactionVerdict::of(CompactionMeasure {
         fit: MeasuredFit::of(kind),
         occupancy,
         trigger,
-        input_headroom: scheduling_input_headroom(kind, unanchored_estimate),
+        input_headroom: scheduling_input_headroom(kind, unanchored_estimate, native_reserve),
     })
 }
 
 pub(in crate::runtime) fn scheduling_input_headroom(
     kind: &ContextStatusKind,
     unanchored_estimate: bool,
+    native_reserve: u64,
 ) -> Option<u64> {
     match kind {
         ContextStatusKind::Fits { headroom } if !unanchored_estimate => {
-            Some(input_headroom_tokens(*headroom))
+            Some(input_headroom_tokens(*headroom).saturating_sub(native_reserve))
         }
         _ => None,
     }

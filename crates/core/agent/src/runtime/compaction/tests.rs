@@ -70,8 +70,8 @@ fn tool_group_fence_occupied_tokens_adds_nested_local_composition_observations()
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
-    assert!(tool_group_fence_verdict(&fits, occupied, Some(232_000), false).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false, 0).is_due());
+    assert!(tool_group_fence_verdict(&fits, occupied, Some(232_000), false, 0).is_due());
 }
 
 /// While the measure is unanchored (before a session's first completed
@@ -86,9 +86,9 @@ fn an_unanchored_measure_never_schedules_the_tool_group_fence() {
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!tool_group_fence_verdict(&fits, unanchored, Some(800_000), false).is_due());
+    assert!(!tool_group_fence_verdict(&fits, unanchored, Some(800_000), false, 0).is_due());
     let overflow = ContextStatusKind::WouldOverflow(fixture_overflow());
-    assert!(tool_group_fence_verdict(&overflow, unanchored, None, false).is_due());
+    assert!(tool_group_fence_verdict(&overflow, unanchored, None, false, 0).is_due());
 }
 
 #[test]
@@ -96,8 +96,8 @@ fn estimated_headroom_never_schedules_the_tool_group_reserve() {
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(0)),
     };
-    assert!(!tool_group_fence_verdict(&fits, None, None, true).is_due());
-    assert!(tool_group_fence_verdict(&fits, None, None, false).observation_headroom());
+    assert!(!tool_group_fence_verdict(&fits, None, None, true, 0).is_due());
+    assert!(tool_group_fence_verdict(&fits, None, None, false, 0).observation_headroom());
 }
 
 /// The telemetry case: the provider counted 298,468 input tokens for a
@@ -123,14 +123,14 @@ fn tool_group_fence_is_anchored_on_the_last_provider_input() {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
     let anchored = tool_group_fence_occupied_tokens(Some(estimate), anchor, 0);
-    assert!(!tool_group_fence_verdict(&fits, anchored, trigger, false).is_due());
+    assert!(!tool_group_fence_verdict(&fits, anchored, trigger, false, 0).is_due());
     // The same estimate on the anchor's own scale would have fired it.
     let identity = ContextAnchor::new(850_715, 850_715);
     let whole = tool_group_fence_occupied_tokens(Some(estimate), identity, 0);
-    assert!(tool_group_fence_verdict(&fits, whole, trigger, false).is_due());
+    assert!(tool_group_fence_verdict(&fits, whole, trigger, false, 0).is_due());
     // Growth past the trigger on the anchored scale still fires it.
     let grown = tool_group_fence_occupied_tokens(Some(850_715 + 110_000), anchor, 0);
-    assert!(tool_group_fence_verdict(&fits, grown, trigger, false).is_due());
+    assert!(tool_group_fence_verdict(&fits, grown, trigger, false, 0).is_due());
 }
 
 /// The actionable meter uses the tighter of the reported window and the admitted
@@ -208,7 +208,8 @@ fn should_schedule_mid_turn_compaction_matches_spec_thresholds() {
             &ContextStatusKind::WouldOverflow(overflow),
             None,
             None,
-            false
+            false,
+            0
         )
         .is_due()
     );
@@ -217,7 +218,8 @@ fn should_schedule_mid_turn_compaction_matches_spec_thresholds() {
             &ContextStatusKind::ProtectedOverflow(overflow),
             None,
             None,
-            false
+            false,
+            0
         )
         .is_due()
     );
@@ -229,18 +231,19 @@ fn should_schedule_mid_turn_compaction_matches_spec_thresholds() {
             &ContextStatusKind::ProtectedOverflow(overflow),
             None,
             None,
-            false
+            false,
+            0
         )
         .is_due()
     );
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
-    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
-    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
-    assert!(tool_group_fence_verdict(&fits, Some(400_000), Some(400_000), false).is_due());
-    assert!(!tool_group_fence_verdict(&fits, Some(399_000), Some(400_000), false).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false, 0).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false, 0).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false, 0).is_due());
+    assert!(tool_group_fence_verdict(&fits, Some(400_000), Some(400_000), false, 0).is_due());
+    assert!(!tool_group_fence_verdict(&fits, Some(399_000), Some(400_000), false, 0).is_due());
 }
 
 #[test]
@@ -253,7 +256,7 @@ fn exhausted_admission_headroom_fences_even_below_anchored_occupancy() {
         };
         for occupied in [None, Some(346_950)] {
             assert_eq!(
-                tool_group_fence_verdict(&fits, occupied, Some(850_000), false).is_due(),
+                tool_group_fence_verdict(&fits, occupied, Some(850_000), false, 0).is_due(),
                 remaining <= 4_096,
             );
         }

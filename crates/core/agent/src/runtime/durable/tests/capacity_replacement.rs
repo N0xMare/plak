@@ -1357,7 +1357,8 @@ async fn summary_headroom_case(
         assert_eq!(
             crate::runtime::compaction::request::scheduling_input_headroom(
                 status.kind(),
-                status.uses_unanchored_estimate()
+                status.uses_unanchored_estimate(),
+                0,
             ),
             None
         );
