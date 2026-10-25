@@ -13,8 +13,6 @@ pub struct MintRequest<'a> {
     pub launch: &'a Path,
     /// Logical owner of the new copy.
     pub agent_id: &'a str,
-    /// Tree-scoped directory identity.
-    pub copy_id: &'a str,
     /// Full tree digest owning its pins.
     pub namespace: &'a str,
     /// Caller state to copy when no candidate is supplied.

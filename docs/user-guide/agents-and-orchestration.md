@@ -186,11 +186,14 @@ Default: children share your checkout. Give them file-disjoint work, or run
 writers in sequence. Fork when more than one child must write at the same time,
 or when the work should stay off this checkout.
 
-Isolated copies live at `<project>/.plak/worktrees/<agent_id>` (git, branch
-`plak/<agent_id>`) or `<project>/.plak/workspaces/<agent_id>` (jj). Closing a
+Isolated copies live at `<project>/.plak/worktrees/<tree8>-<agent_id>` (git,
+branch `plak/<tree8>/<agent_id>`) or
+`<project>/.plak/workspaces/<tree8>-<agent_id>` (jj). `tree8` is the first eight
+hex digits of the tree identity's SHA-256 digest. Closing a
 child removes its copy once nothing needs it: at once if it produced nothing,
 or after its candidate is adopted. A copy whose candidate was never adopted
-stays until you adopt or `discard_workspace` it.
+stays until you adopt or `discard_workspace` it. Candidate and landing-provenance
+pins belong to retained records, independently of the checkout's lifetime.
 
 ## What a spawned child sees
 

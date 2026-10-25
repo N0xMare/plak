@@ -35,15 +35,46 @@ pub(super) fn lock(common: &Path) -> Result<fs::File, VcsError> {
 }
 
 pub(super) fn reserve(common: &Path, digest: &str) -> Result<fs::File, VcsError> {
+    reserve_prefixes(common, digest, &[16])
+}
+
+pub(super) fn reserve_prefix(common: &Path, digest: &str) -> Result<fs::File, VcsError> {
+    reserve_prefixes(common, digest, &[8, 16])
+        .map_err(|error| VcsError::mint_unavailable(error.detail))
+}
+
+fn reserve_prefixes(common: &Path, digest: &str, lengths: &[usize]) -> Result<fs::File, VcsError> {
     if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(VcsError::seal_failed("invalid tree namespace digest"));
     }
     let guard = lock(common)?;
     let dir = common.join("plak-namespaces");
-    let path = dir.join(&digest[..16]);
+    // Check every existing claim before publishing either new claim. A
+    // collision must not leave evidence asserting a different prefix owner.
+    for length in lengths {
+        if let Some(owner) = read_owner(&dir, &digest[..*length])? {
+            check_owner(&owner, digest, *length)?;
+        }
+    }
+    // Publish the longer witness first: a process loss must not strand an
+    // eight-hex claim that the sixteen-hex cleanup cannot find.
+    for length in lengths.iter().rev() {
+        let prefix = &digest[..*length];
+        if read_owner(&dir, prefix)?.is_none() {
+            publish(&dir, digest, prefix)?;
+        }
+        let owner = read_owner(&dir, prefix)?
+            .ok_or_else(|| VcsError::seal_failed("namespace ownership disappeared"))?;
+        check_owner(&owner, digest, *length)?;
+    }
+    Ok(guard)
+}
+
+fn publish(dir: &Path, digest: &str, prefix: &str) -> Result<(), VcsError> {
+    let path = dir.join(prefix);
     // An atomic link publishes a complete immutable owner identity. Readers
     // never mistake a concurrent creator's partially written file for a collision.
-    let mut scratch = tempfile::NamedTempFile::new_in(&dir)
+    let mut scratch = tempfile::NamedTempFile::new_in(dir)
         .map_err(|error| VcsError::seal_failed(error.to_string()))?;
     scratch
         .write_all(digest.as_bytes())
@@ -51,29 +82,61 @@ pub(super) fn reserve(common: &Path, digest: &str) -> Result<fs::File, VcsError>
         .map_err(|error| VcsError::seal_failed(error.to_string()))?;
     match scratch.persist_noclobber(&path) {
         Ok(_) => {
-            fs::File::open(&dir)
+            fs::File::open(dir)
                 .and_then(|file| file.sync_all())
                 .map_err(|error| VcsError::seal_failed(error.to_string()))?;
         }
         Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(VcsError::seal_failed(error.to_string())),
     }
-    let metadata =
-        fs::symlink_metadata(&path).map_err(|error| VcsError::seal_failed(error.to_string()))?;
+    Ok(())
+}
+
+fn read_owner(dir: &Path, prefix: &str) -> Result<Option<String>, VcsError> {
+    let path = dir.join(prefix);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(VcsError::seal_failed(error.to_string())),
+    };
     if !metadata.is_file()
         || metadata.uid() != rustix::process::geteuid().as_raw()
         || metadata.mode() & 0o077 != 0
     {
         return Err(VcsError::seal_failed("unsafe namespace ownership evidence"));
     }
-    if fs::read(&path).map_err(|error| VcsError::seal_failed(error.to_string()))?
-        != digest.as_bytes()
+    let owner =
+        fs::read_to_string(path).map_err(|error| VcsError::seal_failed(error.to_string()))?;
+    if owner.len() != 64
+        || !owner.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !owner.starts_with(prefix)
     {
         return Err(VcsError::seal_failed(
-            "tree ref namespace prefix collision; existing artifacts retained",
+            "invalid namespace ownership evidence",
         ));
     }
-    Ok(guard)
+    Ok(Some(owner))
+}
+
+fn check_owner(owner: &str, digest: &str, length: usize) -> Result<(), VcsError> {
+    if owner != digest {
+        return Err(VcsError::seal_failed(if length == 8 {
+            "tree prefix collision with another tree in this checkout; existing artifacts retained"
+        } else {
+            "tree ref namespace prefix collision; existing artifacts retained"
+        }));
+    }
+    Ok(())
+}
+
+pub(super) fn owner(common: &Path, tree8: &str) -> Result<String, VcsError> {
+    if tree8.len() != 8 || !tree8.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(VcsError::mint_unavailable("invalid copy prefix"));
+    }
+    let _guard = lock(common)?;
+    read_owner(&common.join("plak-namespaces"), tree8)?.ok_or_else(|| {
+        VcsError::mint_unavailable("copy prefix ownership is missing; artifacts retained")
+    })
 }
 
 /// Ref publication holds the same directory lock through its update. Evidence
@@ -95,6 +158,7 @@ pub(super) fn cleanup(common: &Path, prefix: &str) -> Result<(), VcsError> {
             "for-each-ref",
             "--format=%(refname)",
             &format!("refs/plak/{prefix}/"),
+            &format!("refs/heads/plak/{}/", &prefix[..8]),
         ],
     )
     .map_err(|error| VcsError::seal_failed(error.to_string()))?;
@@ -124,6 +188,20 @@ pub(super) fn cleanup(common: &Path, prefix: &str) -> Result<(), VcsError> {
         return Err(VcsError::seal_failed(
             "invalid namespace ownership evidence",
         ));
+    }
+    let tree8 = &prefix[..8];
+    let tree_owner = read_owner(&dir, tree8)?;
+    if let Some(owner) = &tree_owner {
+        let expected = std::str::from_utf8(&digest)
+            .map_err(|error| VcsError::seal_failed(error.to_string()))?;
+        check_owner(owner, expected, 8)?;
+    }
+    if tree_owner.is_some() {
+        fs::remove_file(dir.join(tree8))
+            .map_err(|error| VcsError::seal_failed(error.to_string()))?;
+        fs::File::open(&dir)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| VcsError::seal_failed(error.to_string()))?;
     }
     fs::remove_file(path).map_err(|error| VcsError::seal_failed(error.to_string()))?;
     fs::File::open(dir)

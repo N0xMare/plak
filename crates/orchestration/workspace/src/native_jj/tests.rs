@@ -1,4 +1,39 @@
-use super::{adopt, mint, snapshot};
+fn mint(
+    launch: &std::path::Path,
+    id: &str,
+    parent_cwd: &std::path::Path,
+    base: Option<&crate::occupancy_vcs::VcsSnapshot>,
+) -> Result<crate::occupancy_vcs::MintedCopy, crate::occupancy_vcs::VcsError> {
+    super::mint(&crate::occupancy_vcs::MintRequest {
+        launch,
+        agent_id: id,
+        namespace: &crate::occupancy_vcs::digest_text("native-fixture"),
+        parent_cwd,
+        mode: plakous_host_protocol::topology::WorkspaceMode::Fork,
+        base,
+    })
+}
+fn forget(launch: &std::path::Path, id: &str) -> Result<(), crate::occupancy_vcs::VcsError> {
+    let namespace = crate::occupancy_vcs::digest_text("native-fixture");
+    let names = crate::occupancy_vcs::copy_names(&namespace[..8], id);
+    super::forget(launch, &names.dir, &namespace)
+}
+
+fn set_base_pin(path: &std::path::Path, agent: &str, commit: Option<&str>) {
+    let namespace = crate::occupancy_vcs::digest_text("native-fixture");
+    super::pin_references(
+        path,
+        &namespace,
+        &[(
+            crate::occupancy_vcs::copy_base_ref(&namespace, agent),
+            commit,
+        )],
+        false,
+    )
+    .unwrap();
+}
+
+use super::{adopt, snapshot};
 use crate::vcs_fixtures::{jj_available, jj_in, jj_repo};
 use jj_lib::object_id::ObjectId;
 use jj_lib::repo::Repo;
@@ -36,7 +71,7 @@ fn jj_counts_exclude_empty_commits_and_the_copied_mint_tree() {
 }
 
 #[test]
-fn upgraded_jj_copy_requires_a_matching_base_pin_and_a_recorded_row() {
+fn jj_copy_requires_a_matching_base_pin_and_a_recorded_row() {
     let root = native_repo();
     let child = mint(root.path(), "base-validation", root.path(), None).unwrap();
     assert!(super::validate_copy_base(&child.path, &child.base.commit).is_ok());
@@ -45,19 +80,19 @@ fn upgraded_jj_copy_requires_a_matching_base_pin_and_a_recorded_row() {
         super::validate_copy_base(&child.path, &head.commit)
             .unwrap_err()
             .detail
-            .contains("jj copy minted by an older build")
+            .contains("jj copy base provenance is missing or differs")
     );
     let missing = crate::git_redirect_fence::install_for_copy(&child.path, None).unwrap_err();
     assert!(missing.contains("no recorded tree row"));
     assert!(
         super::validate_copy_base(&child.path, &snapshot(root.path()).unwrap().commit).is_err()
     );
-    super::pin_base(&child.path, "base-validation", None).unwrap();
+    set_base_pin(&child.path, "base-validation", None);
     assert!(
         super::validate_copy_base(&child.path, &child.base.commit)
             .unwrap_err()
             .detail
-            .contains("jj copy minted by an older build")
+            .contains("jj copy base provenance is missing or differs")
     );
 }
 
@@ -65,14 +100,16 @@ fn upgraded_jj_copy_requires_a_matching_base_pin_and_a_recorded_row() {
 fn stale_base_pin_is_replaced_and_unused_frozen_base_is_abandoned() {
     let root = native_repo();
     let stale = snapshot(root.path()).unwrap();
-    super::pin_base(root.path(), "reused-pin", Some(&stale.commit)).unwrap();
+    set_base_pin(root.path(), "reused-pin", Some(&stale.commit));
     let child = mint(root.path(), "reused-pin", root.path(), None).unwrap();
     assert_ne!(child.base.commit, stale.commit);
-    super::forget(root.path(), "reused-pin").unwrap();
+    forget(root.path(), "reused-pin").unwrap();
     pollster::block_on(async {
         let ws = super::load(root.path()).unwrap();
         let repo = ws.repo_loader().load_at_head().await.unwrap();
-        assert!(super::pinned_base(&repo, "reused-pin").is_none());
+        assert!(
+            super::pinned_base(&repo, child.path.file_name().unwrap().to_str().unwrap()).is_none()
+        );
         assert!(
             !repo
                 .view()
@@ -188,11 +225,11 @@ fn mint_base_is_a_sibling_of_parent_working_copy() {
             .downcast_ref::<jj_lib::git_backend::GitBackend>()
             .unwrap()
             .git_repo();
-        let namespace = crate::occupancy_vcs::digest_text("sibling-base");
+        let namespace = crate::occupancy_vcs::digest_text("native-fixture");
         let reference = format!("refs/plak/{}/bases/sibling-base", &namespace[..16]);
         assert!(git.try_find_reference(&reference).unwrap().is_some());
     });
-    super::forget(root.path(), "sibling-base").unwrap();
+    forget(root.path(), "sibling-base").unwrap();
     pollster::block_on(async {
         let ws = super::load(root.path()).unwrap();
         let repo = ws.repo_loader().load_at_head().await.unwrap();
@@ -202,7 +239,7 @@ fn mint_base_is_a_sibling_of_parent_working_copy() {
             .downcast_ref::<jj_lib::git_backend::GitBackend>()
             .unwrap()
             .git_repo();
-        let namespace = crate::occupancy_vcs::digest_text("sibling-base");
+        let namespace = crate::occupancy_vcs::digest_text("native-fixture");
         assert!(
             git.try_find_reference(
                 format!("refs/plak/{}/bases/sibling-base", &namespace[..16]).as_str()
@@ -478,7 +515,7 @@ fn candidate_ref_stays_exact_after_rewrite_and_workspace_removal() {
         )
         .is_err()
     );
-    super::forget(repo.path(), "pinned").unwrap();
+    forget(repo.path(), "pinned").unwrap();
     pollster::block_on(async {
         let ws = super::load(repo.path()).unwrap();
         let repo = ws.repo_loader().load_at_head().await.unwrap();

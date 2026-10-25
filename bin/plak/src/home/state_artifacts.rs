@@ -504,12 +504,25 @@ fn tree_artifacts(database: &rusqlite::Connection) -> Result<Vec<(String, Artifa
             .map_err(|error| error.to_string())?
             .collect::<Result<_, _>>()
             .map_err(|error| error.to_string())?;
-        for path in &artifact.worktrees {
-            if let Some(id) = path.file_name().and_then(|id| id.to_str()) {
-                artifact.references.insert(format!("refs/heads/plak/{id}"));
+        if version < 9 {
+            for path in &artifact.worktrees {
+                if let Some(id) = path.file_name().and_then(|id| id.to_str()) {
+                    artifact.references.insert(format!("refs/heads/plak/{id}"));
+                }
             }
-        }
-        if version >= 9 {
+        } else {
+            let mut branches = database
+                .prepare("SELECT branch FROM agent_nodes WHERE tree_id=?1 AND branch IS NOT NULL AND workspace_id IN (SELECT workspace_id FROM agent_workspaces WHERE tree_id=?1 AND mode!='inherit')")
+                .map_err(|error| error.to_string())?;
+            for branch in branches
+                .query_map([&tree], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+            {
+                let branch = branch.map_err(|error| error.to_string())?;
+                if branch.starts_with("plak/") {
+                    artifact.references.insert(format!("refs/heads/{branch}"));
+                }
+            }
             let mut owners = database.prepare("SELECT agent_id FROM agent_nodes WHERE tree_id=?1 AND workspace_id IN (SELECT workspace_id FROM agent_workspaces WHERE tree_id=?1 AND mode!='inherit')")
                 .map_err(|error| error.to_string())?;
             for owner in owners
@@ -805,11 +818,15 @@ pub(crate) fn remember_deleted_tree(paths: &PlakPaths, tree_id: &str) -> Result<
                 &maintenance::digest_text(tree_id),
                 &node.agent_id,
             ));
+            if let Some(branch) = node
+                .branch
+                .as_ref()
+                .filter(|branch| branch.starts_with("plak/"))
+            {
+                artifact.references.insert(format!("refs/heads/{branch}"));
+            }
         }
         artifact.worktrees.insert(workspace.path.clone());
-        if let Some(id) = workspace.path.file_name().and_then(|id| id.to_str()) {
-            artifact.references.insert(format!("refs/heads/plak/{id}"));
-        }
     }
     for candidate in rows.candidates().values() {
         let reference = maintenance::candidate_ref(
@@ -2096,7 +2113,7 @@ mod tests {
     }
 
     #[test]
-    fn maintenance_inventories_rescue_pins_by_schema() {
+    fn maintenance_names_legacy_and_short_branches_by_schema() {
         for version in [8, 9] {
             let db = rusqlite::Connection::open_in_memory().unwrap();
             db.execute_batch(
@@ -2122,6 +2139,8 @@ mod tests {
             {
                 assert_eq!(refs.contains(&reference), version == 9);
             }
+            assert_eq!(refs.contains("refs/heads/plak/1234abcd-c1"), version == 8);
+            assert_eq!(refs.contains("refs/heads/plak/1234abcd/c1"), version == 9);
             assert_eq!(
                 refs.contains(&maintenance::copy_base_ref(
                     &maintenance::digest_text("tree"),
@@ -2147,7 +2166,11 @@ mod tests {
             rusqlite::params![record.id, repo.path().display().to_string()],
         )
         .unwrap();
-        db.execute("INSERT INTO agent_workspaces(tree_id,workspace_id,owner_agent_id,path,mode,status,generation) VALUES(?1,'workspace','root',?2,'fork','active',0)",
+        db.execute("INSERT INTO agent_workspaces(tree_id,workspace_id,owner_agent_id,path,mode,status,generation) VALUES(?1,'workspace','c1',?2,'fork','active',0)",
+            rusqlite::params![record.id, copy.display().to_string()]).unwrap();
+        // Current inventory owns this shared legacy artifact by its recorded
+        // branch, not by applying legacy naming to the copy directory.
+        db.execute("INSERT INTO agent_nodes(tree_id,agent_id,parent_agent_id,depth,description,prompt,output_schema_json,schema_digest,tuple_id,account,status,workspace_id,tier,path,branch,active_turn) VALUES(?1,'c1','root',1,'worker','task','{}','digest','tuple','account','running','workspace','mutate',?2,'plak/old-c1',0)",
             rusqlite::params![record.id, copy.display().to_string()]).unwrap();
         drop(db);
         let unowned = repo.path().join(".plak/worktrees/unowned");
@@ -2673,6 +2696,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(artifact.worktrees.len(), 2);
+        for node in tree
+            .nodes()
+            .values()
+            .filter(|node| node.parent_agent_id.is_some())
+        {
+            let branch = node.branch.as_ref().unwrap();
+            assert!(
+                artifact
+                    .references
+                    .contains(&format!("refs/heads/{branch}"))
+            );
+            let dir = node.path.file_name().unwrap().to_str().unwrap();
+            assert!(
+                !artifact
+                    .references
+                    .contains(&format!("refs/heads/plak/{dir}"))
+            );
+        }
     }
 
     #[test]

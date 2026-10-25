@@ -1202,7 +1202,6 @@ impl ProductAgentTree {
             namespace: super::digest_text(&self.tree_id),
             launch_checkout: self.launch_checkout.clone(),
             agent_id: reserved_agent_id.to_owned(),
-            copy_id: copy_id(&self.tree_id, reserved_agent_id),
             caller_path: caller.path.clone(),
             mode,
             input_base: input_base.cloned(),
@@ -1889,7 +1888,14 @@ mod tests {
         assert!(node.path.is_dir());
         assert_eq!(
             node.branch.as_deref(),
-            Some(format!("plak/{}", child.agent_id).as_str())
+            Some(
+                plakous_workspace::occupancy_vcs::copy_names(
+                    &digest_text(&tree.tree_id)[..8],
+                    &child.agent_id
+                )
+                .branch
+                .as_str()
+            )
         );
         let row = tree.workspace(&node.workspace_id).unwrap();
         assert_eq!(

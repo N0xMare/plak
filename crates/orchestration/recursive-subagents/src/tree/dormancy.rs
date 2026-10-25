@@ -4,7 +4,7 @@ use super::{
     BTreeMap, CandidateId, CandidateRecord, Deserialize, MintedCopy, NodeRecord, NodeStatus,
     OperationRecord, Path, PathBuf, ProductAgentTree, SendAgentMessageRequest, Serialize,
     TopologyError, TopologyErrorCode, VcsError, VcsOps, VcsSnapshot, WorkspaceMode,
-    WorkspaceRecord, WorkspaceStatus, canonical_json, copy_id, digest_text, now_unix_millis,
+    WorkspaceRecord, WorkspaceStatus, canonical_json, digest_text, now_unix_millis,
 };
 
 const KIND: &str = "workspace_reclamation";
@@ -79,7 +79,6 @@ pub(crate) struct DormancyTicket {
     workspace: WorkspaceRecord,
     evidence: Reclamation,
     namespace: String,
-    copy_id: String,
     reference_id: String,
     trim_target: bool,
     trim_outcome: Option<TrimOutcome>,
@@ -175,7 +174,6 @@ impl DormancyTicket {
                 vcs.mint_from(&super::MintRequest {
                     launch,
                     agent_id: &self.agent_id,
-                    copy_id: &self.copy_id,
                     namespace: &self.namespace,
                     parent_cwd: launch,
                     mode: self.workspace.mode,
@@ -315,7 +313,6 @@ impl ProductAgentTree {
         let agent_id = self.workspace_producer(workspace)?;
         self.effects.dormancy.push(DormancyTicket {
             reference_id: format!("reclaimed-{}-{}", agent_id, evidence.generation),
-            copy_id: copy_id(&self.tree_id, &agent_id),
             agent_id,
             namespace: digest_text(&self.tree_id),
             workspace: row,

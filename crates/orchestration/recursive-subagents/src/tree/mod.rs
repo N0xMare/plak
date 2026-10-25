@@ -986,9 +986,6 @@ pub struct MintTicket {
     launch_checkout: PathBuf,
     /// Logical node identity, retained for VCS snapshot labels and test ports.
     agent_id: String,
-    /// Tree-scoped VCS identity. Unlike the logical agent id, this cannot be reused by
-    /// another tree sharing the launch checkout.
-    copy_id: String,
     caller_path: PathBuf,
     mode: WorkspaceMode,
     input_base: Option<VcsSnapshot>,
@@ -1007,7 +1004,6 @@ impl MintTicket {
         vcs.mint_from(&MintRequest {
             launch: &self.launch_checkout,
             agent_id: &self.agent_id,
-            copy_id: &self.copy_id,
             namespace: &self.namespace,
             parent_cwd: &self.caller_path,
             mode: self.mode,
@@ -2570,7 +2566,7 @@ fn next_child_id(
 }
 
 fn copy_id(tree_id: &str, agent_id: &str) -> String {
-    format!("{}-{agent_id}", digest_text(tree_id))
+    plakous_workspace::occupancy_vcs::copy_names(&digest_text(tree_id)[..8], agent_id).dir
 }
 
 /// The exact root dialect the portable V2 subset requires.

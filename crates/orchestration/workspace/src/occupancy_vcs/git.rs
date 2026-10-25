@@ -1174,12 +1174,15 @@ pub(super) fn ensure_plak_mint_excludes(launch: &Path) -> Result<(), VcsError> {
 /// Removes a copy a crash left between `git worktree add` and the tree
 /// recording it. Copy ids are tree-scoped and the tree never mints an id it has
 /// recorded, so an existing destination for this id was never handed to an
-/// agent: its registration, directory and `plak/<copy_id>` branch all go.
+/// agent: its registration, directory and `plak/<tree8>/<agent_id>` branch all go.
 pub(super) fn reclaim_orphan_worktree(
     launch: &Path,
     dest: &Path,
     copy_id: &str,
 ) -> Result<(), VcsError> {
+    let branch = super::branch_of_copy_dir(copy_id).ok_or_else(|| {
+        VcsError::mint_unavailable("unrecognized orphan identity; directory retained")
+    })?;
     let dest_text = dest.display().to_string();
     let _ = git_run(
         launch,
@@ -1198,7 +1201,6 @@ pub(super) fn reclaim_orphan_worktree(
     if !pruned.status.success() {
         return Err(VcsError::mint_failed("git worktree prune refused"));
     }
-    let branch = format!("plak/{copy_id}");
     let reference = format!("refs/heads/{branch}");
     let present = git_run(
         launch,

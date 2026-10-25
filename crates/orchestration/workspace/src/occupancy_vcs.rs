@@ -24,6 +24,7 @@ mod git;
 mod jj;
 pub mod maintenance;
 mod mint;
+mod names;
 mod namespace;
 mod ops;
 mod pins;
@@ -48,6 +49,7 @@ pub use mint::run_mint_hook;
 #[cfg(test)]
 use mint::run_mint_hook_bounded;
 use mint::{mint_git_worktree, mint_jj_workspace};
+pub use names::{CopyNames, branch_of_copy_dir, copy_names};
 pub use ops::{AdoptRequest, MintRequest, SystemVcs, VcsOps};
 
 use plakous_host_protocol::topology::WorkspaceMode;
@@ -388,18 +390,13 @@ pub fn snapshot(path: &Path, label: &str) -> Result<VcsSnapshot, VcsError> {
 pub(crate) fn mint_worktree_from(request: &MintRequest<'_>) -> Result<MintedCopy, VcsError> {
     match detect_vcs(request.launch)? {
         SessionVcs::Git => mint_git_worktree(request),
-        SessionVcs::Jj => mint_jj_workspace(
-            request.launch,
-            request.copy_id,
-            request.parent_cwd,
-            request.base,
-        ),
+        SessionVcs::Jj => mint_jj_workspace(request),
     }
 }
 
 /// Seals `child_path` into a candidate: snapshot the copy and,
 /// on git, pin the commit under `refs/plak/<namespace>/candidates/<candidate_id>` so
-/// discarding the worktree and its `plak/<id>` branch cannot orphan it. Native
+/// discarding the worktree and its `plak/<tree8>/<agent_id>` branch cannot orphan it. Native
 /// JJ pins the exact commit in its Git backend under the same ref namespace.
 pub(crate) fn seal_candidate(
     child_path: &Path,
@@ -486,6 +483,20 @@ pub(crate) fn reserve_candidate_namespace(
     digest: &str,
 ) -> Result<std::fs::File, VcsError> {
     namespace::reserve(common, digest)
+}
+
+pub(crate) fn reserve_copy_namespace(
+    common: &Path,
+    digest: &str,
+) -> Result<std::fs::File, VcsError> {
+    namespace::reserve_prefix(common, digest)
+}
+
+pub(crate) fn copy_namespace_owner(common: &Path, dir: &str) -> Result<(String, String), VcsError> {
+    let (tree8, agent) = names::copy_parts(dir).ok_or_else(|| {
+        VcsError::mint_unavailable("unrecognized copy identity; artifacts retained")
+    })?;
+    Ok((namespace::owner(common, tree8)?, agent.to_owned()))
 }
 
 /// Drops the pin `seal_candidate` placed when the snapshot turned out not to
@@ -604,16 +615,25 @@ fn wait_bounded(
 }
 
 /// Unmints the copy. `refs/plak/*/candidates/*` is deliberately untouched: the
-/// worktree and its `plak/<id>` branch go, the sealed commit stays reachable
+/// worktree and its `plak/<tree8>/<agent_id>` branch go, the sealed commit stays reachable
 /// through its pin.
 pub(crate) fn unmint_copy(launch: &Path, path: &Path, namespace: &str) -> Result<(), VcsError> {
     let agent_id = path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| VcsError::mint_unavailable("workspace path has no identity"))?;
+    let branch = branch_of_copy_dir(agent_id)
+        .ok_or_else(|| VcsError::mint_unavailable("unrecognized copy directory; retained"))?;
+    let (tree8, logical_agent) = names::copy_parts(agent_id)
+        .ok_or_else(|| VcsError::mint_unavailable("invalid copy identity"))?;
+    if namespace.get(..8) != Some(tree8) {
+        return Err(VcsError::mint_unavailable(
+            "copy belongs to another tree; retained",
+        ));
+    }
     match SessionVcs::of_copy(path)? {
         SessionVcs::Jj => {
-            crate::native_jj::forget(launch, agent_id)?;
+            crate::native_jj::forget(launch, agent_id, namespace)?;
             std::fs::remove_dir_all(path)
                 .or_else(|error| {
                     if error.kind() == std::io::ErrorKind::NotFound {
@@ -630,6 +650,13 @@ pub(crate) fn unmint_copy(launch: &Path, path: &Path, namespace: &str) -> Result
                 })?;
         }
         SessionVcs::Git => {
+            let common = pins::common(launch)?;
+            if copy_namespace_owner(&common, agent_id)?.0 != namespace {
+                return Err(VcsError::mint_unavailable(
+                    "copy namespace owner differs; retained",
+                ));
+            }
+            let _namespace_guard = reserve_copy_namespace(&common, namespace)?;
             let path_text = path.display().to_string();
             // A copy whose directory and registration are both gone was
             // already removed, by an earlier attempt or by hand; only its
@@ -654,7 +681,6 @@ pub(crate) fn unmint_copy(launch: &Path, path: &Path, namespace: &str) -> Result
                     ));
                 }
             }
-            let branch = format!("plak/{agent_id}");
             let reference = format!("refs/heads/{branch}");
             let present = git_run(
                 launch,
@@ -686,10 +712,8 @@ pub(crate) fn unmint_copy(launch: &Path, path: &Path, namespace: &str) -> Result
                     "worktree removed but branch presence is uncertain",
                 ));
             }
-            let logical_agent = agent_id.rsplit('-').next().unwrap_or(agent_id);
-            pins::update(
+            pins::update_reserved(
                 launch,
-                namespace,
                 &[(pins::reference(namespace, "bases", logical_agent), None)],
                 false,
             )?;

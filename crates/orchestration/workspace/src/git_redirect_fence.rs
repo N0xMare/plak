@@ -518,21 +518,16 @@ fn jj_shim_script(allowed: &Path, real_jj: &Path, base: &str) -> String {
     )
 }
 
-/// `plak/<copy directory>` when the mint created that branch, and empty for a
+/// `plak/<tree8>/<agent_id>` when the mint created that branch, and empty for a
 /// detached snapshot. The branch ref is the record, not HEAD, so a child that
 /// switches branch still owns the same name. Does not run git.
 fn own_branch(copy: &Path) -> String {
     let Some(id) = copy.file_name().and_then(|name| name.to_str()) else {
         return String::new();
     };
-    if id.is_empty()
-        || !id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
+    let Some(minted) = crate::occupancy_vcs::branch_of_copy_dir(id) else {
         return String::new();
-    }
-    let minted = format!("plak/{id}");
+    };
     if branch_ref_exists(copy, &minted) {
         minted
     } else {

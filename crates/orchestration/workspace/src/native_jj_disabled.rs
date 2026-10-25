@@ -9,12 +9,7 @@ fn unavailable() -> VcsError {
 pub(super) fn snapshot(_: &Path) -> Result<VcsSnapshot, VcsError> {
     Err(unavailable())
 }
-pub(super) fn mint(
-    _: &Path,
-    _: &str,
-    _: &Path,
-    _: Option<&VcsSnapshot>,
-) -> Result<MintedCopy, VcsError> {
+pub(super) fn mint(_: &super::occupancy_vcs::MintRequest<'_>) -> Result<MintedCopy, VcsError> {
     Err(unavailable())
 }
 pub(super) fn adopt(
@@ -29,7 +24,7 @@ pub(super) fn adopt(
 pub(super) fn diverged(_: &Path, _: &str) -> Result<bool, VcsError> {
     Err(unavailable())
 }
-pub(super) fn forget(_: &Path, _: &str) -> Result<(), VcsError> {
+pub(super) fn forget(_: &Path, _: &str, _: &str) -> Result<(), VcsError> {
     Err(unavailable())
 }
 pub(super) fn over(_: &Path, _: &str, _: &VcsSnapshot) -> bool {

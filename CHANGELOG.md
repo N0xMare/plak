@@ -84,7 +84,7 @@ one cross-build carrier (a build imports its own and the previous version).
   Runtime SQLite schema 26 admits `NamedStateValue` objects (kind 20). The
   manifest gains a sorted named-state key/address group; checkpoint integrity
   and commit identities bind keys and immutable value addresses.
-  State key `r26.e33.p33.t8`; carry conversation history with `/reload` or
+  State key `r26.e33.p33.t9`; carry conversation history with `/reload` or
   export and import. Export document version 8 is unchanged and does not
   carry named state; an imported session starts with empty named state.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine
@@ -171,6 +171,13 @@ one cross-build carrier (a build imports its own and the previous version).
 ## 0.0.2
 
 ### Plak
+
+- Agent trees use schema 9 and state key `r26.e33.p33.t9`. Carry sessions by
+  `/reload` or export/import; export document v8 is unchanged. Forks use short
+  `plak/<tree8>/<agent_id>` branches and `<tree8>-<agent_id>` copy directories,
+  with a full-digest prefix collision guard. Base, candidate and landing
+  provenance pins retain work independently of checkout removal. Submitted
+  output is stored in its intent, not duplicated in attempt rows or submit receipts.
 
 - Conversations carry across builds and configuration changes: `/reload` and
   `session import` move the full neutral conversation through export

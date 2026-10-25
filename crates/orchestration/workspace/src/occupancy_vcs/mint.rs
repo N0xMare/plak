@@ -3,9 +3,9 @@
 use std::process::Command;
 
 use super::{
-    BTreeMap, MintedCopy, Path, VcsError, VcsSnapshot, WorkspaceMode, create_private,
-    ensure_plak_mint_excludes, git_run, git_snapshot, jj_mint_lock, mint_error, private_scratch,
-    reclaim_orphan_worktree, unmint_git_dest, wait_bounded,
+    BTreeMap, MintedCopy, Path, VcsError, WorkspaceMode, create_private, ensure_plak_mint_excludes,
+    git_run, git_snapshot, jj_mint_lock, mint_error, private_scratch, reclaim_orphan_worktree,
+    unmint_git_dest, wait_bounded,
 };
 
 /// Ceiling on one `on_mint` hook run.
@@ -114,15 +114,25 @@ pub(super) fn run_mint_hook_bounded(
 pub(super) fn mint_git_worktree(request: &super::MintRequest<'_>) -> Result<MintedCopy, VcsError> {
     let super::MintRequest {
         launch,
-        copy_id: agent_id,
+        agent_id,
         parent_cwd,
         mode,
         base: over,
         ..
     } = *request;
-    let dest = launch.join(".plak/worktrees").join(agent_id);
+    let tree8 = request
+        .namespace
+        .get(..8)
+        .ok_or_else(|| VcsError::mint_unavailable("invalid tree namespace"))?;
+    let names = super::copy_names(tree8, agent_id);
+    if super::names::copy_parts(&names.dir).is_none() {
+        return Err(VcsError::mint_unavailable("invalid copy identity"));
+    }
+    let namespace_guard =
+        super::reserve_copy_namespace(&super::pins::common(launch)?, request.namespace)?;
+    let dest = launch.join(".plak/worktrees").join(&names.dir);
     if dest.exists() || dest.is_symlink() {
-        reclaim_orphan_worktree(launch, &dest, agent_id)?;
+        reclaim_orphan_worktree(launch, &dest, &names.dir)?;
     }
     std::fs::create_dir_all(dest.parent().unwrap_or(launch))
         .map_err(|_| mint_error("could not create .plak/worktrees"))?;
@@ -133,11 +143,11 @@ pub(super) fn mint_git_worktree(request: &super::MintRequest<'_>) -> Result<Mint
         Some(candidate) => candidate.clone(),
         None => git_snapshot(parent_cwd, agent_id)?,
     };
-    let branch = (mode == WorkspaceMode::Fork).then(|| format!("plak/{agent_id}"));
+    let branch = (mode == WorkspaceMode::Fork).then_some(names.branch);
     let dest_text = dest.display().to_string();
     let mut args = vec!["worktree", "add"];
     match branch.as_deref() {
-        // `-B`: a `plak/<id>` branch left behind by an earlier tree in this
+        // `-B`: a `plak/<tree8>/<agent_id>` branch left behind by this tree in this
         // checkout (its worktree gone) is reset onto the new base instead of
         // refusing the mint. A branch still checked out elsewhere is refused
         // by git itself. The branch never holds work: seals pin candidates
@@ -166,25 +176,18 @@ pub(super) fn mint_git_worktree(request: &super::MintRequest<'_>) -> Result<Mint
     let old_pin = super::git_query(launch, &["show-ref", "--verify", "--quiet", &base_ref])
         .map_err(|error| VcsError::mint_failed(error.to_string()))?;
     if old_pin.status.success() {
-        super::pins::update(
-            launch,
-            request.namespace,
-            &[(base_ref.clone(), None)],
-            false,
-        )?;
+        super::pins::update_reserved(launch, &[(base_ref.clone(), None)], false)?;
     } else if old_pin.status.code() != Some(1) {
         unmint_git_dest(launch, &dest, dest_text.as_str(), cleanup_branch.as_str());
         return Err(VcsError::mint_failed("cannot inspect orphan base pin"));
     }
-    if let Err(error) = super::pins::update(
-        &dest,
-        request.namespace,
-        &[(base_ref, Some(base.commit.as_str()))],
-        true,
-    ) {
+    if let Err(error) =
+        super::pins::update_reserved(&dest, &[(base_ref, Some(base.commit.as_str()))], true)
+    {
         unmint_git_dest(launch, &dest, dest_text.as_str(), cleanup_branch.as_str());
         return Err(error);
     }
+    drop(namespace_guard);
     if let Err(error) = crate::git_redirect_fence::install(&dest) {
         unmint_git_dest(launch, &dest, dest_text.as_str(), cleanup_branch.as_str());
         return Err(mint_error(&format!(
@@ -198,15 +201,10 @@ pub(super) fn mint_git_worktree(request: &super::MintRequest<'_>) -> Result<Mint
     })
 }
 
-pub(super) fn mint_jj_workspace(
-    launch: &Path,
-    agent_id: &str,
-    parent_cwd: &Path,
-    over: Option<&VcsSnapshot>,
-) -> Result<MintedCopy, VcsError> {
-    let lock = jj_mint_lock(launch);
+pub(super) fn mint_jj_workspace(request: &super::MintRequest<'_>) -> Result<MintedCopy, VcsError> {
+    let lock = jj_mint_lock(request.launch);
     let _guard = lock
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    crate::native_jj::mint(launch, agent_id, parent_cwd, over)
+    crate::native_jj::mint(request)
 }

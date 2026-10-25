@@ -53,6 +53,15 @@ pub(super) fn update(
     create_only: bool,
 ) -> Result<(), VcsError> {
     let _guard = namespace::reserve(&common(path)?, namespace)?;
+    update_reserved(path, refs, create_only)
+}
+
+/// Caller holds the namespace reservation through publication.
+pub(super) fn update_reserved(
+    path: &Path,
+    refs: &[(String, Option<&str>)],
+    create_only: bool,
+) -> Result<(), VcsError> {
     let mut transaction = String::from("start\n");
     for (name, commit) in refs {
         if name.bytes().any(|byte| byte.is_ascii_whitespace())

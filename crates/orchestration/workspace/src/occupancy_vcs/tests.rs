@@ -7,7 +7,7 @@ fn fixture_source(path: &Path) -> Option<&str> {
     copy_layout_kind(path)?;
     let id = path.file_name()?.to_str()?;
     let (prefix, agent) = id.split_once('-').unwrap_or(("", id));
-    Some(if prefix.len() == 64 { agent } else { id })
+    Some(if prefix.len() == 8 { agent } else { id })
 }
 
 fn fixture_namespace(copy_id: &str) -> String {
@@ -29,7 +29,7 @@ fn mint_worktree_from(
     super::mint_worktree_from(&MintRequest {
         launch,
         agent_id: id,
-        copy_id: id,
+
         namespace: &fixture_namespace(id),
         parent_cwd,
         mode,
@@ -39,6 +39,97 @@ fn mint_worktree_from(
 
 fn git_repo() -> tempfile::TempDir {
     git_repo_with_init(&["init", "-b", "main"])
+}
+
+#[test]
+fn tree_prefix_collision_refuses_mint_without_changing_existing_artifacts() {
+    let repo = git_repo();
+    let first = format!("1234abcd{}", "0".repeat(56));
+    let other = format!("1234abcd{}", "1".repeat(56));
+    let request = MintRequest {
+        launch: repo.path(),
+        agent_id: "c1",
+        namespace: &first,
+        parent_cwd: repo.path(),
+        mode: WorkspaceMode::Fork,
+        base: None,
+    };
+    let copy = SystemVcs.mint_from(&request).unwrap();
+    assert_eq!(copy.branch.as_deref(), Some("plak/1234abcd/c1"));
+    assert_eq!(copy.path.file_name().unwrap(), "1234abcd-c1");
+    let before = git_text(repo.path(), &["for-each-ref"], "refs").unwrap();
+    let error = SystemVcs
+        .mint_from(&MintRequest {
+            namespace: &other,
+            agent_id: "c2",
+            ..request
+        })
+        .unwrap_err();
+    assert_eq!(error.kind, VcsErrorKind::MintUnavailable);
+    assert!(error.detail.contains("tree prefix collision"), "{error:?}");
+    assert!(!repo.path().join(".plak/worktrees/1234abcd-c2").exists());
+    assert_eq!(
+        before,
+        git_text(repo.path(), &["for-each-ref"], "refs").unwrap()
+    );
+    let evidence = pins::common(repo.path()).unwrap().join("plak-namespaces");
+    assert_eq!(
+        std::fs::read_to_string(evidence.join("1234abcd")).unwrap(),
+        first
+    );
+    assert!(!evidence.join(&other[..16]).exists());
+}
+
+#[test]
+fn prefix_evidence_lives_until_both_branches_and_pins_are_gone() {
+    let repo = git_repo();
+    let digest = digest_text("prefix-evidence");
+    let common = pins::common(repo.path()).unwrap();
+    drop(reserve_copy_namespace(&common, &digest).unwrap());
+    let names = copy_names(&digest[..8], "c1");
+    assert!(
+        git_run(repo.path(), &["branch", &names.branch])
+            .unwrap()
+            .status
+            .success()
+    );
+    let pin = copy_base_ref(&digest, "c1");
+    assert!(
+        git_run(repo.path(), &["update-ref", &pin, "HEAD"])
+            .unwrap()
+            .status
+            .success()
+    );
+    namespace::cleanup(&common, &digest[..16]).unwrap();
+    let evidence = common.join("plak-namespaces");
+    assert!(evidence.join(&digest[..8]).exists());
+    assert!(
+        git_run(repo.path(), &["update-ref", "-d", &pin])
+            .unwrap()
+            .status
+            .success()
+    );
+    namespace::cleanup(&common, &digest[..16]).unwrap();
+    assert!(
+        evidence.join(&digest[..8]).exists(),
+        "branch still owns the prefix"
+    );
+    assert!(
+        git_run(repo.path(), &["branch", "-D", &names.branch])
+            .unwrap()
+            .status
+            .success()
+    );
+    namespace::cleanup(&common, &digest[..16]).unwrap();
+    assert!(!evidence.join(&digest[..8]).exists());
+    assert!(!evidence.join(&digest[..16]).exists());
+
+    // Both a cut before the short claim's publication and a cut after its
+    // deletion leave only the long witness. Cleanup must finish either one.
+    drop(reserve_copy_namespace(&common, &digest).unwrap());
+    std::fs::remove_file(evidence.join(&digest[..8])).unwrap();
+    namespace::cleanup(&common, &digest[..16]).unwrap();
+    assert!(!evidence.join(&digest[..16]).exists());
 }
 
 #[test]
@@ -58,7 +149,7 @@ fn assert_adoption_pin_failure(already_present: bool) {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             namespace: &namespace,
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
@@ -130,7 +221,7 @@ fn seal_pins_candidate_and_base_atomically() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             namespace: &namespace,
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
@@ -185,7 +276,7 @@ fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
             .mint_from(&MintRequest {
                 launch: repo.path(),
                 agent_id: agent,
-                copy_id: agent,
+
                 namespace: &namespace,
                 parent_cwd: repo.path(),
                 mode: WorkspaceMode::Fork,
@@ -506,7 +597,10 @@ fn a_stale_plak_branch_does_not_block_a_fork_mint() {
     let repo = git_repo();
     assert!(
         Command::new("git")
-            .args(["branch", "plak/c1"])
+            .args([
+                "branch",
+                &copy_names(&digest_text("fixture")[..8], "c1").branch
+            ])
             .current_dir(repo.path())
             .status()
             .unwrap()
@@ -516,14 +610,17 @@ fn a_stale_plak_branch_does_not_block_a_fork_mint() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
             namespace: &fixture_namespace("c1"),
         })
         .unwrap();
-    assert_eq!(minted.branch.as_deref(), Some("plak/c1"));
+    assert_eq!(
+        minted.branch,
+        Some(copy_names(&digest_text("fixture")[..8], "c1").branch)
+    );
     assert!(minted.path.join("SEED.txt").is_file());
 }
 
@@ -534,47 +631,39 @@ fn a_stale_plak_branch_does_not_block_a_fork_mint() {
 #[test]
 fn stale_tree_cleanup_cannot_remove_another_trees_reused_child_id() {
     let repo = git_repo();
-    let first_id = format!("{}-c1", digest_text("tree-first"));
-    let second_id = format!("{}-c1", digest_text("tree-second"));
+    let first_namespace = digest_text("tree-first");
+    let second_namespace = digest_text("tree-second");
     let first = SystemVcs
         .mint_from(&MintRequest {
             launch: repo.path(),
-            agent_id: &first_id,
-            copy_id: &first_id,
+            agent_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
-            namespace: &fixture_namespace(&first_id),
+            namespace: &first_namespace,
         })
         .unwrap();
     SystemVcs
-        .unmint(
-            repo.path(),
-            &first.path,
-            &fixture_namespace(first.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &first.path, &first_namespace)
         .unwrap();
 
     let second = SystemVcs
         .mint_from(&MintRequest {
             launch: repo.path(),
-            agent_id: &second_id,
-            copy_id: &second_id,
+            agent_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
-            namespace: &fixture_namespace(&second_id),
+            namespace: &second_namespace,
         })
         .unwrap();
     assert_ne!(first.path, second.path);
     // A stale repeat of the first tree's cleanup finds its copy already
     // gone and succeeds without touching the second tree's copy.
     SystemVcs
-        .unmint(
-            repo.path(),
-            &first.path,
-            &fixture_namespace(first.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &first.path, &first_namespace)
         .unwrap();
     assert!(second.path.join("SEED.txt").is_file());
     let branch = second.branch.as_deref().unwrap();
@@ -703,7 +792,7 @@ fn git_untouched_fork_over_dirty_parent_reports_zero_zero() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -723,7 +812,7 @@ fn adopted_child_with_uncommitted_work_reports_zero_ahead() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -789,7 +878,7 @@ fn child_uncommitted_edit_counts_one_ahead() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -811,7 +900,7 @@ fn parent_commit_of_mint_dirt_adds_no_behind() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -839,7 +928,7 @@ fn parent_commit_plus_mint_dirt_counts_one_behind() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -862,7 +951,7 @@ fn parent_behind_cache_is_scoped_to_one_probe_and_keyed_by_base() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -873,7 +962,7 @@ fn parent_behind_cache_is_scoped_to_one_probe_and_keyed_by_base() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c2",
-            copy_id: "c2",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: Some(&first.base),
@@ -929,7 +1018,7 @@ fn secret_only_changes_count_nothing() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -977,7 +1066,7 @@ fn git_worktree_copy_unmints_through_git_after_colocation() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "t-c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -987,17 +1076,18 @@ fn git_worktree_copy_unmints_through_git_after_colocation() {
     colocate_jj(repo.path());
     assert_eq!(detect_vcs(repo.path()).unwrap(), SessionVcs::Jj);
     SystemVcs
-        .unmint(
-            repo.path(),
-            &minted.path,
-            &fixture_namespace(minted.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &minted.path, &digest_text("fixture"))
         .unwrap();
     assert!(!minted.path.exists());
     assert!(
         !git_run(
             repo.path(),
-            &["show-ref", "--verify", "--quiet", "refs/heads/plak/t-c1"],
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", minted.branch.as_ref().unwrap())
+            ],
         )
         .unwrap()
         .status
@@ -1015,7 +1105,7 @@ fn git_fork_seals_after_launch_colocation() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1079,7 +1169,7 @@ fn colocated_launch_keeps_all_copy_queries_and_maintenance_on_git() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1093,7 +1183,7 @@ fn colocated_launch_keeps_all_copy_queries_and_maintenance_on_git() {
         .seal(&copy.path, &namespace, "candidate", &copy.base.commit)
         .unwrap();
     assert!(SystemVcs.dirty(&copy.path));
-    assert_eq!(SystemVcs.label(&copy.path).as_deref(), Some("plak/c1"));
+    assert_eq!(SystemVcs.label(&copy.path), copy.branch);
     assert_eq!(
         SystemVcs.ahead_behind(&copy.path, repo.path(), Some(&copy.base.commit)),
         Some((1, 0))
@@ -1156,7 +1246,7 @@ fn jj_adoption_omits_file_listing_even_when_files_changed_is_nonzero() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1506,7 +1596,7 @@ fn binary_and_modify_delete_conflicts_name_their_kinds() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1731,7 +1821,7 @@ fn repository_hooks_never_run_in_plak_git_steps() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1761,11 +1851,7 @@ fn repository_hooks_never_run_in_plak_git_steps() {
         })
         .unwrap();
     SystemVcs
-        .unmint(
-            repo.path(),
-            &minted.path,
-            &fixture_namespace(minted.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &minted.path, &digest_text("fixture"))
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(repo.path().join("SEED.txt")).unwrap(),
@@ -1794,7 +1880,7 @@ fn adopt_ignores_external_diff_and_textconv() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1859,7 +1945,7 @@ fn adopt_receipt_lists_changed_files_with_status_and_bounds_at_64() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1942,7 +2028,7 @@ fn adopt_receipt_uses_lossy_names_without_losing_non_utf8_files() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -1990,7 +2076,7 @@ fn unmint_of_an_already_removed_copy_drops_only_its_branch() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "t-c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -2011,7 +2097,12 @@ fn unmint_of_an_already_removed_copy_drops_only_its_branch() {
     let branch = |repo: &Path| {
         git_run(
             repo,
-            &["show-ref", "--verify", "--quiet", "refs/heads/plak/t-c1"],
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", copy.branch.as_ref().unwrap()),
+            ],
         )
         .unwrap()
         .status
@@ -2020,26 +2111,18 @@ fn unmint_of_an_already_removed_copy_drops_only_its_branch() {
     assert!(branch(repo.path()), "the branch outlives a by-hand removal");
 
     SystemVcs
-        .unmint(
-            repo.path(),
-            &copy.path,
-            &fixture_namespace(copy.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &copy.path, &digest_text("fixture"))
         .unwrap();
     assert!(!branch(repo.path()), "unmint dropped the leftover branch");
     SystemVcs
-        .unmint(
-            repo.path(),
-            &copy.path,
-            &fixture_namespace(copy.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &copy.path, &digest_text("fixture"))
         .unwrap();
 
     let live = SystemVcs
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c2",
-            copy_id: "t-c2",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -2047,15 +2130,11 @@ fn unmint_of_an_already_removed_copy_drops_only_its_branch() {
         })
         .unwrap();
     SystemVcs
-        .unmint(
-            repo.path(),
-            &live.path,
-            &fixture_namespace(live.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &live.path, &digest_text("fixture"))
         .unwrap();
     assert!(!live.path.exists());
     let listed = String::from_utf8(git_in(repo.path(), &["worktree", "list"]).stdout).unwrap();
-    assert!(!listed.contains("t-c2"), "{listed}");
+    assert!(!listed.contains(live.path.to_str().unwrap()), "{listed}");
 }
 
 /// A crash between `git worktree add` and the tree recording the copy
@@ -2069,7 +2148,7 @@ fn the_next_mint_reclaims_an_orphaned_copy() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "t-c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,
@@ -2081,7 +2160,7 @@ fn the_next_mint_reclaims_an_orphaned_copy() {
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "t-c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Snapshot,
             base: None,
@@ -2093,7 +2172,12 @@ fn the_next_mint_reclaims_an_orphaned_copy() {
     assert!(
         !git_run(
             repo.path(),
-            &["show-ref", "--verify", "--quiet", "refs/heads/plak/t-c1"]
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", orphan.branch.as_ref().unwrap())
+            ]
         )
         .unwrap()
         .status
@@ -2101,22 +2185,22 @@ fn the_next_mint_reclaims_an_orphaned_copy() {
         "the orphan's branch survived"
     );
     let listed = String::from_utf8(git_in(repo.path(), &["worktree", "list"]).stdout).unwrap();
-    assert_eq!(listed.matches("t-c1").count(), 1, "{listed}");
+    assert_eq!(
+        listed.matches(reminted.path.to_str().unwrap()).count(),
+        1,
+        "{listed}"
+    );
 
     // A directory with no registration at all.
     SystemVcs
-        .unmint(
-            repo.path(),
-            &reminted.path,
-            &fixture_namespace(reminted.path.file_name().unwrap().to_str().unwrap()),
-        )
+        .unmint(repo.path(), &reminted.path, &digest_text("fixture"))
         .unwrap();
     std::fs::create_dir_all(reminted.path.join("partial")).unwrap();
     let fresh = SystemVcs
         .mint_from(&MintRequest {
             launch: repo.path(),
             agent_id: "c1",
-            copy_id: "t-c1",
+
             parent_cwd: repo.path(),
             mode: WorkspaceMode::Fork,
             base: None,

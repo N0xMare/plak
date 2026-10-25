@@ -58,7 +58,8 @@ fn git_repo() -> tempfile::TempDir {
 }
 
 fn mint_child(parent: &Path, id: &str) -> PathBuf {
-    let dest = parent.join(".plak/worktrees").join(id);
+    let names = crate::occupancy_vcs::copy_names("01234567", id);
+    let dest = parent.join(".plak/worktrees").join(names.dir);
     std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
     assert!(
         Command::new("git")
@@ -67,7 +68,7 @@ fn mint_child(parent: &Path, id: &str) -> PathBuf {
                 "add",
                 "-q",
                 "-b",
-                &format!("plak/{id}"),
+                &names.branch,
                 dest.to_str().unwrap(),
             ])
             .current_dir(parent)
@@ -368,8 +369,19 @@ fn jj_shim_immutability_and_secret_auto_track() {
         return;
     }
     let launch = crate::vcs_fixtures::jj_repo();
-    let child = crate::native_jj::mint(launch.path(), "protected", launch.path(), None).unwrap();
-    let sibling = crate::native_jj::mint(launch.path(), "sibling", launch.path(), None).unwrap();
+    let mint = |agent_id| {
+        crate::native_jj::mint(&crate::occupancy_vcs::MintRequest {
+            launch: launch.path(),
+            agent_id,
+            namespace: &crate::occupancy_vcs::digest_text("shim-immutability"),
+            parent_cwd: launch.path(),
+            mode: plakous_host_protocol::topology::WorkspaceMode::Fork,
+            base: None,
+        })
+        .unwrap()
+    };
+    let child = mint("protected");
+    let sibling = mint("sibling");
     let shim = child.path.join(".plak/bin/jj");
     let before = jj(
         launch.path(),
@@ -1265,7 +1277,11 @@ fn guard_refuses_coordination_writes() {
             "refs/plak/pin",
             head,
         ],
-        vec!["symbolic-ref", "refs/heads/plak/c2", "refs/heads/plak/c1"],
+        vec![
+            "symbolic-ref",
+            "refs/heads/plak/c2",
+            "refs/heads/plak/01234567/c1",
+        ],
         vec!["branch", "-d", "plak/c2"],
         vec!["branch", "-f", "Plak/c2"],
         vec!["branch", "-v", "-f", "plak/c2", "HEAD"],
@@ -1403,7 +1419,7 @@ fn guard_refuses_coordination_writes() {
         vec!["update-ref", "--std"],
         vec!["push", ".", "--dele", "refs/plak/pin"],
         vec!["branch", "--del", "feature", "plak/c2"],
-        vec!["branch", "--mov", "--force", "plak/c1", "plak/c2"],
+        vec!["branch", "--mov", "--force", "plak/01234567/c1", "plak/c2"],
         vec!["branch", "--color", "-D", "feature", "plak/c2"],
         vec!["switch", "--cr", "plak/new"],
         vec!["checkout", "--orph", "plak/new"],
@@ -1482,7 +1498,7 @@ fn guard_refuses_coordination_writes() {
             "-c",
             "rebase.updateRefs=true",
             "-c",
-            "branch.plak/c1.rebase=merges",
+            "branch.plak/01234567/c1.rebase=merges",
             "pull",
             "origin",
             "up",
@@ -1604,7 +1620,11 @@ fn guard_admits_ordinary_git() {
     git_ok(&child, &["fetch", "origin"]);
     git_ok(
         &child,
-        &["branch", "--set-upstream-to=origin/main", "plak/c1"],
+        &[
+            "branch",
+            "--set-upstream-to=origin/main",
+            "plak/01234567/c1",
+        ],
     );
     git_ok(
         &child,
@@ -1638,7 +1658,7 @@ fn guard_admits_ordinary_git() {
         &["branch", "feature", "plak/c2"],
         &["branch", "-f", "feature", "plak/c2"],
         &["branch", "-v", "-f", "feature", "plak/c2"],
-        &["update-ref", "refs/heads/plak/c1", "HEAD"],
+        &["update-ref", "refs/heads/plak/01234567/c1", "HEAD"],
         &[
             "symbolic-ref",
             "-m",
@@ -1723,7 +1743,7 @@ fn guard_admits_ordinary_git() {
             "-c",
             "pull.rebase=true",
             "-c",
-            "branch.plak/c1.rebase=false",
+            "branch.plak/01234567/c1.rebase=false",
             "pull",
             "origin",
             "main",
@@ -1789,7 +1809,7 @@ fn guard_admits_ordinary_git() {
         &["reflog", "expire", "--expire=now", "--updateref", "HEAD"],
         &["prune", "-n"],
         &["checkout", "--detach"],
-        &["branch", "-f", "plak/c1"],
+        &["branch", "-f", "plak/01234567/c1"],
     ] {
         let output = output_retrying(Command::new(&shim).args(args).current_dir(&child));
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1889,7 +1909,7 @@ fn configured_fetches_guard_default_remotes_groups_and_effective_pruning() {
         (
             vec![
                 ("remote.other.fetch", "+refs/nothing/*:refs/*"),
-                ("branch.plak/c1.remote", "other"),
+                ("branch.plak/01234567/c1.remote", "other"),
             ],
             vec!["fetch", "--prune"],
         ),
@@ -1922,7 +1942,7 @@ fn configured_fetches_guard_default_remotes_groups_and_effective_pruning() {
         (
             vec![
                 ("rebase.updateRefs", "true"),
-                ("branch.plak/c1.rebase", "merges"),
+                ("branch.plak/01234567/c1.rebase", "merges"),
             ],
             vec!["pull", "origin", "up"],
         ),
@@ -2118,7 +2138,11 @@ fn stdin_transaction_lists_worktrees_once_and_preserves_all_updates() {
         super::sh_single_quote(calls.to_str().unwrap()), super::sh_single_quote(real_git.to_str().unwrap())
     )).unwrap();
     let shim = scratch.path().join("git");
-    super::write_executable(&shim, &super::shim_script(&child, &wrapper, "plak/c1")).unwrap();
+    super::write_executable(
+        &shim,
+        &super::shim_script(&child, &wrapper, "plak/01234567/c1"),
+    )
+    .unwrap();
     let mut process = Command::new("/bin/sh")
         .arg(&shim)
         .args(["update-ref", "--stdin"])

@@ -1095,7 +1095,7 @@ so the host retries it once per process and marks the row `discarded` on
 success. The explicit discard that reserved such a row already gave up its
 unadopted candidates, so they do not hold the copy. In a Git checkout, a copy
 whose directory and worktree registration are both already gone counts as
-removed; only its `plak/<copy_id>` branch is then dropped.
+removed; only its `plak/<tree8>/<agent_id>` branch is then dropped.
 
 ### 4.9 Error codes
 
@@ -1417,12 +1417,13 @@ that fails. A path is secret by basename: `.env` and any `.env.*` other than
 therefore cannot pin a secret the tool policy already excludes.
 
 **Mint.** The copy is `<launch>/.plak/worktrees/<copy_id>`, where `copy_id` is
-`sha256(tree_id)-<agent_id>`. The tree-scoped identity also names the
-`plak/<copy_id>` branch. Consequently two trees sharing a checkout may both
+`<tree8>-<agent_id>` and `tree8 = sha256(tree_id)[..8]`. One shared naming
+function maps this identity to the `plak/<tree8>/<agent_id>` branch and
+`plak-<tree8>-<agent_id>` JJ workspace. Consequently two trees sharing a checkout may both
 use the logical child id `c1`, and delayed cleanup from a crashed or partially
 pruned tree cannot address the other tree's path or branch. The base is the
 supplied candidate, or `snapshot(<parent cwd>)` — never the launch HEAD. The
-argv is `git worktree add` plus `-B plak/<copy_id>` for a `fork` (a stale
+argv is `git worktree add` plus `-B plak/<tree8>/<agent_id>` for a `fork` (a stale
 branch the same tree left in this checkout is reset, never a refusal; git
 still refuses a branch checked out elsewhere) or
 `--detach` for a `snapshot` copy, then the destination and the base commit, run
@@ -1434,14 +1435,14 @@ destination that already exists for the id being minted was left by a crash
 between `git worktree add` and the tree persisting the copy, and no agent ever
 ran in it. The mint reclaims it first: `git worktree remove --force <dest>`,
 removal of the directory, `git worktree prune`, and `git branch -D
-plak/<copy_id>` when that branch exists. Child-id allocation therefore does not
+plak/<tree8>/<agent_id>` when that branch exists. Child-id allocation therefore does not
 skip a `.plak/worktrees/<copy_id>` the tree has no row for.
 
 **Seal.** `snapshot(<child path>)`, then one `git update-ref --stdin`
 transaction publishes `refs/plak/<namespace>/candidates/<candidate_id>` and
 `refs/plak/<namespace>/candidate-bases/<candidate_id>` for the candidate and
 its recorded base. Both updates prepare before either is committed, inside the
-child, so discarding the worktree and the `plak/<copy_id>` branch cannot
+child, so discarding the worktree and the `plak/<tree8>/<agent_id>` branch cannot
 orphan the candidate. The child's own `HEAD` is deliberately **not** advanced;
 adoption never needs a checkout.
 Model-visible candidate ids stay short: `cand-<attempt_id>` (the node id
@@ -1451,13 +1452,20 @@ pinning, a private immutable ownership file under the Git common directory
 records the full digest; a short-prefix collision refuses the seal and retains
 existing artifacts. Reservation and ref publication hold one repository
 namespace-directory lock. Pruning drops an owned namespace's immutable evidence
-only after its last pin is gone, under that same lock; concurrent seals cannot
+only after its last pin and branch are gone, under that same lock; concurrent seals cannot
 publish across the empty-ref check. Tickets resolve the short id in their own tree namespace,
 so one tree's cleanup cannot unpin another tree's adoptable work. Worktree paths
-and fork branches already use the full tree digest and do not collide.
+and fork branches use the eight-hex prefix. Before minting, the same lock
+protects `plak-namespaces/<tree8>` containing the full digest. A different owner
+refuses with `mint_unavailable`, `tree prefix collision with another tree in
+this checkout; existing artifacts retained`, before touching a copy or branch.
+Cleanup removes this evidence with the 16-hex evidence only when both
+`refs/heads/plak/<tree8>/` and `refs/plak/<namespace>/` are empty.
+The durable 16-hex witness precedes short-claim publication and outlives its
+deletion, so an interrupted reservation or cleanup remains discoverable.
 
 **Discard.** `git worktree remove --force <dest>`, then the directory, then
-`git branch -D plak/<copy_id>`. Only a copy whose candidates are all adopted,
+`git branch -D plak/<tree8>/<agent_id>`. Only a copy whose candidates are all adopted,
 or whose settled owner explicitly gives up its candidates, is removed (§4.8),
 and once it is gone the tree drops `refs/plak/<namespace>/bases/<agent>`.
 Candidate records retain their candidate, candidate-base and adopted-before/
@@ -1572,7 +1580,7 @@ and parent IDs, described `plak base <copy_id>`: F is a sibling of the parent's
 working-copy commit, not its descendant. With candidate input, that exact
 candidate is F. The child's empty working-copy commit has F as its parent,
 and the recorded base is F. F and the child are published together by
-`plak mint workspace`; F is pinned at `refs/plak/<namespace>/bases/<copy_id>`.
+`plak mint workspace`; F is pinned at `refs/plak/<namespace>/bases/<agent_id>`.
 For JJ occupancy, ahead counts non-empty commits in `base..@`; behind counts
 `base-..parent@` excluding empty commits and commits whose tree equals F
 (the copied mint state is not new parent work). The frozen base and empty working-copy commit add no noise to
@@ -1783,7 +1791,7 @@ Three rules govern every landing:
 - **No checkout, no child mutation, no commit.** The child's work arrives in the
   caller's working tree as ordinary changes; new files arrive untracked.
 - **The root checkout MUST NEVER receive a Plak-authored commit.** Children
-  commit freely on `plak/<copy_id>` branches inside `.plak/`. Commit, push, and
+  commit freely on `plak/<tree8>/<agent_id>` branches inside `.plak/`. Commit, push, and
   pull request happen only when the user instructs the root, which then uses the
   `git`, `gh`, or `jj` CLIs itself. **Plak ships no commit or PR tool.**
 - **A conflict never destroys the only copy.** Conflicts stay in the retained
@@ -2492,7 +2500,7 @@ no following value.
 After that admission, and before exec, the same shim refuses a write to Plak
 coordination state. Exit 128, `plak: git-guard refused: <op> would change Plak
 coordination state (<name>); <remedy>`. The copy's own branch is
-`plak/<copy directory>` when that branch ref exists (a fork; the mint records
+`plak/<tree8>/<agent_id>`, derived from `<tree8>-<agent_id>`, when that branch ref exists (a fork; the mint records
 it, and a later `switch` does not drop it) and empty for a detached snapshot.
 Names are compared case-insensitively. Protected names are `refs/plak/**`,
 `refs/stash` and `stash`, and `refs/heads/plak/*`, `heads/plak/*`, `plak/*`
@@ -2647,16 +2655,16 @@ including the `.env.example` exception). Thus only the copy's own descendants
 of its base are mutable and every other workspace's ancestry is immutable.
 The shim is regenerated from the recorded base at hosted construction; no
 user config is written. Other user settings still apply. At hosted
-construction the copy's `refs/plak/<namespace>/bases/<copy_id>` pin must match
+construction the copy's `refs/plak/<namespace>/bases/<agent_id>` pin must match
 the recorded row base. A missing or mismatched pin refuses with `jj copy
-minted by an older build; discard or close it and respawn`. An admitted copy
+base provenance is missing or differs; inspect the retained copy`. An admitted copy
 may have moved its `@` off that base through `new`/`rebase`; follow-up and
 reload still regenerate its shim. Sealing records `history_left_base` in the
 canonical `seal_outcome` payload and result-mail replay emits `history left
 plak_base(); the candidate is the whole tree` when true. The transient snapshot
 observation uses the sealed commit and recorded base under the unlocked seal
-phase, never a later working-copy observation. This is folded into unreleased
-tree schema 8; the runtime epoch (now e33) prevents older-shape state being opened. A JJ copy
+phase, never a later working-copy observation. Tree schema 9 includes this
+payload; the versioned state key identifies its store tuple. A JJ copy
 with no owning tree row refuses with `jj copy has no recorded tree row; launch
 from its owning session, or discard or close it and respawn`.
 
@@ -2698,7 +2706,8 @@ overriding any template entries of the same name:
 - `PLAK_LAUNCH_CHECKOUT`: the tree's original launch checkout path.
 - `PLAK_PARENT_PATH`: the spawning parent's workspace path, which may be a copy;
   captured when the workspace is planned, not looked up after minting.
-- `PLAK_COPY_ID`: the new copy's tree-scoped VCS identity, not its logical agent id.
+- `PLAK_COPY_ID`: `<tree8>-<agent_id>`, the new copy's tree-scoped VCS identity,
+  not its logical agent id.
 
 No other ambient host variables cross: the API-key store reads `*_API_KEY`
 from the environment when set, and a template-authored shell command has no

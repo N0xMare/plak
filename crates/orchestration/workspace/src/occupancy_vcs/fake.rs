@@ -210,15 +210,20 @@ impl VcsOps for FakeVcs {
             agent_id,
             mode,
             base,
+            namespace,
             ..
         } = *request;
         let path = Self::copy_dir(launch, agent_id);
+        let tree8 = namespace
+            .get(..8)
+            .ok_or_else(|| VcsError::mint_unavailable("invalid tree namespace"))?;
         self.record(FakeOp::Mint, &path);
         std::fs::create_dir_all(&path)
             .map_err(|error| VcsError::mint_failed(format!("fake mint: {error}")))?;
         Ok(MintedCopy {
             path,
-            branch: (mode == WorkspaceMode::Fork).then(|| format!("plak/{agent_id}")),
+            branch: (mode == WorkspaceMode::Fork)
+                .then(|| super::copy_names(tree8, agent_id).branch),
             base: base.cloned().unwrap_or_else(|| Self::base_for(agent_id)),
         })
     }

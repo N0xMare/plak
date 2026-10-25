@@ -275,15 +275,39 @@ pub(super) fn snapshot(path: &Path) -> std::result::Result<VcsSnapshot, VcsError
 }
 
 pub(super) fn mint(
-    launch: &Path,
-    id: &str,
-    parent: &Path,
-    base: Option<&VcsSnapshot>,
+    request: &super::occupancy_vcs::MintRequest<'_>,
 ) -> std::result::Result<MintedCopy, VcsError> {
+    let super::occupancy_vcs::MintRequest {
+        launch,
+        agent_id,
+        parent_cwd,
+        base,
+        namespace,
+        ..
+    } = *request;
+    let tree8 = namespace
+        .get(..8)
+        .ok_or_else(|| VcsError::mint_unavailable("invalid tree namespace"))?;
+    let names = super::occupancy_vcs::copy_names(tree8, agent_id);
+    if super::occupancy_vcs::branch_of_copy_dir(&names.dir).is_none() {
+        return Err(VcsError::mint_unavailable("invalid copy identity"));
+    }
+    let id = names.dir.as_str();
     let dest = launch.join(".plak/workspaces").join(id);
+    let mut parent = load(parent_cwd).map_err(|error| failure(&error))?;
+    let common = pollster::block_on(async {
+        let repo = parent.repo_loader().load_at_head().await?;
+        let backend = repo
+            .store()
+            .backend()
+            .downcast_ref::<jj_lib::git_backend::GitBackend>()
+            .ok_or("only Git-backed JJ repositories are supported")?;
+        Ok::<_, Error>(backend.git_repo().common_dir().to_path_buf())
+    })
+    .map_err(|error| failure(&error))?;
+    let namespace_guard = super::occupancy_vcs::reserve_copy_namespace(&common, namespace)?;
     let created = std::cell::Cell::new(false);
     pollster::block_on(async {
-        let mut parent = load(parent)?;
         let (repo, head) = snapshot_workspace(&mut parent).await?;
         let backend = repo
             .store()
@@ -312,7 +336,7 @@ pub(super) fn mint(
         }
         std::fs::create_dir_all(&dest)?;
         created.set(true);
-        let name = format!("plak-{id}");
+        let name = names.jj_workspace;
         let expected_init_parent=repo.op_id().clone();
         let (mut ws, repo) = Workspace::init_workspace_with_existing_repo(
             &dest,
@@ -344,7 +368,10 @@ pub(super) fn mint(
         let repo = publish_checked(tx, "plak mint workspace").await?;
         let checkout=ws.check_out(repo.op_id().clone(), Some(&old.tree()), &child).await?;
         if checkout.skipped_files != 0 { return Err(recovery("workspace checkout skipped files; retained workspace needs recovery")); }
-        pin_base(launch, id, Some(&base.id().hex())).map_err(|error| recovery(error.detail))?;
+        let base_ref = super::occupancy_vcs::copy_base_ref(namespace, agent_id);
+        pin_transaction(launch, namespace, &[(base_ref, Some(base.id().hex().as_str()))], false, true, Some(&namespace_guard))
+            .map_err(|error| recovery(error.detail))?;
+        drop(namespace_guard);
         crate::git_redirect_fence::install_jj(&dest, &base.id().hex())?;
         crate::git_redirect_fence::install(&dest)?;
         Ok::<_, Error>(MintedCopy {
@@ -501,7 +528,7 @@ pub(super) fn validate_copy_base(path: &Path, base: &str) -> std::result::Result
         let base = CommitId::try_from_hex(base).ok_or("invalid base")?;
         if pinned_base(&repo, id).as_ref() != Some(&base) {
             return Err(recovery(
-                "jj copy minted by an older build; discard or close it and respawn",
+                "jj copy base provenance is missing or differs; inspect the retained copy",
             ));
         }
         Ok::<_, Error>(())
@@ -524,35 +551,65 @@ pub(super) fn history_left_base(
     .map_err(|error| failure(&error))
 }
 
-fn base_reference(id: &str) -> String {
-    let prefix = id.split_once('-').map_or(id, |(namespace, _)| namespace);
-    let namespace = if prefix.len() == 64 && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        prefix.to_owned()
-    } else {
-        super::occupancy_vcs::digest_text(id)
-    };
-    let agent = id.strip_prefix(&format!("{namespace}-")).unwrap_or(id);
-    format!("refs/plak/{}/bases/{agent}", &namespace[..16])
-}
-
 fn pinned_base(repo: &ReadonlyRepo, id: &str) -> Option<CommitId> {
     let backend = repo
         .store()
         .backend()
         .downcast_ref::<jj_lib::git_backend::GitBackend>()?;
     let git = backend.git_repo();
-    let reference = git.try_find_reference(base_reference(id).as_str()).ok()??;
+    let (namespace, agent) =
+        super::occupancy_vcs::copy_namespace_owner(git.common_dir(), id).ok()?;
+    pinned_base_reference(
+        repo,
+        &super::occupancy_vcs::copy_base_ref(&namespace, &agent),
+    )
+}
+
+fn pinned_base_reference(repo: &ReadonlyRepo, reference: &str) -> Option<CommitId> {
+    let backend = repo
+        .store()
+        .backend()
+        .downcast_ref::<jj_lib::git_backend::GitBackend>()?;
+    let git = backend.git_repo();
+    let reference = git.try_find_reference(reference).ok()??;
     CommitId::try_from_hex(reference.target().try_id()?.to_string())
 }
 
-pub(super) fn forget(launch: &Path, id: &str) -> std::result::Result<(), VcsError> {
+pub(super) fn forget(
+    launch: &Path,
+    id: &str,
+    namespace: &str,
+) -> std::result::Result<(), VcsError> {
+    let expected_dir = super::occupancy_vcs::branch_of_copy_dir(id)
+        .ok_or_else(|| VcsError::mint_unavailable("unrecognized copy identity; retained"))?;
+    let (tree8, agent) = expected_dir
+        .strip_prefix("plak/")
+        .and_then(|tail| tail.split_once('/'))
+        .ok_or_else(|| VcsError::mint_unavailable("invalid copy branch; retained"))?;
+    if namespace.get(..8) != Some(tree8) {
+        return Err(VcsError::mint_unavailable(
+            "copy belongs to another namespace; retained",
+        ));
+    }
+    let names = super::occupancy_vcs::copy_names(tree8, agent);
     pollster::block_on(async {
         let ws = load(launch)?;
         let repo = ws.repo_loader().load_at_head().await?;
-        let base = pinned_base(&repo, id);
+        let backend = repo
+            .store()
+            .backend()
+            .downcast_ref::<jj_lib::git_backend::GitBackend>()
+            .ok_or("only Git-backed JJ repositories are supported")?;
+        let namespace_guard = super::occupancy_vcs::reserve_copy_namespace(
+            backend.git_repo().common_dir(),
+            namespace,
+        )
+        .map_err(|error| recovery(error.detail))?;
+        let base_ref = super::occupancy_vcs::copy_base_ref(namespace, agent);
+        let base = pinned_base_reference(&repo, &base_ref);
         let mut tx = repo.start_transaction();
         tx.repo_mut()
-            .remove_workspace(&WorkspaceNameBuf::from(format!("plak-{id}")))
+            .remove_workspace(&WorkspaceNameBuf::from(names.jj_workspace))
             .await?;
         tx.repo_mut().rebase_descendants().await?;
         if let Some(base) = base {
@@ -570,7 +627,15 @@ pub(super) fn forget(launch: &Path, id: &str) -> std::result::Result<(), VcsErro
             }
         }
         publish_checked(tx, "plak forget workspace").await?;
-        pin_base(launch, id, None).map_err(|error| recovery(error.detail))?;
+        pin_transaction(
+            launch,
+            namespace,
+            &[(base_ref, None)],
+            false,
+            true,
+            Some(&namespace_guard),
+        )
+        .map_err(|error| recovery(error.detail))?;
         Ok::<_, Error>(())
     })
     .map_err(|error| failure(&error))
@@ -594,7 +659,17 @@ pub(super) fn over(path: &Path, id: &str, candidate: &VcsSnapshot) -> bool {
     pollster::block_on(async {
         let ws = load(path)?;
         let repo = ws.repo_loader().load_at_head().await?;
-        let name = WorkspaceNameBuf::from(format!("plak-{id}"));
+        let backend = repo
+            .store()
+            .backend()
+            .downcast_ref::<jj_lib::git_backend::GitBackend>()
+            .ok_or("only Git-backed JJ repositories are supported")?;
+        let (namespace, agent) =
+            super::occupancy_vcs::copy_namespace_owner(backend.git_repo().common_dir(), id)
+                .map_err(|error| error.detail)?;
+        let name = WorkspaceNameBuf::from(
+            super::occupancy_vcs::copy_names(&namespace[..8], &agent).jj_workspace,
+        );
         let child = repo.view().get_wc_commit_id(&name).ok_or("copy missing")?;
         let child = repo.store().get_commit_async(child).await?;
         let ancestor =
@@ -677,13 +752,13 @@ pub(super) fn pin(
     id: &str,
     commit: Option<&str>,
 ) -> std::result::Result<(), VcsError> {
-    pin_reference(
+    pin_transaction(
         path,
         namespace,
-        &super::occupancy_vcs::candidate_ref(namespace, id),
+        &[(super::occupancy_vcs::candidate_ref(namespace, id), commit)],
         id.starts_with("failed-"),
         false,
-        commit,
+        None,
     )
 }
 
@@ -693,35 +768,7 @@ pub(super) fn pin_references(
     refs: &[(String, Option<&str>)],
     create_only: bool,
 ) -> std::result::Result<(), VcsError> {
-    pin_transaction(path, namespace, refs, create_only, true)
-}
-
-fn pin_base(path: &Path, id: &str, commit: Option<&str>) -> std::result::Result<(), VcsError> {
-    let reference = base_reference(id);
-    let prefix = id.split_once('-').map_or(id, |(namespace, _)| namespace);
-    let namespace = if prefix.len() == 64 && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        prefix.to_owned()
-    } else {
-        super::occupancy_vcs::digest_text(id)
-    };
-    pin_reference(path, &namespace, &reference, false, true, commit)
-}
-
-fn pin_reference(
-    path: &Path,
-    namespace: &str,
-    reference: &str,
-    create_only: bool,
-    overwrite: bool,
-    commit: Option<&str>,
-) -> std::result::Result<(), VcsError> {
-    pin_transaction(
-        path,
-        namespace,
-        &[(reference.to_owned(), commit)],
-        create_only,
-        overwrite,
-    )
+    pin_transaction(path, namespace, refs, create_only, true, None)
 }
 
 fn pin_transaction(
@@ -730,6 +777,7 @@ fn pin_transaction(
     refs: &[(String, Option<&str>)],
     create_only: bool,
     overwrite: bool,
+    reservation: Option<&std::fs::File>,
 ) -> std::result::Result<(), VcsError> {
     use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
     pollster::block_on(async {
@@ -741,9 +789,10 @@ fn pin_transaction(
             .downcast_ref::<jj_lib::git_backend::GitBackend>()
             .ok_or("only Git-backed JJ repositories are supported")?;
         let git = backend.git_repo();
-        let _namespace_guard =
-            super::occupancy_vcs::reserve_candidate_namespace(git.common_dir(), namespace)
-                .map_err(|error| recovery(&error.detail))?;
+        let _namespace_guard = if reservation.is_none() {
+            Some(super::occupancy_vcs::reserve_candidate_namespace(git.common_dir(), namespace)
+                .map_err(|error| recovery(&error.detail))?)
+        } else { None };
         let mut edits = Vec::new();
         for (reference, commit) in refs {
             let change = if let Some(commit) = commit {

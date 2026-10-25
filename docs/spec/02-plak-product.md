@@ -823,6 +823,9 @@ current trees are selected only through their tombstones. Physical ownership nam
 are maintenance inventory, never session opens or resume authority. Maintenance
 inventory accepts tree schemas from 1 through the tree store's current
 `SCHEMA_VERSION`, including the current-key store; unknown versions fail closed.
+For schemas through 8 it derives legacy `refs/heads/plak/<directory>` names;
+schema 9 reads recorded Git branches from `agent_nodes.branch`, including
+`plak/<tree8>/<agent>`, and inventories base, candidate-base and adoption pins.
 Doctor uses the same version bound for its unowned-worktree inventory. Current
 sessions and their lineage, including carried-forward source ids in the
 reference ledger, protect their artifacts by exact id membership, including shared
