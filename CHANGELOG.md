@@ -52,6 +52,15 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Persisted formats
 
+- Runtime format epoch 33: the cell compiler uses one v3 descriptor identity
+  recipe for product JavaScript, Python PTC (structured and freeform), and
+  Codex Code Mode (native and minimal). Their descriptor identities rotate;
+  the Python profile, presentation, result, catalog and limits component
+  facts remain unchanged. Model-visible text and outer and nested projection
+  digests are unchanged.
+  - Cell attachment identities: pending the unified facade attachment change.
+  State key `r25.e33.p33.t8`; carry a session with `/reload` or export and
+  import. Export document version 8 is unchanged.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine
   contract and adapter `plakous.monty-python-adapter.v8` instead of the
   monty-pool contract and adapter v7. Its worker artifact, host and containment
