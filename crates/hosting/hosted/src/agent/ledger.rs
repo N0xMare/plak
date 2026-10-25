@@ -280,7 +280,7 @@ fn prepare(
                 CommandKind::Followup => AgentCommandKind::Followup,
                 CommandKind::Corrective => AgentCommandKind::Corrective,
                 CommandKind::Resume => AgentCommandKind::Resume,
-                CommandKind::RootStart | CommandKind::HostWake => {
+                CommandKind::RootStart | CommandKind::RootSteer(_) | CommandKind::HostWake => {
                     return Err("root command passed to child ledger".into());
                 }
             },

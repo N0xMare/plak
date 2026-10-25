@@ -1607,12 +1607,17 @@ one product edge to transport fault injection as well.
 
 Hosted ledger equivalence tests `root_ledger_prechange_bytes`,
 `root_batched_command_bytes`, `child_ledger_prechange_bytes`, and
-`mail_start_batched_command_bytes` pin product submission and tree-command
+`mail_start_batched_command_bytes`, and `root_send_now_command_bytes` pin product submission and tree-command
 fields and exact prompt bytes. Batched root Start and host wake fixtures check
-the tree `RootBatch` row and session touch; mail Start carries its primary
+the tree `RootBatch` row and session touch; send-now pins its target turn,
+untouched session timestamp and repeated pending-intent save. Mail Start carries its primary
 envelope, another unread envelope and a child result. The explicit-intent
 matrices cover root Start, host wake and transient resume, and child spawn,
 wake, transient resume, corrective, mail Start, follow-up and steer.
+`interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable` checks
+typed preparation/settlement refusals, retained unread mail and exact retry;
+`live_steer_skips_intent_reads_and_preserves_typed_store_refusals` checks typed
+product capacity refusal before dispatch and during root settlement.
 
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on

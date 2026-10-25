@@ -6,6 +6,8 @@ use super::{
     sessions,
 };
 use super::{HostBoundary, HostWorkflow, observe_boundary};
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger, Settlement};
+use crate::runtime::ledger::RootLedger;
 use crate::sessions::projector::{Submission, SubmissionKind};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -59,13 +61,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 .ok_or_else(|| "stored steer has no target turn".to_owned())?
                 .parse()
                 .map_err(|_| "stored steer target is invalid".to_owned())?;
-            self.host
-                .store
-                .save_submission(self.host.session, &intent)?;
+            let prepared =
+                RootLedger::new(self.host.rows, self.host.store, self.host.session, &item)
+                    .prepare(CommandIntent {
+                        command_id: &intent.command_id,
+                        kind: CommandKind::RootSteer(turn_id),
+                        base_text: &intent.canonical_command,
+                        batch: BatchRule::None,
+                    })
+                    .map_err(String::from)?;
             Ok(plakous::agent::TurnCommand::Steer {
                 command_id,
                 turn_id,
-                input: item.user_input(&intent.canonical_command),
+                input: item.user_input(&prepared.prompt),
             })
         })();
         let command = match dispatch {
@@ -90,11 +98,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             Ok(submission) => submission,
             Err(error) => {
                 if error.kind() == plakous::agent::ControlErrorKind::Backpressure && !was_pending {
-                    if let Err(save_error) = self.host.store.discard_submission(
-                        self.host.session,
-                        &intent.command_id,
-                        None,
-                    ) {
+                    if let Err(save_error) =
+                        RootLedger::new(self.host.rows, self.host.store, self.host.session, &item)
+                            .settle(&intent.command_id, Settlement::Refused { pause: None })
+                            .map_err(String::from)
+                    {
                         report_queue_persist_failed(
                             self.host.events,
                             self.host.home,
@@ -186,10 +194,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 "queued prompt already ran; its result is no longer kept",
             );
             candidate.record_notice(row.clone());
-            match self
-                .host
-                .store
-                .discard_submission(&mut candidate, &intent.command_id, None)
+            match RootLedger::new(self.host.rows, self.host.store, &mut candidate, &item)
+                .settle(&intent.command_id, Settlement::Consumed)
+                .map_err(String::from)
             {
                 Ok(()) => {
                     *self.host.session = candidate;
@@ -233,11 +240,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 let cause = sessions::projector::HostPauseCause::UnrecordedRefusal {
                     reason: error.to_string(),
                 };
-                if let Err(save_error) = self.host.store.discard_submission(
-                    self.host.session,
-                    &intent.command_id,
-                    Some(cause),
-                ) {
+                if let Err(save_error) =
+                    RootLedger::new(self.host.rows, self.host.store, self.host.session, &item)
+                        .settle(
+                            &intent.command_id,
+                            Settlement::Refused { pause: Some(cause) },
+                        )
+                        .map_err(String::from)
+                {
                     report_queue_persist_failed(
                         self.host.events,
                         self.host.home,

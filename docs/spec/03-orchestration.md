@@ -2046,10 +2046,18 @@ Fresh intents name their command kind and batching rule explicitly. Duplicate
 settlement projects through the role's reader, then applies one rule: settle
 from an acceptance fact, or consume an absent fact only below a positive
 retained feed boundary; a rejected fact is never consumption. Child mail never
-enters the product queue. Command identities use these pinned spellings:
+enters the product queue. Product-store refusals and interrupted tree-capacity
+refusals retain their typed classification through preparation and settlement;
+child publication waits belong to the command recipient. Command identities use these pinned spellings:
 `plak.queue.`, `plak:child-wake:`, `plak:resume-transient:root:`,
 `plak:park-wake:`, `plak:resume-transient:{agent}:`, `plak:submit-harness:`,
-`plak:spawn-start:`, and `plak:mail:{id}:{start|follow-up|steer}`.
+`plak:spawn-start:`, `plak:mail:{id}:{start|follow-up|steer}`, and
+`plak.send-now.{id}.{revision}`. A live-root send-now steer uses this ledger's
+root adapter with its exact target turn and the stored `send_now_steer` kind.
+Preparation saves the pending intent in place on the live session, including
+an exact retry, without a session touch, a clone, or an existence pre-read.
+Consumed settlement discards the intent; an unrecorded definite refusal
+discards it with its pause cause, while uncertain outcomes retain it.
 
 Nested parents receive the same bounded context on their next authorized child
 start. The command is first written as an `agent_commands` intent (§14.3) with

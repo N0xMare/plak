@@ -305,13 +305,86 @@ fn child_integrity_refusals_preserve_the_intent() {
     );
 }
 
+#[test]
+fn interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable() {
+    use crate::driver::ledger::LedgerError;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut tree, child) = root_with_child(dir.path(), "ledger-capacity");
+    tree.send_agent_message("root", &parent_mail(&child, "continue"), None)
+        .unwrap();
+    let store = std::sync::Arc::new(SecondSaveStore {
+        inner: crate::agent_tree::MemoryTreeStore::new(),
+        saves: AtomicUsize::new(0),
+        stale: false,
+        full: true,
+    });
+    let driver = TreeDriver::new(
+        std::sync::Arc::new(std::sync::Mutex::new(tree.clone())),
+        store.clone(),
+        tree.vcs_port(),
+        None,
+    );
+    let command = format!("plak:park-wake:{child}:1:c1-a1:1");
+    let mut ledger = ChildLedger::new(&driver, &child);
+    let prepare = |ledger: &mut ChildLedger<'_>| {
+        ledger.prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::Wake,
+            base_text: "wake",
+            batch: BatchRule::WakeAll,
+        })
+    };
+    assert!(
+        matches!(prepare(&mut ledger), Err(LedgerError::TreeStorageFull(error))
+        if error.code == crate::agent_tree_protocol::TopologyErrorCode::RecoveryStorageUnavailable)
+    );
+    driver
+        .read(|tree| {
+            assert!(tree.command(&command).is_none());
+            assert_eq!(tree.mail("m1").unwrap().durable, MailDurableState::Accepted);
+        })
+        .unwrap();
+    let prepared = prepare(&mut ledger).unwrap();
+    assert_eq!(prepared.message_ids, ["m1"]);
+    let before = driver.read(|tree| tree.command(&command).cloned()).unwrap();
+    store.saves.store(1, Ordering::SeqCst);
+    let refused = ledger.settle(&command, Settlement::Refused { pause: None });
+    let Err(LedgerError::TreeStorageFull(error)) = refused else {
+        panic!("tree capacity refusal must remain typed")
+    };
+    let product = crate::session_store::RecordStoreError::from(LedgerError::TreeStorageFull(error));
+    assert_eq!(
+        product.refusal(),
+        Some(crate::error::StoreRefusal::StorageFull)
+    );
+    assert_eq!(
+        before,
+        driver.read(|tree| tree.command(&command).cloned()).unwrap()
+    );
+    ledger
+        .settle(&command, Settlement::Refused { pause: None })
+        .unwrap();
+    driver
+        .read(|tree| {
+            assert!(tree.command(&command).unwrap().withdrawn);
+            assert_eq!(tree.mail("m1").unwrap().durable, MailDurableState::Accepted);
+        })
+        .unwrap();
+}
+
 struct SecondSaveStore {
     inner: crate::agent_tree::MemoryTreeStore,
     saves: std::sync::atomic::AtomicUsize,
     stale: bool,
+    full: bool,
 }
 
 impl crate::agent_tree::TreeStore for SecondSaveStore {
+    fn storage_wait_cancelled(&self) -> bool {
+        self.full
+    }
+
     fn exists(&self, id: &str) -> Result<bool, crate::agent_tree::TreeStoreError> {
         self.inner.exists(id)
     }
@@ -329,7 +402,9 @@ impl crate::agent_tree::TreeStore for SecondSaveStore {
         tree: &ProductAgentTree,
     ) -> Result<crate::agent_tree::Revision, crate::agent_tree::TreeStoreError> {
         if self.saves.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
-            return Err(if self.stale {
+            return Err(if self.full {
+                crate::agent_tree::TreeStoreError::storage_full()
+            } else if self.stale {
                 crate::agent_tree::TreeStoreError::stale(tree.stored_revision + 1, tree.revision)
             } else {
                 crate::agent_tree::TreeStoreError::unavailable("second save refused")
@@ -359,6 +434,7 @@ fn duplicate_projection_second_save_refusal_restores_command_and_cursor() {
             inner: crate::agent_tree::MemoryTreeStore::new(),
             saves: std::sync::atomic::AtomicUsize::new(0),
             stale,
+            full: false,
         });
         let driver = TreeDriver::new(
             std::sync::Arc::new(std::sync::Mutex::new(tree.clone())),

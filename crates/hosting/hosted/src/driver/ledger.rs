@@ -13,6 +13,7 @@ use crate::sessions::projector::HostPauseCause;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CommandKind {
     RootStart,
+    RootSteer(plakous::model::TurnId),
     HostWake,
     Resume,
     Start,

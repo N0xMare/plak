@@ -141,9 +141,10 @@ impl<'a> RootLedger<'a> {
 
 impl CommandLedger for RootLedger<'_> {
     fn prepare(&mut self, intent: CommandIntent<'_>) -> Result<Prepared, LedgerError> {
-        let kind = match intent.kind {
-            CommandKind::RootStart => SubmissionKind::RootStart,
-            CommandKind::HostWake | CommandKind::Resume => SubmissionKind::HostWake,
+        let (kind, target_turn_id) = match intent.kind {
+            CommandKind::RootStart => (SubmissionKind::RootStart, None),
+            CommandKind::RootSteer(turn) => (SubmissionKind::SendNowSteer, Some(turn.to_string())),
+            CommandKind::HostWake | CommandKind::Resume => (SubmissionKind::HostWake, None),
             _ => {
                 return Err(LedgerError::Integrity(
                     "child command passed to root ledger".into(),
@@ -159,8 +160,31 @@ impl CommandLedger for RootLedger<'_> {
                 ));
             }
         };
-        // Ordinary unbatched starts did not touch or pre-read the record;
-        // retain that exact write boundary, including its crash label.
+        let submission = Submission {
+            command_id: intent.command_id.to_owned(),
+            kind,
+            queue_item_id: self.item.id.clone(),
+            queue_item_revision: self.item.revision,
+            target_turn_id,
+            canonical_command: intent.base_text.to_owned(),
+            submitted_at_ms: self.item.submitted_at_ms,
+        };
+        if kind == SubmissionKind::SendNowSteer {
+            if batch.is_some() {
+                return Err(LedgerError::Integrity(
+                    "root steer cannot carry a tree batch".into(),
+                ));
+            }
+            // A live steer writes in place, including an exact retry. It must
+            // neither touch the session nor reject an already-pending intent.
+            self.store.save_submission(self.session, &submission)?;
+            return Ok(Prepared {
+                prompt: intent.base_text.to_owned(),
+                message_ids: Vec::new(),
+                instruction: false,
+            });
+        }
+        // Only batch preparation pre-reads and touches the record.
         let batch_preparation = batch.is_some() || kind == SubmissionKind::HostWake;
         if batch_preparation
             && self
@@ -182,18 +206,7 @@ impl CommandLedger for RootLedger<'_> {
         if batch_preparation {
             candidate.touch();
         }
-        let saved = self.store.save_submission(
-            &mut candidate,
-            &Submission {
-                command_id: intent.command_id.to_owned(),
-                kind,
-                queue_item_id: self.item.id.clone(),
-                queue_item_revision: self.item.revision,
-                target_turn_id: None,
-                canonical_command: intent.base_text.to_owned(),
-                submitted_at_ms: self.item.submitted_at_ms,
-            },
-        );
+        let saved = self.store.save_submission(&mut candidate, &submission);
         if let Err(error) = saved {
             if error.refusal().is_some()
                 && let Some(batch) = &batch

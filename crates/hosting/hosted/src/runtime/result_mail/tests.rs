@@ -93,6 +93,57 @@ fn root_batched_command_bytes() {
 }
 
 #[test]
+fn root_send_now_command_bytes() {
+    use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger};
+    use crate::sessions::projector::{Submission, SubmissionKind};
+    let dir = tempfile::tempdir().unwrap();
+    let rows = MemoryRows::new();
+    let mut session = SessionRecord::new(dir.path().to_owned());
+    session.updated_at_unix = 1;
+    rows.records().save(&mut session).unwrap();
+    let intent = Submission {
+        command_id: "plak.send-now.00000000-0000-4000-8000-000000000001.3".into(),
+        kind: SubmissionKind::SendNowSteer,
+        queue_item_id: "00000000-0000-4000-8000-000000000001".into(),
+        queue_item_revision: 3,
+        target_turn_id: Some("00000000-0000-4000-8000-000000000002".into()),
+        canonical_command: "steer now".into(),
+        submitted_at_ms: 42,
+    };
+    let mut item = QueueItem::new("steer now");
+    item.id.clone_from(&intent.queue_item_id);
+    item.revision = intent.queue_item_revision;
+    item.submitted_at_ms = intent.submitted_at_ms;
+    for _ in 0..2 {
+        let revision = session.store_revision;
+        RootLedger::new(&rows, rows.records(), &mut session, &item)
+            .prepare(CommandIntent {
+                command_id: &intent.command_id,
+                kind: CommandKind::RootSteer(
+                    intent.target_turn_id.as_ref().unwrap().parse().unwrap(),
+                ),
+                base_text: &intent.canonical_command,
+                batch: BatchRule::None,
+            })
+            .unwrap();
+        assert!(session.store_revision > revision);
+        assert_eq!(session.updated_at_unix, 1);
+        let intents = rows.records().load_intents(&session.id).unwrap();
+        let submission = intents.submission(&intent.command_id).unwrap();
+        let bytes = serde_json::to_string(&serde_json::json!({
+            "command_id": submission.command_id, "kind": submission.kind.as_str(),
+            "queue_item_id": submission.queue_item_id, "queue_item_revision": submission.queue_item_revision,
+            "target_turn_id": submission.target_turn_id, "canonical_command": submission.canonical_command,
+            "submitted_at_ms": submission.submitted_at_ms,
+        })).unwrap();
+        assert_eq!(
+            bytes,
+            r#"{"canonical_command":"steer now","command_id":"plak.send-now.00000000-0000-4000-8000-000000000001.3","kind":"send_now_steer","queue_item_id":"00000000-0000-4000-8000-000000000001","queue_item_revision":3,"submitted_at_ms":42,"target_turn_id":"00000000-0000-4000-8000-000000000002"}"#
+        );
+    }
+}
+
+#[test]
 fn root_ledger_prechange_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let rows = MemoryRows::new();
