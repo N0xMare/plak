@@ -29,7 +29,131 @@ struct VcsFaultSettled {
     attempt_id: Option<super::AttemptId>,
 }
 
+#[derive(Clone, Debug)]
+pub(super) enum BasePinRecovery {
+    Pending(Arc<()>),
+    Failed(String),
+    Complete,
+}
+
 impl ProductAgentTree {
+    fn recovery_base_pins(&self) -> Vec<super::BasePinTicket> {
+        self.workspaces
+            .values()
+            .filter(|row| {
+                row.status == WorkspaceStatus::Adopting
+                    && row.mode != WorkspaceMode::Inherit
+                    && !self.reclaimed(&row.workspace_id)
+                    && row.path.exists()
+            })
+            .filter(|row| {
+                self.operations.values().any(|op| {
+                    op.tool_name == VCS_FAULT_KIND
+                        && !self.vcs_fault_is_settled(&op.caller_agent_id, &op.operation_id, true)
+                        && serde_json::from_str::<VcsFault>(&op.canonical_request).is_ok_and(
+                            |fault| fault.workspace_id.as_deref() == Some(&row.workspace_id),
+                        )
+                })
+            })
+            .filter_map(|row| {
+                Some(super::BasePinTicket {
+                    ownership: Arc::new(()),
+                    workspace_id: row.workspace_id.clone(),
+                    path: row.path.clone(),
+                    agent_id: self.workspace_producer(&row.workspace_id).ok()?,
+                    namespace: super::digest_text(&self.tree_id),
+                    base: row.base_commit.clone()?,
+                })
+            })
+            .collect()
+    }
+
+    fn queue_recovery_base_pins(&mut self) {
+        for ticket in self.recovery_base_pins() {
+            if self.base_pin_recovery.contains_key(&ticket.workspace_id) {
+                continue;
+            }
+            self.base_pin_recovery.insert(
+                ticket.workspace_id.clone(),
+                BasePinRecovery::Pending(ticket.ownership.clone()),
+            );
+            self.effects.base_pins.push(ticket);
+        }
+    }
+
+    pub(super) fn check_base_pin_recovery(&self, workspace: &str) -> Result<(), TopologyError> {
+        let detail = match self.base_pin_recovery.get(workspace) {
+            Some(BasePinRecovery::Pending(_)) => "base-pin reconciliation is pending".to_owned(),
+            Some(BasePinRecovery::Failed(reason)) => {
+                format!("base-pin reconciliation failed: {reason}; reopen to retry")
+            }
+            _ => return Ok(()),
+        };
+        Err(TopologyError::new(
+            TopologyErrorCode::WorkspaceRecoveryRequired,
+            format!("workspace {workspace} {detail}; nothing was adopted"),
+        ))
+    }
+
+    pub(super) fn finish_base_pin_recovery(
+        &mut self,
+        ticket: super::BasePinTicket,
+        result: Result<(), VcsError>,
+    ) {
+        if !matches!(self.base_pin_recovery.get(&ticket.workspace_id),
+            Some(BasePinRecovery::Pending(owner)) if Arc::ptr_eq(owner, &ticket.ownership))
+        {
+            return;
+        }
+        match result {
+            Ok(()) => {
+                self.base_pin_recovery
+                    .insert(ticket.workspace_id, BasePinRecovery::Complete);
+            }
+            Err(error) => {
+                let reason = format!(
+                    "workspace {} base pin recovery failed: {}",
+                    ticket.workspace_id, error.detail
+                );
+                self.base_pin_recovery.insert(
+                    ticket.workspace_id.clone(),
+                    BasePinRecovery::Failed(error.detail),
+                );
+                self.fault_reasons
+                    .insert(ticket.agent_id.clone(), reason.clone());
+                let fault = VcsFault {
+                    source_id: format!(
+                        "base-pin-recovery:{}:{}",
+                        ticket.workspace_id, self.host_generation
+                    ),
+                    workspace_id: Some(ticket.workspace_id),
+                    attempt_id: self
+                        .nodes
+                        .get(&ticket.agent_id)
+                        .and_then(|node| node.attempt_id.clone()),
+                    reason,
+                };
+                self.record_vcs_fault(
+                    &ticket.agent_id,
+                    fault,
+                    self.vcs_fault_anchor(&ticket.agent_id),
+                );
+                if let Err(error) = self.fold_due(&ticket.agent_id) {
+                    tracing::error!(agent_id = %ticket.agent_id, refusal = %error.message, "base pin recovery fault fold refused");
+                }
+            }
+        }
+    }
+
+    pub(super) fn workspace_has_vcs_fault(&self, workspace: &str) -> bool {
+        self.operations.values().any(|op| {
+            op.tool_name == VCS_FAULT_KIND
+                && !self.vcs_fault_is_settled(&op.caller_agent_id, &op.operation_id, true)
+                && serde_json::from_str::<VcsFault>(&op.canonical_request)
+                    .is_ok_and(|fault| fault.workspace_id.as_deref() == Some(workspace))
+        })
+    }
+
     /// Lifts the restore overlay after acknowledged host consequences quiesce.
     pub(crate) fn lift_restored_pause_if_quiescent(&mut self) {
         if self.state == TreeAdmissionState::RestoredPaused && self.quiescence_refusal().is_none() {
@@ -56,6 +180,7 @@ impl ProductAgentTree {
             root.status = NodeStatus::Running;
         }
         self.fault_in_flight_vcs();
+        self.queue_recovery_base_pins();
         let agents: std::collections::BTreeSet<_> = self
             .operations
             .values()
@@ -811,8 +936,8 @@ impl ProductAgentTree {
     }
 
     /// Queues removal of every forked copy nothing needs any more: all its
-    /// occupants are closed and settled, and it backs no unadopted candidate
-    /// and no live copy's base. These are the `discard_workspace` checks,
+    /// occupants are closed and settled, and it backs no unadopted candidate.
+    /// These are the `discard_workspace` checks,
     /// applied by the host after a close, a seal, or an adopt, so closed
     /// children do not leave worktrees behind. An adopted candidate stays
     /// reachable through its pin; the copy itself is disposable.
@@ -860,7 +985,9 @@ impl ProductAgentTree {
     fn candidate_ids_of(&self, workspace_id: &str) -> Vec<String> {
         self.candidates
             .values()
-            .filter(|candidate| candidate.workspace_id == workspace_id)
+            .filter(|candidate| {
+                candidate.workspace_id == workspace_id && candidate.adopted_by.is_none()
+            })
             .map(|candidate| candidate.candidate_id.as_str().to_owned())
             .collect()
     }
@@ -898,7 +1025,6 @@ impl ProductAgentTree {
         if !settled {
             return false;
         }
-        let mut sealed_here = Vec::new();
         for candidate in self
             .candidates
             .values()
@@ -910,18 +1036,10 @@ impl ProductAgentTree {
             if candidate.adopted_by.is_none() && !retrying_removal {
                 return false;
             }
-            sealed_here.push(&candidate.commit);
         }
-        !self.workspaces.values().any(|row| {
-            row.workspace_id != workspace_id
-                && row
-                    .base_commit
-                    .as_ref()
-                    .is_some_and(|base| sealed_here.contains(&base))
-                && self.nodes.values().any(|node| {
-                    node.workspace_id == row.workspace_id && node.status != NodeStatus::Closed
-                })
-        })
+        // Every dependent copy pins its own base independently of this
+        // checkout and of the producing candidate's retention lifetime.
+        true
     }
 
     pub(super) fn finish_unmint(
@@ -1081,6 +1199,7 @@ impl ProductAgentTree {
             WorkspaceMode::Snapshot
         };
         Ok(WorkspacePlan::Mint(MintTicket {
+            namespace: super::digest_text(&self.tree_id),
             launch_checkout: self.launch_checkout.clone(),
             agent_id: reserved_agent_id.to_owned(),
             copy_id: copy_id(&self.tree_id, reserved_agent_id),
@@ -1099,11 +1218,13 @@ impl ProductAgentTree {
         reserved_agent_id: &str,
         mode: WorkspaceMode,
         minted: MintedCopy,
+        input_candidate_id: Option<super::CandidateId>,
     ) -> BoundWorkspace {
         let workspace_id = format!("ws-{reserved_agent_id}");
         self.workspaces.insert(
             workspace_id.clone(),
             WorkspaceRecord {
+                input_candidate_id,
                 workspace_id: workspace_id.clone(),
                 owner_agent_id: caller_id.to_owned(),
                 path: minted.path.clone(),

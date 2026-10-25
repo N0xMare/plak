@@ -1078,11 +1078,12 @@ successful empty candidate; unresolved seal or session work cannot be discarded.
 
 **Closed copies are pruned by the host.** After a close, a seal, or an adopt,
 every forked copy whose occupants are all closed and settled, that backs no
-unadopted candidate and no live copy's base (the checks above), is removed the
+unadopted candidate (the checks above), is removed the
 same way: marked `discarding`, published, removed, then `discarded`. An adopted
 candidate's content already lives in its adopter, so its copy is disposable
 once its occupants close; an open finished node retains its copy and base for
-followup attempts. Removal also drops that candidate's pin (§6.1). A
+followup attempts. Removal drops only the copy's base pin (§6.1), not a retained
+candidate's pins. Dependent copies pin their own bases. A
 closed node with no candidate also releases its copy. A candidate still
 adoptable always retains its copy and pin. A prune that fails puts the row back to its prior status and records a
 fault on the root; the closed nodes do not become recovery-required, and the
@@ -1436,8 +1437,10 @@ removal of the directory, `git worktree prune`, and `git branch -D
 plak/<copy_id>` when that branch exists. Child-id allocation therefore does not
 skip a `.plak/worktrees/<copy_id>` the tree has no row for.
 
-**Seal.** `snapshot(<child path>)`, then
-`git update-ref refs/plak/<namespace>/candidates/<candidate_id> <commit>` run inside the
+**Seal.** `snapshot(<child path>)`, then one `git update-ref --stdin`
+transaction publishes `refs/plak/<namespace>/candidates/<candidate_id>` and
+`refs/plak/<namespace>/candidate-bases/<candidate_id>` for the candidate and
+its recorded base. Both updates prepare before either is committed, inside the
 child, so discarding the worktree and the `plak/<copy_id>` branch cannot
 orphan the candidate. The child's own `HEAD` is deliberately **not** advanced;
 adoption never needs a checkout.
@@ -1456,11 +1459,48 @@ and fork branches already use the full tree digest and do not collide.
 **Discard.** `git worktree remove --force <dest>`, then the directory, then
 `git branch -D plak/<copy_id>`. Only a copy whose candidates are all adopted,
 or whose settled owner explicitly gives up its candidates, is removed (§4.8),
-and once it is gone the tree deletes each of those candidates'
-`refs/plak/<namespace>/candidates/<candidate_id>` pins (best effort: a pin that survives
-only keeps an adopted or explicitly relinquished commit reachable). An adopted candidate whose copy is
-removed is then refused as a spawn `inputs` entry with `input_not_sealed`; fork
-the node that adopted it instead.
+and once it is gone the tree drops `refs/plak/<namespace>/bases/<agent>`.
+Candidate records retain their candidate, candidate-base and adopted-before/
+after pins until record collection. A retained adopted candidate remains a
+spawn input after its checkout is removed. Explicit discard relinquishes
+unadopted candidate pins. Cleanup retains durable ownership until all of a
+collected record's refs have been removed successfully.
+
+Mint creates the copy's `bases/<agent>` pin after worktree creation and before
+installing the fence. Reclaiming an orphan mint removes its stale base pin
+before the new create-only publication. Adoption pins the target snapshot at
+`adopted/<id>-before` and the exact merged tree's wrapper at
+`adopted/<id>-after` in one transaction after applying the patch. That wrapper
+has the target snapshot as its parent; it does not race a second working-tree
+snapshot or advance the target branch. Native JJ publishes the same candidate
+base and adoption ref families through its Git backend.
+For a producing copy that is still present, the adoption transaction also
+advances its base pin to the candidate, matching the workspace row's new base.
+Collecting the candidate record therefore cannot orphan an open copy's base.
+Reopen queues copy-base reconciliation for interrupted `adopting` rows once per
+host generation. Copies with absent paths, missing bases or unknown producers
+are skipped. Driver attachment drains and completes this dedicated queue before
+returning; ordinary mutation effects cannot take or discard it. A queued
+reconciliation must complete before that workspace can admit an adoption retry;
+no other settle queues it again. Attachment acknowledges the reopened generation
+before changing refs; a refused publication changes no pin and fails that
+workspace's reconciliation with the `reopen to retry` remedy, never a silent
+pending hold. A failure records a
+workspace-local VCS fault and holds its retries until reopen, without failing
+unrelated topology effects. A successful reconciliation republishes the pin
+from the committed workspace row before hosted fence construction. It does not
+decide whether the landing applied: the VCS recovery hold remains and no files
+are changed or retried. A retried landing cannot race a queued reconciliation.
+A provenance-publication failure after applying files is
+`workspace_recovery_required`: retained target files must be inspected before
+another landing; it is not reported as an unavailable operation that did nothing.
+Publication failure on a zero-file landing is `mint_unavailable` unless this
+is a retry of an unsettled interrupted adoption. That retry retains its
+`workspace_recovery_required` hold: earlier target files may already have landed.
+Any failed retry of an unsettled interrupted adoption — conflict, target changed,
+unavailable or recovery required — retains the `adopting` row and recovery hold.
+The operator inspects the target, then uses `close_agent`; the copy and its
+provenance pins remain until tree deletion.
 
 Because the base is computed at mint, a dirty parent checkout is captured
 exactly, rather than copied in as loose files and merged afterwards.
@@ -1708,10 +1748,25 @@ After conversation retirement, keep each such candidate plus a minimal listable
 closed child record naming all retained candidates, and minimal ancestor rows
 needed to retain their tree membership. It says the conversation
 was retired, accepts no follow-up, and remains adoptable and usable as spawn
-inputs. Adopted and empty refs may be collected; their exact unpin intents stay
+inputs. Each collected candidate releases its candidate, candidate-base and
+adopted-before/after refs together. Adopted and empty refs may be collected; their exact unpin intents stay
 until cleanup succeeds. Unknown ignored/secret or uncertain checkout contents
 prevent sealing, reclamation and retirement, regardless of either bound.
 Bounds are soft where safe collection is unavailable or protected work remains.
+Collection publishes a `candidate_unpin` operation with the exact candidate-id
+array in the same save that removes the records. The unlocked VCS phase drops
+all four ref families; only a successful cleanup acknowledges and removes that
+intent. A failure or process loss leaves an idempotent obligation for reopen.
+Maintenance inventories these pending refs even after the records are gone.
+Failed-turn rescue snapshots have `rescue_pin` ownership rows in
+`agent_operations`, published before sealing and containing the exact pin-id
+array under the producing agent. They are not adoptable candidates. Their
+candidate and candidate-base refs remain owned until that child's conversation
+is collected; collection transfers them into the same durable `candidate_unpin`
+cleanup intent. Maintenance and deleted-session inventory include both live
+rescue ownership and pending cleanup, so removing a tree also releases its
+rescue refs. A refused snapshot can leave an owner with no refs, which cleans
+up through the same idempotent rule.
 
 ## 7. Adoption
 
@@ -1743,12 +1798,13 @@ files_truncated? }`, plus `warning` when running processes still use the
 checkout. `files` lists at most 64 changed paths (`"M src/lib.rs"`,
 `"R old.rs -> new.rs"`); `files_changed` remains the full count. The warning is JSON
 inside the stored receipt and replays verbatim, not a fresh observation.
-The candidate durably records `merged_at`, the commit component of
+The candidate durably records `target_before` and `merged_at`, the commit component of
 `target_after`, alongside its adopter and evidence. `list_agents` exposes this
-field and `plak session show` says `merged at <commit>`. On Git this is the
+field and `plak session show` says `merged at <after> (before <before>)`. On Git this is the
 internal target snapshot, never a new commit on the root branch. A failed or
 conflicted adoption records no merged-at commit. Cleanup does not erase this
-provenance even when its worktree, branch and pin are removed.
+provenance when its worktree or branch is removed; the record owns its pins
+until collection.
 
 ### 7.1 Base identity and expectations
 
@@ -1841,10 +1897,10 @@ Typed refusals: `not_sealed`, `not_authorized`, `candidate_unknown`,
 - a candidate built on another candidate this caller has not adopted. The
   refusal names that input. When the input landed in another node, it names
   that node: adopt the input first (or that node's candidate), or the landing
-  would drop the input's changes. On both backends the input is the candidate
-  whose immutable commit is this candidate's recorded `base_commit`; the mint
-  preserves that identity even when jj later rewrites live ancestry. This check
-  performs no repository probes and does not truncate the candidate scan.
+  would drop the input's changes. On both backends the producing workspace's
+  `input_candidate_id` records this identity at mint, independent of live
+  ancestry, later seals and later base advancement. This check performs no
+  repository probes or candidate scan.
   The caller's own earlier adoption of the input passes.
   An inherit adopter in the caller's resolved checkout has already landed the
   input there. Otherwise carriers are followed transitively, including later
@@ -2513,8 +2569,12 @@ other than that own branch. The guard refuses:
   pass; the remedy is `commit WIP on <own branch>`, or `git stash create`
   followed by `git show <object>`, or retaining the file, when the snapshot
   has no branch);
-- `gc --prune=<date>`, `prune` other than `-n`/`--dry-run`, `reflog expire`,
-  `reflog delete`, `reflog drop`, and `repack -a/-A -d` (including clusters).
+- `gc --prune=<value>` except `--prune=never`, `prune` other than `-n`/`--dry-run`,
+  `reflog expire`/`delete` with `--all` or the shared stash, `reflog drop`,
+  and `repack -a/-A -d` (including clusters). Ordinary named reflog expiry
+  and deletion pass because provenance objects have independent pins;
+  `--updateref` still checks its written branch against protected refs and
+  branches checked out elsewhere.
   `gc` and `maintenance` are refused when `-c`, `--config-env` or
   `GIT_CONFIG_PARAMETERS` or indexed `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/
   `GIT_CONFIG_VALUE_n` explicitly sets `gc.pruneExpire` or `gc.reflogExpire*`
@@ -2528,9 +2588,9 @@ other than that own branch. The guard refuses:
 
 A pin is read with `git show <ref>`. Any other protected branch is answered
 with `work on <own branch>`. Push to a real remote and PR creation are not guarded.
-Immediate pruning (`gc --prune=now` and mutating `prune`) is permanently
-refused because it races in-flight object writes. Reflog expiry and deletion
-are refused while provenance objects remain unpinned.
+Explicit object expiry (`gc --prune=<value>` other than `never`, and mutating
+`prune`) is refused because it races in-flight object writes. Bare `gc --prune`
+uses configured expiry. Shared stash and global reflog expiry/deletion are refused.
 Reftable repositories, or deleting the minted branch after switching away,
 can make OWN_BRANCH empty and reclamation conservatively treat the old shim
 as unmanaged. This retains the copy; it does not grant another branch.
@@ -2617,6 +2677,9 @@ Retention driven by repository/global config, or ordinary
 residual; the guard does not evaluate every effective expiry policy or date
 spelling. Direct-URL `url.pushInsteadOf` rewrites and pre-existing symbolic-ref
 indirection beyond the explicitly guarded worktree refs are also residual.
+Named operator-branch reflog expiry, such as
+`git reflog expire --expire=now refs/heads/main`, is also residual: it can remove
+the operator's recovery history without changing the protected ref itself.
 These are not covered by the lexical ref and explicit-option checks above.
 
 ## 13. `on_mint`
@@ -2662,7 +2725,7 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 Product state lives in `product.sqlite3` at **schema 33**: intents and
 feed-derived views (chapter 02 §2.6). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
-intent. The tree lives separately in `subagents.sqlite3` at **schema 8**, owned
+intent. The tree lives separately in `subagents.sqlite3` at **schema 9**, owned
 by `plakous-recursive-subagents-store`. Its ten domain tables are below; §14.3
 classifies every column family as an intent, a view of the feed, or an
 external-effect record.
@@ -2694,8 +2757,8 @@ operator must not repair it by guessing a new tree locator.
 | `agent_operations` | `(tree_id, operation_id)` | the canonical request, its digest, the terminal code and response for replay, and paired nullable INTEGER `fold_anchor` / `fold_order` for host fold intents |
 | `agent_messages` | `(tree_id, message_id)` | body, `purpose` (including `followup` and the host-authored `result`), priority, reply link, disposition, durable state |
 | `agent_attempts` | `(tree_id, attempt_id)` | `AttemptStatus`, turn token and plain turn id, `output_json`, the 0–2 harness nudge count, `candidate_id`, `retry_of`, `request_key`, start and end stamps, the blocked reason, the failure `{kind, message}`, and the five usage counters |
-| `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, evidence |
-| `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, current `candidate_id`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
+| `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, target-before snapshot commit, evidence |
+| `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, nullable `input_candidate_id`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
 | `agent_commands` | `(tree_id, command_id)` | every runtime command the tree prepares — a root admission's result-mail batch, a child Start, wake, mail Start, followup or corrective round — with its recipient, attempt, kind, exact canonical text and message ids, all immutable; the tree's withdrawal of a command no fact settled; and, as a view, the fact the recipient's feed recorded for it (`accepted`, `rejected`, or `returned` by a withheld terminal) with the plain turn id it bound and nullable INTEGER `accepted_seq` |
 | `agent_feed_cursors` | `(tree_id, runtime_session_id)` | the last feed sequence the tree projector applied for that session, root or child |
 
@@ -2893,6 +2956,11 @@ returned is never marked active again. A running turn that no tree command
 admitted is left to recovery.
 
 ### 14.2 Settling `recovery_required`
+
+A failed retry of an unsettled interrupted adoption retains the `adopting` row
+and recovery hold for every failure outcome, including conflict, target changed,
+unavailable and recovery required. The operator inspects the target and then
+uses `close_agent`; the copy and its provenance pins remain until tree deletion.
 
 `ProductAgentTree::apply_host_recovery`, called only by the tree
 projector's application of a child's feed records (§14.3) and by the explicit
@@ -3163,6 +3231,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Tool, operator and cascading close | intent, joined into views | anchored `agent_operations` of kind `close`, per target attempt; captures recovery hold, terminal refusal, outstanding seal ownership, seal deferral and close stamp; only the target applier derives its rows |
 | Descendant-close reservation | external-effect record | `agent_operations` of kind `descendant_close_effect`, keyed by the terminating parent attempt; captures target ids even when empty, so a feed-derived terminal reserves the cascade once as host intents do |
 | Result-mail reservation | external-effect record | `agent_operations` of kind `result_effect`, keyed by the producing agent and attempt; fences the first eligible push, including a capacity-refused push, independently of envelope retention |
+| Failed-turn rescue snapshot ownership | external-effect record | `agent_operations` of kind `rescue_pin`, keyed by rescue id and owned by its producing agent, captures pin ids before the VCS write; conversation collection transfers cleanup ownership to `candidate_unpin` (§6.7) |
 | Tool and root descendant interruption | intent, joined into views | anchored `agent_operations` of kind `interrupt`, per target attempt; captures whether live ownership or a non-ending park made the request effective, and derives only that agent's interrupted status |
 | Session bound after materialization failure | intent, joined into views | `agent_operations` of kind `session_bound_after_failure`, keyed by the exact materialization intent, ordered with the other host intents |
 | Submitted output and submitted attempt status | intent, joined into views | anchored `agent_operations` of kind `submitted`, per attempt, captures the validated exact `output_json`; its agent-local fold derives output and status, including historical attempts |

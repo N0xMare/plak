@@ -301,6 +301,7 @@ impl Model {
                 self.candidates.insert(
                     id.clone(),
                     CandidateRecord {
+                        target_before: seed.is_multiple_of(2).then(|| text("before", seed)),
                         candidate_id: id,
                         workspace_id: format!("w{slot}"),
                         producing_agent_id: node_id(slot),
@@ -325,6 +326,9 @@ impl Model {
                 workspace.path = PathBuf::from(text("copy", seed));
                 workspace.generation = u64::from(seed % 5);
                 workspace.base_commit = seed.is_multiple_of(2).then(|| text("base", seed));
+                workspace.input_candidate_id = seed
+                    .is_multiple_of(3)
+                    .then(|| CandidateId::from_persisted(text("input", seed)));
                 self.workspaces
                     .insert(workspace.workspace_id.clone(), workspace);
             }

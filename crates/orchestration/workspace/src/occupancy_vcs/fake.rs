@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-use super::{AdoptFailure, AdoptLanding, MintedCopy, VcsError, VcsOps, VcsSnapshot};
+use super::{
+    AdoptFailure, AdoptLanding, AdoptRequest, MintRequest, MintedCopy, VcsError, VcsOps,
+    VcsSnapshot,
+};
 use plakous_host_protocol::topology::WorkspaceMode;
 
 /// Which [`VcsOps`] method one recorded call was.
@@ -14,6 +17,8 @@ pub enum FakeOp {
     Seal,
     /// [`VcsOps::unpin`].
     Unpin,
+    /// [`VcsOps::restore_copy_base`].
+    RestoreBase,
     /// [`VcsOps::adopt`].
     Adopt,
     /// [`VcsOps::run_mint_hook`].
@@ -66,6 +71,7 @@ pub struct FakeVcs {
     next_hook: Mutex<Option<Result<(), VcsError>>>,
     next_unmint: Mutex<Option<Result<(), VcsError>>>,
     next_unpin: Mutex<Option<Result<(), VcsError>>>,
+    next_restore_base: Mutex<Option<Result<(), VcsError>>>,
     label: Mutex<Option<String>>,
 }
 
@@ -145,6 +151,14 @@ impl FakeVcs {
             .unwrap_or_else(PoisonError::into_inner) = Some(answer);
     }
 
+    /// Injects one copy-base reconciliation result.
+    pub fn restore_base_next_with(&self, answer: Result<(), VcsError>) {
+        *self
+            .next_restore_base
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(answer);
+    }
+
     fn record(&self, op: FakeOp, _path: &Path) {
         let lock_held = self
             .lock_probe
@@ -175,15 +189,29 @@ impl FakeVcs {
 }
 
 impl VcsOps for FakeVcs {
-    fn mint_from(
+    fn restore_copy_base(
         &self,
-        launch: &Path,
-        agent_id: &str,
-        _copy_id: &str,
-        _parent_cwd: &Path,
-        mode: WorkspaceMode,
-        base: Option<&VcsSnapshot>,
-    ) -> Result<MintedCopy, VcsError> {
+        path: &Path,
+        _namespace: &str,
+        _agent: &str,
+        _base: &str,
+    ) -> Result<(), VcsError> {
+        self.record(FakeOp::RestoreBase, path);
+        self.next_restore_base
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .unwrap_or(Ok(()))
+    }
+
+    fn mint_from(&self, request: &MintRequest<'_>) -> Result<MintedCopy, VcsError> {
+        let MintRequest {
+            launch,
+            agent_id,
+            mode,
+            base,
+            ..
+        } = *request;
         let path = Self::copy_dir(launch, agent_id);
         self.record(FakeOp::Mint, &path);
         std::fs::create_dir_all(&path)
@@ -200,6 +228,7 @@ impl VcsOps for FakeVcs {
         child_path: &Path,
         _namespace: &str,
         candidate_id: &str,
+        _base_commit: &str,
     ) -> Result<VcsSnapshot, VcsError> {
         self.record(FakeOp::Seal, child_path);
         if let Some(answer) = self
@@ -232,15 +261,12 @@ impl VcsOps for FakeVcs {
             .unwrap_or(Ok(()))
     }
 
-    fn adopt(
-        &self,
-        target_path: &Path,
-        _child_path: &Path,
-        _base_commit: &str,
-        _base_change_id: Option<&str>,
-        candidate: &VcsSnapshot,
-        _expected_target: Option<&str>,
-    ) -> Result<AdoptLanding, AdoptFailure> {
+    fn adopt(&self, request: &AdoptRequest<'_>) -> Result<AdoptLanding, AdoptFailure> {
+        let AdoptRequest {
+            target_path,
+            candidate,
+            ..
+        } = *request;
         self.record(FakeOp::Adopt, target_path);
         if let Some(answer) = self
             .next_adopt
@@ -273,7 +299,7 @@ impl VcsOps for FakeVcs {
             .unwrap_or(Ok(()))
     }
 
-    fn unmint(&self, _launch: &Path, path: &Path) -> Result<(), VcsError> {
+    fn unmint(&self, _launch: &Path, path: &Path, _namespace: &str) -> Result<(), VcsError> {
         self.record(FakeOp::Unmint, path);
         if let Some(answer) = self
             .next_unmint

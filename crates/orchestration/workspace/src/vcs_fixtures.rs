@@ -13,6 +13,11 @@ fn jj_command() -> Command {
     Command::new(executable)
 }
 
+/// Installs the current managed fence in an explicitly constructed Git copy.
+pub fn install_git_copy_fence(path: &Path) {
+    crate::git_redirect_fence::install_for_copy(path, None).unwrap();
+}
+
 /// A seeded git repository on `main` with one commit and a local identity.
 pub fn git_repo() -> tempfile::TempDir {
     let root = tempdir().unwrap();

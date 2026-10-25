@@ -1776,7 +1776,7 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
             rebuilt.fault_reason(child),
             Some("earlier precise diagnostic")
         );
-        assert!(rebuilt.take_effects().is_empty());
+        settle_only_reopen_base_pin(&mut rebuilt, &vcs, !settled);
         let _ = store.save(&rebuilt).unwrap();
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
         again
@@ -1784,7 +1784,7 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
             .unwrap();
         assert_eq!(again.attempt(child).unwrap(), &expected_attempt);
         assert_eq!(again.node(child).unwrap(), &expected_node);
-        assert!(again.take_effects().is_empty());
+        settle_only_reopen_base_pin(&mut again, &vcs, !settled);
     }
 }
 
@@ -2571,7 +2571,7 @@ fn sqlite_orphaned_vcs_faults_survive_view_deletion_and_a_second_reopen() {
             .unwrap();
         assert_eq!(rebuilt.node(child).unwrap(), &expected_node);
         assert_eq!(rebuilt.attempt(child).unwrap(), &expected_attempt);
-        assert!(rebuilt.take_effects().is_empty());
+        settle_only_reopen_base_pin(&mut rebuilt, &vcs, adopt);
         assert!(rebuilt.fault_reason(child).is_some());
         let _ = store.save(&rebuilt).unwrap();
         let mut again = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
@@ -2579,8 +2579,31 @@ fn sqlite_orphaned_vcs_faults_survive_view_deletion_and_a_second_reopen() {
             .project_feed(child, SESSION, &feed, &TreeFeedReads::default())
             .unwrap();
         assert_eq!(again.node(child).unwrap(), &expected_node);
-        assert!(again.take_effects().is_empty());
+        settle_only_reopen_base_pin(&mut again, &vcs, adopt);
     }
+}
+
+fn settle_only_reopen_base_pin(tree: &mut ProductAgentTree, vcs: &Arc<FakeVcs>, expected: bool) {
+    use plakous_workspace::occupancy_vcs::fake::FakeOp;
+    let before = vcs.calls().len();
+    assert!(tree.take_effects().is_empty());
+    tree.set_vcs(vcs.clone());
+    let settled = tree.settle_for_test();
+    let calls = vcs.calls()[before..]
+        .iter()
+        .map(|call| call.op)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls,
+        if expected {
+            vec![FakeOp::RestoreBase]
+        } else {
+            Vec::new()
+        },
+        "reopen may reconcile a pin, never retry a seal or landing"
+    );
+    assert_eq!(settled.cleanup_failures, Vec::new());
+    assert!(tree.take_effects().is_empty());
 }
 
 fn record_decision(

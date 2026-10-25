@@ -531,7 +531,8 @@ fn base_reference(id: &str) -> String {
     } else {
         super::occupancy_vcs::digest_text(id)
     };
-    format!("refs/plak/{}/bases/{id}", &namespace[..16])
+    let agent = id.strip_prefix(&format!("{namespace}-")).unwrap_or(id);
+    format!("refs/plak/{}/bases/{agent}", &namespace[..16])
 }
 
 fn pinned_base(repo: &ReadonlyRepo, id: &str) -> Option<CommitId> {
@@ -669,6 +670,7 @@ pub(super) fn ahead_behind(child: &Path, parent: &Path, base: Option<&str>) -> O
     })
 }
 
+#[cfg(test)]
 pub(super) fn pin(
     path: &Path,
     namespace: &str,
@@ -683,6 +685,15 @@ pub(super) fn pin(
         false,
         commit,
     )
+}
+
+pub(super) fn pin_references(
+    path: &Path,
+    namespace: &str,
+    refs: &[(String, Option<&str>)],
+    create_only: bool,
+) -> std::result::Result<(), VcsError> {
+    pin_transaction(path, namespace, refs, create_only, true)
 }
 
 fn pin_base(path: &Path, id: &str, commit: Option<&str>) -> std::result::Result<(), VcsError> {
@@ -704,6 +715,22 @@ fn pin_reference(
     overwrite: bool,
     commit: Option<&str>,
 ) -> std::result::Result<(), VcsError> {
+    pin_transaction(
+        path,
+        namespace,
+        &[(reference.to_owned(), commit)],
+        create_only,
+        overwrite,
+    )
+}
+
+fn pin_transaction(
+    path: &Path,
+    namespace: &str,
+    refs: &[(String, Option<&str>)],
+    create_only: bool,
+    overwrite: bool,
+) -> std::result::Result<(), VcsError> {
     use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
     pollster::block_on(async {
         let ws = load(path)?;
@@ -714,61 +741,56 @@ fn pin_reference(
             .downcast_ref::<jj_lib::git_backend::GitBackend>()
             .ok_or("only Git-backed JJ repositories are supported")?;
         let git = backend.git_repo();
-        let _namespace_guard = if commit.is_some() {
-            Some(
-                super::occupancy_vcs::reserve_candidate_namespace(git.common_dir(), namespace)
-                    .map_err(|error| recovery(&error.detail))?,
-            )
-        } else {
-            None
-        };
-        let change = if let Some(commit) = commit {
-            let target = gix::refs::Target::Object(gix::ObjectId::from_hex(commit.as_bytes())?);
-            Change::Update {
-                log: LogChange {
-                    mode: RefLog::AndReference,
-                    force_create_reflog: false,
-                    message: "plak candidate pin".into(),
-                },
-                expected: if create_only {
-                    // MustNotExist accepts an identical existing target in gix;
-                    // matching the impossible null target is strictly create-only.
-                    PreviousValue::ExistingMustMatch(gix::refs::Target::Object(
-                        gix::ObjectId::null(git.object_hash()),
-                    ))
-                } else if overwrite {
-                    PreviousValue::Any
-                } else {
-                    PreviousValue::ExistingMustMatch(target.clone())
-                },
-                new: target,
-            }
-        } else if let Some(existing) = git.try_find_reference(reference)? {
-            Change::Delete {
-                expected: PreviousValue::MustExistAndMatch(existing.target().into()),
-                log: RefLog::AndReference,
-            }
-        } else {
-            return Ok(());
-        };
+        let _namespace_guard =
+            super::occupancy_vcs::reserve_candidate_namespace(git.common_dir(), namespace)
+                .map_err(|error| recovery(&error.detail))?;
+        let mut edits = Vec::new();
+        for (reference, commit) in refs {
+            let change = if let Some(commit) = commit {
+                let target = gix::refs::Target::Object(gix::ObjectId::from_hex(commit.as_bytes())?);
+                Change::Update {
+                    log: LogChange {
+                        mode: RefLog::AndReference,
+                        force_create_reflog: false,
+                        message: "plak candidate pin".into(),
+                    },
+                    expected: if create_only {
+                        // MustNotExist accepts an identical existing target in gix;
+                        // matching the impossible null target is strictly create-only.
+                        PreviousValue::ExistingMustMatch(gix::refs::Target::Object(
+                            gix::ObjectId::null(git.object_hash()),
+                        ))
+                    } else if overwrite {
+                        PreviousValue::Any
+                    } else {
+                        PreviousValue::ExistingMustMatch(target.clone())
+                    },
+                    new: target,
+                }
+            } else if let Some(existing) = git.try_find_reference(reference.as_str())? {
+                Change::Delete {
+                    expected: PreviousValue::MustExistAndMatch(existing.target().into()),
+                    log: RefLog::AndReference,
+                }
+            } else {
+                continue;
+            };
+            edits.push(RefEdit {
+                name: reference.as_str().try_into()?,
+                deref: false,
+                change,
+            });
+        }
         let signature = gix::actor::SignatureRef {
             name: gix::bstr::BStr::new("plak"),
             email: gix::bstr::BStr::new("plak@local"),
             time: "0 +0000",
         };
-        git.edit_references_as(
-            [RefEdit {
-                name: reference.try_into()?,
-                deref: false,
-                change,
-            }],
-            Some(signature),
-        )
-        .map_err(|_| {
-            recovery(format!(
-                "candidate pin {reference} update refused or publication uncertain; recovery required"
-            ))
-        })?;
+        git.edit_references_as(edits, Some(signature))
+            .map_err(|_| {
+                let names = refs.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ");
+                recovery(format!("provenance pins {names} update refused or publication uncertain; recovery required"))
+            })?;
         Ok::<_, Error>(())
     })
     .map_err(|error| failure(&error))

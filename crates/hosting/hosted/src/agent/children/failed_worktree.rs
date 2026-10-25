@@ -10,32 +10,46 @@ pub(super) async fn snapshot_failure(
     identity: &ChildTurnIdentity,
     agent_id: &str,
 ) -> Option<String> {
-    let ticket = driver
-        .read(|tree| {
+    let (ticket, effects) = driver
+        .mutate(|tree| {
             if !identity.still_owns(tree, agent_id) {
-                return None;
+                return Ok(None);
             }
-            let node = tree.node(agent_id).ok()?;
-            let workspace = tree.workspace(&node.workspace_id)?;
+            let node = tree.node(agent_id)?;
+            let Some(workspace) = tree.workspace(&node.workspace_id) else {
+                return Ok(None);
+            };
             if workspace.mode == WorkspaceMode::Inherit
                 || workspace.status != WorkspaceStatus::Active
             {
-                return None;
+                return Ok(None);
             }
-            Some((
+            let Some(base) = workspace.base_commit.clone() else {
+                return Ok(None);
+            };
+            let ticket = (
                 tree.vcs_port(),
                 node.path.clone(),
                 digest_text(&tree.tree_id),
                 format!("failed-{}-{}", identity.attempt, identity.turn),
-            ))
+                base,
+            );
+            driver.fold_and_commit(tree, |tree| {
+                tree.record_rescue_pin(
+                    agent_id,
+                    crate::agent_tree_protocol::CandidateId::from_persisted(ticket.3.clone()),
+                )?;
+                Ok(Some(ticket))
+            })
         })
-        .ok()
-        .flatten()?;
-    let (vcs, path, namespace, id) = ticket;
+        .ok()?;
+    let ticket = ticket.ok()??;
+    driver.settle(effects).ok()?;
+    let (vcs, path, namespace, id, base) = ticket;
     let reference = candidate_ref(&namespace, &id);
     // The seal primitive leaves HEAD, the branch and the real index untouched,
-    // and excludes secrets. This pin is not registered as an adoptable candidate.
-    let result = tokio::task::spawn_blocking(move || vcs.seal(&path, &namespace, &id)).await;
+    // and excludes secrets. Its durable rescue owner is not adoptable authority.
+    let result = tokio::task::spawn_blocking(move || vcs.seal(&path, &namespace, &id, &base)).await;
     Some(match result {
         Ok(Ok(snapshot)) => format!(
             "; failed worktree snapshot: {reference} (commit {})",
@@ -128,6 +142,19 @@ mod tests {
         assert!(first.contains(&turn(1).to_string()));
         assert!(second.contains(&turn(2).to_string()));
         assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 2);
+        let owners = runtime
+            .driver()
+            .read(|tree| {
+                tree.operations()
+                    .values()
+                    .filter(|op| op.tool_name == "rescue_pin" && op.caller_agent_id == child)
+                    .count()
+            })
+            .unwrap();
+        assert_eq!(
+            owners, 2,
+            "each turn's rescue has a durable retention owner"
+        );
     }
 
     #[tokio::test]

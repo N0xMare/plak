@@ -523,7 +523,7 @@ pub fn load_agent_tree(
     let mut candidates = BTreeMap::new();
     let mut candidate_statement = tx
         .prepare(
-            "SELECT candidate_id, workspace_id, producing_agent_id, producing_attempt_id, base_commit, base_content, base_change_id, commit_id, content, change_id, sealed_at, adopted_by, adopted_evidence, merged_at FROM agent_candidates WHERE tree_id=?1",
+            "SELECT candidate_id, workspace_id, producing_agent_id, producing_attempt_id, base_commit, base_content, base_change_id, commit_id, content, change_id, sealed_at, adopted_by, adopted_evidence, merged_at, target_before FROM agent_candidates WHERE tree_id=?1",
         )
         .map_err(|_| "could not query agent candidates".to_owned())?;
     let candidate_rows = candidate_statement
@@ -542,6 +542,7 @@ pub fn load_agent_tree(
                 sealed_at: from_i64(row.get(10)?)?,
                 adopted_by: row.get(11)?,
                 merged_at: row.get(13)?,
+                target_before: row.get(14)?,
                 adopted_evidence: serde_json::from_str(&row.get::<_, String>(12)?)
                     .unwrap_or_default(),
             })
@@ -555,7 +556,7 @@ pub fn load_agent_tree(
     let mut workspaces = BTreeMap::new();
     let mut workspace_statement = tx
         .prepare(
-            "SELECT workspace_id, owner_agent_id, path, mode, status, base_commit, base_content, base_change_id, generation, adopter_agent_id FROM agent_workspaces WHERE tree_id=?1",
+            "SELECT workspace_id, owner_agent_id, path, mode, status, base_commit, base_content, base_change_id, generation, adopter_agent_id, input_candidate_id FROM agent_workspaces WHERE tree_id=?1",
         )
         .map_err(|_| "could not query agent workspaces".to_owned())?;
     let workspace_rows = workspace_statement
@@ -571,6 +572,9 @@ pub fn load_agent_tree(
                 base_change_id: row.get(7)?,
                 generation: from_i64(row.get(8)?)?,
                 adopter_agent_id: row.get(9)?,
+                input_candidate_id: row
+                    .get::<_, Option<String>>(10)?
+                    .map(CandidateId::from_persisted),
             })
         })
         .map_err(|_| "could not query agent workspaces".to_owned())?;

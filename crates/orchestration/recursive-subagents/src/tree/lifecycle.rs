@@ -315,7 +315,17 @@ impl ProductAgentTree {
         self.minting.remove(&agent_id);
         let bound = match (bound, minted) {
             (Some(bound), _) => bound,
-            (None, Some(minted)) => self.record_minted(&caller_id, &agent_id, mode, minted),
+            (None, Some(minted)) => self.record_minted(
+                &caller_id,
+                &agent_id,
+                mode,
+                minted,
+                request
+                    .input_ids()
+                    .first()
+                    .cloned()
+                    .map(CandidateId::from_persisted),
+            ),
             (None, None) => {
                 self.pending_spawns = self.pending_spawns.saturating_sub(1);
                 return Err(TopologyError::new(
@@ -558,25 +568,26 @@ impl ProductAgentTree {
                 ),
             )
         })?;
-        // Removing a copy drops the pins of the (adopted) candidates it
-        // sealed, so their commits are no longer guaranteed to exist.
-        if self
-            .workspaces
-            .get(&candidate.workspace_id)
-            .is_some_and(|row| {
-                !self.reclaimed(&row.workspace_id)
-                    && matches!(
-                        row.status,
-                        WorkspaceStatus::Discarding
-                            | WorkspaceStatus::Discarded
-                            | WorkspaceStatus::CleanRemoved
-                    )
-            })
+        // Adopted records retain their pins after copy removal. Only an
+        // explicit discard of unadopted work relinquishes this input.
+        if candidate.adopted_by.is_none()
+            && self
+                .workspaces
+                .get(&candidate.workspace_id)
+                .is_some_and(|row| {
+                    !self.reclaimed(&row.workspace_id)
+                        && matches!(
+                            row.status,
+                            WorkspaceStatus::Discarding
+                                | WorkspaceStatus::Discarded
+                                | WorkspaceStatus::CleanRemoved
+                        )
+                })
         {
             return Err(TopologyError::new(
                 TopologyErrorCode::InputNotSealed,
                 format!(
-                    "input {first} was adopted and its copy removed; fork the node that adopted it"
+                    "input {first} was explicitly discarded; its snapshot is no longer retained"
                 ),
             ));
         }
@@ -3118,6 +3129,7 @@ mod tests {
         tree.workspaces.insert(
             "ws-c2".into(),
             WorkspaceRecord {
+                input_candidate_id: None,
                 workspace_id: "ws-c2".into(),
                 owner_agent_id: "root".into(),
                 path: tree.launch_checkout.join(".plak/worktrees/old-tree-c2"),

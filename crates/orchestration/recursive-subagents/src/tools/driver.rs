@@ -115,15 +115,40 @@ impl TreeDriver {
 
     /// Binds `tree` to `store` and `vcs`, installing `vcs` as the tree's own
     /// port so the mint inside `spawn_agent` and the effects run here drive
-    /// one implementation.
+    /// one implementation. Reopen-owned base-pin reconciliation completes
+    /// before attachment returns, outside the mutex and before any adopt retry.
     pub fn new(
         tree: Arc<Mutex<ProductAgentTree>>,
         store: Arc<dyn TreeStore>,
         vcs: Arc<dyn VcsOps>,
         observer: Option<Arc<dyn TopologyObserver>>,
     ) -> Self {
-        if let Ok(mut guard) = tree.lock() {
+        let preparation = if let Ok(mut guard) = tree.lock() {
             guard.set_vcs(Arc::clone(&vcs));
+            let attach = guard.take_attach_effects();
+            if attach.is_empty() {
+                None
+            } else {
+                let published = store.save(&guard).map(|revision| {
+                    guard.acknowledge_revision(revision);
+                });
+                Some((attach, published))
+            }
+        } else {
+            None
+        };
+        if let Some((attach, published)) = preparation {
+            let completed = match published {
+                Ok(()) => attach.run(vcs.as_ref()),
+                Err(error) => attach.refuse_attach(format!(
+                    "attachment publication failed: {error}; no base pin was changed"
+                )),
+            };
+            if let Ok(mut guard) = tree.lock() {
+                // Record local faults now; startup publication (or the first
+                // mutation) saves them with the rest of the reopened generation.
+                guard.complete(completed);
+            }
         }
         Self {
             tree,
@@ -253,21 +278,35 @@ impl TreeDriver {
                     }
                 }
             }
-            let namespace =
-                self.read(|tree| plakous::model::sha256_hex(&[tree.tree_id.as_bytes()]))?;
-            let launch = self.read(|tree| tree.launch_checkout.clone())?;
-            let vcs = self.read(ProductAgentTree::vcs_port)?;
-            for candidate in &ticket.pins {
+            let (finished, _) = self.mutate(|tree| {
+                self.fold_and_commit(tree, |tree| tree.finish_child_retention(&ticket))
+            })?;
+            finished?;
+        }
+        self.cleanup_candidate_pins()
+    }
+
+    fn cleanup_candidate_pins(&self) -> Result<(), TopologyError> {
+        let pending = self.read(ProductAgentTree::pending_pin_cleanup)??;
+        let (namespace, launch, vcs) = self.read(|tree| {
+            (
+                plakous::model::sha256_hex(&[tree.tree_id.as_bytes()]),
+                tree.launch_checkout.clone(),
+                tree.vcs_port(),
+            )
+        })?;
+        for ticket in pending {
+            for candidate in &ticket.candidates {
                 vcs.unpin(&launch, &namespace, candidate.as_str())
                     .map_err(|_| {
                         TopologyError::new(
                             TopologyErrorCode::WorkspaceRecoveryRequired,
-                            "collected child pin cleanup remains pending; other work refs retained",
+                            "collected candidate pin cleanup remains pending; intent retained",
                         )
                     })?;
             }
             let (finished, _) = self.mutate(|tree| {
-                self.fold_and_commit(tree, |tree| tree.finish_child_retention(&ticket))
+                self.fold_and_commit(tree, |tree| tree.acknowledge_pin_cleanup(&ticket))
             })?;
             finished?;
         }
@@ -509,7 +548,8 @@ impl TreeDriver {
             let refused = {
                 let tree = self.lock()?;
                 if tree.revision != tree.stored_revision
-                    && (!effects.seals.is_empty()
+                    && (!effects.base_pins.is_empty()
+                        || !effects.seals.is_empty()
                         || !effects.adopts.is_empty()
                         || !effects.dormancy.is_empty())
                 {

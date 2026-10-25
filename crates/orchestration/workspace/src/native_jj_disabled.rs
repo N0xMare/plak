@@ -46,7 +46,12 @@ pub(super) fn resolve(_: &Path, _: &str) -> Option<String> {
     None
 }
 
-pub(super) fn pin(_: &Path, _: &str, _: &str, _: Option<&str>) -> Result<(), VcsError> {
+pub(super) fn pin_references(
+    _: &Path,
+    _: &str,
+    _: &[(String, Option<&str>)],
+    _: bool,
+) -> Result<(), VcsError> {
     Err(unavailable())
 }
 

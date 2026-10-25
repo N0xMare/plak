@@ -136,7 +136,15 @@ impl DormancyTicket {
     fn run_step(&self, vcs: &dyn VcsOps, launch: &Path) -> Result<DormancyAnswer, VcsError> {
         match self.evidence.phase {
             Phase::Sealing => vcs
-                .seal(&self.workspace.path, &self.namespace, &self.reference_id)
+                .seal(
+                    &self.workspace.path,
+                    &self.namespace,
+                    &self.reference_id,
+                    self.workspace
+                        .base_commit
+                        .as_deref()
+                        .ok_or_else(|| VcsError::seal_failed("copy has no recorded base"))?,
+                )
                 .map(DormancyAnswer::Sealed),
             Phase::Removing => {
                 if self.workspace.path.exists() {
@@ -146,7 +154,7 @@ impl DormancyTicket {
                         .map_err(|e| VcsError::mint_unavailable(e.message))?;
                     vcs.check_reclaimable(&self.workspace.path, Some(&snapshot))?;
                 }
-                vcs.unmint(launch, &self.workspace.path)?;
+                vcs.unmint(launch, &self.workspace.path, &self.namespace)?;
                 Ok(DormancyAnswer::Removed)
             }
             Phase::Restoring => {
@@ -164,14 +172,15 @@ impl DormancyTicket {
                         base: snapshot,
                     }));
                 }
-                vcs.mint_from(
+                vcs.mint_from(&super::MintRequest {
                     launch,
-                    &self.agent_id,
-                    &self.copy_id,
-                    launch,
-                    self.workspace.mode,
-                    Some(&snapshot),
-                )
+                    agent_id: &self.agent_id,
+                    copy_id: &self.copy_id,
+                    namespace: &self.namespace,
+                    parent_cwd: launch,
+                    mode: self.workspace.mode,
+                    base: Some(&snapshot),
+                })
                 .map(DormancyAnswer::Restored)
             }
             Phase::Reclaimed | Phase::Present => Err(VcsError::mint_unavailable(
@@ -317,7 +326,7 @@ impl ProductAgentTree {
         Ok(())
     }
 
-    fn workspace_producer(&self, workspace: &str) -> Result<String, TopologyError> {
+    pub(super) fn workspace_producer(&self, workspace: &str) -> Result<String, TopologyError> {
         // Workspace ownership is the parent's cleanup grant, not the child
         // whose copy was minted. Inheritors are always deeper than that child.
         self.nodes
@@ -586,6 +595,7 @@ impl ProductAgentTree {
                     self.candidates.insert(
                         candidate_id.clone(),
                         CandidateRecord {
+                            target_before: None,
                             candidate_id,
                             workspace_id: id.clone(),
                             producing_agent_id: node.agent_id.clone(),

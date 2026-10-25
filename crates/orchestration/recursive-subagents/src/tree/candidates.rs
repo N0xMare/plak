@@ -229,6 +229,7 @@ impl ProductAgentTree {
             self.candidates.insert(
                 candidate_id.clone(),
                 CandidateRecord {
+                    target_before: None,
                     candidate_id: candidate_id.clone(),
                     workspace_id: workspace_id.clone(),
                     producing_agent_id: agent_id.clone(),
@@ -537,22 +538,18 @@ impl ProductAgentTree {
         caller_id: &str,
         candidate: &CandidateRecord,
     ) -> Option<TopologyError> {
-        let blocker = self.candidates.values().find(|other| {
-            if other.commit != candidate.base_commit
-                || other.candidate_id == candidate.candidate_id
-                || other.workspace_id == candidate.workspace_id
-                || other.adopted_by.as_deref() == Some(caller_id)
-                || other.commit.is_empty()
-                || self.input_was_relinquished(other)
-                || self.caller_has_input(caller_id, other)
-            {
-                return false;
-            }
-            // Both mints record the immutable input commit as their base.
-            // Do not walk live jj ancestry under the tree mutex: it can move
-            // after mint, and limiting a candidate scan would miss blockers.
-            true
-        })?;
+        let input = self
+            .workspaces
+            .get(&candidate.workspace_id)?
+            .input_candidate_id
+            .as_ref()?;
+        let blocker = self.candidates.get(input)?;
+        if blocker.adopted_by.as_deref() == Some(caller_id)
+            || self.input_was_relinquished(blocker)
+            || self.caller_has_input(caller_id, blocker)
+        {
+            return None;
+        }
         let (which, remedy) = match blocker.adopted_by.as_deref() {
             Some(adopter)
                 if self
@@ -591,7 +588,7 @@ impl ProductAgentTree {
 
     /// Explicit discard gives the input up. Landing a copy that was minted
     /// over it no longer drops work the caller was still owed.
-    fn input_was_relinquished(&self, input: &CandidateRecord) -> bool {
+    pub(super) fn input_was_relinquished(&self, input: &CandidateRecord) -> bool {
         self.workspaces.get(&input.workspace_id).is_some_and(|row| {
             matches!(
                 row.status,
@@ -700,6 +697,7 @@ impl ProductAgentTree {
                 "that candidate has no sealed commit; nothing was adopted",
             ));
         }
+        self.check_base_pin_recovery(&candidate.workspace_id)?;
         if let Some(adopter) = &candidate.adopted_by {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
@@ -893,6 +891,8 @@ impl ProductAgentTree {
             child.path.clone()
         };
         let target_path = self.node(caller_id)?.path.clone();
+        let advance_copy_base = !self.reclaimed(&candidate.workspace_id);
+        let interrupted_adopt = self.workspace_has_vcs_fault(&candidate.workspace_id);
         if let Some(row) = self.workspaces.get_mut(&candidate.workspace_id) {
             row.status = WorkspaceStatus::Adopting;
             row.adopter_agent_id = Some(caller_id.to_owned());
@@ -900,6 +900,9 @@ impl ProductAgentTree {
         self.bump();
         self.take_adopt_conflict(candidate.candidate_id.as_str());
         self.effects.adopts.push(AdoptTicket {
+            interrupted_adopt,
+            advance_copy_base,
+            namespace: super::digest_text(&self.tree_id),
             caller_id: caller_id.to_owned(),
             candidate,
             target_path,
@@ -917,7 +920,10 @@ impl ProductAgentTree {
         landed: Result<AdoptLanding, AdoptFailure>,
     ) -> Result<AdoptOutcome, TopologyError> {
         let workspace_id = ticket.candidate.workspace_id.clone();
-        self.settle_workspace_faults(&workspace_id);
+        let retain_hold = ticket.interrupted_adopt && landed.is_err();
+        if !retain_hold {
+            self.settle_workspace_faults(&workspace_id);
+        }
         let reclaimed = self.reclaimed(&workspace_id);
         match landed {
             Ok(landing) => {
@@ -952,6 +958,14 @@ impl ProductAgentTree {
                 }
                 if let Some(record) = self.candidates.get_mut(&ticket.candidate.candidate_id) {
                     record.adopted_by = Some(ticket.caller_id.clone());
+                    record.target_before = Some(
+                        landing
+                            .target_before
+                            .split(':')
+                            .next()
+                            .unwrap_or(&landing.target_before)
+                            .to_owned(),
+                    );
                     record.merged_at = Some(
                         landing
                             .target_after
@@ -983,7 +997,11 @@ impl ProductAgentTree {
                 })
             }
             Err(failure) => {
-                if let Some(row) = self.workspaces.get_mut(&workspace_id) {
+                if let Some(row) = self
+                    .workspaces
+                    .get_mut(&workspace_id)
+                    .filter(|_| !retain_hold)
+                {
                     row.status = if reclaimed {
                         WorkspaceStatus::CleanRemoved
                     } else {
@@ -1014,6 +1032,12 @@ impl ProductAgentTree {
                     AdoptFailure::RecoveryRequired(reason) => {
                         TopologyError::new(TopologyErrorCode::WorkspaceRecoveryRequired, reason)
                     }
+                    AdoptFailure::Unavailable(reason) if retain_hold => TopologyError::new(
+                        TopologyErrorCode::WorkspaceRecoveryRequired,
+                        format!(
+                            "interrupted adoption remains unresolved; inspect the target before retrying: {reason}"
+                        ),
+                    ),
                     AdoptFailure::Unavailable(reason) => TopologyError::new(
                         TopologyErrorCode::MintUnavailable,
                         format!("the candidate could not be landed: {reason}"),
@@ -1405,18 +1429,14 @@ mod tests {
             tree.workspace(&worker.workspace.id).unwrap().status,
             WorkspaceStatus::Discarded
         );
-        // The adopted candidate's pin goes with its copy, and only after it.
+        // Copy removal drops only the mint base. Candidate and provenance
+        // pins belong to the retained record, not the checkout.
         let ops: Vec<FakeOp> = vcs.calls().into_iter().map(|call| call.op).collect();
-        assert_eq!(vcs.calls_of(FakeOp::Unpin).len(), unpins_before + 1);
-        assert_eq!(ops.last(), Some(&FakeOp::Unpin));
-        assert_eq!(ops[ops.len() - 2], FakeOp::Unmint);
-        // Its commit is no longer pinned, so it is no longer a spawn input.
+        assert_eq!(vcs.calls_of(FakeOp::Unpin).len(), unpins_before);
+        assert_eq!(ops.last(), Some(&FakeOp::Unmint));
         let mut over = mint_req();
         over.inputs = Some(vec![candidate_id.to_string()]);
-        assert_eq!(
-            tree.spawn_agent("root", &over, None).unwrap_err().code,
-            TopologyErrorCode::InputNotSealed
-        );
+        tree.spawn_agent("root", &over, None).unwrap();
 
         let idle = tree.spawn_agent("root", &mint_req(), None).unwrap();
         vcs.seal_next_with(Ok(FakeVcs::base_for(&idle.agent_id)));
@@ -2591,10 +2611,10 @@ mod tests {
     }
 
     /// The `refs/plak/<namespace>/candidates/<id>` pin outlives the adopt (a later adopt
-    /// of the same copy needs it as its merge base) and is deleted with the
-    /// copy.
+    /// of the same copy needs it as its merge base) and belongs to the record,
+    /// not the copy's lifetime.
     #[test]
-    fn candidate_ref_is_deleted_with_its_copy() {
+    fn candidate_ref_survives_removal_of_its_copy() {
         let repo = git_repo();
         let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
         let child = tree.spawn_agent("root", &mint_req(), None).unwrap();
@@ -2631,8 +2651,8 @@ mod tests {
         tree.settle_for_test();
         assert!(!child_path.exists(), "the copy is gone");
         assert!(
-            !resolve().status.success(),
-            "the candidate pin outlived its copy"
+            resolve().status.success(),
+            "copy removal lost a retained candidate pin"
         );
     }
 

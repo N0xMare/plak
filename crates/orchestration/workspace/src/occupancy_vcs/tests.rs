@@ -3,8 +3,349 @@ use std::process::{Command, Output};
 use super::*;
 use tempfile::tempdir;
 
+fn fixture_source(path: &Path) -> Option<&str> {
+    copy_layout_kind(path)?;
+    let id = path.file_name()?.to_str()?;
+    let (prefix, agent) = id.split_once('-').unwrap_or(("", id));
+    Some(if prefix.len() == 64 { agent } else { id })
+}
+
+fn fixture_namespace(copy_id: &str) -> String {
+    let prefix = copy_id.split('-').next().unwrap();
+    if prefix.len() == 64 {
+        prefix.to_owned()
+    } else {
+        digest_text("fixture")
+    }
+}
+
+fn mint_worktree_from(
+    launch: &Path,
+    id: &str,
+    parent_cwd: &Path,
+    mode: WorkspaceMode,
+    base: Option<&VcsSnapshot>,
+) -> Result<MintedCopy, VcsError> {
+    super::mint_worktree_from(&MintRequest {
+        launch,
+        agent_id: id,
+        copy_id: id,
+        namespace: &fixture_namespace(id),
+        parent_cwd,
+        mode,
+        base,
+    })
+}
+
 fn git_repo() -> tempfile::TempDir {
     git_repo_with_init(&["init", "-b", "main"])
+}
+
+#[test]
+fn adoption_pin_failure_after_apply_requires_explicit_recovery() {
+    assert_adoption_pin_failure(false);
+}
+
+#[test]
+fn no_op_adoption_pin_failure_is_unavailable() {
+    assert_adoption_pin_failure(true);
+}
+
+fn assert_adoption_pin_failure(already_present: bool) {
+    let repo = git_repo();
+    let namespace = digest_text("failed-adoption-pins");
+    let copy = SystemVcs
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            namespace: &namespace,
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+        })
+        .unwrap();
+    std::fs::write(copy.path.join("work"), "retained landing").unwrap();
+    let candidate = SystemVcs
+        .seal(&copy.path, &namespace, "candidate", &copy.base.commit)
+        .unwrap();
+    if already_present {
+        std::fs::write(repo.path().join("work"), "retained landing").unwrap();
+    }
+    let refs = candidate_refs(&namespace, "candidate");
+    let blocker = format!("{}/blocked", refs[3]);
+    assert!(
+        git_run(repo.path(), &["update-ref", &blocker, "HEAD"])
+            .unwrap()
+            .status
+            .success()
+    );
+    let failure = SystemVcs
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &copy.path,
+            source_agent_id: Some("c1"),
+            base_commit: &copy.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &namespace,
+            candidate_id: "candidate",
+        })
+        .unwrap_err();
+    assert!(
+        matches!(
+            (&failure, already_present),
+            (AdoptFailure::Unavailable(_), true) | (AdoptFailure::RecoveryRequired(_), false)
+        ),
+        "{failure:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("work")).unwrap(),
+        "retained landing"
+    );
+    assert!(
+        !git_run(repo.path(), &["show-ref", "--verify", "--quiet", &refs[2]])
+            .unwrap()
+            .status
+            .success()
+    );
+    assert_eq!(
+        git_text(
+            repo.path(),
+            &["rev-parse", &copy_base_ref(&namespace, "c1")],
+            "unchanged base"
+        )
+        .unwrap()
+        .trim(),
+        copy.base.commit
+    );
+}
+
+#[test]
+fn seal_pins_candidate_and_base_atomically() {
+    let repo = git_repo();
+    let namespace = digest_text("pin-transaction");
+    let copy = SystemVcs
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            namespace: &namespace,
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+        })
+        .unwrap();
+    std::fs::write(copy.path.join("work"), "candidate bytes").unwrap();
+    let before = git_text(repo.path(), &["for-each-ref", "refs/plak/"], "refs").unwrap();
+    assert!(
+        SystemVcs
+            .seal(&copy.path, &namespace, "candidate", "not-an-object")
+            .is_err()
+    );
+    assert_eq!(
+        git_text(repo.path(), &["for-each-ref", "refs/plak/"], "refs").unwrap(),
+        before
+    );
+    let sealed = SystemVcs
+        .seal(&copy.path, &namespace, "candidate", &copy.base.commit)
+        .unwrap();
+    let refs = candidate_refs(&namespace, "candidate");
+    assert_eq!(
+        git_text(repo.path(), &["rev-parse", &refs[0]], "candidate")
+            .unwrap()
+            .trim(),
+        sealed.commit
+    );
+    assert_eq!(
+        git_text(repo.path(), &["rev-parse", &refs[1]], "base")
+            .unwrap()
+            .trim(),
+        copy.base.commit
+    );
+    assert_eq!(
+        git_text(
+            repo.path(),
+            &["rev-parse", &copy_base_ref(&namespace, "c1")],
+            "mint base"
+        )
+        .unwrap()
+        .trim(),
+        copy.base.commit
+    );
+}
+
+#[test]
+fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
+    let repo = git_repo();
+    let namespace = digest_text("retained-provenance");
+    let mint = |agent, base| {
+        SystemVcs
+            .mint_from(&MintRequest {
+                launch: repo.path(),
+                agent_id: agent,
+                copy_id: agent,
+                namespace: &namespace,
+                parent_cwd: repo.path(),
+                mode: WorkspaceMode::Fork,
+                base,
+            })
+            .unwrap()
+    };
+    let first = mint("c1", None);
+    std::fs::write(first.path.join("first"), "first work").unwrap();
+    let candidate = SystemVcs
+        .seal(&first.path, &namespace, "first", &first.base.commit)
+        .unwrap();
+    let landing = SystemVcs
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &first.path,
+            source_agent_id: fixture_source(&first.path),
+            base_commit: &first.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &namespace,
+            candidate_id: "first",
+        })
+        .unwrap();
+    let refs = candidate_refs(&namespace, "first");
+    assert_eq!(
+        git_text(
+            repo.path(),
+            &["rev-parse", &copy_base_ref(&namespace, "c1")],
+            "advanced base"
+        )
+        .unwrap()
+        .trim(),
+        candidate.commit
+    );
+    for (reference, expected) in [
+        (&refs[2], &landing.target_before),
+        (&refs[3], &landing.target_after),
+    ] {
+        assert_eq!(
+            git_text(repo.path(), &["rev-parse", reference], "provenance")
+                .unwrap()
+                .trim(),
+            expected
+        );
+    }
+    assert_eq!(
+        git_text(
+            repo.path(),
+            &["rev-parse", &format!("{}^", landing.target_after)],
+            "parent"
+        )
+        .unwrap()
+        .trim(),
+        landing.target_before
+    );
+    let repeated = SystemVcs
+        .seal(
+            &first.path,
+            &namespace,
+            "already-present",
+            &first.base.commit,
+        )
+        .unwrap();
+    let no_op = SystemVcs
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &first.path,
+            source_agent_id: Some("c1"),
+            base_commit: &first.base.commit,
+            base_change_id: None,
+            candidate: &repeated,
+            expected_target: None,
+            namespace: &namespace,
+            candidate_id: "already-present",
+        })
+        .unwrap();
+    assert_eq!(no_op.files_changed, 0);
+    assert_eq!(
+        git_text(
+            repo.path(),
+            &["rev-parse", &format!("{}^", no_op.target_after)],
+            "no-op parent"
+        )
+        .unwrap()
+        .trim(),
+        no_op.target_before
+    );
+    assert_eq!(
+        git_text(
+            repo.path(),
+            &["rev-parse", &copy_base_ref(&namespace, "c1")],
+            "no-op base"
+        )
+        .unwrap()
+        .trim(),
+        repeated.commit
+    );
+    SystemVcs
+        .unmint(repo.path(), &first.path, &namespace)
+        .unwrap();
+    assert!(
+        git_run(repo.path(), &["gc", "--prune=now"])
+            .unwrap()
+            .status
+            .success()
+    );
+    for reference in &refs {
+        assert!(
+            git_run(repo.path(), &["cat-file", "-e", reference])
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+    // A new copy pins its input independently of that input's record. Once
+    // the old record is collected and all four refs dropped, adoption still
+    // has its exact base, even after immediate collection.
+    let second = mint("c2", Some(&candidate));
+    SystemVcs.unpin(repo.path(), &namespace, "first").unwrap();
+    for reference in &refs {
+        assert!(
+            !git_run(repo.path(), &["show-ref", "--verify", "--quiet", reference])
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+    assert!(
+        git_run(repo.path(), &["gc", "--prune=now"])
+            .unwrap()
+            .status
+            .success()
+    );
+    std::fs::write(second.path.join("second"), "second work").unwrap();
+    let next = SystemVcs
+        .seal(&second.path, &namespace, "second", &second.base.commit)
+        .unwrap();
+    SystemVcs
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &second.path,
+            source_agent_id: fixture_source(&second.path),
+            base_commit: &second.base.commit,
+            base_change_id: None,
+            candidate: &next,
+            expected_target: None,
+            namespace: &namespace,
+            candidate_id: "second",
+        })
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("first")).unwrap(),
+        "first work"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("second")).unwrap(),
+        "second work"
+    );
 }
 
 #[test]
@@ -172,14 +513,15 @@ fn a_stale_plak_branch_does_not_block_a_fork_mint() {
             .success()
     );
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     assert_eq!(minted.branch.as_deref(), Some("plak/c1"));
     assert!(minted.path.join("SEED.txt").is_file());
@@ -195,31 +537,45 @@ fn stale_tree_cleanup_cannot_remove_another_trees_reused_child_id() {
     let first_id = format!("{}-c1", digest_text("tree-first"));
     let second_id = format!("{}-c1", digest_text("tree-second"));
     let first = SystemVcs
-        .mint_from(
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: &first_id,
+            copy_id: &first_id,
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace(&first_id),
+        })
+        .unwrap();
+    SystemVcs
+        .unmint(
             repo.path(),
-            &first_id,
-            &first_id,
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
+            &first.path,
+            &fixture_namespace(first.path.file_name().unwrap().to_str().unwrap()),
         )
         .unwrap();
-    SystemVcs.unmint(repo.path(), &first.path).unwrap();
 
     let second = SystemVcs
-        .mint_from(
-            repo.path(),
-            &second_id,
-            &second_id,
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: &second_id,
+            copy_id: &second_id,
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace(&second_id),
+        })
         .unwrap();
     assert_ne!(first.path, second.path);
     // A stale repeat of the first tree's cleanup finds its copy already
     // gone and succeeds without touching the second tree's copy.
-    SystemVcs.unmint(repo.path(), &first.path).unwrap();
+    SystemVcs
+        .unmint(
+            repo.path(),
+            &first.path,
+            &fixture_namespace(first.path.file_name().unwrap().to_str().unwrap()),
+        )
+        .unwrap();
     assert!(second.path.join("SEED.txt").is_file());
     let branch = second.branch.as_deref().unwrap();
     assert!(
@@ -344,14 +700,15 @@ fn git_untouched_fork_over_dirty_parent_reports_zero_zero() {
     let repo = git_repo();
     std::fs::write(repo.path().join("DIRT.txt"), "dirt\n").unwrap();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     assert_eq!(
         ahead_behind(&minted.path, repo.path(), Some(&minted.base.commit)),
@@ -363,29 +720,38 @@ fn git_untouched_fork_over_dirty_parent_reports_zero_zero() {
 fn adopted_child_with_uncommitted_work_reports_zero_ahead() {
     let repo = git_repo();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(minted.path.join("ADOPTED.txt"), "adopted\n").unwrap();
     std::fs::write(minted.path.join("SEED.txt"), "edited seed\n").unwrap();
     let candidate = SystemVcs
-        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .seal(
+            &minted.path,
+            &digest_text("fixture"),
+            "cand-1",
+            &minted.base.commit,
+        )
         .unwrap();
     SystemVcs
-        .adopt(
-            repo.path(),
-            &minted.path,
-            &minted.base.commit,
-            None,
-            &candidate,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &minted.path,
+            source_agent_id: fixture_source(&minted.path),
+            base_commit: &minted.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap();
     let base = candidate.commit.as_str();
     let status = git_in(&minted.path, &["status", "--porcelain"]);
@@ -420,14 +786,15 @@ fn adopted_child_with_uncommitted_work_reports_zero_ahead() {
 fn child_uncommitted_edit_counts_one_ahead() {
     let repo = git_repo();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(minted.path.join("AHEAD.txt"), "ahead\n").unwrap();
     assert_eq!(
@@ -441,14 +808,15 @@ fn parent_commit_of_mint_dirt_adds_no_behind() {
     let repo = git_repo();
     std::fs::write(repo.path().join("DIRT.txt"), "dirt\n").unwrap();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     git_in(repo.path(), &["add", "DIRT.txt"]);
     git_in(repo.path(), &["commit", "-q", "-m", "mint dirt"]);
@@ -468,14 +836,15 @@ fn parent_commit_plus_mint_dirt_counts_one_behind() {
     let repo = git_repo();
     std::fs::write(repo.path().join("a"), "mint dirt\n").unwrap();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(repo.path().join("y"), "committed later\n").unwrap();
     git_in(repo.path(), &["add", "y"]);
@@ -490,24 +859,26 @@ fn parent_commit_plus_mint_dirt_counts_one_behind() {
 fn parent_behind_cache_is_scoped_to_one_probe_and_keyed_by_base() {
     let repo = git_repo();
     let first = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     let second = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c2",
-            "c2",
-            repo.path(),
-            WorkspaceMode::Fork,
-            Some(&first.base),
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c2",
+            copy_id: "c2",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: Some(&first.base),
+            namespace: &fixture_namespace("c2"),
+        })
         .unwrap();
     let mut cache = ParentBehindCache::new();
     assert_eq!(
@@ -531,7 +902,7 @@ fn parent_behind_cache_is_scoped_to_one_probe_and_keyed_by_base() {
     );
     assert_eq!(cache.len(), 1);
     let changed_base = SystemVcs
-        .seal(repo.path(), &digest_text("cache"), "parent")
+        .seal(repo.path(), &digest_text("cache"), "parent", "HEAD")
         .unwrap();
     SystemVcs.ahead_behind_cached(
         &second.path,
@@ -555,14 +926,15 @@ fn parent_behind_cache_is_scoped_to_one_probe_and_keyed_by_base() {
 fn secret_only_changes_count_nothing() {
     let repo = git_repo();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(minted.path.join(".env"), "CHILD=1\n").unwrap();
     std::fs::write(repo.path().join(".env"), "PARENT=1\n").unwrap();
@@ -602,18 +974,25 @@ fn git_worktree_copy_unmints_through_git_after_colocation() {
     }
     let repo = git_repo();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "t-c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "t-c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("t-c1"),
+        })
         .unwrap();
     colocate_jj(repo.path());
     assert_eq!(detect_vcs(repo.path()).unwrap(), SessionVcs::Jj);
-    SystemVcs.unmint(repo.path(), &minted.path).unwrap();
+    SystemVcs
+        .unmint(
+            repo.path(),
+            &minted.path,
+            &fixture_namespace(minted.path.file_name().unwrap().to_str().unwrap()),
+        )
+        .unwrap();
     assert!(!minted.path.exists());
     assert!(
         !git_run(
@@ -633,14 +1012,15 @@ fn git_fork_seals_after_launch_colocation() {
     }
     let repo = git_repo();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(minted.path.join("H.txt"), "child\n").unwrap();
     colocate_jj(repo.path());
@@ -653,7 +1033,9 @@ fn git_fork_seals_after_launch_colocation() {
         refused.detail
     );
     let namespace = digest_text("fixture");
-    let sealed = SystemVcs.seal(&minted.path, &namespace, "cand-1").unwrap();
+    let sealed = SystemVcs
+        .seal(&minted.path, &namespace, "cand-1", &minted.base.commit)
+        .unwrap();
     let reference = candidate_ref(&namespace, "cand-1");
     assert!(
         git_run(
@@ -666,14 +1048,17 @@ fn git_fork_seals_after_launch_colocation() {
         "seal did not pin {reference}"
     );
     let refused = SystemVcs
-        .adopt(
-            repo.path(),
-            &minted.path,
-            &minted.base.commit,
-            None,
-            &sealed,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &minted.path,
+            source_agent_id: fixture_source(&minted.path),
+            base_commit: &minted.base.commit,
+            base_change_id: None,
+            candidate: &sealed,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap_err();
     assert!(
         matches!(refused, AdoptFailure::Unavailable(ref reason) if reason.contains("git candidate into a jj target")),
@@ -691,19 +1076,22 @@ fn colocated_launch_keeps_all_copy_queries_and_maintenance_on_git() {
     git_in(repo.path(), &["add", ".gitignore"]);
     git_in(repo.path(), &["commit", "-qm", "ignore build cache"]);
     let copy = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(copy.path.join("WIP.txt"), "work\n").unwrap();
     colocate_jj(repo.path());
     let namespace = digest_text("colocation");
-    let sealed = SystemVcs.seal(&copy.path, &namespace, "candidate").unwrap();
+    let sealed = SystemVcs
+        .seal(&copy.path, &namespace, "candidate", &copy.base.commit)
+        .unwrap();
     assert!(SystemVcs.dirty(&copy.path));
     assert_eq!(SystemVcs.label(&copy.path).as_deref(), Some("plak/c1"));
     assert_eq!(
@@ -724,14 +1112,17 @@ fn colocated_launch_keeps_all_copy_queries_and_maintenance_on_git() {
         refused.detail
     );
     let refused = SystemVcs
-        .adopt(
-            repo.path(),
-            &copy.path,
-            &copy.base.commit,
-            None,
-            &sealed,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &copy.path,
+            source_agent_id: fixture_source(&copy.path),
+            base_commit: &copy.base.commit,
+            base_change_id: None,
+            candidate: &sealed,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap_err();
     assert!(
         matches!(refused, AdoptFailure::Unavailable(reason) if reason.contains("git candidate into a jj target: not yet supported"))
@@ -762,28 +1153,37 @@ fn jj_adoption_omits_file_listing_even_when_files_changed_is_nonzero() {
     }
     let repo = jj_repo();
     let copy = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(copy.path.join("WORK.txt"), "work\n").unwrap();
     let sealed = SystemVcs
-        .seal(&copy.path, &digest_text("jj-receipt"), "candidate")
+        .seal(
+            &copy.path,
+            &digest_text("jj-receipt"),
+            "candidate",
+            &copy.base.commit,
+        )
         .unwrap();
     let landing = SystemVcs
-        .adopt(
-            repo.path(),
-            &copy.path,
-            &copy.base.commit,
-            copy.base.change_id.as_deref(),
-            &sealed,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &copy.path,
+            source_agent_id: fixture_source(&copy.path),
+            base_commit: &copy.base.commit,
+            base_change_id: copy.base.change_id.as_deref(),
+            candidate: &sealed,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap();
     assert_ne!(landing.files_changed, 0);
     assert_eq!(landing.receipt_files(), (Vec::new(), false));
@@ -887,12 +1287,16 @@ fn assert_failed_snapshot_ref_is_create_only(repo: &tempfile::TempDir) {
     let namespace = digest_text("create-only-failure");
     let id = "failed-worker-a1";
     std::fs::write(repo.path().join("SEED.txt"), "first failure\n").unwrap();
-    let first = SystemVcs.seal(repo.path(), &namespace, id).unwrap();
-    let repeated = SystemVcs.seal(repo.path(), &namespace, id).unwrap_err();
+    let first = SystemVcs.seal(repo.path(), &namespace, id, "HEAD").unwrap();
+    let repeated = SystemVcs
+        .seal(repo.path(), &namespace, id, "HEAD")
+        .unwrap_err();
     let reference = candidate_ref(&namespace, id);
     assert!(repeated.detail.contains(&reference), "{repeated:?}");
     std::fs::write(repo.path().join("SEED.txt"), "later work\n").unwrap();
-    let error = SystemVcs.seal(repo.path(), &namespace, id).unwrap_err();
+    let error = SystemVcs
+        .seal(repo.path(), &namespace, id, "HEAD")
+        .unwrap_err();
     assert!(error.detail.contains(&reference), "{error:?}");
     assert_eq!(
         git_text(repo.path(), &["rev-parse", &reference], "ref").unwrap(),
@@ -918,13 +1322,18 @@ fn failed_attempt_jj_snapshot_ref_is_create_only() {
     let repo = jj_repo_with_init_args(&["git", "init", "--no-colocate"]);
     let namespace = digest_text("create-only-jj-failure");
     let id = "failed-worker-a1";
+    let base = jj_snapshot(repo.path()).unwrap().commit;
     std::fs::write(repo.path().join("SEED.txt"), "first failure\n").unwrap();
-    let first = SystemVcs.seal(repo.path(), &namespace, id).unwrap();
-    let repeated = SystemVcs.seal(repo.path(), &namespace, id).unwrap_err();
+    let first = SystemVcs.seal(repo.path(), &namespace, id, &base).unwrap();
+    let repeated = SystemVcs
+        .seal(repo.path(), &namespace, id, &base)
+        .unwrap_err();
     let reference = candidate_ref(&namespace, id);
     assert!(repeated.detail.contains(&reference), "{repeated:?}");
     std::fs::write(repo.path().join("SEED.txt"), "later work\n").unwrap();
-    let error = SystemVcs.seal(repo.path(), &namespace, id).unwrap_err();
+    let error = SystemVcs
+        .seal(repo.path(), &namespace, id, &base)
+        .unwrap_err();
     assert!(error.detail.contains(&reference), "{error:?}");
     let output = Command::new("git")
         .arg("--git-dir=.jj/repo/store/git")
@@ -952,7 +1361,7 @@ fn failed_attempt_snapshot_pins_dirty_files_without_moving_branch() {
     let index = std::fs::read(repo.path().join(".git/index")).unwrap();
     let namespace = digest_text("failure-test");
     let snap = SystemVcs
-        .seal(repo.path(), &namespace, "failed-worker-a1")
+        .seal(repo.path(), &namespace, "failed-worker-a1", "HEAD")
         .unwrap();
     let reference = candidate_ref(&namespace, "failed-worker-a1");
     let files = git_text(
@@ -1094,14 +1503,15 @@ fn binary_and_modify_delete_conflicts_name_their_kinds() {
     git_in(repo.path(), &["commit", "-q", "-m", "files"]);
 
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(repo.path().join("src/a.rs"), "parent\n").unwrap();
     std::fs::write(repo.path().join("img.png"), b"BBB\0").unwrap();
@@ -1111,17 +1521,25 @@ fn binary_and_modify_delete_conflicts_name_their_kinds() {
     std::fs::remove_file(minted.path.join("gone.txt")).unwrap();
 
     let candidate = SystemVcs
-        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .seal(
+            &minted.path,
+            &digest_text("fixture"),
+            "cand-1",
+            &minted.base.commit,
+        )
         .unwrap();
     let failure = SystemVcs
-        .adopt(
-            repo.path(),
-            &minted.path,
-            &minted.base.commit,
-            None,
-            &candidate,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &minted.path,
+            source_agent_id: fixture_source(&minted.path),
+            base_commit: &minted.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap_err();
     let AdoptFailure::Conflict(paths) = failure else {
         panic!("expected a conflict, got {failure:?}");
@@ -1310,30 +1728,45 @@ fn repository_hooks_never_run_in_plak_git_steps() {
     git_in(repo.path(), &["config", "core.fsmonitor", &monitor]);
 
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(minted.path.join("SEED.txt"), "child\n").unwrap();
     let candidate = SystemVcs
-        .seal(&minted.path, &digest_text("fixture"), "cand-1")
-        .unwrap();
-    SystemVcs
-        .adopt(
-            repo.path(),
+        .seal(
             &minted.path,
+            &digest_text("fixture"),
+            "cand-1",
             &minted.base.commit,
-            None,
-            &candidate,
-            None,
         )
         .unwrap();
-    SystemVcs.unmint(repo.path(), &minted.path).unwrap();
+    SystemVcs
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &minted.path,
+            source_agent_id: fixture_source(&minted.path),
+            base_commit: &minted.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
+        .unwrap();
+    SystemVcs
+        .unmint(
+            repo.path(),
+            &minted.path,
+            &fixture_namespace(minted.path.file_name().unwrap().to_str().unwrap()),
+        )
+        .unwrap();
     assert_eq!(
         std::fs::read_to_string(repo.path().join("SEED.txt")).unwrap(),
         "child\n"
@@ -1358,29 +1791,38 @@ fn adopt_ignores_external_diff_and_textconv() {
     git_in(repo.path(), &["commit", "-q", "-m", "attributes"]);
 
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(minted.path.join("SEED.txt"), "seed\nchild line\n").unwrap();
     std::fs::write(minted.path.join("NEW.txt"), "new\n").unwrap();
     let candidate = SystemVcs
-        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .seal(
+            &minted.path,
+            &digest_text("fixture"),
+            "cand-1",
+            &minted.base.commit,
+        )
         .unwrap();
     let landing = SystemVcs
-        .adopt(
-            repo.path(),
-            &minted.path,
-            &minted.base.commit,
-            None,
-            &candidate,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &minted.path,
+            source_agent_id: fixture_source(&minted.path),
+            base_commit: &minted.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap();
     assert_eq!(landing.files_changed, 2);
     assert_eq!(
@@ -1414,14 +1856,15 @@ fn adopt_receipt_lists_changed_files_with_status_and_bounds_at_64() {
     git_in(repo.path(), &["commit", "-q", "-m", "base files"]);
 
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     std::fs::write(minted.path.join("0-keep.txt"), "keep\nchanged\n").unwrap();
     std::fs::remove_file(minted.path.join("1-gone.txt")).unwrap();
@@ -1438,17 +1881,25 @@ fn adopt_receipt_lists_changed_files_with_status_and_bounds_at_64() {
     }
 
     let candidate = SystemVcs
-        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .seal(
+            &minted.path,
+            &digest_text("fixture"),
+            "cand-1",
+            &minted.base.commit,
+        )
         .unwrap();
     let landing = SystemVcs
-        .adopt(
-            repo.path(),
-            &minted.path,
-            &minted.base.commit,
-            None,
-            &candidate,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &minted.path,
+            source_agent_id: fixture_source(&minted.path),
+            base_commit: &minted.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap();
     let (files, truncated) = landing.receipt_files();
     assert_eq!(landing.files_changed, 75, "{files:?}");
@@ -1488,29 +1939,38 @@ fn adopt_receipt_uses_lossy_names_without_losing_non_utf8_files() {
 
     let repo = git_repo();
     let minted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("c1"),
+        })
         .unwrap();
     let name = std::ffi::OsStr::from_bytes(b"non-utf8-\xff.txt");
     std::fs::write(minted.path.join(name), "work\n").unwrap();
     let candidate = SystemVcs
-        .seal(&minted.path, &digest_text("fixture"), "cand-1")
+        .seal(
+            &minted.path,
+            &digest_text("fixture"),
+            "cand-1",
+            &minted.base.commit,
+        )
         .unwrap();
     let landing = SystemVcs
-        .adopt(
-            repo.path(),
-            &minted.path,
-            &minted.base.commit,
-            None,
-            &candidate,
-            None,
-        )
+        .adopt(&AdoptRequest {
+            target_path: repo.path(),
+            child_path: &minted.path,
+            source_agent_id: fixture_source(&minted.path),
+            base_commit: &minted.base.commit,
+            base_change_id: None,
+            candidate: &candidate,
+            expected_target: None,
+            namespace: &digest_text("fixture"),
+            candidate_id: "cand-1",
+        })
         .unwrap();
     assert_eq!(
         landing.receipt_files(),
@@ -1527,14 +1987,15 @@ fn adopt_receipt_uses_lossy_names_without_losing_non_utf8_files() {
 fn unmint_of_an_already_removed_copy_drops_only_its_branch() {
     let repo = git_repo();
     let copy = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "t-c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "t-c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("t-c1"),
+        })
         .unwrap();
     let removed = git_in(
         repo.path(),
@@ -1558,21 +2019,40 @@ fn unmint_of_an_already_removed_copy_drops_only_its_branch() {
     };
     assert!(branch(repo.path()), "the branch outlives a by-hand removal");
 
-    SystemVcs.unmint(repo.path(), &copy.path).unwrap();
-    assert!(!branch(repo.path()), "unmint dropped the leftover branch");
-    SystemVcs.unmint(repo.path(), &copy.path).unwrap();
-
-    let live = SystemVcs
-        .mint_from(
+    SystemVcs
+        .unmint(
             repo.path(),
-            "c2",
-            "t-c2",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
+            &copy.path,
+            &fixture_namespace(copy.path.file_name().unwrap().to_str().unwrap()),
         )
         .unwrap();
-    SystemVcs.unmint(repo.path(), &live.path).unwrap();
+    assert!(!branch(repo.path()), "unmint dropped the leftover branch");
+    SystemVcs
+        .unmint(
+            repo.path(),
+            &copy.path,
+            &fixture_namespace(copy.path.file_name().unwrap().to_str().unwrap()),
+        )
+        .unwrap();
+
+    let live = SystemVcs
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c2",
+            copy_id: "t-c2",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("t-c2"),
+        })
+        .unwrap();
+    SystemVcs
+        .unmint(
+            repo.path(),
+            &live.path,
+            &fixture_namespace(live.path.file_name().unwrap().to_str().unwrap()),
+        )
+        .unwrap();
     assert!(!live.path.exists());
     let listed = String::from_utf8(git_in(repo.path(), &["worktree", "list"]).stdout).unwrap();
     assert!(!listed.contains("t-c2"), "{listed}");
@@ -1586,25 +2066,27 @@ fn unmint_of_an_already_removed_copy_drops_only_its_branch() {
 fn the_next_mint_reclaims_an_orphaned_copy() {
     let repo = git_repo();
     let orphan = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "t-c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "t-c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("t-c1"),
+        })
         .unwrap();
     std::fs::write(orphan.path.join("STALE.txt"), "never recorded\n").unwrap();
     let reminted = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "t-c1",
-            repo.path(),
-            WorkspaceMode::Snapshot,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "t-c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Snapshot,
+            base: None,
+            namespace: &fixture_namespace("t-c1"),
+        })
         .unwrap();
     assert_eq!(reminted.path, orphan.path);
     assert!(!reminted.path.join("STALE.txt").exists());
@@ -1622,17 +2104,24 @@ fn the_next_mint_reclaims_an_orphaned_copy() {
     assert_eq!(listed.matches("t-c1").count(), 1, "{listed}");
 
     // A directory with no registration at all.
-    SystemVcs.unmint(repo.path(), &reminted.path).unwrap();
+    SystemVcs
+        .unmint(
+            repo.path(),
+            &reminted.path,
+            &fixture_namespace(reminted.path.file_name().unwrap().to_str().unwrap()),
+        )
+        .unwrap();
     std::fs::create_dir_all(reminted.path.join("partial")).unwrap();
     let fresh = SystemVcs
-        .mint_from(
-            repo.path(),
-            "c1",
-            "t-c1",
-            repo.path(),
-            WorkspaceMode::Fork,
-            None,
-        )
+        .mint_from(&MintRequest {
+            launch: repo.path(),
+            agent_id: "c1",
+            copy_id: "t-c1",
+            parent_cwd: repo.path(),
+            mode: WorkspaceMode::Fork,
+            base: None,
+            namespace: &fixture_namespace("t-c1"),
+        })
         .unwrap();
     assert!(!fresh.path.join("partial").exists());
     assert!(fresh.path.join("SEED.txt").is_file());

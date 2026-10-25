@@ -7,6 +7,46 @@ use super::{
     run_mint_hook, seal_candidate, unmint_copy, unpin_candidate, workspace_label,
 };
 
+/// Identity and immutable inputs for one copy mint.
+pub struct MintRequest<'a> {
+    /// Checkout owning all copies.
+    pub launch: &'a Path,
+    /// Logical owner of the new copy.
+    pub agent_id: &'a str,
+    /// Tree-scoped directory identity.
+    pub copy_id: &'a str,
+    /// Full tree digest owning its pins.
+    pub namespace: &'a str,
+    /// Caller state to copy when no candidate is supplied.
+    pub parent_cwd: &'a Path,
+    /// Fork or detached snapshot.
+    pub mode: WorkspaceMode,
+    /// An explicit candidate input, otherwise the caller's live state.
+    pub base: Option<&'a VcsSnapshot>,
+}
+
+/// One three-way landing and the identity of its retained provenance.
+pub struct AdoptRequest<'a> {
+    /// Checkout receiving the patch.
+    pub target_path: &'a Path,
+    /// Copy that produced the candidate.
+    pub child_path: &'a Path,
+    /// Immutable merge base.
+    pub base_commit: &'a str,
+    /// JJ lineage at that base.
+    pub base_change_id: Option<&'a str>,
+    /// Immutable candidate snapshot.
+    pub candidate: &'a VcsSnapshot,
+    /// Optional target concurrency fence.
+    pub expected_target: Option<&'a str>,
+    /// Full tree digest owning the provenance refs.
+    pub namespace: &'a str,
+    /// Candidate whose landing is recorded.
+    pub candidate_id: &'a str,
+    /// Base pin to advance for a retained producing copy; absent after reclamation.
+    pub source_agent_id: Option<&'a str>,
+}
+
 /// The VCS port the tree drives. Every method is a
 /// repository operation or a filesystem probe and is expected to run with the tree
 /// mutex released; the tree itself never holds one of these across a seal,
@@ -28,15 +68,7 @@ pub trait VcsOps: Send + Sync {
     }
     /// Mints `agent_id`'s copy of `parent_cwd` under `launch`, over `base`
     /// when one is named and over the parent's own state otherwise.
-    fn mint_from(
-        &self,
-        launch: &Path,
-        agent_id: &str,
-        copy_id: &str,
-        parent_cwd: &Path,
-        mode: WorkspaceMode,
-        base: Option<&VcsSnapshot>,
-    ) -> Result<MintedCopy, VcsError>;
+    fn mint_from(&self, request: &MintRequest<'_>) -> Result<MintedCopy, VcsError>;
     /// Whether the sealed JJ history has left its recorded mint base.
     fn history_left_base(
         &self,
@@ -47,27 +79,28 @@ pub trait VcsOps: Send + Sync {
         Ok(false)
     }
 
-    /// Seals what the copy changed as `candidate_id`, pinned until adoption or discard.
+    /// Seals what the copy changed as `candidate_id`, pinned while its record is retained.
     fn seal(
         &self,
         child_path: &Path,
         namespace: &str,
         candidate_id: &str,
+        base_commit: &str,
     ) -> Result<VcsSnapshot, VcsError>;
     /// Drops the candidate's pin.
     fn unpin(&self, child_path: &Path, namespace: &str, candidate_id: &str)
     -> Result<(), VcsError>;
+    /// Mirrors the committed workspace base during interrupted-adopt recovery.
+    fn restore_copy_base(
+        &self,
+        path: &Path,
+        namespace: &str,
+        agent: &str,
+        base: &str,
+    ) -> Result<(), VcsError>;
     /// Lands `candidate` three-way onto `target_path`, refusing when the
     /// target moved past `expected_target` or the merge conflicts.
-    fn adopt(
-        &self,
-        target_path: &Path,
-        child_path: &Path,
-        base_commit: &str,
-        base_change_id: Option<&str>,
-        candidate: &VcsSnapshot,
-        expected_target: Option<&str>,
-    ) -> Result<AdoptLanding, AdoptFailure>;
+    fn adopt(&self, request: &AdoptRequest<'_>) -> Result<AdoptLanding, AdoptFailure>;
     /// Runs a template's `on_mint` hook in `cwd`; `Err` is `HookFailed`
     /// with the bounded output excerpt as its detail.
     fn run_mint_hook(
@@ -77,7 +110,7 @@ pub trait VcsOps: Send + Sync {
         env: &BTreeMap<String, String>,
     ) -> Result<(), VcsError>;
     /// Removes the copy at `path` and whatever the mint registered for it.
-    fn unmint(&self, launch: &Path, path: &Path) -> Result<(), VcsError>;
+    fn unmint(&self, launch: &Path, path: &Path, namespace: &str) -> Result<(), VcsError>;
     /// Whether the copy has uncommitted changes.
     fn dirty(&self, path: &Path) -> bool;
     /// How far `child` has moved from `parent`, when both are readable.
@@ -111,6 +144,20 @@ pub trait VcsOps: Send + Sync {
 pub struct SystemVcs;
 
 impl VcsOps for SystemVcs {
+    fn restore_copy_base(
+        &self,
+        path: &Path,
+        namespace: &str,
+        agent: &str,
+        base: &str,
+    ) -> Result<(), VcsError> {
+        let refs = [(super::copy_base_ref(namespace, agent), Some(base))];
+        match SessionVcs::of_copy(path)? {
+            SessionVcs::Git => super::pins::update(path, namespace, &refs, false),
+            SessionVcs::Jj => crate::native_jj::pin_references(path, namespace, &refs, false),
+        }
+    }
+
     fn trim_disposable_target(&self, path: &Path) -> Result<bool, VcsError> {
         maintenance::trim_disposable_target(path)
     }
@@ -118,16 +165,8 @@ impl VcsOps for SystemVcs {
     fn check_reclaimable(&self, path: &Path, sealed: Option<&VcsSnapshot>) -> Result<(), VcsError> {
         maintenance::check_reclaimable(path, sealed)
     }
-    fn mint_from(
-        &self,
-        launch: &Path,
-        _agent_id: &str,
-        copy_id: &str,
-        parent_cwd: &Path,
-        mode: WorkspaceMode,
-        base: Option<&VcsSnapshot>,
-    ) -> Result<MintedCopy, VcsError> {
-        mint_worktree_from(launch, copy_id, parent_cwd, mode, base)
+    fn mint_from(&self, request: &MintRequest<'_>) -> Result<MintedCopy, VcsError> {
+        mint_worktree_from(request)
     }
 
     fn history_left_base(&self, path: &Path, base: &str, sealed: &str) -> Result<bool, VcsError> {
@@ -142,8 +181,9 @@ impl VcsOps for SystemVcs {
         child_path: &Path,
         namespace: &str,
         candidate_id: &str,
+        base_commit: &str,
     ) -> Result<VcsSnapshot, VcsError> {
-        seal_candidate(child_path, namespace, candidate_id)
+        seal_candidate(child_path, namespace, candidate_id, base_commit)
     }
 
     fn unpin(
@@ -155,23 +195,8 @@ impl VcsOps for SystemVcs {
         unpin_candidate(child_path, namespace, candidate_id)
     }
 
-    fn adopt(
-        &self,
-        target_path: &Path,
-        child_path: &Path,
-        base_commit: &str,
-        base_change_id: Option<&str>,
-        candidate: &VcsSnapshot,
-        expected_target: Option<&str>,
-    ) -> Result<AdoptLanding, AdoptFailure> {
-        adopt_candidate(
-            target_path,
-            child_path,
-            base_commit,
-            base_change_id,
-            candidate,
-            expected_target,
-        )
+    fn adopt(&self, request: &AdoptRequest<'_>) -> Result<AdoptLanding, AdoptFailure> {
+        adopt_candidate(request)
     }
 
     fn run_mint_hook(
@@ -183,8 +208,8 @@ impl VcsOps for SystemVcs {
         run_mint_hook(cwd, command, env).map_err(VcsError::hook_failed)
     }
 
-    fn unmint(&self, launch: &Path, path: &Path) -> Result<(), VcsError> {
-        unmint_copy(launch, path)
+    fn unmint(&self, launch: &Path, path: &Path, namespace: &str) -> Result<(), VcsError> {
+        unmint_copy(launch, path, namespace)
     }
 
     fn dirty(&self, path: &Path) -> bool {

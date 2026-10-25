@@ -464,6 +464,7 @@ fn candidate_ref_stays_exact_after_rewrite_and_workspace_removal() {
         &child.path,
         &super::super::occupancy_vcs::digest_text("fixture"),
         "candidate-pinned",
+        &child.base.commit,
     )
     .unwrap();
     std::fs::write(child.path.join("candidate.txt"), "later work").unwrap();

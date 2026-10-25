@@ -509,6 +509,20 @@ fn tree_artifacts(database: &rusqlite::Connection) -> Result<Vec<(String, Artifa
                 artifact.references.insert(format!("refs/heads/plak/{id}"));
             }
         }
+        if version >= 9 {
+            let mut owners = database.prepare("SELECT agent_id FROM agent_nodes WHERE tree_id=?1 AND workspace_id IN (SELECT workspace_id FROM agent_workspaces WHERE tree_id=?1 AND mode!='inherit')")
+                .map_err(|error| error.to_string())?;
+            for owner in owners
+                .query_map([&tree], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+            {
+                let agent = owner.map_err(|error| error.to_string())?;
+                artifact.references.insert(maintenance::copy_base_ref(
+                    &maintenance::digest_text(&tree),
+                    &agent,
+                ));
+            }
+        }
         let mut candidates = database
             .prepare("SELECT candidate_id FROM agent_candidates WHERE tree_id=?1")
             .map_err(|error| error.to_string())?;
@@ -530,6 +544,18 @@ fn tree_artifacts(database: &rusqlite::Connection) -> Result<Vec<(String, Artifa
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| error.to_string())?,
         );
+        if version >= 9 {
+            for candidate in candidates
+                .query_map([&tree], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+            {
+                let candidate = candidate.map_err(|error| error.to_string())?;
+                artifact.references.extend(maintenance::candidate_refs(
+                    &maintenance::digest_text(&tree),
+                    &candidate,
+                ));
+            }
+        }
         let has_adopted_by = database
             .prepare("PRAGMA table_info(agent_candidates)")
             .map_err(|error| error.to_string())?
@@ -539,6 +565,24 @@ fn tree_artifacts(database: &rusqlite::Connection) -> Result<Vec<(String, Artifa
             .map_err(|error| error.to_string())?
             .iter()
             .any(|column| column == "adopted_by");
+        if version >= 9 {
+            let mut cleanups = database.prepare("SELECT canonical_request FROM agent_operations WHERE tree_id=?1 AND tool_name IN ('candidate_unpin','rescue_pin')")
+                .map_err(|error| error.to_string())?;
+            for cleanup in cleanups
+                .query_map([&tree], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+            {
+                let encoded = cleanup.map_err(|error| error.to_string())?;
+                let ids: Vec<String> = serde_json::from_str(&encoded)
+                    .map_err(|_| "invalid candidate cleanup intent")?;
+                for id in ids {
+                    artifact.references.extend(maintenance::candidate_refs(
+                        &maintenance::digest_text(&tree),
+                        &id,
+                    ));
+                }
+            }
+        }
         let sql = if has_adopted_by {
             "SELECT candidate_id FROM agent_candidates WHERE tree_id=?1 AND adopted_by IS NULL"
         } else {
@@ -752,6 +796,16 @@ pub(crate) fn remember_deleted_tree(paths: &PlakPaths, tree_id: &str) -> Result<
         .values()
         .filter(|row| row.mode != plakous_host_protocol::topology::WorkspaceMode::Inherit)
     {
+        for node in rows
+            .nodes()
+            .values()
+            .filter(|node| node.workspace_id == workspace.workspace_id)
+        {
+            artifact.references.insert(maintenance::copy_base_ref(
+                &maintenance::digest_text(tree_id),
+                &node.agent_id,
+            ));
+        }
         artifact.worktrees.insert(workspace.path.clone());
         if let Some(id) = workspace.path.file_name().and_then(|id| id.to_str()) {
             artifact.references.insert(format!("refs/heads/plak/{id}"));
@@ -765,7 +819,24 @@ pub(crate) fn remember_deleted_tree(paths: &PlakPaths, tree_id: &str) -> Result<
         if candidate.adopted_by.is_none() {
             artifact.unadopted.insert(reference.clone());
         }
-        artifact.references.insert(reference);
+        artifact.references.extend(maintenance::candidate_refs(
+            &maintenance::digest_text(tree_id),
+            candidate.candidate_id.as_str(),
+        ));
+    }
+    for cleanup in rows
+        .operations()
+        .values()
+        .filter(|op| matches!(op.tool_name.as_str(), "candidate_unpin" | "rescue_pin"))
+    {
+        let ids: Vec<String> = serde_json::from_str(&cleanup.canonical_request)
+            .map_err(|_| "invalid candidate cleanup intent")?;
+        for id in ids {
+            artifact.references.extend(maintenance::candidate_refs(
+                &maintenance::digest_text(tree_id),
+                &id,
+            ));
+        }
     }
     remember_artifacts(paths, tree_id, artifact)
 }
@@ -847,8 +918,6 @@ fn tombstone_id(path: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use crate::home::state::{confirm_prune_legacy, prune_legacy};
-    use plakous_host_protocol::topology::WorkspaceMode;
-    use plakous_hosted::occupancy_vcs::{SystemVcs, VcsOps as _};
     use plakous_recursive_subagents::tree::vcs_fixtures::git_repo;
 
     thread_local! {
@@ -913,20 +982,32 @@ mod tests {
         let old = paths.state_root().join("r1.e1.p1.t1");
         fs::create_dir_all(&old).unwrap();
         let repo = git_repo();
-        let copy = SystemVcs
-            .mint_from(
-                repo.path(),
-                "c1",
-                "old-c1",
-                repo.path(),
-                WorkspaceMode::Fork,
-                None,
-            )
-            .unwrap();
-        // A real pin, no provider or real checkout involved.
-        let candidate = SystemVcs
-            .seal(&copy.path, &maintenance::digest_text("old"), "cand-old-a1")
-            .unwrap();
+        // This is a schema-3 artifact fixture, not a current-schema mint:
+        // it must not gain today's base and provenance ref families.
+        let copy = repo.path().join(".plak/worktrees/old-c1");
+        fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        fs::write(
+            repo.path().join(".git/info/exclude"),
+            ".plak/worktrees/\n.plak/bin/\n",
+        )
+        .unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    "plak/old-c1",
+                    copy.to_str().unwrap(),
+                    "HEAD"
+                ])
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        plakous_recursive_subagents::tree::vcs_fixtures::install_git_copy_fence(&copy);
         let database = rusqlite::Connection::open(old.join("subagents.sqlite3")).unwrap();
         database.execute_batch("PRAGMA user_version=3; CREATE TABLE agent_trees(tree_id TEXT,launch_checkout TEXT); CREATE TABLE agent_workspaces(tree_id TEXT,path TEXT,mode TEXT); CREATE TABLE agent_candidates(tree_id TEXT,candidate_id TEXT,adopted_by TEXT);").unwrap();
         database
@@ -938,7 +1019,7 @@ mod tests {
         database
             .execute(
                 "INSERT INTO agent_workspaces VALUES('old',?1,'fork')",
-                [copy.path.display().to_string()],
+                [copy.display().to_string()],
             )
             .unwrap();
         database
@@ -947,9 +1028,8 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert_ne!(candidate.commit, "");
-        // Model a landed candidate: both the branch and its pin are reachable
-        // from launch HEAD, rather than the synthetic snapshot seal commit.
+        // Model landed legacy work: both branch and pin are reachable from
+        // launch HEAD, so maintenance can prove collection is safe.
         let pin = maintenance::candidate_ref(&maintenance::digest_text("old"), "cand-old-a1");
         for reference in ["refs/heads/plak/old-c1", pin.as_str()] {
             assert!(
@@ -963,7 +1043,7 @@ mod tests {
                     .success()
             );
         }
-        (home, paths, repo, old, copy.path)
+        (home, paths, repo, old, copy)
     }
 
     #[test]
@@ -2013,6 +2093,43 @@ mod tests {
         assert_eq!(prune_legacy(&paths).unwrap(), 2);
         assert!(copy.exists());
         assert!(!old.exists());
+    }
+
+    #[test]
+    fn maintenance_inventories_rescue_pins_by_schema() {
+        for version in [8, 9] {
+            let db = rusqlite::Connection::open_in_memory().unwrap();
+            db.execute_batch(
+                "CREATE TABLE agent_trees(tree_id TEXT, launch_checkout TEXT);
+                 CREATE TABLE agent_workspaces(tree_id TEXT, workspace_id TEXT, path TEXT, mode TEXT);
+                 CREATE TABLE agent_nodes(tree_id TEXT, agent_id TEXT, workspace_id TEXT, branch TEXT);
+                 CREATE TABLE agent_candidates(tree_id TEXT, candidate_id TEXT, adopted_by TEXT);
+                 CREATE TABLE agent_operations(tree_id TEXT, tool_name TEXT, canonical_request TEXT);
+                 INSERT INTO agent_trees VALUES('tree','/checkout');
+                 INSERT INTO agent_workspaces VALUES('tree','ws-c1','/checkout/.plak/worktrees/1234abcd-c1','fork');
+                 INSERT INTO agent_nodes VALUES('tree','c1','ws-c1','plak/1234abcd/c1');"
+            ).unwrap();
+            db.execute(
+                "INSERT INTO agent_operations VALUES('tree','rescue_pin',?1)",
+                ["[\"failed-c1-a1-turn\"]"],
+            )
+            .unwrap();
+            db.pragma_update(None, "user_version", version).unwrap();
+            let inventory = tree_artifacts(&db).unwrap();
+            let refs = &inventory[0].1.references;
+            for reference in
+                maintenance::candidate_refs(&maintenance::digest_text("tree"), "failed-c1-a1-turn")
+            {
+                assert_eq!(refs.contains(&reference), version == 9);
+            }
+            assert_eq!(
+                refs.contains(&maintenance::copy_base_ref(
+                    &maintenance::digest_text("tree"),
+                    "c1"
+                )),
+                version == 9
+            );
+        }
     }
 
     #[test]

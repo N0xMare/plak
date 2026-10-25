@@ -26,6 +26,7 @@ pub mod maintenance;
 mod mint;
 mod namespace;
 mod ops;
+mod pins;
 
 pub(crate) use git::git_query;
 #[cfg(test)]
@@ -47,7 +48,7 @@ pub use mint::run_mint_hook;
 #[cfg(test)]
 use mint::run_mint_hook_bounded;
 use mint::{mint_git_worktree, mint_jj_workspace};
-pub use ops::{SystemVcs, VcsOps};
+pub use ops::{AdoptRequest, MintRequest, SystemVcs, VcsOps};
 
 use plakous_host_protocol::topology::WorkspaceMode;
 
@@ -384,16 +385,15 @@ pub fn snapshot(path: &Path, label: &str) -> Result<VcsSnapshot, VcsError> {
 /// starts from a sealed candidate, not from whatever its parent's checkout
 /// happens to hold now. It is the candidate's own snapshot, so the copy's merge
 /// base is the candidate and a later adopt is still three-way.
-pub(crate) fn mint_worktree_from(
-    launch: &Path,
-    agent_id: &str,
-    parent_cwd: &Path,
-    mode: WorkspaceMode,
-    base: Option<&VcsSnapshot>,
-) -> Result<MintedCopy, VcsError> {
-    match detect_vcs(launch)? {
-        SessionVcs::Git => mint_git_worktree(launch, agent_id, parent_cwd, mode, base),
-        SessionVcs::Jj => mint_jj_workspace(launch, agent_id, parent_cwd, base),
+pub(crate) fn mint_worktree_from(request: &MintRequest<'_>) -> Result<MintedCopy, VcsError> {
+    match detect_vcs(request.launch)? {
+        SessionVcs::Git => mint_git_worktree(request),
+        SessionVcs::Jj => mint_jj_workspace(
+            request.launch,
+            request.copy_id,
+            request.parent_cwd,
+            request.base,
+        ),
     }
 }
 
@@ -405,9 +405,10 @@ pub(crate) fn seal_candidate(
     child_path: &Path,
     namespace: &str,
     candidate_id: &str,
+    base_commit: &str,
 ) -> Result<VcsSnapshot, VcsError> {
     let vcs = SessionVcs::of_copy(child_path)?;
-    let _namespace_guard = if vcs == SessionVcs::Git {
+    let namespace_guard = if vcs == SessionVcs::Git {
         let output = git_query(child_path, &["rev-parse", "--git-common-dir"])
             .map_err(|error| VcsError::seal_failed(error.to_string()))?;
         if !output.status.success() {
@@ -424,36 +425,59 @@ pub(crate) fn seal_candidate(
         SessionVcs::Git => git_snapshot(child_path, candidate_id),
         SessionVcs::Jj => jj_snapshot(child_path),
     }?;
-    if vcs == SessionVcs::Git {
-        let reference = candidate_ref(namespace, candidate_id);
-        let mut args = vec!["update-ref", reference.as_str(), sealed.commit.as_str()];
-        if candidate_id.starts_with("failed-") {
-            // An empty old value means "must not exist" in every object
-            // format; a 40-zero id is not a valid name in SHA-256 repositories.
-            args.push("");
-        }
-        let output = git_run(child_path, &args)
-            .map_err(|_| VcsError::seal_failed("git update-ref could not pin the candidate"))?;
-        if !output.status.success() {
-            return Err(VcsError::seal_failed(format!(
-                "git update-ref refused the candidate pin {reference}; any existing ref was preserved"
-            )));
-        }
-    }
-    if vcs == SessionVcs::Jj {
-        crate::native_jj::pin(child_path, namespace, candidate_id, Some(&sealed.commit))?;
+    drop(namespace_guard);
+    let refs = [
+        (
+            candidate_ref(namespace, candidate_id),
+            Some(sealed.commit.as_str()),
+        ),
+        (
+            pins::reference(namespace, "candidate-bases", candidate_id),
+            Some(base_commit),
+        ),
+    ];
+    match vcs {
+        SessionVcs::Git => pins::update(
+            child_path,
+            namespace,
+            &refs,
+            candidate_id.starts_with("failed-"),
+        )?,
+        SessionVcs::Jj => crate::native_jj::pin_references(
+            child_path,
+            namespace,
+            &refs,
+            candidate_id.starts_with("failed-"),
+        )?,
     }
     Ok(sealed)
 }
 
 /// The ref a sealed candidate is pinned by, so the commit survives until the
-/// candidate is adopted or discarded.
+/// candidate record is collected or its unadopted work is explicitly discarded.
 #[must_use]
 pub fn candidate_ref(namespace: &str, candidate_id: &str) -> String {
     format!(
         "refs/plak/{}/candidates/{candidate_id}",
         namespace.get(..16).unwrap_or(namespace)
     )
+}
+
+/// All refs owned by a retained candidate record, including landing provenance.
+#[must_use]
+pub fn candidate_refs(namespace: &str, candidate_id: &str) -> [String; 4] {
+    [
+        candidate_ref(namespace, candidate_id),
+        pins::reference(namespace, "candidate-bases", candidate_id),
+        pins::reference(namespace, "adopted", &format!("{candidate_id}-before")),
+        pins::reference(namespace, "adopted", &format!("{candidate_id}-after")),
+    ]
+}
+
+/// Ref retaining the base of one live copy independently of its input record.
+#[must_use]
+pub fn copy_base_ref(namespace: &str, agent: &str) -> String {
+    pins::reference(namespace, "bases", agent)
 }
 
 #[cfg(feature = "jj-lib")]
@@ -473,56 +497,81 @@ pub(crate) fn unpin_candidate(
     namespace: &str,
     candidate_id: &str,
 ) -> Result<(), VcsError> {
+    let refs = [
+        (candidate_ref(namespace, candidate_id), None),
+        (
+            pins::reference(namespace, "candidate-bases", candidate_id),
+            None,
+        ),
+        (
+            pins::reference(namespace, "adopted", &format!("{candidate_id}-before")),
+            None,
+        ),
+        (
+            pins::reference(namespace, "adopted", &format!("{candidate_id}-after")),
+            None,
+        ),
+    ];
     match SessionVcs::of_copy(child_path)? {
-        SessionVcs::Jj => crate::native_jj::pin(child_path, namespace, candidate_id, None),
-        SessionVcs::Git => {
-            let reference = candidate_ref(namespace, candidate_id);
-            let output =
-                git_run(child_path, &["update-ref", "-d", reference.as_str()]).map_err(|_| {
-                    VcsError::new(
-                        VcsErrorKind::RecoveryRequired,
-                        "candidate unpin could not run",
-                    )
-                })?;
-            if !output.status.success() {
-                return Err(VcsError::new(
-                    VcsErrorKind::RecoveryRequired,
-                    "candidate unpin failed; reference may remain",
-                ));
-            }
-            Ok(())
-        }
+        SessionVcs::Git => pins::update(child_path, namespace, &refs, false),
+        SessionVcs::Jj => crate::native_jj::pin_references(child_path, namespace, &refs, false),
     }
 }
 
 /// Three-way landing of a sealed candidate into `target_path`.
 /// Git updates target files; JJ records and checks out a working-copy commit.
 /// Neither backend changes child files.
-pub(crate) fn adopt_candidate(
-    target_path: &Path,
-    child_path: &Path,
-    base_commit: &str,
-    base_change_id: Option<&str>,
-    candidate: &VcsSnapshot,
-    expected_target: Option<&str>,
-) -> Result<AdoptLanding, AdoptFailure> {
+pub(crate) fn adopt_candidate(request: &AdoptRequest<'_>) -> Result<AdoptLanding, AdoptFailure> {
+    let AdoptRequest {
+        target_path,
+        child_path,
+        base_commit,
+        base_change_id,
+        candidate,
+        expected_target,
+        ..
+    } = *request;
     match detect_vcs(target_path).or_else(|_| detect_parent_vcs(target_path)) {
-        Ok(SessionVcs::Git) => {
-            git_adopt(target_path, base_commit, &candidate.commit, expected_target)
-        }
+        Ok(SessionVcs::Git) => git_adopt(request),
         Ok(SessionVcs::Jj) if matches!(SessionVcs::of_copy(child_path), Ok(SessionVcs::Git)) => {
             Err(AdoptFailure::Unavailable(
                 "git candidate into a jj target: not yet supported".to_owned(),
             ))
         }
-        Ok(SessionVcs::Jj) => jj_adopt(
-            target_path,
-            child_path,
-            base_commit,
-            base_change_id,
-            candidate,
-            expected_target,
-        ),
+        Ok(SessionVcs::Jj) => {
+            let landing = jj_adopt(
+                target_path,
+                child_path,
+                base_commit,
+                base_change_id,
+                candidate,
+                expected_target,
+            )?;
+            let refs = pins::adoption(
+                request,
+                landing
+                    .target_before
+                    .split(':')
+                    .next()
+                    .unwrap_or(&landing.target_before),
+                landing
+                    .target_after
+                    .split(':')
+                    .next()
+                    .unwrap_or(&landing.target_after),
+            );
+            crate::native_jj::pin_references(
+                target_path,
+                request.namespace,
+                &refs
+                    .iter()
+                    .map(|(name, value)| (name.clone(), Some(value.as_str())))
+                    .collect::<Vec<_>>(),
+                false,
+            )
+            .map_err(|error| AdoptFailure::RecoveryRequired(error.detail))?;
+            Ok(landing)
+        }
         Err(error) => Err(AdoptFailure::Unavailable(error.detail)),
     }
 }
@@ -557,7 +606,7 @@ fn wait_bounded(
 /// Unmints the copy. `refs/plak/*/candidates/*` is deliberately untouched: the
 /// worktree and its `plak/<id>` branch go, the sealed commit stays reachable
 /// through its pin.
-pub(crate) fn unmint_copy(launch: &Path, path: &Path) -> Result<(), VcsError> {
+pub(crate) fn unmint_copy(launch: &Path, path: &Path, namespace: &str) -> Result<(), VcsError> {
     let agent_id = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -637,6 +686,13 @@ pub(crate) fn unmint_copy(launch: &Path, path: &Path) -> Result<(), VcsError> {
                     "worktree removed but branch presence is uncertain",
                 ));
             }
+            let logical_agent = agent_id.rsplit('-').next().unwrap_or(agent_id);
+            pins::update(
+                launch,
+                namespace,
+                &[(pins::reference(namespace, "bases", logical_agent), None)],
+                false,
+            )?;
         }
     }
     Ok(())

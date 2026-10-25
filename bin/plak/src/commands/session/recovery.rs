@@ -178,9 +178,13 @@ fn show_child_recovery_status_with(
                 if let Some(commit) = &candidate.merged_at {
                     writeln!(
                         stdout,
-                        "  Candidate      {} merged at {}",
+                        "  Candidate      {} merged at {} (before {})",
                         crate::cli_output::safe_terminal_text(candidate.candidate_id.as_str(), 96),
-                        crate::cli_output::safe_terminal_text(commit, 96)
+                        crate::cli_output::safe_terminal_text(commit, 96),
+                        crate::cli_output::safe_terminal_text(
+                            candidate.target_before.as_deref().unwrap_or("unknown"),
+                            96
+                        )
                     )
                     .map_err(|_| CliFailure::new("stdout failed"))?;
                 }

@@ -111,13 +111,15 @@ pub(super) fn run_mint_hook_bounded(
     ))
 }
 
-pub(super) fn mint_git_worktree(
-    launch: &Path,
-    agent_id: &str,
-    parent_cwd: &Path,
-    mode: WorkspaceMode,
-    over: Option<&VcsSnapshot>,
-) -> Result<MintedCopy, VcsError> {
+pub(super) fn mint_git_worktree(request: &super::MintRequest<'_>) -> Result<MintedCopy, VcsError> {
+    let super::MintRequest {
+        launch,
+        copy_id: agent_id,
+        parent_cwd,
+        mode,
+        base: over,
+        ..
+    } = *request;
     let dest = launch.join(".plak/worktrees").join(agent_id);
     if dest.exists() || dest.is_symlink() {
         reclaim_orphan_worktree(launch, &dest, agent_id)?;
@@ -156,6 +158,32 @@ pub(super) fn mint_git_worktree(
     if !output.status.success() {
         unmint_git_dest(launch, &dest, dest_text.as_str(), cleanup_branch.as_str());
         return Err(VcsError::mint_failed("git worktree add refused the mint"));
+    }
+    // A prior uncommitted mint can leave only its base pin. Worktree add has
+    // now proved that no other checkout owns the branch; reclaim that pin
+    // before the new create-only publication.
+    let base_ref = super::pins::reference(request.namespace, "bases", request.agent_id);
+    let old_pin = super::git_query(launch, &["show-ref", "--verify", "--quiet", &base_ref])
+        .map_err(|error| VcsError::mint_failed(error.to_string()))?;
+    if old_pin.status.success() {
+        super::pins::update(
+            launch,
+            request.namespace,
+            &[(base_ref.clone(), None)],
+            false,
+        )?;
+    } else if old_pin.status.code() != Some(1) {
+        unmint_git_dest(launch, &dest, dest_text.as_str(), cleanup_branch.as_str());
+        return Err(VcsError::mint_failed("cannot inspect orphan base pin"));
+    }
+    if let Err(error) = super::pins::update(
+        &dest,
+        request.namespace,
+        &[(base_ref, Some(base.commit.as_str()))],
+        true,
+    ) {
+        unmint_git_dest(launch, &dest, dest_text.as_str(), cleanup_branch.as_str());
+        return Err(error);
     }
     if let Err(error) = crate::git_redirect_fence::install(&dest) {
         unmint_git_dest(launch, &dest, dest_text.as_str(), cleanup_branch.as_str());

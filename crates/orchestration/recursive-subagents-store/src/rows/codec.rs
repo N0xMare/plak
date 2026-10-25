@@ -385,6 +385,7 @@ impl Row for CandidateRecord {
             "adopted_by",
             "adopted_evidence",
             "merged_at",
+            "target_before",
         ],
     };
 
@@ -419,6 +420,7 @@ impl Row for CandidateRecord {
                 serde_json::to_string(&candidate.adopted_evidence)
                     .map_err(|_| "candidate evidence could not be encoded".to_owned())?,
                 candidate.merged_at,
+                candidate.target_before,
             ],
         ))
     }
@@ -441,6 +443,7 @@ impl Row for WorkspaceRecord {
             "base_change_id",
             "generation",
             "adopter_agent_id",
+            "input_candidate_id",
         ],
     };
 
@@ -470,6 +473,10 @@ impl Row for WorkspaceRecord {
                 workspace.base_change_id,
                 to_i64(workspace.generation)?,
                 workspace.adopter_agent_id,
+                workspace
+                    .input_candidate_id
+                    .as_ref()
+                    .map(CandidateId::as_str),
             ],
         ))
     }

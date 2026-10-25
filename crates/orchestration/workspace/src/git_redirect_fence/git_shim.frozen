@@ -983,9 +983,11 @@ guard_gc() {
       continue
     fi
     case "$_arg" in
-      --prune|--prune=*)
+      --prune=*)
+        gc_expiry=$(printf '%s' "${_arg#*=}" | tr '[:upper:]' '[:lower:]')
+        case "$gc_expiry" in never) ;; *)
         guard_refuse gc prune "leave object retention to Plak"
-        ;;
+        ;; esac ;;
     esac
   done
 }
@@ -1009,19 +1011,35 @@ guard_prune() {
 }
 
 guard_reflog() {
-  _seen=$command_index
-  for _arg in "$@"; do
-    if [ "$_seen" -gt 0 ]; then
-      _seen=$((_seen - 1))
-      continue
-    fi
-    case "$_arg" in
+  shift "$command_index"
+  reflog_mutates=0
+  for reflog_arg in "$@"; do
+    case "$reflog_arg" in
       -*) ;;
-      expire|delete|drop)
-        guard_refuse reflog "$_arg" "leave object retention to Plak"
-        ;;
+      expire|delete) reflog_mutates=1; break ;;
+      drop) guard_refuse reflog drop "leave shared reflog retention to Plak" ;;
       *) return ;;
     esac
+  done
+  [ "$reflog_mutates" -eq 1 ] || return
+  reflog_updates=0
+  for reflog_arg in "$@"; do
+    case "$reflog_arg" in --updateref) reflog_updates=1 ;; --no-updateref) reflog_updates=0 ;; esac
+  done
+  for reflog_arg in "$@"; do
+    reflog_lower=$(printf '%s' "$reflog_arg" | tr '[:upper:]' '[:lower:]')
+    case "$reflog_lower" in
+      --all|stash|stash@*|refs/stash|refs/stash@*)
+        guard_refuse reflog "$reflog_arg" "leave shared stash and global reflog retention to Plak" ;;
+    esac
+    if [ "$reflog_updates" -eq 1 ]; then
+      case "$reflog_arg" in
+        -*|expire|delete) ;;
+        *)
+          reflog_ref=$(printf '%s' "$reflog_arg" | sed 's/@{.*//')
+          guard_branch_target "$reflog_ref" ;;
+      esac
+    fi
   done
 }
 
@@ -1089,6 +1107,7 @@ guard_option_spellings() {
     remote) guarded_options="prune no-prune dry-run no-dry-run verbose" ;;
     push|send-pack) guarded_options="delete repo prune mirror force force-with-lease push-option receive-pack exec all tags follow-tags stdin" ;;
     gc) guarded_options="prune" ;;
+    reflog) guarded_options="all single-worktree expire expire-unreachable updateref no-updateref rewrite dry-run" ;;
     prune) guarded_options="dry-run no-dry-run expire" ;;
     worktree) guarded_options="reason force lock dry-run no-dry-run expire" ;;
     repack) guarded_options="delete" ;;

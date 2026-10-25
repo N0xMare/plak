@@ -3,7 +3,7 @@
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
-pub use super::{candidate_ref, digest_text};
+pub use super::{candidate_ref, candidate_refs, copy_base_ref, digest_text};
 
 use super::{ReclamationRefusal, VcsError, git_query, git_run};
 

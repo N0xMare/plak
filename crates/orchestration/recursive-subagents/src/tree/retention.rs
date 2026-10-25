@@ -7,12 +7,18 @@ use super::{
 
 const KIND: &str = "child_retirement";
 const WATERMARK: &str = "plak:child_collection_watermark";
+const PIN_CLEANUP: &str = "candidate_unpin";
+const RESCUE_PIN: &str = "rescue_pin";
+
+pub(crate) struct PinCleanup {
+    pub(crate) operation_id: String,
+    pub(crate) candidates: Vec<CandidateId>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct RetirementTicket {
     pub(crate) agent_id: String,
     pub(crate) locator: Option<String>,
-    pub(crate) pins: Vec<CandidateId>,
     collected: bool,
 }
 
@@ -23,6 +29,130 @@ struct CollectionWatermark {
 }
 
 impl ProductAgentTree {
+    /// Records ownership before a failed-turn rescue snapshot is published.
+    ///
+    /// # Errors
+    /// Refuses an unknown owner or a conflicting rescue identity.
+    pub fn record_rescue_pin(
+        &mut self,
+        agent: &str,
+        pin: CandidateId,
+    ) -> Result<(), TopologyError> {
+        self.node(agent)?;
+        let id = format!("plak:rescue:{pin}");
+        let canonical = canonical_json(&vec![pin])?;
+        if let Some(prior) = self.operations.get(&id) {
+            if prior.tool_name == RESCUE_PIN
+                && prior.caller_agent_id == agent
+                && prior.canonical_request == canonical
+            {
+                return Ok(());
+            }
+            return Err(TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "rescue snapshot ownership conflicts; refs retained",
+            ));
+        }
+        self.operations.insert(
+            id.clone(),
+            OperationRecord {
+                operation_id: id,
+                caller_agent_id: agent.to_owned(),
+                tool_name: RESCUE_PIN.to_owned(),
+                request_digest: digest_text(&canonical),
+                canonical_request: canonical,
+                fold: None,
+                terminal_code: None,
+                terminal_response: None,
+            },
+        );
+        self.bump();
+        Ok(())
+    }
+
+    fn rescue_pins(&self, agent: &str) -> Result<Vec<CandidateId>, TopologyError> {
+        let mut pins = Vec::new();
+        for operation in self
+            .operations
+            .values()
+            .filter(|op| op.tool_name == RESCUE_PIN && op.caller_agent_id == agent)
+        {
+            pins.extend(
+                serde_json::from_str::<Vec<CandidateId>>(&operation.canonical_request).map_err(
+                    |_| {
+                        TopologyError::new(
+                            TopologyErrorCode::OperationRecoveryRequired,
+                            "rescue snapshot ownership is invalid; refs retained",
+                        )
+                    },
+                )?,
+            );
+        }
+        Ok(pins)
+    }
+
+    fn queue_pin_cleanup(&mut self, candidates: Vec<CandidateId>) -> Result<(), TopologyError> {
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let canonical = canonical_json(&candidates)?;
+        let digest = digest_text(&canonical);
+        let id = format!("plak:unpin:{digest}");
+        self.operations.insert(
+            id.clone(),
+            OperationRecord {
+                operation_id: id,
+                caller_agent_id: self.root_agent_id.clone(),
+                tool_name: PIN_CLEANUP.to_owned(),
+                request_digest: digest,
+                canonical_request: canonical,
+                terminal_code: None,
+                terminal_response: None,
+                fold: None,
+            },
+        );
+        Ok(())
+    }
+
+    pub(crate) fn pending_pin_cleanup(&self) -> Result<Vec<PinCleanup>, TopologyError> {
+        self.operations
+            .values()
+            .filter(|op| op.tool_name == PIN_CLEANUP)
+            .map(|op| {
+                let candidates = serde_json::from_str(&op.canonical_request).map_err(|_| {
+                    TopologyError::new(
+                        TopologyErrorCode::OperationRecoveryRequired,
+                        "candidate cleanup intent is invalid; refs retained",
+                    )
+                })?;
+                Ok(PinCleanup {
+                    operation_id: op.operation_id.clone(),
+                    candidates,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn acknowledge_pin_cleanup(
+        &mut self,
+        ticket: &PinCleanup,
+    ) -> Result<(), TopologyError> {
+        let Some(op) = self.operations.get(&ticket.operation_id) else {
+            return Ok(());
+        };
+        if op.tool_name != PIN_CLEANUP
+            || op.canonical_request != canonical_json(&ticket.candidates)?
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "candidate cleanup ownership changed; refs retained",
+            ));
+        }
+        self.operations.remove(&ticket.operation_id);
+        self.bump();
+        Ok(())
+    }
+
     fn retirement_id(agent: &str) -> String {
         format!("plak:{KIND}:{agent}")
     }
@@ -156,6 +286,7 @@ impl ProductAgentTree {
                     candidate.producing_agent_id == ticket.agent_id
                         && candidate.adopted_by.is_none()
                         && candidate.content != candidate.base_content
+                        && !self.input_was_relinquished(candidate)
                 });
                 if protected
                     || self
@@ -166,12 +297,6 @@ impl ProductAgentTree {
                     continue;
                 }
                 ticket.collected = false;
-                ticket.pins = self
-                    .candidates
-                    .values()
-                    .filter(|candidate| candidate.producing_agent_id == ticket.agent_id)
-                    .map(|candidate| candidate.candidate_id.clone())
-                    .collect();
                 self.write_retention(
                     Self::retirement_id(&ticket.agent_id),
                     ticket.agent_id.clone(),
@@ -212,16 +337,6 @@ impl ProductAgentTree {
                 agent_id: agent.clone(),
                 locator: node.session_locator.clone(),
                 collected: false,
-                pins: self
-                    .candidates
-                    .values()
-                    .filter(|candidate| {
-                        candidate.producing_agent_id == agent
-                            && (candidate.adopted_by.is_some()
-                                || candidate.content == candidate.base_content)
-                    })
-                    .map(|candidate| candidate.candidate_id.clone())
-                    .collect(),
             };
             self.write_retention(Self::retirement_id(&agent), agent.clone(), &ticket)?;
             self.nodes
@@ -259,6 +374,7 @@ impl ProductAgentTree {
                 candidate.producing_agent_id == ticket.agent_id
                     && candidate.adopted_by.is_none()
                     && candidate.content != candidate.base_content
+                    && !self.input_was_relinquished(candidate)
             })
             .map(|candidate| candidate.candidate_id.clone())
             .collect();
@@ -296,12 +412,26 @@ impl ProductAgentTree {
             .retain(|_, attempt| attempt.agent_id != ticket.agent_id);
         self.commands
             .retain(|_, command| command.recipient != ticket.agent_id);
+        let rescue_pins = self.rescue_pins(&ticket.agent_id)?;
         self.operations.retain(|key, operation| {
             key == WATERMARK
                 || key == &id
                 || operation.tool_name == "workspace_reclamation"
                 || operation.caller_agent_id != ticket.agent_id
         });
+        let mut collected: Vec<_> = self
+            .candidates
+            .values()
+            .filter(|candidate| {
+                candidate.producing_agent_id == ticket.agent_id
+                    && !retained.contains(&candidate.candidate_id)
+            })
+            .map(|candidate| candidate.candidate_id.clone())
+            .collect();
+        collected.extend(rescue_pins);
+        // Publish cleanup ownership in the same save that removes records.
+        // VCS failures cannot turn collection into a lost unpin obligation.
+        self.queue_pin_cleanup(collected)?;
         self.candidates.retain(|candidate, row| {
             row.producing_agent_id != ticket.agent_id || retained.contains(candidate)
         });
@@ -368,7 +498,6 @@ impl ProductAgentTree {
             let mut completed = ticket.clone();
             completed.collected = true;
             completed.locator = None;
-            completed.pins.clear();
             self.write_retention(id, ticket.agent_id.clone(), &completed)?;
         }
         self.bump();
@@ -379,6 +508,7 @@ impl ProductAgentTree {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
+    use super::CandidateId;
     use crate::tree::AwaitAgents;
     use crate::tree::test_support::{adopt_req, candidate_of, mint_req, spawn_req, tree, tree_at};
     use crate::tree::{ListAgentsRequest, NodeStatus, WorkspaceStatus, WriterMode};
@@ -495,6 +625,47 @@ mod tests {
             std::fs::read_to_string(repo.path().join("WORK.txt")).unwrap(),
             "retained work\n"
         );
+    }
+
+    #[test]
+    fn collected_records_keep_durable_pin_cleanup_until_acknowledged() {
+        use crate::tree::{MemoryTreeStore, ProductAgentTree, TreeStore as _};
+        let (_tmp, _vcs, mut tree) = crate::tree::test_support::fake_tree();
+        let child = tree.spawn_agent("root", &mint_req(), None).unwrap();
+        let rescue = CandidateId::from_persisted("failed-c1-a1-turn".into());
+        tree.record_rescue_pin(&child.agent_id, rescue.clone())
+            .unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        delivered(&mut tree);
+        let candidate = candidate_of(&tree, &child.agent_id);
+        tree.adopt_candidate("root", &adopt_req(&candidate), None)
+            .unwrap();
+        tree.close_agent(
+            "root",
+            &crate::tree::test_support::close_req(&child.agent_id),
+            None,
+        )
+        .unwrap();
+        tree.settle_for_test();
+        let ticket = tree.prepare_child_retention(u64::MAX).unwrap().remove(0);
+        tree.finish_child_retention(&ticket).unwrap();
+        assert!(!tree.candidates.contains_key(&candidate));
+        let store = MemoryTreeStore::new();
+        let revision = store.save(&tree).unwrap();
+        tree.acknowledge_revision(revision);
+        let mut reopened = ProductAgentTree::reopen(store.load(&tree.tree_id).unwrap().unwrap());
+        let mut pending = reopened.pending_pin_cleanup().unwrap();
+        assert_eq!(pending.len(), 1);
+        let mut cleanup = pending.remove(0);
+        let owned = vec![candidate, rescue];
+        assert_eq!(cleanup.candidates, owned);
+        cleanup.candidates.clear();
+        assert!(reopened.acknowledge_pin_cleanup(&cleanup).is_err());
+        assert_eq!(reopened.pending_pin_cleanup().unwrap().len(), 1);
+        cleanup.candidates = owned;
+        reopened.acknowledge_pin_cleanup(&cleanup).unwrap();
+        assert!(reopened.pending_pin_cleanup().unwrap().is_empty());
     }
 
     #[test]

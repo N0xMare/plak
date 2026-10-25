@@ -4,8 +4,9 @@ use std::io::Write;
 use std::process::{Command, Output};
 
 use super::{
-    AdoptFailure, AdoptLanding, ChangeKind, ChangedPath, ConflictPath, GIT_CLI_ENABLED, Path,
-    VcsError, VcsErrorKind, VcsSnapshot, create_private, mint_error, private_scratch, wait_bounded,
+    AdoptFailure, AdoptLanding, AdoptRequest, ChangeKind, ChangedPath, ConflictPath,
+    GIT_CLI_ENABLED, Path, VcsError, VcsErrorKind, VcsSnapshot, create_private, mint_error,
+    private_scratch, wait_bounded,
 };
 
 /// Ceiling on a `git` read: status, rev-parse, counts, name lists.
@@ -204,6 +205,18 @@ pub(super) fn git_run(cwd: &Path, args: &[&str]) -> Result<Output, std::io::Erro
     output_within(command, GIT_WRITE_TIMEOUT)
 }
 
+pub(super) fn git_run_stdin(cwd: &Path, args: &[&str], input: &[u8]) -> std::io::Result<Output> {
+    if !GIT_CLI_ENABLED {
+        return Err(std::io::Error::other("Git CLI backend not included"));
+    }
+    let scratch = private_scratch()?;
+    let path = scratch.path().join("stdin");
+    create_private(&path)?.write_all(input)?;
+    let mut command = git_command(cwd);
+    command.args(args);
+    output_within_reading(command, GIT_WRITE_TIMEOUT, Some(&path))
+}
+
 /// A `git` read, bounded by [`GIT_QUERY_TIMEOUT`]. It takes no optional locks,
 /// so a status poll never contends with the agent's own `git`.
 pub(crate) fn git_query(cwd: &Path, args: &[&str]) -> Result<Output, std::io::Error> {
@@ -355,12 +368,15 @@ fn git_snapshot_indexed(
     })
 }
 
-pub(super) fn git_adopt(
-    target_path: &Path,
-    base_commit: &str,
-    candidate_commit: &str,
-    expected_target: Option<&str>,
-) -> Result<AdoptLanding, AdoptFailure> {
+pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, AdoptFailure> {
+    let AdoptRequest {
+        target_path,
+        base_commit,
+        candidate,
+        expected_target,
+        ..
+    } = *request;
+    let candidate_commit = &candidate.commit;
     let target = git_snapshot(target_path, "adopt-target")
         .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
     if let Some(expected) = expected_target
@@ -430,9 +446,13 @@ pub(super) fn git_adopt(
     let files = parse_name_status(&names.stdout)?;
     let files_changed = u32::try_from(files.len()).unwrap_or(u32::MAX);
     if files_changed == 0 {
+        let after = commit_tree(target_path, merged_tree, &target.commit)
+            .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
+        pin_adoption(request, &target.commit, &after)
+            .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
         return Ok(AdoptLanding {
-            target_before: target.commit.clone(),
-            target_after: target.commit,
+            target_before: target.commit,
+            target_after: after,
             files_changed: 0,
             files,
             child_base: None,
@@ -476,15 +496,55 @@ pub(super) fn git_adopt(
             "git apply refused the merged patch: {stderr}"
         )));
     }
-    let after = git_snapshot(target_path, "adopt-after")
-        .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
+    // Pin the exact merge result, not a second snapshot racing a target edit.
+    let after = commit_tree(target_path, merged_tree, &target.commit)
+        .map_err(|error| AdoptFailure::RecoveryRequired(error.detail))?;
+    pin_adoption(request, &target.commit, &after).map_err(|error| {
+        AdoptFailure::RecoveryRequired(format!(
+            "adoption provenance needs recovery; inspect the target before retrying: {}",
+            error.detail
+        ))
+    })?;
     Ok(AdoptLanding {
         target_before: target.commit,
-        target_after: after.commit,
+        target_after: after,
         files_changed,
         files,
         child_base: None,
     })
+}
+
+fn commit_tree(path: &Path, tree: &str, parent: &str) -> Result<String, VcsError> {
+    let mut command = git_command(path);
+    command
+        .args(["commit-tree", tree, "-p", parent, "-m", "plak adoption"])
+        .env("GIT_AUTHOR_NAME", "plak")
+        .env("GIT_AUTHOR_EMAIL", "plak@local")
+        .env("GIT_COMMITTER_NAME", "plak")
+        .env("GIT_COMMITTER_EMAIL", "plak@local")
+        .env("GIT_AUTHOR_DATE", "@0 +0000")
+        .env("GIT_COMMITTER_DATE", "@0 +0000");
+    let output = output_within(command, GIT_WRITE_TIMEOUT)
+        .map_err(|error| VcsError::seal_failed(error.to_string()))?;
+    if !output.status.success() {
+        return Err(VcsError::seal_failed(
+            "cannot preserve adoption tree; inspect the target before retrying",
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+fn pin_adoption(request: &AdoptRequest<'_>, before: &str, after: &str) -> Result<(), VcsError> {
+    let refs = super::pins::adoption(request, before, after);
+    super::pins::update(
+        request.target_path,
+        request.namespace,
+        &refs
+            .iter()
+            .map(|(name, value)| (name.clone(), Some(value.as_str())))
+            .collect::<Vec<_>>(),
+        false,
+    )
 }
 
 /// `git diff --name-status -z -M`: one record is `<status> NUL <path> NUL`,

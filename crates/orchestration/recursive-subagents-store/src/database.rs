@@ -18,7 +18,7 @@ use crate::rows::load_agent_tree;
 /// `subagents.sqlite3` starts at schema version 1. It is not the
 /// product schema's number and never follows it; both name the state
 /// directory.
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// Every object the tree's database holds, name and exact DDL. The
 /// fingerprint is taken over this list, so a changed byte here needs a new
@@ -58,11 +58,11 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "agent_candidates",
-        "CREATE TABLE agent_candidates(tree_id TEXT NOT NULL,candidate_id TEXT NOT NULL,workspace_id TEXT NOT NULL,producing_agent_id TEXT NOT NULL,producing_attempt_id TEXT NOT NULL,base_commit TEXT NOT NULL,base_content TEXT NOT NULL,base_change_id TEXT,commit_id TEXT NOT NULL,content TEXT NOT NULL,change_id TEXT,sealed_at INTEGER NOT NULL CHECK(sealed_at>=0),adopted_by TEXT,adopted_evidence TEXT NOT NULL,merged_at TEXT,PRIMARY KEY(tree_id,candidate_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+        "CREATE TABLE agent_candidates(tree_id TEXT NOT NULL,candidate_id TEXT NOT NULL,workspace_id TEXT NOT NULL,producing_agent_id TEXT NOT NULL,producing_attempt_id TEXT NOT NULL,base_commit TEXT NOT NULL,base_content TEXT NOT NULL,base_change_id TEXT,commit_id TEXT NOT NULL,content TEXT NOT NULL,change_id TEXT,sealed_at INTEGER NOT NULL CHECK(sealed_at>=0),adopted_by TEXT,adopted_evidence TEXT NOT NULL,merged_at TEXT,target_before TEXT,PRIMARY KEY(tree_id,candidate_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
     ),
     (
         "agent_workspaces",
-        "CREATE TABLE agent_workspaces(tree_id TEXT NOT NULL,workspace_id TEXT NOT NULL,owner_agent_id TEXT NOT NULL,path TEXT NOT NULL,mode TEXT NOT NULL CHECK(mode IN('inherit','snapshot','fork')),status TEXT NOT NULL CHECK(status IN('active','adopting','discarding','clean_removed','adopted','discarded')),base_commit TEXT,base_content TEXT,base_change_id TEXT,generation INTEGER NOT NULL CHECK(generation>=0),adopter_agent_id TEXT CHECK(adopter_agent_id IS NULL OR status='adopting'),PRIMARY KEY(tree_id,workspace_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+        "CREATE TABLE agent_workspaces(tree_id TEXT NOT NULL,workspace_id TEXT NOT NULL,owner_agent_id TEXT NOT NULL,path TEXT NOT NULL,mode TEXT NOT NULL CHECK(mode IN('inherit','snapshot','fork')),status TEXT NOT NULL CHECK(status IN('active','adopting','discarding','clean_removed','adopted','discarded')),base_commit TEXT,base_content TEXT,base_change_id TEXT,generation INTEGER NOT NULL CHECK(generation>=0),adopter_agent_id TEXT CHECK(adopter_agent_id IS NULL OR status='adopting'),input_candidate_id TEXT,PRIMARY KEY(tree_id,workspace_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
     ),
     (
         "agent_commands",
@@ -290,10 +290,10 @@ mod tests {
     /// Identity golden for the unreleased t7 cohort's durable format.
     #[test]
     fn the_tree_schema_fingerprint_is_pinned() {
-        assert_eq!(SCHEMA_VERSION, 8);
+        assert_eq!(SCHEMA_VERSION, 9);
         assert_eq!(
             expected_schema_fingerprint(),
-            "1c356c82ae91952bd72d6ae9a15f970ee57cfbf23d6fd96ede103f93f41d67a2"
+            "2881756c6bbc8d45ef680b0f34676310786108159189a1644aa69ce25c2f84e0"
         );
     }
 
@@ -381,7 +381,7 @@ mod tests {
             refusal("version"),
             (
                 super::OpenErrorKind::UnsupportedPersistence,
-                "subagents schema 99, expected 8: this subagents.sqlite3 was created by an incompatible plak build; move it aside to start fresh".to_owned()
+                "subagents schema 99, expected 9: this subagents.sqlite3 was created by an incompatible plak build; move it aside to start fresh".to_owned()
             )
         );
     }
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn a_foreign_schema_version_is_refused_as_unsupported() {
         // Earlier cohorts have no transient-resume command or decision.
-        for foreign in [4_i64, 5, 6, 7, 99] {
+        for foreign in [4_i64, 5, 6, 7, 8, 99] {
             let root = tempfile::tempdir().unwrap();
             let database = root.path().join("subagents.sqlite3");
             drop(SubagentsDatabase::open(&database).unwrap());
@@ -406,7 +406,7 @@ mod tests {
             assert!(
                 error
                     .message()
-                    .contains(&format!("subagents schema {foreign}, expected 8")),
+                    .contains(&format!("subagents schema {foreign}, expected 9")),
                 "{error}"
             );
         }

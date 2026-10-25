@@ -31,8 +31,8 @@ use crate::protocol::{
     WorkspaceStatus, WriterMode,
 };
 use plakous_workspace::occupancy_vcs::{
-    AdoptFailure, AdoptLanding, MintedCopy, SystemVcs, VcsError, VcsErrorKind, VcsOps, VcsSnapshot,
-    digest_text,
+    AdoptFailure, AdoptLanding, AdoptRequest, MintRequest, MintedCopy, SystemVcs, VcsError,
+    VcsErrorKind, VcsOps, VcsSnapshot, digest_text,
 };
 use text::errors::{
     topology_mail_request_invalid_message, topology_output_schema_mismatch_message,
@@ -548,6 +548,8 @@ pub struct CandidateRecord {
     pub adopted_by: Option<String>,
     /// Target snapshot commit after adoption; never a commit on the root branch.
     pub merged_at: Option<String>,
+    /// Exact target snapshot before the landing, pinned for provenance.
+    pub target_before: Option<String>,
     /// Review attempt ids the adopter recorded with the landing.
     /// Validated against the caller's subtree at `begin_adopt`; kept here so
     /// "what evidence stood behind this landing" survives the process.
@@ -558,6 +560,8 @@ pub struct CandidateRecord {
 /// checkout itself, or a copy minted for one node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceRecord {
+    /// Candidate this copy was minted over, absent for a live-state fork.
+    pub input_candidate_id: Option<CandidateId>,
     /// Durable id; `ws-<agent>` for a minted copy.
     pub workspace_id: String,
     /// The node this copy was minted for. Other nodes may share it by
@@ -882,7 +886,12 @@ impl SealTicket {
     /// phase. An unpin refusal is a recoverable seal failure, never an empty
     /// candidate success.
     pub fn seal(&self, vcs: &dyn VcsOps) -> Result<Option<VcsSnapshot>, VcsError> {
-        let mut sealed = vcs.seal(&self.path, &self.namespace, self.candidate_id.as_str())?;
+        let mut sealed = vcs.seal(
+            &self.path,
+            &self.namespace,
+            self.candidate_id.as_str(),
+            &self.base_commit,
+        )?;
         sealed.history_left_base =
             vcs.history_left_base(&self.path, &self.base_commit, &sealed.commit)?;
         if !diverged_from_base(&sealed, &self.base_content) {
@@ -903,6 +912,9 @@ fn diverged_from_base(snapshot: &VcsSnapshot, base_content: &str) -> bool {
 /// landing. Carries no tree reference for the same reason.
 #[derive(Clone, Debug)]
 pub struct AdoptTicket {
+    interrupted_adopt: bool,
+    namespace: String,
+    advance_copy_base: bool,
     caller_id: String,
     candidate: CandidateRecord,
     target_path: PathBuf,
@@ -917,19 +929,24 @@ impl AdoptTicket {
     /// The subprocess half of the adopt. Holds no tree
     /// reference so it can run with the tree mutex released.
     pub fn land(&self, vcs: &dyn VcsOps) -> Result<AdoptLanding, AdoptFailure> {
-        vcs.adopt(
-            &self.target_path,
-            &self.child_path,
-            &self.candidate.base_commit,
-            self.candidate.base_change_id.as_deref(),
-            &VcsSnapshot {
+        vcs.adopt(&AdoptRequest {
+            target_path: &self.target_path,
+            child_path: &self.child_path,
+            base_commit: &self.candidate.base_commit,
+            base_change_id: self.candidate.base_change_id.as_deref(),
+            candidate: &VcsSnapshot {
                 history_left_base: false,
                 commit: self.candidate.commit.clone(),
                 content: self.candidate.content.clone(),
                 change_id: self.candidate.change_id.clone(),
             },
-            self.expected_target.as_deref(),
-        )
+            expected_target: self.expected_target.as_deref(),
+            namespace: &self.namespace,
+            candidate_id: self.candidate.candidate_id.as_str(),
+            source_agent_id: self
+                .advance_copy_base
+                .then_some(self.candidate.producing_agent_id.as_str()),
+        })
     }
 }
 
@@ -965,6 +982,7 @@ pub struct MintHook {
 /// the caller rather than only the tree.
 #[derive(Clone, Debug)]
 pub struct MintTicket {
+    namespace: String,
     launch_checkout: PathBuf,
     /// Logical node identity, retained for VCS snapshot labels and test ports.
     agent_id: String,
@@ -986,14 +1004,15 @@ impl MintTicket {
     /// The subprocess half of the mint. Holds no tree reference so it can
     /// run with the tree mutex released.
     pub fn mint(&self, vcs: &dyn VcsOps) -> Result<MintedCopy, VcsError> {
-        vcs.mint_from(
-            &self.launch_checkout,
-            &self.agent_id,
-            &self.copy_id,
-            &self.caller_path,
-            self.mode,
-            self.input_base.as_ref(),
-        )
+        vcs.mint_from(&MintRequest {
+            launch: &self.launch_checkout,
+            agent_id: &self.agent_id,
+            copy_id: &self.copy_id,
+            namespace: &self.namespace,
+            parent_cwd: &self.caller_path,
+            mode: self.mode,
+            base: self.input_base.as_ref(),
+        })
     }
 }
 
@@ -1060,12 +1079,21 @@ pub struct UnmintTicket {
     /// back to if removal fails, which leaves the copy in place instead of
     /// putting its closed occupants into recovery.
     pub prune_of: Option<WorkspaceStatus>,
-    /// Candidate pins sealed from this copy, dropped once the copy is gone.
-    /// Automatic cleanup removes only adopted candidates. Explicit discard
-    /// relinquishes unadopted candidates too.
+    /// Unadopted candidate pins explicitly relinquished by this discard.
+    /// Automatic copy removal never owns retained candidate or provenance pins.
     pub candidate_ids: Vec<String>,
     /// Full tree digest owning these candidate pins.
     pub namespace: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BasePinTicket {
+    ownership: Arc<()>,
+    workspace_id: String,
+    path: PathBuf,
+    agent_id: String,
+    namespace: String,
+    base: String,
 }
 
 /// What one tree mutation owes the VCS once the mutex is released.
@@ -1079,6 +1107,8 @@ pub struct UnmintTicket {
 #[derive(Clone, Debug, Default)]
 #[must_use = "effects the caller drops are stranded: the node stays Sealing or the row Adopting/Discarding, which reopens RecoveryRequired"]
 pub struct Effects {
+    // Reopen-owned; ordinary mutation drains leave these for driver attachment.
+    pub(crate) base_pins: Vec<BasePinTicket>,
     /// Copies to seal into candidates.
     pub seals: Vec<SealTicket>,
     pub(crate) dormancy: Vec<dormancy::DormancyTicket>,
@@ -1098,6 +1128,7 @@ impl Effects {
     /// settles once.
     pub fn absorb(&mut self, other: Self) {
         let Self {
+            base_pins,
             seals,
             dormancy,
             adopts,
@@ -1105,6 +1136,7 @@ impl Effects {
             unmints,
             launch_checkout,
         } = other;
+        self.base_pins.extend(base_pins);
         self.seals.extend(seals);
         self.dormancy.extend(dormancy);
         self.adopts.extend(adopts);
@@ -1119,11 +1151,31 @@ impl Effects {
     /// unlocked phase entirely.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.dormancy.is_empty()
+        self.base_pins.is_empty()
+            && self.dormancy.is_empty()
             && self.seals.is_empty()
             && self.adopts.is_empty()
             && self.hooks.is_empty()
             && self.unmints.is_empty()
+    }
+
+    pub(crate) fn refuse_attach(self, reason: String) -> Completed {
+        Completed {
+            base_pins: self
+                .base_pins
+                .into_iter()
+                .map(|ticket| {
+                    (
+                        ticket,
+                        Err(VcsError::new(
+                            VcsErrorKind::RecoveryRequired,
+                            reason.clone(),
+                        )),
+                    )
+                })
+                .collect(),
+            ..Completed::default()
+        }
     }
 
     /// Runs every queued effect against `vcs`. Holds no tree reference, so it
@@ -1131,6 +1183,19 @@ impl Effects {
     /// arguments; a `FakeVcs` in tests records whether it was anyway.
     #[must_use]
     pub fn run(self, vcs: &dyn VcsOps) -> Completed {
+        let base_pins = self
+            .base_pins
+            .into_iter()
+            .map(|ticket| {
+                let result = vcs.restore_copy_base(
+                    &ticket.path,
+                    &ticket.namespace,
+                    &ticket.agent_id,
+                    &ticket.base,
+                );
+                (ticket, result)
+            })
+            .collect();
         let seals = self
             .seals
             .into_iter()
@@ -1159,11 +1224,11 @@ impl Effects {
             .unmints
             .into_iter()
             .map(|ticket| {
-                let removed = vcs.unmint(&self.launch_checkout, &ticket.path);
+                let removed = vcs.unmint(&self.launch_checkout, &ticket.path, &ticket.namespace);
                 if removed.is_ok() {
                     for candidate_id in &ticket.candidate_ids {
-                        // A surviving pin keeps adopted or explicitly
-                        // relinquished content reachable; the copy is gone.
+                        // A surviving pin keeps explicitly relinquished
+                        // content reachable; the copy is gone.
                         let _ = vcs.unpin(&self.launch_checkout, &ticket.namespace, candidate_id);
                     }
                 }
@@ -1179,6 +1244,7 @@ impl Effects {
             })
             .collect();
         Completed {
+            base_pins,
             dormancy,
             seals,
             adopts,
@@ -1192,6 +1258,7 @@ impl Effects {
 /// [`ProductAgentTree::complete`].
 #[derive(Debug, Default)]
 pub struct Completed {
+    base_pins: Vec<(BasePinTicket, Result<(), VcsError>)>,
     dormancy: Vec<(
         dormancy::DormancyTicket,
         Result<dormancy::DormancyAnswer, VcsError>,
@@ -1227,7 +1294,7 @@ pub struct Settled {
     pub hook_failures: Vec<TopologyError>,
     /// Seal failures, recorded on their attempts before they are reported.
     pub seal_failures: Vec<TopologyError>,
-    /// Removal failures; no affected copy or operation is reported discarded.
+    /// Copy removal failures; no affected operation is acknowledged.
     pub cleanup_failures: Vec<TopologyError>,
 }
 
@@ -1382,6 +1449,8 @@ pub struct ProductAgentTree {
     /// What the mutations since the last [`Self::take_effects`] owe the VCS.
     /// Never persisted; never run by the tree.
     effects: Effects,
+    /// One base-pin reconciliation per workspace in this host generation.
+    base_pin_recovery: BTreeMap<String, workspaces::BasePinRecovery>,
     /// Exact seal ownership survives draining the effect queue and changes to
     /// presentation status. Only the matching completion releases it.
     outstanding_seals: BTreeMap<String, Arc<()>>,
@@ -1509,6 +1578,8 @@ pub use tree_store::{
     fence_revision,
 };
 #[cfg(test)]
+mod base_pin_recovery_tests;
+#[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod test_support;
 #[cfg(any(test, feature = "test-support"))]
@@ -1599,6 +1670,7 @@ impl ProductAgentTree {
             close_ids: Vec::new(),
         };
         let workspace = WorkspaceRecord {
+            input_candidate_id: None,
             workspace_id: workspace_id.clone(),
             owner_agent_id: root_agent_id.clone(),
             path: launch_checkout.clone(),
@@ -1650,6 +1722,7 @@ impl ProductAgentTree {
             minting: BTreeSet::new(),
             live_generations: BTreeMap::from([(workspace_id.clone(), LiveGeneration::new(0))]),
             effects: Effects::default(),
+            base_pin_recovery: BTreeMap::new(),
             #[cfg(test)]
             fold_scratch_clones: 0,
             pending_turn_usages: BTreeMap::new(),
@@ -1703,13 +1776,23 @@ impl ProductAgentTree {
         Arc::clone(&self.cell_budget)
     }
 
-    /// Drains what the mutations so far owe the VCS. The
+    /// Drains what the mutations so far owe the VCS, excluding reopen-owned
+    /// base-pin reconciliation, which the driver drains during attachment. The
     /// caller runs them with the mutex released and hands the answers back
     /// to [`Self::complete`].
     pub fn take_effects(&mut self) -> Effects {
+        let base_pins = std::mem::take(&mut self.effects.base_pins);
         let mut effects = std::mem::take(&mut self.effects);
+        self.effects.base_pins = base_pins;
         effects.launch_checkout.clone_from(&self.launch_checkout);
         effects
+    }
+
+    pub(crate) fn take_attach_effects(&mut self) -> Effects {
+        Effects {
+            base_pins: std::mem::take(&mut self.effects.base_pins),
+            ..Effects::default()
+        }
     }
 
     /// Whether `agent_id` owns a queued or already dispatched seal.
@@ -1723,19 +1806,24 @@ impl ProductAgentTree {
     /// follows is a real change to the store's compare-and-swap.
     pub fn complete(&mut self, completed: Completed) -> Settled {
         let Completed {
+            base_pins,
             dormancy,
             seals,
             adopts,
             hooks,
             unmints,
         } = completed;
-        let recorded_anything = !dormancy.is_empty()
+        let recorded_anything = !base_pins.is_empty()
+            || !dormancy.is_empty()
             || !seals.is_empty()
             || !adopts.is_empty()
             || !unmints.is_empty()
             || hooks.iter().any(|(_, ran)| ran.is_err());
         let before = self.revision;
         let mut settled = Settled::default();
+        for (ticket, result) in base_pins {
+            self.finish_base_pin_recovery(ticket, result);
+        }
         for (ticket, answer) in dormancy {
             if let Err(error) = self.complete_dormancy(ticket, answer) {
                 settled.cleanup_failures.push(error);
@@ -1802,6 +1890,10 @@ impl ProductAgentTree {
         reason = "test driver refuses malformed close fixtures"
     )]
     pub fn settle_for_test(&mut self) -> Settled {
+        let attach = self.take_attach_effects();
+        if !attach.is_empty() {
+            self.complete(attach.run(self.vcs()));
+        }
         let mut settled = Settled::default();
         loop {
             self.fold_reserved_closes()
@@ -2121,6 +2213,7 @@ impl ProductAgentTree {
             minting: BTreeSet::new(),
             live_generations,
             effects: Effects::default(),
+            base_pin_recovery: BTreeMap::new(),
             #[cfg(test)]
             fold_scratch_clones: 0,
             pending_turn_usages: BTreeMap::new(),

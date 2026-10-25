@@ -189,13 +189,15 @@ v7 document with 0.0.2 (§2.5.1 of chapter 02).
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **26** |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **33** (the named-state manifest, checkpoint integrity and commit identity encodings, the unified v3 cell descriptor identities, the Python cell-worker engine, artifact and containment identities, cell-protocol engine contracts and the Code Mode descriptor identities that name the cell worker revision, inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
-| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **8** |
+| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **9** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
 | Session export document | Plak | version **8**, imports **8** and **7** |
 
-Tree schema 8's canonical `seal_outcome` payload includes the durable
-`history_left_base` boolean used by replayed result-mail notices. Runtime epoch
-31 moves the whole state key, so no older t8 shape is opened. Export v8 carries
+Tree schema 9 records candidate `target_before` provenance and each workspace's
+`input_candidate_id`; retained snapshots have independent Git-backend pins.
+The canonical `seal_outcome` payload includes the durable
+`history_left_base` boolean used by replayed result-mail notices. Builds open
+only their current version tuple as state authority. Export v8 carries
 conversation history and CarryBinding, not tree seal outcomes. Its v8
 history encoding also preserves exact account/model replay scope; the v7
 importer keeps accountless material unbound rather than retagging it.
@@ -207,7 +209,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r26.e33.p33.t8`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r26.e33.p33.t9`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is
