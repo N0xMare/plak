@@ -143,17 +143,11 @@ pub(super) fn terminal_turn_outcome(result: &TurnResult) -> TurnHostOutcome {
             } else {
                 TurnHostOutcome::Failed {
                     error: rendered,
-                    transient: error.model_error().and_then(|model| {
-                        let context = model.context()?;
-                        crate::agent::transient::classify(
-                            model.kind(),
-                            context.phase(),
-                            context.retryability(),
-                        )
-                        .map(|gate| super::TransientFailure {
+                    transient: crate::driver::transient::failure_gate(result).map(|gate| {
+                        super::TransientFailure {
                             failed_turn: result.turn_id(),
                             gate,
-                        })
+                        }
                     }),
                     exchange: crate::agent::TerminalExchange::of(result),
                 }

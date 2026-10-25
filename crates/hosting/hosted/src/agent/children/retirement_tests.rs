@@ -1084,7 +1084,7 @@ async fn transient_gate_interrupt_wins_without_waiting_for_delay() {
         &runtime.live,
         &child.agent_id,
         &identity,
-        crate::agent::transient::ResumeGate::Delay(Duration::from_secs(60)),
+        crate::driver::transient::ResumeGate::Delay(Duration::from_secs(60)),
     );
     tokio::pin!(gate);
     assert!(

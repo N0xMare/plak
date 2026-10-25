@@ -47,6 +47,16 @@ pub struct ChildTerminal {
 }
 
 impl ProductAgentTree {
+    /// The persisted command identity for an immutable child continuation round.
+    #[must_use]
+    pub fn transient_resume_command_id(
+        agent_id: &str,
+        attempt: &crate::protocol::AttemptId,
+        round: u8,
+    ) -> String {
+        format!("plak:resume-transient:{agent_id}:{attempt}:{round}")
+    }
+
     /// Records the host decision, keyed by child, attempt and exact ended turn.
     /// No view or external effect is changed by this write.
     ///
@@ -244,10 +254,7 @@ impl ProductAgentTree {
         let Some((turn_id, round)) = latest else {
             return Ok(None);
         };
-        let command_id = format!(
-            "plak:resume-transient:{agent_id}:{}:{round}",
-            attempt.attempt_id
-        );
+        let command_id = Self::transient_resume_command_id(agent_id, &attempt.attempt_id, round);
         if self
             .commands
             .get(&command_id)

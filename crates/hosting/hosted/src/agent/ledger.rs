@@ -112,8 +112,6 @@ fn persist_context<T>(
 
 /// Prefix of every submit-harness corrective command; its identity is
 /// `plak:submit-harness:{agent}:{host_generation}:{attempt}:{round}`.
-pub(super) const TRANSIENT_RESUME_PREFIX: &str = "plak:resume-transient:";
-
 const SUBMIT_HARNESS_PREFIX: &str = "plak:submit-harness:";
 
 /// The attempt a wake or corrective command was written for: both
@@ -122,7 +120,7 @@ pub(super) fn command_attempt(command_id: &str) -> Option<&str> {
     let rest = command_id
         .strip_prefix("plak:park-wake:")
         .or_else(|| command_id.strip_prefix(SUBMIT_HARNESS_PREFIX))
-        .or_else(|| command_id.strip_prefix(TRANSIENT_RESUME_PREFIX))?;
+        .or_else(|| command_id.strip_prefix(crate::driver::transient::COMMAND_PREFIX))?;
     let mut parts = rest.rsplitn(3, ':');
     let _count = parts.next()?;
     let attempt = parts.next()?;

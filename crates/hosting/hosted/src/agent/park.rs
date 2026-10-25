@@ -9,6 +9,7 @@
 use crate::driver::ledger::CommandLedger as _;
 
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
+use crate::driver::transient::{self, ResumeGate, ResumeOwner, ResumePlan};
 
 use std::future::Future;
 use std::sync::Arc;
@@ -725,8 +726,7 @@ enum ReopenedWake {
 
 struct ReopenedResume {
     identity: ChildTurnIdentity,
-    command_id: CommandId,
-    gate: crate::agent::transient::ResumeGate,
+    plan: ResumePlan,
     terminal: Box<plakous::sessions::feed::FeedTerminal>,
 }
 
@@ -753,10 +753,7 @@ async fn start_reopened_resume(
         }
     };
     mutate_child(runtime.driver(), agent_id, |tree| {
-        tree.mark_transient_wait(
-            agent_id,
-            resume.gate == crate::agent::transient::ResumeGate::Network,
-        );
+        tree.mark_transient_wait(agent_id, resume.plan.gate == ResumeGate::Network);
     });
     let owner = runtime.clone();
     let id = agent_id.to_owned();
@@ -770,7 +767,7 @@ async fn start_reopened_resume(
             &id,
             &resume.identity,
             attached.reachability_probe.clone(),
-            resume.gate,
+            resume.plan.gate,
         )
         .await;
         if !ready {
@@ -783,16 +780,12 @@ async fn start_reopened_resume(
             super::children::release_startup(&owner, &id, &startup, attached).await;
             return;
         };
-        let prompt = crate::child_prompts::TransientResume {
-            failure: error.message(),
-        }
-        .render();
         let started = super::children::start_child_turn_owned_with_ack(
             &owner,
             &id,
             attached,
-            resume.command_id,
-            super::children::ChildCommand::fresh(prompt, CommandKind::Resume),
+            resume.plan.command_id,
+            super::children::ChildCommand::fresh(resume.plan.text, CommandKind::Resume),
             &startup,
             false,
             super::children::StartAdmission::ReopenWake,
@@ -883,15 +876,11 @@ async fn prepare_reopened_wake(
         let model = error
             .model_error()
             .ok_or_else(|| "saved continuation has no model failure".to_owned())?;
-        let context = model
+        model
             .context()
             .ok_or_else(|| "saved continuation has no typed failure context".to_owned())?;
-        let gate = crate::agent::transient::classify(
-            model.kind(),
-            context.phase(),
-            context.retryability(),
-        )
-        .ok_or_else(|| "saved continuation is not eligible".to_owned())?;
+        let gate = transient::failure_gate(terminal.result())
+            .ok_or_else(|| "saved continuation is not eligible".to_owned())?;
         let attempt = runtime
             .read(|tree| {
                 tree.attempt(agent_id)
@@ -899,22 +888,28 @@ async fn prepare_reopened_wake(
             })
             .map_err(|error| error.message)?
             .ok_or_else(|| "saved continuation has no attempt".to_owned())?;
-        let command_id = CommandId::new(format!(
-            "{}{agent_id}:{attempt}:{round}",
-            crate::agent::ledger::TRANSIENT_RESUME_PREFIX
-        ))
-        .map_err(|error| error.to_string())?;
+        // The immutable round is already spent; rebuild it, not a fresh round
+        // under the current roster's budget.
+        let plan = ResumePlan::for_round(
+            gate,
+            ResumeOwner::Child {
+                agent: agent_id,
+                attempt: &attempt,
+            },
+            error.message(),
+            round,
+        )
+        .ok_or_else(|| "saved continuation has an invalid round".to_owned())?;
         for prior in crate::agent::ledger::prepared_commands(driver, agent_id)? {
             // The exact pending Resume keeps its original prompt and mail;
             // withdrawing it would make an accepted retry impossible to bind.
-            if prior.command_id != command_id.as_str() {
+            if prior.command_id != plan.command_id.as_str() {
                 prior.settle(driver, false)?;
             }
         }
         return Ok(ReopenedWake::Resume(ReopenedResume {
             identity: ChildTurnIdentity { attempt, turn },
-            command_id,
-            gate,
+            plan,
             terminal,
         }));
     }

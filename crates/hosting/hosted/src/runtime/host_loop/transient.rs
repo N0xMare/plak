@@ -1,50 +1,43 @@
 //! Root transient continuation owns no turn while waiting.
 
 use super::{CliFailure, CliResult, HostLoop, HostStep, InterruptWatch};
-use crate::agent::transient::ResumeGate;
+use crate::driver::transient::{self, ResumeGate, ResumeOwner, ResumePlan};
 use crate::runtime::TransientFailure;
 use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous::model::{CancellationToken, ReachabilityProbe};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-
-pub(in crate::runtime) const COMMAND_PREFIX: &str = "plak:resume-transient:root:";
 
 pub(super) struct PendingResume {
     session_id: String,
-    failed_turn: plakous::model::TurnId,
-    error: String,
+    plan: ResumePlan,
     ready: Arc<AtomicBool>,
     cancellation: CancellationToken,
     task: tokio::task::JoinHandle<()>,
 }
 
 impl PendingResume {
-    fn spawn(
-        session_id: String,
-        failure: TransientFailure,
-        error: String,
-        probe: Option<ReachabilityProbe>,
-    ) -> Self {
+    fn spawn(session_id: String, plan: ResumePlan, probe: Option<ReachabilityProbe>) -> Self {
         let ready = Arc::new(AtomicBool::new(false));
         let cancellation = CancellationToken::new();
         let signal = ready.clone();
         let cancel = cancellation.clone();
+        let gate = plan.gate;
         let task = tokio::spawn(async move {
-            let (probe, fallback) = match failure.gate {
-                ResumeGate::Network => (probe, Duration::from_secs(30)),
-                ResumeGate::Delay(delay) => (None, delay),
-            };
-            let reached = crate::runtime::network_watch::NetworkWatch::shared()
-                .wait(probe, fallback, &cancel)
-                .await;
+            let reached = transient::wait_gate(
+                gate,
+                probe,
+                &cancel,
+                None,
+                || Some(std::future::pending()),
+                || std::future::ready(true),
+            )
+            .await;
             signal.store(reached, Ordering::Release);
         });
         Self {
             session_id,
-            failed_turn: failure.failed_turn,
-            error,
+            plan,
             ready,
             cancellation,
             task,
@@ -87,9 +80,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 self.config.session.effort.as_deref(),
             )
             .map_or(0, |roster| roster.transient_resumes.min(2));
-        if self.transient_resumes_used >= budget {
+        let Some(plan) = transient::plan(
+            failure.gate,
+            ResumeOwner::Root {
+                failed_turn: failure.failed_turn,
+            },
+            error,
+            self.transient_resumes_used,
+            budget,
+        ) else {
             return false;
-        }
+        };
+        let round = plan.round;
         let human = error.to_owned();
         let wait = match failure.gate {
             ResumeGate::Network => "when the network returns".to_owned(),
@@ -99,12 +101,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let probe = self.opened.reachability_probe();
         let Ok(pending) = self
             .executor
-            .block_on(async { PendingResume::spawn(session_id, failure, human.clone(), probe) })
+            .block_on(async { PendingResume::spawn(session_id, plan, probe) })
         else {
             return false;
         };
         self.pending_resume = Some(pending);
-        self.transient_resumes_used += 1;
+        self.transient_resumes_used = round;
         let _ = self.events.notice(TranscriptRow::info(
             NoticeScope::Turn,
             format!(
@@ -146,12 +148,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if !pending.ready.load(Ordering::Acquire) {
             return Ok(HostStep::Continue);
         }
-        let command = format!("{COMMAND_PREFIX}{}", pending.failed_turn);
-        let text = format!(
-            "The previous turn failed transiently: {}. Continue the current task from the last completed step; do not repeat completed actions.",
-            pending.error,
-        );
-        self.pending_resume = None;
+        let command = pending.plan.command_id.clone();
+        let text = pending.plan.text.clone();
         let mut candidate = self.config.session.clone();
         let item = candidate
             .enqueue_live(text.clone())
@@ -163,10 +161,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             &item,
             &text,
             None,
-            &command,
+            command.as_str(),
             crate::driver::ledger::CommandKind::Resume,
         )
-        .map_err(CliFailure::new)?;
+        .map_err(CliFailure::from)
+        .inspect_err(|error| {
+            if error.store_refusal() == Some(crate::error::StoreRefusal::StorageFull) {
+                self.cancel_transient_resume();
+            }
+        })?;
+        self.pending_resume = None;
         Ok(HostStep::Prompt {
             text,
             queued_delivery: Some(item),

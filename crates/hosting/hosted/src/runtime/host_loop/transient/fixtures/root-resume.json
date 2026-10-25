@@ -1,0 +1,1 @@
+{"canonical_command":"The previous turn failed transiently: temporary connection failure. Continue the current task from the last completed step; do not repeat completed actions.","command_id":"plak:resume-transient:root:00000000-0000-0000-0000-000000000001","kind":"host_wake","target_turn_id":null}

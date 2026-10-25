@@ -593,6 +593,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/signals.rs"): {"select"},
     ("plakous-hosted", "src/runtime/turn_drive/mod.rs"): {"pin", "select"},
     ("plakous-hosted", "src/runtime/network_watch.rs"): {"select"},
+    ("plakous-hosted", "src/driver/transient.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/turn_drive/admission.rs"): {"thread_local"},
     ("plakous-hosted", "src/interrupt.rs"): {"pin", "select"},
     # The product half of the session record keeps the one-entry store cache.
@@ -634,7 +635,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # credential-refresh warning above; typed fields only.
     ("plakous-hosted", "src/agent/children/bind.rs"): {"error"},
     ("plakous-hosted", "src/agent/children/turns.rs"): {"error"},
-    ("plakous-hosted", "src/agent/children/waiter.rs"): {"error", "pin", "select"},
+    ("plakous-hosted", "src/agent/children/waiter.rs"): {"error"},
     # Background recovery reports only typed child ids and closed recovery
     # dispositions after the pass has settled; it never logs prompt content.
     ("plakous-hosted", "src/agent/recovery.rs"): {"info"},

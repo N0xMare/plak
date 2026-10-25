@@ -3,12 +3,13 @@
 use crate::driver::ledger::CommandLedger as _;
 
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
+use crate::driver::transient::{self, ResumeGate, ResumeOwner};
 
 use super::{
     Arc, AttachedCodingSession, ChildReopen, ChildReopenMode, ChildStartup, ChildTurnIdentity,
-    CommandId, Duration, StartAdmission, SubmitNudgeBudget, TreeDriver, TurnId, TurnOutcome,
-    TurnResult, TurnResultHandle, TurnResultOutcome, end_attempt_work, failed_worktree,
-    mutate_child, persist_or_fault, reopen_spawned_child, retire_live_child, settle_or_fault,
+    CommandId, StartAdmission, SubmitNudgeBudget, TreeDriver, TurnId, TurnOutcome, TurnResult,
+    TurnResultHandle, TurnResultOutcome, end_attempt_work, failed_worktree, mutate_child,
+    persist_or_fault, reopen_spawned_child, retire_live_child, settle_or_fault,
     submit_harness_prompt,
 };
 
@@ -1086,7 +1087,7 @@ pub(super) async fn wait_transient_gate(
     live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
     agent_id: &str,
     identity: &ChildTurnIdentity,
-    gate: crate::agent::transient::ResumeGate,
+    gate: ResumeGate,
 ) -> bool {
     let probe = live
         .lock()
@@ -1103,45 +1104,36 @@ pub(in crate::agent) async fn wait_resume_gate(
     agent_id: &str,
     identity: &ChildTurnIdentity,
     probe: Option<plakous::model::ReachabilityProbe>,
-    gate: crate::agent::transient::ResumeGate,
+    gate: ResumeGate,
 ) -> bool {
     let cancellation = plakous::model::CancellationToken::new();
-    let (probe, delay) = match gate {
-        crate::agent::transient::ResumeGate::Network => (probe, Duration::from_secs(30)),
-        crate::agent::transient::ResumeGate::Delay(delay) => (None, delay),
-    };
-    let ready =
-        crate::runtime::network_watch::NetworkWatch::shared().wait(probe, delay, &cancellation);
-    tokio::pin!(ready);
-    loop {
-        let Ok(notify) = driver.read(crate::agent_tree::ProductAgentTree::waiters) else {
-            return false;
-        };
-        let notified = notify.notified_owned();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
-        if !resume_allowed(driver, agent_id, identity)
-            || startup.is_some_and(ChildStartup::is_cancelled)
-            || if let Some(live) = live {
-                live.lock()
-                    .await
-                    .get(agent_id)
-                    .is_none_or(|child| child.turn_id() != identity.turn)
-            } else {
-                false
-            }
-        {
-            cancellation.cancel();
-            return false;
-        }
-        tokio::select! {
-            biased;
-            () = &mut notified => {}
-            value = &mut ready => return value && resume_allowed(driver, agent_id, identity),
-            // A hub release may drain the live slot without a tree mutation.
-            () = tokio::time::sleep(Duration::from_secs(1)) => {}
-        }
-    }
+    transient::wait_gate(
+        gate,
+        probe,
+        &cancellation,
+        Some(std::time::Duration::from_secs(1)),
+        || {
+            let notify = driver
+                .read(crate::agent_tree::ProductAgentTree::waiters)
+                .ok()?;
+            let mut notified = Box::pin(notify.notified_owned());
+            notified.as_mut().enable();
+            Some(notified)
+        },
+        || async move {
+            resume_allowed(driver, agent_id, identity)
+                && !startup.is_some_and(ChildStartup::is_cancelled)
+                && if let Some(live) = live {
+                    live.lock()
+                        .await
+                        .get(agent_id)
+                        .is_some_and(|child| child.turn_id() == identity.turn)
+                } else {
+                    true
+                }
+        },
+    )
+    .await
 }
 
 async fn try_transient_resume(
@@ -1156,19 +1148,25 @@ async fn try_transient_resume(
     let TurnResultOutcome::Failed(error) = result.outcome() else {
         return None;
     };
-    let model = error.model_error()?;
-    let context = model.context()?;
-    let gate =
-        crate::agent::transient::classify(model.kind(), context.phase(), context.retryability())?;
+    let gate = transient::failure_gate(result)?;
     if !resume_allowed(driver, agent_id, identity) {
         return None;
     }
-    let round = driver
+    let plan = driver
         .read(|tree| {
             let spent = tree
                 .transient_resume_count(agent_id, &identity.attempt)
                 .ok()?;
-            (spent < tree.snapshot.transient_resumes).then_some(spent + 1)
+            transient::plan(
+                gate,
+                ResumeOwner::Child {
+                    agent: agent_id,
+                    attempt: &identity.attempt,
+                },
+                error.message(),
+                spent,
+                tree.snapshot.transient_resumes,
+            )
         })
         .ok()
         .flatten()?;
@@ -1183,7 +1181,7 @@ async fn try_transient_resume(
             tree.record_child_finalization(
                 agent_id,
                 &identity.turn.to_string(),
-                crate::agent_tree::ChildFinalizationDecision::Resume { round },
+                crate::agent_tree::ChildFinalizationDecision::Resume { round: plan.round },
                 false,
                 None,
             )
@@ -1211,7 +1209,7 @@ async fn try_transient_resume(
     mutate_child(driver, agent_id, |tree| {
         if resume_allowed_in(tree, agent_id, identity) {
             let _ = tree.park_child(agent_id, Vec::new());
-            if gate == crate::agent::transient::ResumeGate::Network {
+            if gate == ResumeGate::Network {
                 tree.mark_transient_wait(agent_id, true);
             }
         }
@@ -1220,24 +1218,13 @@ async fn try_transient_resume(
         mutate_child(driver, agent_id, |tree| tree.unpark_child(agent_id));
         return Some(Err(()));
     }
-    let command_id = CommandId::new(format!(
-        "{}{}:{}:{round}",
-        crate::agent::ledger::TRANSIENT_RESUME_PREFIX,
-        agent_id,
-        identity.attempt
-    ))
-    .ok()?;
-    let prompt = crate::child_prompts::TransientResume {
-        failure: error.message(),
-    }
-    .render();
     if let Ok(next) = start_instruction_turn(
         driver,
         live,
         agent_id,
         identity,
-        command_id,
-        prompt,
+        plan.command_id,
+        plan.text,
         CommandKind::Resume,
     )
     .await

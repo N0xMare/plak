@@ -1715,13 +1715,16 @@ fn fixtures() {
     def test_transient_probe_bridge_and_gate_macros_are_source_specific(self) -> None:
         cases = [
             ("src/agent/build/session.rs", "fn x() { plakous::sessions::internal::reachability_probe(&runtime); }"),
-            ("src/agent/children/waiter.rs", "fn x() { tokio::pin!(ready); tokio::select! { value = ready => value } }"),
+            ("src/driver/transient.rs", "fn x() { debug_assert!(valid); tokio::pin!(ready); tokio::select! { value = ready => value } }"),
         ]
         for path, source in cases:
             with self.subTest(path=path):
                 self.assertEqual(workspace_policy.validate_cli_security_sources("plakous-hosted", {path: source}), [])
                 self.assertTrue(workspace_policy.validate_cli_security_sources("plakous-hosted", {"src/x.rs": source}))
                 self.assertTrue(workspace_policy.validate_cli_security_sources("plak", {path: source}))
+        self.assertTrue(workspace_policy.validate_cli_security_sources(
+            "plakous-hosted", {"src/agent/children/waiter.rs": cases[1][1]}
+        ))
 
     def test_neutral_carry_codec_is_source_specific(self) -> None:
         codec = """

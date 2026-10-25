@@ -5,6 +5,20 @@ use super::{PendingResume, ResumeGate, TransientFailure};
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::fresh_injected_attached_host;
 use crate::sessions::TranscriptRow;
+use std::time::Duration;
+
+fn plan(gate: ResumeGate, message: &str) -> crate::driver::transient::ResumePlan {
+    crate::driver::transient::plan(
+        gate,
+        crate::driver::transient::ResumeOwner::Root {
+            failed_turn: failure(gate).failed_turn,
+        },
+        message,
+        0,
+        1,
+    )
+    .unwrap()
+}
 
 fn failure(gate: ResumeGate) -> TransientFailure {
     TransientFailure {
@@ -43,8 +57,7 @@ async fn root_transient_waits_for_exact_route_and_cancels_probe() {
     });
     let pending = PendingResume::spawn(
         "session".into(),
-        failure(ResumeGate::Network),
-        "connection unavailable".into(),
+        plan(ResumeGate::Network, "connection unavailable"),
         Some(probe),
     );
     entered.notified().await;
@@ -72,8 +85,7 @@ async fn root_transient_waits_for_exact_route_and_cancels_probe() {
     });
     let pending = PendingResume::spawn(
         "session".into(),
-        failure(ResumeGate::Network),
-        "connection unavailable".into(),
+        plan(ResumeGate::Network, "connection unavailable"),
         Some(probe),
     );
     started.notified().await;
@@ -90,12 +102,7 @@ async fn root_transient_delay_and_no_probe_fallback_use_paused_time() {
         ResumeGate::Network,
         ResumeGate::Delay(Duration::from_secs(30)),
     ] {
-        let pending = PendingResume::spawn(
-            "session".into(),
-            failure(gate),
-            "temporary failure".into(),
-            None,
-        );
+        let pending = PendingResume::spawn("session".into(), plan(gate, "temporary failure"), None);
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(29)).await;
         assert!(!pending.ready.load(Ordering::Acquire));
@@ -148,11 +155,24 @@ fn root_transient_ready_enqueues_one_instruction_without_user_history_or_mail() 
         submission.command_id,
         format!(
             "{}{}",
-            super::COMMAND_PREFIX,
+            crate::driver::transient::ROOT_COMMAND_PREFIX,
             failure(ResumeGate::Network).failed_turn
         )
     );
     assert_eq!(submission.canonical_command, text);
+    let bytes = serde_json::to_string(&serde_json::json!({
+        "command_id": submission.command_id,
+        "kind": submission.kind.as_str(),
+        "target_turn_id": submission.target_turn_id,
+        "canonical_command": submission.canonical_command,
+    }))
+    .unwrap();
+    assert_eq!(
+        bytes.as_bytes(),
+        include_str!("fixtures/root-resume.json")
+            .trim_end()
+            .as_bytes()
+    );
     assert!(text.contains("do not repeat completed actions"));
     assert_eq!(
         submission.kind,
@@ -316,6 +336,64 @@ fn root_transient_failure_announces_automatic_continue() {
 }
 
 #[test]
+fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() {
+    use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use crate::session_store::SessionRecordStore as _;
+    use std::sync::Arc;
+
+    struct FullSubmission;
+    impl StoreFaults for FullSubmission {
+        fn before(&self, _: StoreCall, _: Option<&sessions::SessionRecord>) -> Result<(), String> {
+            Ok(())
+        }
+        fn refusal(&self, call: StoreCall) -> Option<crate::error::StoreRefusal> {
+            (call == StoreCall::SaveSubmission).then_some(crate::error::StoreRefusal::StorageFull)
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let records = Arc::new(crate::session_store::MemoryStore::new());
+    records.save(&mut config.session).unwrap();
+    let id = config.session.id.clone();
+    config.store = Arc::new(FaultStore::new(records.clone(), FullSubmission));
+    let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+    assert!(host.schedule_transient_resume(failure(ResumeGate::Network), "temporary failure"));
+    host.pending_resume
+        .as_ref()
+        .unwrap()
+        .ready
+        .store(true, Ordering::Release);
+    assert!(!host.config.store.storage_wait_cancelled());
+    let error = host
+        .transient_resume_prompt()
+        .err()
+        .expect("typed capacity refusal");
+    assert_eq!(
+        error.store_refusal(),
+        Some(crate::error::StoreRefusal::StorageFull)
+    );
+    assert!(host.pending_resume.is_none());
+    assert!(host.retain_interrupted_storage(&error));
+    assert_eq!(
+        host.config.session.queue_drain_state,
+        sessions::QueueDrainState::RestoredPaused
+    );
+    assert!(!host.config.session.queue_commands.has_pending());
+    assert_eq!(records.load_intents(&id).unwrap().submissions, []);
+    assert!(matches!(
+        host.transient_resume_prompt().unwrap(),
+        HostStep::Continue
+    ));
+    assert!(observations.try_iter().any(|event| matches!(event,
+        HostEvent::Row(TranscriptRow::Notice(row)) if row.text == "automatic continuation cancelled"
+    )));
+    host.release().unwrap();
+}
+
+#[test]
 fn root_transient_run_bounds_cancel_the_pending_wait() {
     use crate::runtime::oneshot::{OneShotOutcome, OneShotState, RunBounds, RunState};
     use std::sync::Arc;
@@ -423,7 +501,13 @@ fn root_transient_canonical_failure_continues_in_a_new_turn() {
         .pending_resume
         .as_ref()
         .expect("classified canonical failure");
-    let failed_turn = pending.failed_turn;
+    let failed_turn = pending
+        .plan
+        .command_id
+        .as_str()
+        .strip_prefix(crate::driver::transient::ROOT_COMMAND_PREFIX)
+        .unwrap()
+        .to_owned();
     pending.ready.store(true, Ordering::Release);
     let HostStep::Prompt {
         text,
@@ -444,18 +528,10 @@ fn root_transient_canonical_failure_continues_in_a_new_turn() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(
-        lifecycle
-            .iter()
-            .any(|value| value.turn_id == failed_turn.to_string()
-                && value.phase == plakous_host_protocol::TurnPhase::Failed)
-    );
-    assert!(
-        lifecycle
-            .iter()
-            .any(|value| value.turn_id != failed_turn.to_string()
-                && value.phase == plakous_host_protocol::TurnPhase::Completed)
-    );
+    assert!(lifecycle.iter().any(|value| value.turn_id == failed_turn
+        && value.phase == plakous_host_protocol::TurnPhase::Failed));
+    assert!(lifecycle.iter().any(|value| value.turn_id != failed_turn
+        && value.phase == plakous_host_protocol::TurnPhase::Completed));
     assert!(host.pending_resume.is_none());
     assert_eq!(host.transient_resumes_used, 1);
     host.release().unwrap();

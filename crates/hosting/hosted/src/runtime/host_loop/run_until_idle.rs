@@ -274,7 +274,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     batch,
                     &trigger_ids,
                 )
-                .map_err(CliFailure::new)?;
+                .map_err(CliFailure::from)?;
                 let triggers = notices
                     .iter()
                     .map(|job| format!("p{} {}", job.number, job_status(job.status)))

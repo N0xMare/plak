@@ -2125,6 +2125,9 @@ A stored-only root batch has no attached parking owner: its capacity refusal
 pauses the queue and retains input and unread mail without ending the host,
 even when no interrupt was requested. The operator may retry after storage
 recovers; no background retry or inference replay is scheduled.
+An automatic root continuation whose product preparation refuses capacity is
+cancelled with its notice before the host retains the storage pause; it creates
+no submission and is not retried in the background.
 Child publication waits belong to the command recipient. A refused root batch
 leaves the queued input and unread mail retryable. Retrying a batch written
 before its product submission reuses the same command identity and bytes
@@ -2361,7 +2364,9 @@ model sees the bounds it is actually under.
 
 ### 10.2 Blocked and failed attempts
 
-The hosted transient-continuation classifier uses only canonical model-error
+One hosted transient-continuation service plans and gates root and child
+continuations; both roles admit its instruction through the command ledger
+(§8). Its classifier uses only canonical model-error
 kind, phase and retryability. Transport, timeout, unavailable, incomplete-response
 and short retryable rate limits qualify; unknown/permanent dispositions and
 possible provider-hosted external effects never qualify. Duplicate-inference or
@@ -2372,6 +2377,15 @@ reachability; other qualifying failures honor retry advice clamped to 1-60 secon
 Reachability is shared by route, uses credential-free probes with exponential
 5-60 second backoff, and has no wall-clock wait cap. Interrupt and close cancel
 one waiter; the final subscriber cancels the probe task.
+
+The service derives the role's exact command identity and model-visible text
+under the owner's budget. Roots count continuations in memory per user task,
+use `plak:resume-transient:root:{failed_turn}`, and cancel a pending wait on
+new input or reload. Children count durable Resume decisions per attempt and
+recheck attempt ownership, turn capacity and cancellation on tree notifications,
+gate readiness and a child-only safety tick. The full admission predicate is
+checked again when readiness resolves, including startup cancellation; a lost
+owner releases without failed settlement. Their mailbox remains tree-owned.
 
 Failed child diagnostics include the canonical model error's operation phase,
 HTTP status and provider code when present, followed by its sanitized message
@@ -2810,7 +2824,8 @@ already depends on that crate.
 A pending child Resume is re-derived from its immutable decision and the exact
 canonical failed terminal, including when death occurred before that terminal
 was projected into the tree. No saved decision means conservative ordinary
-failure settlement. The new owner re-enters the same gate and retries the same
+failure settlement. The new owner uses the same transient-continuation service
+to reconstruct the saved round, re-enters its gate and retries the same
 `plak:resume-transient:{agent}:{attempt}:{round}` identity. A prepared exact
 Resume keeps its original prompt/mail batch rather than being withdrawn like a
 generation-dependent corrective command. Accepted commands are never replayed.
@@ -3213,7 +3228,8 @@ same `mint_hook_failed`.
 
 ### 14.3 Intents, views, and the tree projector
 
-A `Resume { round }` decision is durable before the failed terminal is projected.
+A `Resume { round }` decision from the shared continuation plan is durable
+before the failed terminal is projected.
 For the current bound turn only, it suppresses failed settlement and releases the
 turn binding, leaving the attempt running. Before that decision a crash settles
 failed conservatively; afterwards replay derives running without reserving a seal

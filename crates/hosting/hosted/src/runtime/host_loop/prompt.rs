@@ -179,7 +179,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .is_some_and(|submission| {
                     submission
                         .command_id
-                        .starts_with(super::transient::COMMAND_PREFIX)
+                        .starts_with(crate::driver::transient::ROOT_COMMAND_PREFIX)
                 })
         });
         if !host_authored {

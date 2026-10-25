@@ -15,7 +15,6 @@ mod park;
 mod recovery;
 mod reresolve;
 pub mod roots;
-pub mod transient;
 
 // The test modules below reach these through `use super::*`, as they did when
 // the module was one file.

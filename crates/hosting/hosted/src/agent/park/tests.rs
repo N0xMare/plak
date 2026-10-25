@@ -326,7 +326,10 @@ async fn transient_failure_continues_same_attempt_after_exact_route_probe() {
     let fixture = fixture_with_probe(json!([
         {"fault": {"at": "pre_stream", "kind": "transport", "phase": "Connect", "retryability": "Exhausted", "message": "offline network failure"}, "output": {"text": "unused"}},
         held("continued")
-    ]), leaf, Some(probe)).await;
+    ]), |tree| {
+        tree.snapshot.transient_resumes = 1;
+        leaf(tree)
+    }, Some(probe)).await;
     entered.notified().await;
     let (attempt_id, token) = fixture
         .runtime
@@ -372,6 +375,21 @@ async fn transient_failure_continues_same_attempt_after_exact_route_probe() {
             assert_eq!(command.kind, crate::agent_tree::AgentCommandKind::Resume);
             assert_eq!(command.fact, Some(crate::agent_tree::CommandFact::Accepted));
             assert!(command.text.contains("offline network failure"));
+            let bytes = serde_json::to_string(&json!({
+                "command_id": command.command_id,
+                "recipient": command.recipient,
+                "attempt_id": command.attempt_id,
+                "kind": command.kind,
+                "text": command.text,
+                "message_ids": command.message_ids,
+            }))
+            .unwrap();
+            assert_eq!(
+                bytes.as_bytes(),
+                include_str!("fixtures/child-resume.json")
+                    .trim_end()
+                    .as_bytes()
+            );
             assert!(command.text.contains("Do not repeat completed actions"));
         })
         .unwrap();
@@ -454,7 +472,10 @@ async fn assert_reopened_transient_resume(journaled: bool) {
         });
     let fixture = fixture_with_probe(json!([
         {"fault": {"at": "pre_stream", "kind": "transport", "phase": "Connect", "retryability": "Exhausted", "message": "retained original outage"}, "output": {"text": "unused"}}, held("reopened continuation")
-    ]), leaf, Some(probe)).await;
+    ]), |tree| {
+        tree.snapshot.transient_resumes = 1;
+        leaf(tree)
+    }, Some(probe)).await;
     entered.notified().await;
     let attempt = fixture
         .runtime
@@ -531,6 +552,78 @@ async fn assert_reopened_transient_resume(journaled: bool) {
     fixture.submit();
     fixture.provider_gates[0].release();
     fixture.until("reopened submission", settled).await;
+}
+
+#[tokio::test]
+async fn reopened_transient_startup_cancelled_as_probe_resolves_does_not_settle_failed() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let probe = plakous::model::ReachabilityProbe::new(
+        plakous::model::RouteId::new("offline.reopen.ready-cancel").unwrap(),
+        {
+            let entered = entered.clone();
+            move |_, _| {
+                entered.notify_one();
+                Box::pin(std::future::pending())
+            }
+        },
+    );
+    let fixture = fixture_with_probe(json!([
+        {"fault": {"at": "pre_stream", "kind": "transport", "phase": "Connect", "retryability": "Exhausted"}, "output": {"text": "unused"}}, held("must not dispatch")
+    ]), leaf, Some(probe)).await;
+    entered.notified().await;
+    let attached = lose_and_reopen(&fixture).await;
+    let ReopenedWake::Resume(resume) =
+        prepare_reopened_wake(&fixture.runtime, &fixture.child, &attached)
+            .await
+            .unwrap()
+    else {
+        panic!("saved continuation");
+    };
+    let startup = fixture
+        .runtime
+        .reserve_startup(&fixture.child)
+        .await
+        .unwrap();
+    let probe = plakous::model::ReachabilityProbe::new(
+        plakous::model::RouteId::new("offline.reopen.ready-cancel").unwrap(),
+        {
+            let startup = startup.clone();
+            move |_, _| {
+                startup.request_cancel();
+                Box::pin(async { Ok(()) })
+            }
+        },
+    );
+    assert!(
+        !super::super::children::wait_resume_gate(
+            fixture.runtime.driver(),
+            None,
+            Some(&startup),
+            &fixture.child,
+            &resume.identity,
+            Some(probe),
+            resume.plan.gate,
+        )
+        .await
+    );
+    super::super::children::release_startup(&fixture.runtime, &fixture.child, &startup, attached)
+        .await;
+    fixture
+        .runtime
+        .read(|tree| {
+            assert_eq!(
+                tree.attempt(&fixture.child).unwrap().status,
+                AttemptStatus::Running
+            );
+            assert_eq!(tree.attempt(&fixture.child).unwrap().usage.turns, 1);
+            assert!(
+                !tree
+                    .commands()
+                    .values()
+                    .any(|command| command.kind == crate::agent_tree::AgentCommandKind::Resume)
+            );
+        })
+        .unwrap();
 }
 
 #[tokio::test]

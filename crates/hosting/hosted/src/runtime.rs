@@ -1032,7 +1032,7 @@ enum TurnHostOutcome {
 
 struct TransientFailure {
     failed_turn: plakous::model::TurnId,
-    gate: crate::agent::transient::ResumeGate,
+    gate: crate::driver::transient::ResumeGate,
 }
 
 struct DrivenTurn {

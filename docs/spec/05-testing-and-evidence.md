@@ -1666,6 +1666,17 @@ submission without saving it.
 drives the host prompt/run loop with a non-cancelling full tree store, retains
 the queued input and unread mail, and admits one retry after storage recovers.
 
+`root_transient_ready_enqueues_one_instruction_without_user_history_or_mail`
+and `transient_failure_continues_same_attempt_after_exact_route_probe` pin the
+root and child transient-resume identities, instruction kinds and prompt bytes.
+The root transient matrix checks task budgets, cancellation and reload; child
+park and reopen tests check durable rounds, exact retry, retained mail and
+ownership loss while the shared continuation gate waits.
+The matrix also checks non-cancelling product capacity refusal cancels a root
+continuation before retaining a live, paused host with no submission or retry,
+reopen at the exact spent budget, and startup cancellation as the probe resolves
+without failed settlement.
+
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
