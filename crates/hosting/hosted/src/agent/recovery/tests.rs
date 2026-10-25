@@ -38,9 +38,14 @@ struct SwitchableStore {
     refuse: AtomicBool,
     refuse_sealed: AtomicBool,
     refuse_seal_failed: AtomicBool,
+    capacity_full: AtomicBool,
+    capacity_waiting: AtomicBool,
 }
 
 impl TreeStore for SwitchableStore {
+    fn storage_unavailable(&self) -> bool {
+        self.capacity_waiting.load(Ordering::Acquire)
+    }
     fn exists(&self, tree_id: &str) -> Result<bool, TreeStoreError> {
         self.inner.exists(tree_id)
     }
@@ -50,6 +55,10 @@ impl TreeStore for SwitchableStore {
     }
 
     fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
+        if self.capacity_full.load(Ordering::Acquire) {
+            self.capacity_waiting.store(true, Ordering::Release);
+            return Err(TreeStoreError::storage_full());
+        }
         if self.refuse.load(Ordering::SeqCst)
             || (self.refuse_sealed.load(Ordering::SeqCst) && !tree.candidates().is_empty())
             || (self.refuse_seal_failed.load(Ordering::SeqCst)
@@ -68,6 +77,73 @@ impl TreeStore for SwitchableStore {
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {
         self.inner.load(tree_id)
     }
+}
+
+#[tokio::test]
+async fn child_retirement_capacity_pause_keeps_attempt_pending_until_operator_cancel() {
+    let fixture = Fixture::new("child-retirement-capacity-cancel");
+    let id = fixture.spawn();
+    let sessions = fixture.sessions();
+    let CreateSessionOutcome::Created { session, .. } = sessions
+        .create(CreateSessionRequest::new(
+            spawn_child_operation_id(&fixture.tree_id, &id).unwrap(),
+            fixture.binding(),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("created child session")
+    };
+    let locator = session.release().await.unwrap();
+    mutate_and_publish(&fixture.runtime, &id, |tree| {
+        tree.record_child_session(&id, &locator.to_string())
+    })
+    .unwrap();
+    let prior = fixture
+        .runtime
+        .read(|tree| tree.attempt(&id).unwrap().clone())
+        .unwrap();
+    fixture.store.capacity_full.store(true, Ordering::Release);
+    let runtime = fixture.runtime.clone();
+    let child = id.clone();
+    let task = tokio::task::spawn_blocking(move || {
+        runtime.record_then_apply(&child, |tree| tree.record_host_cancellation(&child))
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !fixture.store.storage_unavailable() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !task.is_finished(),
+        "a capacity pause has no terminal or retirement completion"
+    );
+    fixture
+        .runtime
+        .read(|tree| {
+            let attempt = tree.attempt(&id).unwrap();
+            assert_eq!(attempt.attempt_id, prior.attempt_id);
+            assert_eq!(attempt.status, prior.status);
+            assert_eq!(attempt.failure, prior.failure);
+        })
+        .unwrap();
+    let _ = fixture.runtime.cancel_live(&id).await;
+    assert!(task.await.unwrap().is_err());
+    fixture
+        .runtime
+        .read(|tree| {
+            assert!(
+                !tree
+                    .fault_reason(&id)
+                    .is_some_and(|reason| reason.contains("tree publish refused"))
+            );
+            assert_eq!(tree.attempt(&id).unwrap().attempt_id, prior.attempt_id);
+        })
+        .unwrap();
+    fixture.store.capacity_full.store(false, Ordering::Release);
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 
 pub(crate) struct Fixture {

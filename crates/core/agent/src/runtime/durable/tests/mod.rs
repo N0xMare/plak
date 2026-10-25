@@ -54,6 +54,7 @@ mod provider_outcome_tests;
 mod reresolution_tests;
 mod round_limit;
 mod scheduling_diagnostics;
+mod storage_outage;
 mod terminal_enrichment;
 mod turn_fence_workflow;
 #[path = "../workflow_abandonment_tests.rs"]

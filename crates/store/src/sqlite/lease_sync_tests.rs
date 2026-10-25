@@ -52,6 +52,36 @@ async fn actor_direct_io_capacity_refusals_preserve_the_head_and_exact_retry() -
 
 struct StepClock(AtomicU64);
 
+#[tokio::test]
+async fn exact_commit_reconciliation_clears_capacity_debt_without_waiting_for_heartbeat()
+-> TestResult {
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open_with_clock(
+        directory.path().join("runtime.sqlite3"),
+        Arc::new(StepClock(AtomicU64::new(100))),
+    )?;
+    let request = seed()?;
+    let genesis = request.initial().clone();
+    let created = store.create(request).await?;
+    let mutation = successor(created.lease(), created.branch(), &genesis)?;
+    let committed = store.commit(mutation.clone()).await?;
+    assert_eq!(
+        store
+            .dispatch("refuse_capacity", |_| Err::<(), _>(
+                SessionStoreError::StorageFull
+            ))
+            .await,
+        Err(SessionStoreError::StorageFull)
+    );
+    assert!(store.storage_unavailable());
+    let recovered = store
+        .recover_commit(mutation.checkpoint().checkpoint_id())
+        .await?;
+    assert_eq!(recovered.receipt().head(), committed.head());
+    assert!(!store.storage_unavailable());
+    Ok(())
+}
+
 impl StepClock {
     fn set(&self, seconds: u64) {
         self.0.store(seconds, Ordering::SeqCst);

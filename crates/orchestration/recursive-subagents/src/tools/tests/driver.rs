@@ -2,9 +2,81 @@
 
 use super::*;
 
+#[test]
+#[ignore = "manual large-tree lock cost measurement"]
+fn large_tree_lock_cost() {
+    use crate::tree::{MailRecord, PersistedTree};
+    use std::collections::BTreeMap;
+    let directory = tempfile::tempdir().unwrap();
+    let base = bootstrap_tree("lock-cost", directory.path());
+    let mut nodes = base.nodes().clone();
+    for index in 0..64 {
+        let mut child = base.node("root").unwrap().clone();
+        child.agent_id = format!("child-{index}");
+        child.parent_agent_id = Some("root".into());
+        child.prompt = "p".repeat(4096);
+        nodes.insert(child.agent_id.clone(), child);
+    }
+    let messages = (0..512)
+        .map(|index| {
+            let id = format!("mail-{index}");
+            (
+                id.clone(),
+                MailRecord {
+                    message_id: id,
+                    from: "root".into(),
+                    to: format!("child-{}", index % 64),
+                    body: "m".repeat(2048),
+                    purpose: MessagePurpose::Coordinate,
+                    priority: MessagePriority::Deferred,
+                    in_reply_to: None,
+                    disposition: MailDisposition::Queued,
+                    durable: MailDurableState::Accepted,
+                },
+            )
+        })
+        .collect();
+    let tree = PersistedTree::from_rows(
+        base.tree_id.clone(),
+        "root".into(),
+        base.revision,
+        base.host_generation,
+        base.state,
+        base.writer_mode,
+        base.selected_tuple.clone(),
+        base.launch_checkout.clone(),
+        base.snapshot.clone(),
+        nodes,
+        BTreeMap::new(),
+        BTreeMap::new(),
+        BTreeMap::new(),
+        BTreeMap::new(),
+        messages,
+        BTreeMap::new(),
+    )
+    .rows()
+    .clone();
+    let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
+    let mut samples = Vec::new();
+    for _ in 0..2000 {
+        let started = std::time::Instant::now();
+        {
+            let tree = driver.lock().unwrap();
+            std::hint::black_box(tree.revision);
+        }
+        samples.push(started.elapsed().as_nanos());
+    }
+    samples.sort_unstable();
+    eprintln!(
+        "large-tree-lock nodes=65 mail=512 payload_bytes=1310720 iterations=2000 median_ns={} p99_ns={}",
+        samples[1000], samples[1980]
+    );
+}
+
 struct CapacityStore {
     inner: MemoryTreeStore,
     refuse: AtomicBool,
+    remain_full: AtomicBool,
     saves: AtomicUsize,
     offered: Mutex<Vec<(u64, u64)>>,
 }
@@ -31,7 +103,7 @@ impl TreeStore for CapacityStore {
             .lock()
             .unwrap()
             .push((tree.stored_revision, tree.revision));
-        if self.refuse.swap(false, Ordering::SeqCst) {
+        if self.remain_full.load(Ordering::Acquire) || self.refuse.swap(false, Ordering::SeqCst) {
             return Err(crate::tree::TreeStoreError::storage_full());
         }
         self.inner.save(tree)
@@ -45,6 +117,7 @@ fn capacity_refused_child_retirement_publishes_the_same_intent_without_publicati
     let store = Arc::new(CapacityStore {
         inner: MemoryTreeStore::new(),
         refuse: AtomicBool::new(false),
+        remain_full: AtomicBool::new(false),
         saves: AtomicUsize::new(0),
         offered: Mutex::default(),
     });
@@ -81,6 +154,119 @@ fn capacity_refused_child_retirement_publishes_the_same_intent_without_publicati
             .rows()
             .revision,
         tree.revision
+    );
+}
+
+#[test]
+fn cancelling_one_agent_never_abandons_another_agents_retained_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(CapacityStore {
+        inner: MemoryTreeStore::new(),
+        refuse: AtomicBool::new(false),
+        remain_full: AtomicBool::new(true),
+        saves: AtomicUsize::new(0),
+        offered: Mutex::default(),
+    });
+    let mut driver = driver_on(
+        bootstrap_tree("scoped-publication-cancel", root.path()),
+        store.clone(),
+    );
+    driver.capacity_retry_without_delay();
+    let writer = driver.for_agent("child-a");
+    let task = std::thread::spawn(move || {
+        let mut tree = writer.lock().unwrap();
+        writer.save_guarded(&mut tree)
+    });
+    while store.saves.load(Ordering::Acquire) < 2 {
+        std::thread::yield_now();
+    }
+    driver.cancel_storage_waits("child-b");
+    let before = store.saves.load(Ordering::Acquire);
+    while store.saves.load(Ordering::Acquire) == before && !task.is_finished() {
+        std::thread::yield_now();
+    }
+    assert!(
+        !task.is_finished(),
+        "unrelated cancellation leaves the retained mutation parked"
+    );
+    driver.cancel_storage_waits("child-a");
+    assert_eq!(
+        task.join().unwrap().unwrap_err().code,
+        TopologyErrorCode::RecoveryStorageUnavailable
+    );
+    let writer = driver.for_agent("child-b");
+    let before = store.saves.load(Ordering::Acquire);
+    let task = std::thread::spawn(move || {
+        let mut tree = writer.lock().unwrap();
+        writer.save_guarded(&mut tree)
+    });
+    while store.saves.load(Ordering::Acquire) == before {
+        std::thread::yield_now();
+    }
+    store.remain_full.store(false, Ordering::Release);
+    task.join().unwrap().unwrap();
+}
+
+#[test]
+fn cancelled_child_spawn_publication_is_recovery_required_not_a_definite_floor_refusal() {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(CapacityStore {
+        inner: MemoryTreeStore::new(),
+        refuse: AtomicBool::new(false),
+        remain_full: AtomicBool::new(false),
+        saves: AtomicUsize::new(0),
+        offered: Mutex::default(),
+    });
+    let driver = driver_on(
+        bootstrap_tree("capacity-spawn-cancel", root.path()),
+        store.clone(),
+    );
+    driver.mutate(|tree| driver.save(tree)).unwrap().0.unwrap();
+    let original = driver
+        .read(|tree| (tree.revision, tree.nodes().len()))
+        .unwrap();
+    store.remain_full.store(true, Ordering::Release);
+    let writer = driver.clone();
+    let task = std::thread::spawn(move || {
+        writer
+            .mutate(|tree| {
+                let child = tree
+                    .spawn_agent("root", &spawn_request(), None)
+                    .unwrap()
+                    .agent_id;
+                let error = writer.save(tree).unwrap_err();
+                assert!(
+                    !tree
+                        .fault_reason(&child)
+                        .is_some_and(|message| message.contains("tree publish refused"))
+                );
+                error
+            })
+            .unwrap()
+            .0
+    });
+    while !driver.storage_unavailable() {
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        driver
+            .read(|tree| (tree.revision, tree.nodes().len()))
+            .unwrap(),
+        original,
+        "reads stay responsive and expose only the prior live image while parked"
+    );
+    driver.cancel_storage_waits("root");
+    let error = task.join().unwrap();
+    assert_eq!(error.code, TopologyErrorCode::RecoveryStorageUnavailable);
+    assert_eq!(
+        store
+            .inner
+            .load("capacity-spawn-cancel")
+            .unwrap()
+            .unwrap()
+            .rows()
+            .revision,
+        original.0
     );
 }
 

@@ -40,6 +40,28 @@ fn child_live_deltas_coalesce_and_flood_leaves_room_for_root() {
 }
 
 #[test]
+fn root_interrupt_is_not_process_shutdown_and_quit_remains_latched_after_dequeue() {
+    let (sender, receiver) = intent_channel::<Core>();
+    let interrupt = receiver.storage_interrupt_probe();
+    let shutdown = receiver.storage_shutdown_probe();
+    sender.send(SessionIntent::Interrupt).unwrap();
+    assert!(interrupt());
+    assert!(!shutdown());
+    assert_eq!(*receiver.try_recv().unwrap(), SessionIntent::Interrupt);
+    assert!(
+        !interrupt(),
+        "a later root turn does not inherit an earlier interrupt"
+    );
+    sender.send(SessionIntent::Quit).unwrap();
+    assert!(shutdown());
+    assert_eq!(*receiver.try_recv().unwrap(), SessionIntent::Quit);
+    assert!(
+        shutdown(),
+        "child shutdown remains visible after the host dequeues Quit"
+    );
+}
+
+#[test]
 fn job_lifecycle_is_not_evicted_at_saturation() {
     let (sender, receiver) = observation_channel::<Core>();
     sender

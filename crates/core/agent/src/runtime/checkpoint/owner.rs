@@ -703,6 +703,10 @@ impl CheckpointOwner {
 }
 
 impl CheckpointReader {
+    #[cfg(test)]
+    pub(in crate::runtime) fn lease_lost_for_test(&self) -> bool {
+        self.heartbeat_lost.is_cancelled()
+    }
     pub(in crate::runtime) fn set_storage_interrupt(
         &self,
         probe: super::storage_pause::StorageInterrupt,
@@ -1611,6 +1615,7 @@ mod tests {
     /// `BackendBusy`, and every renewal reports `LeaseExpired` once `expired`
     /// is set, with revival answering `revive_error`.
     struct FlakyRenewStore {
+        colocated_full: std::sync::atomic::AtomicBool,
         now: std::sync::atomic::AtomicU64,
         busy: std::sync::atomic::AtomicUsize,
         expired: std::sync::atomic::AtomicBool,
@@ -1621,6 +1626,7 @@ mod tests {
     impl FlakyRenewStore {
         fn new(busy: usize, revive_error: SessionStoreError) -> Self {
             Self {
+                colocated_full: std::sync::atomic::AtomicBool::new(false),
                 now: std::sync::atomic::AtomicU64::new(0),
                 busy: std::sync::atomic::AtomicUsize::new(busy),
                 expired: std::sync::atomic::AtomicBool::new(false),
@@ -1631,6 +1637,10 @@ mod tests {
     }
 
     impl SessionStore for FlakyRenewStore {
+        fn storage_unavailable(&self) -> bool {
+            self.colocated_full
+                .load(std::sync::atomic::Ordering::Acquire)
+        }
         fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
             LeaseInstant::new(
                 LeaseDomain::new([1; 16], [2; 32]),
@@ -1752,6 +1762,25 @@ mod tests {
             .heartbeat
             .stop_and_join(Duration::from_secs(1))
             .await?;
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn colocated_capacity_debt_never_extends_a_busy_runtime_lease() -> TestResult {
+        let store = Arc::new(FlakyRenewStore::new(
+            usize::MAX,
+            SessionStoreError::LeaseHeld,
+        ));
+        store
+            .colocated_full
+            .store(true, std::sync::atomic::Ordering::Release);
+        let mut owner = flaky_owner(store.clone())?;
+        store.now.store(101, std::sync::atomic::Ordering::Release);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(owner.heartbeat.lost().is_cancelled());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(owner.heartbeat.check().is_err());
+        let _ = owner.heartbeat.stop_and_join(Duration::from_secs(1)).await;
         Ok(())
     }
 

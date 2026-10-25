@@ -373,6 +373,53 @@ mod contract {
         session
     }
 
+    #[test]
+    fn cancelled_product_publication_retains_queue_identity_and_recovers_with_an_authoritative_probe()
+     {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let root = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::new(PlakPaths::explicit(root.path().join("product")));
+        let mut session = queued(root.path());
+        store.save(&mut session).unwrap();
+        let original = session.clone();
+        let full = Arc::new(AtomicBool::new(true));
+        let fault = full.clone();
+        store
+            .with_store::<_, String>(|backend| {
+                backend.capacity_fault = Some(fault);
+                Ok(())
+            })
+            .unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let signal = cancelled.clone();
+        store.set_storage_interrupt(Arc::new(move || signal.load(Ordering::Acquire)));
+        let writer = store.clone();
+        session.title = Some("not committed".into());
+        let task = std::thread::spawn(move || writer.save(&mut session));
+        while !store.storage_unavailable() {
+            std::thread::yield_now();
+        }
+        cancelled.store(true, Ordering::Release);
+        let error = task.join().unwrap().unwrap_err();
+        assert_eq!(
+            error.refusal(),
+            Some(plakous_hosted::error::StoreRefusal::StorageFull)
+        );
+        let stored = store.load(&original.id).unwrap();
+        assert_eq!(stored.pending_queue, original.pending_queue);
+        assert_eq!(stored.store_revision, original.store_revision);
+        full.store(false, Ordering::Release);
+        store.recover_storage().unwrap();
+        assert!(!store.storage_unavailable());
+        assert_eq!(
+            store.load(&original.id).unwrap().store_revision,
+            original.store_revision
+        );
+    }
+
     fn suite(store: &dyn SessionRecordStore, workspace: &Path) {
         // First commit publishes at revision 1; a stale token is refused.
         let mut session = record(workspace);

@@ -319,6 +319,33 @@ fn row_observations_never_author_notice_intents() {
     assert!(events.take_notice_intents().is_empty());
 }
 
+#[test]
+fn storage_notice_operator_path_never_reaches_session_log_or_exportable_transcript() {
+    let root = tempfile::tempdir().unwrap();
+    let home = SessionHome::new(root.path().join("sessions"));
+    let mut session = SessionRecord::new(root.path().to_path_buf());
+    let store = crate::session_store::MemoryStore::new();
+    store.save(&mut session).unwrap();
+    let log = crate::session_log::SessionLog::open(&home, &session.id).unwrap();
+    let (events, receiver) = host_event_sink();
+    let private_path = "/private/operator-home/storage-notice-only";
+    events.notice(TranscriptRow::info(NoticeScope::Settings,
+        format!("storage unavailable · {private_path}; existing work retained; retrying writes every 5 s")));
+    assert!(format!("{:?}", receiver.try_iter().collect::<Vec<_>>()).contains(private_path));
+    commit_notice_intents(&events, &store, &home, Some(&log), &mut session);
+    let stored = store.load(&session.id).unwrap();
+    let exported_rows =
+        serde_json::to_string(&stored.transcript.iter().collect::<Vec<_>>()).unwrap();
+    assert!(!exported_rows.contains(private_path));
+    assert!(
+        !format!(
+            "{:?}",
+            crate::session_log::read_tail(&home, &session.id, 10).unwrap()
+        )
+        .contains(private_path)
+    );
+}
+
 /// On a live Grok hub the claimed call carries `exposed_name` =
 /// `get_command_or_subagent_output` (or `kill_command_or_subagent`). A
 /// call naming only a child must read as the await/interrupt over that

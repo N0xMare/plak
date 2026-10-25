@@ -11,6 +11,7 @@ pub(super) struct CreateStoreState {
     pub(super) commits: BTreeMap<CheckpointId, CommittedCheckpoint>,
     pub(super) stored_commits: BTreeMap<CheckpointId, StoredCheckpoint>,
     pub(super) active_lease: Option<BranchLease>,
+    pub(super) previous_lease: Option<BranchLease>,
     pub(super) released_lease: Option<BranchLease>,
     pub(super) last_fence: u64,
 }
@@ -72,6 +73,12 @@ pub(super) struct TestCreateStore {
     pub(super) force_recover_commit_not_found: AtomicBool,
     pub(super) reject_next_commit: Mutex<Option<SessionStoreError>>,
     pub(super) full_after_completed_round: AtomicBool,
+    pub(super) full_until: Mutex<Option<tokio::time::Instant>>,
+    pub(super) remain_full_after_round: AtomicBool,
+    pub(super) full_writes: AtomicBool,
+    pub(super) full_commits: AtomicBool,
+    pub(super) full_renewals: AtomicUsize,
+    pub(super) full_next_acquire: AtomicBool,
     pub(super) full_after_tool_result: AtomicBool,
     pub(super) full_round_refused: Notify,
     pub(super) fail_atomic_queued_cancel: AtomicBool,
@@ -96,6 +103,7 @@ pub(super) struct TestCreateStore {
         Mutex<Option<(Arc<RuntimeCheckpoint>, Arc<RuntimeCheckpoint>)>>,
     pub(super) extend_lease_on_renew: AtomicBool,
     pub(super) reject_renewal: AtomicBool,
+    pub(super) unavailable_renewal: AtomicBool,
     /// Revives an expired lease under its fence, as a store does for a holder
     /// that was suspended rather than replaced.
     pub(super) allow_revival: AtomicBool,
@@ -130,6 +138,16 @@ pub(super) struct TestCreateStore {
 }
 
 impl TestCreateStore {
+    fn capacity_refused(&self) -> bool {
+        let refused = self.full_writes.load(Ordering::Acquire)
+            || lock_mutex(&self.full_until)
+                .is_some_and(|until| tokio::time::Instant::now() < until);
+        if refused {
+            self.full_round_refused.notify_one();
+        }
+        refused
+    }
+
     pub(super) fn record_admission_job(&self, name: &'static str) {
         let mut jobs = lock_mutex(&self.admission_jobs);
         if let Some(jobs) = jobs.as_mut() {
@@ -436,6 +454,9 @@ impl SessionStore for TestCreateStore {
     fn acquire(&self, request: AcquireBranch) -> crate::StoreFuture<'_, BranchLease> {
         self.record_admission_job("acquire");
         Box::pin(async move {
+            if self.full_next_acquire.swap(false, Ordering::AcqRel) {
+                return Err(SessionStoreError::StorageFull);
+            }
             let authority_now = *lock_mutex(&self.lease_read_override);
             let mut state = lock_mutex(&self.state);
             let loaded = state.loaded.as_ref().ok_or(SessionStoreError::NotFound)?;
@@ -474,6 +495,7 @@ impl SessionStore for TestCreateStore {
                 request.lease_seconds(),
             );
             state.last_fence = fence.get();
+            state.previous_lease = None;
             state.active_lease = Some(lease.clone());
             state.released_lease = None;
             Ok(lease)
@@ -484,8 +506,31 @@ impl SessionStore for TestCreateStore {
         self.record_admission_job("renew");
         self.renew_calls.fetch_add(1, Ordering::Relaxed);
         Box::pin(async move {
+            if self.capacity_refused() {
+                self.full_renewals.fetch_add(1, Ordering::AcqRel);
+                return Err(SessionStoreError::StorageFull);
+            }
             if self.reject_renewal.load(Ordering::Acquire) {
                 return Err(SessionStoreError::LeaseExpired);
+            }
+            if self.unavailable_renewal.load(Ordering::Acquire) {
+                return Err(SessionStoreError::BackendUnavailable);
+            }
+            {
+                let state = lock_mutex(&self.state);
+                if state.previous_lease.as_ref() == Some(&lease) {
+                    let now = self.lease_now()?;
+                    let active = state
+                        .active_lease
+                        .as_ref()
+                        .ok_or(SessionStoreError::corrupt())?;
+                    return if now.same_domain_cmp(active.expires_at())? == std::cmp::Ordering::Less
+                    {
+                        Ok(active.clone())
+                    } else {
+                        Err(SessionStoreError::LeaseExpired)
+                    };
+                }
             }
             let publication_clock = *lock_mutex(&self.publication_clock);
             if let Some((epoch, base)) = publication_clock {
@@ -507,6 +552,9 @@ impl SessionStore for TestCreateStore {
                             .map_err(|_| SessionStoreError::corrupt())?,
                         lease.lease_seconds(),
                     );
+                    if renewed != lease {
+                        state.previous_lease = Some(lease.clone());
+                    }
                     state.active_lease = Some(renewed.clone());
                     renewed
                 };
@@ -537,6 +585,9 @@ impl SessionStore for TestCreateStore {
                             .map_err(|_| SessionStoreError::corrupt())?,
                         lease.lease_seconds(),
                     );
+                    if renewed != lease {
+                        state.previous_lease = Some(lease.clone());
+                    }
                     state.active_lease = Some(renewed.clone());
                     renewed
                 };
@@ -561,6 +612,9 @@ impl SessionStore for TestCreateStore {
                         .map_err(|_| SessionStoreError::corrupt())?,
                     lease.lease_seconds(),
                 );
+                if renewed != lease {
+                    state.previous_lease = Some(lease.clone());
+                }
                 state.active_lease = Some(renewed.clone());
                 return Ok(renewed);
             }
@@ -577,9 +631,13 @@ impl SessionStore for TestCreateStore {
         self.record_admission_job("revive");
         self.revive_calls.fetch_add(1, Ordering::Relaxed);
         Box::pin(async move {
+            if self.capacity_refused() {
+                return Err(SessionStoreError::StorageFull);
+            }
             if !self.allow_revival.load(Ordering::Acquire) {
                 return Err(SessionStoreError::FenceSuperseded);
             }
+            let now = self.lease_now()?;
             let mut state = lock_mutex(&self.state);
             if state.active_lease.as_ref() != Some(&lease)
                 || state.last_fence != lease.fence().get()
@@ -590,17 +648,11 @@ impl SessionStore for TestCreateStore {
                 lease.session(),
                 lease.owner(),
                 lease.fence(),
-                lease_instant(
-                    lease
-                        .expires_at()
-                        .seconds()
-                        .saturating_add(lease.lease_seconds().get()),
-                    0,
-                )
-                .map_err(|_| SessionStoreError::corrupt())?,
+                now.checked_add_seconds(lease.lease_seconds().get())?,
                 lease.lease_seconds(),
             );
             state.active_lease = Some(revived.clone());
+            state.previous_lease = Some(lease);
             Ok(revived)
         })
     }
@@ -612,12 +664,16 @@ impl SessionStore for TestCreateStore {
             .fetch_add(1, Ordering::AcqRel)
             .saturating_add(1);
         Box::pin(async move {
+            if self.capacity_refused() {
+                return Err(SessionStoreError::StorageFull);
+            }
             if self.hang_release_on.load(Ordering::Acquire) == call {
                 std::future::pending::<()>().await;
             }
             let mut state = lock_mutex(&self.state);
             if state.active_lease.as_ref() == Some(&lease) {
                 state.active_lease = None;
+                state.previous_lease = None;
                 state.released_lease = Some(lease);
                 return Ok(());
             }
@@ -637,6 +693,9 @@ impl SessionStore for TestCreateStore {
             .saturating_add(1);
         lock_mutex(&self.feed_facts).push(request.feed_facts().to_vec());
         Box::pin(async move {
+            if self.capacity_refused() || self.full_commits.load(Ordering::Acquire) {
+                return Err(SessionStoreError::StorageFull);
+            }
             if let Some(error) = lock_mutex(&self.reject_next_commit).take() {
                 return Err(error);
             }
@@ -719,6 +778,9 @@ impl SessionStore for TestCreateStore {
                     .full_after_completed_round
                     .swap(false, Ordering::AcqRel)
             {
+                if self.remain_full_after_round.load(Ordering::Acquire) {
+                    self.full_writes.store(true, Ordering::Release);
+                }
                 self.full_round_refused.notify_one();
                 return Err(SessionStoreError::StorageFull);
             }

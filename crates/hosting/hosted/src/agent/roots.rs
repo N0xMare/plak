@@ -668,6 +668,117 @@ mod tests {
 
     use super::ProductStateRoots;
 
+    #[derive(Default)]
+    struct PausedTreeStore {
+        inner: crate::agent_tree::MemoryTreeStore,
+        full: std::sync::atomic::AtomicBool,
+        waiting: std::sync::atomic::AtomicBool,
+        recovered: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::agent_tree::TreeStore for PausedTreeStore {
+        fn exists(&self, id: &str) -> Result<bool, crate::agent_tree::TreeStoreError> {
+            self.inner.exists(id)
+        }
+        fn ids(&self) -> Result<Vec<String>, crate::agent_tree::TreeStoreError> {
+            self.inner.ids()
+        }
+        fn load(
+            &self,
+            id: &str,
+        ) -> Result<Option<crate::agent_tree::PersistedTree>, crate::agent_tree::TreeStoreError>
+        {
+            self.inner.load(id)
+        }
+        fn save(
+            &self,
+            tree: &crate::agent_tree::ProductAgentTree,
+        ) -> Result<crate::agent_tree::Revision, crate::agent_tree::TreeStoreError> {
+            if self.full.load(std::sync::atomic::Ordering::Acquire) {
+                self.waiting
+                    .store(true, std::sync::atomic::Ordering::Release);
+                return Err(crate::agent_tree::TreeStoreError::storage_full());
+            }
+            self.inner.save(tree)
+        }
+        fn storage_unavailable(&self) -> bool {
+            self.waiting.load(std::sync::atomic::Ordering::Acquire)
+        }
+        fn recover_storage(&self) -> Result<(), crate::agent_tree::TreeStoreError> {
+            if self.full.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(crate::agent_tree::TreeStoreError::storage_full());
+            }
+            self.recovered
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            self.waiting
+                .store(false, std::sync::atomic::Ordering::Release);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn next_root_prompt_retries_the_paused_tree_store_without_an_incidental_tree_mutation() {
+        use crate::agent_tree::TreeStore as _;
+        use std::sync::atomic::Ordering;
+        let home = tempfile::tempdir().unwrap();
+        let roots =
+            ProductStateRoots::with_doubles(home.path().to_path_buf(), home.path().join("state"));
+        let store = Arc::new(PausedTreeStore::default());
+        *roots.tree_store.lock().unwrap() = Some(store.clone());
+        let sessions = roots.runtime_sessions().unwrap();
+        let controller =
+            plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+                plakous_offline_crash_harness::protocol::CrashBoundary::None,
+                home.path().join("evidence.jsonl"),
+            )
+            .unwrap();
+        let binding =
+            plakous_offline_crash_harness::runtime_binding(home.path(), controller).unwrap();
+        let plakous::sessions::CreateSessionOutcome::Created { session, .. } = sessions
+            .create(plakous::sessions::CreateSessionRequest::new(
+                plakous::sessions::SessionOperationId::new("create:paused-tree-admission").unwrap(),
+                binding,
+            ))
+            .await
+            .unwrap()
+        else {
+            panic!("created root")
+        };
+        let tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test_with(
+            Arc::new(crate::occupancy_vcs::fake::FakeVcs::new()),
+            "paused-tree",
+            "root",
+            "owner",
+            home.path().to_path_buf(),
+            "tuple",
+            crate::agent_tree_protocol::WriterMode::SingleLease,
+        )
+        .unwrap();
+        store.full.store(true, Ordering::Release);
+        assert!(store.save(&tree).is_err());
+        store.full.store(false, Ordering::Release);
+        assert!(session.agent().storage_unavailable());
+        let submission = session
+            .agent()
+            .start(
+                plakous::agent::CommandId::new("root:after-space-freed").unwrap(),
+                "complete after space is freed",
+            )
+            .await
+            .unwrap();
+        let result = submission.result().unwrap().clone().result().await.unwrap();
+        assert!(matches!(
+            result.outcome(),
+            plakous::agent::TurnResultOutcome::Completed(_)
+        ));
+        assert_eq!(store.recovered.load(Ordering::Acquire), 1);
+        assert!(
+            store.ids().unwrap().is_empty(),
+            "no incidental tree save cleared the debt"
+        );
+        session.agent().shutdown().await.unwrap();
+    }
+
     struct LowStorage;
 
     impl crate::runtime::fault_store::StoreFaults for LowStorage {

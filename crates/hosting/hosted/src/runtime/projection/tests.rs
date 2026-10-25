@@ -30,6 +30,8 @@ mod terminal_usage;
 
 #[cfg(test)]
 mod perf_cold;
+#[cfg(test)]
+mod storage_outage;
 
 #[test]
 fn an_intent_written_during_the_feed_read_is_joined_to_that_page() {
