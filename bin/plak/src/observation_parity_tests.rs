@@ -76,6 +76,8 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 /// identities, timestamps, durations, token counts and temporary paths the
 /// task treats as incidental. Every other field is compared byte for byte, so
 /// a field that changes meaning fails the golden.
+/// Presentation updates are first validated and folded to complete row values;
+/// their schema/key/revision representation is pinned by the patch contract tests.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Record {
     kind: String,
@@ -436,6 +438,7 @@ fn latest_state_kind(kind: &str) -> bool {
     matches!(
         kind,
         "presentation"
+            | "agent_presentation"
             | "provider_snapshot"
             | "activity"
             | "attached"
@@ -1319,17 +1322,18 @@ enum OneShot {
 /// to the phase and queue length it means. Every other observation is compared
 /// exactly.
 fn normalize(events: &[HostEvent], root: &Path, _script: Script) -> Vec<Record> {
+    let mut presentations = std::collections::BTreeMap::new();
     let records = events
         .iter()
         // Background projector settlements have no arrival-count or ordering
-        // contract. Their complete values are compared in terminal snapshots.
+        // contract. Their complete values are compared in folded presentations.
         .filter(|event| {
             !matches!(
                 event,
                 HostEvent::Row(crate::store::sessions::TranscriptRow::Tool(_))
             )
         })
-        .map(|event| Record::from_event(event, root))
+        .map(|event| folded_presentation_record(event, root, &mut presentations))
         // IntentStarted is an in-process correlation receipt consumed by the
         // JSONL adapter, not a user-visible observation on either surface.
         .filter(|record| record.kind != "intent_started")
@@ -1338,6 +1342,101 @@ fn normalize(events: &[HostEvent], root: &Path, _script: Script) -> Vec<Record> 
         .map(drop_cancelled_tool_detail)
         .collect();
     coalesce(records)
+}
+
+fn folded_presentation_record(
+    event: &HostEvent,
+    root: &Path,
+    presentations: &mut std::collections::BTreeMap<
+        plakous_host_protocol::views::transcript::TranscriptScope,
+        plakous_host_protocol::views::transcript::TranscriptState,
+    >,
+) -> Record {
+    use plakous_host_protocol::views::transcript::TranscriptScope;
+    let scope = match event {
+        HostEvent::PresentationSnapshot(snapshot) => snapshot.scope.clone(),
+        HostEvent::TranscriptPatch(patch) => patch.scope.clone(),
+        _ => return Record::from_event(event, root),
+    };
+    let state = presentations.entry(scope.clone()).or_default();
+    match event {
+        HostEvent::PresentationSnapshot(snapshot) => state
+            .replace(snapshot.clone())
+            .expect("parity transcript snapshot"),
+        HostEvent::TranscriptPatch(patch) => {
+            state.apply(patch.clone()).expect("parity transcript patch");
+        }
+        _ => unreachable!("presentation update"),
+    }
+    let rows: Vec<_> = state.items().values().collect();
+    let (kind, payload) = match scope {
+        TranscriptScope::Root => ("presentation", format!("PresentationRows({rows:?})")),
+        TranscriptScope::Agent(agent) => (
+            "agent_presentation",
+            format!("AgentPresentationRows {{ agent: {agent:?}, rows: {rows:?} }}"),
+        ),
+    };
+    Record::synthetic(kind, scrub(&payload, root))
+}
+
+#[test]
+fn presentation_parity_compares_folded_rows_not_snapshot_or_patch_encoding() {
+    use plakous_host_protocol::views::PresentationSnapshot;
+    use plakous_host_protocol::views::transcript::{
+        Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptRow, TranscriptScope,
+    };
+    let initial = PresentationSnapshot {
+        revision: 7,
+        items: vec![TranscriptItem {
+            key: RowKey::new(3, Lane::Runtime, 0),
+            row: TranscriptRow::user("prompt"),
+        }],
+        ..PresentationSnapshot::default()
+    };
+    let mut final_view = initial.clone();
+    final_view.revision = 11;
+    final_view.items.push(TranscriptItem {
+        key: RowKey::new(9, Lane::Runtime, 0),
+        row: TranscriptRow::assistant("answer"),
+    });
+    let before = initial
+        .items
+        .iter()
+        .map(|item| (item.key, item.row.clone()))
+        .collect();
+    let after = final_view
+        .items
+        .iter()
+        .map(|item| (item.key, item.row.clone()))
+        .collect();
+    let mut patch = TranscriptPatch::between(TranscriptScope::Root, 7, 11, &before, &after);
+    let full = normalize(
+        &[
+            HostEvent::PresentationSnapshot(initial.clone()),
+            HostEvent::AssistantDone,
+            HostEvent::PresentationSnapshot(final_view),
+        ],
+        Path::new("/fixture"),
+        Script::Effect,
+    );
+    let incremental = |patch| {
+        normalize(
+            &[
+                HostEvent::PresentationSnapshot(initial.clone()),
+                HostEvent::AssistantDone,
+                HostEvent::TranscriptPatch(patch),
+            ],
+            Path::new("/fixture"),
+            Script::Effect,
+        )
+    };
+    assert_eq!(incremental(patch.clone()), full);
+    patch.upserts[0].row = TranscriptRow::assistant("different answer");
+    assert_ne!(
+        incremental(patch),
+        full,
+        "changed row content must still fail parity"
+    );
 }
 
 /// Whether this is one of the host's intra-workflow progress statuses.

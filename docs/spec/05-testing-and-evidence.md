@@ -2668,6 +2668,13 @@ receipts, including the queue identity, revision, and prompt text after the
 existing identity scrub. These receipts are in-process provenance even though
 the JSONL projection does not emit them as standalone wire records. A receipt
 change must be reviewed in the goldens; normalization must not hide it.
+Presentation snapshots and patches are validated and folded through the typed
+transcript reducer before comparison. The oracle compares complete ordered row
+values, including all their existing identity/text fields after the established
+scrub, rather than the schema/key/revision encoding of a snapshot or delta.
+Patch contract tests separately pin schema, ordering, exact revision, scope and
+atomic bounds refusals. A row-content change still fails observation parity;
+the JSONL kind table remains checked against the production closed projection.
 Usage parity omits the live request's Coding/Agent tool-inventory
 informational rows and the timestamp-dependent `Live turn growth (est.)`
 category: prepared-request and terminal refreshes supersede one
