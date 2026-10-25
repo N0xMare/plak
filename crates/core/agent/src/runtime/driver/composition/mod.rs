@@ -72,6 +72,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 mod nested;
+mod observation;
 mod outer;
 mod read_only;
 mod resources;
