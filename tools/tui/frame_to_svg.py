@@ -26,6 +26,40 @@ def svg_color(value: str, default: str) -> str:
 
 def render(source: str) -> str:
     lines = source.splitlines()
+    headers = [
+        index for index, line in enumerate(lines)
+        if re.fullmatch(r"frame (\d+)x(\d+)", line)
+    ]
+    if headers == [0]:
+        return render_frame(source)
+    if not headers or headers[0] != 1:
+        raise ValueError("invalid frame header")
+    stories = []
+    offset = 8
+    width = 0
+    for index, start in enumerate(headers):
+        end = headers[index + 1] - 1 if index + 1 < len(headers) else len(lines)
+        label = html.escape(lines[start - 1])
+        frame = render_frame("\n".join(lines[start:end]))
+        dimensions = re.fullmatch(r"frame (\d+)x(\d+)", lines[start])
+        columns, rows = map(int, dimensions.groups())
+        width = max(width, columns * CELL_WIDTH + 16)
+        stories.append(
+            f'<text x="8" y="{offset + 15}" font-family="monospace" '
+            f'font-size="15" fill="{DEFAULT_FOREGROUND}">{label}</text>'
+            f'<g transform="translate(0,{offset + 22})">{frame.strip()}</g>'
+        )
+        offset += 22 + rows * 18 + 8 + 12
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
+        f'height="{offset}" viewBox="0 0 {width} {offset}">'
+        f'<rect width="100%" height="100%" fill="{DEFAULT_BACKGROUND}"/>'
+        + "".join(stories) + "</svg>\n"
+    )
+
+
+def render_frame(source: str) -> str:
+    lines = source.splitlines()
     match = re.fullmatch(r"frame (\d+)x(\d+)", lines[0])
     if not match:
         raise ValueError("invalid frame header")

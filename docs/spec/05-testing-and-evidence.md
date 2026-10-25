@@ -364,7 +364,10 @@ distinguishes local abandonment/finalization debt from external effect evidence.
 Processes stories cover 48-, 80- and 120-column TestBackend frames in the
 default dark theme: idle HUD count, Processes list, live output, the busy
 `Esc` stop pop-up and the quit pop-up. `activity-processes.frame` pins these
-surfaces; pilot journeys cover confirmed `s` and `S` intents and the turn
+surfaces. A `.frame` is either one `frame WxH` dump or a bundle in which each
+dump is preceded by its story name. The SVG reader preserves single-frame
+rendering and renders every named dump in a bundle, in order, with its label.
+Pilot journeys cover confirmed `s` and `S` intents and the turn
 stop's `[ Stop turn + processes ]` button. The typing-safety tests type drafts,
 editing keys and pastes into every view (Activity tabs, the agent view, the
 root view, the queue, approvals, the slash palette, quit and settings reset).
