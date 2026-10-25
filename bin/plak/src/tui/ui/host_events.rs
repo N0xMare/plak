@@ -483,6 +483,10 @@ impl App {
             | HostEvent::PromptStarted(None)
             | HostEvent::IntentStarted(_) => {}
             HostEvent::PresentationSnapshot(snapshot) => {
+                if snapshot.scope != plakous_host_protocol::views::transcript::TranscriptScope::Root
+                {
+                    return;
+                }
                 self.accepted_drafts.clear();
                 if let Err(error) = snapshot.validate() {
                     self.pane.blocks.push(ScrollBlock::Error(format!(
@@ -492,10 +496,17 @@ impl App {
                     return;
                 }
                 self.pane.assistant_stream_active = false;
-                self.restore_tip_clocks(&snapshot.rows);
+                self.restore_tip_clocks(
+                    &snapshot
+                        .items
+                        .iter()
+                        .map(|item| item.row.clone())
+                        .collect::<Vec<_>>(),
+                );
                 let full_window =
-                    snapshot.rows.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
-                let mut blocks = blocks::blocks_from_rows(snapshot.rows);
+                    snapshot.items.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
+                let mut blocks =
+                    blocks::blocks_from_rows(snapshot.items.into_iter().map(|item| item.row));
                 self.restore_opening_note(&mut blocks, full_window);
                 for note in self.take_open_notes() {
                     let already = blocks.iter().any(|block| match (block, &note) {

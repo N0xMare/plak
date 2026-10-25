@@ -65,9 +65,10 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
     let stored = host.config.store.load(&host.config.session.id).unwrap();
     assert_eq!(host.config.session.tool_call_count, stored.tool_call_count);
     assert!(events.try_iter().any(|event| match event {
-        HostEvent::PresentationSnapshot(snapshot) => snapshot.rows.iter().any(
-            |row| matches!(row, TranscriptRow::Tool(tool) if tool.name == "hosted_interpreter")
-        ),
+        HostEvent::PresentationSnapshot(snapshot) =>
+            snapshot.items.iter().map(|item| &item.row).any(
+                |row| matches!(row, TranscriptRow::Tool(tool) if tool.name == "hosted_interpreter")
+            ),
         HostEvent::Row(TranscriptRow::Tool(tool)) => tool.name == "hosted_interpreter",
         _ => false,
     }));
@@ -616,14 +617,15 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
     gate.release();
     let HostEvent::PresentationSnapshot(snapshot) = next(&|event| {
         matches!(event, HostEvent::PresentationSnapshot(snapshot)
-            if snapshot.rows.iter().any(|row| matches!(row,
+            if snapshot.items.iter().map(|item| &item.row).any(|row| matches!(row,
                 TranscriptRow::Steer { text, .. } if text == "edited send-now")))
     }) else {
         unreachable!()
     };
     let steers: Vec<_> = snapshot
-        .rows
+        .items
         .iter()
+        .map(|item| &item.row)
         .filter(|row| {
             matches!(row,
         TranscriptRow::Steer { text, .. } if text == "edited send-now")

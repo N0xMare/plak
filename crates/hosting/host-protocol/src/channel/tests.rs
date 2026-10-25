@@ -502,10 +502,21 @@ fn transcript_replacement_clears_saturation_gap() {
     assert!(sender.transcript_resnapshot_required());
 
     let mut authoritative = crate::views::PresentationSnapshot::empty(1);
-    authoritative.rows = vec![
+    authoritative.items = vec![
         TranscriptRow::user("prompt"),
         TranscriptRow::assistant("complete"),
-    ];
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, row)| crate::views::transcript::TranscriptItem {
+        key: crate::views::transcript::RowKey::new(
+            index as u64 + 1,
+            crate::views::transcript::Lane::Runtime,
+            0,
+        ),
+        row,
+    })
+    .collect();
     sender
         .send(SessionObservation::PresentationSnapshot(
             authoritative.clone(),

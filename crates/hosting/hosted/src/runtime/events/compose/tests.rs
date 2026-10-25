@@ -381,8 +381,9 @@ fn compose_counts_moved_by_wait_children_survive_resume() {
         unreachable!("snapshot projection")
     };
     let tools: Vec<_> = snapshot
-        .rows
+        .items
         .iter()
+        .map(|item| &item.row)
         .filter_map(TranscriptRow::as_tool)
         .collect();
     let compose = tools

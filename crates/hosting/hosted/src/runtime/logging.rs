@@ -30,63 +30,88 @@ pub(super) fn session_header(session: &sessions::SessionRecord) -> TranscriptRow
 pub(super) fn project_session_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     session: &sessions::SessionRecord,
 ) -> HostEvent<P> {
-    let HostEvent::PresentationSnapshot(mut snapshot) =
-        project_presentation_snapshot::<P>(&session.transcript)
-    else {
-        unreachable!("restore projection always produces a snapshot")
-    };
-    if snapshot.rows.len() == plakous_host_protocol::views::presentation::MAX_SNAPSHOT_ROWS {
-        snapshot.rows.remove(0);
-    }
-    snapshot.rows.insert(0, session_header(session));
-    HostEvent::PresentationSnapshot(snapshot)
+    let mut items = session.transcript.items();
+    items.insert(
+        0,
+        plakous_host_protocol::views::transcript::TranscriptItem {
+            key: sessions::projector::RowKey::TRUNCATION,
+            row: session_header(session),
+        },
+    );
+    project_keyed_snapshot(items)
 }
 
-/// The restore snapshot: the newest suffix of the product transcript's typed
-/// rows that fits the presentation bounds, oldest first. Rows are the ones the
-/// host emitted live; only lineage to a tool row outside the window and the
-/// process-start alias label are normalized, exactly as the live path does.
+/// Repository-only rehearsal of unkeyed rows. Real session snapshots retain
+/// the keys read from the projector instead of reconstructing them by index.
 pub(super) fn project_presentation_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     transcript: &[TranscriptRow],
+) -> HostEvent<P> {
+    use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem};
+    project_keyed_snapshot(
+        transcript
+            .iter()
+            .enumerate()
+            .map(|(index, row)| TranscriptItem {
+                key: RowKey::new(
+                    u64::try_from(index).unwrap_or(u64::MAX) + 1,
+                    Lane::Runtime,
+                    0,
+                ),
+                row: row.clone(),
+            })
+            .collect(),
+    )
+}
+
+fn project_keyed_snapshot<P: plakous_host_protocol::ProtocolExtension>(
+    items: Vec<plakous_host_protocol::views::transcript::TranscriptItem>,
 ) -> HostEvent<P> {
     use plakous_host_protocol::views::presentation::{
         MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, PresentationSnapshot, row_bytes,
     };
-
-    let mut rows = Vec::new();
-    let mut bytes = 0_usize;
-    for row in transcript.iter().rev() {
-        bytes = bytes.saturating_add(row_bytes(row));
-        if bytes > MAX_PRESENTATION_BYTES || rows.len() == MAX_SNAPSHOT_ROWS {
+    let header = items
+        .first()
+        .filter(|item| matches!(item.row, TranscriptRow::SessionHeader { .. }))
+        .cloned();
+    let reserved = usize::from(header.is_some());
+    let mut kept = Vec::new();
+    let mut bytes = header.as_ref().map_or(0, |item| row_bytes(&item.row));
+    for mut item in items.into_iter().rev() {
+        if matches!(item.row, TranscriptRow::SessionHeader { .. }) {
+            continue;
+        }
+        bytes = bytes.saturating_add(row_bytes(&item.row));
+        if bytes > MAX_PRESENTATION_BYTES || kept.len() == MAX_SNAPSHOT_ROWS - reserved {
             break;
         }
-        let mut row = row.clone();
-        if let TranscriptRow::Tool(tool) = &mut row
+        if let TranscriptRow::Tool(tool) = &mut item.row
             && crate::activity::is_process_start_alias(&tool.name)
         {
             crate::activity::PROCESS_ACTIVITY_LABEL.clone_into(&mut tool.name);
         }
-        rows.push(row);
+        kept.push(item);
     }
-    rows.reverse();
-    let retained_calls: std::collections::BTreeSet<String> = rows
+    kept.reverse();
+    if let Some(header) = header {
+        kept.insert(0, header);
+    }
+    let retained_calls: std::collections::BTreeSet<String> = kept
         .iter()
-        .filter_map(|row| row.call_id().map(str::to_owned))
+        .filter_map(|item| item.row.call_id().map(str::to_owned))
         .collect();
-    for row in &mut rows {
-        if let TranscriptRow::Tool(tool) = row
+    for item in &mut kept {
+        if let TranscriptRow::Tool(tool) = &mut item.row
             && tool
                 .parent_call_id
                 .as_ref()
                 .is_some_and(|parent| !retained_calls.contains(parent))
         {
-            // A composition parent outside the window cannot own a visible row.
             tool.parent_call_id = None;
             tool.cell_id = None;
         }
     }
     let mut snapshot = PresentationSnapshot::empty(0);
-    snapshot.rows = rows;
+    snapshot.items = kept;
     HostEvent::PresentationSnapshot(snapshot)
 }
 
@@ -240,7 +265,7 @@ mod tests {
             panic!("snapshot");
         };
         snapshot.validate().unwrap();
-        snapshot.rows
+        snapshot.items.into_iter().map(|item| item.row).collect()
     }
 
     fn tool(index: usize) -> sessions::ToolItem {

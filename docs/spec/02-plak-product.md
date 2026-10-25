@@ -1790,6 +1790,24 @@ immutable `RowKey` (anchor, lane, ordinal), and the transcript is ordered by it.
 `RowKey` and its `Lane` vocabulary belong to `plakous-host-protocol`, shared
 by the hosted projector and presentation consumers; their stored encodings
 remain unchanged.
+The in-process presentation snapshot is schema **3**: a `scope` (`Root` or
+`Agent(id)`), a presentation-local `revision`, and ordered
+`TranscriptItem { key, row }` values. It retains projector keys rather than
+deriving identities from vector positions. The synthetic session header uses
+`(0, runtime, 0)` in this presentation; the stored truncation sentinel is
+presented at `(0, runtime, 1)`, without changing the stored key. Live rows not
+yet replaced by their projector rows use an attachment-local, non-persisted
+key namespace (anchors starting at 2^63).
+
+`TranscriptPatch { scope, from_revision, to_revision, upserts, deletes }`
+describes an atomic keyed update. Upserts and deletes each have strictly
+increasing keys, cannot overlap, and retain the snapshot's row/byte bounds.
+`to_revision` is strictly greater than `from_revision`; applying it requires
+the exact scope and baseline revision. A malformed patch, missing revision,
+foreign scope or resulting bound overflow leaves the baseline unchanged and
+requires a scope resync, never blind folding. Presentation revisions are not
+feed cursors or tree revisions. Neither snapshots nor patches change the
+closed JSONL v1 projection, canonical history or any persisted encoding.
 A runtime-derived row's anchor is its record's sequence, lane 0, and its ordinal
 is its position among the rows that record derives. An operator notice's anchor
 is the cursor the authoring host had applied when it wrote the notice, lane 1,

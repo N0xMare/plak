@@ -887,8 +887,9 @@ async fn result_observation_is_bounded_and_deduplicated_before_admission() {
         panic!("snapshot")
     };
     let tools: Vec<_> = snapshot
-        .rows
+        .items
         .iter()
+        .map(|item| &item.row)
         .filter_map(plakous_host_protocol::views::transcript::TranscriptRow::as_tool)
         .collect();
     assert_eq!(tools.len(), 1);

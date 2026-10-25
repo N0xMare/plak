@@ -449,7 +449,7 @@ fn report_snapshot(
     writeln!(
         output,
         "{label}: transcript_rows={rows} projected rows={}/{} byte_limit={} validation={:?}",
-        snapshot.rows.len(),
+        snapshot.items.len(),
         MAX_SNAPSHOT_ROWS,
         MAX_PRESENTATION_BYTES,
         validation
@@ -500,7 +500,7 @@ mod tests {
             .map(|_| TranscriptRow::error(NoticeScope::Turn, "synthetic-private-text"))
             .collect::<Vec<_>>();
         let snapshot = plakous_hosted::runtime::rehearse_presentation_snapshot(&transcript);
-        assert_eq!(snapshot.rows.len(), MAX_SNAPSHOT_ROWS);
+        assert_eq!(snapshot.items.len(), MAX_SNAPSHOT_ROWS);
         let mut report = Vec::new();
         assert!(report_snapshot("root", transcript.len(), &snapshot, &mut report).unwrap());
         assert!(

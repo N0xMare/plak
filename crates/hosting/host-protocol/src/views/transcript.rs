@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use super::presentation::ActivityState;
 
 mod key;
+mod patch;
 pub use key::{Lane, RowKey};
+pub(super) use patch::validate_items;
+pub use patch::{TranscriptItem, TranscriptPatch, TranscriptScope, TranscriptState};
 
 /// One transcript row.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

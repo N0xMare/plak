@@ -12,7 +12,7 @@
 
 use std::borrow::Cow;
 
-use super::transcript::TranscriptRow;
+use super::transcript::{TranscriptItem, TranscriptRow, TranscriptScope};
 
 /// Shared current-activity vocabulary for the root HUD and live child rows.
 ///
@@ -105,7 +105,7 @@ impl<'a> McpCall<'a> {
 }
 
 /// Schema of the typed-row restore snapshot.
-pub const PRESENTATION_SCHEMA_V2: u32 = 2;
+pub const PRESENTATION_SCHEMA_V3: u32 = 3;
 /// Maximum rows one snapshot restores.
 pub const MAX_SNAPSHOT_ROWS: usize = 16_384;
 /// Maximum approximate string bytes in a snapshot, with per-row headroom above
@@ -118,10 +118,12 @@ pub const MAX_PRESENTATION_BYTES: usize = 18 * 1024 * 1024;
 pub struct PresentationSnapshot {
     /// Wire/read-model schema, independent of semantic runtime revisions.
     pub schema: u32,
+    /// The transcript this baseline replaces.
+    pub scope: TranscriptScope,
     /// Monotonic position within this replaceable presentation epoch.
     pub revision: u64,
     /// Ordered transcript rows.
-    pub rows: Vec<TranscriptRow>,
+    pub items: Vec<TranscriptItem>,
 }
 
 impl PresentationSnapshot {
@@ -129,9 +131,10 @@ impl PresentationSnapshot {
     #[must_use]
     pub const fn empty(revision: u64) -> Self {
         Self {
-            schema: PRESENTATION_SCHEMA_V2,
+            schema: PRESENTATION_SCHEMA_V3,
+            scope: TranscriptScope::Root,
             revision,
-            rows: Vec::new(),
+            items: Vec::new(),
         }
     }
 
@@ -141,22 +144,10 @@ impl PresentationSnapshot {
     ///
     /// Returns the first violated presentation invariant.
     pub fn validate(&self) -> Result<(), PresentationError> {
-        if self.schema != PRESENTATION_SCHEMA_V2 {
+        if self.schema != PRESENTATION_SCHEMA_V3 {
             return Err(PresentationError::UnsupportedSchema(self.schema));
         }
-        if self.rows.len() > MAX_SNAPSHOT_ROWS {
-            return Err(PresentationError::ItemLimit);
-        }
-        if self
-            .rows
-            .iter()
-            .map(row_bytes)
-            .fold(0_usize, usize::saturating_add)
-            > MAX_PRESENTATION_BYTES
-        {
-            return Err(PresentationError::ByteLimit);
-        }
-        Ok(())
+        super::transcript::validate_items(&self.items)
     }
 }
 
@@ -178,6 +169,11 @@ pub enum PresentationError {
     UnsupportedSchema(u32),
     ItemLimit,
     ByteLimit,
+    KeyOrder,
+    ConflictingKey,
+    ScopeMismatch,
+    RevisionMismatch { expected: u64, actual: u64 },
+    NonAdvancingRevision,
 }
 
 /// One collapsed Tact-like activity row.
@@ -766,13 +762,23 @@ mod tests {
     #[test]
     fn durable_transcript_payload_ceiling_has_presentation_identity_headroom() {
         let mut snapshot = PresentationSnapshot::empty(1);
-        snapshot
-            .rows
-            .push(TranscriptRow::assistant("x".repeat(16 * 1024 * 1024)));
+        snapshot.items.push(TranscriptItem {
+            key: super::super::transcript::RowKey::new(
+                1,
+                super::super::transcript::Lane::Runtime,
+                0,
+            ),
+            row: TranscriptRow::assistant("x".repeat(16 * 1024 * 1024)),
+        });
         assert_eq!(snapshot.validate(), Ok(()));
-        snapshot
-            .rows
-            .push(TranscriptRow::assistant("x".repeat(3 * 1024 * 1024)));
+        snapshot.items.push(TranscriptItem {
+            key: super::super::transcript::RowKey::new(
+                2,
+                super::super::transcript::Lane::Runtime,
+                0,
+            ),
+            row: TranscriptRow::assistant("x".repeat(3 * 1024 * 1024)),
+        });
         assert_eq!(snapshot.validate(), Err(PresentationError::ByteLimit));
     }
 

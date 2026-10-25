@@ -1342,9 +1342,23 @@ pub(super) fn providers_text(app: &mut App) -> String {
 /// A restore: the host's presentation snapshot carrying `rows`.
 pub(super) fn restore_snapshot(revision: u64, rows: Vec<TranscriptRow>) -> HostEvent {
     HostEvent::PresentationSnapshot(crate::tui::presentation::PresentationSnapshot {
-        schema: crate::tui::presentation::PRESENTATION_SCHEMA_V2,
+        schema: crate::tui::presentation::PRESENTATION_SCHEMA_V3,
+        scope: plakous_host_protocol::views::transcript::TranscriptScope::Root,
         revision,
-        rows,
+        items: rows
+            .into_iter()
+            .enumerate()
+            .map(
+                |(index, row)| plakous_host_protocol::views::transcript::TranscriptItem {
+                    key: plakous_host_protocol::views::transcript::RowKey::new(
+                        index as u64 + 1,
+                        plakous_host_protocol::views::transcript::Lane::Runtime,
+                        0,
+                    ),
+                    row,
+                },
+            )
+            .collect(),
     })
 }
 

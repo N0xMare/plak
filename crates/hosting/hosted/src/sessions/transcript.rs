@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use plakous_host_protocol::views::presentation::row_bytes;
-use plakous_host_protocol::views::transcript::{ToolItem, TranscriptRow};
+use plakous_host_protocol::views::transcript::{ToolItem, TranscriptItem, TranscriptRow};
 
 use super::projector::{Lane, RowKey};
 use super::{MAX_THINKING_ACTIVITY_BYTES, MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES};
@@ -112,6 +112,9 @@ pub struct ProductTranscript {
     base: u64,
     /// Tool call id to the absolute sequence of its row.
     calls: HashMap<String, u64>,
+    /// Retained projector keys by absolute row sequence. Live rows have no
+    /// committed key until the next projector publication replaces them.
+    keys: HashMap<u64, RowKey>,
     /// Operator notices recorded since the last commit: the only rows a store
     /// persists from this projection, as notice intents (spec 02 §2.6).
     notices: Vec<TranscriptRow>,
@@ -171,6 +174,18 @@ impl ProductTranscript {
         for row in rows {
             transcript.append(row);
         }
+        let offset = usize::from(transcript.marked);
+        for index in offset..transcript.lines.len() {
+            let sequence = transcript.base + (index - offset) as u64;
+            transcript.keys.insert(
+                sequence,
+                RowKey::new(
+                    0,
+                    Lane::Product,
+                    u32::try_from(sequence).unwrap_or(u32::MAX),
+                ),
+            );
+        }
         transcript
     }
 
@@ -219,6 +234,33 @@ impl ProductTranscript {
             .collect()
     }
 
+    /// Retained rows with their ordering keys. The presentation-only header
+    /// uses `(0, runtime, 0)`, so the stored truncation sentinel is presented
+    /// at `(0, runtime, 1)` without changing its persisted encoding.
+    #[must_use]
+    pub fn items(&self) -> Vec<TranscriptItem> {
+        let offset = usize::from(self.marked);
+        self.lines
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let sequence = self.base + index.saturating_sub(offset) as u64;
+                let key = if self.marked && index == 0 {
+                    RowKey::new(0, Lane::Runtime, 1)
+                } else {
+                    self.keys
+                        .get(&sequence)
+                        .copied()
+                        .unwrap_or_else(|| RowKey::uncommitted(sequence))
+                };
+                TranscriptItem {
+                    key,
+                    row: row.clone(),
+                }
+            })
+            .collect()
+    }
+
     /// Forget notice intents once a store has committed them.
     pub fn mark_committed(&mut self) {
         self.notices.clear();
@@ -258,9 +300,16 @@ impl ProductTranscript {
             transcript.bytes = marker_bytes();
         }
         for (key, row) in rows {
+            let sequence = row
+                .call_id()
+                .and_then(|id| transcript.calls.get(id).copied())
+                .unwrap_or_else(|| transcript.next_sequence());
             match key.lane {
                 Lane::Runtime => transcript.insert(row, std::convert::identity),
                 Lane::Product => transcript.insert(row, bound_row),
+            }
+            if sequence >= transcript.base {
+                transcript.keys.insert(sequence, key);
             }
         }
         transcript
@@ -392,6 +441,7 @@ impl ProductTranscript {
             .saturating_add(u64::try_from(rows).unwrap_or(u64::MAX));
         let base = self.base;
         self.calls.retain(|_, sequence| *sequence >= base);
+        self.keys.retain(|sequence, _| *sequence >= base);
     }
 }
 

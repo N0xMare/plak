@@ -5,6 +5,44 @@ use super::projector::{
 };
 use crate::session_store::{MemoryStore, SessionRecordStore};
 
+#[test]
+fn stored_transcript_keeps_projector_keys_through_tool_updates_and_live_notices() {
+    use super::projector::{Lane, RowKey};
+    let mut tool = ToolItem {
+        call_id: "call".into(),
+        name: "read_file".into(),
+        exposed_name: None,
+        kind: plakous_host_protocol::views::ActivityKind::Tool,
+        state: "running".into(),
+        subject: None,
+        detail: None,
+        started_at_ms: None,
+        finished_at_ms: None,
+        parent_call_id: None,
+        cell_id: None,
+        wait: None,
+    };
+    let keys = [
+        RowKey::new(7, Lane::Runtime, 2),
+        RowKey::new(13, Lane::Runtime, 0),
+    ];
+    let mut transcript = ProductTranscript::stored(vec![
+        (RowKey::TRUNCATION, TranscriptRow::Truncated),
+        (keys[0], TranscriptRow::user("prompt")),
+        (keys[1], TranscriptRow::Tool(tool.clone())),
+    ]);
+    tool.state = "succeeded".into();
+    transcript.upsert_tool(&tool);
+    transcript.record_notice(TranscriptRow::info(NoticeScope::Tree, "notice"));
+    let items = transcript.items();
+    assert_eq!(items[0].key, RowKey::new(0, Lane::Runtime, 1));
+    assert_eq!(items[1].key, keys[0]);
+    assert_eq!(items[2].key, keys[1]);
+    assert_eq!(items[2].row, TranscriptRow::Tool(tool));
+    assert!(items[3].key > keys[1]);
+    assert!(items.windows(2).all(|items| items[0].key < items[1].key));
+}
+
 fn submission(item: &QueueItem, command: &str) -> Submission {
     Submission {
         command_id: command.into(),
