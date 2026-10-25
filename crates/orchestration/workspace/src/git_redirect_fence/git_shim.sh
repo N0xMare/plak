@@ -554,6 +554,8 @@ guard_switch() {{
   checkout_separator=0
   take_name=0
   skip_value=0
+  pathspec_next=0
+  pathspec_file=
   creates=0
   first_branch=
   for switch_arg in "$@"; do
@@ -561,7 +563,11 @@ guard_switch() {{
       [ -z "$switch_arg" ] || checkout_paths=1
       continue
     fi
-    if [ "$skip_value" -eq 1 ]; then skip_value=0; continue; fi
+    if [ "$skip_value" -eq 1 ]; then
+      if [ "$pathspec_next" -eq 1 ]; then pathspec_file=$switch_arg; pathspec_next=0; fi
+      skip_value=0
+      continue
+    fi
     if [ "$take_name" -eq 1 ]; then
       guard_branch_target "$switch_arg"
       take_name=0
@@ -573,8 +579,8 @@ guard_switch() {{
       --orphan=*|--create=*|--force-create=*) creates=1; guard_branch_target "${{switch_arg#*=}}" ;;
       --orphan|--create|--force-create) creates=1; take_name=1 ;;
       --conflict) skip_value=1 ;;
-      --pathspec-from-file) checkout_paths=1; skip_value=1 ;;
-      --pathspec-from-file=*) checkout_paths=1 ;;
+      --pathspec-from-file) pathspec_next=1; skip_value=1 ;;
+      --pathspec-from-file=*) pathspec_file=${{switch_arg#*=}} ;;
       --*) ;;
       -*)
         switch_cluster=${{switch_arg#-}}
@@ -591,6 +597,12 @@ guard_switch() {{
       *) [ -n "$first_branch" ] || first_branch=$switch_arg ;;
     esac
   done
+  case "$pathspec_file" in
+    ''|-) ;;
+    *)
+      case "$pathspec_file" in /*) ;; *) pathspec_file=$cwd/$pathspec_file ;; esac
+      if [ -f "$pathspec_file" ] && [ -s "$pathspec_file" ]; then checkout_paths=1; fi ;;
+  esac
   # Only a pathspec exempts a tree read, never explicit branch creation.
   if [ "$creates" -eq 0 ] && [ -n "$first_branch" ] && {{ [ "$sub1" != checkout ] || [ "$checkout_paths" -eq 0 ]; }}; then
     guard_branch_target "$first_branch"
@@ -728,7 +740,52 @@ guard_fetch_group() {{
   fi
 }}
 
+guard_pull_rebase() {{
+  shift "$command_index"
+  pull_rebase=
+  pull_skip=0
+  for pull_arg in "$@"; do
+    if [ "$pull_skip" -eq 1 ]; then pull_skip=0; continue; fi
+    case "$pull_arg" in
+      --) break ;;
+      --rebase) pull_rebase=1 ;;
+      --rebase=*)
+        pull_mode=$(printf '%s' "${{pull_arg#*=}}" | tr '[:upper:]' '[:lower:]')
+        case "$pull_mode" in false|no|off|0|'') pull_rebase=0 ;; *) pull_rebase=1 ;; esac ;;
+      --no-rebase) pull_rebase=0 ;;
+      -o|--server-option|--upload-pack|--filter|--depth|--shallow-since|--shallow-exclude|-s|--strategy|-X|--strategy-option|-j|--jobs) pull_skip=1 ;;
+      --*) ;;
+      -*)
+        pull_cluster=${{pull_arg#-}}
+        while [ -n "$pull_cluster" ]; do
+          pull_letter=${{pull_cluster%"${{pull_cluster#?}}"}}
+          pull_cluster=${{pull_cluster#?}}
+          case "$pull_letter" in
+            r)
+              case "$pull_cluster" in false|no|off|0) pull_rebase=0 ;; *) pull_rebase=1 ;; esac
+              break ;;
+            s|X|o|j|S) break ;;
+          esac
+        done ;;
+    esac
+  done
+  if [ -z "$pull_rebase" ]; then
+    pull_branch=$(query_git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    pull_key=branch.$pull_branch.rebase
+    if ! query_git config --get "$pull_key" >/dev/null 2>&1; then pull_key=pull.rebase; fi
+    pull_rebase=0
+    if query_git config --get "$pull_key" >/dev/null 2>&1; then
+      pull_bool=$(query_git config --bool --get "$pull_key" 2>/dev/null || true)
+      [ "$pull_bool" = false ] || pull_rebase=1
+    fi
+  fi
+  if [ "$pull_rebase" -eq 1 ] && [ "$(query_git config --bool rebase.updateRefs 2>/dev/null || true)" = true ]; then
+    guard_refuse pull rebase.updateRefs "git fetch then git rebase --no-update-refs"
+  fi
+}}
+
 guard_fetch() {{
+  [ "$sub1" != pull ] || guard_pull_rebase "$@"
   shift "$command_index"
   fetch_prune_override=
   multiple_remotes=0
@@ -857,14 +914,14 @@ $push_urls
 EOF
   [ "$push_local" -eq 1 ] || return
   push_mirror=$(query_git config --bool --get "remote.$push_remote.mirror" 2>/dev/null || true)
-  [ "$push_mirror" != true ] || guard_refuse push mirror "push explicit refs outside Plak's namespaces"
+  [ "$push_mirror" != true ] || guard_refuse "$sub1" mirror "push explicit refs outside Plak's namespaces"
   push_skip=0
   push_skip_repository=1
   for push_arg in "$@"; do
     if [ "$push_skip" -eq 1 ]; then push_skip=0; continue; fi
     case "$push_arg" in
       --repo|-o|--push-option|--receive-pack|--exec) push_skip=1 ;;
-      --mirror) guard_refuse push mirror "push explicit refs outside Plak's namespaces" ;;
+      --mirror) guard_refuse "$sub1" mirror "push explicit refs outside Plak's namespaces" ;;
       --all|--stdin)
         [ "$sub1" != send-pack ] || guard_refuse send-pack "$push_arg" "send explicit refs outside Plak's namespaces" ;;
       -*) ;;
@@ -1026,7 +1083,9 @@ guard_option_spellings() {{
     branch) guarded_options="delete move copy force list all remotes verbose show-current merged no-merged contains no-contains points-at format sort set-upstream-to color track no-track edit-description unset-upstream" ;;
     checkout|switch) guarded_options="create force-create orphan ignore-other-worktrees detach quiet conflict track no-track merge pathspec-from-file pathspec-file-nul" ;;
     rebase) guarded_options="onto root interactive continue abort skip quit empty whitespace update-refs no-update-refs" ;;
-    fetch|pull) guarded_options="refmap prune no-prune prune-tags multiple all upload-pack filter server-option depth shallow-since shallow-exclude" ;;
+    fetch|pull)
+      guarded_options="refmap prune no-prune prune-tags multiple all upload-pack filter server-option depth shallow-since shallow-exclude"
+      [ "$sub1" != pull ] || guarded_options="$guarded_options rebase no-rebase" ;;
     remote) guarded_options="prune no-prune dry-run no-dry-run verbose" ;;
     push|send-pack) guarded_options="delete repo prune mirror force force-with-lease push-option receive-pack exec all tags follow-tags stdin" ;;
     gc) guarded_options="prune" ;;

@@ -2469,12 +2469,18 @@ other than that own branch. The guard refuses:
   currently checked out), explicit rebase branch targets, and
   `--ignore-other-worktrees`. `checkout <tree> -- <paths>` remains a read;
   an empty trailing `--` does not exempt a branch switch. A non-empty pathspec
-  after `--`, or `--pathspec-from-file`, exempts only a tree read, never
+  after `--`, or a regular non-empty `--pathspec-from-file` resolved against
+  the effective cwd, exempts only a tree read, never
   explicit branch creation. Rebase skips values
   of `--empty` and `--whitespace` when locating its branch target, and
   `--update-refs` is refused because it can rewrite other protected branches.
   Effective `rebase.updateRefs=true`, including repository config and `-c`,
   is also refused unless `--no-update-refs` is explicit;
+- `pull` with effective rebase mode and `rebase.updateRefs=true`, because its
+  internal rebase does not invoke the shim. Explicit `--rebase`/`-r` modes and
+  their ordering against `--no-rebase` take precedence over the current
+  branch's `rebase` setting, then `pull.rebase`. The remedy is
+  `git fetch then git rebase --no-update-refs`;
 - a destination refspec of `fetch` or `pull`, including the value of
   `--refmap` and configured remote fetch mappings. The repository positional
   is not a refspec; with `--multiple`/`--all`, all positionals are remotes.
@@ -2495,7 +2501,7 @@ other than that own branch. The guard refuses:
   push URLs and `url.insteadOf` are resolved with effective command-line
   configuration before comparing locality, including remotes defined only by
   `-c` (whose push URLs require a config query, not `remote get-url` alone);
-  local mirrors are refused.
+  local mirror refusals name the invoked command, including `send-pack`.
   `--force-with-lease` takes no following argument.
   The first positional repository wins over `--repo`; only its absence uses
   `--repo`, then the configured push remote. Push to any other remote is not guarded;

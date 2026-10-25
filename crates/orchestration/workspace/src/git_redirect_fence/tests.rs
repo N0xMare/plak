@@ -1249,6 +1249,9 @@ fn guard_refuses_coordination_writes() {
     let file_remote = format!("file://{parent_path}");
     let child_remote = child.display().to_string();
     let child_file_remote = format!("file://{child_remote}");
+    let empty_pathspec = child.join("empty-pathspec");
+    std::fs::write(&empty_pathspec, "").unwrap();
+    let empty_pathspec_option = format!("--pathspec-from-file={}", empty_pathspec.display());
     let mut refused: Vec<Vec<String>> = [
         vec!["update-ref", "refs/plak/pin", head],
         vec!["update-ref", "-d", "refs/stash"],
@@ -1399,12 +1402,90 @@ fn guard_refuses_coordination_writes() {
         vec!["checkout", "-qb", "plak/new"],
         vec!["switch", "-qC", "plak/c2"],
         vec!["checkout", "-q", "plak/c2", "--"],
+        vec![
+            "checkout",
+            "-q",
+            "plak/c2",
+            "--pathspec-from-file=/dev/null",
+        ],
+        vec!["checkout", "-q", "plak/c2", empty_pathspec_option.as_str()],
+        vec![
+            "checkout",
+            "-q",
+            "plak/c2",
+            "--pathspec-from-file",
+            "empty-pathspec",
+        ],
+        vec!["checkout", "-q", "plak/c2", "--pathspec-from-file=-"],
         vec!["-c", "rebase.updateRefs=true", "rebase", "HEAD"],
+        vec![
+            "-c",
+            "rebase.updateRefs=true",
+            "pull",
+            "-q",
+            "--rebase",
+            "origin",
+            "up",
+        ],
+        vec![
+            "-c",
+            "rebase.updateRefs=true",
+            "pull",
+            "--rebase=merges",
+            "origin",
+            "up",
+        ],
+        vec![
+            "-c",
+            "rebase.updateRefs=true",
+            "pull",
+            "-qr",
+            "origin",
+            "up",
+        ],
+        vec![
+            "-c",
+            "rebase.updateRefs=true",
+            "pull",
+            "--no-rebase",
+            "--rebase",
+            "origin",
+            "up",
+        ],
+        vec![
+            "-c",
+            "rebase.updateRefs=true",
+            "-c",
+            "pull.rebase=true",
+            "pull",
+            "origin",
+            "up",
+        ],
+        vec![
+            "-c",
+            "rebase.updateRefs=true",
+            "-c",
+            "pull.rebase",
+            "pull",
+            "origin",
+            "up",
+        ],
+        vec![
+            "-c",
+            "rebase.updateRefs=true",
+            "-c",
+            "branch.plak/c1.rebase=merges",
+            "pull",
+            "origin",
+            "up",
+        ],
         vec!["send-pack", ".", ":refs/plak/pin"],
         vec!["send-pack", parent_path.as_str(), ":refs/plak/pin"],
         vec!["send-pack", ".", "refs/plak/pin"],
         vec!["send-pack", ".", "--all"],
         vec!["send-pack", ".", "--mirror"],
+        vec!["send-pack", "--mirror", "."],
+        vec!["-c", "remote.self.mirror=true", "send-pack", "self"],
         vec!["send-pack", ".", "--stdin"],
         vec!["push", "self", ":refs/plak/pin"],
         vec!["-c", "remote.me.url=.", "push", "me", ":refs/plak/pin"],
@@ -1462,6 +1543,16 @@ fn guard_refuses_coordination_writes() {
             stderr.contains("plak: git-guard refused:"),
             "{args:?}: {stderr}"
         );
+        if args.iter().any(|arg| arg == "send-pack")
+            && args
+                .iter()
+                .any(|arg| arg == "--mirror" || arg.ends_with(".mirror=true"))
+        {
+            assert!(
+                stderr.contains("send-pack would change"),
+                "{args:?}: {stderr}"
+            );
+        }
         assert_eq!(coordination_refs(parent.path()), refs_before, "{args:?}");
         assert_eq!(
             std::fs::read(parent.path().join(".git/index")).unwrap(),
@@ -1592,6 +1683,43 @@ fn guard_admits_ordinary_git() {
         &["fetch", "--all"],
         &["fetch", "--prune"],
         &["pull", "--ff-only", "--prune"],
+        &[
+            "-c",
+            "rebase.updateRefs=true",
+            "pull",
+            "--rebase",
+            "--no-rebase",
+            "origin",
+            "main",
+        ],
+        &[
+            "-c",
+            "rebase.updateRefs=true",
+            "pull",
+            "--rebase=false",
+            "origin",
+            "main",
+        ],
+        &[
+            "-c",
+            "rebase.updateRefs=true",
+            "-c",
+            "pull.rebase=false",
+            "pull",
+            "origin",
+            "main",
+        ],
+        &[
+            "-c",
+            "rebase.updateRefs=true",
+            "-c",
+            "pull.rebase=true",
+            "-c",
+            "branch.plak/c1.rebase=false",
+            "pull",
+            "origin",
+            "main",
+        ],
         &["remote", "update", "--prune"],
         &["remote", "prune", "origin"],
         &["-c", "remotes.team=origin", "remote", "update", "team"],
@@ -1776,6 +1904,17 @@ fn configured_fetches_guard_default_remotes_groups_and_effective_pruning() {
             vec!["fetch", "--multiple", "team"],
         ),
         (vec![("rebase.updateRefs", "true")], vec!["rebase", "HEAD"]),
+        (
+            vec![("rebase.updateRefs", "true"), ("pull.rebase", "true")],
+            vec!["pull", "origin", "up"],
+        ),
+        (
+            vec![
+                ("rebase.updateRefs", "true"),
+                ("branch.plak/c1.rebase", "merges"),
+            ],
+            vec!["pull", "origin", "up"],
+        ),
     ] {
         for remote in ["origin", "other"] {
             git_ok(
