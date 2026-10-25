@@ -1623,6 +1623,14 @@ product capacity refusal before dispatch and during root settlement.
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
 `promoted_background_job`, and `sealed_family_artifacts` with sixteen workers.
+The entry point first prepares the whole workspace's all-features test build,
+including `plak`, `plakous-js-runtime`'s `plakous-js-host` and
+`plakous-py-worker`'s `plakous-py-host`, in the same Cargo
+profile and target directory used by the sweep. Build failure stops the sweep;
+an existing sibling worker is never treated as build evidence. This is the
+same prerequisite the gate prepares for the offline e2e harness. Standalone
+offline e2e runs likewise require `cargo test --no-run --locked --workspace
+--all-features` before selecting the product tests.
 The process pilots prove a real shell job was promoted and quit settled it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.
@@ -1637,6 +1645,14 @@ twins use the existing answer-release gate: the first exposes the answer marker
 before face idle and consumes any prematurely sent quit before another event;
 the second drains events through `busy:false` before checking stdin. This pins
 the legal face schedules without adding an interrupt to the scripted inputs.
+The lifecycle's stalled-step deadline advances only for new face records or
+indexed commits, not lease-renewal trace writes. A failed worker startup cannot
+keep a pilot waiting for `assistant_done` forever by renewing its idle lease.
+Every lifecycle also has an absolute cap of ten step budgets (450 s), even
+when it continues producing progress. Pilots that expect success fail as soon
+as an `error` terminal or failed `turn_lifecycle` record appears. Cut runs and
+pilots deliberately testing recovery, escalated quit or capacity denial keep
+their expected failure semantics rather than taking this success-only check.
 The strict corpus also includes `busy_quit_escalates`: a cancellation-deaf
 provider emits a prefix and then stalls, so quit is sent while busy, exhausts
 the cancellation grace and result-join bound, and releases only the lease

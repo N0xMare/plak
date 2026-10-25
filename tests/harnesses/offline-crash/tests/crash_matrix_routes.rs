@@ -909,7 +909,8 @@ impl Fixture {
             .flatten();
         if scenario == Scenario::CodeMode && sidecar.is_none() {
             return Err("plakous-js-host is not built beside this test binary; \
-                        run `cargo build -p plakous-js-host` first"
+                        run `cargo build --locked -p plakous-js-runtime --bin plakous-js-host \
+                        -p plakous-py-worker --bin plakous-py-host` first"
                 .into());
         }
         Ok(Self {
@@ -2217,8 +2218,9 @@ fn pi_edit_and_write_in_one_turn_commit_canonical_apply_patch_and_lower_by_expos
 // These cells drive `plak agent` through the scripted offline model (the
 // `test-hooks` feature). They are ignored by default because this package's
 // gate does not build the binary; run them after
-// `cargo build -p plak --features test-hooks` (or point `PLAK_TEST_BINARY` at
-// one) with `cargo test -p plakous-offline-crash-harness --test
+// `cargo build --locked -p plak --features test-hooks -p plakous-js-runtime
+// -p plakous-py-worker` (or point `PLAK_TEST_BINARY` at a matching build with
+// both sidecars beside it) with `cargo test -p plakous-offline-crash-harness --test
 // crash_matrix_routes -- --ignored jsonl`. Cut points on this face are reached
 // through fsynced evidence rows, stream records and script stalls; the fold
 // and the effect-outcome interval have no deterministic hook on this face and
@@ -2251,8 +2253,8 @@ impl FaceFixture {
     fn new(script: &Value) -> TestResult<Self> {
         use std::os::unix::fs::PermissionsExt;
         let binary = plak_binary().ok_or(
-            "no plak binary with test hooks; build one with `cargo build -p plak --features \
-             test-hooks` or set PLAK_TEST_BINARY",
+            "no plak binary with test hooks; build one with `cargo build --locked -p plak \
+             --features test-hooks -p plakous-js-runtime -p plakous-py-worker` or set PLAK_TEST_BINARY",
         )?;
         let root = tempfile::tempdir()?;
         let home = root.path().join("home");

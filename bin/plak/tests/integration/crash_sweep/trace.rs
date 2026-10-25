@@ -19,6 +19,54 @@ impl Commit {
     }
 }
 
+/// Only indexed commits advance a lifecycle; lease renewals are not progress.
+pub(super) fn progress(path: &Path) -> u64 {
+    let body = std::fs::read_to_string(path).unwrap_or_default();
+    body.rsplit_once('\n')
+        .and_then(|(complete, _)| complete.lines().next_back())
+        .and_then(|line| serde_json::from_str::<Commit>(line).ok())
+        .map_or(0, |commit| commit.ordinal)
+}
+
+#[test]
+fn lease_renewals_and_partial_rows_do_not_advance_lifecycle_progress() {
+    let directory = tempfile::tempdir().expect("trace directory");
+    let path = directory.path().join("trace.jsonl");
+    assert_eq!(progress(&path), 0);
+    let mut commit = Commit {
+        ordinal: 1,
+        store: "runtime".into(),
+        store_index: 1,
+        store_ordinal: 1,
+        label: "provider_outcome".into(),
+        tables: Vec::new(),
+        indexed: true,
+    };
+    let mut body = format!("{}\n", serde_json::to_string(&commit).expect("commit"));
+    std::fs::write(&path, &body).expect("trace");
+    assert_eq!(progress(&path), 1);
+    commit.indexed = false;
+    commit.label = "renew".into();
+    for index in 2..5 {
+        commit.store_index = index;
+        body.push_str(&serde_json::to_string(&commit).expect("renew"));
+        body.push('\n');
+        std::fs::write(&path, &body).expect("trace");
+        assert_eq!(progress(&path), 1);
+    }
+    body.push_str("{\"ordinal\":2,");
+    std::fs::write(&path, &body).expect("partial row");
+    assert_eq!(progress(&path), 1);
+    commit.ordinal = 2;
+    commit.indexed = true;
+    std::fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string(&commit).expect("commit")),
+    )
+    .expect("trace");
+    assert_eq!(progress(&path), 2);
+}
+
 pub(super) fn read(path: &Path) -> Vec<Commit> {
     let body = std::fs::read_to_string(path).expect("commit trace");
     assert!(body.ends_with('\n'), "trace ended with an incomplete row");

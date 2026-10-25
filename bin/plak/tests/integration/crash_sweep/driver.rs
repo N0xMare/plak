@@ -37,14 +37,88 @@ mod retained_successor_laws;
 
 fn step_deadline(
     deadline: &mut Instant,
+    absolute: Instant,
     now: Instant,
     previous: (usize, u64),
     current: (usize, u64),
 ) -> bool {
+    if now >= absolute {
+        return true;
+    }
     if previous != current {
         *deadline = now + WAIT;
     }
     now >= *deadline
+}
+
+fn unexpected_pilot_terminal<'a>(
+    shape: &str,
+    is_cut: bool,
+    records: &'a [Value],
+) -> Option<&'a Value> {
+    // These pilots deliberately end in recovery, an escalated quit, or capacity denial.
+    if is_cut
+        || matches!(
+            shape,
+            "uncertain_mcp_tool" | "busy_quit_escalates" | "capacity_overflow"
+        )
+    {
+        return None;
+    }
+    records.iter().find(|record| {
+        record["kind"] == "error"
+            || (record["kind"] == "turn_lifecycle" && record["phase"] == "failed")
+    })
+}
+
+#[test]
+fn a_success_pilot_refuses_failed_terminals_without_waiting_for_more_progress() {
+    for terminal in [
+        json!({"kind": "error", "message": "reinstall the matching plakous-js-host"}),
+        json!({"kind": "turn_lifecycle", "phase": "failed"}),
+    ] {
+        let records = [terminal];
+        for shape in shapes::REGISTRY {
+            let expected = !matches!(
+                shape.name,
+                "uncertain_mcp_tool" | "busy_quit_escalates" | "capacity_overflow"
+            );
+            assert_eq!(
+                unexpected_pilot_terminal(shape.name, false, &records).is_some(),
+                expected,
+                "{}",
+                shape.name
+            );
+            assert!(unexpected_pilot_terminal(shape.name, true, &records).is_none());
+        }
+    }
+    assert!(
+        unexpected_pilot_terminal(
+            "code_mode_cell_final",
+            false,
+            &[json!({"kind": "turn_lifecycle", "phase": "admitted"})]
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn continuous_progress_cannot_extend_the_absolute_lifecycle_cap() {
+    let start = Instant::now();
+    let absolute = start + WAIT * 10;
+    let mut deadline = start + WAIT;
+    for index in 1..=10 {
+        assert_eq!(
+            step_deadline(
+                &mut deadline,
+                absolute,
+                start + WAIT * index,
+                (0, u64::from(index - 1)),
+                (0, u64::from(index))
+            ),
+            index == 10
+        );
+    }
 }
 
 #[test]
@@ -53,30 +127,35 @@ fn lifecycle_progress_renews_only_the_stalled_step_budget() {
     let mut deadline = start + WAIT;
     assert!(!step_deadline(
         &mut deadline,
+        start + WAIT * 10,
         start + WAIT / 2,
         (0, 0),
         (1, 0)
     ));
     assert!(!step_deadline(
         &mut deadline,
+        start + WAIT * 10,
         start + WAIT,
         (1, 0),
         (1, 100)
     ));
     assert!(!step_deadline(
         &mut deadline,
+        start + WAIT * 10,
         start + WAIT * 3 / 2,
         (1, 100),
         (2, 100)
     ));
     assert!(!step_deadline(
         &mut deadline,
+        start + WAIT * 10,
         start + WAIT * 2,
         (2, 100),
         (2, 100)
     ));
     assert!(step_deadline(
         &mut deadline,
+        start + WAIT * 10,
         start + WAIT * 5 / 2,
         (2, 100),
         (2, 100)
@@ -122,7 +201,9 @@ fn lifecycle(
         command.env(KILL_ENV, format!("{}:{}", k.store, k.store_ordinal));
     }
     let mut agent = AgentProcess::start_command(command, true);
-    let mut deadline = Instant::now() + WAIT;
+    let start = Instant::now();
+    let absolute = start + WAIT * 10;
+    let mut deadline = start + WAIT;
     let mut progress = (0, 0);
     let mut state = shapes::Lifecycle::default();
     loop {
@@ -134,6 +215,13 @@ fn lifecycle(
             .iter()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
             .collect::<Vec<_>>();
+        if let Some(terminal) = unexpected_pilot_terminal(shape, cut.is_some(), &records) {
+            fixture.preserve();
+            panic!(
+                "pilot expected success but failed; shape={shape}; fixture={}; terminal={terminal}",
+                fixture.root.display()
+            );
+        }
         let frame = (shapes::get(shape).lifecycle)(fixture, &records, &mut state);
         let quitting = frame.as_ref().is_some_and(|frame| frame["kind"] == "quit");
         if let Some(frame) = frame {
@@ -164,13 +252,12 @@ fn lifecycle(
         }
         let observed = (
             lines.len(),
-            std::fs::metadata(fixture.root.join("commit-trace.jsonl"))
-                .map_or(0, |metadata| metadata.len()),
+            trace::progress(&fixture.root.join("commit-trace.jsonl")),
         );
-        if step_deadline(&mut deadline, Instant::now(), progress, observed) {
+        if step_deadline(&mut deadline, absolute, Instant::now(), progress, observed) {
             fixture.preserve();
             panic!(
-                "traced lifecycle made no progress within step deadline; fixture={}; records={records:?}",
+                "traced lifecycle exceeded its stalled-step or absolute deadline; fixture={}; records={records:?}",
                 fixture.root.display()
             );
         }
