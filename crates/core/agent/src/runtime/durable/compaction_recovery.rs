@@ -734,6 +734,7 @@ impl CompactionRecoveryOwner<'_> {
                 history,
                 ledger,
                 jobs: prior.jobs().clone(),
+                named_state: prior.named_state().clone(),
                 context,
                 family,
             },

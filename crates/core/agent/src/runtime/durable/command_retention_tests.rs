@@ -98,6 +98,7 @@ async fn full_settled_ledger_reclaims_capacity_after_durable_reopen() -> TestRes
         history_identity: history.identity(),
         ledger: &ledger,
         context_identity: context.identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     let checkpoint = RuntimeCheckpoint::new(RuntimeManifest::new(
@@ -127,6 +128,7 @@ async fn full_settled_ledger_reclaims_capacity_after_durable_reopen() -> TestRes
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?;
     store

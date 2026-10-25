@@ -1202,6 +1202,13 @@ own.
 
 ## 5. Redaction
 
+Composition named state is session data in the runtime store, not a credential
+store. It is unencrypted like canonical history, bounded to 64 canonical JSON
+values (1 MiB each, 4 MiB total), and subject to the same store permissions.
+The next-turn harness note reveals only keys and sizes, never saved values.
+The driver alone owns publication; evaluator state requests cannot publish
+outside their own successful terminal checkpoint or address another cell.
+
 Protection of Plak's own credentials is **structural, not pattern-based**.
 Secrets live in dedicated wrappers whose `Debug` and `Display` are redacted,
 which do not serialize, and which are held for the shortest practical lifetime.

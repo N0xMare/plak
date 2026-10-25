@@ -218,9 +218,9 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r25.e33.p33.t8/             this build's state (§2.5)
+    r26.e33.p33.t8/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 25, epoch 33
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 26, epoch 33
       product.sqlite3             Plak intents and feed-derived views, schema 33
       subagents.sqlite3           the agent tree, schema 8
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
@@ -754,7 +754,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r25.e33.p33.t8`. The key is derived from the stores'
+schema>`, for example `r26.e33.p33.t8`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -1125,7 +1125,8 @@ unresolved rows belong in `pending_work`; settled rows are the optional typed
 `source_resolved_count`, never a pseudo obligation of that name (which import
 refuses). Closed children's dirty/adopted workspaces remain unresolved reference
 facts when appropriate. Live process ownership, store/feed/event state, usage,
-telemetry, provider continuation and model/tool-owned runtime state do not carry.
+telemetry, provider continuation, composition named state (01 §9.8), and
+model/tool-owned runtime state do not carry.
 Earlier compaction has already replaced superseded history; carry cannot recover
 what that compaction removed. Old stores, source children and workspaces remain
 untouched.

@@ -989,6 +989,7 @@ async fn completed_process_evidence_reopen_preserves_settled_work_and_abandons_o
         history_identity: prior.canonical().history().identity(),
         ledger: prior.ledger(),
         context_identity: prior.canonical().context().identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     let seeded = RuntimeCheckpoint::new(RuntimeManifest::new(
@@ -1013,6 +1014,7 @@ async fn completed_process_evidence_reopen_preserves_settled_work_and_abandons_o
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?;
     let bundle = RuntimeCheckpointCodec::bundle(&seeded, None)?;

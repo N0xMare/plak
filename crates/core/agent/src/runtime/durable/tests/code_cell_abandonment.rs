@@ -422,6 +422,7 @@ pub(super) async fn historical_code_cell_continuation_recovery(
         history_identity: prior.canonical().history().identity(),
         ledger: prior.ledger(),
         context_identity: prior.canonical().context().identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     let published_checkpoint = RuntimeCheckpoint::new(RuntimeManifest::new(
@@ -444,6 +445,7 @@ pub(super) async fn historical_code_cell_continuation_recovery(
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?;
     // Full encoding deliberately seeds a crash cut; the live incremental

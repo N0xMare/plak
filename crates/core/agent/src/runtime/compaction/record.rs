@@ -246,6 +246,7 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         history_identity: manifest.canonical().history().identity(),
         ledger: manifest.ledger(),
         context_identity: manifest.canonical().context().identity(),
+        named_state: manifest.named_state(),
         family_artifact: manifest.family_artifact(),
     })?;
     let bundle = stored.bundle();

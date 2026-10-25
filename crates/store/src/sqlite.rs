@@ -90,7 +90,7 @@ use rows::*;
 use schema::*;
 
 /// The runtime store's schema version. Only this exact version opens.
-pub const SQLITE_SCHEMA_VERSION: i64 = 25;
+pub const SQLITE_SCHEMA_VERSION: i64 = 26;
 /// Reviewed `SQLite` release statically embedded by the workspace dependency.
 pub const BUNDLED_SQLITE_VERSION: &str = "3.53.2";
 /// Upstream source identity of [`BUNDLED_SQLITE_VERSION`].

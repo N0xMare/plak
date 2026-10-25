@@ -91,7 +91,8 @@ impl Driver {
                 }
             })
             .collect::<Vec<_>>();
-        if jobs.is_empty() {
+        let state_note = self.named_state_note();
+        if jobs.is_empty() && state_note.is_empty() {
             return Ok(None);
         }
         let integer_handles = match &self.tool_presentation {
@@ -108,9 +109,41 @@ impl Driver {
             .iter()
             .map(|job| self.job_sessions.job_output_file(job.number))
             .collect::<Vec<_>>();
-        let text = render_batch(&jobs, integer_handles, &files)?;
+        let mut text = if jobs.is_empty() {
+            BATCH_MARKER.to_owned()
+        } else {
+            render_batch(&jobs, integer_handles, &files)?
+        };
+        text.push_str(&state_note);
         let segment = harness_note_segment(self.entry_id()?, text)?;
         Ok(Some((segment, jobs.iter().map(|job| job.number).collect())))
+    }
+
+    fn named_state_note(&self) -> String {
+        let checkpoint = self.authority.checkpoint();
+        let manifest = checkpoint.manifest();
+        if manifest.named_state().values().is_empty() {
+            return String::new();
+        }
+        let mut text = String::from("\n<session_state>\nNamed state (canonical JSON bytes):\n");
+        for (key, value) in manifest.named_state().values() {
+            let _ = writeln!(text, "{key}: {}", value.len());
+        }
+        text.push_str("Running promoted jobs:");
+        let snapshots = self.job_sessions.jobs();
+        for row in manifest.jobs().rows().iter().filter(|row| {
+            row.terminal.is_none()
+                && snapshots.iter().any(|job| {
+                    job.number == row.number
+                        && job.session_id == row.session_id.as_bytes()
+                        && job.owner_generation == row.owner_generation.get()
+                        && job.status == JobStatus::Running
+                })
+        }) {
+            let _ = write!(text, " p{}", row.number);
+        }
+        text.push_str("\n</session_state>\n");
+        text
     }
 }
 

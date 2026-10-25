@@ -18,6 +18,7 @@ pub(in crate::runtime) mod resources;
 pub(super) use resources::InterpreterResources;
 
 pub(in crate::runtime) mod nested;
+mod state;
 
 /// The actual extracted owner lives in Driver's polled async call. `InFlight`
 /// records that cleanup authority must return or be classified as lost.
@@ -132,6 +133,7 @@ impl PendingNestedDeliveries {
 }
 
 pub(super) struct CompositionOwner {
+    state_overlay: Option<(String, crate::manifest::NamedState)>,
     descriptor: LocalCompositionDescriptor,
     integration: Arc<dyn LocalCompositionIntegration>,
     resources: Option<InterpreterResources>,
@@ -208,6 +210,7 @@ impl CompositionOwner {
         interpreter_observation: Option<InterpreterObservation>,
     ) -> Self {
         Self {
+            state_overlay: None,
             descriptor: construction.descriptor,
             integration: construction.integration,
             resources: None,

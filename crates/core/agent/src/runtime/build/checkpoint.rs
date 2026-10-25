@@ -481,6 +481,7 @@ pub(in crate::runtime) fn initial_memory_checkpoint(
         None,
         crate::manifest::JobLedger::new(job_counter_seed, Vec::new())
             .map_err(runtime_manifest_error)?,
+        crate::manifest::NamedState::default(),
         durability,
     )
     .map_err(runtime_manifest_error)?;

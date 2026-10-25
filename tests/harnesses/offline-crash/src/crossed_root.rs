@@ -132,6 +132,7 @@ pub async fn seed_crossed_root(
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?;
     let bundle = RuntimeCheckpointCodec::advance(&checkpoint, loaded.checkpoint().bundle())?;

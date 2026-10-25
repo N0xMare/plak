@@ -349,6 +349,7 @@ pub(crate) fn fixture_with_history_and_ledger(
         supplied_ledger,
         supplied_lifecycle,
         RuntimeContextState::genesis(id(1)?, id(2)?, [0x4b; 32])?,
+        crate::manifest::NamedState::default(),
     )
 }
 
@@ -359,6 +360,7 @@ fn fixture_with_context(
     supplied_ledger: Option<RuntimeOperationLedger>,
     supplied_lifecycle: Option<RuntimeLifecycle>,
     context: RuntimeContextState,
+    named_state: crate::manifest::NamedState,
 ) -> TestResult<RuntimeCheckpoint> {
     let provider_configuration = provider_configuration()?;
     let descriptor = provider_configuration.effective().descriptor();
@@ -534,6 +536,7 @@ fn fixture_with_context(
         Some(artifact),
         None,
         crate::manifest::JobLedger::default(),
+        named_state,
         RuntimeDurability::Required,
     )?;
     Ok(RuntimeCheckpoint::new(manifest)?)
@@ -710,55 +713,111 @@ fn anchored_quiescent_fixture() -> TestResult<RuntimeCheckpoint> {
         CanonicalHistory::new((0..3).map(history_segment).collect::<Result<Vec<_>, _>>()?)?;
     let context = RuntimeContextState::genesis(id(1)?, id(2)?, [0x4b; 32])?
         .with_occupancy_anchor(plakous_model::ContextAnchor::new(298_468, 850_715))?;
-    fixture_with_context(history, 3, false, None, None, context)
+    fixture_with_context(
+        history,
+        3,
+        false,
+        None,
+        None,
+        context,
+        crate::manifest::NamedState::default(),
+    )
+}
+
+fn named_state_fixture(checkpoint_number: u128) -> TestResult<RuntimeCheckpoint> {
+    let history =
+        CanonicalHistory::new((0..3).map(history_segment).collect::<Result<Vec<_>, _>>()?)?;
+    let state = crate::manifest::NamedState::default()
+        .put("saved".to_owned(), &serde_json::json!({"a": [1, true]}))?
+        .put("null".to_owned(), &serde_json::Value::Null)?;
+    fixture_with_context(
+        history,
+        checkpoint_number,
+        false,
+        None,
+        None,
+        RuntimeContextState::genesis(id(1)?, id(2)?, [0x4b; 32])?,
+        state,
+    )
+}
+
+#[test]
+fn named_state_advance_reuses_prior_value_addresses() -> TestResult {
+    let prior = named_state_fixture(3)?;
+    let prior_bundle = RuntimeCheckpointCodec::bundle(&prior, None)?;
+    let next = named_state_fixture(4)?;
+    let bundle = RuntimeCheckpointCodec::advance(&next, &prior_bundle)?;
+    assert!(
+        bundle
+            .objects()
+            .iter()
+            .all(|object| object.address().kind() != RuntimeObjectKind::NamedStateValue)
+    );
+    assert_eq!(bundle.validated_checkpoint()?.as_ref(), &next);
+    Ok(())
 }
 
 #[test]
 fn v33_graph_goldens_pin_quiescent_and_working_closures() -> TestResult {
     let cases = [
         (
+            named_state_fixture(3)?,
+            [
+                38, 5, 224, 245, 56, 13, 32, 159, 239, 155, 219, 101, 5, 79, 16, 147, 57, 248, 194,
+                92, 56, 58, 72, 176, 40, 85, 104, 77, 170, 220, 0, 234,
+            ],
+            [
+                214, 91, 13, 14, 189, 9, 5, 74, 69, 1, 195, 213, 243, 104, 232, 74, 4, 64, 250,
+                176, 204, 21, 85, 150, 246, 6, 174, 224, 17, 26, 191, 98,
+            ],
+            [
+                192, 156, 78, 146, 50, 211, 35, 90, 131, 208, 197, 157, 22, 30, 43, 232, 252, 59,
+                187, 34, 254, 37, 214, 134, 252, 91, 135, 22, 250, 243, 140, 84,
+            ],
+        ),
+        (
             fixture(3, 3, false)?,
             [
-                246, 64, 224, 247, 8, 180, 202, 236, 127, 61, 20, 188, 154, 57, 194, 86, 189, 157,
-                5, 158, 218, 25, 80, 53, 69, 69, 57, 27, 110, 114, 187, 2,
+                3, 216, 104, 7, 187, 0, 108, 7, 39, 27, 149, 73, 76, 180, 230, 9, 18, 86, 218, 182,
+                40, 172, 83, 96, 163, 175, 79, 237, 159, 37, 240, 95,
             ],
             [
-                107, 136, 192, 206, 136, 194, 63, 126, 56, 60, 103, 4, 155, 166, 9, 41, 180, 3,
-                107, 42, 119, 89, 189, 144, 226, 35, 63, 88, 19, 205, 234, 72,
+                237, 165, 185, 95, 191, 161, 114, 252, 137, 245, 100, 61, 144, 244, 88, 100, 151,
+                25, 58, 141, 242, 30, 27, 69, 200, 37, 162, 78, 218, 240, 198, 162,
             ],
             [
-                101, 16, 149, 98, 239, 78, 88, 127, 52, 112, 153, 115, 159, 234, 60, 62, 139, 127,
-                187, 241, 229, 8, 153, 116, 19, 90, 27, 39, 226, 189, 49, 94,
+                86, 199, 226, 71, 250, 209, 253, 42, 83, 236, 58, 250, 192, 169, 163, 200, 27, 143,
+                7, 144, 23, 105, 44, 91, 188, 203, 106, 194, 32, 28, 249, 178,
             ],
         ),
         (
             compaction_working_fixture(5)?,
             [
-                191, 162, 69, 180, 92, 232, 62, 47, 228, 187, 170, 169, 148, 42, 174, 139, 187,
-                144, 76, 230, 23, 233, 246, 213, 172, 242, 195, 186, 55, 64, 34, 245,
+                180, 75, 223, 53, 185, 33, 83, 141, 17, 135, 27, 46, 120, 190, 64, 204, 19, 245,
+                162, 211, 179, 91, 29, 240, 43, 187, 255, 3, 150, 220, 125, 81,
             ],
             [
-                128, 166, 43, 94, 207, 219, 2, 8, 183, 179, 2, 105, 19, 5, 142, 152, 251, 248, 122,
-                144, 15, 83, 163, 211, 56, 159, 145, 250, 54, 95, 240, 96,
+                236, 142, 75, 156, 159, 90, 113, 59, 185, 181, 108, 93, 178, 23, 184, 177, 246, 58,
+                163, 208, 20, 185, 176, 95, 176, 19, 235, 78, 92, 141, 16, 199,
             ],
             [
-                130, 196, 7, 103, 92, 164, 48, 69, 20, 215, 126, 144, 119, 66, 240, 140, 187, 197,
-                150, 207, 144, 13, 105, 60, 165, 161, 190, 41, 97, 58, 144, 150,
+                133, 199, 159, 18, 133, 33, 134, 221, 70, 247, 18, 222, 190, 36, 229, 111, 74, 185,
+                254, 214, 61, 127, 38, 95, 103, 111, 21, 177, 93, 77, 77, 215,
             ],
         ),
         (
             anchored_quiescent_fixture()?,
             [
-                196, 174, 192, 195, 20, 200, 9, 14, 118, 68, 78, 127, 160, 55, 152, 161, 36, 2,
-                173, 24, 113, 244, 124, 27, 244, 218, 99, 21, 253, 50, 60, 19,
+                75, 93, 192, 79, 109, 125, 51, 111, 149, 8, 215, 242, 215, 250, 142, 148, 45, 105,
+                87, 55, 232, 17, 34, 170, 89, 165, 129, 165, 185, 10, 57, 166,
             ],
             [
-                234, 103, 95, 77, 11, 126, 147, 110, 212, 164, 245, 26, 213, 195, 66, 170, 19, 102,
-                177, 5, 35, 2, 184, 206, 55, 179, 58, 115, 35, 154, 221, 175,
+                19, 223, 202, 163, 63, 143, 66, 78, 51, 106, 82, 186, 250, 226, 157, 105, 57, 157,
+                84, 105, 176, 49, 25, 35, 185, 240, 254, 197, 123, 231, 218, 98,
             ],
             [
-                35, 252, 69, 106, 76, 111, 17, 206, 31, 98, 144, 197, 93, 241, 153, 72, 206, 96,
-                141, 196, 20, 229, 76, 46, 61, 41, 15, 163, 163, 33, 13, 121,
+                70, 5, 107, 97, 75, 203, 213, 202, 203, 30, 23, 142, 226, 142, 7, 230, 16, 3, 143,
+                128, 109, 130, 212, 146, 7, 72, 48, 30, 110, 216, 34, 48,
             ],
         ),
     ];
@@ -766,7 +825,10 @@ fn v33_graph_goldens_pin_quiescent_and_working_closures() -> TestResult {
     let mut expected = Vec::new();
     for (checkpoint, root, integrity, closure) in cases {
         let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
-        assert_eq!(bundle.objects().len(), 34);
+        assert_eq!(
+            bundle.objects().len(),
+            34 + checkpoint.manifest().named_state().values().len()
+        );
         let mut exact_closure = Vec::new();
         for object in bundle.objects() {
             exact_closure.push(object.address().kind() as u8);

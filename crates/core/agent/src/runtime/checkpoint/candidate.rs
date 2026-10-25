@@ -16,6 +16,7 @@ pub(in crate::runtime) struct SuccessorFacts {
     pub(in crate::runtime) history: CanonicalHistory,
     pub(in crate::runtime) ledger: RuntimeOperationLedger,
     pub(in crate::runtime) jobs: crate::manifest::JobLedger,
+    pub(in crate::runtime) named_state: crate::manifest::NamedState,
     pub(in crate::runtime) context: RuntimeContextState,
     pub(in crate::runtime) family: Option<FamilyArtifact>,
 }
@@ -40,6 +41,7 @@ pub(in crate::runtime) fn successor_candidate(
         history,
         ledger,
         jobs,
+        named_state,
         context,
         family,
     } = facts;
@@ -59,6 +61,7 @@ pub(in crate::runtime) fn successor_candidate(
         history_identity: history.identity(),
         ledger: &ledger,
         context_identity: context.identity(),
+        named_state: &named_state,
         family_artifact: family.as_ref(),
     })?;
     let canonical = RuntimeCanonicalState::new(
@@ -92,6 +95,7 @@ pub(in crate::runtime) fn successor_candidate(
                 family,
                 interpreter_observation,
                 jobs,
+                named_state,
                 prior.durability(),
             )
             .map_err(runtime_manifest_error)?,

@@ -77,6 +77,7 @@ mod fence_compaction;
 mod lease_permits;
 mod lineage;
 mod model_fixtures;
+mod named_state;
 mod pending_decisions;
 mod placeholders;
 mod provenance;

@@ -384,6 +384,7 @@ pub(crate) fn checkpoint_with_payload(
         None,
         None,
         plakous_agent::internal::JobLedger::default(),
+        plakous_agent::internal::NamedState::default(),
         durability,
     )?;
     Ok(RuntimeCheckpoint::new(manifest)?)

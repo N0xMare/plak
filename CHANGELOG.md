@@ -18,6 +18,14 @@ one cross-build carrier (a build imports its own and the previous version).
   38 packages. Compose exposes the inert `HostApi`, `python_bootstrap`, its
   interpreter-neutral `PythonBootstrap` data, and `codex_exec` at its crate
   root. Presentation building blocks and fixture constructors are private.
+
+- Local composition has session-owned named state. The driver stages bounded
+  canonical JSON writes per cell and publishes them only with a successful
+  terminal result. Exact reopen, compaction, fork and rebind preserve saved
+  values independently of interpreter lifetime. The harness lists keys and
+  sizes, not values, before the next prompt. This is the persistence seam;
+  Python SDK selection and export carriage are separate changes.
+
 - The harness compaction instruction asks for fixed sections (Requests,
   Constraints, Values, Work done, Decisions, Open errors, Plan, Next step),
   each written once. Standing user constraints from any request stay quoted
@@ -70,8 +78,12 @@ one cross-build carrier (a build imports its own and the previous version).
   and nested projection digests instead of the removed component identities.
   Model-visible text, engine/artifact/host identities and projection digests
   are unchanged.
-  State key `r25.e33.p33.t8`; carry a session with `/reload` or export and
-  import. Export document version 8 is unchanged.
+  Runtime SQLite schema 26 admits `NamedStateValue` objects (kind 20). The
+  manifest gains a sorted named-state key/address group; checkpoint integrity
+  and commit identities bind keys and immutable value addresses.
+  State key `r26.e33.p33.t8`; carry conversation history with `/reload` or
+  export and import. Export document version 8 is unchanged and does not
+  carry named state; an imported session starts with empty named state.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine
   contract and adapter `plakous.monty-python-adapter.v8` instead of the
   monty-pool contract and adapter v7. Its worker artifact, host and containment

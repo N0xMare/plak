@@ -77,6 +77,7 @@ pub(super) fn checkpoint_with_review_commands(
         history_identity: canonical.history().identity(),
         ledger: &ledger,
         context_identity: canonical.context().identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     Ok(RuntimeCheckpoint::new(RuntimeManifest::new(
@@ -92,6 +93,7 @@ pub(super) fn checkpoint_with_review_commands(
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?)
 }

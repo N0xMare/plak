@@ -288,6 +288,7 @@ pub(crate) fn assemble_bundle_manifest(
     tools: ToolRuntimeManifest,
     ledger: RuntimeOperationLedger,
     family_artifact: Option<FamilyArtifact>,
+    named_state: NamedState,
 ) -> Result<RuntimeManifest, RuntimeManifestError> {
     RuntimeManifest::new(
         metadata.provenance,
@@ -302,6 +303,7 @@ pub(crate) fn assemble_bundle_manifest(
         family_artifact,
         metadata.interpreter_observation,
         metadata.jobs,
+        named_state,
         metadata.durability,
     )
 }

@@ -57,6 +57,9 @@ pub(in crate::runtime::durable) async fn checkpoint() -> TestResult<RuntimeCheck
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         jobs,
+        prior
+            .named_state()
+            .put("branch_saved".to_owned(), &json!({"exact": [1, 2, 3]}))?,
         prior.durability(),
     )?)?;
     agent.shutdown().await?;

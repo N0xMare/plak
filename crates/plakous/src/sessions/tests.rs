@@ -1476,6 +1476,7 @@ async fn install_family_artifact(
         Some(artifact),
         source_manifest.interpreter_observation().cloned(),
         plakous_agent::internal::JobLedger::default(),
+        source_manifest.named_state().clone(),
         source_manifest.durability(),
     )?)?;
     let bundle = RuntimeCheckpointCodec::advance(&checkpoint, loaded.checkpoint().bundle())?;
@@ -6319,6 +6320,7 @@ async fn sqlite_recovery_inspection_reports_working_obligations_without_mutation
         manifest.family_artifact().cloned(),
         manifest.interpreter_observation().cloned(),
         plakous_agent::internal::JobLedger::default(),
+        manifest.named_state().clone(),
         manifest.durability(),
     )?)?);
     let bundle = RuntimeCheckpointCodec::advance(&working, genesis_loaded.checkpoint().bundle())?;
@@ -7108,6 +7110,7 @@ async fn scripted_working_checkpoint_is_recovery_only_and_never_mutated() -> Tes
         working_manifest.family_artifact().cloned(),
         working_manifest.interpreter_observation().cloned(),
         plakous_agent::internal::JobLedger::default(),
+        working_manifest.named_state().clone(),
         working_manifest.durability(),
     )?)?);
     let working_bundle = RuntimeCheckpointCodec::advance(&working, &genesis_bundle)?;

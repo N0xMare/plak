@@ -446,7 +446,7 @@ fn unsupported_detached_wal_inspection_preserves_persistent_bytes() -> Result<()
         let shm_path = db.path.with_extension("sqlite3-shm");
         let wal_before = fs::read(&wal_path)?;
         let shm_before = fs::read(&shm_path)?;
-        assert_eq!(&main_before[60..64], &25_u32.to_be_bytes());
+        assert_eq!(&main_before[60..64], &26_u32.to_be_bytes());
         assert!(
             wal_before.len() > 32,
             "unsupported version lives in WAL frames"
@@ -535,7 +535,9 @@ fn fifo_runtime_path_is_refused_without_waiting_for_a_writer() -> Result<(), Box
 
 #[test]
 fn unsupported_runtime_schemas_refuse_without_changing_files() -> Result<(), Box<dyn Error>> {
-    for version in [13_i64, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 100] {
+    for version in [
+        13_i64, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 100,
+    ] {
         let db = Database::new();
         drop(SqliteSessionStore::open(&db.path)?);
         let connection = Connection::open(&db.path)?;
@@ -800,7 +802,7 @@ async fn fresh_schema_has_required_integrity_pragmas_and_reopens() {
         connection
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .expect("version"),
-        25
+        26
     );
     assert_eq!(
         connection
@@ -829,13 +831,19 @@ async fn fresh_schema_has_required_integrity_pragmas_and_reopens() {
         .expect("provider-configuration object must satisfy the current schema constraint");
     connection
         .execute(
-            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(20,9,zeroblob(32),1)",
+            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(20,33,zeroblob(32),1)",
+            [],
+        )
+        .expect("named-state object must satisfy the current schema constraint");
+    connection
+        .execute(
+            "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(21,33,zeroblob(32),1)",
             [],
         )
         .expect_err("unknown object kind must violate the current schema constraint");
     connection
         .execute(
-            "DELETE FROM runtime_objects WHERE kind=19 AND codec=33 AND digest=zeroblob(32)",
+            "DELETE FROM runtime_objects WHERE kind IN(19,20) AND codec=33 AND digest=zeroblob(32)",
             [],
         )
         .expect("remove schema probe");
@@ -2542,6 +2550,7 @@ async fn sqlite_retains_large_operation_payloads_after_prune_and_cold_reopen()
                 None,
                 None,
                 plakous_agent::internal::JobLedger::default(),
+                manifest.named_state().clone(),
                 RuntimeDurability::Required,
             )?)?;
             let next = RuntimeCheckpointCodec::advance(&checkpoint, &prior)?;

@@ -1480,6 +1480,11 @@ client or official native host binary is part of this execution path.
   `serde_json_canonicalizer`. Plakous keeps strict parsing, duplicate-key
   rejection, resource bounds, the deliberately small portable schema language,
   and input/output validation authority.
+  L0 dependency review: `plakous-agent` also uses this existing pin to encode
+  session-owned named values. Its own validators retain key/count/byte bounds
+  and require exact canonical bytes on restore; the serializer receives no
+  store, tool or interpreter authority. This adds a dependency edge, not a new
+  package or a provider dependency in the neutral core.
 - SQLite is statically bundled through a pinned `rusqlite` with reviewed compile
   options; there is no system SQLite dependency.
 - Provider SDKs are absent from the production graph.

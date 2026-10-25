@@ -62,6 +62,7 @@ impl RuntimeObjectKind {
             17 => Ok(Self::FamilyArtifact),
             18 => Ok(Self::ContextState),
             19 => Ok(Self::ProviderConfiguration),
+            20 => Ok(Self::NamedStateValue),
             _ => Err(CheckpointBundleError::UnknownObjectKind(tag)),
         }
     }
@@ -257,7 +258,7 @@ impl fmt::Debug for RuntimeObject {
     }
 }
 
-pub(super) fn object_address(
+pub(crate) fn object_address(
     kind: RuntimeObjectKind,
     canonical_bytes: &[u8],
 ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
@@ -314,7 +315,17 @@ pub(super) fn canonical_child_specs(
                 root.family
                     .map(|address| (address, RuntimeObjectKind::FamilyArtifact)),
             );
+            children.extend(
+                root.named_state
+                    .into_values()
+                    .map(|address| (address, RuntimeObjectKind::NamedStateValue)),
+            );
             children
+        }
+        RuntimeObjectKind::NamedStateValue => {
+            crate::manifest::named_state::validate_state_value(canonical_bytes)
+                .map_err(RuntimeManifestError::from)?;
+            Vec::new()
         }
         RuntimeObjectKind::ManifestMetadata => {
             canonical_metadata(canonical_bytes)?;

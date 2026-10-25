@@ -794,7 +794,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
     let cases = [
         (
             RuntimeLifecycle::Quiescent,
-            "b0b5b49c4d8e2dad9475a3e32924061200bc3b31f52e61d0921a674828fe90ae",
+            "33bee2e4f55a05f2c06b06c3698f5f195ccf89a76c7e7e1b9ebc41dab0b9ef7d",
         ),
         (
             RuntimeLifecycle::Working {
@@ -816,7 +816,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     )?,
                 ],
             },
-            "19c64f931fa3ef13e497bb7eb62f96465cba9cbfc5a97899ce3f9c83c307e4e4",
+            "f0dc07a9d69b04bc3a1be65860d17cecb0e0ccf478e914d2fd89310d60a4c3ed",
         ),
         (
             RuntimeLifecycle::Working {
@@ -838,7 +838,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     )?,
                 ],
             },
-            "47294861d308d10ebe504222ce9f988157e677d4125fd1fc14e3f9ccb2f850d9",
+            "36d2520645527d19eef861a5750d70b36903007aa5071d36a53a2921b50d7e8e",
         ),
         (
             RuntimeLifecycle::Working {
@@ -853,7 +853,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     RecoveryAction::CommitRecovery,
                 )?],
             },
-            "c627e96623b669c4f27c9b63df1f0cc490e068c8d33d3b5c0548f935f57b65a8",
+            "ec933b7d744f00c929993e16821627b7fcc7b2faff8b4fc5ee830a80237fad99",
         ),
         (
             RuntimeLifecycle::Working {
@@ -868,7 +868,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                     RecoveryAction::FinalizationRequired,
                 )?],
             },
-            "f9e48e0a2141f656f4c5e34ec7236db9d5002e6993a45b2ad628f23ce4c7a84c",
+            "c44c655d4b108320cf53d167c4adc9d92302d8801312d7b653b96ae0b0a07293",
         ),
     ];
     let checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(0x600))?;
@@ -876,6 +876,24 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
     let history_identity = Digest::sha256(DigestDomain::CanonicalHistory, 1, &[b"history"])?;
     let context_identity = Digest::sha256(DigestDomain::ContextBudget, 1, &[b"context"])?;
     let ledger = RuntimeOperationLedger::new(Vec::new(), Vec::new())?;
+    let named_state = crate::manifest::NamedState::default()
+        .put("saved".to_owned(), &json!({"a": [1, true]}))?
+        .put("null".to_owned(), &serde_json::Value::Null)?;
+    let named_identity = checkpoint_commit_identity(CheckpointCommitFacts {
+        checkpoint_id,
+        parent_checkpoint_id,
+        branch_revision: 7,
+        lifecycle: &RuntimeLifecycle::Quiescent,
+        history_identity,
+        ledger: &ledger,
+        context_identity,
+        named_state: &named_state,
+        family_artifact: None,
+    })?;
+    assert_eq!(
+        named_identity.to_string(),
+        "eb90a47983b87fa7dc2d27da86f6a09d7fd5831f34bbe1d8fec557f8415709c7"
+    );
     let actual = cases
         .iter()
         .map(|(lifecycle, _)| {
@@ -887,6 +905,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
                 history_identity,
                 ledger: &ledger,
                 context_identity,
+                named_state: &crate::manifest::NamedState::default(),
                 family_artifact: None,
             })
         })
@@ -922,6 +941,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
             history_identity,
             ledger: &ledger,
             context_identity,
+            named_state: &crate::manifest::NamedState::default(),
             family_artifact: None,
         })?,
         checkpoint_commit_identity(CheckpointCommitFacts {
@@ -932,6 +952,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
             history_identity,
             ledger: &ledger,
             context_identity,
+            named_state: &crate::manifest::NamedState::default(),
             family_artifact: None,
         })?
     );
@@ -944,6 +965,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
             history_identity,
             ledger: &ledger,
             context_identity,
+            named_state: &crate::manifest::NamedState::default(),
             family_artifact: None,
         })?,
         checkpoint_commit_identity(CheckpointCommitFacts {
@@ -954,6 +976,7 @@ fn checkpoint_commit_identity_golden_matrix_is_debug_independent() -> TestResult
             history_identity,
             ledger: &ledger,
             context_identity: Digest::sha256(DigestDomain::ContextBudget, 1, &[b"other-context"])?,
+            named_state: &crate::manifest::NamedState::default(),
             family_artifact: None,
         })?
     );

@@ -929,7 +929,8 @@ A checkpoint contains or references:
 - exact profile bytes, compiler and strategy revisions, resolved plan bytes,
   plan and input digests, tool and environment identities, context-source
   facts, and the runtime-policy revision;
-- namespaced component state and integrity metadata.
+- namespaced component state and integrity metadata;
+- session-owned named state (§9.8).
 
 That reconstruction set is the `RuntimeManifest`. Digests prove identity and
 detect corruption; they are not reconstruction data,
@@ -1476,7 +1477,7 @@ per-session rows through indexes. Unit tests assert an index search in the
 query plan of every foreign-key child probe, of the prune candidate query and of
 every session-deletion statement.
 
-Schema 25 stores object metadata in a rowid `runtime_objects` table with an
+Schema 26 stores object metadata in a rowid `runtime_objects` table with an
 integer primary key, unique `(kind,codec,digest)` address and `byte_len`.
 `runtime_object_bytes` stores the payload by integer id; edges and checkpoint
 roots still reference the unique address. Accounting sums metadata lengths plus
@@ -6884,6 +6885,65 @@ declined to write to the interpreter — because the encoded frame exceeds the
 protocol's bounds, or the batch failed validation, or a correlated reply was
 missing — never reached the cell, so every acknowledgement in that batch is a
 proved non-delivery and the cell's own loss is reported on its own terms.
+
+### 9.8 Session-owned named state
+
+The local-composition seam accepts driver-owned `StateOp::Get`, `Put`, `List`
+and `Drop` events correlated to the active cell. These are not tools, do not
+mint child operations, and grant the evaluator no store authority. A foreign
+or retired cell's request is refused. Get distinguishes a missing key from a
+stored JSON null; List returns sorted keys and canonical JSON byte sizes.
+Drop reports whether the key existed. Reads see the cell's own writes.
+
+Keys match `[A-Za-z_][A-Za-z0-9_.-]{0,63}`. A session holds at most 64 keys,
+each value is at most 1 MiB of RFC 8785 canonical JSON, and their total is at
+most 4 MiB. A refused write changes nothing; replacement and deletion release
+capacity. Numbers use IEEE doubles; integer inputs outside
+`-(2^53-1)..=2^53-1` are refused before canonicalization rather than silently
+rounded. Integral floats read back as integers, and negative zero reads back
+as zero. Integral float inputs beyond 2^53 are accepted as exact doubles and,
+when representable as JSON integers, read back as integers. Refusals use typed
+`StateError` values, not string classifications; manifest validation preserves
+them in its error source chain.
+
+Values are immutable checkpoint objects of kind `NamedStateValue` (20),
+referenced by a sorted key/address map in the manifest root. Canonical
+bytes, key order, counts, object kinds and aggregate bounds are validated on
+restore. Missing, corrupt or noncanonical state fails closed, never becoming
+an empty map. Checkpoint and commit identities bind each key and its immutable
+value address, not another copy of the raw JSON bytes. An unchanged map reuses
+the prior manifest's value addresses when advancing a checkpoint.
+
+The sole driver keeps writes in a per-cell overlay, including across yields.
+Only a successful terminal result whose success path produced the
+model-visible result publishes the entire overlay, atomically with the outer
+evaluation (or wait continuation) outcome checkpoint. Nested calls and their
+checkpoints never publish it. A failed, stopped, cancelled or abandoned cell
+publishes none of its writes. Response-part or presentation refusals discard
+the overlay even when a refusal fallback produces a result.
+
+The overlay is bound to the cell id; a different cell's result cannot publish
+it. A definite terminal response takes ownership of its overlay before
+evaluator retirement or cleanup. Losing that generation cannot discard writes
+from a successful, presented result; error responses and refused presentations
+still publish none. Retirement or session loss without a definite terminal
+response clears the overlay. Nested tool effects retain their ordinary
+independently committed outcomes. A crash before the result checkpoint retains
+the old state; a crash after it retains the complete new state, even when
+observation promotion or terminal delivery is interrupted. No source or state
+operation is replayed to reconstruct it.
+
+Every later checkpoint, compaction, exact reopen, fork and rebind preserves the
+committed map. Forks share immutable value objects, not mutable state authority.
+Interpreter reset, root-turn joining and process reopen do not clear session
+state. At each prompt/steer boundary while state is non-empty, the harness note
+lists saved keys and their sizes, plus running promoted job numbers. Values
+themselves are not included in that note. Compaction may drop a state-only note
+because the next boundary re-emits it.
+
+No shipped presentation issues state operations. Export documents do not carry
+named state; an imported session, including one carried by `/reload` across
+builds, starts with empty named state.
 
 ## 10. Compaction
 

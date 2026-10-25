@@ -234,6 +234,20 @@ impl Driver {
             })
             .map(|row| row.number)
             .collect::<Vec<_>>();
+        // The overlay is eligible only in the checkpoint that first completes
+        // its own outer operation, never in an unrelated nested publication.
+        let named_state = self
+            .pending_named_state
+            .as_ref()
+            .filter(|(operation, _)| {
+                ledger.operation(operation.0).is_some_and(|record| {
+                    matches!(record.state(), DurableOperationState::Completed(_))
+                })
+            })
+            .map_or_else(
+                || prior.manifest().named_state().clone(),
+                |(_, state)| state.clone(),
+            );
         let storage_pause = self.active_root.as_ref().map_or_else(
             || crate::runtime::checkpoint::storage_pause::StoragePause::new(self.shutdown.clone()),
             |root| root.shared.storage_pause.clone(),
@@ -245,6 +259,7 @@ impl Driver {
                 history,
                 ledger,
                 jobs,
+                named_state,
                 context,
                 family: family_artifact,
             },

@@ -51,6 +51,7 @@ pub(in crate::runtime) async fn join_extracted_local_composition_owner(
     terminate_active_cell: bool,
     telemetry: Option<LocalCompositionShutdownTelemetry>,
 ) -> Vec<AgentError> {
+    state.state_overlay = None;
     let mut errors = Vec::new();
     // Poll every queued batch reply before closing its receiver. A healthy
     // batch can acknowledge concurrently; a stalled interpreter never delays
@@ -110,6 +111,7 @@ pub(in crate::runtime) fn observe_local_composition_session_loss(
     state: &mut CompositionOwner,
     loss: &LocalCompositionSessionLoss,
 ) -> Result<(), AgentError> {
+    state.state_overlay = None;
     let Some(observation) = state.interpreter_observation.as_ref() else {
         return Ok(());
     };
@@ -258,6 +260,7 @@ impl CompositionOwner {
         cell_id: String,
     ) -> Result<(), AgentError> {
         self.cell = Some(cell_id.clone());
+        self.state_overlay = None;
         self.retired_cell = None;
         if let Some(observation) = self.interpreter_observation.as_ref() {
             self.interpreter_observation = Some(
@@ -329,6 +332,7 @@ impl CompositionOwner {
         self.restore_resources(resources);
     }
     pub(in super::super) fn retire_cell(&mut self) {
+        self.state_overlay = None;
         self.retired_cell = self.cell.take();
         self.source_digest = None;
         self.possible_start = false;

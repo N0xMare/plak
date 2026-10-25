@@ -336,6 +336,15 @@ fn materialize_checkpoint(
         tools,
         ledger,
         family_artifact,
+        crate::manifest::NamedState::from_values(
+            root.named_state
+                .into_iter()
+                .map(|(key, address)| {
+                    let object = index.object(address, RuntimeObjectKind::NamedStateValue)?;
+                    Ok((key, object.canonical_bytes.clone()))
+                })
+                .collect::<Result<_, CheckpointBundleError>>()?,
+        )?,
     )?;
     if manifest.topology().checkpoint_id != checkpoint_id {
         return Err(CheckpointBundleError::SemanticDisagreement);

@@ -175,6 +175,7 @@ pub(super) fn checkpoint_with_compaction_state(
         history_identity: canonical.history().identity(),
         ledger: &ledger,
         context_identity: canonical.context().identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     Ok(RuntimeCheckpoint::new(RuntimeManifest::new(
@@ -199,6 +200,7 @@ pub(super) fn checkpoint_with_compaction_state(
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?)
 }
@@ -320,6 +322,7 @@ pub(super) fn checkpoint_with_code_cell_records(
         history_identity: prior.canonical().history().identity(),
         ledger: &ledger,
         context_identity: prior.canonical().context().identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     Ok(RuntimeCheckpoint::new(RuntimeManifest::new(
@@ -344,6 +347,7 @@ pub(super) fn checkpoint_with_code_cell_records(
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?)
 }
@@ -676,6 +680,7 @@ pub(super) async fn seed_code_cell_recovery_checkpoint(
         history_identity: history.identity(),
         ledger: &ledger,
         context_identity: context.identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     let canonical = RuntimeCanonicalState::new(
@@ -706,6 +711,7 @@ pub(super) async fn seed_code_cell_recovery_checkpoint(
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )
     .map_err(|error| format!("seed manifest failed: {error:?}"))?;

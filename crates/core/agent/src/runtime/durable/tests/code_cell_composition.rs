@@ -18,14 +18,16 @@ pub(super) struct FakeCompositionEvidence {
     pub(super) child_exit_on_integration_shutdown: AtomicBool,
     pub(super) generations: Mutex<Vec<u64>>,
     pub(super) loaded_values: Mutex<Vec<String>>,
+    pub(super) lose_generation_on_named_state_result: AtomicBool,
     pub(super) order: Mutex<Vec<&'static str>>,
 }
 
 pub(super) struct FakeCompositionSession {
+    pub(super) state_events: tokio::sync::mpsc::UnboundedSender<LocalCompositionEvent>,
     pub(super) evidence: Arc<FakeCompositionEvidence>,
     pub(super) state: Mutex<Option<String>>,
     /// Set by a cell that ends definitely and takes its evaluator with it.
-    pub(super) generation_lost: AtomicBool,
+    pub(super) generation_lost: Arc<AtomicBool>,
 }
 
 /// Cell id of the fake cell that yields on every resume and never completes.
@@ -41,7 +43,9 @@ const FOREVER_YIELD_MAX_MODEL_ROUNDS: usize = 8;
 /// Scripted resumes offered to the model: far more than the round cap allows.
 const FOREVER_YIELD_SCRIPTED_WAITS: usize = 40;
 
-pub(super) struct PendingCompositionEvents;
+pub(super) struct PendingCompositionEvents(
+    pub(super) tokio::sync::mpsc::UnboundedReceiver<LocalCompositionEvent>,
+);
 
 struct FalseCompositionResponder;
 

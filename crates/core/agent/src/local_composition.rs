@@ -287,7 +287,46 @@ pub trait LocalCompositionNotificationResponder: Send {
     fn reject(self: Box<Self>, reason: String) -> bool;
 }
 
+pub use crate::manifest::named_state::StateError;
+
+/// Session state operations, authorized and applied only by the sole driver.
+#[derive(Clone, Debug)]
+pub enum StateOp {
+    /// Reads the cell overlay, or the committed session value if unchanged.
+    Get { key: String },
+    /// Stages a bounded canonical JSON value until a successful terminal result.
+    Put { key: String, value: Value },
+    /// Lists sorted keys and canonical byte sizes visible to this cell.
+    List,
+    /// Stages deletion of a key.
+    Drop { key: String },
+}
+
+/// Successful reply to one driver-owned state operation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StateResult {
+    /// A missing key is `None`; a stored JSON null is `Some(Value::Null)`.
+    Value(Option<Value>),
+    /// The value is staged, not yet durably published.
+    Stored,
+    /// Sorted keys and canonical JSON byte sizes.
+    Keys(std::collections::BTreeMap<String, usize>),
+    /// Whether the deleted key existed in this cell's view.
+    Dropped(bool),
+}
+
+/// One-shot reply authority, implemented by the composition host adapter.
+pub trait LocalCompositionStateResponder: Send {
+    /// Returns false when the requesting cell can no longer receive the reply.
+    fn respond(self: Box<Self>, result: Result<StateResult, StateError>) -> bool;
+}
+
 pub enum LocalCompositionEvent {
+    State {
+        cell_id: String,
+        op: StateOp,
+        responder: Box<dyn LocalCompositionStateResponder>,
+    },
     NestedCall {
         call: LocalCompositionNestedCall,
         responder: Box<dyn LocalCompositionNestedResponder>,

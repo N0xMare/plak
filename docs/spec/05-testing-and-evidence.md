@@ -336,7 +336,18 @@ compaction count and requires eventual paid dispatch without ContextLimit.
 Code Cell reopen fixtures also pin accepted pending and completed same-turn
 steering, and the exact Prepared-root, Completed-provider,
 `EvaluationAbandonmentRequired` shape: no invented cell result, preserved
-completed evidence, and exactly one root terminal. A real-driver crash matrix
+completed evidence, and exactly one root terminal. Named-state fixtures save
+through driver-owned events, close and reopen the session, and require a new
+cell to read the exact value. They cover canonical and exact-integer bounds,
+fork/rebind copy, compaction and interpreter resets, yield/wait publication,
+failed/stopped/abandoned/refused rollback, generation loss paired with definite
+success/error/refusal responses, and store cuts immediately before
+and after the result checkpoint (old state or the complete new map, never
+partial state). The first state-carrying checkpoint must complete its own outer
+operation; real session open recovers both cut shapes with exactly one root
+terminal and no source replay. The SQLite fixture closes and reopens the real
+store and rejects corrupt or missing value objects rather than substituting
+empty state. A real-driver crash matrix
 (`code_cell_crash`) cuts the store inside a native Code Mode, JavaScript and
 Python cell — the round landed but the cell not yet prepared (claim
 `NothingStarted`), source admitted with no nested call, a nested tool or

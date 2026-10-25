@@ -240,6 +240,7 @@ impl Driver {
         };
         let LocalCompositionCallResponse {
             response,
+            terminal_state,
             max_output_tokens,
             wall_time,
         } = response;
@@ -253,6 +254,7 @@ impl Driver {
                 "local composition owner disappeared",
             )
         })?;
+        let mut presented = true;
         let result = local_composition_response_parts(
             &response,
             max_output_tokens,
@@ -269,6 +271,7 @@ impl Driver {
                 .map_err(|error| AgentError::from_tool(&error))
         })
         .or_else(|error| {
+            presented = false;
             let parts = local_composition_refusal_parts(
                 &response,
                 wall_time,
@@ -281,6 +284,10 @@ impl Driver {
                 .and_then(|outcome| outcome.to_model_result(&invocation))
                 .map_err(|error| AgentError::from_tool(&error))
         })?;
+        let named_state = self
+            .local_composition
+            .as_mut()
+            .and_then(|state| state.finish_state(&response, terminal_state, presented));
         // Recovery restores the pre-batch observation budget and cuts once.
         // Retain the bounded, presented parts, never an already-cut view.
         let evidence = runtime_component(
@@ -321,12 +328,16 @@ impl Driver {
             )
             .await?;
         } else {
-            self.transition_operation(
-                command.turn_id,
-                operation_id,
-                DurableOperationState::Completed(evidence),
-            )
-            .await?;
+            self.pending_named_state = named_state.map(|state| (operation_id, state));
+            let publication = self
+                .transition_operation(
+                    command.turn_id,
+                    operation_id,
+                    DurableOperationState::Completed(evidence),
+                )
+                .await;
+            self.pending_named_state = None;
+            publication?;
         }
         if is_exec
             && local_composition_response_terminal(&response)
@@ -650,6 +661,7 @@ impl Driver {
                 return Err(error_with_cleanup_disposition(primary, &cleanup_errors));
             }
         };
+        let terminal_state = state.take_terminal_state(&result);
         if local_composition_response_terminal(&result) {
             if let Err(primary) = state.acknowledge_terminal() {
                 let cleanup = join_extracted_local_composition_owner(
@@ -668,6 +680,7 @@ impl Driver {
         }
         Ok(LocalCompositionCallResponse {
             response: result,
+            terminal_state,
             max_output_tokens,
             wall_time: state
                 .started_at()
@@ -779,6 +792,7 @@ impl Driver {
                 return Err(error_with_cleanup_disposition(primary, &cleanup_errors));
             }
         };
+        let terminal_state = state.take_terminal_state(&result);
         if matches!(&result, LocalCompositionResponse::Terminated { .. }) && input.terminate {
             if let Err(primary) = state.acknowledge_termination() {
                 let cleanup = join_extracted_local_composition_owner(
@@ -819,6 +833,7 @@ impl Driver {
         }
         Ok(LocalCompositionCallResponse {
             response: result,
+            terminal_state,
             max_output_tokens,
             wall_time: state
                 .started_at()

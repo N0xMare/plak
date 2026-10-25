@@ -40,6 +40,26 @@ struct BuiltLedger {
 }
 
 impl BundleBuilder {
+    fn named_state(
+        &mut self,
+        state: &crate::manifest::NamedState,
+        writer: &mut BundleWriter,
+        children: &mut Vec<RuntimeObjectAddress>,
+    ) -> Result<(), CheckpointBundleError> {
+        writer.count(state.values().len())?;
+        for (key, value) in state.values() {
+            let address = self.insert(
+                RuntimeObjectKind::NamedStateValue,
+                value.to_vec(),
+                Vec::new(),
+            )?;
+            writer.raw(key.as_bytes())?;
+            writer.address(address);
+            children.push(address);
+        }
+        Ok(())
+    }
+
     pub(super) fn retain_candidate_closure(
         &mut self,
         root: RuntimeObjectAddress,
@@ -156,6 +176,11 @@ impl BundleBuilder {
             ledger,
         ];
         manifest_children.extend(family);
+        self.named_state(
+            manifest.named_state(),
+            &mut manifest_writer,
+            &mut manifest_children,
+        )?;
         let manifest_root = self.insert(
             RuntimeObjectKind::ManifestRoot,
             manifest_writer.finish(),
@@ -203,6 +228,7 @@ impl BundleBuilder {
                 operation_head: ledger_spec.operation_head,
                 ledger,
                 family,
+                named_state: manifest.named_state().addresses().clone(),
             },
         })
     }
@@ -289,6 +315,20 @@ impl BundleBuilder {
             ledger.address,
         ];
         manifest_children.extend(family);
+        if manifest.named_state().addresses() == &prior.named_state {
+            manifest_writer.count(prior.named_state.len())?;
+            for (key, address) in &prior.named_state {
+                manifest_writer.raw(key.as_bytes())?;
+                manifest_writer.address(*address);
+                manifest_children.push(*address);
+            }
+        } else {
+            self.named_state(
+                manifest.named_state(),
+                &mut manifest_writer,
+                &mut manifest_children,
+            )?;
+        }
         let manifest_root = self.insert(
             RuntimeObjectKind::ManifestRoot,
             manifest_writer.finish(),
@@ -321,6 +361,7 @@ impl BundleBuilder {
                 operation_head: ledger.operation_head,
                 ledger: ledger.address,
                 family,
+                named_state: manifest.named_state().addresses().clone(),
             },
         })
     }
@@ -791,5 +832,6 @@ pub(super) fn reuse_from_bundle(
         operation_head: ledger.operation_head,
         ledger: manifest.ledger,
         family: manifest.family,
+        named_state: manifest.named_state,
     })
 }

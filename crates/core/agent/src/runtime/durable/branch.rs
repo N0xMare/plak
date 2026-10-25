@@ -980,6 +980,7 @@ fn prepare_branch_checkpoint(
         None,
         None,
         source_manifest.jobs().clone(),
+        source_manifest.named_state().clone(),
         source_manifest.durability(),
     )
     .map_err(runtime_manifest_error)?;
@@ -1132,6 +1133,16 @@ mod jobs_carry_tests {
             );
             assert_eq!(seeded.manifest().jobs(), prior.jobs());
             assert_eq!(seeded.manifest().jobs().rows().len(), 1);
+            assert_eq!(seeded.manifest().named_state(), prior.named_state());
+            let bundle = RuntimeCheckpointCodec::bundle(&seeded, None)?;
+            assert_eq!(
+                bundle.validated_checkpoint()?.manifest().named_state(),
+                prior.named_state()
+            );
+            assert_eq!(
+                prior.named_state().get("branch_saved")?,
+                Some(serde_json::json!({"exact": [1, 2, 3]}))
+            );
         }
         Ok(())
     }

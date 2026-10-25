@@ -77,6 +77,7 @@ pub(in crate::runtime) fn checkpoint_commit_identity(
             facts.history_identity.bytes(),
             ledger_identity.bytes(),
             facts.context_identity.bytes(),
+            &facts.named_state.integrity_bytes(),
             family_integrity
                 .as_ref()
                 .map_or(&[][..], |digest| digest.bytes().as_slice()),
@@ -101,5 +102,6 @@ pub(in crate::runtime) struct CheckpointCommitFacts<'a> {
     pub(in crate::runtime) history_identity: Digest,
     pub(in crate::runtime) ledger: &'a RuntimeOperationLedger,
     pub(in crate::runtime) context_identity: Digest,
+    pub(in crate::runtime) named_state: &'a crate::manifest::NamedState,
     pub(in crate::runtime) family_artifact: Option<&'a FamilyArtifact>,
 }

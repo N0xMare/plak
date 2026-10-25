@@ -232,6 +232,7 @@ impl PreparedAgent {
             next_operation_sequence: self.next_operation_sequence,
             next_checkpoint_sequence,
             process_session_cleanup_uncertainty: None,
+            pending_named_state: None,
             recovery_gated: false,
             observation_budget: crate::runtime::observation::budget::ObservationBudget::default(),
             accepting: Arc::clone(&accepting),

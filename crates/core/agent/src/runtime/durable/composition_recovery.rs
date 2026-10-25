@@ -1029,6 +1029,7 @@ async fn validate_code_cell_final_receipt(
         history_identity: target_manifest.canonical().history().identity(),
         ledger: target_manifest.ledger(),
         context_identity: target_manifest.canonical().context().identity(),
+        named_state: target_manifest.named_state(),
         family_artifact: target_manifest.family_artifact(),
     })?;
     if operation.expected().checkpoint() != evidence.reference()

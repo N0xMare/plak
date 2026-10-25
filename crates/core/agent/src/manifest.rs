@@ -17,6 +17,8 @@ mod encoding;
 mod jobs;
 mod ledger;
 mod lifecycle;
+pub(crate) mod named_state;
+pub use named_state::NamedState;
 mod operations;
 mod state;
 pub use context_state::{
@@ -653,6 +655,7 @@ pub struct OutputBoundRederived {
 /// Reconstruction-complete runtime manifest.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeManifest {
+    named_state: NamedState,
     output_bound_rederived: Option<OutputBoundRederived>,
     provenance: ProducerProvenance,
     topology: RuntimeTopology,
@@ -688,6 +691,7 @@ impl RuntimeManifest {
         family_artifact: Option<FamilyArtifact>,
         interpreter_observation: Option<InterpreterObservation>,
         jobs: JobLedger,
+        named_state: NamedState,
         durability: RuntimeDurability,
     ) -> Result<Self, RuntimeManifestError> {
         topology.validate()?;
@@ -738,6 +742,7 @@ impl RuntimeManifest {
         validate_composition_graph(&ledger)?;
         validate_lifecycle(&lifecycle, &canonical, &ledger)?;
         Ok(Self {
+            named_state,
             output_bound_rederived,
             provenance,
             topology,
@@ -768,6 +773,12 @@ impl RuntimeManifest {
     #[must_use]
     pub const fn jobs(&self) -> &JobLedger {
         &self.jobs
+    }
+
+    /// Returns session-owned named state, independent of interpreter lifetime.
+    #[must_use]
+    pub const fn named_state(&self) -> &NamedState {
+        &self.named_state
     }
 
     /// Returns producing provenance (never a compatibility gate).
@@ -914,6 +925,9 @@ impl RuntimeCheckpoint {
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum RuntimeManifestError {
+    /// A named key or canonical JSON value exceeds its closed contract.
+    #[error("invalid or oversized named state")]
+    InvalidNamedState(#[source] Box<named_state::StateError>),
     /// A behavior-bearing revision used reserved zero.
     #[error("runtime semantic revision must be nonzero")]
     ZeroRevision,
@@ -1136,6 +1150,7 @@ fn checkpoint_compositional_integrity(
             binding.bytes(),
             tools.bytes(),
             ledger.bytes(),
+            &manifest.named_state.integrity_bytes(),
             &family_present,
             manifest
                 .family_artifact

@@ -1287,6 +1287,7 @@ async fn abandonment_terminal_report_survives_parent_pruning_and_sqlite_inspecti
         manifest.family_artifact().cloned(),
         manifest.interpreter_observation().cloned(),
         plakous_agent::internal::JobLedger::default(),
+        manifest.named_state().clone(),
         manifest.durability(),
     )?)?);
     let bundle = RuntimeCheckpointCodec::advance(&working, genesis_loaded.checkpoint().bundle())?;

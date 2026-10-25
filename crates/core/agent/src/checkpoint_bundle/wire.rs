@@ -211,6 +211,7 @@ pub(super) struct ManifestRootSpec {
     pub(super) tools: RuntimeObjectAddress,
     pub(super) ledger: RuntimeObjectAddress,
     pub(super) family: Option<RuntimeObjectAddress>,
+    pub(super) named_state: std::collections::BTreeMap<String, RuntimeObjectAddress>,
 }
 
 pub(super) fn parse_manifest_root(bytes: &[u8]) -> Result<ManifestRootSpec, CheckpointBundleError> {
@@ -224,9 +225,35 @@ pub(super) fn parse_manifest_root(bytes: &[u8]) -> Result<ManifestRootSpec, Chec
         tools: reader.address()?,
         ledger: reader.address()?,
         family: reader.optional_address()?,
+        named_state: read_named_state(&mut reader)?,
     };
     reader.finish()?;
     Ok(value)
+}
+
+fn read_named_state(
+    reader: &mut BundleReader<'_>,
+) -> Result<std::collections::BTreeMap<String, RuntimeObjectAddress>, CheckpointBundleError> {
+    let count = reader.count()?;
+    if count > crate::manifest::named_state::MAX_STATE_KEYS {
+        return Err(CheckpointBundleError::BoundExceeded);
+    }
+    let mut values = std::collections::BTreeMap::new();
+    for _ in 0..count {
+        let key = std::str::from_utf8(reader.raw()?)
+            .map_err(|_| CheckpointBundleError::Malformed)?
+            .to_owned();
+        crate::manifest::named_state::validate_state_key(&key)
+            .map_err(crate::manifest::RuntimeManifestError::from)?;
+        if values
+            .last_key_value()
+            .is_some_and(|(previous, _)| previous >= &key)
+        {
+            return Err(CheckpointBundleError::NonCanonical);
+        }
+        values.insert(key, reader.address()?);
+    }
+    Ok(values)
 }
 
 pub(super) struct SequenceNodeSpec {

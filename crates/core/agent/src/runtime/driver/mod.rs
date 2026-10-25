@@ -151,6 +151,7 @@ struct Driver {
     next_checkpoint_sequence: u64,
     process_session_cleanup_uncertainty: Option<TurnId>,
     pending_job_promotions: Vec<crate::manifest::JobRow>,
+    pending_named_state: Option<(OperationId, crate::manifest::NamedState)>,
     pending_job_consumptions: Vec<u32>,
     noticed_job_terminals: Vec<u32>,
     observed_job_terminals: Vec<u32>,
@@ -513,6 +514,7 @@ pub(in crate::runtime) struct LocalCompositionOuterExecution {
 
 pub(in crate::runtime) struct LocalCompositionCallResponse {
     response: LocalCompositionResponse,
+    terminal_state: Option<(String, crate::manifest::NamedState)>,
     max_output_tokens: usize,
     wall_time: Duration,
 }

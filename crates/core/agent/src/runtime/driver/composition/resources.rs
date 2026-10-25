@@ -63,6 +63,22 @@ impl Driver {
             ));
         };
         match event {
+            LocalCompositionEvent::State {
+                cell_id,
+                op,
+                responder,
+            } => {
+                let result = state.apply_state_op(
+                    &cell_id,
+                    op,
+                    self.authority.checkpoint().manifest().named_state(),
+                );
+                if !responder.respond(result) {
+                    return Err(local_composition_started_error(
+                        "named state acknowledgement receiver disappeared",
+                    ));
+                }
+            }
             LocalCompositionEvent::Notification {
                 notification,
                 responder,

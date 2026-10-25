@@ -122,6 +122,7 @@ async fn facade_open_closes_finalization_debt_after_root_already_finalized() -> 
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?;
     let bundle = RuntimeCheckpointCodec::advance(&working, loaded.checkpoint().bundle())?;

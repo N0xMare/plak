@@ -681,6 +681,7 @@ fn manifest_with_bounds(
         Some(artifact),
         None,
         JobLedger::default(),
+        NamedState::default(),
         RuntimeDurability::Required,
     )?)
 }
@@ -770,6 +771,7 @@ fn interpreter_observation_is_closed_and_checkpoint_round_trips() -> TestResult 
         prior.family_artifact.clone(),
         Some(observation.clone()),
         prior.jobs.clone(),
+        NamedState::default(),
         prior.durability,
     )?)?;
     let bundle = crate::RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
@@ -2735,6 +2737,7 @@ fn checkpoint_construction_and_graph_publication_are_compositional() -> TestResu
         prior.family_artifact.clone(),
         prior.interpreter_observation.clone(),
         prior.jobs.clone(),
+        NamedState::default(),
         prior.durability,
     )?)?;
     let advanced = crate::RuntimeCheckpointCodec::advance(&next_checkpoint, &bundle)?;

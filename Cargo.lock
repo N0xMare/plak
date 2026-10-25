@@ -3910,6 +3910,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "serde_json_canonicalizer",
  "tempfile",
  "thiserror 2.0.21",
  "time",

@@ -227,15 +227,17 @@ impl LocalCompositionIntegration for FakeComposition {
                     .fetch_add(1, Ordering::AcqRel);
                 lock_mutex(&fixture.evidence.generations).push(generation);
                 lock_mutex(&fixture.evidence.order).push("create-session");
+                let (state_events, events) = tokio::sync::mpsc::unbounded_channel();
                 let session = FakeCompositionSession {
+                    state_events,
                     evidence: Arc::clone(&fixture.evidence),
                     state: Mutex::new(None),
-                    generation_lost: AtomicBool::new(false),
+                    generation_lost: Arc::new(AtomicBool::new(false)),
                 };
                 Box::pin(async move {
                     Ok(LocalCompositionSessionBundle {
                         session: Box::new(FakeSession::Neutral(session)),
-                        events: Box::new(FakeEvents::Neutral(PendingCompositionEvents)),
+                        events: Box::new(FakeEvents::Neutral(PendingCompositionEvents(events))),
                     })
                 })
             }
@@ -349,7 +351,9 @@ impl LocalCompositionIntegration for FakeComposition {
         target: ProviderModelProjectionIdentityV2,
     ) -> Result<LocalCompositionDescriptor, String> {
         match self {
-            Self::Neutral(fixture) => Ok(fixture.descriptor.clone()),
+            Self::Neutral(_) => {
+                neutral_composition_descriptor(registry, target).map_err(|error| error.to_string())
+            }
             Self::Scheduler(fixture) => {
                 let nested_names = fixture
                     .descriptor
@@ -517,6 +521,9 @@ impl LocalCompositionSession for FakeSession {
                         .physical_cell_starts
                         .fetch_add(1, Ordering::AcqRel);
                     lock_mutex(&fixture.evidence.order).push("execute");
+                    if request.source.starts_with("named state ") {
+                        return Ok(named_state::start_cell(fixture, request.source));
+                    }
                     let mut started_cell_id = "C";
                     let response = match request.source.as_str() {
                         "yield once" => LocalCompositionResponse::Yielded {
@@ -793,6 +800,15 @@ impl LocalCompositionSession for FakeSession {
                 fixture.evidence.waits.fetch_add(1, Ordering::AcqRel);
                 lock_mutex(&fixture.evidence.order).push("wait");
                 Box::pin(async move {
+                    if request.cell_id == "named" {
+                        return Ok(LocalCompositionWaitOutcome::Live(
+                            LocalCompositionResponse::Result {
+                                cell_id: "named".to_owned(),
+                                items: Vec::new(),
+                                error: None,
+                            },
+                        ));
+                    }
                     if request.cell_id == FOREVER_YIELD_CELL {
                         // Stay within the requested observation window while proving
                         // elapsed root-turn time does not cap successive resumes.
@@ -1030,7 +1046,7 @@ enum FakeEvents {
 impl LocalCompositionEventReceiver for FakeEvents {
     fn receive(&mut self) -> LocalCompositionSessionFuture<'_, Option<LocalCompositionEvent>> {
         match self {
-            Self::Neutral(_) => Box::pin(std::future::pending()),
+            Self::Neutral(fixture) => Box::pin(async move { Ok(fixture.0.recv().await) }),
             Self::Scheduler(fixture) => {
                 Box::pin(async move {
                     assert!(

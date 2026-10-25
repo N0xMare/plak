@@ -792,6 +792,7 @@ impl CheckpointReader {
                 history: manifest.canonical().history().clone(),
                 ledger: manifest.ledger().clone(),
                 jobs,
+                named_state: manifest.named_state().clone(),
                 context: manifest.canonical().context().retained_for_exact_resume(),
                 family: manifest.family_artifact().cloned(),
             },

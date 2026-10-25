@@ -16,17 +16,18 @@ mod object;
 mod operation_tree;
 mod wire;
 
-pub(crate) use object::component_object_digest;
+pub(crate) use object::{component_object_digest, object_address};
 
 /// Format epoch of the complete persisted checkpoint object graph. Every
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
 /// the per-component revision constants inside the graph are frozen.
-// Epoch 33 records the unified cell descriptor and attachment identities.
+/// Epoch 33 includes unified cell identities and named-state addresses/integrity.
 pub const RUNTIME_FORMAT_EPOCH: u32 = 33;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
-const MAX_CHECKPOINT_OBJECTS: usize = MAX_RUNTIME_RECORDS * 8 + 64;
+const MAX_CHECKPOINT_OBJECTS: usize =
+    MAX_RUNTIME_RECORDS * 8 + 64 + crate::manifest::named_state::MAX_STATE_KEYS;
 // A long session retains operation evidence outside its compacted conversation.
 // This bound must cover the reachable graph, not just a few flat manifest encodings.
 const MAX_CHECKPOINT_OBJECT_BYTES: usize = 1024 * 1024 * 1024;
@@ -74,6 +75,8 @@ pub enum RuntimeObjectKind {
     ContextState = 18,
     /// Reconstruction-complete selected and effective provider configuration.
     ProviderConfiguration = 19,
+    /// One bounded canonical JSON value in session-owned named state.
+    NamedStateValue = 20,
 }
 
 /// Complete content address of one immutable runtime object.
@@ -168,6 +171,7 @@ struct BundleReuse {
     operation_head: Option<RuntimeObjectAddress>,
     ledger: RuntimeObjectAddress,
     family: Option<RuntimeObjectAddress>,
+    named_state: BTreeMap<String, RuntimeObjectAddress>,
 }
 
 /// Sole agent-owned persisted codec for the closed checkpoint object graph.

@@ -4,6 +4,7 @@
 mod commit_trace;
 mod conformance;
 mod feed;
+mod named_state;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 #[cfg(feature = "sqlite")]

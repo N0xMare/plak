@@ -125,6 +125,7 @@ pub(in crate::runtime) async fn recover_root_turn_publication(
         history_identity: history.identity(),
         ledger: &ledger,
         context_identity: context.identity(),
+        named_state: source_manifest.named_state(),
         family_artifact: family_artifact.as_ref(),
     })?;
     let canonical = RuntimeCanonicalState::new(
@@ -158,6 +159,7 @@ pub(in crate::runtime) async fn recover_root_turn_publication(
                 family_artifact,
                 source_manifest.interpreter_observation().cloned(),
                 source_manifest.jobs().clone(),
+                source_manifest.named_state().clone(),
                 source_manifest.durability(),
             )
             .map_err(runtime_manifest_error)?,

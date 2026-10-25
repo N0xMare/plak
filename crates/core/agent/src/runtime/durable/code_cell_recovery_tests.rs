@@ -367,6 +367,7 @@ async fn seed_mixed_debt(
         history_identity: prior.canonical().history().identity(),
         ledger: &ledger,
         context_identity: context.identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     let canonical = RuntimeCanonicalState::new(
@@ -397,6 +398,7 @@ async fn seed_mixed_debt(
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?;
     let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
@@ -984,6 +986,7 @@ fn assert_crossed_finalization_obligations_are_corrupt(
             prior.family_artifact().cloned(),
             prior.interpreter_observation().cloned(),
             prior.jobs().clone(),
+            prior.named_state().clone(),
             prior.durability(),
         );
         assert!(matches!(
@@ -1092,6 +1095,7 @@ async fn explicit_code_cell_abandonment_refuses_an_uncertain_nested_effect() -> 
         history_identity,
         ledger: &ledger,
         context_identity: context.identity(),
+        named_state: prior.named_state(),
         family_artifact: prior.family_artifact(),
     })?;
     let canonical = RuntimeCanonicalState::new(
@@ -1122,6 +1126,7 @@ async fn explicit_code_cell_abandonment_refuses_an_uncertain_nested_effect() -> 
         prior.family_artifact().cloned(),
         prior.interpreter_observation().cloned(),
         prior.jobs().clone(),
+        prior.named_state().clone(),
         prior.durability(),
     )?)?;
     let cell = code_cell_abandonment_fold(&uncertain)?;
