@@ -34,6 +34,7 @@ pub use reads::{
     ReadRequest, ReadValue, ResultRead, TerminalRead, load_reads, load_reads_sqlite, plan_reads,
     read_item, record_checkpoint,
 };
+pub(crate) use reads::{TranscriptPart, TranscriptRead, transcript_tail};
 pub use views::{
     Anchored, CallView, Counters, Delivery, Lane, LineageStep, OpenTurn, PauseCause, ProcessTrack,
     RowKey, SessionViewState, SessionViews, WorkflowCompletion, WorkflowSettlement,

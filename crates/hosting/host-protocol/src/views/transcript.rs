@@ -15,6 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use super::presentation::ActivityState;
 
+mod key;
+pub use key::{Lane, RowKey};
+
 /// One transcript row.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

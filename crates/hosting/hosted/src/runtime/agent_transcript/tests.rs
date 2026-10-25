@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
-use super::{Item, Part, bound_rows, read_rows, read_rows_within, rows_from_items};
+use super::{
+    TranscriptPart, TranscriptRead, bound_rows, read_rows, read_rows_within, rows_from_items,
+};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous::model::{Actor, ReasoningVisibility};
 use plakous::sessions::{
@@ -14,6 +16,28 @@ use std::sync::atomic::AtomicU64;
 
 const SECRET: &str = "sk-abcdefghijklmnopqrstuvwxyz0123";
 const CALL: &str = "00000000-0000-4000-8000-0000000000ca";
+
+#[test]
+fn child_history_keeps_image_chips_in_the_same_user_row_as_root_history() {
+    let chip = crate::sessions::image_chip("image/png", 1234, Some((80, 60)));
+    let rows = rows_from_items(
+        &[item(
+            Actor::User,
+            vec![
+                TranscriptPart::Text("inspect this"),
+                TranscriptPart::Image(chip.clone()),
+                TranscriptPart::Text("please"),
+            ],
+        )],
+        locator(),
+        &[],
+        false,
+    );
+    assert_eq!(
+        rows,
+        vec![TranscriptRow::user(format!("inspect this\n{chip}\nplease"))]
+    );
+}
 
 #[test]
 fn unlinked_nested_calls_have_neither_a_parent_nor_a_cell_row_identity() {
@@ -37,7 +61,7 @@ fn unlinked_nested_calls_have_neither_a_parent_nor_a_cell_row_identity() {
             &[
                 item(
                     Actor::Assistant,
-                    vec![Part::Call {
+                    vec![TranscriptPart::Call {
                         call_id: CALL.into(),
                         canonical: "read_file",
                         exposed: "read_file",
@@ -48,7 +72,7 @@ fn unlinked_nested_calls_have_neither_a_parent_nor_a_cell_row_identity() {
                 ),
                 item(
                     Actor::Tool,
-                    vec![Part::Result {
+                    vec![TranscriptPart::Result {
                         call_id: CALL.into(),
                         succeeded: true,
                         preview: "done",
@@ -85,7 +109,7 @@ fn explicit_owners_win_over_history_order_and_reused_cell_ids() {
         &[item(
             Actor::Assistant,
             vec![
-                Part::Call {
+                TranscriptPart::Call {
                     call_id: CALL.into(),
                     canonical: "exec",
                     exposed: "exec",
@@ -93,7 +117,7 @@ fn explicit_owners_win_over_history_order_and_reused_cell_ids() {
                     lineage: Some(&marker),
                     composition_owner: None,
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     call_id: other.into(),
                     canonical: "exec",
                     exposed: "exec",
@@ -101,7 +125,7 @@ fn explicit_owners_win_over_history_order_and_reused_cell_ids() {
                     lineage: Some(&marker),
                     composition_owner: None,
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     call_id: child.into(),
                     canonical: "read_file",
                     exposed: "read_file",
@@ -109,7 +133,7 @@ fn explicit_owners_win_over_history_order_and_reused_cell_ids() {
                     lineage: Some(&nested),
                     composition_owner: None,
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     call_id: wait.into(),
                     canonical: "wait",
                     exposed: "wait",
@@ -162,7 +186,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
         .collect::<Vec<_>>();
     for name in ["exec", "exec_js"] {
         let observation = call_observation(serde_json::json!({"path": "src/main.rs"}));
-        let mut calls = vec![Part::Call {
+        let mut calls = vec![TranscriptPart::Call {
             composition_owner: None,
             call_id: CALL.into(),
             canonical: name,
@@ -170,19 +194,23 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
             observation: None,
             lineage: Some(&marker),
         }];
-        calls.extend(ids.iter().zip(&nested).map(|(id, lineage)| Part::Call {
-            composition_owner: None,
-            call_id: (*id).into(),
-            canonical: "read_file",
-            exposed: "read_file",
-            observation: Some(&observation),
-            lineage: Some(lineage),
-        }));
+        calls.extend(
+            ids.iter()
+                .zip(&nested)
+                .map(|(id, lineage)| TranscriptPart::Call {
+                    composition_owner: None,
+                    call_id: (*id).into(),
+                    canonical: "read_file",
+                    exposed: "read_file",
+                    observation: Some(&observation),
+                    lineage: Some(lineage),
+                }),
+        );
         let mut results = ids
             .iter()
             .zip(&nested)
             .enumerate()
-            .map(|(index, (id, lineage))| Part::Result {
+            .map(|(index, (id, lineage))| TranscriptPart::Result {
                 call_id: (*id).into(),
                 succeeded: index != 1,
                 preview: "read result",
@@ -190,7 +218,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
                 lineage: Some(lineage),
             })
             .collect::<Vec<_>>();
-        results.push(Part::Result {
+        results.push(TranscriptPart::Result {
             call_id: CALL.into(),
             succeeded: true,
             preview: if name == "exec" {
@@ -206,7 +234,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
             let wait = "00000000-0000-4000-8000-0000000000d4";
             history.push(item(
                 Actor::Assistant,
-                vec![Part::Call {
+                vec![TranscriptPart::Call {
                     call_id: wait.into(),
                     canonical: "wait",
                     exposed: "wait",
@@ -217,7 +245,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
             ));
             history.push(item(
                 Actor::Tool,
-                vec![Part::Result {
+                vec![TranscriptPart::Result {
                     call_id: wait.into(),
                     succeeded: true,
                     preview: "Script completed",
@@ -276,8 +304,8 @@ fn locator() -> SessionLocator {
         .unwrap()
 }
 
-fn item(actor: Actor, parts: Vec<Part<'_>>) -> Item<'_> {
-    Item {
+fn item(actor: Actor, parts: Vec<TranscriptPart<'_>>) -> TranscriptRead<'_> {
+    TranscriptRead {
         actor,
         harness_authored: false,
         parts,
@@ -291,27 +319,27 @@ fn mail_is_a_tree_notice_and_harness_notes_and_hidden_reasoning_have_no_row() {
         "output": "all green\nmore"
     })
     .to_string();
-    let mut harness = item(Actor::User, vec![Part::Text("[plak: wrap up]")]);
+    let mut harness = item(Actor::User, vec![TranscriptPart::Text("[plak: wrap up]")]);
     harness.harness_authored = true;
     let rows = rows_from_items(
         &[
-            item(Actor::User, vec![Part::Text("do the task")]),
+            item(Actor::User, vec![TranscriptPart::Text("do the task")]),
             harness,
             item(
                 Actor::Assistant,
                 vec![
-                    Part::Reasoning {
+                    TranscriptPart::Reasoning {
                         visibility: ReasoningVisibility::Omitted,
                         text: "hidden",
                     },
-                    Part::Reasoning {
+                    TranscriptPart::Reasoning {
                         visibility: ReasoningVisibility::Summary,
                         text: "weighing it",
                     },
-                    Part::Text("done"),
+                    TranscriptPart::Text("done"),
                 ],
             ),
-            item(Actor::User, vec![Part::Text(&mail)]),
+            item(Actor::User, vec![TranscriptPart::Text(&mail)]),
         ],
         locator(),
         &[],
@@ -336,7 +364,7 @@ fn a_call_joins_its_result_by_call_id_and_a_credential_in_the_result_is_redacted
             item(
                 Actor::Assistant,
                 vec![
-                    Part::Call {
+                    TranscriptPart::Call {
                         composition_owner: None,
                         lineage: None,
                         call_id: CALL.to_owned(),
@@ -344,7 +372,7 @@ fn a_call_joins_its_result_by_call_id_and_a_credential_in_the_result_is_redacted
                         exposed: "read_file",
                         observation: None,
                     },
-                    Part::Call {
+                    TranscriptPart::Call {
                         composition_owner: None,
                         lineage: None,
                         call_id: "unsettled".to_owned(),
@@ -357,14 +385,14 @@ fn a_call_joins_its_result_by_call_id_and_a_credential_in_the_result_is_redacted
             item(
                 Actor::Tool,
                 vec![
-                    Part::Result {
+                    TranscriptPart::Result {
                         lineage: None,
                         call_id: CALL.to_owned(),
                         succeeded: true,
                         preview: &preview,
                         subject: None,
                     },
-                    Part::Result {
+                    TranscriptPart::Result {
                         lineage: None,
                         call_id: "never-called".to_owned(),
                         succeeded: false,
@@ -373,7 +401,7 @@ fn a_call_joins_its_result_by_call_id_and_a_credential_in_the_result_is_redacted
                     },
                 ],
             ),
-            item(Actor::Assistant, vec![Part::Compaction]),
+            item(Actor::Assistant, vec![TranscriptPart::Compaction]),
         ],
         locator(),
         &[],
@@ -569,7 +597,7 @@ fn a_settled_process_wait_reads_like_the_live_row() {
         &[
             item(
                 Actor::Assistant,
-                vec![Part::Call {
+                vec![TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: CALL.to_owned(),
@@ -580,7 +608,7 @@ fn a_settled_process_wait_reads_like_the_live_row() {
             ),
             item(
                 Actor::Tool,
-                vec![Part::Result {
+                vec![TranscriptPart::Result {
                     lineage: None,
                     call_id: CALL.to_owned(),
                     succeeded: true,
@@ -622,7 +650,7 @@ fn a_process_wait_names_the_command_an_earlier_start_ran() {
         &[
             item(
                 Actor::Assistant,
-                vec![Part::Call {
+                vec![TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: CALL.to_owned(),
@@ -633,7 +661,7 @@ fn a_process_wait_names_the_command_an_earlier_start_ran() {
             ),
             item(
                 Actor::Tool,
-                vec![Part::Result {
+                vec![TranscriptPart::Result {
                     lineage: None,
                     call_id: CALL.to_owned(),
                     succeeded: true,
@@ -643,7 +671,7 @@ fn a_process_wait_names_the_command_an_earlier_start_ran() {
             ),
             item(
                 Actor::Assistant,
-                vec![Part::Call {
+                vec![TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: WAIT.to_owned(),
@@ -654,7 +682,7 @@ fn a_process_wait_names_the_command_an_earlier_start_ran() {
             ),
             item(
                 Actor::Tool,
-                vec![Part::Result {
+                vec![TranscriptPart::Result {
                     lineage: None,
                     call_id: WAIT.to_owned(),
                     succeeded: true,
@@ -783,7 +811,7 @@ fn grok_calls_naming_a_child_read_as_the_await_and_the_interrupt() {
         &[item(
             Actor::Assistant,
             vec![
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: CALL.to_owned(),
@@ -791,7 +819,7 @@ fn grok_calls_naming_a_child_read_as_the_await_and_the_interrupt() {
                     exposed: "get_command_or_subagent_output",
                     observation: Some(&await_child),
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: KILL.to_owned(),
@@ -799,7 +827,7 @@ fn grok_calls_naming_a_child_read_as_the_await_and_the_interrupt() {
                     exposed: "kill_command_or_subagent",
                     observation: Some(&kill_child),
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: PROCESS.to_owned(),
@@ -831,7 +859,7 @@ fn grok_calls_naming_a_child_read_as_the_await_and_the_interrupt() {
     let leaf = rows_from_items(
         &[item(
             Actor::Assistant,
-            vec![Part::Call {
+            vec![TranscriptPart::Call {
                 composition_owner: None,
                 lineage: None,
                 call_id: CALL.to_owned(),
@@ -890,7 +918,7 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
         &[item(
             Actor::Assistant,
             vec![
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: CALL.to_owned(),
@@ -898,7 +926,7 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
                     exposed: "wait",
                     observation: Some(&wait),
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: BARE.to_owned(),
@@ -906,7 +934,7 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
                     exposed: "wait",
                     observation: Some(&bare),
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: STOP.to_owned(),
@@ -914,7 +942,7 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
                     exposed: "stop",
                     observation: Some(&stop),
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: CHILD.to_owned(),
@@ -965,7 +993,7 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
     let leaf = rows_from_items(
         &[item(
             Actor::Assistant,
-            vec![Part::Call {
+            vec![TranscriptPart::Call {
                 composition_owner: None,
                 lineage: None,
                 call_id: CHILD.to_owned(),
@@ -1017,7 +1045,7 @@ fn a_bare_pi_wait_that_ran_the_await_restores_as_the_await() {
                 [
                     item(
                         Actor::Assistant,
-                        vec![Part::Call {
+                        vec![TranscriptPart::Call {
                             composition_owner: None,
                             lineage: None,
                             call_id: (*call_id).to_owned(),
@@ -1028,7 +1056,7 @@ fn a_bare_pi_wait_that_ran_the_await_restores_as_the_await() {
                     ),
                     item(
                         Actor::Tool,
-                        vec![Part::Result {
+                        vec![TranscriptPart::Result {
                             lineage: None,
                             call_id: (*call_id).to_owned(),
                             succeeded: true,
@@ -1083,7 +1111,7 @@ fn a_restored_bare_wait_keeps_the_observation_subject_when_the_preview_drops_it(
             &[
                 item(
                     Actor::Assistant,
-                    vec![Part::Call {
+                    vec![TranscriptPart::Call {
                         composition_owner: None,
                         lineage: None,
                         call_id: CALL.to_owned(),
@@ -1094,7 +1122,7 @@ fn a_restored_bare_wait_keeps_the_observation_subject_when_the_preview_drops_it(
                 ),
                 item(
                     Actor::Tool,
-                    vec![Part::Result {
+                    vec![TranscriptPart::Result {
                         lineage: None,
                         call_id: CALL.to_owned(),
                         succeeded: true,
@@ -1134,7 +1162,7 @@ fn aliased_history_calls_are_labelled_by_exposed_name_and_classified_by_canonica
         &[item(
             Actor::Assistant,
             vec![
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: CALL.to_owned(),
@@ -1142,7 +1170,7 @@ fn aliased_history_calls_are_labelled_by_exposed_name_and_classified_by_canonica
                     exposed: "edit",
                     observation: Some(&edit),
                 },
-                Part::Call {
+                TranscriptPart::Call {
                     composition_owner: None,
                     lineage: None,
                     call_id: WRITE.to_owned(),
@@ -1256,7 +1284,7 @@ fn child_mail_riding_a_prompt_is_one_tree_row_per_child_not_part_of_the_user_row
         "do the task\n\n{frame}\n\n<child_message message_id=\"m1\" from=\"tree-c7\" purpose=\"finding\">\nsaw it\n</child_message>"
     );
     let rows = rows_from_items(
-        &[item(Actor::User, vec![Part::Text(&command)])],
+        &[item(Actor::User, vec![TranscriptPart::Text(&command)])],
         locator(),
         &[],
         false,

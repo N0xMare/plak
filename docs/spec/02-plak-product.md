@@ -1786,7 +1786,10 @@ window keep the ordinary pending rules.
 Operator notices are intents and survive any rebuild at their anchors.
 
 **Ordering product rows against runtime rows.** Every transcript row carries an
-immutable key (anchor, lane, ordinal), and the transcript is ordered by it.
+immutable `RowKey` (anchor, lane, ordinal), and the transcript is ordered by it.
+`RowKey` and its `Lane` vocabulary belong to `plakous-host-protocol`, shared
+by the hosted projector and presentation consumers; their stored encodings
+remain unchanged.
 A runtime-derived row's anchor is its record's sequence, lane 0, and its ordinal
 is its position among the rows that record derives. An operator notice's anchor
 is the cursor the authoring host had applied when it wrote the notice, lane 1,

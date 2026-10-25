@@ -11,9 +11,10 @@ use plakous::sessions::feed::{
     FeedItemsOutcome, FeedItemsRequest, FeedOperationKind, FeedOperationState, FeedRecord,
     FeedTerminalOutcome, FeedTerminalRequest, FeedTurnOutcome,
 };
-use plakous::sessions::{
-    AgentSessions, AgentSessionsError, SessionTranscriptItem, SessionTranscriptPart,
-};
+use plakous::sessions::{AgentSessions, AgentSessionsError, SessionTranscriptItem};
+
+mod transcript;
+pub(crate) use transcript::{TranscriptPart, TranscriptRead, transcript_tail};
 
 /// What a call read names.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -583,55 +584,51 @@ pub fn read_item(item: &SessionTranscriptItem) -> ReadItem {
             _ => ReadActor::Other,
         },
         harness_authored: item.is_harness_authored(),
-        parts: item.parts().iter().filter_map(read_part).collect(),
+        parts: transcript::transcript_parts(item, |_| None)
+            .filter_map(read_part)
+            .collect(),
     }
 }
 
-fn read_part(part: &SessionTranscriptPart) -> Option<ReadPart> {
+fn read_part(part: TranscriptPart<'_>) -> Option<ReadPart> {
     match part {
-        SessionTranscriptPart::Text(text) => Some(ReadPart::Text(text.clone())),
-        SessionTranscriptPart::Reasoning { visibility, text } => matches!(
+        TranscriptPart::Text(text) => Some(ReadPart::Text(text.to_owned())),
+        TranscriptPart::Reasoning { visibility, text } => matches!(
             visibility,
             ReasoningVisibility::Visible | ReasoningVisibility::Summary
         )
-        .then(|| ReadPart::Reasoning(text.clone())),
-        SessionTranscriptPart::ToolCall {
+        .then(|| ReadPart::Reasoning(text.to_owned())),
+        TranscriptPart::Call {
             call_id,
-            canonical_name,
-            exposed_name,
+            canonical,
+            exposed,
             observation,
             lineage,
+            ..
         } => Some(ReadPart::Call {
-            call_id: call_id.to_string(),
-            canonical: canonical_name.as_str().to_owned(),
-            exposed: exposed_name.as_str().to_owned(),
-            arguments: Some(observation.arguments_preview().to_owned()),
-            parent_call_id: lineage.parent_call_id().map(|parent| parent.to_string()),
-            cell_id: lineage.cell_id().map(str::to_owned),
-            subject: observation.subject().map(str::to_owned),
-        }),
-        SessionTranscriptPart::ToolResult {
             call_id,
-            observation,
+            canonical: canonical.to_owned(),
+            exposed: exposed.to_owned(),
+            arguments: observation.map(|observation| observation.arguments_preview().to_owned()),
+            parent_call_id: lineage
+                .and_then(|lineage| lineage.parent_call_id().map(|parent| parent.to_string())),
+            cell_id: lineage.and_then(|lineage| lineage.cell_id().map(str::to_owned)),
+            subject: observation.and_then(|observation| observation.subject().map(str::to_owned)),
+        }),
+        TranscriptPart::Result {
+            call_id,
+            succeeded,
+            preview,
             ..
         } => Some(ReadPart::Result {
-            call_id: call_id.to_string(),
+            call_id,
             result: ResultRead {
-                succeeded: observation.succeeded(),
-                text: observation.preview().to_owned(),
+                succeeded,
+                text: preview.to_owned(),
             },
         }),
-        SessionTranscriptPart::Compaction => Some(ReadPart::Compaction),
-        SessionTranscriptPart::Image {
-            media_type,
-            byte_len,
-            dimensions,
-        } => Some(ReadPart::Image(crate::sessions::image_chip(
-            media_type,
-            *byte_len,
-            *dimensions,
-        ))),
-        _ => None,
+        TranscriptPart::Compaction => Some(ReadPart::Compaction),
+        TranscriptPart::Image(chip) => Some(ReadPart::Image(chip)),
     }
 }
 

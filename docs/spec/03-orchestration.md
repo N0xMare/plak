@@ -4000,6 +4000,10 @@ after it, so the rows are exactly that history and the ops exactly that tail; no
 item committed before the cursor is in neither, none is sent twice, and what the
 tail cannot replay is marked with the same gap notice. Items map to the
 row types the root's live path writes: a non-harness user prompt is `User`,
+with inline images represented by the same metadata-only image chips as the
+root transcript. Root feed reads and child atomic-history reads use one hosted
+`SessionTranscriptPart` reader, preserving result subjects and composition
+lineage before their row projection;
 assistant text is `Assistant`, reasoning is `Thinking` under the root's
 visibility gate, each call joined with its result by call id is one `Tool` row
 whose subject, detail, state and wait facts come from the functions the root's

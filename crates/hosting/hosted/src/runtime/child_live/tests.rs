@@ -208,7 +208,8 @@ fn tool_lifecycle_event(
 
 #[test]
 fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
-    use crate::runtime::agent_transcript::{Item, Part, rows_from_items};
+    use crate::runtime::agent_transcript::rows_from_items;
+    use crate::sessions::projector::{TranscriptPart, TranscriptRead};
     use plakous::agent::ToolCallerLineageView;
     use plakous::model::Actor;
     let parent = uuid::Uuid::from_u128(1).to_string();
@@ -263,10 +264,10 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
     );
     let rows = rows_from_items(
         &[
-            Item {
+            TranscriptRead {
                 actor: Actor::Assistant,
                 harness_authored: false,
-                parts: vec![Part::Call {
+                parts: vec![TranscriptPart::Call {
                     call_id: parent.clone(),
                     canonical: "exec",
                     exposed: "exec",
@@ -275,10 +276,10 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
                     composition_owner: None,
                 }],
             },
-            Item {
+            TranscriptRead {
                 actor: Actor::Tool,
                 harness_authored: false,
-                parts: vec![Part::Result {
+                parts: vec![TranscriptPart::Result {
                     call_id: parent.clone(),
                     succeeded: true,
                     preview: "Script running with cell ID cell-7",
@@ -286,10 +287,10 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
                     lineage: Some(&marker),
                 }],
             },
-            Item {
+            TranscriptRead {
                 actor: Actor::Assistant,
                 harness_authored: false,
-                parts: vec![Part::Call {
+                parts: vec![TranscriptPart::Call {
                     call_id: wait.clone(),
                     canonical: "wait",
                     exposed: "wait",
@@ -298,10 +299,10 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
                     composition_owner: Some(parent.clone()),
                 }],
             },
-            Item {
+            TranscriptRead {
                 actor: Actor::Tool,
                 harness_authored: false,
-                parts: vec![Part::Result {
+                parts: vec![TranscriptPart::Result {
                     call_id: wait,
                     succeeded: true,
                     preview: "Script completed",
@@ -342,7 +343,8 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
 
 #[test]
 fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
-    use crate::runtime::agent_transcript::{Item, Part, rows_from_items};
+    use crate::runtime::agent_transcript::rows_from_items;
+    use crate::sessions::projector::{TranscriptPart, TranscriptRead};
     use plakous::agent::{ToolCallObservation, ToolCallerLineageView};
     use plakous::model::{Actor, ToolCallerLineage};
     let parent = uuid::Uuid::from_u128(1).to_string();
@@ -407,11 +409,11 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
         };
         let rows = rows_from_items(
             &[
-                Item {
+                TranscriptRead {
                     actor: Actor::Assistant,
                     harness_authored: false,
                     parts: vec![
-                        Part::Call {
+                        TranscriptPart::Call {
                             call_id: parent.clone(),
                             canonical: "exec",
                             exposed: "exec",
@@ -419,7 +421,7 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
                             lineage: Some(&marker),
                             composition_owner: None,
                         },
-                        Part::Call {
+                        TranscriptPart::Call {
                             call_id: call_id.clone(),
                             canonical: "read_file",
                             exposed: "read_file",
@@ -429,10 +431,10 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
                         },
                     ],
                 },
-                Item {
+                TranscriptRead {
                     actor: Actor::Tool,
                     harness_authored: false,
-                    parts: vec![Part::Result {
+                    parts: vec![TranscriptPart::Result {
                         call_id: call_id.clone(),
                         succeeded,
                         preview: "read result",

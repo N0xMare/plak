@@ -6,12 +6,9 @@
 
 use std::collections::HashMap;
 
-use plakous::agent::{ToolCallObservation, ToolCallerClass, ToolCallerLineageView};
-use plakous::model::{Actor, ReasoningVisibility};
-use plakous::sessions::{
-    AgentSessions, SessionLocator, SessionTranscriptPart, SessionTranscriptSource,
-    SessionTranscriptTail,
-};
+use plakous::agent::{ToolCallerClass, ToolCallerLineageView};
+use plakous::model::Actor;
+use plakous::sessions::{AgentSessions, SessionLocator, SessionTranscriptSource};
 use plakous_host_protocol::views::ProcessView;
 use plakous_host_protocol::views::presentation::{
     MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, row_bytes,
@@ -23,104 +20,17 @@ use super::events::{
     completed_tool_summary, live_tool_subject, reasoning_visibility_admits,
     settled_process_wait_subject, started_tool_text,
 };
+use crate::sessions::projector::{TranscriptPart, TranscriptRead, transcript_tail};
 use crate::sessions::{NoticeScope, ToolItem, TranscriptRow, bound_row};
 
 /// A call whose result is not in committed history did not finish there.
 const UNSETTLED_STATE: &str = "interrupted";
 
-/// One presentation part, as the row mapping reads it.
-pub(super) enum Part<'a> {
-    Text(&'a str),
-    Reasoning {
-        visibility: ReasoningVisibility,
-        text: &'a str,
-    },
-    Call {
-        call_id: String,
-        /// Canonical executable name: classification follows it.
-        canonical: &'a str,
-        /// Exact name the model called: the row is labelled by it.
-        exposed: &'a str,
-        observation: Option<&'a ToolCallObservation>,
-        lineage: Option<&'a ToolCallerLineageView>,
-        composition_owner: Option<String>,
-    },
-    Result {
-        call_id: String,
-        succeeded: bool,
-        preview: &'a str,
-        /// The result observation's subject, when it carried one.
-        subject: Option<&'a str>,
-        lineage: Option<&'a ToolCallerLineageView>,
-    },
-    Compaction,
-}
-
-/// One committed item, as the row mapping reads it.
-pub(super) struct Item<'a> {
-    pub(super) actor: Actor,
-    pub(super) harness_authored: bool,
-    pub(super) parts: Vec<Part<'a>>,
-}
-
-fn items(tail: &SessionTranscriptTail) -> Vec<Item<'_>> {
-    tail.items()
-        .iter()
-        .map(|item| Item {
-            actor: item.actor(),
-            harness_authored: item.is_harness_authored(),
-            parts: item
-                .parts()
-                .iter()
-                .filter_map(|part| match part {
-                    SessionTranscriptPart::Text(text) => Some(Part::Text(text)),
-                    SessionTranscriptPart::Reasoning { visibility, text } => {
-                        Some(Part::Reasoning {
-                            visibility: *visibility,
-                            text,
-                        })
-                    }
-                    SessionTranscriptPart::ToolCall {
-                        call_id,
-                        canonical_name,
-                        exposed_name,
-                        observation,
-                        lineage,
-                    } => Some(Part::Call {
-                        call_id: call_id.to_string(),
-                        canonical: canonical_name.as_str(),
-                        exposed: exposed_name.as_str(),
-                        observation: Some(observation),
-                        lineage: Some(lineage),
-                        composition_owner: tail
-                            .composition_owner(*call_id)
-                            .filter(|owner| owner != call_id)
-                            .map(|owner| owner.to_string()),
-                    }),
-                    SessionTranscriptPart::ToolResult {
-                        call_id,
-                        observation,
-                        lineage,
-                    } => Some(Part::Result {
-                        call_id: call_id.to_string(),
-                        succeeded: observation.succeeded(),
-                        preview: observation.preview(),
-                        subject: observation.subject(),
-                        lineage: Some(lineage),
-                    }),
-                    SessionTranscriptPart::Compaction => Some(Part::Compaction),
-                    _ => None,
-                })
-                .collect(),
-        })
-        .collect()
-}
-
 /// Maps committed items to rows, oldest first. `locator` is the session the
 /// items belong to, for a process call's subject; `processes` is the job
 /// registry as the host sees it now.
 pub(super) fn rows_from_items(
-    items: &[Item<'_>],
+    items: &[TranscriptRead<'_>],
     locator: SessionLocator,
     processes: &[ProcessView],
     task_tools: bool,
@@ -134,13 +44,19 @@ pub(super) fn rows_from_items(
         let mut text = String::new();
         for (block_index, part) in item.parts.iter().enumerate() {
             match part {
-                Part::Text(value) => {
+                TranscriptPart::Text(value) => {
                     if !text.is_empty() {
                         text.push('\n');
                     }
                     text.push_str(value);
                 }
-                Part::Reasoning {
+                TranscriptPart::Image(value) => {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(value);
+                }
+                TranscriptPart::Reasoning {
                     visibility,
                     text: value,
                 } => {
@@ -153,7 +69,7 @@ pub(super) fn rows_from_items(
                         }));
                     }
                 }
-                Part::Call {
+                TranscriptPart::Call {
                     call_id,
                     canonical,
                     exposed,
@@ -245,7 +161,7 @@ pub(super) fn rows_from_items(
                         wait: super::tool_facts::wait_started(tool, label, args.as_ref()),
                     }));
                 }
-                Part::Result {
+                TranscriptPart::Result {
                     call_id,
                     succeeded,
                     preview,
@@ -297,7 +213,7 @@ pub(super) fn rows_from_items(
                         _ => {}
                     }
                 }
-                Part::Compaction => {
+                TranscriptPart::Compaction => {
                     flush_text(&mut rows, item, &mut text);
                     rows.push(TranscriptRow::Tool(ToolItem {
                         call_id: format!("compaction-{item_index}"),
@@ -404,7 +320,7 @@ fn settle(tool: &mut ToolItem, succeeded: bool, preview: &str, wait_ids: Option<
 
 /// Inbound mail is one tree notice, a prompt's child-mail batch one per
 /// child; a harness note is not the operator's.
-fn flush_text(rows: &mut Vec<TranscriptRow>, item: &Item<'_>, text: &mut String) {
+fn flush_text(rows: &mut Vec<TranscriptRow>, item: &TranscriptRead<'_>, text: &mut String) {
     if text.trim().is_empty() {
         text.clear();
         return;
@@ -527,7 +443,12 @@ fn rows_within(
     max_bytes: usize,
 ) -> Vec<TranscriptRow> {
     let tail = source.tail(max_items, max_bytes);
-    let rows = rows_from_items(&items(&tail), tail.locator(), processes, task_tools);
+    let rows = rows_from_items(
+        &transcript_tail(&tail),
+        tail.locator(),
+        processes,
+        task_tools,
+    );
     bound_rows(rows, tail.truncated(), max_rows, max_bytes)
 }
 
