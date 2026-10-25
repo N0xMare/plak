@@ -9,6 +9,27 @@ use crate::session_store::{MemoryStore, SessionRecordStore as _};
 use crate::sessions::QueueItem;
 
 #[test]
+fn root_ledger_prechange_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = MemoryRows::new();
+    let mut session = SessionRecord::new(dir.path().to_owned());
+    let mut item = QueueItem::new("continue");
+    item.id = "00000000-0000-4000-8000-000000000001".into();
+    item.submitted_at_ms = 42;
+    rows.records().save(&mut session).unwrap();
+    let prepared = prepare_with_command(&rows, rows.records(), &session, &item,
+        "continue", None, "plak:resume-transient:failed-turn").unwrap();
+    let intents = rows.records().load_intents(&prepared.id).unwrap();
+    let submission = intents.submission("plak:resume-transient:failed-turn").unwrap();
+    assert_eq!(serde_json::to_string(&serde_json::json!({
+        "command_id": submission.command_id, "kind": submission.kind.as_str(),
+        "queue_item_id": submission.queue_item_id, "queue_item_revision": submission.queue_item_revision,
+        "target_turn_id": submission.target_turn_id, "canonical_command": submission.canonical_command,
+        "submitted_at_ms": submission.submitted_at_ms,
+    })).unwrap(), r#"{"canonical_command":"continue","command_id":"plak:resume-transient:failed-turn","kind":"root_start","queue_item_id":"00000000-0000-4000-8000-000000000001","queue_item_revision":1,"submitted_at_ms":42,"target_turn_id":null}"#);
+}
+
+#[test]
 fn exact_wait_head_seed_refuses_a_head_move_after_history_load() {
     use plakous::sessions::feed::FeedRecord;
     let locator: plakous::sessions::SessionLocator =

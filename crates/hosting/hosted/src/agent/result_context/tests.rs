@@ -4,6 +4,31 @@ use super::*;
 use crate::agent_tree::{ProductAgentTree, TreeStore as _};
 use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
 
+#[test]
+fn child_ledger_prechange_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut tree, child) = root_with_child(dir.path(), "ledger-bytes");
+    tree.send_agent_message("root", &parent_mail(&child, "standing instruction"), None).unwrap();
+    let driver = TreeDriver::new(
+        std::sync::Arc::new(std::sync::Mutex::new(tree.clone())),
+        std::sync::Arc::new(crate::agent_tree::MemoryTreeStore::new()),
+        tree.vcs_port(), None,
+    );
+    let id = format!("plak:park-wake:{child}:1:attempt:2");
+    let prepared = prepare(&driver, &child, &id, "continue").unwrap();
+    let bytes = driver.read(|tree| {
+        let row = tree.command(&id).unwrap();
+        serde_json::to_string(&serde_json::json!({
+            "command_id": row.command_id, "recipient": row.recipient,
+            "attempt_id": row.attempt_id, "kind": row.kind, "text": row.text,
+            "message_ids": row.message_ids, "withdrawn": row.withdrawn,
+            "fact": row.fact, "turn_id": row.turn_id, "accepted_seq": row.accepted_seq,
+        })).unwrap()
+    }).unwrap();
+    assert_eq!(prepared.prompt, "continue\n\nMessage:\nstanding instruction");
+    assert_eq!(bytes, r#"{"accepted_seq":null,"attempt_id":"attempt","command_id":"plak:park-wake:c1:1:attempt:2","fact":null,"kind":"wake","message_ids":["m1"],"recipient":"c1","text":"continue\n\nMessage:\nstanding instruction","turn_id":null,"withdrawn":false}"#);
+}
+
 struct SecondSaveStore {
     inner: crate::agent_tree::MemoryTreeStore,
     saves: std::sync::atomic::AtomicUsize,
