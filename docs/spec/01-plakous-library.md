@@ -6403,9 +6403,19 @@ allocation, so a truncated length, an oversize length and an unterminated
 body are all loss. The worker opens with a `Hello` naming the protocol
 revision, engine and adapter; the client refuses any other worker before it
 sends its one `Configure` (the engine's heap and stack limits). Any refused
-worker — wrong or malformed `Hello`, no `Hello` within 10 s, or a failed
-`Configure` — is killed and reaped within the two-second settle bound, or is
-reported unreaped. A worker refuses a `Configure` naming other limits,
+worker — wrong or malformed `Hello`, EOF before or during it, no `Hello`
+within 10 s, or a failed `Configure` — is killed and reaped within the
+two-second settle bound, or is reported unreaped. The same ten-second
+handshake deadline covers reading `Hello` and writing `Configure`; it is
+not renewed between those steps. Startup returns a typed `CellStartupError`
+naming the cause and asking to reinstall the matching `plakous-js-host` or
+`plakous-py-host`. A deadline failure instead says the worker did not answer
+within 10 s and advises retrying if the host is overloaded, otherwise
+reinstalling the matching worker. Worker-supplied revision, engine and adapter
+strings echoed in refusal diagnostics are capped at 64 UTF-8 bytes each.
+No cell source is dispatched: the outer tool and root turn
+fail definitively, rather than waiting for cell events or requiring recovery.
+A worker refuses a `Configure` naming other limits,
 and a repeated one, with `HostLost{ProtocolViolation}` and exits. Every later
 frame names its cell. A nested-call input or result nests at most 40
 containers deep, so its tagged frame stays within the JSON decoder's

@@ -4,11 +4,12 @@ use std::{collections::HashMap, path::Path, process::Stdio, sync::Arc, time::Dur
 
 use tokio::{
     io::AsyncWriteExt,
-    process::{Child, Command},
+    process::{Child, ChildStdin, ChildStdout, Command},
     sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch},
     task::JoinHandle,
 };
 
+use crate::CellStartupError;
 use crate::frame::{MAX_FRAME_BYTES, encode_frame, read_frame};
 use crate::protocol::{
     CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict, EngineConfig,
@@ -42,7 +43,7 @@ pub struct WorkerStop {
 pub const MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
 /// Shutdown includes cancelable I/O and a bounded child reap.
 pub const WORKER_SHUTDOWN_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
-/// How long a spawned worker has to send `Hello`.
+/// How long a spawned worker has to send `Hello` and receive `Configure`.
 pub const WORKER_HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const QUEUE_ITEMS: usize = 64;
 /// Outstanding host commands a queue holds before it is a genuine resource limit.
@@ -183,7 +184,7 @@ impl CellClient {
         program: &Path,
         expected: WorkerIdentity,
         engine: EngineConfig,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, CellStartupError> {
         Self::spawn_within(program, expected, engine, WORKER_HELLO_TIMEOUT).await
     }
 
@@ -192,10 +193,11 @@ impl CellClient {
         expected: WorkerIdentity,
         engine: EngineConfig,
         hello_bound: Duration,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, CellStartupError> {
+        let failure = |cause| CellStartupError::new(expected, cause);
         // Check the task owner before creating a process; construction never
         // hands off a child without its I/O supervision.
-        let runtime = tokio::runtime::Handle::try_current().map_err(|e| e.to_string())?;
+        let runtime = tokio::runtime::Handle::try_current().map_err(|e| failure(e.to_string()))?;
         let mut child = Command::new(program)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -204,29 +206,21 @@ impl CellClient {
             .env("PATH", "/usr/bin:/bin")
             .kill_on_drop(true)
             .spawn()
-            .map_err(|e| format!("failed to spawn cell worker: {e}"))?;
-        let pid = child.id().ok_or("cell worker pid missing")?;
-        let mut stdin = child.stdin.take().ok_or("cell worker stdin missing")?;
-        let mut stdout = child.stdout.take().ok_or("cell worker stdout missing")?;
-        let hello =
-            tokio::time::timeout(hello_bound, read_frame(&mut stdout, MAX_FRAME_BYTES)).await;
-        let hello = match hello {
-            Ok(Ok(Some(frame))) => serde_json::from_slice::<WorkerFrame>(&frame)
-                .map_err(|_| "cell worker sent a malformed hello".to_owned()),
-            Ok(Ok(None)) => Err("cell worker closed before hello".to_owned()),
-            Ok(Err(error)) => Err(error),
-            Err(_) => Err("cell worker did not say hello in time".to_owned()),
-        }
-        .and_then(|frame| check_hello(&frame, expected));
-        if let Err(error) = hello {
+            .map_err(|e| failure(format!("failed to spawn cell worker: {e}")))?;
+        let pid = child
+            .id()
+            .ok_or_else(|| failure("cell worker pid missing".into()))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| failure("cell worker stdin missing".into()))?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| failure("cell worker stdout missing".into()))?;
+        if let Err(error) = handshake(&mut stdin, &mut stdout, expected, engine, hello_bound).await
+        {
             return Err(refuse(&mut child, error).await);
-        }
-        let configure = encode_frame(&HostFrame::Configure {
-            revision: CELL_PROTOCOL_REVISION.to_owned(),
-            engine,
-        })?;
-        if let Err(error) = stdin.write_all(&configure).await {
-            return Err(refuse(&mut child, format!("cell worker configure failed: {error}")).await);
         }
         let (commands, mut command_rx) = mpsc::channel::<Vec<u8>>(COMMAND_QUEUE_ITEMS);
         let (event_tx, events) = mpsc::channel(QUEUE_ITEMS);
@@ -541,13 +535,49 @@ impl Drop for CellClient {
     }
 }
 
+async fn handshake(
+    stdin: &mut ChildStdin,
+    stdout: &mut ChildStdout,
+    expected: WorkerIdentity,
+    engine: EngineConfig,
+    bound: Duration,
+) -> Result<(), CellStartupError> {
+    let failure = |cause| CellStartupError::new(expected, cause);
+    let deadline = tokio::time::Instant::now() + bound;
+    let hello = tokio::time::timeout_at(deadline, read_frame(stdout, MAX_FRAME_BYTES)).await;
+    let frame = match hello {
+        Ok(Ok(Some(frame))) => serde_json::from_slice::<WorkerFrame>(&frame)
+            .map_err(|_| failure("cell worker sent a malformed hello".into())),
+        Ok(Ok(None)) => Err(failure("cell worker closed before hello".into())),
+        Ok(Err(error)) => Err(failure(error)),
+        Err(_) => Err(CellStartupError::timeout(
+            expected,
+            "cell worker did not say hello in time".into(),
+        )),
+    }?;
+    check_hello(&frame, expected).map_err(failure)?;
+    let configure = encode_frame(&HostFrame::Configure {
+        revision: CELL_PROTOCOL_REVISION.to_owned(),
+        engine,
+    })
+    .map_err(failure)?;
+    match tokio::time::timeout_at(deadline, stdin.write_all(&configure)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(failure(format!("cell worker configure failed: {error}"))),
+        Err(_) => Err(CellStartupError::timeout(
+            expected,
+            "cell worker configure timed out".into(),
+        )),
+    }
+}
+
 /// Kills a worker refused before it was configured, and reaps it within the
 /// settle bound.
-async fn refuse(child: &mut Child, error: String) -> String {
+async fn refuse(child: &mut Child, error: CellStartupError) -> CellStartupError {
     let _ = child.start_kill();
     match tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await {
         Ok(Ok(_)) => error,
-        _ => format!("{error}; cell worker remained unreaped after kill deadline"),
+        _ => error.unreaped(),
     }
 }
 
@@ -564,20 +594,36 @@ fn check_hello(frame: &WorkerFrame, expected: WorkerIdentity) -> Result<(), Stri
             Ok(())
         }
         WorkerFrame::Hello { revision, .. } if revision != CELL_PROTOCOL_REVISION => Err(format!(
-            "cell worker speaks {revision}, not {CELL_PROTOCOL_REVISION}"
+            "cell worker speaks {}, not {CELL_PROTOCOL_REVISION}",
+            hello_diagnostic(revision)
         )),
         WorkerFrame::Hello {
             engine, adapter, ..
         } => Err(format!(
-            "cell worker is {engine}/{adapter}, not {}/{}",
-            expected.engine, expected.adapter
+            "cell worker is {}/{}, not {}/{}",
+            hello_diagnostic(engine),
+            hello_diagnostic(adapter),
+            expected.engine,
+            expected.adapter
         )),
         _ => Err("cell worker did not open with hello".into()),
     }
 }
 
+fn hello_diagnostic(value: &str) -> String {
+    const LIMIT: usize = 64;
+    if value.len() <= LIMIT {
+        return value.to_owned();
+    }
+    let mut end = LIMIT - 3;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &value[..end])
+}
+
 async fn read_worker(
-    mut stdout: tokio::process::ChildStdout,
+    mut stdout: ChildStdout,
     mut reader_stop: watch::Receiver<bool>,
     loss_tx: watch::Sender<Option<String>>,
     event_tx: mpsc::Sender<QueuedEvent>,
@@ -721,7 +767,7 @@ mod tests {
             started.elapsed() < bound + WORKER_SHUTDOWN_SETTLE_TIMEOUT,
             "{error}"
         );
-        error
+        error.to_string()
     }
 
     #[tokio::test]
@@ -748,6 +794,38 @@ mod tests {
         for (opening, expected) in cases {
             let error = refusal(&opening, Duration::from_secs(10)).await;
             assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn incompatible_hello_diagnostics_bound_worker_supplied_fields() {
+        let oversized = format!("{}DO_NOT_ECHO", "λ".repeat(100));
+        for (revision, engine, adapter) in [
+            (
+                oversized.as_str(),
+                QUICKJS_WORKER.engine,
+                QUICKJS_WORKER.adapter,
+            ),
+            (
+                CELL_PROTOCOL_REVISION,
+                oversized.as_str(),
+                QUICKJS_WORKER.adapter,
+            ),
+            (
+                CELL_PROTOCOL_REVISION,
+                QUICKJS_WORKER.engine,
+                oversized.as_str(),
+            ),
+        ] {
+            let frame = WorkerFrame::Hello {
+                revision: revision.into(),
+                engine: engine.into(),
+                adapter: adapter.into(),
+            };
+            let error = check_hello(&frame, QUICKJS_WORKER).expect_err("incompatible worker");
+            assert!(error.len() < 256, "diagnostic has {} bytes", error.len());
+            assert!(error.contains("..."));
+            assert!(!error.contains("DO_NOT_ECHO"));
         }
     }
 

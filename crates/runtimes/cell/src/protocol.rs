@@ -19,6 +19,7 @@ pub const CELL_PROTOCOL_REVISION: &str = "plakous-cell-protocol.v1";
 /// version its engine contract records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WorkerIdentity {
+    pub binary: &'static str,
     pub engine: &'static str,
     pub version: &'static str,
     pub adapter: &'static str,
@@ -26,6 +27,7 @@ pub struct WorkerIdentity {
 
 /// The `QuickJS` worker, `plakous-js-host`.
 pub const QUICKJS_WORKER: WorkerIdentity = WorkerIdentity {
+    binary: "plakous-js-host",
     engine: "quickjs",
     version: "rquickjs-0.12",
     adapter: "plakous-js-host-bootstrap.v7",
@@ -33,6 +35,7 @@ pub const QUICKJS_WORKER: WorkerIdentity = WorkerIdentity {
 
 /// The Monty worker, `plakous-py-host`.
 pub const MONTY_WORKER: WorkerIdentity = WorkerIdentity {
+    binary: "plakous-py-host",
     engine: "monty",
     version: "1.2.0",
     adapter: "plakous.monty-python-adapter.v8",

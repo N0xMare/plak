@@ -9008,6 +9008,8 @@ mod durability {
     }
 }
 
+#[path = "offline_e2e/cell_startup.rs"]
+mod cell_startup;
 #[path = "offline_e2e/running_root_waits.rs"]
 mod running_root_waits;
 #[path = "offline_e2e/tui_view_parity.rs"]

@@ -10,6 +10,9 @@ mod frame;
 mod process_resources;
 mod protocol;
 mod session;
+mod startup;
+
+pub use startup::CellStartupError;
 
 pub use client::{
     COMMAND_QUEUE_ITEMS, CellClient, CellEvent, ChildProcessUsage, MAX_QUEUED_BYTES,

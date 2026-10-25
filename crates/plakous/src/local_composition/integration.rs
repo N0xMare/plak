@@ -111,7 +111,9 @@ impl LocalCompositionIntegration for CellIntegration {
             self.presentation
                 .verify_worker(&self.worker, &self.identity)?;
             let (expected, config) = self.presentation.worker();
-            let client = CellClient::spawn(&self.worker, expected, config).await?;
+            let client = CellClient::spawn(&self.worker, expected, config)
+                .await
+                .map_err(|error| error.to_string())?;
             Ok(session_bundle(
                 Arc::new(client),
                 self.presentation.session_engine(),

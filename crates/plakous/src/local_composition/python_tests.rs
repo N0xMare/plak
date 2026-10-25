@@ -157,7 +157,9 @@ async fn python_session_within(
     request_bound: Duration,
 ) -> Result<LocalCompositionSessionBundle, String> {
     let bootstrap = fixture_bootstrap(&bindings).map_err(|error| error.to_string())?;
-    let client = CellClient::spawn(worker, MONTY_WORKER, EngineConfig::MONTY).await?;
+    let client = CellClient::spawn(worker, MONTY_WORKER, EngineConfig::MONTY)
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(session_bundle(
         Arc::new(client),
         Box::new(Monty::new(bootstrap, request_bound)),

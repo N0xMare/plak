@@ -29,6 +29,7 @@ impl Worker {
         CellClient::spawn(program, WORKER, EngineConfig::QUICKJS)
             .await
             .map(Self)
+            .map_err(|error| error.to_string())
     }
 
     fn child_id(&self) -> Option<u32> {
