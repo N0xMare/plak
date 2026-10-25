@@ -495,10 +495,7 @@ struct CompositionContinuationRequest {
 }
 
 fn composition_child_call_id(binding: Digest) -> Result<CallId, RuntimeManifestError> {
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&binding.bytes()[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let bytes = crate::derived_id::bytes(binding);
     CallId::try_from(uuid::Uuid::from_bytes(bytes)).map_err(|_| RuntimeManifestError::InvalidLedger)
 }
 

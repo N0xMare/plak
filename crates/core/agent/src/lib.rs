@@ -67,6 +67,7 @@ mod checkpoint_bundle;
 mod compaction_verdict;
 mod context_source;
 mod control;
+mod derived_id;
 mod error;
 mod event;
 mod facade_support;

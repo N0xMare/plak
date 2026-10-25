@@ -2295,10 +2295,7 @@ fn turn_note_bytes(turn_id: TurnId, domain: &[u8]) -> Option<[u8; 16]> {
         &[domain, turn_id.as_uuid().as_bytes()],
     )
     .ok()?;
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest.bytes()[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let bytes = crate::derived_id::bytes(digest);
     Some(bytes)
 }
 

@@ -50,12 +50,7 @@ pub(in crate::runtime) fn deterministic_checkpoint_id(
             "in-memory checkpoint identity could not be derived",
         )
     })?;
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest.bytes()[..16]);
-    // RFC 9562 UUIDv8: deterministic application-defined bytes with the
-    // standard version and variant bits set explicitly.
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let bytes = crate::derived_id::bytes(digest);
     CheckpointId::try_from(uuid::Uuid::from_bytes(bytes))
         .map_err(|error| AgentError::from_identity(&error))
 }

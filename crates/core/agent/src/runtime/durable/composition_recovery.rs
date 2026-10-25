@@ -235,10 +235,7 @@ fn code_cell_abandonment_entry_id(workflow: Digest, role: &[u8]) -> Result<Entry
         ],
     )
     .map_err(|_| AgentError::new(AgentErrorKind::Identity, "Code Cell entry identity failed"))?;
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest.bytes()[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let bytes = crate::derived_id::bytes(digest);
     EntryId::try_from(uuid::Uuid::from_bytes(bytes))
         .map_err(|error| AgentError::from_identity(&error))
 }
