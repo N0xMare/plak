@@ -1,7 +1,7 @@
 //! Process-group termination and setup-failure cleanup.
 
 #[cfg(target_os = "macos")]
-use super::{Command, Stdio, set_nonblocking};
+mod macos_group_snapshot;
 use super::{
     Duration, Errno, ExecutionBackendError, Instant, JoinedSessionShared, LeftoverJob, Mutex,
     io_error, lock, sleep_until_next_poll,
@@ -278,7 +278,19 @@ impl GroupProbe {
             .checked
             .is_none_or(|at| at.elapsed() >= Duration::from_millis(250))
         {
-            self.count = live_group_members(self.group);
+            #[cfg(target_os = "linux")]
+            {
+                self.count = live_group_members(self.group);
+            }
+            #[cfg(target_os = "macos")]
+            {
+                // The first query follows leader-exit observation. A snapshot
+                // from before that query could still count the live leader,
+                // delaying a short command by an entire polling interval.
+                // Resetting `checked` for KILL also fences the new phase.
+                let fresh_since = self.checked.unwrap_or_else(Instant::now);
+                self.count = macos_group_snapshot::members(self.group, fresh_since).unwrap_or(1);
+            }
             self.checked = Some(Instant::now());
         }
         self.count
@@ -316,6 +328,7 @@ pub(super) fn observe_leftover_group(
 
 // Zombies cannot run or receive signals. In particular, an orphaned zombie
 // waiting for the host's init must not keep a server job alive forever.
+#[cfg(target_os = "linux")]
 fn live_group_members(group: rustix::process::Pid) -> usize {
     if !process_group_exists(group) {
         return 0;
@@ -418,64 +431,6 @@ mod tests {
         }
         assert_eq!(super::live_group_members(pid), 0);
     }
-}
-
-#[cfg(target_os = "macos")]
-fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
-    let mut child = Command::new("/bin/ps")
-        .args(["-axo", "pgid=,stat="])
-        .env_clear()
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut output = Vec::new();
-    let collected = (|| {
-        let mut stdout = child.stdout.take()?;
-        set_nonblocking(&stdout).ok()?;
-        let deadline = Instant::now() + Duration::from_millis(100);
-        let mut buffer = [0; 4096];
-        loop {
-            match std::io::Read::read(&mut stdout, &mut buffer) {
-                Ok(0) => break,
-                Ok(count) => output.extend_from_slice(&buffer[..count]),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(_) => return None,
-            }
-            if output.len() > 1_048_576 || Instant::now() >= deadline {
-                return None;
-            }
-        }
-        loop {
-            if let Some(status) = child.try_wait().ok()? {
-                return status.success().then_some(status);
-            }
-            if Instant::now() >= deadline {
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    })();
-    if collected.is_none() {
-        let _ = child.kill();
-        let _ = child.wait();
-        return None;
-    }
-    Some(
-        String::from_utf8(output)
-            .ok()?
-            .lines()
-            .filter(|line| {
-                let mut fields = line.split_whitespace();
-                fields.next().and_then(|pgid| pgid.parse::<i32>().ok()) == Some(group.as_raw_pid())
-                    && fields.next().is_some_and(|state| !state.starts_with('Z'))
-            })
-            .count(),
-    )
 }
 
 pub(in crate::environment::backend) fn process_group_exists(

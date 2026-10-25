@@ -5223,7 +5223,17 @@ Leader exit is observed with waitid WNOWAIT; the unreaped leader pins the PGID
 until no live group members remain, or ownership is explicitly relinquished.
 Ordinary polls use killpg(0), treating EPERM as present; per-owner live-member
 scans for classification/zombies are limited to one per 250 ms except a new
-termination phase. Literal one-shot execution is not a joined shell/job operation and retains its
+termination phase. On macOS, concurrent probes share one bounded, complete
+`ps` snapshot across groups instead of spawning one scanner per group. A probe
+requires a snapshot begun after its first membership query (following leader
+exit observation) or previous polling phase;
+starting a new termination phase invalidates its previous observation. Failed,
+truncated or malformed snapshots leave membership unknown, never empty.
+The scanner's own process group must be visible in a successful snapshot;
+empty output or a missing visibility anchor cannot prove absence. Scanner rollback
+polls for bounded reaping, then hands an unreaped helper to a detached reaper
+instead of blocking all shared probes on its exit.
+Literal one-shot execution is not a joined shell/job operation and retains its
 bounded process-group cleanup contract.
 
 Promoted jobs survive turn and cell cleanup. They stop only on explicit

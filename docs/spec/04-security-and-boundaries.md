@@ -335,6 +335,12 @@ not merely that the shell exited; zombies are not running work. On Linux,
 member scans read process names as bytes, so a non-UTF-8 name does not hide a
 live member. An incomplete directory scan or malformed status leaves group
 membership unknown and is treated as live, not as proof of completion.
+macOS probes share bounded process-group snapshots across concurrent owners;
+only a complete successful scan can prove absence, and a new owner or
+termination phase cannot reuse a snapshot from its preceding phase.
+A snapshot missing the scanner's own process group remains unknown, even
+after a successful scanner exit; scanner reaping never blocks shared probes
+indefinitely.
 Explicit stop, session release, attempt end and the hard cap terminate the
 group. Escaping the group with `setsid` or double-forking remains outside this
 ownership boundary.
