@@ -100,6 +100,7 @@ pub mod store;
 pub mod telemetry {
     pub mod topology;
 }
+mod observation_projection;
 #[cfg(feature = "otel")]
 mod otel_bridge;
 #[cfg(all(test, unix))]

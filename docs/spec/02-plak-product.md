@@ -425,7 +425,10 @@ recorded head refuses with the actual projector or store failure, not lease
 contention or recovery-required. Retrying a deterministic projector error is
 not a recovery remedy; the reported failure must be repaired.
 
-Deleting a telemetry file loses analytics and nothing else. Each schema has
+Deleting a telemetry file loses analytics and nothing else. Telemetry rows and
+exported OTel span attributes come from one content-free projection of each
+observation; SQLite pairing and upserts, and OTel span identity, parentage and
+TTFT buffering, belong to the respective sinks. Each schema has
 its own `telemetry/telemetry-v<schema>.sqlite3`; writers never drop or rewrite
 another schema's data. Old schema files and the legacy `telemetry.sqlite3` are
 left alone and reported by `plak doctor`. Removal stays explicit; there is no

@@ -1,6 +1,7 @@
 use super::tests::{TestResult, all_observations, fixture_context, fixture_timestamp};
 use super::*;
-use plakous::agent::TurnUsage;
+use plakous::agent::{TelemetryObservationKind, TurnUsage};
+use plakous::model::Usage;
 use std::sync::Arc;
 
 use crate::store::session_records::{SessionRecordStore, SqliteSessionStore};

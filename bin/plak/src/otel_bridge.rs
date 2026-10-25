@@ -57,6 +57,9 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::observation_projection::{
+    AttributeValue, Output, SpanIdentity, SpanTiming, SyntheticKind,
+};
 use crate::telemetry_store::TelemetryItem;
 use opentelemetry::trace::{SpanKind, Status, TraceFlags, TraceState};
 use opentelemetry::{InstrumentationScope, KeyValue};
@@ -64,11 +67,12 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{
     BatchSpanProcessor, SpanData, SpanEvents, SpanLinks, SpanProcessor,
 };
+#[cfg(test)]
 use plakous::agent::{
-    ChildProcessKind, CompactionEventOutcome, CompactionEventReason, CredentialRefreshPhase,
-    DurabilityAttemptKind, DurabilityAttemptOutcome, TelemetryContext, TelemetryObservation,
-    TelemetryObservationKind, TelemetrySink, TelemetrySinkError, TelemetryTerminalStatus,
+    ChildProcessKind, CompactionEventOutcome, CompactionEventReason, DurabilityAttemptKind,
+    DurabilityAttemptOutcome, TelemetryObservationKind, TelemetryTerminalStatus,
 };
+use plakous::agent::{TelemetryContext, TelemetryObservation, TelemetrySink, TelemetrySinkError};
 use plakous::model::{AttemptId, CallId, SessionId, Timestamp, TurnId, sha256_bytes};
 use plakous_hosted::product_observation::ProductObservation;
 
@@ -416,489 +420,108 @@ pub const ALLOWED_ATTRIBUTE_NAMES: &[&str] = &[
     reason = "TelemetrySink::try_emit passes observation by value"
 )]
 fn emit_observation(worker: &mut BridgeWorker, observation: TelemetryObservation) {
-    let ctx = observation.context();
+    use crate::observation_projection as projection;
+    let context = observation.context();
     let timestamp = observation.timestamp();
-    match observation.kind() {
-        TelemetryObservationKind::TurnStarted { .. }
-        | TelemetryObservationKind::ModelStarted
-        | TelemetryObservationKind::ToolStarted { .. }
-        | TelemetryObservationKind::CompactionStarted { .. } => {}
-        TelemetryObservationKind::ModelFirstEvent { elapsed } => {
-            if let Some(attempt_id) = ctx.attempt_id() {
-                worker
-                    .ttft
-                    .insert(attempt_id, timestamp_to_system_time(timestamp), elapsed);
-            }
-        }
-        TelemetryObservationKind::TurnFinished {
-            elapsed,
-            status,
-            usage,
-            model_wall,
-            tool_wall,
-            compaction_wall,
-            model_attempts,
-            tool_calls,
-            compactions,
-        } => {
-            let Some(turn_id) = ctx.turn_id() else {
-                return;
-            };
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(&mut attributes, "gen_ai.operation.name", "turn");
-            push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            push_str(&mut attributes, "plak.status", terminal_status(status));
-            push_u64(
-                &mut attributes,
-                "plak.turn.model_operations",
-                usage.model_operations(),
-            );
-            push_u64(
-                &mut attributes,
-                "plak.turn.model_operations_reporting_usage",
-                usage.model_operations_reporting_usage(),
-            );
-            push_u64(
-                &mut attributes,
-                "plak.turn.local_tool_attempts",
-                usage.local_tool_attempts(),
-            );
-            push_u128(
-                &mut attributes,
-                "plak.model_wall_ns",
-                duration_ns(model_wall),
-            );
-            push_u128(&mut attributes, "plak.tool_wall_ns", duration_ns(tool_wall));
-            push_u128(
-                &mut attributes,
-                "plak.compaction_wall_ns",
-                duration_ns(compaction_wall),
-            );
-            push_u64(
-                &mut attributes,
-                "plak.model_attempts",
-                u64::from(model_attempts),
-            );
-            push_u64(&mut attributes, "plak.tool_calls", u64::from(tool_calls));
-            push_u64(&mut attributes, "plak.compactions", u64::from(compactions));
-            emit_finished(
-                worker,
-                ctx,
-                timestamp,
-                elapsed,
-                SpanSpec {
-                    name: "turn",
-                    span_id: span_id_for_turn(turn_id),
-                    parent: ParentSpec::Root,
-                    kind: SpanKind::Internal,
-                    status: span_status(status),
-                },
-                attributes,
-                SpanEvents::default(),
-            );
-        }
-        TelemetryObservationKind::ModelFinished {
-            elapsed,
-            status,
-            usage,
-            served_by,
-            ..
-        } => {
-            let Some(attempt_id) = ctx.attempt_id() else {
-                return;
-            };
-            let ttft = worker.ttft.take(attempt_id);
-            let mut events = SpanEvents::default();
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(&mut attributes, "gen_ai.operation.name", "model_attempt");
-            push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            push_str(&mut attributes, "plak.status", terminal_status(status));
-            if let Some(endpoint) = served_by {
-                attributes.push(KeyValue::new(
-                    "plak.served_endpoint",
-                    endpoint.as_str().to_owned(),
-                ));
-            }
-            if let Some(model) = usage {
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.input_tokens",
-                    model.input_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.output_tokens",
-                    model.output_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.reasoning_tokens",
-                    model.reasoning_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.cached_input_tokens",
-                    model.cached_input_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.cache_write_tokens",
-                    model.cache_write_tokens(),
-                );
-                if let Some(cost_micros) = model.cost_micros() {
-                    push_u64(&mut attributes, "plak.cost_micros", cost_micros);
-                }
-            }
-            if let Some(record) = ttft {
-                push_u128(&mut attributes, "plak.ttft_ns", duration_ns(record.elapsed));
-                events.events.push(opentelemetry::trace::Event::new(
-                    "gen_ai.first_token",
-                    record.at,
-                    Vec::new(),
-                    0,
-                ));
-            }
-            emit_finished(
-                worker,
-                ctx,
-                timestamp,
-                elapsed,
-                SpanSpec {
-                    name: "model_attempt",
-                    span_id: span_id_for_attempt(attempt_id),
-                    parent: ParentSpec::Turn,
-                    kind: SpanKind::Client,
-                    status: span_status(status),
-                },
-                attributes,
-                events,
-            );
-        }
-        TelemetryObservationKind::ToolFinished {
-            elapsed,
-            status,
-            output_bytes,
-        } => {
-            let Some(call_id) = ctx.call_id() else {
-                return;
-            };
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(&mut attributes, "gen_ai.operation.name", "tool_call");
-            push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            push_str(&mut attributes, "plak.status", terminal_status(status));
-            push_u64(&mut attributes, "plak.output_bytes", output_bytes);
-            emit_finished(
-                worker,
-                ctx,
-                timestamp,
-                elapsed,
-                SpanSpec {
-                    name: "tool_call",
-                    span_id: span_id_for_call(call_id),
-                    parent: ParentSpec::Turn,
-                    kind: SpanKind::Internal,
-                    status: span_status(status),
-                },
-                attributes,
-                SpanEvents::default(),
-            );
-        }
-        TelemetryObservationKind::CompactionFinished {
-            refusal,
-            elapsed,
-            outcome,
-            reason,
-            tokens_before,
-            tokens_after,
-            usage,
-        } => {
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(&mut attributes, "gen_ai.operation.name", "compaction");
-            push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            push_str(
-                &mut attributes,
-                "plak.compaction.outcome",
-                compaction_outcome(outcome),
-            );
-            push_str(
-                &mut attributes,
-                "plak.compaction.reason",
-                compaction_reason(reason),
-            );
-            if let Some(refusal) = refusal {
-                push_str(
-                    &mut attributes,
-                    "plak.compaction.refusal_reason",
-                    refusal.as_str(),
-                );
-            }
-            if let (Some(tokens_before), Some(tokens_after), Some(model)) =
-                (tokens_before, tokens_after, usage)
-            {
-                push_u64(
-                    &mut attributes,
-                    "plak.compaction.tokens_before",
-                    tokens_before,
-                );
-                push_u64(
-                    &mut attributes,
-                    "plak.compaction.tokens_after",
-                    tokens_after,
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.input_tokens",
-                    model.input_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.output_tokens",
-                    model.output_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.reasoning_tokens",
-                    model.reasoning_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.cached_input_tokens",
-                    model.cached_input_tokens(),
-                );
-                push_u64(
-                    &mut attributes,
-                    "gen_ai.usage.cache_write_tokens",
-                    model.cache_write_tokens(),
-                );
-            }
-            emit_finished(
-                worker,
-                ctx,
-                timestamp,
-                elapsed,
-                SpanSpec {
-                    name: "compaction",
-                    span_id: synthetic_span_id(SyntheticKind::Compaction, ctx, timestamp),
-                    parent: ParentSpec::TurnOrRoot,
-                    kind: SpanKind::Internal,
-                    status: compaction_span_status(outcome),
-                },
-                attributes,
-                SpanEvents::default(),
-            );
-        }
-        TelemetryObservationKind::DurabilityFinished { elapsed, status } => {
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(&mut attributes, "gen_ai.operation.name", "durability");
-            push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            push_str(&mut attributes, "plak.status", terminal_status(status));
-            emit_finished(
-                worker,
-                ctx,
-                timestamp,
-                elapsed,
-                SpanSpec {
-                    name: "durability",
-                    span_id: synthetic_span_id(SyntheticKind::Durability, ctx, timestamp),
-                    parent: ParentSpec::TurnOrRoot,
-                    kind: SpanKind::Internal,
-                    status: span_status(status),
-                },
-                attributes,
-                SpanEvents::default(),
-            );
-        }
-        TelemetryObservationKind::DurabilityAttemptFinished {
-            elapsed,
-            attempt,
-            outcome,
-        } => {
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(
-                &mut attributes,
-                "gen_ai.operation.name",
-                "durability_attempt",
-            );
-            push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            push_str(
-                &mut attributes,
-                "plak.durability.attempt",
-                durability_attempt(attempt),
-            );
-            push_str(
-                &mut attributes,
-                "plak.durability.outcome",
-                durability_outcome(outcome),
-            );
-            emit_finished(
-                worker,
-                ctx,
-                timestamp,
-                elapsed,
-                SpanSpec {
-                    name: "durability_attempt",
-                    span_id: synthetic_span_id(SyntheticKind::DurabilityAttempt, ctx, timestamp),
-                    parent: ParentSpec::TurnOrRoot,
-                    kind: SpanKind::Internal,
-                    status: durability_attempt_span_status(outcome),
-                },
-                attributes,
-                SpanEvents::default(),
-            );
-        }
-        TelemetryObservationKind::RetentionFinished {
-            elapsed,
-            status,
-            pruned_checkpoints,
-        } => {
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(&mut attributes, "gen_ai.operation.name", "retention");
-            push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            push_str(&mut attributes, "plak.status", terminal_status(status));
-            push_u64(
-                &mut attributes,
-                "plak.retention.pruned_checkpoints",
-                pruned_checkpoints,
-            );
-            emit_finished(
-                worker,
-                ctx,
-                timestamp,
-                elapsed,
-                SpanSpec {
-                    name: "retention",
-                    span_id: synthetic_span_id(SyntheticKind::Retention, ctx, timestamp),
-                    parent: ParentSpec::TurnOrRoot,
-                    kind: SpanKind::Internal,
-                    status: span_status(status),
-                },
-                attributes,
-                SpanEvents::default(),
-            );
-        }
-        TelemetryObservationKind::ChildProcessExited {
-            child,
-            user_cpu,
-            system_cpu,
-            peak_rss_bytes,
-        } => {
-            let mut attributes = base_attributes(ctx, timestamp);
-            push_str(
-                &mut attributes,
-                "gen_ai.operation.name",
-                "child_process_exited",
-            );
-            push_str(
-                &mut attributes,
-                "plak.child_kind",
-                child_process_kind(child),
-            );
-            push_u128(&mut attributes, "plak.user_cpu_ns", duration_ns(user_cpu));
-            push_u128(
-                &mut attributes,
-                "plak.system_cpu_ns",
-                duration_ns(system_cpu),
-            );
-            if let Some(peak_rss_bytes) = peak_rss_bytes {
-                push_u64(&mut attributes, "plak.peak_rss_bytes", peak_rss_bytes);
-            }
-            let end_time = timestamp_to_system_time(timestamp);
-            emit_span(
-                worker,
-                ctx,
-                SpanSpec {
-                    name: "child_process_exited",
-                    span_id: synthetic_span_id(SyntheticKind::ChildProcessExited, ctx, timestamp),
-                    parent: ParentSpec::TurnOrRoot,
-                    kind: SpanKind::Internal,
-                    status: Status::Ok,
-                },
-                end_time,
-                end_time,
-                attributes,
-                SpanEvents::default(),
-            );
-        }
-        TelemetryObservationKind::CredentialRefresh {
+    let projected = projection::project(&observation, Output::Span);
+    if let (Some(attempt), Some(elapsed)) = (context.attempt_id(), projected.first_event) {
+        worker
+            .ttft
+            .insert(attempt, timestamp_to_system_time(timestamp), elapsed);
+    }
+    let Some(span) = projected.span else {
+        return;
+    };
+    let (projected_spec, timing, values, take_ttft) = match span {
+        projection::Span::Observed {
+            spec,
+            timing,
+            attributes,
+            take_ttft,
+        } => (spec, timing, attributes, take_ttft),
+        projection::Span::Credential {
             provider,
-            phase,
-            failure_class,
-            transport_phase,
-            http_status,
-            elapsed,
             generation,
-            detail,
+            elapsed,
+            status,
+            attributes,
         } => {
-            let mut attributes = vec![
-                KeyValue::new(
-                    "plak.timestamp_secs",
-                    i64::try_from(timestamp.seconds()).unwrap_or(i64::MAX),
-                ),
-                KeyValue::new("plak.timestamp_nanos", i64::from(timestamp.nanoseconds())),
-            ];
-            push_str(
-                &mut attributes,
-                "gen_ai.operation.name",
-                "credential_refresh",
-            );
-            push_string(
-                &mut attributes,
-                "plak.credential.provider",
-                provider.as_str().to_owned(),
-            );
-            push_str(
-                &mut attributes,
-                "plak.credential.phase",
-                crate::telemetry_store::credential_refresh_phase_text(phase),
-            );
-            if let Some(failure_class) = failure_class {
-                push_str(
-                    &mut attributes,
-                    "plak.credential.failure_class",
-                    crate::telemetry_store::credential_refresh_failure_text(failure_class),
-                );
-            }
-            if let Some(transport_phase) = transport_phase {
-                push_str(
-                    &mut attributes,
-                    "plak.credential.transport_phase",
-                    crate::telemetry_store::credential_transport_phase_text(transport_phase),
-                );
-            }
-            if let Some(http_status) = http_status {
-                push_u64(
-                    &mut attributes,
-                    "plak.credential.http_status",
-                    u64::from(http_status),
-                );
-            }
-            if let Some(reason) = detail.reason {
-                push_str(
-                    &mut attributes,
-                    "plak.credential.failure_reason",
-                    reason.as_str(),
-                );
-            }
-            push_u64(&mut attributes, "plak.credential.generation", generation);
-            if let Some(elapsed) = elapsed {
-                push_u128(&mut attributes, "plak.elapsed_ns", duration_ns(elapsed));
-            }
             let end_time = timestamp_to_system_time(timestamp);
             let start_time = elapsed
                 .and_then(|elapsed| end_time.checked_sub(elapsed))
                 .unwrap_or(end_time);
-            let span_id = credential_span_id(provider.as_str(), generation, timestamp);
             emit_credential_span(
                 worker,
-                span_id,
-                credential_trace_id(provider.as_str(), generation, timestamp),
+                credential_span_id(&provider, generation, timestamp),
+                credential_trace_id(&provider, generation, timestamp),
                 start_time,
                 end_time,
-                attributes,
-                credential_refresh_span_status(phase),
+                span_attributes(attributes),
+                span_status(status),
             );
+            return;
         }
-        _ => {}
+    };
+    let span_id = match projected_spec.span_id {
+        SpanIdentity::Turn(id) => span_id_for_turn(id),
+        SpanIdentity::Attempt(id) => span_id_for_attempt(id),
+        SpanIdentity::Call(id) => span_id_for_call(id),
+        SpanIdentity::Synthetic(kind) => synthetic_span_id(kind, context, timestamp),
+    };
+    let parent = match projected_spec.parent {
+        projection::ParentSpec::Root => ParentSpec::Root,
+        projection::ParentSpec::Turn => ParentSpec::Turn,
+        projection::ParentSpec::TurnOrRoot => ParentSpec::TurnOrRoot,
+    };
+    let kind = match projected_spec.kind {
+        projection::SpanKind::Internal => SpanKind::Internal,
+        projection::SpanKind::Client => SpanKind::Client,
+    };
+    let spec = SpanSpec {
+        name: projected_spec.name,
+        span_id,
+        parent,
+        kind,
+        status: span_status(projected_spec.status),
+    };
+    let mut attributes = base_attributes(context, timestamp);
+    attributes.extend(span_attributes(values));
+    let mut events = SpanEvents::default();
+    if take_ttft && let Some(record) = context.attempt_id().and_then(|id| worker.ttft.take(id)) {
+        push_u128(&mut attributes, "plak.ttft_ns", duration_ns(record.elapsed));
+        events.events.push(opentelemetry::trace::Event::new(
+            "gen_ai.first_token",
+            record.at,
+            Vec::new(),
+            0,
+        ));
+    }
+    match timing {
+        SpanTiming::Elapsed(elapsed) => emit_finished(
+            worker, context, timestamp, elapsed, spec, attributes, events,
+        ),
+        SpanTiming::Instant => {
+            let at = timestamp_to_system_time(timestamp);
+            emit_span(worker, context, spec, at, at, attributes, events);
+        }
+    }
+}
+
+fn span_attributes(attributes: Vec<crate::observation_projection::Attribute>) -> Vec<KeyValue> {
+    attributes
+        .into_iter()
+        .map(|attribute| match attribute.value {
+            AttributeValue::Integer(value) => KeyValue::new(attribute.key, value),
+            AttributeValue::Text(value) => KeyValue::new(attribute.key, value),
+            AttributeValue::StaticText(value) => KeyValue::new(attribute.key, value),
+        })
+        .collect()
+}
+
+fn span_status(status: crate::observation_projection::Status) -> Status {
+    match status {
+        crate::observation_projection::Status::Ok => Status::Ok,
+        crate::observation_projection::Status::Error(reason) => Status::error(reason),
     }
 }
 
@@ -1035,14 +658,6 @@ fn base_attributes(ctx: TelemetryContext, timestamp: Timestamp) -> Vec<KeyValue>
     attributes
 }
 
-fn push_str(attributes: &mut Vec<KeyValue>, key: &'static str, value: &'static str) {
-    attributes.push(KeyValue::new(key, value));
-}
-
-fn push_string(attributes: &mut Vec<KeyValue>, key: &'static str, value: String) {
-    attributes.push(KeyValue::new(key, value));
-}
-
 fn push_u64(attributes: &mut Vec<KeyValue>, key: &'static str, value: u64) {
     attributes.push(KeyValue::new(key, i64::try_from(value).unwrap_or(i64::MAX)));
 }
@@ -1072,27 +687,6 @@ fn span_id_for_attempt(attempt_id: AttemptId) -> opentelemetry::trace::SpanId {
 
 fn span_id_for_call(call_id: CallId) -> opentelemetry::trace::SpanId {
     span_id_from_uuid(call_id.as_uuid())
-}
-
-#[derive(Clone, Copy)]
-enum SyntheticKind {
-    Compaction,
-    Durability,
-    DurabilityAttempt,
-    Retention,
-    ChildProcessExited,
-}
-
-impl SyntheticKind {
-    const fn tag(self) -> &'static str {
-        match self {
-            Self::Compaction => "compaction",
-            Self::Durability => "durability",
-            Self::DurabilityAttempt => "durability_attempt",
-            Self::Retention => "retention",
-            Self::ChildProcessExited => "child_process_exited",
-        }
-    }
 }
 
 fn credential_trace_id(
@@ -1153,114 +747,6 @@ fn timestamp_to_system_time(timestamp: Timestamp) -> SystemTime {
 
 fn duration_ns(duration: Duration) -> u128 {
     duration.as_nanos()
-}
-
-fn terminal_status(status: TelemetryTerminalStatus) -> &'static str {
-    #[allow(
-        unreachable_patterns,
-        reason = "non-exhaustive telemetry enums reserve future variants"
-    )]
-    match status {
-        TelemetryTerminalStatus::Completed => "completed",
-        TelemetryTerminalStatus::Failed => "failed",
-        TelemetryTerminalStatus::Cancelled => "cancelled",
-        TelemetryTerminalStatus::Shutdown => "shutdown",
-        _ => "unknown",
-    }
-}
-
-fn span_status(status: TelemetryTerminalStatus) -> Status {
-    match status {
-        TelemetryTerminalStatus::Completed => Status::Ok,
-        _ => Status::error(terminal_status(status)),
-    }
-}
-
-fn credential_refresh_span_status(phase: CredentialRefreshPhase) -> Status {
-    #[allow(
-        unreachable_patterns,
-        reason = "non-exhaustive telemetry enums reserve future variants"
-    )]
-    match phase {
-        CredentialRefreshPhase::OutcomeUnknown | CredentialRefreshPhase::Quarantined => {
-            Status::error(crate::telemetry_store::credential_refresh_phase_text(phase))
-        }
-        _ => Status::Ok,
-    }
-}
-
-fn compaction_span_status(outcome: CompactionEventOutcome) -> Status {
-    #[allow(
-        unreachable_patterns,
-        reason = "non-exhaustive telemetry enums reserve future variants"
-    )]
-    match outcome {
-        CompactionEventOutcome::Committed | CompactionEventOutcome::NotNeeded => Status::Ok,
-        _ => Status::error(compaction_outcome(outcome)),
-    }
-}
-
-fn durability_attempt_span_status(outcome: DurabilityAttemptOutcome) -> Status {
-    match outcome {
-        DurabilityAttemptOutcome::Committed
-        | DurabilityAttemptOutcome::RecoveredAcknowledgement
-        | DurabilityAttemptOutcome::Joined => Status::Ok,
-        _ => Status::error(durability_outcome(outcome)),
-    }
-}
-
-fn compaction_reason(reason: CompactionEventReason) -> &'static str {
-    match reason {
-        CompactionEventReason::Manual => "manual",
-        CompactionEventReason::Scheduled => "scheduled",
-    }
-}
-
-fn compaction_outcome(outcome: CompactionEventOutcome) -> &'static str {
-    #[allow(
-        unreachable_patterns,
-        reason = "non-exhaustive telemetry enums reserve future variants"
-    )]
-    match outcome {
-        CompactionEventOutcome::Committed => "committed",
-        CompactionEventOutcome::Failed => "failed",
-        CompactionEventOutcome::RecoveryRequired => "recovery_required",
-        CompactionEventOutcome::NotNeeded => "not_needed",
-        CompactionEventOutcome::NoEligibleRange => "no_eligible_range",
-        CompactionEventOutcome::Unavailable => "unavailable",
-        _ => "unknown",
-    }
-}
-
-fn durability_attempt(attempt: DurabilityAttemptKind) -> &'static str {
-    match attempt {
-        DurabilityAttemptKind::InitialCommit => "initial_commit",
-        DurabilityAttemptKind::InitialAcknowledgementRecovery => "initial_acknowledgement_recovery",
-        DurabilityAttemptKind::CleanupToolDrain => "cleanup_tool_drain",
-        DurabilityAttemptKind::CleanupJobTerminals => "cleanup_job_terminals",
-        DurabilityAttemptKind::CleanupHeartbeatJoin => "cleanup_heartbeat_join",
-        DurabilityAttemptKind::CleanupLeaseRelease => "cleanup_lease_release",
-        DurabilityAttemptKind::CleanupFlush => "cleanup_flush",
-        _ => "unknown",
-    }
-}
-
-fn durability_outcome(outcome: DurabilityAttemptOutcome) -> &'static str {
-    match outcome {
-        DurabilityAttemptOutcome::Committed => "committed",
-        DurabilityAttemptOutcome::Failed => "failed",
-        DurabilityAttemptOutcome::RecoveredAcknowledgement => "recovered_acknowledgement",
-        DurabilityAttemptOutcome::Joined => "joined",
-        _ => "unknown",
-    }
-}
-
-fn child_process_kind(child: ChildProcessKind) -> &'static str {
-    match child {
-        ChildProcessKind::JsEvalSidecar => "js_eval_sidecar",
-        ChildProcessKind::PythonWorker => "python_worker",
-        _ => "unknown",
-    }
 }
 
 #[cfg(test)]
