@@ -631,9 +631,9 @@ pub struct OperationRecord {
     pub caller_agent_id: String,
     /// Which tool it was, so a key reused across tools is a conflict.
     pub tool_name: String,
-    /// The request in canonical JSON, kept for the conflict message.
+    /// Canonical request JSON, or a digest summary for submit-result receipts.
     pub canonical_request: String,
-    /// Digest of `canonical_request`; the replay check compares this.
+    /// Digest of the full canonical request; submit receipts retain only its summary.
     pub request_digest: String,
     /// Immutable position of a host fold intent; ordinary tool receipts have none.
     pub fold: Option<FoldAnchor>,
@@ -2381,7 +2381,7 @@ impl ProductAgentTree {
             return Ok(None);
         };
         let canonical = canonical_json(request)?;
-        if prior.tool_name != tool_name || prior.canonical_request != canonical {
+        if prior.tool_name != tool_name || prior.request_digest != digest_text(&canonical) {
             return Err(TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
                 "retry content conflicts with the prepared operation",
@@ -2444,7 +2444,7 @@ impl ProductAgentTree {
         if self.operations.contains_key(operation_id) {
             return Ok(None);
         }
-        let canonical = canonical_json(request)?;
+        let (request_digest, canonical) = operation_request(tool_name, request)?;
         self.operations.insert(
             operation_id.to_owned(),
             OperationRecord {
@@ -2452,7 +2452,7 @@ impl ProductAgentTree {
                 operation_id: operation_id.to_owned(),
                 caller_agent_id: caller_id.to_owned(),
                 tool_name: tool_name.to_owned(),
-                request_digest: digest_text(&canonical),
+                request_digest,
                 canonical_request: canonical,
                 terminal_code: None,
                 terminal_response: None,
@@ -2474,7 +2474,7 @@ impl ProductAgentTree {
         request: &T,
         response: &R,
     ) -> Result<(), TopologyError> {
-        let canonical = canonical_json(request)?;
+        let (request_digest, canonical) = operation_request(tool_name, request)?;
         let terminal_response = serde_json::to_string(response).map_err(|_| {
             TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
@@ -2488,7 +2488,7 @@ impl ProductAgentTree {
                 operation_id: operation_id.to_owned(),
                 caller_agent_id: caller_id.to_owned(),
                 tool_name: tool_name.to_owned(),
-                request_digest: digest_text(&canonical),
+                request_digest,
                 canonical_request: canonical,
                 terminal_code: None,
                 terminal_response: Some(terminal_response),
@@ -2511,7 +2511,7 @@ impl ProductAgentTree {
         request: &T,
         code: TopologyErrorCode,
     ) -> Result<(), TopologyError> {
-        let canonical = canonical_json(request)?;
+        let (request_digest, canonical) = operation_request(tool_name, request)?;
         self.operations.insert(
             operation_id.to_owned(),
             OperationRecord {
@@ -2519,7 +2519,7 @@ impl ProductAgentTree {
                 operation_id: operation_id.to_owned(),
                 caller_agent_id: caller_id.to_owned(),
                 tool_name: tool_name.to_owned(),
-                request_digest: digest_text(&canonical),
+                request_digest,
                 canonical_request: canonical,
                 terminal_code: Some(code),
                 terminal_response: None,
@@ -2527,6 +2527,29 @@ impl ProductAgentTree {
         );
         Ok(())
     }
+}
+
+fn operation_request<T: Serialize>(
+    tool_name: &str,
+    request: &T,
+) -> Result<(String, String), TopologyError> {
+    let canonical = canonical_json(request)?;
+    let digest = digest_text(&canonical);
+    if tool_name != "submit_result" {
+        return Ok((digest, canonical));
+    }
+    let request: SubmitResultRequest = serde_json::from_str(&canonical).map_err(|_| {
+        TopologyError::new(
+            TopologyErrorCode::OperationRecoveryRequired,
+            "submit receipt request could not be encoded",
+        )
+    })?;
+    let compact = canonical_json(&serde_json::json!({
+        "turn_token": request.turn_token,
+        "output_sha256": digest_text(&request.output_json),
+        "output_bytes": request.output_json.len(),
+    }))?;
+    Ok((digest, compact))
 }
 
 fn valid_id(value: &str) -> bool {

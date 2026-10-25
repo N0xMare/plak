@@ -1402,6 +1402,95 @@ fn sqlite_pending_close_seal_rebuilds_its_as_of_view_and_orphan_fault() {
 }
 
 #[test]
+fn sqlite_submit_receipt_replays_by_full_digest_without_retaining_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let database = tmp.path().join("subagents.sqlite3");
+    let (mut tree, _vcs, spawned) = spawned_tree(tmp.path());
+    let child = &spawned.agent_id;
+    let request = SubmitResultRequest {
+        turn_token: 1,
+        output_json: format!("{{\"ok\":true}}{}", " ".repeat(4096)),
+    };
+    tree.prepare_operation("submit", child, "submit_result", &request)
+        .unwrap();
+    let prepared = tree.operations()["submit"].clone();
+    let canonical = serde_json::to_string(&request).unwrap();
+    assert_eq!(
+        prepared.request_digest,
+        plakous::model::sha256_hex(&[canonical.as_bytes()])
+    );
+    let compact: serde_json::Value = serde_json::from_str(&prepared.canonical_request).unwrap();
+    assert_eq!(compact["output_bytes"], request.output_json.len());
+    assert_eq!(
+        compact["output_sha256"],
+        plakous::model::sha256_hex(&[request.output_json.as_bytes()])
+    );
+    assert!(prepared.canonical_request.len() < 160);
+    assert!(!prepared.canonical_request.contains("output_json"));
+    let receipt = tree.submit_result(child, &request, Some("submit")).unwrap();
+    assert_eq!(
+        tree.operations()["submit"].canonical_request,
+        prepared.canonical_request
+    );
+    let replay = tree.submit_result(child, &request, Some("submit")).unwrap();
+    assert_eq!(
+        serde_json::to_value(&receipt).unwrap(),
+        serde_json::to_value(replay).unwrap()
+    );
+    tree.remember_failure(
+        "refused",
+        child,
+        "submit_result",
+        &request,
+        plakous_recursive_subagents::protocol::TopologyErrorCode::LiveWork,
+    )
+    .unwrap();
+    assert_eq!(
+        tree.operations()["refused"].canonical_request,
+        prepared.canonical_request
+    );
+    let store = SqliteTreeStore::open(&database).unwrap();
+    let _ = store.save(&tree).unwrap();
+    drop(store);
+    let store = SqliteTreeStore::open(&database).unwrap();
+    let mut cold = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
+    let replay = cold.submit_result(child, &request, Some("submit")).unwrap();
+    assert_eq!(
+        serde_json::to_value(receipt).unwrap(),
+        serde_json::to_value(&replay).unwrap()
+    );
+    let identical = cold
+        .submit_result(child, &request, Some("new-identical"))
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(identical).unwrap(),
+        serde_json::to_value(replay).unwrap()
+    );
+    assert_eq!(
+        cold.submit_result(child, &request, Some("refused"))
+            .unwrap_err()
+            .code,
+        plakous_recursive_subagents::protocol::TopologyErrorCode::LiveWork
+    );
+    let different = SubmitResultRequest {
+        output_json: "{\"ok\":false}".into(),
+        ..request
+    };
+    assert_eq!(
+        cold.submit_result(child, &different, Some("submit"))
+            .unwrap_err()
+            .code,
+        plakous_recursive_subagents::protocol::TopologyErrorCode::OperationRecoveryRequired
+    );
+    assert_eq!(
+        cold.submit_result(child, &different, Some("another-submit"))
+            .unwrap_err()
+            .code,
+        plakous_recursive_subagents::protocol::TopologyErrorCode::SubmitDuplicateConflict
+    );
+}
+
+#[test]
 fn sqlite_submitted_rebuilds_output_and_status_from_its_intent() {
     let tmp = tempfile::tempdir().unwrap();
     let database = tmp.path().join("subagents.sqlite3");

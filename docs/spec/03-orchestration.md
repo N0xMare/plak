@@ -1042,6 +1042,10 @@ JobHost despite having no active turn.
 
 Receipt: `{ agent_id, attempt, candidate? }` — the candidate is absent until
 the copy is sealed.
+The operation receipt retains `{turn_token, output_sha256, output_bytes}`,
+not the output itself. Its request digest is SHA-256 of the full canonical
+request. Every topology tool replays by that digest and tool name, including
+refused calls; a differing retry of the same operation id requires recovery.
 
 ### 4.7 `adopt_candidate`
 
@@ -3244,7 +3248,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Tool and root descendant interruption | intent, joined into views | anchored `agent_operations` of kind `interrupt`, per target attempt; captures whether live ownership or a non-ending park made the request effective, and derives only that agent's interrupted status |
 | Session bound after materialization failure | intent, joined into views | `agent_operations` of kind `session_bound_after_failure`, keyed by the exact materialization intent, ordered with the other host intents |
 | Submitted output and submitted attempt status | intent, joined into views | anchored `agent_operations` of kind `submitted`, per attempt, captures the validated exact `output_json`; its agent-local fold derives output and status, including historical attempts |
-| Topology operation receipts (`agent_operations`), wait receipts | intent | the runtime call id; terminal responses replay for the same request digest |
+| Topology operation receipts (`agent_operations`), wait receipts | intent | the runtime call id; terminal responses replay for the same full canonical request digest; `submit_result` stores only turn token, output SHA-256 and byte length in its canonical request column |
 | Mail body, sender, purpose, priority, reply link, disposition | intent | the sending call |
 | Mail durable state beyond `accepted` (`acknowledged`, `delivered`), returned admissions | view | wait receipt settlement (§4.4) and `agent_commands` batches against `CommandAccepted`, `CommandRejected` and withheld `TurnTerminal` facts (§8) |
 | Child commands and root result-mail batches (`agent_commands`) | intent | the runtime command id |
