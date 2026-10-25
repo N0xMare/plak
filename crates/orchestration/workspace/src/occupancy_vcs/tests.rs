@@ -1479,6 +1479,9 @@ fn adopt_receipt_lists_changed_files_with_status_and_bounds_at_64() {
     assert!(repo.path().join("4-added.txt").is_file());
 }
 
+// APFS refuses file names that are not valid UTF-8, so the case only exists
+// on Linux filesystems.
+#[cfg(target_os = "linux")]
 #[test]
 fn adopt_receipt_uses_lossy_names_without_losing_non_utf8_files() {
     use std::os::unix::ffi::OsStrExt as _;
