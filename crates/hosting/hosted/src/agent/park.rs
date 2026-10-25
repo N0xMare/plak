@@ -821,7 +821,7 @@ async fn prepare_reopened_wake(
     agent_id: &str,
     attached: &super::AttachedCodingSession,
 ) -> Result<ReopenedWake, String> {
-    let driver = runtime.driver();
+    let driver = &runtime.driver().for_agent(agent_id);
     let retained = runtime
         .read(|tree| tree.retained_wait_receipts(agent_id))
         .map_err(|error| error.message)?;
@@ -980,7 +980,7 @@ async fn rejoin_turn(
     control: plakous::agent::TurnControl,
     result: TurnResultHandle,
 ) -> Result<Reopened, String> {
-    let driver = runtime.driver();
+    let driver = &runtime.driver().for_agent(agent_id);
     let begun = begin_reopen_wake(driver, agent_id);
     // The feed pass binds the turn to the command that admitted it and
     // acknowledges that command's batch: the batch is in the session's
@@ -1058,7 +1058,7 @@ async fn admitted_command(
     attached: &super::AttachedCodingSession,
     turn: plakous::model::TurnId,
 ) -> Result<String, String> {
-    let driver = runtime.driver();
+    let driver = &runtime.driver().for_agent(agent_id);
     super::result_context::project_child_feed(runtime, agent_id, attached).await?;
     for command in super::result_context::prepared_commands(driver, agent_id)? {
         command.settle(driver, false)?;

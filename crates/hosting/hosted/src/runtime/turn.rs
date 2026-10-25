@@ -52,6 +52,12 @@ impl From<String> for DriveTurnError {
     }
 }
 
+impl From<crate::session_store::RecordStoreError> for DriveTurnError {
+    fn from(error: crate::session_store::RecordStoreError) -> Self {
+        error.to_string().into()
+    }
+}
+
 impl From<&str> for DriveTurnError {
     fn from(message: &str) -> Self {
         message.to_owned().into()

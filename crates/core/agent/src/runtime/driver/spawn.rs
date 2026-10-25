@@ -49,6 +49,9 @@ impl PreparedAgent {
             let (result_sender, result_receiver) = watch::channel(None);
             let (terminal_failure, terminal_failure_receiver) = watch::channel(None);
             let shared = Arc::new(TurnShared {
+                storage_pause: crate::runtime::checkpoint::storage_pause::StoragePause::new(
+                    shutdown.clone(),
+                ),
                 turn_id: restored.frame.root().turn_id,
                 lifecycle: TurnLifecycle::Admitted(Mutex::new(restored.lifecycle)),
                 settlement: watch::channel(TurnSettlement::Pending).0,
@@ -241,14 +244,17 @@ impl PreparedAgent {
             })),
         };
         let panic_events = events.clone();
+        let storage_pause =
+            crate::runtime::checkpoint::storage_pause::StoragePause::new(shutdown.clone());
         let driver_task = tokio::spawn(async move {
-            let result =
-                if let Ok(result) = Box::pin(AssertUnwindSafe(driver.run()).catch_unwind()).await {
-                    result
-                } else {
-                    panic_events.force_close();
-                    Err(actor_panic_error())
-                };
+            let result = if let Ok(result) =
+                Box::pin(AssertUnwindSafe(storage_pause.scope(driver.run())).catch_unwind()).await
+            {
+                result
+            } else {
+                panic_events.force_close();
+                Err(actor_panic_error())
+            };
             let _ = completion_sender.send(Some(result));
         });
         #[cfg(test)]

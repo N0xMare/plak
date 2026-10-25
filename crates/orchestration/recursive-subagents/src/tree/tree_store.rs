@@ -19,10 +19,13 @@ use plakous_host_protocol::topology::CandidateId;
 
 use super::{ProductAgentTree, TopologyError, TopologyErrorCode};
 
-/// Why a [`TreeStore`] call failed. The three kinds are distinguished because
+/// Why a [`TreeStore`] call failed. The kinds are distinguished because
 /// they need different answers: retry, fail closed, or reload and re-apply.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TreeStoreErrorKind {
+    /// Capacity refused publication; nothing was committed and the same
+    /// prepared tree may be published once storage becomes writable.
+    StorageFull,
     /// The store could not be opened, read, or written.
     Unavailable,
     /// The store holds a revision of this tree other than the one this
@@ -51,6 +54,15 @@ pub struct TreeStoreError {
 }
 
 impl TreeStoreError {
+    /// A proven, uncommitted capacity refusal, not a stale revision.
+    #[must_use]
+    pub fn storage_full() -> Self {
+        Self {
+            kind: TreeStoreErrorKind::StorageFull,
+            detail: "agent tree storage is full".to_owned(),
+        }
+    }
+
     /// The store could not be reached at all.
     #[must_use]
     pub fn unavailable(detail: impl Into<String>) -> Self {
@@ -92,7 +104,18 @@ impl std::fmt::Display for TreeStoreError {
 
 impl From<TreeStoreError> for TopologyError {
     fn from(error: TreeStoreError) -> Self {
-        Self::new(TopologyErrorCode::OperationRecoveryRequired, error.detail)
+        let code = if error.kind == TreeStoreErrorKind::StorageFull {
+            TopologyErrorCode::RecoveryStorageUnavailable
+        } else {
+            TopologyErrorCode::OperationRecoveryRequired
+        };
+        Self::new(code, error.detail)
+    }
+}
+
+impl From<String> for TreeStoreError {
+    fn from(detail: String) -> Self {
+        Self::unavailable(detail)
     }
 }
 
@@ -210,6 +233,25 @@ impl ProductAgentTree {
 /// Durability for one tree. The tree knows nothing about where
 /// its rows live; this is the whole surface between them.
 pub trait TreeStore: Send + Sync {
+    /// Binds process shutdown only. Agent interruption is scoped by the tree
+    /// driver, never shared with unrelated publications through this store.
+    fn set_storage_interrupt(&self, _probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>) {}
+
+    /// Retry a capacity-blocked store with a minimal authoritative write,
+    /// without changing tree revisions or dispatching effects.
+    fn recover_storage(&self) -> Result<(), TreeStoreError> {
+        Ok(())
+    }
+
+    /// An out-of-band operator interruption; never publication authority.
+    fn storage_wait_cancelled(&self) -> bool {
+        false
+    }
+    /// A live capacity refusal not yet followed by an authoritative save.
+    fn storage_unavailable(&self) -> bool {
+        false
+    }
+
     /// Whether the store already holds a tree under this id, without paying
     /// to decode it.
     ///

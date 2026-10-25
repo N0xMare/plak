@@ -8,7 +8,7 @@ use crate::runtime::build::{
     stable_prefix_from_effective_configuration, stable_workspace_environment_bytes,
     tool_registry_descriptor,
 };
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
 use crate::runtime::continuation::{
     checkpoint_bundle_error, runtime_manifest_error, tool_descriptor_error,
 };
@@ -135,14 +135,17 @@ impl DurableSessionRuntime {
         let target = request.publication_target(historical_checkpoint)?;
 
         let owner = operation_run_id(&self.instance_nonce, operation_id)?;
-        let source_lease = store_call(
+        let source_lease = capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                source.session(),
-                owner,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    source.session(),
+                    owner,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -347,10 +350,11 @@ impl DurableSessionRuntime {
             transition,
             &target_checkpoint,
         ));
-        match store_call(
+        match capacity_store_call(
             StorePhase::Fork,
             self.store_timeouts.operation,
-            self.store.fork(fork),
+            || self.store.fork(fork.clone()),
+            || self.store.storage_wait_cancelled(),
         )
         .await
         {

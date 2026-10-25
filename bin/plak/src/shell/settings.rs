@@ -728,7 +728,11 @@ fn acknowledge_agent(
         .map_or(0, |since| since.as_secs());
     let recorded = crate::store::ProductStore::open(paths)
         .map_err(|error| error.to_string())
-        .and_then(|mut store| store.acknowledge_agent_attempt(tree_id, acknowledgement, now));
+        .and_then(|mut store| {
+            store
+                .acknowledge_agent_attempt(tree_id, acknowledgement, now)
+                .map_err(String::from)
+        });
     if let Err(error) = recorded {
         let _ = events.send(HostEvent::Row(TranscriptRow::warning(
             NoticeScope::Tree,

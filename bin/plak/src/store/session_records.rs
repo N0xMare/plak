@@ -17,14 +17,25 @@ pub use plakous_hosted::session_store::SessionRecordStore;
 use crate::home::paths::PlakPaths;
 use crate::store::sessions::SessionRecord;
 
+type StorageInterrupt = Arc<dyn Fn() -> bool + Send + Sync>;
+
 /// One lazily opened product database shared by command and hosted workers.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SqliteSessionStore {
     paths: PlakPaths,
     connection: Arc<Mutex<Option<crate::store::ProductStore>>>,
     storage_override: Option<plakous_hosted::session_store::StorageAdmission>,
+    storage_interrupt: Arc<Mutex<Option<StorageInterrupt>>>,
+    storage_waiting: Arc<std::sync::atomic::AtomicBool>,
+    capacity_retry_interval: std::time::Duration,
     #[cfg(test)]
     opens: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl std::fmt::Debug for SqliteSessionStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SqliteSessionStore").finish_non_exhaustive()
+    }
 }
 
 impl SqliteSessionStore {
@@ -34,6 +45,9 @@ impl SqliteSessionStore {
         Self {
             paths,
             connection: Arc::new(Mutex::new(None)),
+            storage_interrupt: Arc::default(),
+            storage_waiting: Arc::default(),
+            capacity_retry_interval: std::time::Duration::from_secs(5),
             #[cfg(test)]
             storage_override: Some(plakous_hosted::session_store::StorageAdmission::Available),
             #[cfg(not(test))]
@@ -90,9 +104,86 @@ impl SqliteSessionStore {
             .ok_or_else(|| E::from("product store is unavailable".to_owned()))?;
         operation(store)
     }
+
+    fn with_write<T>(
+        &self,
+        mut operation: impl FnMut(
+            &mut crate::store::ProductStore,
+        ) -> Result<T, plakous_hosted::session_store::RecordStoreError>,
+    ) -> Result<T, plakous_hosted::session_store::RecordStoreError> {
+        loop {
+            let result = self.with_store(&mut operation);
+            if result.is_ok() {
+                self.storage_waiting
+                    .store(false, std::sync::atomic::Ordering::Release);
+            }
+            if !matches!(&result, Err(error) if error.refusal() == Some(plakous_hosted::error::StoreRefusal::StorageFull))
+            {
+                return result;
+            }
+            self.storage_waiting
+                .store(true, std::sync::atomic::Ordering::Release);
+            let next = std::time::Instant::now() + self.capacity_retry_interval;
+            // No product connection or write gate is held here. Other
+            // owners can read health and the operator can interrupt the wait.
+            let wait = || {
+                while std::time::Instant::now() < next {
+                    if self.storage_wait_cancelled() {
+                        return false;
+                    }
+                    std::thread::sleep(
+                        next.saturating_duration_since(std::time::Instant::now())
+                            .min(std::time::Duration::from_millis(100)),
+                    );
+                }
+                !self.storage_wait_cancelled()
+            };
+            let retry = if tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+                handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+            }) {
+                tokio::task::block_in_place(wait)
+            } else {
+                wait()
+            };
+            if !retry {
+                return result;
+            }
+        }
+    }
 }
 
 impl SessionRecordStore for SqliteSessionStore {
+    fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
+        *self
+            .storage_interrupt
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(probe);
+    }
+
+    fn storage_wait_cancelled(&self) -> bool {
+        self.storage_interrupt
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|probe| probe())
+    }
+
+    fn recover_storage(&self) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
+        self.with_store(super::ProductStore::recover_storage)?;
+        self.storage_waiting
+            .store(false, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    fn storage_outage_notice(&self) -> String {
+        crate::storage_space::outage_notice(self.paths.home())
+    }
+
+    fn storage_unavailable(&self) -> bool {
+        self.storage_waiting
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     fn storage_admission(&self) -> plakous_hosted::session_store::StorageAdmission {
         if let Some(admission) = &self.storage_override {
             return admission.clone();
@@ -111,8 +202,8 @@ impl SessionRecordStore for SqliteSessionStore {
         id: &str,
         suppress_wake: bool,
         pause: Option<plakous_hosted::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
-        self.with_store(|store| store.write_host_controls(id, suppress_wake, pause))
+    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
+        self.with_write(|store| store.write_host_controls(id, suppress_wake, pause.clone()))
     }
     fn load(&self, id: &str) -> Result<SessionRecord, String> {
         crate::store::sessions::canonical_product_session_id(id)?;
@@ -127,8 +218,11 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load_queue_head(id))
     }
 
-    fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
-        self.with_store(|store| store.commit(session))
+    fn save(
+        &self,
+        session: &mut SessionRecord,
+    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
+        self.with_write(|store| store.commit(session))
     }
 
     fn save_submission(
@@ -136,7 +230,7 @@ impl SessionRecordStore for SqliteSessionStore {
         session: &mut SessionRecord,
         submission: &plakous_hosted::sessions::projector::Submission,
     ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
-        self.with_store(|store| store.commit_submission(session, submission))
+        self.with_write(|store| store.commit_submission(session, submission))
     }
 
     fn discard_submission(
@@ -144,31 +238,34 @@ impl SessionRecordStore for SqliteSessionStore {
         session: &mut SessionRecord,
         command_id: &str,
         pause_cause: Option<plakous_hosted::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
-        self.with_store(|store| store.discard_submission(session, command_id, pause_cause))
+    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
+        self.with_write(|store| store.discard_submission(session, command_id, pause_cause.clone()))
     }
 
     fn submit_workflow_request(
         &self,
         session: &mut SessionRecord,
         request: &plakous_hosted::sessions::projector::WorkflowRequest,
-    ) -> Result<(), String> {
-        self.with_store(|store| store.submit_workflow_request(session, request))
+    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
+        self.with_write(|store| store.submit_workflow_request(session, request))
     }
 
     fn discard_unadmitted_workflow(
         &self,
         session: &mut SessionRecord,
         operation_id: &str,
-    ) -> Result<(), String> {
-        self.with_store(|store| store.discard_unadmitted_workflow(session, operation_id))
+    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
+        self.with_write(|store| store.discard_unadmitted_workflow(session, operation_id))
     }
 
     fn withdraw_unadmitted_workflows(
         &self,
         session: &mut SessionRecord,
-    ) -> Result<Vec<plakous_hosted::sessions::TranscriptRow>, String> {
-        self.with_store(|store| store.withdraw_unadmitted_workflows(session))
+    ) -> Result<
+        Vec<plakous_hosted::sessions::TranscriptRow>,
+        plakous_hosted::session_store::RecordStoreError,
+    > {
+        self.with_write(|store| store.withdraw_unadmitted_workflows(session))
     }
 
     fn list_for_workspace(&self, workspace: &Path) -> Result<Vec<SessionRecord>, String> {
@@ -195,8 +292,8 @@ impl SessionRecordStore for SqliteSessionStore {
         id: &str,
         writes: &ViewWrites,
         views: &plakous_hosted::sessions::projector::SessionViewState,
-    ) -> Result<ProjectionCommit, String> {
-        self.with_store(|store| store.commit_projection_views(id, writes, views))
+    ) -> Result<ProjectionCommit, plakous_hosted::session_store::RecordStoreError> {
+        self.with_write(|store| store.commit_projection_views(id, writes, views))
     }
 }
 
@@ -216,6 +313,57 @@ mod contract {
     use plakous_hosted::sessions::projector::{
         Delivery, SessionViews, Submission, SubmissionKind, ViewWrites,
     };
+
+    #[test]
+    fn product_capacity_outage_retains_the_exact_queue_write_until_commit() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let root = tempfile::tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().join("product"));
+        let mut store = SqliteSessionStore::new(paths.clone());
+        store.capacity_retry_interval = std::time::Duration::ZERO;
+        let mut session = queued(root.path());
+        store.save(&mut session).unwrap();
+        let original = session.clone();
+        let full = Arc::new(AtomicBool::new(true));
+        let fault = full.clone();
+        store
+            .with_store::<_, String>(|backend| {
+                backend.capacity_fault = Some(fault);
+                Ok(())
+            })
+            .unwrap();
+        session.title = Some("retained mutation".into());
+        session
+            .pending_queue
+            .push(crate::store::sessions::QueueItem::new("queued follow-up"));
+        let reader = store.clone();
+        let writer = std::thread::spawn(move || {
+            store.save(&mut session).unwrap();
+            session
+        });
+        while !reader.storage_unavailable() {
+            std::thread::yield_now();
+        }
+        let stored = reader.load(&original.id).unwrap();
+        assert_eq!(stored.store_revision, original.store_revision);
+        assert_eq!(stored.title, original.title);
+        assert_eq!(stored.pending_queue, original.pending_queue);
+        assert!(
+            reader.storage_unavailable(),
+            "reads cannot clear the outage"
+        );
+        full.store(false, Ordering::Release);
+        let written = writer.join().unwrap();
+        let stored = reader.load(&written.id).unwrap();
+        assert_eq!(stored.store_revision, original.store_revision + 1);
+        assert_eq!(stored.title.as_deref(), Some("retained mutation"));
+        assert_eq!(stored.pending_queue.len(), original.pending_queue.len() + 1);
+        assert_eq!(stored.pending_queue[0], original.pending_queue[0]);
+        assert!(!reader.storage_unavailable());
+    }
 
     fn record(workspace: &Path) -> SessionRecord {
         let mut session = SessionRecord::new(workspace.to_path_buf());
@@ -244,7 +392,7 @@ mod contract {
         stale.record_notice(TranscriptRow::warning(NoticeScope::Tree, "elsewhere"));
         assert_eq!(
             store.save(&mut stale),
-            Err("product session changed concurrently".to_owned())
+            Err("product session changed concurrently".into())
         );
         let loaded = store.load(&session.id).unwrap();
         assert_eq!(loaded.store_revision, 2);
@@ -262,7 +410,7 @@ mod contract {
         duplicate.store_revision = 0;
         assert_eq!(
             store.save(&mut duplicate),
-            Err("product session identity already exists or is invalid".to_owned())
+            Err("product session identity already exists or is invalid".into())
         );
 
         let item = crate::store::sessions::QueueItem::new("do it");
@@ -1191,7 +1339,7 @@ mod contract {
             stale.record_notice(TranscriptRow::warning(NoticeScope::Tree, "elsewhere"));
             assert_eq!(
                 store.save(&mut stale),
-                Err("product session changed concurrently".to_owned())
+                Err("product session changed concurrently".into())
             );
             assert_eq!(stale.transcript.pending_notices().len(), 1);
 
@@ -1469,14 +1617,14 @@ mod contract {
             let mut intruder = record(workspace);
             intruder.pending_queue.push(item.clone());
             assert_eq!(
-                store.save(&mut intruder).unwrap_err(),
+                store.save(&mut intruder).unwrap_err().to_string(),
                 "stable product identity contradicts durable state"
             );
             assert_eq!(intruder.store_revision, 0);
 
             owner.pending_queue[0].text = "edited".into();
             assert_eq!(
-                store.save(&mut owner).unwrap_err(),
+                store.save(&mut owner).unwrap_err().to_string(),
                 "queue identity contradicts durable product state"
             );
             assert_eq!(owner.store_revision, 1);
@@ -1485,14 +1633,14 @@ mod contract {
             store.save(&mut owner).unwrap();
             owner.pending_queue[0].revision += 2;
             assert_eq!(
-                store.save(&mut owner).unwrap_err(),
+                store.save(&mut owner).unwrap_err().to_string(),
                 "queue identity contradicts durable product state"
             );
             owner.pending_queue.clear();
             store.save(&mut owner).unwrap();
             owner.pending_queue.push(item);
             assert_eq!(
-                store.save(&mut owner).unwrap_err(),
+                store.save(&mut owner).unwrap_err().to_string(),
                 "stable product identity contradicts durable state"
             );
             assert_eq!(
@@ -1520,7 +1668,7 @@ mod contract {
                 .unwrap();
             session.pending_queue.push(item);
             assert_eq!(
-                store.save(&mut session).unwrap_err(),
+                store.save(&mut session).unwrap_err().to_string(),
                 "stable product identity contradicts durable state"
             );
             assert_eq!(

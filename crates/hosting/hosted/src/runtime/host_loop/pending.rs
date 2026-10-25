@@ -229,6 +229,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     fn record_pause(&mut self, kind: PauseKind) {
+        if self.storage_interrupted && self.config.store.storage_unavailable() {
+            return;
+        }
         let row = kind.row();
         if !self.config.interactive
             || (self.pending_track.baseline && pause_already_recorded(&self.config.session, &row))

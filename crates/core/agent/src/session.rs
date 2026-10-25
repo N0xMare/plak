@@ -2271,6 +2271,26 @@ impl StoreReclaimReport {
 /// revival, acquisition, refused mutations and `recover_*` append nothing,
 /// and an exact recovery returns the sequence the record already holds.
 pub trait SessionStore: Send + Sync + 'static {
+    /// Retry capacity-blocked colocated stores and the backend's own writer.
+    /// This is not permission to bypass a branch lease or checkpoint CAS.
+    fn recover_storage(&self) -> StoreFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Whether an authoritative write most recently refused for exhausted
+    /// storage. This process-local observation is not lease or commit authority.
+    fn storage_unavailable(&self) -> bool {
+        false
+    }
+
+    /// Whether the store's owning host requested shutdown while its colocated
+    /// authoritative stores were unavailable. Shared backends must not bind a
+    /// single agent's interrupt here; bind it through that agent's control.
+    /// This observation carries no lease authority.
+    fn storage_wait_cancelled(&self) -> bool {
+        false
+    }
+
     /// Reads the lease authority clock synchronously, without I/O or actor waits.
     ///
     /// This is the exact clock used by acquire, renew and fenced mutations, not

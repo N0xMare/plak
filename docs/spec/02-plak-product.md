@@ -283,13 +283,42 @@ turns, jobs, retirement and stores are not cancelled or disabled. A new prompt,
 explicit queue retry or spawn rechecks space, without a sticky refusal. An
 unreadable capacity probe warns but does not pretend the volume is full. A
 missing home uses its nearest existing ancestor without creating it. These
-checks reserve no disk space and do not recover an in-flight write failure.
+checks reserve no disk space; actual write refusals use the outage protocol below.
 Root refusal precedes `PromptStarted` and continuation resets. Child wakes
 check before compaction or preparing their immutable receipt; refusal follows
 the transient store-read backoff and never writes suppression or consumes mail.
 Capacity health is not a transcript fact: warning levels remain in live chrome,
 and refusal feedback uses the non-persisted operator-settings notice scope.
 Neither operator paths nor a warning row per prompt enter exports or models.
+
+During work, an authoritative capacity refusal is distinct from the preventive
+floor: product writes carry `StoreRefusal::StorageFull`, and runtime/tree
+stores retain their typed capacity cause. Writers retain the exact pending
+mutation and retry publication every five seconds until an authoritative
+write succeeds or the operator cancels/shuts down. Physical write calls keep
+their deadlines, not an overall outage bound. Connection/tree mutexes are
+released while parked; waiting contenders yield executor workers. Cached queue state is installed
+only after the corresponding commit. A failed write neither consumes an
+accepted submission nor manufactures a replacement command id. Model and
+tool work is never replayed to repair product projection debt.
+
+New paid starts wait while any colocated authoritative store reports an
+outstanding capacity refusal. Admission retries each flagged store through its
+retained operation or a minimal authoritative write, without requiring an
+incidental mutation to clear the pause. One live-only storage notice per attachment
+names the product-home volume and current available space, retaining work
+and announcing the five-second write cadence. It is emitted independently
+of blocked publication callers, sampled every five seconds and coalesced until the state changes. A
+successful authoritative write clears its store's pause; reads, telemetry
+and statvfs alone cannot. No operator location enters exports or model
+history or the session log. Cancellation/shutdown during an outage keeps the
+typed recovery-required disposition if it cannot be written; it does not invent a completed
+result or silently reopen an owner that is still alive.
+An interrupted product write retains queue identities and leaves the host
+loop available for further operator actions; it is not a generic host failure.
+Quit releases the runtime cleanly even if final product projection remains
+storage-unavailable. Root Esc affects only the attached root's storage wait;
+child waits observe their own cancellation or latched process shutdown.
 
 When composing cleanup or release failures, CLI rendering prints an identical
 semicolon-separated leaf cause once and uses `[same cause]` at later stages.
@@ -6287,6 +6316,11 @@ database, telemetry store or optional directory is normal: the row is `OK` with
 the result `missing` and the remedy that state is created by the first stateful
 command (for the config file, `plak config init`). Doctor reads the configured
 locations (`PLAK_HOME`, `XDG_STATE_HOME`) without creating them.
+
+The free-space row remains advisory during a storage outage: quotas and
+allocation failures can refuse a write even when the volume reports free
+blocks. Doctor does not clear a parked writer or authorize paid dispatch;
+the affected store must acknowledge its retained authoritative write.
 
 One check runs a bounded local subprocess: `jj --version`, discovered on PATH
 with `.plak/bin` skipped. It gets a cleared environment with only PATH, null

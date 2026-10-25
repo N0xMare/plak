@@ -75,11 +75,8 @@ fn tree_registrations(
     binder: Arc<ScriptedChildBinder>,
 ) -> Result<Vec<plakous::tools::ToolRegistration>, String> {
     let caller_id = driver
-        .tree_handle_for_test()
-        .lock()
-        .map_err(|_| "offline scripted tree lock".to_owned())?
-        .root_agent_id
-        .clone();
+        .read(|tree| tree.root_agent_id.clone())
+        .map_err(|_| "offline scripted tree lock".to_owned())?;
     plakous_hosted::agent_tree_tools::topology_tool_registrations_on(
         driver.clone(),
         caller_id,
@@ -184,8 +181,7 @@ fn prepare_scripted_tree(
             .map_err(|error| format!("offline scripted tree could not attach: {error}"))?;
     let driver = runtime.driver().clone();
     let binder = Arc::new(ScriptedChildBinder {
-        tree: Arc::clone(driver.tree_handle_for_test()),
-        store,
+        driver: driver.clone(),
         sessions,
         session_id: tree_id.to_owned(),
         child_hold_ms: plan.child_hold_ms,
@@ -263,8 +259,7 @@ impl plakous_hosted::agent_tree::TreeStore for ChildLocatorDiskFullStore {
 /// earlier is undone by the bind itself, which reads as a child that ran and
 /// then un-ran.
 struct ScriptedChildBinder {
-    tree: Arc<std::sync::Mutex<plakous_hosted::agent_tree::ProductAgentTree>>,
-    store: Arc<dyn plakous_hosted::agent_tree::TreeStore>,
+    driver: plakous_hosted::agent_tree_tools::TreeDriver,
     sessions: Arc<dyn plakous_hosted::session_store::SessionRecordStore>,
     session_id: String,
     child_hold_ms: u64,
@@ -293,15 +288,6 @@ impl ScriptedChildBinder {
             .load(&self.session_id)
             .ok()
             .and_then(|record| record.plakous_locator.map(|locator| locator.to_string()))
-    }
-
-    fn publish(
-        tree: &mut plakous_hosted::agent_tree::ProductAgentTree,
-        store: &dyn plakous_hosted::agent_tree::TreeStore,
-    ) {
-        if let Ok(revision) = store.save(tree) {
-            tree.acknowledge_revision(revision);
-        }
     }
 }
 
@@ -338,19 +324,17 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
                 )
             });
         }
-        let tree = Arc::clone(&self.tree);
-        let store = Arc::clone(&self.store);
         let publish = self.durable;
         let agent_id = start.spawned.agent_id.clone();
+        let driver = self.driver.for_agent(&agent_id);
         if self.child_process {
             let quiescent = self.child_process_quiescent;
             let runtime = plakous_hosted::topology_runtime::lookup(&self.session_id);
             let roots = self.state_roots.clone();
-            let path = self
-                .tree
-                .lock()
+            let path = driver
+                .read(|tree| tree.node(&agent_id).ok().map(|node| node.path.clone()))
                 .ok()
-                .and_then(|tree| tree.node(&agent_id).ok().map(|node| node.path.clone()));
+                .flatten();
             return Box::pin(async move {
                 bind_process_child(runtime, roots, agent_id, path, quiescent)
                     .await
@@ -377,48 +361,49 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
             tokio::spawn(async move {
                 for _ in 0..600 {
                     let ready = {
-                        let Ok(tree) = tree.lock() else {
-                            return;
-                        };
-                        tree.node(&agent_id)
-                            .is_ok_and(|node| node.session_locator.is_some())
+                        driver
+                            .read(|tree| {
+                                tree.node(&agent_id)
+                                    .is_ok_and(|node| node.session_locator.is_some())
+                            })
+                            .unwrap_or(false)
                     };
                     if !ready {
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                         continue;
                     }
                     if hold_ms > 0 {
-                        if let Ok(tree) = tree.lock()
-                            && let Ok(node) = tree.node(&agent_id)
-                        {
-                            std::fs::write(node.path.join("holding.txt"), "holding\n").ok();
-                        }
+                        let _ = driver.read(|tree| {
+                            if let Ok(node) = tree.node(&agent_id) {
+                                std::fs::write(node.path.join("holding.txt"), "holding\n").ok();
+                            }
+                        });
                         tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
                     }
-                    let Ok(mut tree) = tree.lock() else {
-                        return;
-                    };
-                    if let Ok(node) = tree.node(&agent_id) {
-                        std::fs::write(node.path.join("child.txt"), "child\n").ok();
-                    }
-                    let turn_token = tree
-                        .attempt(&agent_id)
-                        .map_or(1, |attempt| attempt.turn_token);
-                    let submitted = tree.submit_result(
-                        &agent_id,
-                        &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
-                            turn_token,
-                            output_json: "{\"summary\":\"offline scripted child done\"}".to_owned(),
-                        },
-                        None,
-                    );
-                    if submitted.is_ok() {
-                        tree.record_turn_completed(&agent_id).ok();
-                    }
-                    tree.settle_for_test();
-                    if publish {
-                        Self::publish(&mut tree, store.as_ref());
-                    }
+                    let _ = driver.mutate(|tree| {
+                        if let Ok(node) = tree.node(&agent_id) {
+                            std::fs::write(node.path.join("child.txt"), "child\n").ok();
+                        }
+                        let turn_token = tree
+                            .attempt(&agent_id)
+                            .map_or(1, |attempt| attempt.turn_token);
+                        let submitted = tree.submit_result(
+                            &agent_id,
+                            &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
+                                turn_token,
+                                output_json: "{\"summary\":\"offline scripted child done\"}"
+                                    .to_owned(),
+                            },
+                            None,
+                        );
+                        if submitted.is_ok() {
+                            tree.record_turn_completed(&agent_id).ok();
+                        }
+                        tree.settle_for_test();
+                        if publish {
+                            driver.save(tree).ok();
+                        }
+                    });
                     return;
                 }
             });

@@ -483,6 +483,28 @@ fields and all other content stay pinned. Other arms retain exact matching.
 Test-only session-record faults use one complete forwarding store with per-method
 policies; composition fixtures use one scripted integration, session and event
 port. Refactoring these fixtures does not change their scenario assertions.
+Capacity-outage coverage injects direct-I/O `ENOSPC` and `EDQUOT` before a SQLite actor
+mutation, without filling a real filesystem. This does not cover SQLite-mediated
+EDQUOT: SQLite IOERR without safely available errno remains generic unavailability.
+It checks unchanged heads on
+refusal and exact publication after recovery. Paused-clock driver tests
+cover the five-second cadence, parking beyond physical-call deadlines until
+a write succeeds or the owner cancels/shuts down, retained model output,
+lost acknowledgement reconciliation and duplicate command receipts without
+another paid dispatch. Tree and product tests retain retirement intent and
+queue identities across a refused write; reads cannot clear their pause.
+Advancing-clock tests jump past expiry without an outage and hold all writes
+refused beyond the lease, requiring same-fence revival and exactly one result
+without another paid dispatch. Foreign takeover still refuses revival and
+publication; capacity debt cannot make an expired grant valid. Cancellation
+after one and repeated in-commit revivals retains the newest grant for heartbeat
+and exact release while only checkpoint writes are full. An unreadable lease
+clock with transient renewal failure retries without ending authority. Scoped
+cancellation tests keep unrelated child publications parked and permit later
+owners to recover. Hosted parked-product-write tests interrupt without losing
+queue identities, then quit with a clean runtime release.
+Storage injection is local to these store seams, not `PLAK_TEST_FAULTS`,
+whose transport faults do not simulate database allocation failures.
 Memory conformance runs once, independently of the SQLite suite. The route
 SIGKILL matrix owns the direct boundary cells; the commit-cut campaign remains
 separate. Projection rebuild and plain-reopen laws share a lifecycle per shape,

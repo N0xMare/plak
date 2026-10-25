@@ -16,7 +16,7 @@ use crate::home::paths::PlakPaths;
 
 #[cfg(any(test, feature = "test-support"))]
 pub fn save_session(paths: &PlakPaths, session: &mut SessionRecord) -> Result<(), String> {
-    with_product_store(paths, |store| store.commit(session))
+    with_product_store(paths, |store| store.commit(session).map_err(String::from))
 }
 
 #[cfg(any(test, feature = "test-support"))]

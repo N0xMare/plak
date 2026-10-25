@@ -17,13 +17,13 @@ pub(super) enum MailConsumer {
 }
 
 pub(super) struct MailConsumerGuard {
-    pub(super) tree: Arc<Mutex<ProductAgentTree>>,
+    pub(super) driver: TreeDriver,
     pub(super) consumer: MailConsumer,
 }
 
 impl Drop for MailConsumerGuard {
     fn drop(&mut self) {
-        if let Ok(mut tree) = self.tree.lock() {
+        if let Ok(mut tree) = self.driver.lock() {
             match &self.consumer {
                 MailConsumer::Wait { caller, operation } => {
                     tree.parked_waits
@@ -318,7 +318,7 @@ impl TopologyTool {
         };
         let snapshot = loop {
             let notify = {
-                let mut tree = self.driver.tree.lock().map_err(|_| {
+                let mut tree = self.driver.lock().map_err(|_| {
                     ToolRuntimeError::new(
                         ToolRuntimeErrorKind::Execution,
                         "topology tree lock is poisoned",
@@ -394,14 +394,14 @@ impl TopologyTool {
             }
         };
         let _delivery = MailConsumerGuard {
-            tree: Arc::clone(&self.driver.tree),
+            driver: self.driver.clone(),
             consumer: MailConsumer::Delivery(output.message_id.clone()),
         };
         // A send's Starts to one child are exclusive: the reservation lasts
         // until the send returns.
         let mut start =
             (snapshot.disposition == MailDisposition::Started).then(|| MailConsumerGuard {
-                tree: Arc::clone(&self.driver.tree),
+                driver: self.driver.clone(),
                 consumer: MailConsumer::Start {
                     agent: snapshot.agent_id.clone(),
                     message: snapshot.message_id.clone(),
@@ -463,7 +463,7 @@ impl TopologyTool {
             };
             match answer {
                 Ok(_) => {
-                    let mut tree = self.driver.tree.lock().map_err(|_| {
+                    let mut tree = self.driver.lock().map_err(|_| {
                         ToolRuntimeError::new(
                             ToolRuntimeErrorKind::Execution,
                             "topology tree lock is poisoned",
@@ -492,7 +492,7 @@ impl TopologyTool {
                     // bound; the send binds nothing. A turn that has ended,
                     // or that a later turn replaced, is never bound or marked
                     // active again here.
-                    if let Err(error) = self.driver.save(&mut tree) {
+                    if let Err(error) = self.driver.save_guarded(&mut tree) {
                         return ToolOutcome::failure_text(
                             json!({ "code": error.code, "message": error.message }).to_string(),
                         );
@@ -582,7 +582,7 @@ impl TopologyTool {
                         }
                         TurnEndedMail::Restart => {
                             let _ = start.get_or_insert_with(|| MailConsumerGuard {
-                                tree: Arc::clone(&self.driver.tree),
+                                driver: self.driver.clone(),
                                 consumer: MailConsumer::Start {
                                     agent: snapshot.agent_id.clone(),
                                     message: snapshot.message_id.clone(),
@@ -648,7 +648,7 @@ impl TopologyTool {
         let request = decode::<SendAgentMessageRequest>(value).map_err(|error| {
             ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
         })?;
-        let mut tree = self.driver.tree.lock().map_err(|_| {
+        let mut tree = self.driver.lock().map_err(|_| {
             ToolRuntimeError::new(
                 ToolRuntimeErrorKind::Execution,
                 "topology tree lock is poisoned",
@@ -697,7 +697,7 @@ impl TopologyTool {
         let mut cancel_seen = false;
         loop {
             let notified = {
-                let mut tree = self.driver.tree.lock().map_err(|_| lock_error())?;
+                let mut tree = self.driver.lock().map_err(|_| lock_error())?;
                 let mut notified = Box::pin(tree.waiters().notified_owned());
                 notified.as_mut().enable();
                 if !wait_first {

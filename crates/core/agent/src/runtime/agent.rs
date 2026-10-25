@@ -465,7 +465,22 @@ impl Agent {
     ///
     /// Returns bounded ingress backpressure or actor shutdown before classification.
     pub async fn command(&self, command: TurnCommand) -> Result<TurnSubmission, ControlError> {
-        let reply = crate::submit_actor_command(&self.inner.controls, command).await?;
+        let cancelled_turn = match &command {
+            TurnCommand::Cancel { turn_id, .. } => self.turn_control(*turn_id),
+            _ => None,
+        };
+        let shutdown = matches!(command, TurnCommand::Shutdown { .. });
+        let reply = crate::submit_actor_command(&self.inner.controls, command, || {
+            if let Some(control) = cancelled_turn
+                && !control.shared.is_settled()
+            {
+                control.shared.storage_pause.cancel();
+            }
+            if shutdown {
+                self.inner.authority.interrupt_storage_wait();
+            }
+        })
+        .await?;
         Ok(TurnSubmission {
             acknowledgement: reply.acknowledgement,
             turn: reply.turn,
@@ -548,6 +563,20 @@ impl Agent {
             .manifest()
             .topology()
             .checkpoint_id
+    }
+
+    /// Whether this store is retaining publication through a capacity outage.
+    /// This is a live observation, not proof that a checkpoint was committed.
+    #[must_use]
+    pub fn storage_unavailable(&self) -> bool {
+        self.inner.authority.storage_unavailable()
+    }
+
+    /// Binds this agent's operator interruption signal for storage waits.
+    /// It does not interrupt any other agent sharing the store or acknowledge
+    /// a command. Hosts bind it only on their attached root agent.
+    pub fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
+        self.inner.authority.set_storage_interrupt(probe);
     }
 
     pub(crate) fn checkpoint(&self) -> Arc<RuntimeCheckpoint> {

@@ -164,7 +164,7 @@ pub(super) fn prepare(
     command_id: &str,
     prompt: &str,
 ) -> Result<PreparedResultContext, String> {
-    persist_context(driver, |tree| {
+    persist_context(&driver.for_agent(recipient), |tree| {
         if let Some(stored) = tree.command(command_id) {
             let exact = stored.recipient == recipient
                 && stored
@@ -376,7 +376,16 @@ pub(super) fn acknowledge(
     command_id: &str,
     submission: Submission,
 ) -> Result<(), String> {
-    persist_context(driver, |tree| {
+    let recipient = driver
+        .read(|tree| {
+            tree.command(command_id)
+                .map(|command| command.recipient.clone())
+        })
+        .map_err(|error| error.message)?;
+    let driver = recipient
+        .as_deref()
+        .map_or_else(|| driver.clone(), |recipient| driver.for_agent(recipient));
+    persist_context(&driver, |tree| {
         use crate::agent_tree::CommandFact;
         match submission {
             Submission::Recorded => match tree.command(command_id).and_then(|command| command.fact)

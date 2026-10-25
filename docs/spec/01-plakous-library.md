@@ -1087,13 +1087,17 @@ when the interval has elapsed, the next renewal starts immediately, without
 replaying missed ticks. A heartbeat renewal that fails transiently (the store
 busy or unavailable, or the store call or lease gate past its deadline) is
 retried a quarter interval later while the store clock still reads before the
-held lease's expiry; only a refusal, an expired lease or a failed revival ends
-authority. This does not extend an expired lease or bypass fencing;
+held lease's expiry or cannot be read. A clock check every 100 ms wakes an
+immediate renewal or same-owner revival attempt after suspend; neither expiry nor an unreadable
+clock alone irreversibly ends authority. A refusal or a failed attempt after
+expiry ends authority, except while capacity refusal parks the owner's runtime
+write (§5.2). This does not extend an expired lease or bypass fencing;
 renewal and checkpoint publication still require live authority. Each durable
 checkpoint publication also renews under the same lease gate immediately before
 constructing its commit request, after candidate encoding. The commit and any
-acknowledgement recovery bind that exact renewed lease. A failed renewal cannot
-fall back to the earlier lease or dispatch the checkpoint. This adds one renewal
+acknowledgement recovery bind that exact renewed lease, or a same-owner
+same-fence revival of it established while capacity-parked (§5.2). A failed
+renewal cannot fall back to the earlier lease or dispatch the checkpoint. This adds one renewal
 transaction per publication: periodic renewal alone cannot protect a slow commit
 while publication excludes the heartbeat. It does not promise a full lease period
 after acknowledgement, extend the configured lease duration, or make an expired
@@ -1309,11 +1313,64 @@ recovery to publish within the enlarged budget, without replaying model calls
 or tools.
 
 The admission reserve is logical only: it reserves configured retention
-headroom, not physical disk blocks. `SQLITE_FULL` and filesystem `ENOSPC` are
+headroom, not physical disk blocks. `SQLITE_FULL` and directly observed filesystem `ENOSPC` and `EDQUOT` are
 `SessionStoreError::StorageFull`, distinct from `Capacity` and backend
 unavailability. Hosts name reclamation (`plak session gc`), deleting unused
 sessions, or freeing disk space as remedies; reclamation still needs enough
 physical space for its transaction and is not guaranteed on a full disk.
+SQLite-mediated quota exhaustion reported as `SQLITE_IOERR_WRITE` or
+`SQLITE_IOERR_FSYNC` remains generic backend unavailability: rusqlite does not
+expose the underlying errno safely. No unsafe errno lookup or prose matching
+is used to turn a generic IOERR into a capacity retry.
+
+**Capacity outage during publication.** A proven `StorageFull` refusal parks
+the exact prepared checkpoint instead of failing the active turn immediately.
+The single owner retries only publication, at five-second intervals until an
+authoritative write succeeds or the operator cancels/shuts down. Individual
+physical calls retain their operation deadlines; there is no outage deadline.
+One owner-local pause spans renewal before commit and the commit itself. It retains
+the checkpoint identity, expected head, lease fence, received model output
+and effect ledger. Already dispatched model requests, compaction and tools
+are never dispatched again to repair a failed write. No terminal is installed
+while publication is parked. Successful publication resumes the same owner;
+cancellation/shutdown preserves the typed storage failure and truthful
+recovery-required disposition if settlement still cannot be written.
+Expiry wakes renewal or same-owner revival, not cancellation of the owner's
+terminal `lost` token. Capacity-refused renewal/revival keeps the same owner
+parked beyond lease expiry, with retries at five-second intervals; once the
+store is writable, the next attempt must establish authority under the same
+fence before publication or new dispatch. A foreign takeover or other
+non-capacity refusal ends authority and refuses publication. A colocated
+product/tree pause does not make an expired runtime lease valid for dispatch.
+After expiry, an acquirer may replace the lease despite the old owner's host
+lock. In-flight effects of a capacity-parked owner may therefore overlap a
+foreign acquirer for at most one five-second retry interval plus a store-operation
+deadline: the next parked commit or heartbeat attempt observes the superseded
+fence and ends authority. Every acknowledged same-owner revival replaces the
+owner's held grant even if publication subsequently fails or is interrupted,
+so renewal and cleanup release use the latest grant.
+Interrupt applies only to the addressed turn/agent, not every owner sharing
+the backend. Embedders without an interrupt probe can bound a workflow's
+outage wait by dropping or timing out its future. Timing out an agent command
+or result observer only bounds the caller's wait, not the already running
+owner: cancel the exact turn or shut down that agent explicitly.
+
+Lease acquire, renewal, exact revival, create/fork, pruning and joined release also wait through capacity
+refusals with the same park-until-written policy. A foreign owner,
+expired fence, corrupt checkpoint or revision conflict is never capacity
+retried. Ambiguous acknowledgement failures still reconcile the exact commit
+identity; they are not permission to resend a mutation or external work.
+The backend's process-local capacity observation blocks new starts while
+colocated authoritative stores retain writes. It carries no durable authority:
+a read, free-space probe or telemetry success cannot clear an outstanding
+write refusal. Admission immediately retries the flagged colocated store's
+outstanding write or a minimal authoritative write, then waits five seconds
+before retrying again. SQLite clears its observation after a successful write
+or exact-identity reconciliation. Permission, read-only and generic SQLite IO errors
+are not classified as capacity by their text.
+Reopening a parked child therefore waits at the lease-acquire boundary before
+an outage can reach the host's generic retirement path; waking the owner
+never resends its previous turn.
 
 **Admission reserve.** Every create, fork and commit carries a
 `StoreAdmission` class chosen by the runtime from what the write does, never by

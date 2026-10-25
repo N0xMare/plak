@@ -60,7 +60,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             // drops every non-advancing revision, so at most one push per
             // revision leaves.
             let observed_tree = self.last_tree_observed_at.elapsed() >= TREE_OBSERVE_INTERVAL;
-            if observed_tree {
+            if observed_tree
+                && !(self.storage_interrupted && self.config.store.storage_unavailable())
+            {
                 self.last_tree_observed_at = Instant::now();
                 let _ = self.executor.block_on(async {
                     emit_tree_snapshot_if_revision_advanced(
@@ -257,6 +259,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     None
                 }
                 Ok(UserAction::Interrupt) => {
+                    if self.config.store.storage_unavailable() {
+                        self.storage_interrupted = true;
+                        self.config.session.queue_drain_state =
+                            SessionQueueDrainState::RestoredPaused;
+                        self.pending_start = None;
+                        return Ok(HostStep::Continue);
+                    }
                     if !cancelled_resume
                         && !self.has_automatic_continue_work()
                         && one_shot.is_none()

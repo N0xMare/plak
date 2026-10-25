@@ -1,6 +1,6 @@
 //! Owner-driven reclamation of superseded checkpoint history.
 
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
 use crate::runtime::durable::bootstrap::release_store_lease;
 use crate::runtime::durable::branch::{operation_run_id, validate_session_operation_id};
 use crate::runtime::durable::{DurableSessionAddress, DurableSessionRuntime};
@@ -28,14 +28,17 @@ impl DurableSessionRuntime {
     ) -> Result<Option<PruneReceipt>, AgentError> {
         validate_session_operation_id(operation_id)?;
         let owner = operation_run_id(&self.instance_nonce, operation_id)?;
-        let lease = store_call(
+        let lease = capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                address.session(),
-                owner,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    address.session(),
+                    owner,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -60,10 +63,11 @@ impl DurableSessionRuntime {
                 checkpoint_retained_history(checkpoint),
                 1,
             );
-            store_call(
+            capacity_store_call(
                 StorePhase::Prune,
                 self.store_timeouts.operation,
-                self.store.prune(request),
+                || self.store.prune(request.clone()),
+                || self.store.storage_wait_cancelled(),
             )
             .await
             .map(Some)

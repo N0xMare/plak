@@ -192,6 +192,18 @@ impl NotifyingStore {
 }
 
 impl SessionStore for NotifyingStore {
+    fn storage_unavailable(&self) -> bool {
+        self.inner.storage_unavailable()
+    }
+
+    fn storage_wait_cancelled(&self) -> bool {
+        self.inner.storage_wait_cancelled()
+    }
+
+    fn recover_storage(&self) -> StoreFuture<'_, ()> {
+        self.inner.recover_storage()
+    }
+
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
         self.inner.lease_now()
     }

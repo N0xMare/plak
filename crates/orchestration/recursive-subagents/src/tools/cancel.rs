@@ -211,7 +211,7 @@ impl TopologyTool {
             });
         }
         {
-            let mut tree = self.driver.tree.lock().map_err(|_| {
+            let mut tree = self.driver.lock().map_err(|_| {
                 ToolRuntimeError::new(
                     ToolRuntimeErrorKind::Execution,
                     "topology tree lock is poisoned",
@@ -377,7 +377,7 @@ impl TopologyTool {
         message: String,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         let (persist_error, pending) = {
-            let Ok(mut tree) = self.driver.tree.lock() else {
+            let Ok(mut tree) = self.driver.lock() else {
                 return ToolOutcome::failure_text(
                     json!({
                         "code": TopologyErrorCode::OperationRecoveryRequired,
@@ -394,7 +394,7 @@ impl TopologyTool {
                 .record_host_materialization(agent_id)
                 .and_then(|value| {
                     self.driver
-                        .apply_recorded(&mut tree, agent_id)
+                        .apply_recorded_guarded(&mut tree, agent_id)
                         .map(|()| value)
                 });
             let status = tree

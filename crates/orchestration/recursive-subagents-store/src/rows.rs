@@ -20,7 +20,7 @@ use plakous_recursive_subagents::protocol::{
 use plakous_recursive_subagents::tree::{
     AgentCommand, AttemptFailure, AttemptRecord, BlockedReason, CandidateRecord, FoldAnchor,
     MailRecord, NodeRecord, OperationRecord, PersistedTree, ProductAgentTree, SubmitNudgeBudget,
-    TreeAdmissionState, UsageRow, WorkspaceRecord,
+    TreeAdmissionState, TreeStoreError, UsageRow, WorkspaceRecord,
 };
 
 pub(crate) use codec::Row;
@@ -63,7 +63,7 @@ fn decode_id_list(value: &str) -> Result<Vec<String>, String> {
 
 /// Clears every row of one tree, child tables first, so the foreign keys
 /// never see a parent disappear under a child.
-pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(), String> {
+pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
     for statement in [
         "DELETE FROM agent_feed_cursors WHERE tree_id=?1",
         "DELETE FROM agent_commands WHERE tree_id=?1",
@@ -76,8 +76,9 @@ pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(),
         "DELETE FROM agent_nodes WHERE tree_id=?1",
         "DELETE FROM agent_trees WHERE tree_id=?1",
     ] {
-        tx.execute(statement, [tree_id])
-            .map_err(|_| "could not replace agent tree rows".to_owned())?;
+        tx.execute(statement, [tree_id]).map_err(|error| {
+            crate::store::sqlite_write_error(error, "could not replace agent tree rows".to_owned())
+        })?;
     }
     Ok(())
 }
@@ -88,7 +89,10 @@ pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(),
 /// Each insert asserts it changed exactly one row, so a constraint that
 /// silently dropped a write fails the save instead of persisting a tree the
 /// reopen would read back short.
-pub fn insert_agent_tree_rows(tx: &Transaction<'_>, tree: &ProductAgentTree) -> Result<(), String> {
+pub fn insert_agent_tree_rows(
+    tx: &Transaction<'_>,
+    tree: &ProductAgentTree,
+) -> Result<(), TreeStoreError> {
     let header = Header::of(tree)?;
     let changed = tx
         .execute(
@@ -105,9 +109,9 @@ pub fn insert_agent_tree_rows(tx: &Transaction<'_>, tree: &ProductAgentTree) -> 
                 header.snapshot_json,
             ],
         )
-        .map_err(|_| "could not insert agent tree row".to_owned())?;
+        .map_err(|error| crate::store::sqlite_write_error(error, "could not insert agent tree row".to_owned()))?;
     if changed != 1 {
-        return Err("agent tree insert was not exact".to_owned());
+        return Err("agent tree insert was not exact".to_owned().into());
     }
     let tree_id = tree.tree_id.as_str();
     insert_rows(tx, tree_id, tree.nodes())?;
@@ -127,7 +131,7 @@ pub fn insert_agent_tree_rows(tx: &Transaction<'_>, tree: &ProductAgentTree) -> 
 pub(crate) fn swap_agent_tree_header(
     tx: &Transaction<'_>,
     tree: &ProductAgentTree,
-) -> Result<usize, String> {
+) -> Result<usize, TreeStoreError> {
     let header = Header::of(tree)?;
     tx.execute(
         "UPDATE agent_trees SET root_agent_id=?2, revision=?3, host_generation=?4, state=?5, writer_mode=?6, selected_tuple=?7, launch_checkout=?8, snapshot_json=?9 WHERE tree_id=?1 AND revision=?10",
@@ -144,7 +148,7 @@ pub(crate) fn swap_agent_tree_header(
             to_i64(tree.stored_revision)?,
         ],
     )
-    .map_err(|_| "could not update agent tree row".to_owned())
+    .map_err(|error| crate::store::sqlite_write_error(error, "could not update agent tree row".to_owned()))
 }
 
 /// The `agent_trees` columns that are not plain text, encoded once for
@@ -176,7 +180,7 @@ fn insert_rows<R: Row>(
     tx: &Transaction<'_>,
     tree_id: &str,
     rows: &BTreeMap<R::Key, R>,
-) -> Result<(), String> {
+) -> Result<(), TreeStoreError> {
     let sql = R::TABLE.insert_sql();
     for (key, row) in rows {
         write_row(tx, &sql, "insert", tree_id, key, row)?;
@@ -194,13 +198,13 @@ pub(crate) fn write_row<R: Row>(
     tree_id: &str,
     key: &R::Key,
     row: &R,
-) -> Result<(), String> {
+) -> Result<(), TreeStoreError> {
     let noun = R::TABLE.noun;
-    let changed = row
-        .write(tx, sql, tree_id, key)?
-        .map_err(|_| format!("could not {verb} {noun} row"))?;
+    let changed = row.write(tx, sql, tree_id, key)?.map_err(|error| {
+        crate::store::sqlite_write_error(error, format!("could not {verb} {noun} row"))
+    })?;
     if changed != 1 {
-        return Err(format!("{noun} {verb} was not exact"));
+        return Err(format!("{noun} {verb} was not exact").into());
     }
     Ok(())
 }
@@ -211,13 +215,15 @@ pub(crate) fn delete_row<R: Row>(
     sql: &str,
     tree_id: &str,
     key: &R::Key,
-) -> Result<(), String> {
+) -> Result<(), TreeStoreError> {
     let noun = R::TABLE.noun;
     let changed = tx
         .execute(sql, params![tree_id, R::key_text(key)])
-        .map_err(|_| format!("could not delete {noun} row"))?;
+        .map_err(|error| {
+            crate::store::sqlite_write_error(error, format!("could not delete {noun} row"))
+        })?;
     if changed != 1 {
-        return Err(format!("{noun} delete was not exact"));
+        return Err(format!("{noun} delete was not exact").into());
     }
     Ok(())
 }

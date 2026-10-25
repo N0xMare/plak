@@ -15,6 +15,17 @@ pub(crate) fn healthy_notice() -> String {
     )
 }
 
+pub(crate) fn outage_notice(home: &Path) -> String {
+    match available(home) {
+        Ok((path, bytes)) => format!(
+            "product home volume (containing {}), {} MiB available",
+            path.display(),
+            bytes / MIB
+        ),
+        Err(_) => "product home volume; free space unavailable".to_owned(),
+    }
+}
+
 pub(crate) fn admission(home: &Path) -> StorageAdmission {
     #[cfg(feature = "test-hooks")]
     if let Some(admission) = crate::test_hooks::storage_capacity_override() {

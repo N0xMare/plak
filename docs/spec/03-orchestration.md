@@ -3941,6 +3941,33 @@ model tools and navigator close/stop-all report retirement failures and preserve
 unresolved recovery evidence. Late turn waiters cannot retire a replacement or apply
 terminal mutations to a newer attempt or turn.
 
+A capacity-refused tree publication (`SQLITE_FULL`, or an explicitly typed
+capacity cause from the store port) retains the exact prepared tree and its
+pending effects under the current owner. The driver retries only its fenced
+save at five-second intervals until an authoritative write succeeds or the
+operator cancels/shuts down, with one retained mutation per owner and no
+outage deadline. The live tree mutex is not held while parked, and mutation
+contenders yield executor workers. It does not rerun mint, seal, adopt, model calls or tools.
+Publications are cancelled by their agent identity, never by an unrelated
+child cancellation or root interrupt. Ordinary guarded access holds the live
+tree without cloning it; only a capacity-refused save detaches the retained
+candidate. Public callback mutations which may publish detach before entering
+the callback. All mutations, including scripted children, use this driver
+ownership boundary rather than writing a raw shared tree handle. Child
+wake and retirement publication wait at this boundary rather than recording
+another fault through the same outage, entering retirement, or marking divergence.
+The acknowledged tree revision advances only on a successful save. A
+foreign revision, corruption or ambiguous backend error remains fail-closed;
+cancellation/shutdown while still full returns `recovery_storage_unavailable`,
+never the preventive definite `storage_low` refusal.
+The tree's live capacity observation blocks new paid starts on colocated
+runtime branches until an authoritative save succeeds. This observation is
+not persisted and cannot replace the tree revision CAS or a child lease.
+Admission retries a flagged store's pending or minimal authoritative write.
+Acquiring a runtime lease to wake a parked child uses the same indefinite
+capacity wait (chapter 01 §5); it does not end the old attempt or replay its
+previous turn merely because the first acquire write was refused.
+
 Process-exit abandonment is separate from joined retirement: the hub closes
 admission, aborts and joins its recovery pass before collecting root/child
 runtime capabilities, cancels startups and aborts retirements. Live and retiring

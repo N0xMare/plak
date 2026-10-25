@@ -24,7 +24,9 @@ use crate::rows::{
 
 /// The tree's database as a [`TreeStore`].
 pub struct SqliteTreeStore {
+    storage_interrupt: Mutex<Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>>,
     writer: Mutex<Writer>,
+    storage_waiting: std::sync::atomic::AtomicBool,
 }
 
 /// The connection and, per tree, the image of its last acknowledged save.
@@ -43,6 +45,8 @@ impl SqliteTreeStore {
     /// Opens `database`, creating and versioning it when it is new.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
         Ok(Self {
+            storage_interrupt: Mutex::new(None),
+            storage_waiting: std::sync::atomic::AtomicBool::new(false),
             writer: Mutex::new(Writer {
                 database: SubagentsDatabase::open(database)?,
                 images: BTreeMap::new(),
@@ -73,7 +77,7 @@ impl SqliteTreeStore {
                 }
                 Some(_) => {}
             }
-            delete_agent_tree_rows(&tx, tree_id).map_err(TreeStoreError::unavailable)?;
+            delete_agent_tree_rows(&tx, tree_id)?;
             tx.commit()
                 .map_err(|error| sqlite_unavailable("could not durably delete agent tree", &error))
         })
@@ -122,8 +126,7 @@ impl Writer {
             })?;
         let image = match image {
             Some(mut image) if image.is_current(data_version) => {
-                let swapped =
-                    swap_agent_tree_header(&tx, tree).map_err(TreeStoreError::unavailable)?;
+                let swapped = swap_agent_tree_header(&tx, tree)?;
                 if swapped != 1 {
                     let stored = stored_revision(&tx, tree_id)?;
                     fence_revision(stored, tree.stored_revision, tree.revision)?;
@@ -131,9 +134,7 @@ impl Writer {
                     // this connection committed the row and nothing removed it.
                     return Err(TreeStoreError::stale(stored.unwrap_or(0), tree.revision));
                 }
-                let delta = image
-                    .write_changes(&tx, tree)
-                    .map_err(TreeStoreError::unavailable)?;
+                let delta = image.write_changes(&tx, tree)?;
                 commit(tx)?;
                 delta.fold_into(&mut image);
                 image
@@ -144,8 +145,8 @@ impl Writer {
                     tree.stored_revision,
                     tree.revision,
                 )?;
-                delete_agent_tree_rows(&tx, tree_id).map_err(TreeStoreError::unavailable)?;
-                insert_agent_tree_rows(&tx, tree).map_err(TreeStoreError::unavailable)?;
+                delete_agent_tree_rows(&tx, tree_id)?;
+                insert_agent_tree_rows(&tx, tree)?;
                 commit(tx)?;
                 TreeImage::of(tree, data_version)
             }
@@ -174,6 +175,41 @@ fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
 }
 
 impl TreeStore for SqliteTreeStore {
+    fn set_storage_interrupt(&self, probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>) {
+        *self
+            .storage_interrupt
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(probe);
+    }
+    fn storage_wait_cancelled(&self) -> bool {
+        self.storage_interrupt
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|probe| probe())
+    }
+    fn recover_storage(&self) -> Result<(), TreeStoreError> {
+        self.with_writer(|writer| {
+            let tx = writer.database.connection.transaction()
+                .map_err(|error| {
+                    sqlite_unavailable("could not probe agent tree storage", &error)
+                })?;
+            tx.execute_batch("UPDATE subagents_schema SET fingerprint=fingerprint || 'x' WHERE singleton=1;
+                UPDATE subagents_schema SET fingerprint=substr(fingerprint,1,length(fingerprint)-1) WHERE singleton=1;")
+                .map_err(|error| sqlite_unavailable("could not probe agent tree storage", &error))?;
+            tx.commit().map_err(|error| sqlite_unavailable("could not probe agent tree storage", &error))?;
+            Ok(())
+        })?;
+        self.storage_waiting
+            .store(false, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    fn storage_unavailable(&self) -> bool {
+        self.storage_waiting
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     fn exists(&self, tree_id: &str) -> Result<bool, TreeStoreError> {
         self.with_database(|database| {
             let found = database
@@ -209,7 +245,16 @@ impl TreeStore for SqliteTreeStore {
     }
 
     fn save(&self, tree: &ProductAgentTree) -> Result<Revision, TreeStoreError> {
-        self.with_writer(|writer| writer.save(tree))?;
+        let result = self.with_writer(|writer| writer.save(tree));
+        if result.is_ok() {
+            self.storage_waiting
+                .store(false, std::sync::atomic::Ordering::Release);
+        } else if matches!(&result, Err(error) if error.kind == plakous_recursive_subagents::tree::TreeStoreErrorKind::StorageFull)
+        {
+            self.storage_waiting
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        result?;
         Ok(Revision::published(tree.revision))
     }
 
@@ -228,8 +273,10 @@ impl TreeStore for SqliteTreeStore {
 }
 
 fn sqlite_unavailable(phase: &'static str, error: &rusqlite::Error) -> TreeStoreError {
+    if error.sqlite_error_code() == Some(ErrorCode::DiskFull) {
+        return TreeStoreError::storage_full();
+    }
     let category = match error.sqlite_error_code() {
-        Some(ErrorCode::DiskFull) => "disk_full",
         Some(ErrorCode::DatabaseBusy) => "database_busy",
         Some(ErrorCode::DatabaseLocked) => "database_locked",
         Some(ErrorCode::SystemIoFailure) => "io_failure",
@@ -239,6 +286,16 @@ fn sqlite_unavailable(phase: &'static str, error: &rusqlite::Error) -> TreeStore
         None => "sqlite_api_failure",
     };
     TreeStoreError::unavailable(format!("{phase}: {category}"))
+}
+
+pub(crate) fn sqlite_write_error(error: rusqlite::Error, phase: String) -> TreeStoreError {
+    let full = error.sqlite_error_code() == Some(ErrorCode::DiskFull);
+    drop(error);
+    if full {
+        TreeStoreError::storage_full()
+    } else {
+        TreeStoreError::unavailable(phase)
+    }
 }
 
 #[cfg(test)]
@@ -362,19 +419,27 @@ mod tests {
 
     #[test]
     fn save_failure_identifies_sqlite_cause_without_backend_text() {
-        for (code, category) in [
-            (rusqlite::ffi::SQLITE_FULL, "disk_full"),
-            (rusqlite::ffi::SQLITE_BUSY, "database_busy"),
+        use plakous_recursive_subagents::tree::TreeStoreErrorKind;
+        for (code, kind, detail) in [
+            (
+                rusqlite::ffi::SQLITE_FULL,
+                TreeStoreErrorKind::StorageFull,
+                "agent tree storage is full",
+            ),
+            (
+                rusqlite::ffi::SQLITE_BUSY,
+                TreeStoreErrorKind::Unavailable,
+                "could not durably commit agent tree: database_busy",
+            ),
         ] {
             let error = rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(code),
                 Some("private database path and SQL".to_owned()),
             );
             let mapped = sqlite_unavailable("could not durably commit agent tree", &error);
-            assert_eq!(
-                mapped.detail,
-                format!("could not durably commit agent tree: {category}")
-            );
+            assert_eq!(mapped.kind, kind);
+            assert_eq!(mapped.detail, detail);
+            assert!(!mapped.detail.contains("private database path"));
         }
     }
 

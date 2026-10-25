@@ -84,7 +84,7 @@ impl TopologyTool {
             .unwrap_or_default();
         let jobs = self.driver.job_service(&caller);
         {
-            let mut tree = self.driver.tree.lock().map_err(|_| {
+            let mut tree = self.driver.lock().map_err(|_| {
                 ToolRuntimeError::new(
                     ToolRuntimeErrorKind::Execution,
                     "topology tree lock is poisoned",
@@ -132,7 +132,7 @@ impl TopologyTool {
             plakous::tools::JoinedProcessSessions::job_terminal_generation,
         );
         let _waiting = MailConsumerGuard {
-            tree: Arc::clone(&self.driver.tree),
+            driver: self.driver.clone(),
             consumer: MailConsumer::Wait {
                 caller: caller.clone(),
                 operation: operation_id.to_owned(),
@@ -159,7 +159,7 @@ impl TopologyTool {
             // steer that lands during it still wakes the next park instead of
             // being lost until the tick expires. This is not an event loop.
             let (output, notify) = {
-                let mut tree = self.driver.tree.lock().map_err(|_| {
+                let mut tree = self.driver.lock().map_err(|_| {
                     ToolRuntimeError::new(
                         ToolRuntimeErrorKind::Execution,
                         "topology tree lock is poisoned",
@@ -256,7 +256,7 @@ impl TopologyTool {
                 });
             }
             if tokio::time::Instant::now() >= deadline {
-                let mut tree = self.driver.tree.lock().map_err(|_| {
+                let mut tree = self.driver.lock().map_err(|_| {
                     ToolRuntimeError::new(
                         ToolRuntimeErrorKind::Execution,
                         "topology tree lock is poisoned",

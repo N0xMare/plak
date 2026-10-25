@@ -11,9 +11,12 @@ async fn hub_working_copy_is_shared_across_compiles_and_persists() {
     tree.acknowledge_revision(store.save(&tree).unwrap());
     let runtime =
         crate::hub::insert_root_with(tree_id.clone(), tree, Arc::clone(&store), None).unwrap();
-    let parent_tree = Arc::clone(&runtime.tree);
+    let parent_tree = Arc::clone(runtime.tree_handle_for_test());
     let child_lookup = crate::hub::lookup(&tree_id).unwrap();
-    assert!(Arc::ptr_eq(&parent_tree, &child_lookup.tree));
+    assert!(Arc::ptr_eq(
+        &parent_tree,
+        child_lookup.tree_handle_for_test()
+    ));
     let binder = Arc::new(StubBinder::ok());
     let outcome = spawn_tool(
         runtime.driver().clone(),
@@ -26,7 +29,7 @@ async fn hub_working_copy_is_shared_across_compiles_and_persists() {
     .await
     .unwrap();
     assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
-    let names = granted_names(Arc::clone(&child_lookup.tree), "c1");
+    let names = granted_names(Arc::clone(child_lookup.tree_handle_for_test()), "c1");
     assert!(names.iter().any(|name| name == "submit_result"));
     assert!(!names.iter().any(|name| name == "spawn_agent"));
     let loaded = reload(&store, &tree_id);

@@ -2,6 +2,88 @@
 
 use super::*;
 
+struct CapacityStore {
+    inner: MemoryTreeStore,
+    refuse: AtomicBool,
+    saves: AtomicUsize,
+    offered: Mutex<Vec<(u64, u64)>>,
+}
+
+impl TreeStore for CapacityStore {
+    fn exists(&self, id: &str) -> Result<bool, crate::tree::TreeStoreError> {
+        self.inner.exists(id)
+    }
+    fn ids(&self) -> Result<Vec<String>, crate::tree::TreeStoreError> {
+        self.inner.ids()
+    }
+    fn load(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::tree::PersistedTree>, crate::tree::TreeStoreError> {
+        self.inner.load(id)
+    }
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+    ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
+        self.saves.fetch_add(1, Ordering::SeqCst);
+        self.offered
+            .lock()
+            .unwrap()
+            .push((tree.stored_revision, tree.revision));
+        if self.refuse.swap(false, Ordering::SeqCst) {
+            return Err(crate::tree::TreeStoreError::storage_full());
+        }
+        self.inner.save(tree)
+    }
+}
+
+#[test]
+fn capacity_refused_child_retirement_publishes_the_same_intent_without_publication_fault_or_reexecution()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(CapacityStore {
+        inner: MemoryTreeStore::new(),
+        refuse: AtomicBool::new(false),
+        saves: AtomicUsize::new(0),
+        offered: Mutex::default(),
+    });
+    let mut tree = bootstrap_tree("capacity-retirement", root.path());
+    let child = tree
+        .spawn_agent("root", &spawn_request(), None)
+        .unwrap()
+        .agent_id;
+    let mut driver = driver_on(tree, store.clone());
+    driver.capacity_retry_without_delay();
+    let mut tree = driver.lock().unwrap();
+    driver.save(&mut tree).unwrap();
+    store.refuse.store(true, Ordering::SeqCst);
+    tree.record_host_cancellation(&child).unwrap();
+    driver.apply_recorded(&mut tree, &child).unwrap();
+    assert_eq!(tree.revision, tree.stored_revision);
+    assert!(
+        !tree
+            .fault_reason(&child)
+            .is_some_and(|reason| reason.contains("tree publish refused"))
+    );
+    assert!(!driver.storage_unavailable());
+    let offers = store.offered.lock().unwrap();
+    assert_eq!(
+        offers[1], offers[2],
+        "only publication, not the retirement mutation, is retried"
+    );
+    assert_eq!(
+        store
+            .inner
+            .load(&tree.tree_id)
+            .unwrap()
+            .unwrap()
+            .rows()
+            .revision,
+        tree.revision
+    );
+}
+
 #[test]
 fn cascade_targets_fold_within_commit_and_restore_on_refused_save() {
     for refuse in [false, true] {

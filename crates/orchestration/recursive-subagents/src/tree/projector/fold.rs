@@ -465,7 +465,13 @@ impl ProductAgentTree {
                     }
                     *self = joined;
                 }
-                Err(error) if error.code != TopologyErrorCode::OperationRecoveryRequired => {
+                Err(error)
+                    if !matches!(
+                        error.code,
+                        TopologyErrorCode::OperationRecoveryRequired
+                            | TopologyErrorCode::RecoveryStorageUnavailable
+                    ) =>
+                {
                     if replay {
                         self.operations = std::mem::take(&mut joined.operations);
                     }

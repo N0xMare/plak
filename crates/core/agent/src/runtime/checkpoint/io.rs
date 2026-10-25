@@ -1,5 +1,6 @@
 //! Bounded store calls and exact commit acknowledgement recovery.
 
+use super::storage_pause::StoragePause;
 use crate::{
     AgentError, AgentErrorKind, BranchHead, BranchLease, CheckpointId, CheckpointObjectRef,
     CommitCheckpoint, CommitReceipt, CommittedCheckpoint, DurabilityAttemptKind,
@@ -118,6 +119,101 @@ pub(in crate::runtime) async fn store_call<T>(
         .map_err(StoreCallError::Store)
 }
 
+/// Retries only a proven capacity refusal, retaining the caller's exact
+/// mutation. An ambiguous acknowledgement is returned for reconciliation,
+/// never repeated. Each physical call is bounded; the retained mutation waits
+/// until it is writable or its owner/host interrupts the outage.
+pub(in crate::runtime) async fn capacity_store_call<T, F>(
+    phase: StorePhase,
+    timeout: Duration,
+    mut operation: impl FnMut() -> F,
+    externally_cancelled: impl Fn() -> bool + Sync,
+) -> Result<T, StoreCallError>
+where
+    F: Future<Output = Result<T, SessionStoreError>>,
+{
+    let pause = StoragePause::current();
+    let mut waiting = None;
+    loop {
+        let result = tokio::time::timeout(timeout, operation())
+            .await
+            .map_err(|_| StoreCallError::Timeout(phase))?
+            .map_err(StoreCallError::Store);
+        if !matches!(
+            result,
+            Err(StoreCallError::Store(SessionStoreError::StorageFull))
+        ) {
+            return result;
+        }
+        waiting.get_or_insert_with(|| pause.enter());
+        if !pause.retry(&externally_cancelled).await {
+            return result;
+        }
+    }
+}
+
+async fn capacity_checkpoint_commit(
+    store: &Arc<dyn SessionStore>,
+    timeout: Duration,
+    mut request: CommitCheckpoint,
+) -> (Result<CommitReceipt, StoreCallError>, BranchLease) {
+    let pause = StoragePause::current();
+    let mut waiting = None;
+    let mut parked = false;
+    loop {
+        if parked
+            && store.lease_now().is_ok_and(|now| {
+                now.same_domain_cmp(request.lease().expires_at())
+                    .is_ok_and(|order| order != std::cmp::Ordering::Less)
+            })
+        {
+            // Revival can only retain this owner and fence. It cannot acquire
+            // a replacement lease, nor change the prepared checkpoint.
+            match capacity_store_call(
+                StorePhase::Renew,
+                timeout,
+                || store.revive(request.lease().clone()),
+                || store.storage_wait_cancelled(),
+            )
+            .await
+            {
+                Ok(lease)
+                    if lease.fence() == request.lease().fence()
+                        && lease.owner() == request.lease().owner()
+                        && lease.session() == request.lease().session() =>
+                {
+                    request = CommitCheckpoint::new(
+                        lease,
+                        request.expected(),
+                        request.checkpoint().clone(),
+                    )
+                    .with_admission(request.admission())
+                    .with_feed_facts(request.feed_facts().to_vec());
+                }
+                Ok(_) => {
+                    return (
+                        Err(StoreCallError::Store(SessionStoreError::FenceSuperseded)),
+                        request.lease().clone(),
+                    );
+                }
+                Err(error) => return (Err(error), request.lease().clone()),
+            }
+        }
+        let result = store_call(StorePhase::Commit, timeout, store.commit(request.clone())).await;
+        if !matches!(
+            result,
+            Err(StoreCallError::Store(SessionStoreError::StorageFull))
+        ) {
+            return (result, request.lease().clone());
+        }
+        parked = true;
+        waiting.get_or_insert_with(|| pause.enter());
+        if !pause.retry(&|| store.storage_wait_cancelled()).await {
+            return (result, request.lease().clone());
+        }
+    }
+}
+
 pub(in crate::runtime) fn recovered_commit_matches_exact(
     recovered: &CommittedCheckpoint,
     lease: &BranchLease,
@@ -188,7 +284,7 @@ impl DurabilityCommitTelemetry {
     }
 }
 
-/// Bounded durability protocol: one commit, then at most one acknowledgement
+/// Bounded durability protocol: one retained commit identity, then at most one acknowledgement
 /// recovery. Call sites retain `Box::pin` to bound already-large driver futures;
 /// inlining this protocol previously overflowed the nested local-composition
 /// scheduler's stack.
@@ -205,8 +301,8 @@ pub(in crate::runtime) async fn commit_with_acknowledgement_recovery(
     expected_checkpoint: CheckpointObjectRef,
     commit_identity: Digest,
     telemetry: Option<&DurabilityCommitTelemetry>,
+    lease: &mut BranchLease,
 ) -> Result<CommitReceipt, AgentError> {
-    let lease = request.lease().clone();
     let durability_started = std::time::Instant::now();
     let finish_durability = |status: TelemetryTerminalStatus| {
         if let Some(telemetry) = telemetry {
@@ -214,7 +310,11 @@ pub(in crate::runtime) async fn commit_with_acknowledgement_recovery(
         }
     };
     let commit_started = std::time::Instant::now();
-    let receipt = match store_call(StorePhase::Commit, timeout, store.commit(request)).await {
+    let (committed, latest_lease) = capacity_checkpoint_commit(store, timeout, request).await;
+    // Revival is authoritative even when publication or acknowledgement
+    // recovery fails. The caller retains this grant for renewal and release.
+    *lease = latest_lease;
+    let receipt = match committed {
         Ok(receipt) => {
             if let Some(telemetry) = telemetry {
                 telemetry.emit_attempt(
@@ -258,7 +358,7 @@ pub(in crate::runtime) async fn commit_with_acknowledgement_recovery(
                 Ok(recovered)
                     if recovered_commit_matches_exact(
                         &recovered,
-                        &lease,
+                        lease,
                         expected_previous,
                         expected_checkpoint,
                         commit_identity,

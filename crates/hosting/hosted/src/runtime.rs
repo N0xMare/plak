@@ -141,6 +141,7 @@ mod resume;
 pub mod shell;
 mod source_release;
 mod startup;
+mod storage;
 pub use factory::{ProductionRuntimeFactory, RuntimeFactory, RuntimeFuture, TurnObserver};
 #[cfg(any(test, feature = "test-support"))]
 pub use test_kit::ScriptedRuntimeFactory;

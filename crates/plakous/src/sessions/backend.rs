@@ -50,7 +50,10 @@ impl SessionBackend {
             RuntimeDurability::Disabled,
         ))
     }
+}
 
+#[cfg(feature = "sessions-sqlite")]
+impl SessionBackend {
     /// Opens or creates one required-durability SQLite backend.
     ///
     /// Attach admits bounded shape, exact schema, and counters. It does not
@@ -58,22 +61,45 @@ impl SessionBackend {
     ///
     /// The database path and backend remain private implementation inputs;
     /// callers receive only the semantic workflow handle.
+    /// Capacity waits have no overall outage deadline. Without an interrupt
+    /// probe, bound a workflow by dropping or timing out its future. Dropping
+    /// an agent command or result observer alone does not stop its running
+    /// owner: cancel the exact turn or shut down its agent explicitly.
     ///
     /// # Errors
     ///
     /// Returns a redaction-safe storage or integrity failure when the database
     /// cannot be opened exactly.
-    #[cfg(feature = "sessions-sqlite")]
     pub fn sqlite(path: impl AsRef<Path>) -> Result<Self, AgentSessionsError> {
+        Self::sqlite_with_storage_probe(path, Arc::new(|_| false), Arc::new(|| false))
+    }
+
+    /// Opens SQLite with a process-local pause probe for colocated
+    /// authoritative stores. True refuses new dispatch, never a retained
+    /// publication. The probe receives `true` to retry outstanding storage
+    /// debt through an authoritative write, and `false` for observation only.
+    /// Only the store that failed may clear its own pause. On a shared backend,
+    /// the interrupt probe observes process shutdown only, never a single
+    /// agent's Esc or write authority. Bind per-agent interruption on its agent.
+    ///
+    /// # Errors
+    /// Returns the same admission failures as [`Self::sqlite`].
+    pub fn sqlite_with_storage_probe(
+        path: impl AsRef<Path>,
+        probe: Arc<dyn Fn(bool) -> bool + Send + Sync>,
+        interrupt: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Result<Self, AgentSessionsError> {
         let path = path.as_ref();
         let store =
             SqliteSessionStore::open(path).map_err(|error| store_path_error(path, error))?;
         Ok(Self::from_store(
-            Arc::new(store),
+            Arc::new(store.with_storage_probe(probe, interrupt)),
             RuntimeDurability::Required,
         ))
     }
+}
 
+impl SessionBackend {
     /// Classifies bounded SQLite persistence shape without authorizing use.
     ///
     /// `Current` is only startup-routing evidence. Call [`Self::sqlite`] before

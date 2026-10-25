@@ -100,8 +100,8 @@ impl WholeTree {
             .ok()
             .map(|revision| u64::try_from(revision).unwrap());
         fence_revision(stored, tree.stored_revision, tree.revision)?;
-        rows::delete_agent_tree_rows(&tx, &tree.tree_id).map_err(TreeStoreError::unavailable)?;
-        rows::insert_agent_tree_rows(&tx, tree).map_err(TreeStoreError::unavailable)?;
+        rows::delete_agent_tree_rows(&tx, &tree.tree_id)?;
+        rows::insert_agent_tree_rows(&tx, tree)?;
         tx.commit().unwrap();
         Ok(())
     }

@@ -15,7 +15,7 @@ pub(super) fn persist(store: &dyn SessionRecordStore, session: &mut SessionRecor
 pub(super) fn commit_definite_failure_projection(
     session: &mut SessionRecord,
     error: &str,
-    save: impl FnOnce(&mut SessionRecord) -> Result<(), String>,
+    save: impl FnOnce(&mut SessionRecord) -> Result<(), crate::session_store::RecordStoreError>,
 ) -> Result<(), String> {
     let mut candidate = session.clone();
     candidate.append_transcript(TranscriptRow::error(NoticeScope::Turn, error));
@@ -28,7 +28,7 @@ pub(super) fn commit_definite_failure_projection(
 pub(super) fn commit_exceptional_terminal_projection(
     session: &mut SessionRecord,
     projection: ExceptionalTerminalProjection<'_>,
-    save: impl FnOnce(&mut SessionRecord) -> Result<(), String>,
+    save: impl FnOnce(&mut SessionRecord) -> Result<(), crate::session_store::RecordStoreError>,
 ) -> Result<(), String> {
     let mut candidate = session.clone();
     match projection {

@@ -4,6 +4,7 @@ use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
 use crate::runtime::checkpoint::owner::{
     CheckpointAuthority, DurableBranchContext, lease_authority_lost, lease_taken_over,
 };
+use crate::runtime::checkpoint::storage_pause::StoragePause;
 use crate::runtime::terminal::lock_mutex;
 use crate::{AgentError, AgentErrorKind, SessionStoreError};
 use plakous_model::CancellationToken;
@@ -43,6 +44,12 @@ impl LeaseHeartbeat {
             let failure_task = Arc::clone(&failure);
             let interval = heartbeat_interval(branch.lease.lease_seconds());
             tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_millis(100));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                // The store clock counts suspend time even when Tokio's does
+                // not. Expiry wakes renewal/revival; it is not proof of loss.
+                // Once attempted, capacity retries keep their bounded cadence.
+                let mut expiry_attempted = false;
                 let mut next_renewal = tokio::time::Instant::now() + interval;
                 loop {
                     tokio::select! {
@@ -51,17 +58,36 @@ impl LeaseHeartbeat {
                         biased;
                         () = stop_task.cancelled() => return,
                         () = tokio::time::sleep_until(next_renewal) => {}
+                        _ = tick.tick() => {
+                            if expiry_attempted || lease_live(&authority) == Some(true) {
+                                continue;
+                            }
+                            expiry_attempted = true;
+                        }
                     }
                     // Stores stamp expiry before returning the acknowledgement.
                     // A slow acknowledgement must not add another full sleep;
                     // anchor at this start rather than replaying missed ticks.
                     next_renewal = tokio::time::Instant::now() + interval;
                     let error = match renew_once(&authority).await {
-                        Ok(()) => continue,
+                        Ok(()) => {
+                            expiry_attempted = false;
+                            continue;
+                        }
                         // A busy or slow store does not end authority while
-                        // the held lease is live: retry sooner instead.
-                        Err(RenewalFailure::Transient(_)) if lease_live(&authority) => {
-                            next_renewal = tokio::time::Instant::now() + retry_delay(interval);
+                        // the held lease is live or its clock is unreadable:
+                        // retry sooner instead.
+                        Err(RenewalFailure::Transient(ref error))
+                            if error.is_storage_full()
+                                || storage_waiting(&authority)
+                                || lease_live(&authority) != Some(false) =>
+                        {
+                            next_renewal = tokio::time::Instant::now()
+                                + if error.is_storage_full() || storage_waiting(&authority) {
+                                    Duration::from_secs(5)
+                                } else {
+                                    retry_delay(interval)
+                                };
                             continue;
                         }
                         Err(RenewalFailure::Transient(error) | RenewalFailure::Refused(error)) => {
@@ -143,7 +169,7 @@ enum RenewalFailure {
 
 impl RenewalFailure {
     fn from_store(error: StoreCallError) -> Self {
-        if error.is_retryable() {
+        if error.is_retryable() || error.is(SessionStoreError::StorageFull) {
             Self::Transient(error.into_agent())
         } else {
             Self::Refused(error.into_agent())
@@ -157,16 +183,24 @@ impl RenewalFailure {
     }
 }
 
-/// Whether the store clock still reads before the held lease's expiry. An
-/// unreadable clock counts as expired.
-fn lease_live(authority: &Arc<Mutex<CheckpointAuthority>>) -> bool {
+/// Whether the store clock proves the held lease is live or expired. `None`
+/// means the clock cannot establish either, not that authority was lost.
+fn lease_live(authority: &Arc<Mutex<CheckpointAuthority>>) -> Option<bool> {
     let authority = lock_mutex(authority);
-    authority.durable.as_ref().is_some_and(|branch| {
-        branch.store.lease_now().is_ok_and(|now| {
-            now.same_domain_cmp(branch.lease.expires_at())
-                .is_ok_and(|order| order == std::cmp::Ordering::Less)
-        })
+    authority.durable.as_ref().and_then(|branch| {
+        branch
+            .store
+            .lease_now()
+            .ok()?
+            .same_domain_cmp(branch.lease.expires_at())
+            .ok()
+            .map(|order| order == std::cmp::Ordering::Less)
     })
+}
+
+fn storage_waiting(authority: &Arc<Mutex<CheckpointAuthority>>) -> bool {
+    let state = lock_mutex(authority);
+    state.storage_pause.is_waiting()
 }
 
 #[cfg(test)]
@@ -200,9 +234,31 @@ async fn renew_once(authority: &Arc<Mutex<CheckpointAuthority>>) -> Result<(), R
 pub(super) async fn renew_shared_durable_lease_under_gate(
     authority: &Arc<Mutex<CheckpointAuthority>>,
 ) -> Result<DurableBranchContext, AgentError> {
-    renew_under_gate(authority)
-        .await
-        .map_err(RenewalFailure::into_agent)
+    let pause = StoragePause::current();
+    let mut waiting = None;
+    loop {
+        match renew_under_gate(authority).await {
+            Ok(branch) => return Ok(branch),
+            Err(RenewalFailure::Transient(error)) if error.is_storage_full() => {
+                waiting.get_or_insert_with(|| pause.enter());
+                let store = lock_mutex(authority)
+                    .durable
+                    .as_ref()
+                    .map(|branch| branch.store.clone());
+                if !pause
+                    .retry(&|| {
+                        store
+                            .as_ref()
+                            .is_some_and(|store| store.storage_wait_cancelled())
+                    })
+                    .await
+                {
+                    return Err(error);
+                }
+            }
+            Err(error) => return Err(error.into_agent()),
+        }
+    }
 }
 
 async fn renew_under_gate(
@@ -235,7 +291,7 @@ async fn renew_under_gate(
         .await
         {
             Ok(revived) => revived,
-            Err(error) if error.is_retryable() => {
+            Err(error) if error.is_retryable() || error.is(SessionStoreError::StorageFull) => {
                 return Err(RenewalFailure::Transient(error.into_agent()));
             }
             Err(_) => return Err(RenewalFailure::Refused(lease_taken_over())),

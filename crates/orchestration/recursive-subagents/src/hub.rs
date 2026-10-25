@@ -509,7 +509,7 @@ pub struct ProductTopologyRuntime {
     /// guard without taking the [`crate::tree::Effects`] the mutation queued.
     /// Outside callers get [`Self::read`], [`Self::try_read`] and
     /// [`Self::mutate_and_settle`].
-    pub(crate) tree: Arc<Mutex<ProductAgentTree>>,
+    tree: Arc<Mutex<ProductAgentTree>>,
     /// Live child turns, keyed by agent id. Its lock is separate from the
     /// tree's on purpose: admission and the shutdown drain must be one lock,
     /// and neither may be taken while the tree's is held.
@@ -619,15 +619,17 @@ impl ProductTopologyRuntime {
     ) -> Result<R, String> {
         let (result, effects) = {
             let mut tree = self
-                .tree
+                .driver
                 .lock()
                 .map_err(|_| "topology tree lock is poisoned".to_owned())?;
             if tree.revision != tree.stored_revision {
-                self.driver.save(&mut tree).map_err(|error| error.message)?;
+                self.driver
+                    .save_guarded(&mut tree)
+                    .map_err(|error| error.message)?;
             }
             let result = self
                 .driver
-                .fold_and_commit(&mut tree, |tree| {
+                .fold_and_commit_guarded(&mut tree, |tree| {
                     work(tree).map_err(|message| {
                         crate::tree::TopologyError::new(
                             crate::protocol::TopologyErrorCode::OperationRecoveryRequired,
@@ -659,11 +661,13 @@ impl ProductTopologyRuntime {
         let (result, effects) = {
             let mut tree = self.driver.lock().map_err(|error| error.message)?;
             if tree.revision != tree.stored_revision {
-                self.driver.save(&mut tree).map_err(|error| error.message)?;
+                self.driver
+                    .save_guarded(&mut tree)
+                    .map_err(|error| error.message)?;
             }
             let result = prepare(&mut tree)?;
             self.driver
-                .fold_and_commit(&mut tree, |_| Ok(()))
+                .fold_and_commit_guarded(&mut tree, |_| Ok(()))
                 .map_err(|error| error.message)?;
             (result, tree.take_effects())
         };
@@ -686,7 +690,7 @@ impl ProductTopologyRuntime {
             let mut tree = self.driver.lock().map_err(|error| error.message)?;
             let result = record(&mut tree).map_err(|error| error.message)?;
             self.driver
-                .apply_recorded(&mut tree, agent_id)
+                .apply_recorded_guarded(&mut tree, agent_id)
                 .map_err(|error| error.message)?;
             (result, tree.take_effects())
         };
@@ -902,10 +906,12 @@ impl ProductTopologyRuntime {
     /// before the drain takes the live lock, never after.
     fn close_for_shutdown(&self) {
         self.closed.store(true, Ordering::SeqCst);
+        self.driver.shutdown_storage_waits();
     }
 
     /// Cancels or joins the retirement already owning this agent slot.
     pub async fn cancel_live(&self, agent_id: &str) -> Result<LiveCancelOutcome, LiveCancelError> {
+        self.driver.cancel_storage_waits(agent_id);
         retire_live(&self.driver, &self.live, agent_id, None, true).await
     }
 
@@ -1221,10 +1227,10 @@ pub fn lookup(tree_id: &str) -> Option<Arc<ProductTopologyRuntime>> {
 /// Observational Read/Grep stamp for a session workspace root, if a hub tree owns it.
 pub fn generation_stamp_for_workspace_root(root: &Path) -> Option<Arc<AtomicU64>> {
     for runtime in process_hub().runtimes() {
-        let Ok(tree) = runtime.tree.lock() else {
-            continue;
-        };
-        if let Some(stamp) = tree.generation_counter_for_root(root) {
+        if let Ok(Some(stamp)) = runtime
+            .driver()
+            .read(|tree| tree.generation_counter_for_root(root))
+        {
             return Some(stamp);
         }
     }
@@ -1235,19 +1241,17 @@ pub fn generation_stamp_for_workspace_root(root: &Path) -> Option<Arc<AtomicU64>
 pub fn workspace_base_for_root(root: &Path) -> Option<String> {
     let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     for runtime in process_hub().runtimes() {
-        let Ok(tree) = runtime.tree.lock() else {
-            continue;
-        };
-        if let Some(base) = tree
-            .workspaces()
-            .values()
-            .filter(|row| {
-                let path = std::fs::canonicalize(&row.path).unwrap_or_else(|_| row.path.clone());
-                root == path || root.starts_with(path)
-            })
-            .max_by_key(|row| row.path.components().count())
-            .and_then(|row| row.base_commit.clone())
-        {
+        if let Ok(Some(base)) = runtime.driver().read(|tree| {
+            tree.workspaces()
+                .values()
+                .filter(|row| {
+                    let path =
+                        std::fs::canonicalize(&row.path).unwrap_or_else(|_| row.path.clone());
+                    root == path || root.starts_with(path)
+                })
+                .max_by_key(|row| row.path.components().count())
+                .and_then(|row| row.base_commit.clone())
+        }) {
             return Some(base);
         }
     }
@@ -1450,12 +1454,12 @@ async fn shutdown_runtime(
         let _ = tokio::time::timeout(HOST_SHUTDOWN_DETACH_TIMEOUT, pass).await;
     }
     let mut failure = TopologyShutdownError::default();
-    if let Ok(mut tree) = runtime.tree.lock() {
+    if let Ok(mut tree) = runtime.driver().lock() {
         tree.emit_shutdown_detaches(runtime.observer().as_ref());
         // Detaches are observations, not rows: nothing to publish unless the
         // tree moved since the store last acknowledged it.
         if tree.revision != tree.stored_revision
-            && let Err(error) = runtime.driver.save(&mut tree)
+            && let Err(error) = runtime.driver.save_guarded(&mut tree)
         {
             tracing::warn!(
                 target: "plak.topology",
@@ -1833,8 +1837,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let generation = runtime.tree.lock().unwrap().host_generation;
-        let state = runtime.tree.lock().unwrap().state;
+        let generation = runtime.driver().lock().unwrap().host_generation;
+        let state = runtime.driver().lock().unwrap().state;
         let loaded = AtomicBool::new(false);
         let resolved = resolve_topology_runtime(
             &tree_id,
@@ -2324,7 +2328,7 @@ mod tests {
             })
             .unwrap_err();
         assert!(error.contains("initial publish refused"));
-        let mut tree = runtime.tree.lock().unwrap();
+        let mut tree = runtime.driver().lock().unwrap();
         assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
         assert!(tree.attempt(&child).unwrap().candidate_id.is_none());
         assert!(
@@ -2381,7 +2385,7 @@ mod tests {
         assert!(vcs.calls_of(FakeOp::Hook).is_empty());
         assert!(vcs.calls_of(FakeOp::Unmint).is_empty());
         assert!(path.exists());
-        let mut tree = runtime.tree.lock().unwrap();
+        let mut tree = runtime.driver().lock().unwrap();
         assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Running);
         assert!(
             !tree.take_effects().is_empty(),

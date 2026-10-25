@@ -3,7 +3,7 @@
 use crate::recovery_scope::require_recoverable;
 use crate::runtime::ToolExecutionResult;
 use crate::runtime::checkpoint::identity::history_segment_kind;
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
 use crate::runtime::continuation::runtime_manifest_error;
 use crate::runtime::driver::execution::canonicalize_tool_execution;
 use crate::runtime::driver::{DurableEffectIntentEnvelope, DurableUndispatchedToolRequest};
@@ -49,14 +49,17 @@ impl DurableSessionRuntime {
             return Ok(outcome);
         }
         let owner_id = operation_run_id(&self.instance_nonce, request.operation_id())?;
-        let lease = store_call(
+        let mut lease = capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                identity.source.session(),
-                owner_id,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    identity.source.session(),
+                    owner_id,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -74,7 +77,7 @@ impl DurableSessionRuntime {
             let mut owner = CompactionRecoveryOwner {
                 store: Arc::clone(&self.store),
                 store_timeout: self.store_timeouts.operation,
-                lease: lease.clone(),
+                lease: &mut lease,
                 head: loaded.head(),
                 checkpoint: Arc::clone(loaded.checkpoint().checkpoint()),
                 bundle: loaded.checkpoint().bundle().clone(),

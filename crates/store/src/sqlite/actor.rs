@@ -68,6 +68,7 @@ impl OverflowLog {
 }
 
 pub(super) struct ActorActivity {
+    pub(super) storage_full: AtomicBool,
     pub(super) stopped: AtomicBool,
     pub(super) depths: [AtomicUsize; 2],
     pub(super) running: Mutex<Option<(&'static str, Instant)>>,
@@ -77,6 +78,7 @@ pub(super) struct ActorActivity {
 impl Default for ActorActivity {
     fn default() -> Self {
         Self {
+            storage_full: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
             depths: Default::default(),
             running: Mutex::new(None),

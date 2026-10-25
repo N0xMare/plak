@@ -1196,7 +1196,14 @@ impl TurnControl {
     }
 
     async fn submit(&self, command: TurnCommand) -> Result<ActorCommandReply, ControlError> {
-        submit_actor_command(&self.controls, command).await
+        let cancel =
+            matches!(command, TurnCommand::Cancel { turn_id, .. } if turn_id == self.turn_id);
+        submit_actor_command(&self.controls, command, || {
+            if cancel && !self.shared.is_settled() {
+                self.shared.storage_pause.cancel();
+            }
+        })
+        .await
     }
 
     fn transient_id(&self, operation: &str) -> Result<CommandId, ControlError> {
@@ -1220,6 +1227,7 @@ fn command_reply_error(reply: &ActorCommandReply) -> ControlError {
 pub(crate) async fn submit_actor_command(
     controls: &mpsc::Sender<ActorControl>,
     command: TurnCommand,
+    enqueued: impl FnOnce(),
 ) -> Result<ActorCommandReply, ControlError> {
     let (reply, receiver) = oneshot::channel();
     controls
@@ -1231,6 +1239,7 @@ pub(crate) async fn submit_actor_command(
             ),
             mpsc::error::TrySendError::Closed(_) => control_shutdown(),
         })?;
+    enqueued();
     receiver.await.map_err(|_| {
         ControlError::new(
             ControlErrorKind::OutcomeUnknown,
@@ -1286,6 +1295,7 @@ mod endpoint_tests {
                 command_id: CommandId::new("lost-reply")?,
                 input: "must reconcile".into(),
             },
+            || {},
         )
         .await
         .err()

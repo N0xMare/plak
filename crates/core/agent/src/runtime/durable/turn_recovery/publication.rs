@@ -18,7 +18,7 @@ use super::{
 )]
 pub(in crate::runtime) async fn recover_root_turn_publication(
     store: &Arc<dyn SessionStore>,
-    lease: &BranchLease,
+    lease: &mut BranchLease,
     head: BranchHead,
     source: &Arc<RuntimeCheckpoint>,
     source_bundle: &CheckpointObjectBundle,
@@ -181,6 +181,7 @@ pub(in crate::runtime) async fn recover_root_turn_publication(
         expected,
         checkpoint.manifest().topology().commit_identity,
         durability_telemetry,
+        lease,
     ))
     .await?;
     Ok((checkpoint, bundle, receipt.head()))

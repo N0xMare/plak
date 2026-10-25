@@ -609,6 +609,7 @@ struct PreparedTerminalLifecycle {
 }
 
 pub(crate) struct TurnShared {
+    pub(crate) storage_pause: checkpoint::storage_pause::StoragePause,
     turn_id: TurnId,
     lifecycle: TurnLifecycle,
     settlement: watch::Sender<TurnSettlement>,

@@ -661,9 +661,12 @@ pub fn persist_or_fault(
     tree: &mut crate::agent_tree::ProductAgentTree,
     agent_id: &str,
 ) -> bool {
-    let Err(error) = driver.save(tree) else {
+    let Err(error) = driver.for_agent(agent_id).save(tree) else {
         return true;
     };
+    if error.code == crate::agent_tree_protocol::TopologyErrorCode::RecoveryStorageUnavailable {
+        return false;
+    }
     tracing::error!(
         target: "plak.topology",
         tree_id = %tree.tree_id,
@@ -689,9 +692,12 @@ pub fn settle_or_fault(driver: &TreeDriver, effects: crate::agent_tree::Effects,
     if effects.is_empty() {
         return;
     }
-    let Err(error) = driver.settle(effects) else {
+    let Err(error) = driver.for_agent(agent_id).settle(effects) else {
         return;
     };
+    if error.code == crate::agent_tree_protocol::TopologyErrorCode::RecoveryStorageUnavailable {
+        return;
+    }
     tracing::error!(
         target: "plak.topology",
         agent_id,
@@ -737,7 +743,7 @@ pub(in crate::agent) async fn end_spent_attempt(
     agent_id: &str,
     terminal: crate::agent_tree::ChildTerminal,
 ) -> Result<(), String> {
-    let driver = runtime.driver();
+    let driver = &runtime.driver().for_agent(agent_id);
     let (closed, effects) = driver
         .mutate(|tree| {
             if tree.revision != tree.stored_revision {
@@ -777,6 +783,7 @@ pub(in crate::agent) async fn end_attempt_work(
     agent_id: &str,
     identity: &ChildTurnIdentity,
 ) -> Result<(), String> {
+    let driver = &driver.for_agent(agent_id);
     let result = async {
         let (result, effects) = driver
             .mutate(|tree| {

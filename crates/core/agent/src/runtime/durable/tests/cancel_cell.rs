@@ -827,7 +827,7 @@ async fn root_admission_dispatches_only_renew_and_commit_unless_reclaiming_press
 #[tokio::test]
 async fn precommit_store_rejections_keep_admission_open_without_ack_recovery() -> TestResult {
     for rejection in [
-        SessionStoreError::StorageFull,
+        SessionStoreError::Invalid(StoreInvalidReason::CheckpointCommitTopology),
         SessionStoreError::Corrupt(crate::session::StoreIntegrityReason::MissingChild),
     ] {
         let directory = tempfile::tempdir()?;

@@ -10,6 +10,46 @@ type ProbeLog = Arc<Mutex<Vec<(&'static str, i64)>>>;
 const NORMAL: i64 = 1;
 const FULL: i64 = 2;
 
+#[tokio::test]
+async fn actor_direct_io_capacity_refusals_preserve_the_head_and_exact_retry() -> TestResult {
+    for errno in [rustix::io::Errno::NOSPC, rustix::io::Errno::DQUOT] {
+        let directory = tempfile::tempdir()?;
+        let clock = Arc::new(StepClock(AtomicU64::new(100)));
+        let store =
+            SqliteSessionStore::open_with_clock(directory.path().join("runtime.sqlite3"), clock)?;
+        let request = seed()?;
+        let genesis = request.initial().clone();
+        let created = store.create(request).await?;
+        let mutation = successor(created.lease(), created.branch(), &genesis)?;
+        store
+            .dispatch("arm_capacity_fault", move |backend| {
+                backend.capacity_fault = Some((
+                    "commit",
+                    std::io::Error::from_raw_os_error(errno.raw_os_error()),
+                ));
+                Ok(())
+            })
+            .await?;
+        assert_eq!(
+            store.commit(mutation.clone()).await,
+            Err(SessionStoreError::StorageFull)
+        );
+        assert!(store.storage_unavailable());
+        assert_eq!(
+            store.load_branch(created.branch().session()).await?.head(),
+            created.branch()
+        );
+        assert!(
+            store.storage_unavailable(),
+            "a read is not recovery authority"
+        );
+        let receipt = store.commit(mutation).await?;
+        assert_eq!(receipt.previous(), created.branch());
+        assert!(!store.storage_unavailable());
+    }
+    Ok(())
+}
+
 struct StepClock(AtomicU64);
 
 impl StepClock {
@@ -203,7 +243,7 @@ async fn a_connection_that_cannot_restore_full_refuses_further_work() -> TestRes
     let commit = successor(created.lease(), created.branch(), &genesis)?;
     store
         .dispatch("fail_full_restore", |b| {
-            b.full_restore_fault = Some(SessionStoreError::StorageFull);
+            b.full_restore_fault = Some(SessionStoreError::BackendUnavailable);
             Ok(())
         })
         .await?;
@@ -261,5 +301,48 @@ async fn a_connection_that_cannot_restore_full_refuses_further_work() -> TestRes
     reopened
         .commit(successor(&current, created.branch(), &genesis)?)
         .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn capacity_during_full_restore_parks_without_permanently_poisoning_the_actor() -> TestResult
+{
+    let directory = tempfile::tempdir()?;
+    let clock = Arc::new(StepClock(AtomicU64::new(100)));
+    let store = SqliteSessionStore::open_with_clock(
+        directory.path().join("runtime.sqlite3"),
+        clock.clone(),
+    )?;
+    let request = seed()?;
+    let genesis = request.initial().clone();
+    let created = store.create(request).await?;
+    store
+        .dispatch("arm_restore_capacity", |backend| {
+            backend.full_restore_fault = Some(SessionStoreError::StorageFull);
+            Ok(())
+        })
+        .await?;
+    clock.set(101);
+    assert_eq!(
+        store.renew(created.lease().clone()).await,
+        Err(SessionStoreError::StorageFull)
+    );
+    assert!(store.storage_unavailable());
+    let renewed = store.renew(created.lease().clone()).await?;
+    store
+        .dispatch("check_full_restored", |backend| {
+            let level: i64 = backend
+                .connection
+                .pragma_query_value(None, "synchronous", |row| row.get(0))
+                .map_err(map_sqlite)?;
+            assert_eq!(level, FULL);
+            Ok(())
+        })
+        .await?;
+    let receipt = store
+        .commit(successor(&renewed, created.branch(), &genesis)?)
+        .await?;
+    assert_eq!(receipt.previous(), created.branch());
+    assert!(!store.storage_unavailable());
     Ok(())
 }

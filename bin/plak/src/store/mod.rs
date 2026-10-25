@@ -61,8 +61,36 @@ fn write_refusal(error: rusqlite::Error) -> RecordStoreError {
         Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
             RecordStoreError::refused(StoreRefusal::Busy, "product store is busy")
         }
+        Some(rusqlite::ErrorCode::DiskFull) => {
+            RecordStoreError::refused(StoreRefusal::StorageFull, "product storage is full")
+        }
         _ => "could not start a product store write".into(),
     }
+}
+
+fn write_error<E: std::error::Error + 'static>(
+    error: E,
+    detail: impl Into<String>,
+) -> RecordStoreError {
+    let source = &error as &dyn std::error::Error;
+    if let Some(error) = source.downcast_ref::<RecordStoreError>() {
+        return error.clone();
+    }
+    if source
+        .downcast_ref::<rusqlite::Error>()
+        .is_some_and(|error| error.sqlite_error_code() == Some(rusqlite::ErrorCode::DiskFull))
+        || source
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| {
+                error.raw_os_error().is_some_and(|code| {
+                    code == rustix::io::Errno::NOSPC.raw_os_error()
+                        || code == rustix::io::Errno::DQUOT.raw_os_error()
+                })
+            })
+    {
+        return RecordStoreError::refused(StoreRefusal::StorageFull, "product storage is full");
+    }
+    detail.into().into()
 }
 
 /// Stable admission category for opening the private product database.
@@ -124,6 +152,8 @@ pub struct ProductStore {
     synchronous_full: bool,
     /// The submissions this handle verified against their identity bindings.
     verified_submissions: views::VerifiedSubmissions,
+    #[cfg(test)]
+    capacity_fault: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 #[cfg(feature = "test-hooks")]
@@ -137,6 +167,24 @@ impl Drop for SettleCommitTrace {
 }
 
 impl ProductStore {
+    fn recover_storage(&mut self) -> Result<(), RecordStoreError> {
+        #[cfg(test)]
+        self.capacity_fault()?;
+        self.durability(true)?;
+        // Dirty a real page and restore its value atomically. An optimized
+        // no-op UPDATE would not establish that writes can commit.
+        let tx = self
+            .connection
+            .transaction()
+            .map_err(|error| write_error(error, "could not probe product storage"))?;
+        tx.execute_batch("UPDATE product_schema SET fingerprint=fingerprint || 'x' WHERE singleton=1;
+            UPDATE product_schema SET fingerprint=substr(fingerprint,1,length(fingerprint)-1) WHERE singleton=1;")
+            .map_err(|error| write_error(error, "could not probe product storage"))?;
+        tx.commit()
+            .map_err(|error| write_error(error, "could not probe product storage"))?;
+        Ok(())
+    }
+
     /// Inspects one existing session record under a read-only SQLite snapshot.
     /// This does not create the home, open a writable store, or change product
     /// schema or session authority.
@@ -237,6 +285,8 @@ impl ProductStore {
             baselines: HashMap::new(),
             synchronous_full: true,
             verified_submissions: views::VerifiedSubmissions::default(),
+            #[cfg(test)]
+            capacity_fault: None,
         };
         store.admit_schema()?;
         #[cfg(unix)]
@@ -289,9 +339,8 @@ impl ProductStore {
         Ok(())
     }
 
-    pub fn commit(&mut self, session: &mut SessionRecord) -> Result<(), String> {
+    pub fn commit(&mut self, session: &mut SessionRecord) -> Result<(), RecordStoreError> {
         self.commit_with_submission(session, None, None, None)
-            .map_err(String::from)
     }
 
     pub fn commit_submission(
@@ -307,9 +356,8 @@ impl ProductStore {
         session: &mut SessionRecord,
         command_id: &str,
         pause_cause: Option<plakous_hosted::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.commit_with_submission(session, None, Some(command_id), pause_cause)
-            .map_err(String::from)
     }
 
     fn commit_with_submission(
@@ -319,6 +367,8 @@ impl ProductStore {
         discarded: Option<&str>,
         pause_cause: Option<plakous_hosted::sessions::projector::HostPauseCause>,
     ) -> Result<(), RecordStoreError> {
+        #[cfg(test)]
+        self.capacity_fault()?;
         #[cfg(feature = "test-hooks")]
         let _settle = SettleCommitTrace;
         let expected = session.store_revision;
@@ -348,20 +398,37 @@ impl ProductStore {
                     "DELETE FROM submissions WHERE session_id=?1 AND command_id=?2",
                     params![session.id, command_id],
                 )
-                .map_err(|_| "could not discard command submission".to_owned())?;
+                .map_err(|error| {
+                    write_error(error, "could not discard command submission".to_owned())
+                })?;
         }
         if let Some(cause) = pause_cause {
             views::insert_pause_cause(&transaction, &session.id, &cause)?;
         }
         let queue_commands =
             views::queue_commands_of(&transaction, &mut self.verified_submissions, &session.id)?;
-        transaction
-            .commit()
-            .map_err(|_| "could not durably commit product session".to_owned())?;
+        transaction.commit().map_err(|error| {
+            write_error(error, "could not durably commit product session".to_owned())
+        })?;
         session.store_revision = next;
         session.transcript.mark_committed();
         self.remember(session);
         session.queue_commands = queue_commands;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn capacity_fault(&self) -> Result<(), RecordStoreError> {
+        if self
+            .capacity_fault
+            .as_ref()
+            .is_some_and(|full| full.load(std::sync::atomic::Ordering::Acquire))
+        {
+            return Err(write_error(
+                std::io::Error::from_raw_os_error(rustix::io::Errno::NOSPC.raw_os_error()),
+                "injected write refusal",
+            ));
+        }
         Ok(())
     }
 
@@ -787,7 +854,7 @@ impl ProductStore {
     }
 }
 
-fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
+fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordStoreError> {
     let workspace = s.workspace_root.to_string_lossy().into_owned();
     let workspace_identity = sessions::workspace_identity(&s.workspace_root)
         .to_string_lossy()
@@ -796,9 +863,9 @@ fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String>
     let changed = tx.execute(
         "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?],
-    ).map_err(|_| "product session identity already exists or is invalid".to_owned())?;
+    ).map_err(|error| write_error(error, "product session identity already exists or is invalid".to_owned()))?;
     if changed != 1 {
-        return Err("product session insert was not exact".to_owned());
+        return Err("product session insert was not exact".to_owned().into());
     }
     Ok(())
 }
@@ -808,7 +875,7 @@ fn commit_in_transaction(
     session: &SessionRecord,
     expected: u64,
     baseline: Option<&StoreBaseline>,
-) -> Result<u64, String> {
+) -> Result<u64, RecordStoreError> {
     // Validate before any identity claim or revision change.
     session.validate_for_store()?;
     let next = if expected == 0 {
@@ -828,7 +895,7 @@ fn commit_in_transaction(
             .checked_add(1)
             .ok_or_else(|| "product session revision is exhausted".to_owned())?;
         if update_session(tx, session, expected, next)? != 1 {
-            return Err("product session changed concurrently".to_owned());
+            return Err("product session changed concurrently".to_owned().into());
         }
         next
     };
@@ -851,12 +918,12 @@ fn update_session(
     s: &SessionRecord,
     expected: u64,
     next: u64,
-) -> Result<usize, String> {
+) -> Result<usize, RecordStoreError> {
     // A loaded record carries the view head, not a replacement genesis binding.
     tx.execute(
         "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18) WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6",
         params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?],
-    ).map_err(|_| "could not update product session".to_owned())
+    ).map_err(|error| write_error(error, "could not update product session".to_owned()))
 }
 
 /// The root's frozen tools are written once, with the first runtime
@@ -868,7 +935,7 @@ fn encoded_frozen_tools(s: &SessionRecord) -> Result<Option<String>, String> {
         .transpose()
 }
 
-fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
+fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordStoreError> {
     for item in &s.pending_queue {
         bind_identity(tx, "queue", &item.id, &s.id, &s.id, None, None)?;
     }
@@ -891,7 +958,9 @@ fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
         let binding = digest_parts(&[&s.id, &revision.to_string(), &digest_parts(&[text])]);
         let changed=tx.execute("UPDATE identity_bindings SET binding_digest=?3,terminal_disposition=?4,terminal_outcome=?5 WHERE identity=?1 AND kind='queue' AND owner_session_id=?2 AND binding_digest=?2 AND terminal_disposition IS NULL",params![item_id,s.id,binding,"deleted",None::<&str>]).map_err(|_|"could not seal removed queue identity".to_owned())?;
         if changed != 1 {
-            return Err("queue tombstone contradicts durable state".to_owned());
+            return Err("queue tombstone contradicts durable state"
+                .to_owned()
+                .into());
         }
     }
     delete_missing(
@@ -916,14 +985,16 @@ fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
             "UPDATE queue_items SET position=position+1000000 WHERE session_id=?1",
             [&s.id],
         )
-        .map_err(|_| "could not stage product queue reorder".to_owned())?;
+        .map_err(|error| write_error(error, "could not stage product queue reorder".to_owned()))?;
     }
     for (position, item) in s.pending_queue.iter().enumerate() {
         let changed = tx.execute("INSERT INTO queue_items(session_id,item_id,revision,position,text,submitted_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(item_id) DO UPDATE SET revision=excluded.revision,position=excluded.position,text=excluded.text WHERE session_id=excluded.session_id AND ((queue_items.revision=excluded.revision AND queue_items.text=excluded.text) OR queue_items.revision+1=excluded.revision)",
-            params![s.id,item.id,to_i64(item.revision)?,i64::try_from(position).map_err(|_| "queue position is invalid")?,item.text,to_i64(item.submitted_at_ms)?])
-            .map_err(|_| "could not commit product queue".to_owned())?;
+            params![s.id,item.id,to_i64(item.revision)?,i64::try_from(position).map_err(|error| write_error(error, "queue position is invalid"))?,item.text,to_i64(item.submitted_at_ms)?])
+            .map_err(|error| write_error(error, "could not commit product queue".to_owned()))?;
         if changed != 1 {
-            return Err("queue identity contradicts durable product state".to_owned());
+            return Err("queue identity contradicts durable product state"
+                .to_owned()
+                .into());
         }
         // Attachments are immutable per item: written once with the item,
         // removed with it by the foreign-key cascade.
@@ -933,20 +1004,20 @@ fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
                     "INSERT INTO queue_attachments(item_id,ordinal,name,media_type,bytes) VALUES(?1,?2,?3,?4,?5)",
                     params![
                         item.id,
-                        i64::try_from(ordinal).map_err(|_| "attachment ordinal is invalid")?,
+                        i64::try_from(ordinal).map_err(|error| write_error(error, "attachment ordinal is invalid"))?,
                         image.name,
                         image.media_type,
                         image.bytes
                     ],
                 )
-                .map_err(|_| "could not commit product queue attachments".to_owned())?;
+                .map_err(|error| write_error(error, "could not commit product queue attachments".to_owned()))?;
             }
         }
     }
     Ok(())
 }
 
-fn sync_prompt_history(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
+fn sync_prompt_history(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), RecordStoreError> {
     let old = query_collect(
         tx,
         "SELECT position,prompt FROM prompt_history WHERE session_id=?1 ORDER BY position",
@@ -968,10 +1039,14 @@ fn sync_prompt_history(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), St
                 "DELETE FROM prompt_history WHERE session_id=?1 AND position=?2",
                 params![s.id, position],
             )
-            .map_err(|_| "could not prune product prompt history".to_owned())?
+            .map_err(|error| {
+                write_error(error, "could not prune product prompt history".to_owned())
+            })?
             != 1
         {
-            return Err("product prompt history changed concurrently".to_owned());
+            return Err("product prompt history changed concurrently"
+                .to_owned()
+                .into());
         }
     }
     let mut position = old.last().map_or(Ok(0), |(position, _)| {
@@ -985,9 +1060,13 @@ fn sync_prompt_history(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), St
                 "INSERT INTO prompt_history(session_id,position,prompt) VALUES(?1,?2,?3)",
                 params![s.id, position, prompt],
             )
-            .map_err(|_| "could not commit product prompt history".to_owned())?;
+            .map_err(|error| {
+                write_error(error, "could not commit product prompt history".to_owned())
+            })?;
         if changed != 1 {
-            return Err("could not commit exact product prompt history".to_owned());
+            return Err("could not commit exact product prompt history"
+                .to_owned()
+                .into());
         }
         position = position
             .checked_add(1)
@@ -1001,7 +1080,7 @@ fn delete_missing<'a>(
     table: &str,
     session: &str,
     keep: impl Iterator<Item = &'a str>,
-) -> Result<(), String> {
+) -> Result<(), RecordStoreError> {
     let key = if table == "queue_items" {
         "item_id"
     } else {
@@ -1009,12 +1088,12 @@ fn delete_missing<'a>(
     };
     let mut statement = tx
         .prepare(&format!("SELECT {key} FROM {table} WHERE session_id=?1"))
-        .map_err(|_| "could not inspect product rows".to_owned())?;
+        .map_err(|error| write_error(error, "could not inspect product rows".to_owned()))?;
     let existing = statement
         .query_map([session], |row| row.get::<_, String>(0))
-        .map_err(|_| "could not inspect product rows".to_owned())?
+        .map_err(|error| write_error(error, "could not inspect product rows".to_owned()))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "product row identity is invalid".to_owned())?;
+        .map_err(|error| write_error(error, "product row identity is invalid".to_owned()))?;
     let keep = keep.collect::<HashSet<_>>();
     for id in existing {
         if !keep.contains(id.as_str()) {
@@ -1023,9 +1102,9 @@ fn delete_missing<'a>(
                     &format!("DELETE FROM {table} WHERE session_id=?1 AND {key}=?2"),
                     params![session, id],
                 )
-                .map_err(|_| "could not remove product row".to_owned())?;
+                .map_err(|error| write_error(error, "could not remove product row".to_owned()))?;
             if changed != 1 {
-                return Err("product row changed during exact removal".to_owned());
+                return Err("product row changed during exact removal".to_owned().into());
             }
         }
     }
@@ -1044,7 +1123,7 @@ fn bind_identity(
     binding: &str,
     terminal_disposition: Option<&str>,
     terminal_outcome: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), RecordStoreError> {
     let changed = tx.execute(
         "INSERT INTO identity_bindings(identity,kind,owner_session_id,binding_digest,terminal_disposition,terminal_outcome) VALUES(?1,?2,?3,?4,?5,?6)
          ON CONFLICT(identity) DO UPDATE SET terminal_disposition=excluded.terminal_disposition,terminal_outcome=excluded.terminal_outcome
@@ -1054,9 +1133,11 @@ fn bind_identity(
            AND (terminal_outcome IS NULL OR terminal_outcome IS excluded.terminal_outcome)
            AND NOT(terminal_disposition IS NOT NULL AND excluded.terminal_disposition IS NULL)",
         params![identity, kind, owner, binding, terminal_disposition,terminal_outcome],
-    ).map_err(|_| "stable product identity contradicts durable state".to_owned())?;
+    ).map_err(|error| write_error(error, "stable product identity contradicts durable state".to_owned()))?;
     if changed != 1 {
-        return Err("stable product identity contradicts durable state".to_owned());
+        return Err("stable product identity contradicts durable state"
+            .to_owned()
+            .into());
     }
     Ok(())
 }
@@ -1657,7 +1738,7 @@ mod tests {
         store.connection.busy_timeout(Duration::ZERO).unwrap();
         let mut session = SessionRecord::new(root.path().join("workspace"));
         assert_eq!(
-            store.commit(&mut session),
+            store.commit(&mut session).map_err(String::from),
             Err("product store is busy".to_owned())
         );
         assert_eq!(session.store_revision, 0);
@@ -1822,7 +1903,7 @@ mod tests {
         let mut stale = session.clone();
         store.commit(&mut session).unwrap();
         assert_eq!(
-            store.commit(&mut stale).unwrap_err(),
+            store.commit(&mut stale).unwrap_err().to_string(),
             "product session changed concurrently"
         );
         let c = Connection::open(paths.product_database()).unwrap();

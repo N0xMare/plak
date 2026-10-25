@@ -13,20 +13,25 @@ use super::*;
 pub struct TreeDriver {
     /// The tree under its one mutex.
     ///
-    /// `pub(crate)` and not `pub`: the tree's own tools interleave locked and
+    /// `pub(super)` and not `pub`: the tree's own tools interleave locked and
     /// unlocked phases deliberately and are reviewed as such, but a caller
     /// above this crate that locked the tree could mutate it and drop the
     /// guard without ever taking the [`Effects`] that mutation queued — a
     /// stranded seal or adopt, which reopens `RecoveryRequired`. Outside
     /// callers get [`Self::read`] and [`Self::mutate`] instead, and the
     /// mutation path cannot lose its effects because it returns them.
-    pub(crate) tree: Arc<Mutex<ProductAgentTree>>,
+    pub(super) tree: Arc<Mutex<ProductAgentTree>>,
     pub(super) store: Arc<dyn TreeStore>,
     pub(super) vcs: Arc<dyn VcsOps>,
     pub(super) job_host: Arc<Mutex<Option<Arc<dyn plakous::tools::JobHost>>>>,
     retirement_recovery: Arc<Mutex<Option<RetirementRecovery>>>,
     pub(super) observer: Option<Arc<dyn TopologyObserver>>,
     next_reclaim_probe: Arc<Mutex<u64>>,
+    storage_waiting: Arc<std::sync::atomic::AtomicBool>,
+    mutation_owner: Arc<Mutex<()>>,
+    storage_parking: Arc<storage::StorageParking>,
+    publication_owner: Option<String>,
+    capacity_retry_interval: std::time::Duration,
     checkout_sizes: Arc<Mutex<std::collections::BTreeMap<String, CheckoutSize>>>,
 }
 
@@ -103,6 +108,11 @@ fn directory_bytes(path: &std::path::Path) -> std::io::Result<u64> {
 }
 
 impl TreeDriver {
+    #[cfg(test)]
+    pub(super) fn capacity_retry_without_delay(&mut self) {
+        self.capacity_retry_interval = std::time::Duration::ZERO;
+    }
+
     /// Binds `tree` to `store` and `vcs`, installing `vcs` as the tree's own
     /// port so the mint inside `spawn_agent` and the effects run here drive
     /// one implementation.
@@ -123,6 +133,11 @@ impl TreeDriver {
             retirement_recovery: Arc::new(Mutex::new(None)),
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
+            storage_waiting: Arc::default(),
+            mutation_owner: Arc::default(),
+            storage_parking: Arc::default(),
+            publication_owner: None,
+            capacity_retry_interval: std::time::Duration::from_secs(5),
             checkout_sizes: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
         }
     }
@@ -363,9 +378,9 @@ impl TreeDriver {
                     expected.get(&id).and_then(Option::as_ref),
                     error,
                 )
-                .and_then(|value| self.apply_recorded(&mut tree, &id).map(|()| value))?;
+                .and_then(|value| self.apply_recorded_guarded(&mut tree, &id).map(|()| value))?;
         }
-        self.save(&mut tree)?;
+        self.save_guarded(&mut tree)?;
         drop(tree);
         if recorded {
             self.request_retirement_recovery();
@@ -388,10 +403,18 @@ impl TreeDriver {
     /// # Errors
     ///
     /// Refuses when the tree mutex is poisoned.
-    pub(crate) fn lock(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, ProductAgentTree>, TopologyError> {
-        self.tree.lock().map_err(|_| Self::lock_poisoned())
+    pub(crate) fn lock(&self) -> Result<storage::TreeMutationGuard<'_>, TopologyError> {
+        storage::TreeMutationGuard::lock(&self.tree, &self.mutation_owner)
+            .map_err(|()| Self::lock_poisoned())
+    }
+
+    /// Binds subsequent publication waits to the agent that owns this work.
+    #[must_use]
+    pub fn for_agent(&self, agent_id: &str) -> Self {
+        Self {
+            publication_owner: Some(agent_id.to_owned()),
+            ..self.clone()
+        }
     }
 
     /// Reads the tree under its mutex.
@@ -403,7 +426,10 @@ impl TreeDriver {
     ///
     /// Refuses when the tree mutex is poisoned.
     pub fn read<R>(&self, work: impl FnOnce(&ProductAgentTree) -> R) -> Result<R, TopologyError> {
-        let tree = self.lock()?;
+        if self.mutation_owner.is_poisoned() {
+            return Err(Self::lock_poisoned());
+        }
+        let tree = self.tree.lock().map_err(|_| Self::lock_poisoned())?;
         Ok(work(&tree))
     }
 
@@ -412,6 +438,9 @@ impl TreeDriver {
     /// `None` when the tree is locked or poisoned — a caller rendering a view
     /// would rather skip a frame than block behind a turn.
     pub fn try_read<R>(&self, work: impl FnOnce(&ProductAgentTree) -> R) -> Option<R> {
+        if self.mutation_owner.is_poisoned() {
+            return None;
+        }
         let tree = self.tree.try_lock().ok()?;
         Some(work(&tree))
     }
@@ -425,11 +454,18 @@ impl TreeDriver {
     }
 
     /// Locks the tree, applies `work`, and takes the effects it queued.
+    ///
+    /// Clones the whole tree on every call so a callback that publishes can
+    /// park without holding the live tree mutex. Internal guarded mutations
+    /// instead detach lazily on their first capacity-refused save.
     pub fn mutate<R>(
         &self,
         work: impl FnOnce(&mut ProductAgentTree) -> R,
     ) -> Result<(R, Effects), TopologyError> {
         let mut tree = self.lock()?;
+        // The callback receives a plain prepared tree and can publish it.
+        // Unlike the internal guarded path, its borrow cannot release a lock.
+        tree.detach();
         let result = work(&mut tree);
         let effects = tree.take_effects();
         Ok((result, effects))
@@ -513,7 +549,7 @@ impl TreeDriver {
             settled.seal_failures.extend(more.seal_failures);
             settled.cleanup_failures.extend(more.cleanup_failures);
             tree.lift_restored_pause_if_quiescent();
-            if let Err(error) = self.save(&mut tree) {
+            if let Err(error) = self.save_guarded(&mut tree) {
                 first_save_error = Some(error);
                 // Completed effects remain recorded. Follow-on reservations
                 // stay queued until a later successful publication.
@@ -556,7 +592,7 @@ impl TreeDriver {
     pub(crate) fn fold_startup(&self) -> Result<Effects, TopologyError> {
         let mut tree = self.lock()?;
         if tree.revision != tree.stored_revision {
-            self.save(&mut tree)?;
+            self.save_guarded(&mut tree)?;
         }
         let targets = tree.startup_fold_targets();
         let lift_pause = tree.state == crate::protocol::TreeAdmissionState::RestoredPaused
@@ -564,7 +600,7 @@ impl TreeDriver {
         if targets.is_empty() && tree.pending_close_folds.is_empty() && !lift_pause {
             return Ok(tree.take_effects());
         }
-        self.fold_and_commit(&mut tree, |tree| {
+        self.fold_and_commit_guarded(&mut tree, |tree| {
             for agent in targets {
                 tree.fold_due_in_place(&agent)?;
             }
@@ -579,7 +615,58 @@ impl TreeDriver {
     /// without a revision bump — and always safe: an unchanged revision is
     /// a compare-and-swap hit only for the handle the store acknowledged.
     pub fn save(&self, tree: &mut ProductAgentTree) -> Result<(), TopologyError> {
-        let acknowledged = self.store.save(tree).map_err(TopologyError::from)?;
+        let owner = self
+            .publication_owner
+            .as_deref()
+            .unwrap_or(&tree.root_agent_id);
+        let wait = self.storage_parking.begin(owner);
+        self.save_prepared(tree, None, &wait)
+    }
+
+    pub(crate) fn save_guarded(
+        &self,
+        tree: &mut storage::TreeMutationGuard<'_>,
+    ) -> Result<(), TopologyError> {
+        let owner = self
+            .publication_owner
+            .as_deref()
+            .unwrap_or(&tree.root_agent_id);
+        let wait = self.storage_parking.begin(owner);
+        let first = self.store.save(tree);
+        if matches!(&first, Err(error) if error.kind == crate::tree::TreeStoreErrorKind::StorageFull)
+        {
+            tree.detach();
+        }
+        self.save_prepared(tree, Some(first), &wait)
+    }
+
+    fn save_prepared(
+        &self,
+        tree: &mut ProductAgentTree,
+        mut first: Option<Result<crate::tree::Revision, crate::tree::TreeStoreError>>,
+        wait: &storage::StorageWait<'_>,
+    ) -> Result<(), TopologyError> {
+        let acknowledged = loop {
+            match first.take().unwrap_or_else(|| self.store.save(tree)) {
+                Ok(revision) => {
+                    self.storage_waiting
+                        .store(false, std::sync::atomic::Ordering::Release);
+                    break revision;
+                }
+                Err(error) if error.kind == crate::tree::TreeStoreErrorKind::StorageFull => {
+                    if !self.storage_unavailable() {
+                        self.storage_waiting
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
+                    if !wait.wait(self.capacity_retry_interval, || {
+                        self.store.storage_wait_cancelled()
+                    }) {
+                        return Err(error.into());
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            }
+        };
         tree.acknowledge_revision(acknowledged);
         for terminal in std::mem::take(&mut tree.pending_turn_usages).into_values() {
             if let Some(observer) = &self.observer {
@@ -587,6 +674,23 @@ impl TreeDriver {
             }
         }
         Ok(())
+    }
+
+    /// Process-local publication pause, readable without taking the tree lock.
+    #[must_use]
+    pub(crate) fn storage_unavailable(&self) -> bool {
+        self.storage_waiting
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Interrupts a capacity-refused publication, including a write whose
+    /// refusal has not returned yet, without claiming it was recorded.
+    pub fn cancel_storage_waits(&self, agent_id: &str) {
+        self.storage_parking.cancel(agent_id);
+    }
+
+    pub(crate) fn shutdown_storage_waits(&self) {
+        self.storage_parking.shutdown();
     }
 
     /// Applies consequences only to an acknowledged tree, and publishes them
@@ -608,24 +712,53 @@ impl TreeDriver {
             ));
         }
         let snapshot = tree.clone();
-        match work(tree).and_then(|result| {
-            if tree.state == crate::protocol::TreeAdmissionState::RestoredPaused {
-                for agent in tree.startup_fold_targets() {
-                    tree.fold_due_in_place(&agent)?;
-                }
-            }
-            tree.fold_reserved_closes_in_place()?;
-            tree.refresh_epoch_after_close();
-            tree.prune_closed_copies();
-            tree.lift_restored_pause_if_quiescent();
-            self.save(tree).map(|()| result)
-        }) {
+        match Self::fold_work(tree, work).and_then(|result| self.save(tree).map(|()| result)) {
             Ok(result) => Ok(result),
             Err(error) => {
                 *tree = snapshot;
                 Err(error)
             }
         }
+    }
+
+    pub(crate) fn fold_and_commit_guarded<R>(
+        &self,
+        tree: &mut storage::TreeMutationGuard<'_>,
+        work: impl FnOnce(&mut ProductAgentTree) -> Result<R, TopologyError>,
+    ) -> Result<R, TopologyError> {
+        if tree.revision != tree.stored_revision {
+            return Err(TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "tree consequences require an acknowledged revision",
+            ));
+        }
+        let snapshot = (**tree).clone();
+        match Self::fold_work(tree, work)
+            .and_then(|result| self.save_guarded(tree).map(|()| result))
+        {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                **tree = snapshot;
+                Err(error)
+            }
+        }
+    }
+
+    fn fold_work<R>(
+        tree: &mut ProductAgentTree,
+        work: impl FnOnce(&mut ProductAgentTree) -> Result<R, TopologyError>,
+    ) -> Result<R, TopologyError> {
+        let result = work(tree)?;
+        if tree.state == crate::protocol::TreeAdmissionState::RestoredPaused {
+            for agent in tree.startup_fold_targets() {
+                tree.fold_due_in_place(&agent)?;
+            }
+        }
+        tree.fold_reserved_closes_in_place()?;
+        tree.refresh_epoch_after_close();
+        tree.prune_closed_copies();
+        tree.lift_restored_pause_if_quiescent();
+        Ok(result)
     }
 
     /// Withdraws an unfacted followup in one revision CAS. The caller holds
@@ -643,13 +776,13 @@ impl TreeDriver {
         tail: u64,
         receipt: Option<(String, TopologyErrorCode)>,
     ) -> Result<(), TopologyError> {
-        let mut tree = self.tree.lock().map_err(|_| {
+        let mut tree = self.lock().map_err(|_| {
             TopologyError::new(
                 TopologyErrorCode::OperationRecoveryRequired,
                 "tree lock is poisoned",
             )
         })?;
-        self.fold_and_commit(&mut tree, |tree| {
+        self.fold_and_commit_guarded(&mut tree, |tree| {
             tree.withdraw_unstarted_followup(agent_id, message_id, session_id, tail)?;
             settle_followup_refusal(tree, agent_id, message_id, receipt)
         })
@@ -665,8 +798,23 @@ impl TreeDriver {
         tree: &mut ProductAgentTree,
         agent_id: &str,
     ) -> Result<(), TopologyError> {
-        self.save_host_intent(tree, agent_id)?;
-        self.fold_and_commit(tree, |tree| {
+        let driver = self.for_agent(agent_id);
+        driver.save_host_intent(tree, agent_id)?;
+        driver.fold_and_commit(tree, |tree| {
+            tree.fold_due_in_place(agent_id)?;
+            tree.lift_restored_pause_if_quiescent();
+            Ok(())
+        })
+    }
+
+    pub(crate) fn apply_recorded_guarded(
+        &self,
+        tree: &mut storage::TreeMutationGuard<'_>,
+        agent_id: &str,
+    ) -> Result<(), TopologyError> {
+        let driver = self.for_agent(agent_id);
+        driver.save_guarded(tree)?;
+        driver.fold_and_commit_guarded(tree, |tree| {
             tree.fold_due_in_place(agent_id)?;
             tree.lift_restored_pause_if_quiescent();
             Ok(())
@@ -679,6 +827,9 @@ impl TreeDriver {
         agent_id: &str,
     ) -> Result<(), TopologyError> {
         self.save(tree).inspect_err(|error| {
+            if error.code == TopologyErrorCode::RecoveryStorageUnavailable {
+                return;
+            }
             let reason = tree.fault_reason(agent_id).map_or_else(
                 || format!("tree publish refused: {}", error.message),
                 |prior| format!("{prior}; tree publish refused: {}", error.message),
@@ -704,7 +855,7 @@ pub(super) fn driver_for_tree(
         (guard.tree_id.clone(), guard.vcs_port())
     };
     if let Some(runtime) = crate::hub::lookup(&tree_id)
-        && Arc::ptr_eq(&runtime.tree, tree)
+        && Arc::ptr_eq(&runtime.driver().tree, tree)
     {
         return Ok(runtime.driver().clone());
     }

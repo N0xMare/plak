@@ -8,8 +8,8 @@ use crate::runtime::checkpoint::candidate::{
 };
 use crate::runtime::checkpoint::identity::deterministic_checkpoint_id;
 use crate::runtime::checkpoint::io::{
-    DurabilityCommitTelemetry, StoreCallError, StorePhase, commit_with_acknowledgement_recovery,
-    store_call,
+    DurabilityCommitTelemetry, StoreCallError, StorePhase, capacity_store_call,
+    commit_with_acknowledgement_recovery, store_call,
 };
 #[cfg(test)]
 #[cfg(test)]
@@ -64,6 +64,8 @@ struct DurableBranchContext {
 }
 
 struct CheckpointAuthority {
+    storage_interrupt: super::storage_pause::StorageInterruptSlot,
+    storage_pause: super::storage_pause::StoragePause,
     checkpoint: Arc<RuntimeCheckpoint>,
     bundle: CheckpointObjectBundle,
     /// The feed record of the newest commit this owner published, keyed by
@@ -102,6 +104,45 @@ impl StartAuthority {
     /// definite: nothing has started, so it never leaves an unknown outcome.
     pub(in crate::runtime) async fn admit(&self) -> Result<StartAdmission, AgentError> {
         let branch = lock_mutex(&self.checkpoint).durable.clone();
+        if let Some(branch) = &branch {
+            let pause = super::storage_pause::StoragePause::current();
+            let interrupt = lock_mutex(&self.checkpoint).storage_interrupt.clone();
+            lock_mutex(&self.checkpoint).storage_pause = pause.clone();
+            while branch.store.storage_unavailable() {
+                if super::storage_pause::interrupted(
+                    &lock_mutex(&self.checkpoint).storage_interrupt,
+                ) {
+                    return Err(cancelled_error());
+                }
+                let recovered = tokio::select! {
+                    () = self.shutdown.cancelled() => return Err(cancelled_error()),
+                    () = self.lost.cancelled() => return Err(lease_authority_lost()),
+                    result = store_call(StorePhase::Renew, branch.store_timeouts.operation, branch.store.recover_storage()) => result,
+                };
+                match recovered {
+                    Ok(()) if !branch.store.storage_unavailable() => break,
+                    Ok(()) | Err(StoreCallError::Store(crate::SessionStoreError::StorageFull)) => {}
+                    Err(error) => return Err(error.into_agent()),
+                }
+                if branch.store.storage_wait_cancelled() {
+                    return Err(cancelled_error());
+                }
+                if !pause
+                    .retry(&|| {
+                        self.shutdown.is_cancelled()
+                            || self.lost.is_cancelled()
+                            || super::storage_pause::interrupted(&interrupt)
+                    })
+                    .await
+                {
+                    return Err(if self.lost.is_cancelled() {
+                        lease_authority_lost()
+                    } else {
+                        cancelled_error()
+                    });
+                }
+            }
+        }
         let guard = if let Some(branch) = branch {
             Some(
                 tokio::time::timeout(
@@ -332,6 +373,12 @@ impl CheckpointOwner {
         telemetry: &DurabilityCommitTelemetry,
         admission: StoreAdmission,
     ) -> Result<Arc<RuntimeCheckpoint>, AgentError> {
+        let pause = super::storage_pause::StoragePause::current();
+        let interrupt = lock_mutex(&self.state).storage_interrupt.clone();
+        pause.bind_interrupt(Arc::new(move || {
+            super::storage_pause::interrupted(&interrupt)
+        }));
+        lock_mutex(&self.state).storage_pause = pause;
         let checkpoint_id = facts.checkpoint_id;
         self.heartbeat.check()?;
         let gate = lock_mutex(&self.state).durable.as_ref().map(|branch| {
@@ -408,11 +455,11 @@ impl CheckpointOwner {
             // Publication blocks the periodic heartbeat on the same gate. Give
             // its potentially slow store operation freshly acknowledged lease
             // authority rather than the remainder of an earlier heartbeat.
-            let branch = renew_shared_durable_lease_under_gate(&self.state).await?;
+            let mut branch = renew_shared_durable_lease_under_gate(&self.state).await?;
             let request = CommitCheckpoint::new(branch.lease.clone(), branch.head, bundle.clone())
                 .with_admission(admission)
                 .with_feed_facts(crate::feed::facts::commit_facts(&prior, &checkpoint)?);
-            let receipt = Box::pin(commit_with_acknowledgement_recovery(
+            let committed = Box::pin(commit_with_acknowledgement_recovery(
                 &branch.store,
                 branch.store_timeouts.operation,
                 checkpoint_id,
@@ -421,9 +468,14 @@ impl CheckpointOwner {
                 expected_ref,
                 commit_identity,
                 Some(telemetry),
+                &mut branch.lease,
             ))
-            .await?;
-            accepted_head = Some((receipt.head(), receipt.feed_seq()));
+            .await;
+            if let Some(active) = &mut lock_mutex(&self.state).durable {
+                active.lease = branch.lease.clone();
+            }
+            let receipt = committed?;
+            accepted_head = Some((receipt.head(), receipt.feed_seq(), branch.lease));
         }
         let mut authority = lock_mutex(&self.state);
         if authority.checkpoint.manifest().topology().checkpoint_id != prior_topology.checkpoint_id
@@ -437,7 +489,7 @@ impl CheckpointOwner {
         // Amortize cache trimming after acknowledged publication. Before a
         // store sweep, prune_superseded unconditionally discards old membership.
         authority.bundle = bundle.trimmed().unwrap_or(bundle);
-        if let Some((head, feed_seq)) = accepted_head {
+        if let Some((head, feed_seq, lease)) = accepted_head {
             authority.published_feed_seq = Some((checkpoint_id, feed_seq));
             let branch = authority.durable.as_mut().ok_or_else(|| {
                 AgentError::new(
@@ -446,6 +498,7 @@ impl CheckpointOwner {
                 )
             })?;
             branch.head = head;
+            branch.lease = lease;
         }
         Ok(checkpoint)
     }
@@ -511,10 +564,11 @@ impl CheckpointOwner {
             crate::runtime::checkpoint_retained_history(&checkpoint),
             minimum,
         );
-        let receipt = store_call(
+        let receipt = capacity_store_call(
             StorePhase::Prune,
             branch.store_timeouts.operation,
-            branch.store.prune(request),
+            || branch.store.prune(request.clone()),
+            || branch.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -565,10 +619,11 @@ impl CheckpointOwner {
         let store_result = if let Some(branch) = durable {
             let release_started = std::time::Instant::now();
             let release = contain_cleanup_panic(async {
-                store_call(
+                capacity_store_call(
                     StorePhase::Release,
                     branch.store_timeouts.cleanup,
-                    branch.store.release(branch.lease.clone()),
+                    || branch.store.release(branch.lease.clone()),
+                    || branch.store.storage_wait_cancelled(),
                 )
                 .await
                 .map_err(StoreCallError::into_agent)
@@ -586,10 +641,11 @@ impl CheckpointOwner {
             }
             let flush_started = std::time::Instant::now();
             let flush = contain_cleanup_panic(async {
-                store_call(
+                capacity_store_call(
                     StorePhase::Flush,
                     branch.store_timeouts.cleanup,
-                    branch.store.flush(),
+                    || branch.store.flush(),
+                    || branch.store.storage_wait_cancelled(),
                 )
                 .await
                 .map_err(StoreCallError::into_agent)
@@ -647,6 +703,28 @@ impl CheckpointOwner {
 }
 
 impl CheckpointReader {
+    pub(in crate::runtime) fn set_storage_interrupt(
+        &self,
+        probe: super::storage_pause::StorageInterrupt,
+    ) {
+        *lock_mutex(&self.state)
+            .storage_interrupt
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(probe);
+    }
+    pub(in crate::runtime) fn interrupt_storage_wait(&self) {
+        lock_mutex(&self.state).storage_pause.cancel();
+    }
+
+    pub(in crate::runtime) fn storage_unavailable(&self) -> bool {
+        let state = lock_mutex(&self.state);
+        state.storage_pause.is_waiting()
+            || state
+                .durable
+                .as_ref()
+                .is_some_and(|branch| branch.store.storage_unavailable())
+    }
+
     pub(in crate::runtime) fn lease_released(&self) -> bool {
         lock_mutex(&self.state).released
     }
@@ -720,39 +798,39 @@ impl CheckpointReader {
                 }),
             manifest.interpreter_observation().cloned(),
         )?;
-        let head = if let Some(branch) = &durable {
-            Some(
-                Box::pin(commit_with_acknowledgement_recovery(
-                    &branch.store,
-                    branch.store_timeouts.operation,
-                    checkpoint_id,
-                    CommitCheckpoint::new(
-                        branch.lease.clone(),
-                        branch.head,
-                        candidate.bundle.clone(),
-                    )
+        let head = if let Some(mut branch) = durable {
+            let committed = Box::pin(commit_with_acknowledgement_recovery(
+                &branch.store,
+                branch.store_timeouts.operation,
+                checkpoint_id,
+                CommitCheckpoint::new(branch.lease.clone(), branch.head, candidate.bundle.clone())
                     .with_admission(StoreAdmission::Settlement)
                     .with_feed_facts(crate::feed::facts::commit_facts(
                         &prior,
                         &candidate.checkpoint,
                     )?),
-                    branch.head,
-                    candidate.expected_ref,
-                    candidate.commit_identity,
-                    None,
-                ))
-                .await?,
-            )
+                branch.head,
+                candidate.expected_ref,
+                candidate.commit_identity,
+                None,
+                &mut branch.lease,
+            ))
+            .await;
+            if let Some(active) = &mut lock_mutex(&self.state).durable {
+                active.lease = branch.lease.clone();
+            }
+            Some((committed?, branch.lease))
         } else {
             None
         };
         let mut state = lock_mutex(&self.state);
         state.checkpoint = candidate.checkpoint;
         state.bundle = candidate.bundle;
-        if let Some(receipt) = head
+        if let Some((receipt, lease)) = head
             && let Some(branch) = &mut state.durable
         {
             branch.head = receipt.head();
+            branch.lease = lease;
             state.published_feed_seq = Some((checkpoint_id, receipt.feed_seq()));
         }
         Ok(())
@@ -961,6 +1039,8 @@ impl PreparedCheckpoint {
         let pruned_horizon = durable.as_ref().map_or(0, |facts| facts.pruned_horizon);
         Self {
             state: CheckpointAuthority {
+                storage_interrupt: Arc::default(),
+                storage_pause: super::storage_pause::StoragePause::default(),
                 checkpoint,
                 bundle,
                 durable: durable.map(|facts| DurableBranchContext {
@@ -1006,7 +1086,7 @@ impl PreparedCheckpoint {
                 WorkflowClosureBranch {
                     store: Arc::clone(&branch.store),
                     store_timeout: branch.store_timeouts.operation,
-                    lease: branch.lease.clone(),
+                    lease: &mut branch.lease,
                     head: branch.head,
                     checkpoint: Arc::clone(&authority.checkpoint),
                     bundle: authority.bundle.clone(),
@@ -1046,7 +1126,7 @@ impl PreparedCheckpoint {
         let checkpoint_id = deterministic_checkpoint_id(branch.lease.owner(), 1)?;
         let (checkpoint, bundle, head) = recover_root_turn_publication(
             &branch.store,
-            &branch.lease,
+            &mut branch.lease,
             branch.head,
             &authority.checkpoint,
             &authority.bundle,

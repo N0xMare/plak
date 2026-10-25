@@ -55,6 +55,7 @@ mod jobs;
 mod mail;
 mod registrations;
 mod spawn;
+mod storage;
 mod wait;
 
 pub use cancel::{LiveCancelFailure, LiveCancelOutcome};

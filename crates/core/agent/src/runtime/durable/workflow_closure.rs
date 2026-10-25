@@ -165,10 +165,10 @@ pub(in crate::runtime) fn workflow_compaction_closure(
 }
 
 /// The opening owner's branch authority over the head it closes.
-pub(in crate::runtime) struct WorkflowClosureBranch {
+pub(in crate::runtime) struct WorkflowClosureBranch<'a> {
     pub(in crate::runtime) store: Arc<dyn SessionStore>,
     pub(in crate::runtime) store_timeout: Duration,
-    pub(in crate::runtime) lease: BranchLease,
+    pub(in crate::runtime) lease: &'a mut BranchLease,
     pub(in crate::runtime) head: BranchHead,
     pub(in crate::runtime) checkpoint: Arc<RuntimeCheckpoint>,
     pub(in crate::runtime) bundle: CheckpointObjectBundle,
@@ -177,7 +177,7 @@ pub(in crate::runtime) struct WorkflowClosureBranch {
 /// Publishes the closure under the opening owner's lease, in one commit, and
 /// returns the closed head.
 pub(in crate::runtime) async fn publish_workflow_closure(
-    branch: WorkflowClosureBranch,
+    branch: WorkflowClosureBranch<'_>,
     closure: WorkflowClosure,
     runtime: WorkflowClosureRuntime<'_>,
 ) -> Result<(Arc<RuntimeCheckpoint>, CheckpointObjectBundle, BranchHead), AgentError> {
@@ -194,7 +194,7 @@ pub(in crate::runtime) async fn publish_workflow_closure(
 }
 
 async fn publish_row(
-    owner: &mut CompactionRecoveryOwner,
+    owner: &mut CompactionRecoveryOwner<'_>,
     closure: WorkflowClosure,
     runtime: WorkflowClosureRuntime<'_>,
 ) -> Result<(), AgentError> {

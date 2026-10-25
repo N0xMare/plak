@@ -5,7 +5,8 @@ use crate::runtime::checkpoint::candidate::{
     CheckpointCandidate, SuccessorFacts, successor_candidate,
 };
 use crate::runtime::checkpoint::io::{
-    StoreCallError, StorePhase, commit_with_acknowledgement_recovery, store_call,
+    StoreCallError, StorePhase, capacity_store_call, commit_with_acknowledgement_recovery,
+    store_call,
 };
 use crate::runtime::compaction::continuation::with_post_compaction_note;
 use crate::runtime::compaction::fold::{build_compaction_success_fold, reconstruct_compaction_cut};
@@ -193,14 +194,17 @@ impl DurableSessionRuntime {
         }
         let identity = DurableCompactionIdentity::new(operation_id, source)?;
         let owner_id = operation_run_id(&self.instance_nonce, operation_id)?;
-        let lease = store_call(
+        let mut lease = capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                source.session(),
-                owner_id,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    source.session(),
+                    owner_id,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -271,7 +275,7 @@ impl DurableSessionRuntime {
             let mut owner = CompactionRecoveryOwner {
                 store: Arc::clone(&self.store),
                 store_timeout: self.store_timeouts.operation,
-                lease: lease.clone(),
+                lease: &mut lease,
                 head: loaded.head(),
                 checkpoint: Arc::clone(checkpoint),
                 bundle,
@@ -558,14 +562,17 @@ impl DurableSessionRuntime {
         }
         let identity = DurableCompactionIdentity::new(operation_id, source)?;
         let owner_id = operation_run_id(&self.instance_nonce, operation_id)?;
-        let lease = store_call(
+        let mut lease = capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                source.session(),
-                owner_id,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    source.session(),
+                    owner_id,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -635,7 +642,7 @@ impl DurableSessionRuntime {
             let mut owner = CompactionRecoveryOwner {
                 store: Arc::clone(&self.store),
                 store_timeout: self.store_timeouts.operation,
-                lease: lease.clone(),
+                lease: &mut lease,
                 head: loaded.head(),
                 checkpoint: Arc::clone(checkpoint),
                 bundle,
@@ -691,7 +698,7 @@ impl DurableSessionRuntime {
     }
 }
 
-impl CompactionRecoveryOwner {
+impl CompactionRecoveryOwner<'_> {
     #[allow(
         clippy::too_many_arguments,
         reason = "recovery publication consumes the exact immutable checkpoint groups"
@@ -750,6 +757,7 @@ impl CompactionRecoveryOwner {
             // Open-time recovery has no session telemetry context; durability
             // telemetry covers turn-time commits only.
             None,
+            self.lease,
         ))
         .await?;
         self.head = receipt.head();
@@ -773,7 +781,7 @@ fn abandonment_error() -> AgentError {
 /// and both are finalized in the same commit, which therefore carries the
 /// workflow's `WorkflowSettled { Abandoned }` fact.
 pub(in crate::runtime) async fn close_abandoned_compaction(
-    owner: &mut CompactionRecoveryOwner,
+    owner: &mut CompactionRecoveryOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,
@@ -1032,7 +1040,7 @@ pub(in crate::runtime) fn decode_paid_compaction_operations(
 }
 
 async fn recovery_complete_compaction_call(
-    owner: &mut CompactionRecoveryOwner,
+    owner: &mut CompactionRecoveryOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,
@@ -1100,7 +1108,7 @@ async fn recovery_complete_compaction_call(
 }
 
 pub(in crate::runtime) async fn recovery_fail_compaction(
-    owner: &mut CompactionRecoveryOwner,
+    owner: &mut CompactionRecoveryOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,
@@ -1279,7 +1287,7 @@ pub(in crate::runtime) fn decode_compaction_failure_evidence(
     reason = "restart publication consumes the exact persisted compaction operation tuple"
 )]
 pub(in crate::runtime) async fn recovery_publish_compaction_success(
-    owner: &mut CompactionRecoveryOwner,
+    owner: &mut CompactionRecoveryOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,

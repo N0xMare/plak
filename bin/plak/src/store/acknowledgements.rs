@@ -8,6 +8,8 @@
 //! by the earlier acknowledgement. A `followup` opens a new attempt, which
 //! needs none of the old one's acknowledgements.
 
+use plakous_hosted::session_store::RecordStoreError;
+
 use super::{ProductStore, from_i64, to_i64};
 use crate::surface_protocol::AgentAcknowledgement;
 
@@ -18,7 +20,7 @@ impl ProductStore {
         tree_id: &str,
         acknowledgement: &AgentAcknowledgement,
         acknowledged_at_unix: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         #[cfg(feature = "test-hooks")]
         let _settle = super::SettleCommitTrace;
         self.durability(true)?;
@@ -40,7 +42,7 @@ impl ProductStore {
                     to_i64(acknowledged_at_unix)?,
                 ),
             )
-            .map_err(|_| "could not record the agent acknowledgement".to_owned())?;
+            .map_err(|error| super::write_error(error, "could not record the agent acknowledgement".to_owned()))?;
         Ok(())
     }
 
@@ -73,7 +75,7 @@ impl ProductStore {
 
     /// Deletes every acknowledgement of one tree. Repeating it is success:
     /// session gc runs the deletion again after a partial failure.
-    pub fn delete_agent_acknowledgements(&mut self, tree_id: &str) -> Result<(), String> {
+    pub fn delete_agent_acknowledgements(&mut self, tree_id: &str) -> Result<(), RecordStoreError> {
         #[cfg(feature = "test-hooks")]
         let _settle = super::SettleCommitTrace;
         self.durability(true)?;
@@ -82,7 +84,9 @@ impl ProductStore {
                 "DELETE FROM agent_acknowledgements WHERE tree_id=?1",
                 [tree_id],
             )
-            .map_err(|_| "could not delete agent acknowledgements".to_owned())?;
+            .map_err(|error| {
+                super::write_error(error, "could not delete agent acknowledgements".to_owned())
+            })?;
         Ok(())
     }
 }

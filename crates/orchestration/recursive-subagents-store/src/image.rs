@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use plakous_recursive_subagents::protocol::{AttemptId, CandidateId, TopologyGrant};
 use plakous_recursive_subagents::tree::{
     AgentCommand, AttemptRecord, CandidateRecord, MailRecord, NodeRecord, OperationRecord,
-    ProductAgentTree, WorkspaceRecord,
+    ProductAgentTree, TreeStoreError, WorkspaceRecord,
 };
 use rusqlite::Transaction;
 
@@ -69,7 +69,7 @@ impl TreeImage {
         &self,
         tx: &Transaction<'_>,
         tree: &'t ProductAgentTree,
-    ) -> Result<Delta<'t>, String> {
+    ) -> Result<Delta<'t>, TreeStoreError> {
         let tree_id = tree.tree_id.as_str();
         let delta = Delta {
             nodes: Changes::between(&self.nodes, tree.nodes()),
@@ -146,7 +146,7 @@ impl<'t, R: Row> Changes<'t, R> {
         }
     }
 
-    fn upsert(&self, tx: &Transaction<'_>, tree_id: &str) -> Result<(), String> {
+    fn upsert(&self, tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
         if self.changed.is_empty() {
             return Ok(());
         }
@@ -157,7 +157,7 @@ impl<'t, R: Row> Changes<'t, R> {
         Ok(())
     }
 
-    fn delete(&self, tx: &Transaction<'_>, tree_id: &str) -> Result<(), String> {
+    fn delete(&self, tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
         if self.removed.is_empty() {
             return Ok(());
         }
@@ -168,7 +168,7 @@ impl<'t, R: Row> Changes<'t, R> {
         Ok(())
     }
 
-    fn replace(&self, tx: &Transaction<'_>, tree_id: &str) -> Result<(), String> {
+    fn replace(&self, tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
         self.delete(tx, tree_id)?;
         self.upsert(tx, tree_id)
     }

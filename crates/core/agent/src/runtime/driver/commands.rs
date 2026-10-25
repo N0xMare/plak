@@ -1113,6 +1113,9 @@ impl Driver {
             .ok()
             .map(|events| events.with_terminal_failure(terminal_failure_events.clone()));
         let shared = Arc::new(TurnShared {
+            storage_pause: crate::runtime::checkpoint::storage_pause::StoragePause::new(
+                self.shutdown.clone(),
+            ),
             turn_id,
             lifecycle: TurnLifecycle::Admitted(Mutex::new(queued_turn_machine(turn_id).map_err(
                 |_| {

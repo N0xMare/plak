@@ -482,10 +482,10 @@ pub(in crate::runtime) struct CodeCellAbandonmentFold {
     pub(in crate::runtime) operations: Vec<(OperationId, DurableCodeCellAbandonmentDisposition)>,
 }
 
-pub(in crate::runtime) struct CompactionRecoveryOwner {
+pub(in crate::runtime) struct CompactionRecoveryOwner<'a> {
     store: Arc<dyn SessionStore>,
     store_timeout: Duration,
-    lease: BranchLease,
+    lease: &'a mut BranchLease,
     head: BranchHead,
     checkpoint: Arc<RuntimeCheckpoint>,
     bundle: CheckpointObjectBundle,

@@ -59,6 +59,8 @@ pub enum StoreRefusal {
     Unavailable,
     /// The product volume is below its new-work admission floor.
     LowSpace,
+    /// An authoritative write refused for exhausted storage, without committing.
+    StorageFull,
 }
 
 impl StoreRefusal {
@@ -68,6 +70,7 @@ impl StoreRefusal {
             plakous::sessions::AgentSessionsErrorKind::StorageUnavailable => {
                 Some(Self::Unavailable)
             }
+            plakous::sessions::AgentSessionsErrorKind::StorageFull => Some(Self::StorageFull),
             _ => None,
         }
     }
@@ -79,6 +82,7 @@ impl StoreRefusal {
             Self::Busy => "busy",
             Self::Unavailable => "unavailable",
             Self::LowSpace => "low-space",
+            Self::StorageFull => "storage-full",
         }
     }
 }
@@ -113,6 +117,15 @@ impl From<String> for ReadFailure {
         Self {
             message,
             refusal: None,
+        }
+    }
+}
+
+impl From<crate::session_store::RecordStoreError> for ReadFailure {
+    fn from(error: crate::session_store::RecordStoreError) -> Self {
+        Self {
+            refusal: error.refusal(),
+            message: error.to_string(),
         }
     }
 }
@@ -367,6 +380,7 @@ pub(crate) mod read_faults {
             Some(StoreRefusal::Busy) => "storage busy",
             Some(StoreRefusal::Unavailable) => "storage unavailable",
             Some(StoreRefusal::LowSpace) => "storage low space",
+            Some(StoreRefusal::StorageFull) => "storage full",
             None => "integrity",
         };
         Some(ReadFailure {

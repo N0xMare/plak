@@ -6,7 +6,7 @@ use crate::runtime::build::{
     construction_tool_presentation, initial_memory_checkpoint, resolve_construction_harness_plan,
     stable_prefix_from_effective_configuration,
 };
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
 use crate::runtime::checkpoint::owner::DurableBranchFacts;
 use crate::runtime::control::run_environment;
 use crate::runtime::durable::branch::session_operation_uuid;
@@ -353,7 +353,14 @@ pub(super) async fn recover_or_create(
         }
         Err(error) => return Err(error.into_agent()),
     }
-    match store_call(StorePhase::Create, timeout, store.create(request.clone())).await {
+    match capacity_store_call(
+        StorePhase::Create,
+        timeout,
+        || store.create(request.clone()),
+        || store.storage_wait_cancelled(),
+    )
+    .await
+    {
         Ok(receipt) => Ok(receipt),
         Err(error) if error.is_retryable() => {
             match store_call(
@@ -446,7 +453,14 @@ pub(super) async fn release_store_lease(
     timeout: Duration,
 ) -> Result<(), AgentError> {
     for attempt in 0..2 {
-        match store_call(StorePhase::Release, timeout, store.release(lease.clone())).await {
+        match capacity_store_call(
+            StorePhase::Release,
+            timeout,
+            || store.release(lease.clone()),
+            || store.storage_wait_cancelled(),
+        )
+        .await
+        {
             Ok(()) => return Ok(()),
             Err(error)
                 if error.is(SessionStoreError::LeaseExpired)

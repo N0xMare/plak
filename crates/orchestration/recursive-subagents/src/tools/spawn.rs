@@ -163,12 +163,12 @@ impl TopologyTool {
             )
         };
         let effects = {
-            let mut tree = self.driver.tree.lock().map_err(|_| lock_poisoned())?;
+            let mut tree = self.driver.lock().map_err(|_| lock_poisoned())?;
             let prepared = tree
                 .prepare_operation(operation_id, &caller, "adopt_candidate", &request)
                 .and_then(|prior| match prior {
                     Some(prior) => Ok(Some(prior)),
-                    None => self.driver.save(&mut tree).map(|()| None),
+                    None => self.driver.save_guarded(&mut tree).map(|()| None),
                 });
             match prepared {
                 Ok(Some(prior)) => {
@@ -189,7 +189,7 @@ impl TopologyTool {
             }
             if let Err(error) = self
                 .driver
-                .fold_and_commit(&mut tree, |tree| tree.begin_adopt(&caller, &request))
+                .fold_and_commit_guarded(&mut tree, |tree| tree.begin_adopt(&caller, &request))
             {
                 // Prepare persisted a non-terminal receipt; close it.
                 if let Err(persist) = tree
@@ -200,7 +200,7 @@ impl TopologyTool {
                         &request,
                         error.code,
                     )
-                    .and_then(|()| self.driver.save(&mut tree))
+                    .and_then(|()| self.driver.save_guarded(&mut tree))
                 {
                     return Self::topology_failure(&persist);
                 }
@@ -217,7 +217,7 @@ impl TopologyTool {
             }),
             Err(error) => return Self::topology_failure(&error),
         };
-        let mut tree = self.driver.tree.lock().map_err(|_| lock_poisoned())?;
+        let mut tree = self.driver.lock().map_err(|_| lock_poisoned())?;
         let conflict = tree.take_adopt_conflict(request.candidate_id.as_str());
         match landed {
             Ok(outcome) => {
@@ -233,7 +233,7 @@ impl TopologyTool {
                 }
                 if let Err(error) = tree
                     .remember_success(operation_id, &caller, "adopt_candidate", &request, &outcome)
-                    .and_then(|()| self.driver.save(&mut tree))
+                    .and_then(|()| self.driver.save_guarded(&mut tree))
                 {
                     return Self::topology_failure(&error);
                 }
@@ -256,7 +256,7 @@ impl TopologyTool {
                         &request,
                         error.code,
                     )
-                    .and_then(|()| self.driver.save(&mut tree))
+                    .and_then(|()| self.driver.save_guarded(&mut tree))
                 {
                     return Self::topology_failure(&persist);
                 }
@@ -414,7 +414,7 @@ impl TopologyTool {
         // receipt. Account readiness may change before replay, so inspect the
         // recorded request before consulting the current account state.
         let replay = {
-            let mut tree = self.driver.tree.lock().map_err(|_| {
+            let mut tree = self.driver.lock().map_err(|_| {
                 ToolRuntimeError::new(
                     ToolRuntimeErrorKind::Execution,
                     "topology tree lock is poisoned",
@@ -463,7 +463,7 @@ impl TopologyTool {
             && let Some(binder) = self.binder()
         {
             let binding = {
-                let tree = self.driver.tree.lock().map_err(|_| {
+                let tree = self.driver.lock().map_err(|_| {
                     ToolRuntimeError::new(
                         ToolRuntimeErrorKind::Execution,
                         "topology tree lock is poisoned",
@@ -528,7 +528,7 @@ impl TopologyTool {
             return Self::topology_failure(&error);
         }
         if !replayed {
-            let tree = self.driver.tree.lock().map_err(|_| {
+            let tree = self.driver.lock().map_err(|_| {
                 ToolRuntimeError::new(
                     ToolRuntimeErrorKind::Execution,
                     "topology tree lock is poisoned",
@@ -544,7 +544,7 @@ impl TopologyTool {
             }
         }
         let already_bound = {
-            let tree = self.driver.tree.lock().map_err(|_| {
+            let tree = self.driver.lock().map_err(|_| {
                 ToolRuntimeError::new(
                     ToolRuntimeErrorKind::Execution,
                     "topology tree lock is poisoned",
@@ -567,7 +567,7 @@ impl TopologyTool {
                 .and_then(|node| node.session_locator.clone())
         };
         if already_bound.is_some() {
-            let mut tree = self.driver.tree.lock().map_err(|_| {
+            let mut tree = self.driver.lock().map_err(|_| {
                 ToolRuntimeError::new(
                     ToolRuntimeErrorKind::Execution,
                     "topology tree lock is poisoned",
@@ -578,14 +578,14 @@ impl TopologyTool {
                     json!({ "code": error.code, "message": error.message }).to_string(),
                 );
             }
-            if let Err(error) = self.driver.save(&mut tree) {
+            if let Err(error) = self.driver.save_guarded(&mut tree) {
                 drop(tree);
                 return self.fail_closed_session(
                     &output.agent_id,
                     format!("bound locator could not be persisted: {}", error.message),
                 );
             }
-            if let Err(error) = self.driver.fold_and_commit(&mut tree, |tree| {
+            if let Err(error) = self.driver.fold_and_commit_guarded(&mut tree, |tree| {
                 tree.fold_due_in_place(&output.agent_id).map(|_| ())
             }) {
                 return Self::topology_failure(&error);
@@ -594,7 +594,7 @@ impl TopologyTool {
         }
         if let Some(binder) = self.binder() {
             let start = {
-                let tree = self.driver.tree.lock().map_err(|_| {
+                let tree = self.driver.lock().map_err(|_| {
                     ToolRuntimeError::new(
                         ToolRuntimeErrorKind::Execution,
                         "topology tree lock is poisoned",
@@ -624,7 +624,7 @@ impl TopologyTool {
                     if bound.durably_registered {
                         return ToolOutcome::success_text(json!(output).to_string());
                     }
-                    let mut tree = self.driver.tree.lock().map_err(|_| {
+                    let mut tree = self.driver.lock().map_err(|_| {
                         ToolRuntimeError::new(
                             ToolRuntimeErrorKind::Execution,
                             "topology tree lock is poisoned",
@@ -649,7 +649,7 @@ impl TopologyTool {
                             json!({ "code": error.code, "message": error.message }).to_string(),
                         );
                     }
-                    if let Err(error) = self.driver.save(&mut tree) {
+                    if let Err(error) = self.driver.save_guarded(&mut tree) {
                         drop(tree);
                         return self.fail_closed_session(
                             &output.agent_id,
@@ -679,7 +679,7 @@ impl TopologyTool {
                     if let Some(turn_id) = bound.turn_id {
                         tree.bind_turn_owner(&output.agent_id, turn_id);
                     }
-                    if let Err(error) = self.driver.save(&mut tree) {
+                    if let Err(error) = self.driver.save_guarded(&mut tree) {
                         drop(tree);
                         return self.fail_closed_session(
                             &output.agent_id,

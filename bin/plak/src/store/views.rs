@@ -5,6 +5,8 @@
 //! run read, so a concurrent applier's transaction changes nothing. This is
 //! the only module that writes the projector view tables.
 
+use plakous_hosted::session_store::RecordStoreError;
+
 use std::collections::{BTreeMap, HashMap};
 
 use plakous::sessions::SessionLocator;
@@ -31,11 +33,11 @@ fn unavailable(_: rusqlite::Error) -> String {
     "product store is unavailable".to_owned()
 }
 
-fn projection_refusal(error: rusqlite::Error) -> Result<ProjectionCommit, String> {
+fn projection_refusal(error: rusqlite::Error) -> Result<ProjectionCommit, RecordStoreError> {
     if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) {
         return Ok(ProjectionCommit::CursorMoved);
     }
-    Err(unavailable(error))
+    Err(super::write_error(error, "product projection write failed"))
 }
 
 impl ProductStore {
@@ -54,46 +56,53 @@ impl ProductStore {
         session_id: &str,
         suppress_wake: bool,
         pause: Option<HostPauseCause>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.durability(true)?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| "could not start host intent write".to_owned())?;
+            .map_err(|error| {
+                super::write_error(error, "could not start host intent write".to_owned())
+            })?;
         let exists: bool = tx
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1)",
                 [session_id],
                 |row| row.get(0),
             )
-            .map_err(|_| "could not inspect host intent session".to_owned())?;
+            .map_err(|error| {
+                super::write_error(error, "could not inspect host intent session".to_owned())
+            })?;
         if !exists {
-            return Err("session not found".to_owned());
+            return Err("session not found".to_owned().into());
         }
         let anchor: i64 = tx.query_row("SELECT COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)", [session_id], |row| row.get(0))
-            .map_err(|_| "could not inspect host intent cursor".to_owned())?;
+            .map_err(|error| super::write_error(error, "could not inspect host intent cursor".to_owned()))?;
         let last: Option<u32> = tx
             .query_row(
                 "SELECT MAX(ordinal) FROM host_intents WHERE session_id=?1 AND anchor=?2",
                 params![session_id, anchor],
                 |row| row.get(0),
             )
-            .map_err(|_| "could not inspect host intent ordinal".to_owned())?;
+            .map_err(|error| {
+                super::write_error(error, "could not inspect host intent ordinal".to_owned())
+            })?;
         let ordinal = last
             .map_or(Some(0), |ordinal| ordinal.checked_add(1))
             .ok_or_else(|| "host intent ordinal is exhausted".to_owned())?;
         if suppress_wake {
             tx.execute("INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,'null')", params![session_id, WAKE_SUPPRESSION, anchor, ordinal])
-                .map_err(|_| "could not record wake suppression".to_owned())?;
+                .map_err(|error| super::write_error(error, "could not record wake suppression".to_owned()))?;
         }
         if let Some(pause) = pause {
-            let value = serde_json::to_string(&pause)
-                .map_err(|_| "pause cause is not encodable".to_owned())?;
+            let value = serde_json::to_string(&pause).map_err(|error| {
+                super::write_error(error, "pause cause is not encodable".to_owned())
+            })?;
             tx.execute("INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,?5)", params![session_id, PAUSE_CAUSE, anchor, ordinal, value])
-                .map_err(|_| "could not record pause cause".to_owned())?;
+                .map_err(|error| super::write_error(error, "could not record pause cause".to_owned()))?;
         }
         tx.commit()
-            .map_err(|_| "could not commit host intents".to_owned())
+            .map_err(|error| super::write_error(error, "could not commit host intents".to_owned()))
     }
 
     /// The same-build source whose tree a successor inherits. Carry sources
@@ -207,14 +216,15 @@ impl ProductStore {
         &mut self,
         session_id: &str,
         submission: &Submission,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.durability(true)?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         insert_submission(&tx, &mut self.verified_submissions, session_id, submission)?;
-        tx.commit().map_err(unavailable)
+        tx.commit()
+            .map_err(|error| super::write_error(error, "product store write failed"))
     }
 
     /// Writes one workflow request before it is submitted.
@@ -222,7 +232,7 @@ impl ProductStore {
         &mut self,
         session_id: &str,
         request: &WorkflowRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.durability(true)?;
         let (reason, selection) = encode_workflow_kind(&request.kind);
         let changed = self
@@ -238,14 +248,15 @@ impl ProductStore {
                     selection,
                 ],
             )
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         if changed == 0 {
             let existing = self.load_intents(session_id)?;
             if existing.workflow_request(&request.operation_id) != Some(request) {
                 return Err(format!(
                     "workflow operation id {} is already bound to another request",
                     request.operation_id
-                ));
+                )
+                .into());
             }
         }
         Ok(())
@@ -256,28 +267,33 @@ impl ProductStore {
         &mut self,
         session: &mut plakous_hosted::sessions::SessionRecord,
         request: &WorkflowRequest,
-    ) -> Result<(), String> {
-        plakous::sessions::SessionOperationId::new(&request.operation_id)
-            .map_err(|_| "workflow operation identity is invalid".to_owned())?;
+    ) -> Result<(), RecordStoreError> {
+        plakous::sessions::SessionOperationId::new(&request.operation_id).map_err(|error| {
+            super::write_error(error, "workflow operation identity is invalid".to_owned())
+        })?;
         if session.plakous_locator != Some(request.source_locator) {
-            return Err("workflow source is not the exact product binding".to_owned());
+            return Err("workflow source is not the exact product binding"
+                .to_owned()
+                .into());
         }
         self.durability(true)?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         let (reason, selection) = encode_workflow_kind(&request.kind);
         let inserted = tx.execute(
             "INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,compact_reason,rebind_selection,anchor) VALUES(?1,?2,?3,?4,?5,?6,COALESCE((SELECT applied_seq FROM projector_cursors WHERE session_id=?1),0)) ON CONFLICT(operation_id) DO NOTHING",
             params![session.id, request.operation_id, request.source_locator.to_string(), request.kind.as_str(), reason, selection],
-        ).map_err(unavailable)?;
+        ).map_err(|error| super::write_error(error, "product store write failed"))?;
         if inserted == 0
             && intents_of(&tx, &mut self.verified_submissions, &session.id)?
                 .workflow_request(&request.operation_id)
                 != Some(request)
         {
-            return Err("workflow identity is bound to another request".to_owned());
+            return Err("workflow identity is bound to another request"
+                .to_owned()
+                .into());
         }
         super::bind_identity(
             &tx,
@@ -297,20 +313,23 @@ impl ProductStore {
                     [&target.id],
                     |row| row.get(0),
                 )
-                .map_err(unavailable)?;
+                .map_err(|error| super::write_error(error, "product store write failed"))?;
             if exists {
                 let existing = super::load_record(&tx, &mut self.verified_submissions, &target.id)?;
                 if existing.create_operation_id != target.create_operation_id
                     || existing.source_product_session_id != target.source_product_session_id
                     || existing.source_workflow_operation_id != target.source_workflow_operation_id
                 {
-                    return Err("clear successor identity is bound to another request".to_owned());
+                    return Err("clear successor identity is bound to another request"
+                        .to_owned()
+                        .into());
                 }
             } else {
                 super::commit_in_transaction(&tx, &target, 0, None)?;
             }
         }
-        tx.commit().map_err(unavailable)?;
+        tx.commit()
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         session.store_revision = next;
         session.touch();
         Ok(())
@@ -321,12 +340,12 @@ impl ProductStore {
         &mut self,
         session: &mut plakous_hosted::sessions::SessionRecord,
         operation_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.durability(true)?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         let views = views_of(&tx, &session.id)?
             .ok_or_else(|| "workflow discard requires projected views".to_owned())?;
         let intents = intents_of(&tx, &mut self.verified_submissions, &session.id)?;
@@ -337,7 +356,9 @@ impl ProductStore {
             .iter()
             .any(|id| id == operation_id)
         {
-            return Err("a recorded workflow request cannot be discarded".to_owned());
+            return Err("a recorded workflow request cannot be discarded"
+                .to_owned()
+                .into());
         }
         let next = workflow_intent_cas(&tx, session)?;
         super::bind_identity(
@@ -353,8 +374,9 @@ impl ProductStore {
             "DELETE FROM workflow_requests WHERE session_id=?1 AND operation_id=?2",
             params![session.id, operation_id],
         )
-        .map_err(unavailable)?;
-        tx.commit().map_err(unavailable)?;
+        .map_err(|error| super::write_error(error, "product store write failed"))?;
+        tx.commit()
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         session.store_revision = next;
         session.touch();
         Ok(())
@@ -364,12 +386,12 @@ impl ProductStore {
     pub fn withdraw_unadmitted_workflows(
         &mut self,
         session: &mut plakous_hosted::sessions::SessionRecord,
-    ) -> Result<Vec<TranscriptRow>, String> {
+    ) -> Result<Vec<TranscriptRow>, RecordStoreError> {
         self.durability(true)?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         let views = views_of(&tx, &session.id)?
             .ok_or_else(|| "workflow withdrawal requires projected views".to_owned())?;
         let intents = intents_of(&tx, &mut self.verified_submissions, &session.id)?;
@@ -389,7 +411,7 @@ impl ProductStore {
                     match super::load_record(&tx, &mut self.verified_submissions, &target_id) {
                         Ok(target) => Some(target),
                         Err(error) if error == "session not found" => None,
-                        Err(error) => return Err(error),
+                        Err(error) => return Err(error.into()),
                     };
                 if let Some(target) = target {
                     if views_of(&tx, &target_id)?.is_some()
@@ -400,14 +422,12 @@ impl ProductStore {
                         || intents_of(&tx, &mut self.verified_submissions, &target_id)?
                             != ProductIntents::default()
                     {
-                        return Err(
-                            "unadmitted clear successor is not an empty reservation".to_owned()
-                        );
+                        return Err("unadmitted clear successor is not an empty reservation".into());
                     }
                     // The successful source pass proved this reserved genesis has
                     // no runtime session. Identity bindings deliberately survive.
                     tx.execute("DELETE FROM sessions WHERE id=?1", [&target_id])
-                        .map_err(unavailable)?;
+                        .map_err(|error| super::write_error(error, "product store write failed"))?;
                     self.verified_submissions.forget_session(&target_id);
                 }
             }
@@ -415,11 +435,12 @@ impl ProductStore {
                 "DELETE FROM workflow_requests WHERE session_id=?1 AND operation_id=?2",
                 params![session.id, id],
             )
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
             insert_notice(&tx, &session.id, &notice)?;
             rows.push(notice.row);
         }
-        tx.commit().map_err(unavailable)?;
+        tx.commit()
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         session.store_revision = next;
         session.touch();
         Ok(rows)
@@ -430,7 +451,7 @@ impl ProductStore {
         &mut self,
         session_id: &str,
         intent: &AnchoredIntent<()>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.write_host_intent(
             session_id,
             WAKE_SUPPRESSION,
@@ -445,9 +466,10 @@ impl ProductStore {
         &mut self,
         session_id: &str,
         intent: &AnchoredIntent<HostPauseCause>,
-    ) -> Result<(), String> {
-        let value = serde_json::to_string(&intent.value)
-            .map_err(|_| "pause cause is not encodable".to_owned())?;
+    ) -> Result<(), RecordStoreError> {
+        let value = serde_json::to_string(&intent.value).map_err(|error| {
+            super::write_error(error, "pause cause is not encodable".to_owned())
+        })?;
         self.write_host_intent(
             session_id,
             PAUSE_CAUSE,
@@ -464,14 +486,14 @@ impl ProductStore {
         anchor: u64,
         ordinal: u32,
         value: String,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.durability(true)?;
         self.connection
             .execute(
                 "INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,?5)",
                 params![session_id, kind, to_i64(anchor)?, ordinal, value],
             )
-            .map_err(|_| format!("could not record the {kind} intent"))?;
+            .map_err(|error| super::write_error(error, format!("could not record the {kind} intent")))?;
         Ok(())
     }
 
@@ -494,7 +516,9 @@ impl ProductStore {
         session_id: &str,
         writes: &ViewWrites,
         views: &SessionViewState,
-    ) -> Result<ProjectionCommit, String> {
+    ) -> Result<ProjectionCommit, RecordStoreError> {
+        #[cfg(test)]
+        self.capacity_fault()?;
         self.durability(false)?;
         let tx = match self
             .connection
@@ -580,7 +604,7 @@ impl ProductStore {
                         [&target.id],
                         |row| row.get(0),
                     )
-                    .map_err(unavailable)?;
+                    .map_err(|error| super::write_error(error, "product store write failed"))?;
                 if exists {
                     let existing =
                         super::load_record(&tx, &mut self.verified_submissions, &target.id)?;
@@ -589,7 +613,9 @@ impl ProductStore {
                         || existing.source_workflow_operation_id
                             != target.source_workflow_operation_id
                     {
-                        return Err("successor identity is bound to another request".to_owned());
+                        return Err("successor identity is bound to another request"
+                            .to_owned()
+                            .into());
                     }
                     continue;
                 }
@@ -599,7 +625,7 @@ impl ProductStore {
                         [&target.create_operation_id],
                         |row| row.get(0),
                     )
-                    .map_err(unavailable)?;
+                    .map_err(|error| super::write_error(error, "product store write failed"))?;
                 if claimed {
                     continue;
                 }
@@ -616,7 +642,7 @@ impl ProductStore {
                         [&target.id],
                         |row| row.get(0),
                     )
-                    .map_err(unavailable)?;
+                    .map_err(|error| super::write_error(error, "product store write failed"))?;
                 if let Some(seed) = &successor.seed
                     && !has_cursor
                 {
@@ -634,12 +660,12 @@ impl ProductStore {
 
     /// Deletes one session's views and cursor: always safe, the next
     /// projector run rebuilds them from the feed.
-    pub fn delete_views(&mut self, session_id: &str) -> Result<(), String> {
+    pub fn delete_views(&mut self, session_id: &str) -> Result<(), RecordStoreError> {
         self.durability(false)?;
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         for table in [
             "transcript_rows",
             "session_call_views",
@@ -652,9 +678,10 @@ impl ProductStore {
                 &format!("DELETE FROM {table} WHERE session_id=?1"),
                 [session_id],
             )
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
         }
-        tx.commit().map_err(unavailable)
+        tx.commit()
+            .map_err(|error| super::write_error(error, "product store write failed"))
     }
 }
 
@@ -663,7 +690,7 @@ fn commit_views(
     session_id: &str,
     writes: &ViewWrites,
     views: &SessionViewState,
-) -> Result<ProjectionCommit, String> {
+) -> Result<ProjectionCommit, RecordStoreError> {
     let runtime_session = views
         .runtime_session_id
         .map(|session| session.to_string())
@@ -681,12 +708,13 @@ fn commit_views(
                 params![session_id, runtime_session, next, expected],
             )
         }
-        .map_err(unavailable)?;
+        .map_err(|error| super::write_error(error, "product store write failed"))?;
     if moved != 1 {
         return Ok(ProjectionCommit::CursorMoved);
     }
-    let state = serde_json::to_string(&views)
-        .map_err(|_| "product session views are not encodable".to_owned())?;
+    let state = serde_json::to_string(&views).map_err(|error| {
+        super::write_error(error, "product session views are not encodable".to_owned())
+    })?;
     let counters = views.counters;
     let recorded: Option<String> = tx
         .query_row(
@@ -694,11 +722,13 @@ fn commit_views(
             [session_id],
             |row| row.get(0),
         )
-        .map_err(unavailable)?;
+        .map_err(|error| super::write_error(error, "product store write failed"))?;
     let recorded = recorded
         .map(|locator| locator.parse::<SessionLocator>())
         .transpose()
-        .map_err(|_| "product session locator is invalid".to_owned())?;
+        .map_err(|error| {
+            super::write_error(error, "product session locator is invalid".to_owned())
+        })?;
     let head = views.projected_locator(recorded);
     tx.execute(
             "INSERT INTO session_views(session_id,head_locator,root_turn_count,tool_call_count,compaction_count,state) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(session_id) DO UPDATE SET head_locator=excluded.head_locator,root_turn_count=excluded.root_turn_count,tool_call_count=excluded.tool_call_count,compaction_count=excluded.compaction_count,state=excluded.state",
@@ -711,7 +741,7 @@ fn commit_views(
                 state,
             ],
         )
-        .map_err(unavailable)?;
+        .map_err(|error| super::write_error(error, "product store write failed"))?;
     write_keyed(
         tx,
         session_id,
@@ -743,7 +773,7 @@ fn commit_views(
                 "DELETE FROM transcript_rows WHERE session_id=?1 AND anchor=?2 AND lane=?3 AND ordinal=?4",
                 params![session_id, to_i64(key.anchor)?, key.lane.number(), key.ordinal],
             )
-            .map_err(unavailable)?;
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
     }
     for (key, row) in &writes.upserts {
         if let Some(call_id) = row.call_id() {
@@ -751,11 +781,12 @@ fn commit_views(
                 "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id=?1 AND call_id=?2 AND NOT (anchor=?3 AND lane=?4 AND ordinal=?5))",
                 params![session_id, call_id, to_i64(key.anchor)?, key.lane.number(), key.ordinal],
                 |row| row.get(0),
-            ).map_err(unavailable)?;
+            ).map_err(|error| super::write_error(error, "product store write failed"))?;
             debug_assert!(!duplicated, "duplicated transcript call id: {call_id}");
         }
-        let text =
-            serde_json::to_string(row).map_err(|_| "transcript row is not encodable".to_owned())?;
+        let text = serde_json::to_string(row).map_err(|error| {
+            super::write_error(error, "transcript row is not encodable".to_owned())
+        })?;
         tx.execute(
                 "INSERT INTO transcript_rows(session_id,anchor,lane,ordinal,row,call_id) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(session_id,anchor,lane,ordinal) DO UPDATE SET row=excluded.row,call_id=excluded.call_id",
                 params![
@@ -767,7 +798,7 @@ fn commit_views(
                     row.call_id(),
                 ],
             )
-            .map_err(|_| "could not write a transcript row".to_owned())?;
+            .map_err(|error| super::write_error(error, "could not write a transcript row".to_owned()))?;
     }
     Ok(ProjectionCommit::Applied)
 }
@@ -778,29 +809,30 @@ fn write_keyed<K: rusqlite::ToSql, V: serde::Serialize>(
     table: &str,
     key_column: &str,
     changes: &[(K, Option<V>)],
-) -> Result<(), String> {
+) -> Result<(), RecordStoreError> {
     if changes.is_empty() {
         return Ok(());
     }
     let mut upsert = connection.prepare(&format!(
         "INSERT INTO {table}(session_id,{key_column},value) VALUES(?1,?2,?3) ON CONFLICT(session_id,{key_column}) DO UPDATE SET value=excluded.value"
-    )).map_err(unavailable)?;
+    )).map_err(|error| super::write_error(error, "product store write failed"))?;
     let mut delete = connection
         .prepare(&format!(
             "DELETE FROM {table} WHERE session_id=?1 AND {key_column}=?2"
         ))
-        .map_err(unavailable)?;
+        .map_err(|error| super::write_error(error, "product store write failed"))?;
     for (key, value) in changes {
         if let Some(value) = value {
-            let value = serde_json::to_string(value)
-                .map_err(|_| "product keyed view is not encodable".to_owned())?;
+            let value = serde_json::to_string(value).map_err(|error| {
+                super::write_error(error, "product keyed view is not encodable".to_owned())
+            })?;
             upsert
                 .execute(params![session_id, key, value])
-                .map_err(unavailable)?;
+                .map_err(|error| super::write_error(error, "product store write failed"))?;
         } else {
             delete
                 .execute(params![session_id, key])
-                .map_err(unavailable)?;
+                .map_err(|error| super::write_error(error, "product store write failed"))?;
         }
     }
     Ok(())
@@ -837,7 +869,7 @@ pub(super) fn insert_submission(
     verified: &mut VerifiedSubmissions,
     session_id: &str,
     submission: &Submission,
-) -> Result<(), String> {
+) -> Result<(), RecordStoreError> {
     super::bind_identity(
         tx,
         "command",
@@ -860,13 +892,14 @@ pub(super) fn insert_submission(
             to_i64(submission.submitted_at_ms)?,
         ],
     )
-    .map_err(unavailable)?;
+    .map_err(|error| super::write_error(error, "product store write failed"))?;
     let stored = load_submissions_where(tx, verified, "command_id=?1", &submission.command_id)?;
     if stored.first().map(|(owner, row)| (owner.as_str(), row)) != Some((session_id, submission)) {
         return Err(format!(
             "command id {} is already bound to another submission",
             submission.command_id
-        ));
+        )
+        .into());
     }
     Ok(())
 }
@@ -876,7 +909,7 @@ pub(super) fn insert_pause_cause(
     tx: &rusqlite::Transaction<'_>,
     session_id: &str,
     cause: &HostPauseCause,
-) -> Result<(), String> {
+) -> Result<(), RecordStoreError> {
     let anchor: i64 = tx
         .query_row(
             "SELECT applied_seq FROM projector_cursors WHERE session_id=?1",
@@ -884,16 +917,16 @@ pub(super) fn insert_pause_cause(
             |row| row.get(0),
         )
         .optional()
-        .map_err(unavailable)?
+        .map_err(|error| super::write_error(error, "product store write failed"))?
         .unwrap_or(0);
-    let ordinal: u32 = tx.query_row("SELECT COALESCE(MAX(ordinal)+1,0) FROM host_intents WHERE session_id=?1 AND kind=?2 AND anchor=?3", params![session_id, PAUSE_CAUSE, anchor], |row| row.get(0)).map_err(unavailable)?;
-    let value =
-        serde_json::to_string(cause).map_err(|_| "pause cause is not encodable".to_owned())?;
+    let ordinal: u32 = tx.query_row("SELECT COALESCE(MAX(ordinal)+1,0) FROM host_intents WHERE session_id=?1 AND kind=?2 AND anchor=?3", params![session_id, PAUSE_CAUSE, anchor], |row| row.get(0)).map_err(|error| super::write_error(error, "product store write failed"))?;
+    let value = serde_json::to_string(cause)
+        .map_err(|error| super::write_error(error, "pause cause is not encodable".to_owned()))?;
     tx.execute(
         "INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,?5)",
         params![session_id, PAUSE_CAUSE, anchor, ordinal, value],
     )
-    .map_err(unavailable)?;
+    .map_err(|error| super::write_error(error, "product store write failed"))?;
     Ok(())
 }
 
@@ -1172,7 +1205,7 @@ pub(super) fn write_notices(
     connection: &Connection,
     session: &plakous_hosted::sessions::SessionRecord,
     first_commit: bool,
-) -> Result<(), String> {
+) -> Result<(), RecordStoreError> {
     if first_commit && session.carried_forward_from().is_some() {
         write_import_intents(connection, &session.id, &session.transcript)?;
         return Ok(());
@@ -1187,7 +1220,7 @@ pub(super) fn write_notices(
             |row| row.get(0),
         )
         .optional()
-        .map_err(unavailable)?
+        .map_err(|error| super::write_error(error, "product store write failed"))?
         .unwrap_or(0);
     let mut next: u32 = connection
         .query_row(
@@ -1195,7 +1228,7 @@ pub(super) fn write_notices(
             params![session.id, anchor],
             |row| row.get(0),
         )
-        .map_err(unavailable)?;
+        .map_err(|error| super::write_error(error, "product store write failed"))?;
     for row in session.transcript.pending_notices() {
         insert_notice(
             connection,
@@ -1245,7 +1278,7 @@ pub(super) fn write_import_intents(
     connection: &Connection,
     session_id: &str,
     rows: &[TranscriptRow],
-) -> Result<(), String> {
+) -> Result<(), RecordStoreError> {
     for (ordinal, row) in rows.iter().enumerate() {
         insert_notice(
             connection,
@@ -1253,8 +1286,9 @@ pub(super) fn write_import_intents(
             &OperatorNotice {
                 notice_id: format!("{IMPORTED_NOTICE_PREFIX}{ordinal}"),
                 anchor: 0,
-                ordinal: u32::try_from(ordinal)
-                    .map_err(|_| "imported transcript is too long".to_owned())?,
+                ordinal: u32::try_from(ordinal).map_err(|error| {
+                    super::write_error(error, "imported transcript is too long".to_owned())
+                })?,
                 row: row.clone(),
             },
         )?;
@@ -1265,7 +1299,7 @@ pub(super) fn write_import_intents(
 fn workflow_intent_cas(
     tx: &Connection,
     session: &plakous_hosted::sessions::SessionRecord,
-) -> Result<u64, String> {
+) -> Result<u64, RecordStoreError> {
     let next = session
         .store_revision
         .checked_add(1)
@@ -1280,9 +1314,9 @@ fn workflow_intent_cas(
                 to_i64(plakous::model::now_unix_secs())?
             ],
         )
-        .map_err(unavailable)?;
+        .map_err(|error| super::write_error(error, "product store write failed"))?;
     if changed != 1 {
-        return Err("product session changed concurrently".to_owned());
+        return Err("product session changed concurrently".to_owned().into());
     }
     Ok(next)
 }
@@ -1291,15 +1325,16 @@ fn insert_notice(
     connection: &Connection,
     session_id: &str,
     notice: &OperatorNotice,
-) -> Result<(), String> {
-    let row = serde_json::to_string(&notice.row)
-        .map_err(|_| "operator notice is not encodable".to_owned())?;
+) -> Result<(), RecordStoreError> {
+    let row = serde_json::to_string(&notice.row).map_err(|error| {
+        super::write_error(error, "operator notice is not encodable".to_owned())
+    })?;
     connection
         .execute(
             "INSERT INTO operator_notices(session_id,notice_id,anchor,ordinal,row) VALUES(?1,?2,?3,?4,?5)",
             params![session_id, notice.notice_id, to_i64(notice.anchor)?, notice.ordinal, row],
         )
-        .map_err(|_| format!("could not record operator notice {}", notice.notice_id))?;
+        .map_err(|error| super::write_error(error, format!("could not record operator notice {}", notice.notice_id)))?;
     Ok(())
 }
 

@@ -823,6 +823,8 @@ async fn actor_dispatch_reports_full_and_failed_workers_without_waiting() {
             .is_ok()
     );
     let full = SqliteSessionStore {
+        storage_probe: None,
+        storage_interrupt: None,
         clock: Arc::new(super::SystemLeaseClock::new().expect("system lease clock")),
         domain: super::SystemLeaseClock::new()
             .expect("system lease clock")
@@ -850,6 +852,8 @@ async fn actor_dispatch_reports_full_and_failed_workers_without_waiting() {
     let (failed_sender, failed_receiver) = super::actor_queue(1);
     drop(failed_receiver);
     let failed = SqliteSessionStore {
+        storage_probe: None,
+        storage_interrupt: None,
         clock: Arc::new(super::SystemLeaseClock::new().expect("system lease clock")),
         domain: super::SystemLeaseClock::new()
             .expect("system lease clock")

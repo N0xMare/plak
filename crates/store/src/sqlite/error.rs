@@ -109,7 +109,10 @@ pub(super) const fn sqlite_failure_category(code: ErrorCode) -> &'static str {
 }
 
 pub(super) fn map_io(error: std::io::Error) -> SessionStoreError {
-    let full = error.raw_os_error() == Some(rustix::io::Errno::NOSPC.raw_os_error());
+    let full = error.raw_os_error().is_some_and(|code| {
+        code == rustix::io::Errno::NOSPC.raw_os_error()
+            || code == rustix::io::Errno::DQUOT.raw_os_error()
+    });
     drop(error);
     if full {
         SessionStoreError::StorageFull

@@ -20,6 +20,13 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         events: Sender<P>,
         mut startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
     ) -> CliResult<Self> {
+        let storage_interrupt = actions.storage_interrupt_probe();
+        config
+            .state_roots
+            .bind_storage_shutdown(actions.storage_shutdown_probe());
+        config
+            .store
+            .set_storage_interrupt(storage_interrupt.clone());
         let pending_usage = std::sync::Arc::new(std::sync::Mutex::new(
             super::super::projection::presentation::ProcessUsage::default(),
         ));
@@ -60,6 +67,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         let mut opened = executor
             .block_on(build_session_from_config(&mut config, &mut stderr_buf))
             .map_err(|_| CliFailure::new("application execution failed"))??;
+        if let Some(agent) = opened.agent() {
+            agent.set_storage_interrupt(storage_interrupt);
+        }
         pending_usage
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -541,7 +551,23 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .target = Some(opened.locator().session_id());
+        let storage_notices = if let Some(agent) = opened.agent().cloned() {
+            Some(
+                executor
+                    .block_on(async {
+                        super::super::storage::StorageNotices::start(
+                            agent,
+                            config.store.clone(),
+                            events.clone(),
+                        )
+                    })
+                    .map_err(|_| CliFailure::new("application execution failed"))?,
+            )
+        } else {
+            None
+        };
         let mut host = Self {
+            _storage_notices: storage_notices,
             config,
             actions,
             events,
@@ -561,6 +587,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             job_events: super::super::job_events::JobEvents::default(),
             last_tree_observed_at,
             child_wake: super::wake::ChildWake::default(),
+            storage_interrupted: false,
             pending_track: super::pending::PendingTrack::default(),
             recovery_blocked,
             recovered_at_open: abandoned_turn.is_some(),

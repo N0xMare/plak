@@ -41,6 +41,7 @@ pub(in crate::runtime) async fn queue_join(
         ))
     })
     .await
+    .map_err(String::from)
 }
 
 /// What the after-ack pass leaves: the queue the projected views and the
@@ -83,7 +84,10 @@ async fn after_ack_pass(
         Some((live, target)) => live.settle(target.clone()).await?,
         None => project_to_tail(sessions, store, product_id, followed).await?,
     };
-    let intents = blocking(store, product_id, |store, id| store.load_intents(id)).await?;
+    let intents = blocking(store, product_id, |store, id| {
+        store.load_intents(id).map_err(ReadFailure::from)
+    })
+    .await?;
     Ok(AfterAck {
         commands: crate::sessions::QueueCommands::from_join(&intents, Some(&views)),
         root_turns: views.state.counters.root_turns,
@@ -148,7 +152,10 @@ pub async fn project_session(
         return Ok(None);
     }
     let views = project_to_tail(sessions, store, &session.id, recorded).await?;
-    let intents = blocking(store, &session.id, |store, id| store.load_intents(id)).await?;
+    let intents = blocking(store, &session.id, |store, id| {
+        store.load_intents(id).map_err(ReadFailure::from)
+    })
+    .await?;
     let head = projected_head(recorded, &views);
     Ok(Some(ProjectedSession {
         head,
@@ -263,7 +270,9 @@ async fn project_to_tail_controlled(
         None => load_views(store, product_id).await?,
     };
     let inherited = blocking(store, product_id, |store, id| {
-        store.load_inherited_submissions(id)
+        store
+            .load_inherited_submissions(id)
+            .map_err(ReadFailure::from)
     })
     .await?;
     for _ in 0..MAX_PASS_PAGES {
@@ -350,11 +359,14 @@ async fn project_to_tail_controlled(
                         continue;
                     }
                     let target_id = request.successor_product_id();
-                    let target = match blocking(store, &target_id, |store, id| store.load(id)).await
+                    let target = match blocking(store, &target_id, |store, id| {
+                        store.load(id).map_err(ReadFailure::from)
+                    })
+                    .await
                     {
                         Ok(target) => target,
-                        Err(error) if error == "session not found" => continue,
-                        Err(error) => return Err(error.into()),
+                        Err(error) if error.to_string() == "session not found" => continue,
+                        Err(error) => return Err(error),
                     };
                     let operation =
                         plakous::sessions::SessionOperationId::new(&target.create_operation_id)
@@ -424,7 +436,10 @@ async fn project_to_tail_controlled(
                     behind_retention(sessions, &views, followed, retained_from, tail, &heads)
                         .await?;
                 let mut rebuilt = rebuilt;
-                let session = blocking(store, product_id, |store, id| store.load(id)).await?;
+                let session = blocking(store, product_id, |store, id| {
+                    store.load(id).map_err(ReadFailure::from)
+                })
+                .await?;
                 let operation =
                     plakous::sessions::SessionOperationId::new(&session.create_operation_id)
                         .map_err(|error| error.to_string())?;
@@ -470,11 +485,11 @@ async fn load_views(
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
 ) -> Result<SessionViews, String> {
-    Ok(
-        blocking(store, product_id, |store, id| store.load_views(id))
-            .await?
-            .unwrap_or_else(SessionViews::empty),
-    )
+    Ok(blocking(store, product_id, |store, id| {
+        store.load_views(id).map_err(ReadFailure::from)
+    })
+    .await?
+    .unwrap_or_else(SessionViews::empty))
 }
 
 async fn page_with_intents(
@@ -486,7 +501,10 @@ async fn page_with_intents(
     let page = page.await?;
     // Every intent precedes its submission, so a page read before this
     // snapshot cannot name an intent the snapshot missed.
-    let mut intents = blocking(store, product_id, |store, id| store.load_intents(id)).await?;
+    let mut intents = blocking(store, product_id, |store, id| {
+        store.load_intents(id).map_err(ReadFailure::from)
+    })
+    .await?;
     // Ancestor submissions are immutable; only our own intent snapshot must
     // follow each page read to observe concurrent submissions.
     intents.submissions.extend(inherited.iter().cloned());
@@ -500,7 +518,7 @@ fn rejoin_clear_source(
     store: &dyn SessionRecordStore,
     product_id: &str,
     views: &SessionViews,
-) -> Result<ProjectionCommit, String> {
+) -> Result<ProjectionCommit, ReadFailure> {
     if views
         .state
         .created_operation_id
@@ -528,11 +546,9 @@ fn rejoin_clear_source(
     if !intents.workflow_consumed(operation, source_views.state.retained_from)
         && source_views.state.workflows.get(operation) != Some(&completion)
     {
-        return store.commit_projection_views(
-            product_id,
-            &ViewWrites::between(views, views),
-            &views.state,
-        );
+        return store
+            .commit_projection_views(product_id, &ViewWrites::between(views, views), &views.state)
+            .map_err(ReadFailure::from);
     }
     Ok(ProjectionCommit::Applied)
 }
@@ -542,8 +558,8 @@ fn rejoin_clear_source(
 async fn blocking<T: Send + 'static>(
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
-    call: impl FnOnce(&dyn SessionRecordStore, &str) -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
+    call: impl FnOnce(&dyn SessionRecordStore, &str) -> Result<T, ReadFailure> + Send + 'static,
+) -> Result<T, ReadFailure> {
     let store = Arc::clone(store);
     let product_id = product_id.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -553,7 +569,7 @@ async fn blocking<T: Send + 'static>(
         call(&*store, &product_id)
     })
     .await
-    .map_err(|_| "the projector's store call did not complete".to_owned())?
+    .map_err(|_| ReadFailure::from("the projector's store call did not complete"))?
 }
 
 /// The branch lineage a product session's views start from when it has none

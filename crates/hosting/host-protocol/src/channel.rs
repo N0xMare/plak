@@ -68,6 +68,7 @@ struct IntentQueue<P: ProtocolExtension> {
     abandon_and_release: AtomicBool,
     queue: Mutex<VecDeque<QueuedIntent<P>>>,
     urgent: AtomicU8,
+    shutdown_requested: AtomicBool,
     nonrepeatable: AtomicU8,
     nonrepeatable_generations: [AtomicU64; 3],
     next_generation: AtomicU64,
@@ -308,6 +309,7 @@ impl<P: ProtocolExtension> IntentSender<P> {
     /// Requests process-exit abandonment rather than joined host shutdown.
     /// Call only after restoring the terminal; this outranks queued product work.
     pub fn request_abandon_and_release(&self) {
+        self.0.shutdown_requested.store(true, Ordering::Release);
         self.0.abandon_and_release.store(true, Ordering::Release);
         self.0.urgent.fetch_or(PENDING_QUIT, Ordering::Release);
         self.0.ready.notify_one();
@@ -352,6 +354,9 @@ impl<P: ProtocolExtension> IntentSender<P> {
             _ => None,
         };
         if let Some(urgent_bit) = urgent_bit {
+            if urgent_bit == PENDING_QUIT {
+                self.0.shutdown_requested.store(true, Ordering::Release);
+            }
             self.0.urgent.fetch_or(urgent_bit, Ordering::Release);
             self.0.ready.notify_one();
             self.0.wake_waiter();
@@ -407,6 +412,31 @@ impl<P: ProtocolExtension> Drop for IntentReceiver<P> {
 }
 
 impl<P: ProtocolExtension> IntentReceiver<P> {
+    /// A read-only interrupt/shutdown signal for the attached root's storage
+    /// owner. Never bind this to children sharing its stores; they use their
+    /// own cancellation and [`Self::storage_shutdown_probe`]. This never
+    /// consumes an intent or acknowledges cancellation.
+    #[must_use]
+    pub fn storage_interrupt_probe(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
+        let queue = Arc::clone(&self.0);
+        Arc::new(move || {
+            queue.urgent.load(Ordering::Acquire) & URGENT_INTERRUPT != 0
+                || queue.shutdown_requested.load(Ordering::Acquire)
+                || queue.senders.load(Ordering::Acquire) == 0
+        })
+    }
+
+    /// Process shutdown only: an interrupt of the root must not abandon a
+    /// child's retained publication. Shutdown stays latched after dequeue.
+    #[must_use]
+    pub fn storage_shutdown_probe(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
+        let queue = Arc::clone(&self.0);
+        Arc::new(move || {
+            queue.shutdown_requested.load(Ordering::Acquire)
+                || queue.senders.load(Ordering::Acquire) == 0
+        })
+    }
+
     /// Replaces the observational process view without filling the event queue.
     pub fn set_processes(&self, processes: Vec<crate::views::ProcessView>) {
         self.set_background_processes(processes.iter().filter(|row| row.status.is_live()).count());
@@ -609,6 +639,7 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
 #[must_use]
 pub fn intent_channel<P: ProtocolExtension>() -> (IntentSender<P>, IntentReceiver<P>) {
     let shared = Arc::new(IntentQueue {
+        shutdown_requested: AtomicBool::new(false),
         promptable: AtomicBool::new(false),
         background_processes: AtomicUsize::new(0),
         processes: Mutex::new(Arc::new(Vec::new())),

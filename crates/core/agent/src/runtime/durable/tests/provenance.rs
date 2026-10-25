@@ -27,7 +27,7 @@ fn provenance_test_model_at(
     Ok(Arc::new(model))
 }
 
-fn provenance_test_builder(
+pub(super) fn provenance_test_builder(
     workspace: Arc<WorkspacePolicy>,
     model: &Arc<ArtifactModel>,
 ) -> TestResult<AgentBuilder> {

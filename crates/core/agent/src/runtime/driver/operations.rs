@@ -234,7 +234,11 @@ impl Driver {
             })
             .map(|row| row.number)
             .collect::<Vec<_>>();
-        let published = Box::pin(self.authority.publish(
+        let storage_pause = self.active_root.as_ref().map_or_else(
+            || crate::runtime::checkpoint::storage_pause::StoragePause::new(self.shutdown.clone()),
+            |root| root.shared.storage_pause.clone(),
+        );
+        let published = Box::pin(storage_pause.scope(self.authority.publish(
             SuccessorFacts {
                 checkpoint_id,
                 lifecycle,
@@ -247,7 +251,7 @@ impl Driver {
             observation,
             &telemetry,
             admission,
-        ))
+        )))
         .await?;
         if !consumed.is_empty()
             && let Some(host) = &self.job_host

@@ -341,6 +341,8 @@ impl SqliteStoreStats {
 
 /// Durable `SQLite` store using one connection on one bounded blocking actor.
 pub struct SqliteSessionStore {
+    storage_probe: Option<Arc<dyn Fn(bool) -> bool + Send + Sync>>,
+    storage_interrupt: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     clock: Arc<dyn LeaseClock>,
     domain: LeaseDomain,
     sender: ActorSender,
@@ -365,6 +367,8 @@ struct Backend {
     checkpoints: CheckpointCache,
     #[cfg(test)]
     job_hook: Option<Box<dyn FnMut(ExecutedJob) + Send>>,
+    #[cfg(test)]
+    capacity_fault: Option<(&'static str, std::io::Error)>,
     /// Receives `PRAGMA synchronous` inside each unsynced job and after every
     /// job and background step, with the job's label.
     #[cfg(test)]
@@ -377,6 +381,9 @@ struct Backend {
 /// Whether the actor's connection still takes work.
 #[derive(Clone, Copy)]
 enum BackendState {
+    // Defensive: SQLite currently restores this connection-local pragma
+    // without allocation; fault injection exercises capacity refusal here.
+    AwaitingFull,
     Open,
     /// `synchronous=FULL` could not be restored after an unsynced job, so no
     /// later job may run on this connection; only a reopen clears it.
@@ -385,6 +392,19 @@ enum BackendState {
 }
 
 impl SqliteSessionStore {
+    /// Also pauses new starts while a colocated authoritative store retains
+    /// a capacity-refused publication. The probe never authorizes a write.
+    #[must_use]
+    pub fn with_storage_probe(
+        mut self,
+        probe: Arc<dyn Fn(bool) -> bool + Send + Sync>,
+        interrupt: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.storage_probe = Some(probe);
+        self.storage_interrupt = Some(interrupt);
+        self
+    }
+
     /// Reads one immutable checkpoint without opening a writer or changing leases.
     ///
     /// # Errors
@@ -738,6 +758,8 @@ impl SqliteSessionStore {
         let join =
             wait_for_actor_or_join(ready_rx, sender.clone(), join, STARTUP_TIMEOUT, &progress)?;
         Ok(Self {
+            storage_probe: None,
+            storage_interrupt: None,
             clock: authority_clock,
             domain,
             sender,
@@ -798,11 +820,49 @@ impl SqliteSessionStore {
             }
             #[cfg(feature = "commit-trace")]
             let settle = crate::commit_trace::SettleGuard;
-            let result = if matches!(backend.state, BackendState::Poisoned) {
+            let changes_before = backend.connection.total_changes();
+            #[cfg(test)]
+            let capacity_fault = if backend
+                .capacity_fault
+                .as_ref()
+                .is_some_and(|(site, _)| *site == label)
+            {
+                backend
+                    .capacity_fault
+                    .take()
+                    .map(|(_, error)| map_io(error))
+            } else {
+                None
+            };
+            #[cfg(not(test))]
+            let capacity_fault = None;
+            let restored = backend.resume_durability();
+            let result = if let Err(error) = restored {
+                Err(error)
+            } else if let Some(error) = capacity_fault {
+                Err(error)
+            } else if matches!(backend.state, BackendState::Poisoned) {
                 Err(SessionStoreError::BackendUnavailable)
             } else {
                 operation(backend)
             };
+            if matches!(lane, Lane::Critical) {
+                if result.is_ok()
+                    && (backend.connection.total_changes() > changes_before
+                        || matches!(
+                            label,
+                            "recover_commit"
+                                | "recover_create"
+                                | "recover_fork"
+                                | "recover_delete"
+                                | "recover_prune"
+                        ))
+                {
+                    activity.storage_full.store(false, Ordering::Release);
+                } else if matches!(result, Err(SessionStoreError::StorageFull)) {
+                    activity.storage_full.store(true, Ordering::Release);
+                }
+            }
             #[cfg(test)]
             backend.probe_synchronous(label);
             if matches!(lane, Lane::Critical) {
@@ -842,6 +902,8 @@ fn elapsed_ns(started: Instant) -> u64 {
 impl Clone for SqliteSessionStore {
     fn clone(&self) -> Self {
         Self {
+            storage_probe: self.storage_probe.clone(),
+            storage_interrupt: self.storage_interrupt.clone(),
             clock: Arc::clone(&self.clock),
             domain: self.domain,
             sender: self.sender.clone(),
@@ -936,6 +998,8 @@ impl Backend {
             #[cfg(test)]
             job_hook: None,
             #[cfg(test)]
+            capacity_fault: None,
+            #[cfg(test)]
             synchronous_probe: None,
             #[cfg(test)]
             full_restore_fault: None,
@@ -945,6 +1009,7 @@ impl Backend {
     fn require_open(&self) -> Result<(), SessionStoreError> {
         match self.state {
             BackendState::Open => Ok(()),
+            BackendState::AwaitingFull => Err(SessionStoreError::StorageFull),
             BackendState::Poisoned => Err(SessionStoreError::BackendUnavailable),
             BackendState::Shutdown(_) => Err(SessionStoreError::Shutdown),
         }
@@ -972,7 +1037,13 @@ impl Backend {
                 self.probe_synchronous("unsynced");
                 operation(self)
             });
-        if self.restore_full().is_err() {
+        if let Err(error) = self.restore_full() {
+            if error == SessionStoreError::StorageFull {
+                // No later operation may run at NORMAL. The renewal itself
+                // may have committed; exact renewal repetition reconciles it.
+                self.state = BackendState::AwaitingFull;
+                return Err(error);
+            }
             self.state = BackendState::Poisoned;
             tracing::error!(
                 target: "plakous_store::sqlite_actor",
@@ -981,6 +1052,23 @@ impl Backend {
             return Err(SessionStoreError::BackendUnavailable);
         }
         result
+    }
+
+    fn resume_durability(&mut self) -> Result<(), SessionStoreError> {
+        if !matches!(self.state, BackendState::AwaitingFull) {
+            return Ok(());
+        }
+        match self.restore_full() {
+            Ok(()) => {
+                self.state = BackendState::Open;
+                Ok(())
+            }
+            Err(SessionStoreError::StorageFull) => Err(SessionStoreError::StorageFull),
+            Err(_) => {
+                self.state = BackendState::Poisoned;
+                Err(SessionStoreError::BackendUnavailable)
+            }
+        }
     }
 
     fn restore_full(&mut self) -> Result<(), SessionStoreError> {
@@ -1122,6 +1210,41 @@ impl Backend {
 }
 
 impl SessionStore for SqliteSessionStore {
+    fn storage_wait_cancelled(&self) -> bool {
+        self.storage_interrupt.as_ref().is_some_and(|probe| probe())
+    }
+
+    fn recover_storage(&self) -> StoreFuture<'_, ()> {
+        Box::pin(async move {
+            if let Some(probe) = self.storage_probe.clone()
+                && tokio::task::spawn_blocking(move || probe(true))
+                    .await
+                    .map_err(|_| SessionStoreError::BackendUnavailable)?
+            {
+                return Err(SessionStoreError::StorageFull);
+            }
+            self.dispatch("recover_storage", |backend| {
+                let tx = backend.connection.transaction().map_err(map_sqlite)?;
+                tx.execute_batch(
+                    "UPDATE store_meta SET sessions=sessions+1 WHERE id=1;
+                    UPDATE store_meta SET sessions=sessions-1 WHERE id=1;",
+                )
+                .map_err(map_sqlite)?;
+                tx.commit().map_err(map_sqlite)?;
+                Ok(())
+            })
+            .await
+        })
+    }
+
+    fn storage_unavailable(&self) -> bool {
+        self.sender.activity.storage_full.load(Ordering::Acquire)
+            || self
+                .storage_probe
+                .as_ref()
+                .is_some_and(|probe| probe(false))
+    }
+
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
         sample_clock(self.clock.as_ref(), self.domain)
     }

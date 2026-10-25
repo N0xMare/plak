@@ -71,6 +71,9 @@ pub(super) struct TestCreateStore {
     pub(super) commits_halted: AtomicBool,
     pub(super) force_recover_commit_not_found: AtomicBool,
     pub(super) reject_next_commit: Mutex<Option<SessionStoreError>>,
+    pub(super) full_after_completed_round: AtomicBool,
+    pub(super) full_after_tool_result: AtomicBool,
+    pub(super) full_round_refused: Notify,
     pub(super) fail_atomic_queued_cancel: AtomicBool,
     pub(super) fail_quiescent_terminal: AtomicBool,
     pub(super) refused_terminal:
@@ -703,6 +706,22 @@ impl SessionStore for TestCreateStore {
                 .checkpoint()
                 .validated_checkpoint()
                 .map_err(|_| SessionStoreError::corrupt())?;
+            if checkpoint
+                .manifest()
+                .ledger()
+                .operations()
+                .iter()
+                .any(|record| {
+                    matches!(record.kind(), DurableOperationKind::Provider { .. })
+                        && matches!(record.state(), DurableOperationState::Completed(_))
+                })
+                && self
+                    .full_after_completed_round
+                    .swap(false, Ordering::AcqRel)
+            {
+                self.full_round_refused.notify_one();
+                return Err(SessionStoreError::StorageFull);
+            }
             if self.block_process_notice_commits.load(Ordering::Acquire)
                 && checkpoint.manifest().canonical().history().segments().iter()
                     .flat_map(HistorySegment::items).flat_map(ConversationItem::blocks)
@@ -710,6 +729,19 @@ impl SessionStore for TestCreateStore {
             {
                 self.process_notice_commit_started.notify_one();
                 std::future::pending::<()>().await;
+            }
+            if checkpoint
+                .manifest()
+                .canonical()
+                .history()
+                .segments()
+                .iter()
+                .last()
+                .is_some_and(|segment| segment.kind() == HistorySegmentKind::ToolExchange)
+                && self.full_after_tool_result.swap(false, Ordering::AcqRel)
+            {
+                self.full_round_refused.notify_one();
+                return Err(SessionStoreError::StorageFull);
             }
             if self.fail_tool_exchange_promotion.load(Ordering::Acquire)
                 && checkpoint

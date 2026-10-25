@@ -98,6 +98,31 @@ pub enum StorageAdmission {
 
 /// Durable product session records with compare-and-swap commits.
 pub trait SessionRecordStore: Send + Sync {
+    /// Binds a read-only operator interruption signal; it cannot acknowledge
+    /// an intent or authorize a write.
+    fn set_storage_interrupt(&self, _probe: std::sync::Arc<dyn Fn() -> bool + Send + Sync>) {}
+
+    /// Whether the operator interrupted a parked write.
+    fn storage_wait_cancelled(&self) -> bool {
+        false
+    }
+
+    /// Retry a capacity-blocked store through a minimal authoritative write.
+    fn recover_storage(&self) -> Result<(), RecordStoreError> {
+        Ok(())
+    }
+
+    /// Live capacity debt, cleared only by a successful authoritative write.
+    fn storage_unavailable(&self) -> bool {
+        false
+    }
+
+    /// Operator-only volume/free-space detail for a live outage notice.
+    /// Never persist this text or put it into model-visible history.
+    fn storage_outage_notice(&self) -> String {
+        "product home volume; free space unavailable".to_owned()
+    }
+
     /// Probe product-owned capacity before admitting a new turn or spawn.
     /// In-memory and non-filesystem stores have no product-volume limit.
     fn storage_admission(&self) -> StorageAdmission;
@@ -121,7 +146,7 @@ pub trait SessionRecordStore: Send + Sync {
     ///
     /// # Errors
     /// A concurrent commit, an identity conflict, or an invalid record.
-    fn save(&self, session: &mut SessionRecord) -> Result<(), String>;
+    fn save(&self, session: &mut SessionRecord) -> Result<(), RecordStoreError>;
 
     /// Writes host decisions at the current applied cursor. Runtime outcomes
     /// are never recorded here: the joined views derive them from facts.
@@ -133,7 +158,7 @@ pub trait SessionRecordStore: Send + Sync {
         id: &str,
         suppress_wake: bool,
         pause: Option<crate::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String>;
+    ) -> Result<(), RecordStoreError>;
 
     /// Commits an immutable command submission and its queue item together,
     /// under the record's revision CAS, before dispatch.
@@ -158,7 +183,7 @@ pub trait SessionRecordStore: Send + Sync {
         session: &mut SessionRecord,
         command_id: &str,
         pause_cause: Option<crate::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String>;
+    ) -> Result<(), RecordStoreError>;
 
     /// Writes an immutable workflow request before its runtime submission,
     /// under the session revision CAS. No workflow outcome is stored here.
@@ -169,7 +194,7 @@ pub trait SessionRecordStore: Send + Sync {
         &self,
         session: &mut SessionRecord,
         request: &crate::sessions::projector::WorkflowRequest,
-    ) -> Result<(), String>;
+    ) -> Result<(), RecordStoreError>;
 
     /// Removes only this request after a definite synchronous answer without
     /// admission. Call after projecting to the feed tail. The identity binding
@@ -181,7 +206,7 @@ pub trait SessionRecordStore: Send + Sync {
         &self,
         session: &mut SessionRecord,
         operation_id: &str,
-    ) -> Result<(), String>;
+    ) -> Result<(), RecordStoreError>;
 
     /// Withdraws requests without a feed fact and writes one notice for each,
     /// atomically under the session revision CAS. Call only after exact open
@@ -196,7 +221,7 @@ pub trait SessionRecordStore: Send + Sync {
     fn withdraw_unadmitted_workflows(
         &self,
         session: &mut SessionRecord,
-    ) -> Result<Vec<crate::sessions::TranscriptRow>, String>;
+    ) -> Result<Vec<crate::sessions::TranscriptRow>, RecordStoreError>;
 
     /// Records rooted at `workspace`, newest first, as listing projections.
     ///
@@ -235,7 +260,7 @@ pub trait SessionRecordStore: Send + Sync {
         id: &str,
         writes: &ViewWrites,
         views: &crate::sessions::projector::SessionViewState,
-    ) -> Result<ProjectionCommit, String>;
+    ) -> Result<ProjectionCommit, RecordStoreError>;
 
     /// Emits one batch of disposable usage observations after the winning commit.
     /// A crash between commit and emission loses the observation, never authority.
@@ -665,13 +690,13 @@ mod memory {
             id: &str,
             suppress_wake: bool,
             pause: Option<crate::sessions::projector::HostPauseCause>,
-        ) -> Result<(), String> {
+        ) -> Result<(), RecordStoreError> {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if !state.records.contains_key(id) {
-                return Err("session not found".to_owned());
+                return Err("session not found".to_owned().into());
             }
             let anchor = state.views.get(id).map_or(0, |views| views.cursor.get());
             let intents = state.intents.entry(id.to_owned()).or_default();
@@ -746,12 +771,12 @@ mod memory {
             })
         }
 
-        fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
+        fn save(&self, session: &mut SessionRecord) -> Result<(), RecordStoreError> {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            commit_locked(&mut state, session)
+            commit_locked(&mut state, session).map_err(Into::into)
         }
 
         fn save_submission(
@@ -784,7 +809,7 @@ mod memory {
             session: &mut SessionRecord,
             command_id: &str,
             pause_cause: Option<crate::sessions::projector::HostPauseCause>,
-        ) -> Result<(), String> {
+        ) -> Result<(), RecordStoreError> {
             let mut state = self
                 .state
                 .lock()
@@ -836,11 +861,13 @@ mod memory {
             &self,
             session: &mut SessionRecord,
             request: &crate::sessions::projector::WorkflowRequest,
-        ) -> Result<(), String> {
+        ) -> Result<(), RecordStoreError> {
             plakous::sessions::SessionOperationId::new(&request.operation_id)
                 .map_err(|_| "workflow operation identity is invalid".to_owned())?;
             if session.plakous_locator != Some(request.source_locator) {
-                return Err("workflow source is not the exact product binding".to_owned());
+                return Err("workflow source is not the exact product binding"
+                    .to_owned()
+                    .into());
             }
             let mut state = self
                 .state
@@ -851,7 +878,9 @@ mod memory {
                     .workflow_request(&request.operation_id)
                     .is_some_and(|existing| id != &session.id || existing != request)
             }) {
-                return Err("workflow identity is bound to another request".to_owned());
+                return Err("workflow identity is bound to another request"
+                    .to_owned()
+                    .into());
             }
             let digest = request.binding_digest(&session.id);
             if state
@@ -864,7 +893,9 @@ mod memory {
                         || binding.terminal.is_some()
                 })
             {
-                return Err("workflow identity is bound to another request".to_owned());
+                return Err("workflow identity is bound to another request"
+                    .to_owned()
+                    .into());
             }
             let mut next = state.clone();
             let mut candidate = session.clone();
@@ -897,9 +928,7 @@ mod memory {
                         || existing.source_workflow_operation_id
                             != target.source_workflow_operation_id
                     {
-                        return Err(
-                            "clear successor identity is bound to another request".to_owned()
-                        );
+                        return Err("clear successor identity is bound to another request".into());
                     }
                 } else {
                     commit_locked(&mut next, &mut target)?;
@@ -914,7 +943,7 @@ mod memory {
             &self,
             session: &mut SessionRecord,
             operation_id: &str,
-        ) -> Result<(), String> {
+        ) -> Result<(), RecordStoreError> {
             let mut state = self
                 .state
                 .lock()
@@ -931,7 +960,9 @@ mod memory {
                 .iter()
                 .any(|id| id == operation_id)
             {
-                return Err("a recorded workflow request cannot be discarded".to_owned());
+                return Err("a recorded workflow request cannot be discarded"
+                    .to_owned()
+                    .into());
             }
             let mut candidate = session.clone();
             candidate.touch();
@@ -965,7 +996,7 @@ mod memory {
         fn withdraw_unadmitted_workflows(
             &self,
             session: &mut SessionRecord,
-        ) -> Result<Vec<crate::sessions::TranscriptRow>, String> {
+        ) -> Result<Vec<crate::sessions::TranscriptRow>, RecordStoreError> {
             let mut state = self
                 .state
                 .lock()
@@ -1000,7 +1031,7 @@ mod memory {
                                 != ProductIntents::default()
                         {
                             return Err(
-                                "unadmitted clear successor is not an empty reservation".to_owned()
+                                "unadmitted clear successor is not an empty reservation".into()
                             );
                         }
                         next.records.remove(&target_id);
@@ -1093,7 +1124,7 @@ mod memory {
             id: &str,
             writes: &ViewWrites,
             views: &crate::sessions::projector::SessionViewState,
-        ) -> Result<ProjectionCommit, String> {
+        ) -> Result<ProjectionCommit, RecordStoreError> {
             #[cfg(test)]
             crate::runtime::observe_projector_view_write(id);
             let mut state = self
@@ -1102,7 +1133,7 @@ mod memory {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             // The product store's views reference their session row.
             if !state.records.contains_key(id) {
-                return Err("product session is not stored".to_owned());
+                return Err("product session is not stored".to_owned().into());
             }
             let stored = state
                 .views
@@ -1193,7 +1224,9 @@ mod memory {
                         || existing.source_workflow_operation_id
                             != target.source_workflow_operation_id
                     {
-                        return Err("successor identity is bound to another request".to_owned());
+                        return Err("successor identity is bound to another request"
+                            .to_owned()
+                            .into());
                     }
                     continue;
                 }

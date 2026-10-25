@@ -38,6 +38,7 @@ pub(crate) fn apply_on_driver(
     feed: &TreeFeed,
     agent: &str,
 ) -> Result<TreeProjection, TreeProjectorError> {
+    let driver = &driver.for_agent(agent);
     let mut refusal = None;
     let (result, effects) = driver.mutate(|tree| {
         if tree.revision != tree.stored_revision {

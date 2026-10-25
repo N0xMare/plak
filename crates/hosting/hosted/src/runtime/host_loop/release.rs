@@ -127,7 +127,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     None
                 };
                 if let Some(projected) = projected {
-                    projected.map(|_| ()).map_err(CliFailure::new)
+                    projected.map(|_| ()).map_err(CliFailure::from)
                 } else {
                     super::log_ev(
                         self.log.as_ref(),
@@ -142,6 +142,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             });
             match projected {
                 Ok(Ok(())) => None,
+                Ok(Err(error))
+                    if self.quit_started_at.is_some()
+                        && error.store_refusal()
+                            == Some(crate::error::StoreRefusal::StorageFull) =>
+                {
+                    super::log_ev(
+                        self.log.as_ref(),
+                        &self.config,
+                        super::SessionEvent::new("projector.deferred")
+                            .str("error", error.message()),
+                    );
+                    None
+                }
                 Ok(Err(error)) => Some(error),
                 Err(_) => Some(CliFailure::new(
                     "the post-release projector pass could not run",

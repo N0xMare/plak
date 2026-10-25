@@ -572,6 +572,10 @@ impl AgentBuilder {
             Ok(mut prepared) => match prepared.publish_recovered_turn().await {
                 Ok(()) => Ok(prepared.spawn()),
                 Err(error) => {
+                    let lease = prepared
+                        .authority
+                        .durable_facts()
+                        .map_or(lease, |branch| branch.lease().clone());
                     store_call(StorePhase::Release, cleanup_timeout, store.release(lease))
                         .await
                         .map_err(StoreCallError::into_agent)?;

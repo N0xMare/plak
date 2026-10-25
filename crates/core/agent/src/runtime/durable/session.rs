@@ -1,7 +1,7 @@
 //! Create, open and shut down exact durable sessions.
 
 use crate::runtime::admission::sealed_runtime_admission;
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
 use crate::runtime::continuation::{
     RestoredContinuationFrame, checkpoint_bundle_error, decode_restored_continuation,
 };
@@ -252,14 +252,17 @@ impl DurableSessionRuntime {
         )
         .await?;
         let owner = operation_run_id(&self.instance_nonce, operation_id)?;
-        let lease = store_call(
+        let lease = capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                receipt.branch().session(),
-                owner,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    receipt.branch().session(),
+                    owner,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -331,14 +334,17 @@ impl DurableSessionRuntime {
         }
         let admission = sealed_runtime_admission(&builder).await?;
         let owner = operation_run_id(&self.instance_nonce, operation_id)?;
-        let lease = match store_call(
+        let lease = match capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                address.session(),
-                owner,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    address.session(),
+                    owner,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         {

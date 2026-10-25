@@ -104,11 +104,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.config.session.child_wake_suppressed = true;
         self.child_wake.suppression_pending = true;
         self.child_wake.pause_pending = reason.clone();
+        if self.storage_interrupted && self.config.store.storage_unavailable() {
+            return Ok(());
+        }
         if self.config.session.store_revision == 0 {
             self.config
                 .store
                 .save(&mut self.config.session)
-                .map_err(CliFailure::new)?;
+                .map_err(CliFailure::from)?;
         }
         let pause =
             reason.map(
@@ -117,7 +120,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.config
             .store
             .write_host_controls(&self.config.session.id, true, pause.clone())
-            .map_err(CliFailure::new)?;
+            .map_err(CliFailure::from)?;
         self.child_wake.suppression_pending = false;
         self.child_wake.pause_pending = None;
         if pause.is_some() {
@@ -127,11 +130,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     pub(super) fn pause_unrecorded(&mut self, reason: String) -> CliResult<()> {
+        if self.storage_interrupted && self.config.store.storage_unavailable() {
+            self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
+            return Ok(());
+        }
         if self.config.session.store_revision == 0 {
             self.config
                 .store
                 .save(&mut self.config.session)
-                .map_err(CliFailure::new)?;
+                .map_err(CliFailure::from)?;
         }
         self.config
             .store
@@ -140,7 +147,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 false,
                 Some(crate::sessions::projector::HostPauseCause::UnrecordedRefusal { reason }),
             )
-            .map_err(CliFailure::new)?;
+            .map_err(CliFailure::from)?;
         self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
         Ok(())
     }

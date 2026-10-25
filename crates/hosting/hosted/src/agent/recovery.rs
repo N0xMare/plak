@@ -912,7 +912,7 @@ fn mutate_and_publish<R>(
     agent_id: &str,
     work: impl FnOnce(&mut crate::agent_tree::ProductAgentTree) -> Result<R, TopologyError>,
 ) -> Result<R, TopologyError> {
-    let driver = runtime.driver();
+    let driver = &runtime.driver().for_agent(agent_id);
     let publish_refusal = |error: TopologyError| {
         refusal(
             TopologyErrorCode::RecoveryStorageUnavailable,

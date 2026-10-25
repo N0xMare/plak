@@ -263,6 +263,11 @@ fn registration(
         },
     )
     .map_err(|_| TreeRuntimeError::new("topology tool definition is invalid"))?;
+    let driver = driver.for_agent(
+        &caller_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
     let registration = ToolRegistration::new(
         RegisteredToolId::new(format!("plak.topology.{name}.v1"))
             .map_err(|_| TreeRuntimeError::new("topology tool id is invalid"))?,
@@ -464,7 +469,7 @@ pub async fn invoke_granted_topology_tool_on(
         tree.cell_budget()
     };
     let tool = TopologyTool {
-        driver,
+        driver: driver.for_agent(&caller_id),
         caller_id: Arc::new(Mutex::new(caller_id)),
         kind,
         vocabulary: TopologyVocabulary::default(),

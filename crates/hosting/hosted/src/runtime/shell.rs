@@ -196,7 +196,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         }
         UserAction::ClearSession => {
             if let Err(error) = commit_detached_clear(&mut config.session, |candidate| {
-                config.store.save(candidate)
+                config.store.save(candidate).map_err(String::from)
             }) {
                 let _ = events.notice(TranscriptRow::error(
                     NoticeScope::Session,

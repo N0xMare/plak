@@ -3,7 +3,7 @@
 use crate::recovery_scope::require_recoverable;
 use crate::runtime::OperationId;
 use crate::runtime::checkpoint::identity::{CheckpointCommitFacts, checkpoint_commit_identity};
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
 use crate::runtime::composition::record::{
     DurableLocalCompositionContinuationRequestV1, DurableLocalCompositionEvaluationRequestV2,
     decode_local_composition_evaluation_request, encode_local_composition_continuation_request,
@@ -53,14 +53,17 @@ impl DurableSessionRuntime {
             return Ok(outcome);
         }
         let owner_id = operation_run_id(&self.instance_nonce, request.operation_id())?;
-        let lease = store_call(
+        let mut lease = capacity_store_call(
             StorePhase::Acquire,
             self.store_timeouts.operation,
-            self.store.acquire(AcquireBranch::new(
-                identity.source.session(),
-                owner_id,
-                self.lease_seconds,
-            )),
+            || {
+                self.store.acquire(AcquireBranch::new(
+                    identity.source.session(),
+                    owner_id,
+                    self.lease_seconds,
+                ))
+            },
+            || self.store.storage_wait_cancelled(),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -78,7 +81,7 @@ impl DurableSessionRuntime {
             let mut owner = CompactionRecoveryOwner {
                 store: Arc::clone(&self.store),
                 store_timeout: self.store_timeouts.operation,
-                lease: lease.clone(),
+                lease: &mut lease,
                 head: loaded.head(),
                 checkpoint: Arc::clone(loaded.checkpoint().checkpoint()),
                 bundle: loaded.checkpoint().bundle().clone(),
@@ -104,7 +107,7 @@ impl DurableSessionRuntime {
             })?;
             let (checkpoint, _, _) = recover_root_turn_publication(
                 &self.store,
-                &lease,
+                owner.lease,
                 owner.head,
                 &owner.checkpoint,
                 &owner.bundle,
@@ -765,7 +768,7 @@ pub(in crate::runtime) fn reopen_code_cell_abandonment_identity(
 }
 
 async fn publish_code_cell_abandonment_evidence(
-    owner: &mut CompactionRecoveryOwner,
+    owner: &mut CompactionRecoveryOwner<'_>,
     identity: DurableCodeCellAbandonmentIdentity,
 ) -> Result<(), AgentError> {
     let (history, ledger, lifecycle) =

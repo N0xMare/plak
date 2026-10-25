@@ -23,6 +23,23 @@ pub(crate) struct PresentingStore {
 }
 
 impl SessionRecordStore for PresentingStore {
+    fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
+        self.inner.set_storage_interrupt(probe);
+    }
+    fn storage_wait_cancelled(&self) -> bool {
+        self.inner.storage_wait_cancelled()
+    }
+    fn recover_storage(&self) -> Result<(), crate::session_store::RecordStoreError> {
+        self.inner.recover_storage()
+    }
+    fn storage_outage_notice(&self) -> String {
+        self.inner.storage_outage_notice()
+    }
+
+    fn storage_unavailable(&self) -> bool {
+        self.inner.storage_unavailable()
+    }
+
     fn storage_admission(&self) -> crate::session_store::StorageAdmission {
         self.inner.storage_admission()
     }
@@ -35,7 +52,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load_queue_head(id)
     }
 
-    fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
+    fn save(
+        &self,
+        session: &mut SessionRecord,
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.inner.save(session)
     }
 
@@ -44,7 +64,7 @@ impl SessionRecordStore for PresentingStore {
         id: &str,
         suppress_wake: bool,
         pause: Option<crate::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.inner.write_host_controls(id, suppress_wake, pause)
     }
 
@@ -61,7 +81,7 @@ impl SessionRecordStore for PresentingStore {
         session: &mut SessionRecord,
         command_id: &str,
         pause_cause: Option<crate::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.inner
             .discard_submission(session, command_id, pause_cause)
     }
@@ -70,7 +90,7 @@ impl SessionRecordStore for PresentingStore {
         &self,
         session: &mut SessionRecord,
         request: &crate::sessions::projector::WorkflowRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.inner.submit_workflow_request(session, request)
     }
 
@@ -78,7 +98,7 @@ impl SessionRecordStore for PresentingStore {
         &self,
         session: &mut SessionRecord,
         operation_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.inner
             .discard_unadmitted_workflow(session, operation_id)
     }
@@ -86,7 +106,7 @@ impl SessionRecordStore for PresentingStore {
     fn withdraw_unadmitted_workflows(
         &self,
         session: &mut SessionRecord,
-    ) -> Result<Vec<crate::sessions::TranscriptRow>, String> {
+    ) -> Result<Vec<crate::sessions::TranscriptRow>, crate::session_store::RecordStoreError> {
         self.inner.withdraw_unadmitted_workflows(session)
     }
 
@@ -111,7 +131,7 @@ impl SessionRecordStore for PresentingStore {
         id: &str,
         writes: &ViewWrites,
         views: &crate::sessions::projector::SessionViewState,
-    ) -> Result<ProjectionCommit, String> {
+    ) -> Result<ProjectionCommit, crate::session_store::RecordStoreError> {
         self.inner.commit_projection_views(id, writes, views)
     }
     fn emit_projected_turn_usages(&self, terminals: &[ProjectedTurnUsage]) {

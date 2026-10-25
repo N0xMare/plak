@@ -10,6 +10,8 @@ use plakous::sessions::{AgentSessions, SessionBackend};
 use crate::agent_tree::TreeStore;
 use crate::{CliFailure, CliResult};
 
+type StorageShutdownProbe = Arc<dyn Fn() -> bool + Send + Sync>;
+
 /// Where a hosted session's agent tree is persisted: the product opens its
 /// store (`subagents.sqlite3` writer) and the roots hold the port,
 /// caching one opening per process.
@@ -149,6 +151,7 @@ pub struct ProductStateRoots {
     // Clones are process-lifetime handles: every attach and workflow uses the
     // same bounded SQLite actor instead of reopening its database.
     runtime_sessions: Arc<Mutex<Option<Arc<AgentSessions>>>>,
+    storage_shutdown: Arc<Mutex<Option<StorageShutdownProbe>>>,
     /// The topology store the hub publishes trees through: opened once per
     /// process, on the first root attach, and never per compile.
     tree_store: Arc<Mutex<Option<Arc<dyn TreeStore>>>>,
@@ -177,6 +180,24 @@ pub struct ProductStateRoots {
 }
 
 impl ProductStateRoots {
+    pub(crate) fn bind_storage_shutdown(&self, probe: StorageShutdownProbe) {
+        *self
+            .storage_shutdown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(probe);
+    }
+
+    fn storage_shutdown_probe(&self) -> StorageShutdownProbe {
+        let state = self.storage_shutdown.clone();
+        Arc::new(move || {
+            state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|probe| probe())
+        })
+    }
+
     pub(crate) fn with_child_runtime_factory(
         mut self,
         factory: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
@@ -220,6 +241,7 @@ impl ProductStateRoots {
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             runtime_sessions: Arc::new(Mutex::new(None)),
+            storage_shutdown: Arc::default(),
             tree_store: Arc::new(Mutex::new(None)),
             tree_store_factory: tree_store,
             roster_source: roster,
@@ -363,7 +385,33 @@ impl ProductStateRoots {
         if let Some(sessions) = retained.as_ref() {
             return Ok(Arc::clone(sessions));
         }
-        let backend = SessionBackend::sqlite(&self.runtime_database).map_err(|error| {
+        let product_store = self.session_records.clone();
+        let tree_store = self.tree_store.clone();
+        let probe = Arc::new(move |retry| {
+            if retry && product_store.storage_unavailable() {
+                let _ = product_store.recover_storage();
+            }
+            let tree_store = tree_store
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if retry
+                && let Some(store) = &tree_store
+                && store.storage_unavailable()
+            {
+                let _ = store.recover_storage();
+            }
+            product_store.storage_unavailable()
+                || tree_store
+                    .as_ref()
+                    .is_some_and(|store| store.storage_unavailable())
+        });
+        let backend = SessionBackend::sqlite_with_storage_probe(
+            &self.runtime_database,
+            probe,
+            self.storage_shutdown_probe(),
+        )
+        .map_err(|error| {
             let raw = format!("plak runtime database could not be opened: {error}");
             CliFailure::new(
                 crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
@@ -387,6 +435,7 @@ impl ProductStateRoots {
             return Ok(Arc::clone(store));
         }
         let store = self.tree_store_factory.open()?;
+        store.set_storage_interrupt(self.storage_shutdown_probe());
         *retained = Some(Arc::clone(&store));
         Ok(store)
     }
@@ -483,6 +532,7 @@ impl ProductStateRoots {
             product,
             state_home,
             runtime_sessions: Arc::new(Mutex::new(None)),
+            storage_shutdown: Arc::default(),
             tree_store: Arc::new(Mutex::new(None)),
             tree_store_factory: Arc::new(doubles::MemoryTreeStoreFactory),
             roster_source: Arc::new(doubles::UnpinnedRosterSource),

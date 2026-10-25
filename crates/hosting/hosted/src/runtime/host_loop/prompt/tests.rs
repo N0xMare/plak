@@ -166,6 +166,15 @@ struct SubmissionFailure {
 struct CapacityWriteFault(Arc<std::sync::atomic::AtomicBool>);
 
 impl crate::runtime::fault_store::StoreFaults for CapacityWriteFault {
+    fn refusal(
+        &self,
+        call: crate::runtime::fault_store::StoreCall,
+    ) -> Option<crate::error::StoreRefusal> {
+        (call == crate::runtime::fault_store::StoreCall::Save
+            && self.0.load(std::sync::atomic::Ordering::SeqCst))
+        .then_some(crate::error::StoreRefusal::StorageFull)
+    }
+
     fn before(
         &self,
         call: crate::runtime::fault_store::StoreCall,

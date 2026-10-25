@@ -264,9 +264,9 @@ pub(super) fn report_queue_persist_failed<P: plakous_host_protocol::ProtocolExte
     home: &SessionHome,
     session: &SessionRecord,
     action: QueuePersistAction,
-    error: &str,
+    error: impl std::fmt::Display,
 ) {
-    log_queue_persist_failed(home, session, action, error);
+    log_queue_persist_failed(home, session, action, &error);
     queue_persist_failed(events, session);
 }
 
@@ -274,14 +274,17 @@ pub(super) fn log_queue_persist_failed(
     home: &SessionHome,
     session: &SessionRecord,
     action: QueuePersistAction,
-    error: &str,
+    error: impl std::fmt::Display,
 ) {
     session_log::emit(
         home,
         &session.id,
         SessionEvent::new("queue.persist_failed")
             .str("action", action.label())
-            .str("failure_class", queue_store_failure_class(error))
+            .str(
+                "failure_class",
+                queue_store_failure_class(&error.to_string()),
+            )
             .u64("attempted_store_revision", session.store_revision),
     );
 }

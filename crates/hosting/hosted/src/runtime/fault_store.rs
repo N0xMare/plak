@@ -22,6 +22,13 @@ pub(crate) enum StoreCall {
 }
 
 pub(crate) trait StoreFaults: Send + Sync {
+    fn set_storage_interrupt(&self, _probe: Arc<dyn Fn() -> bool + Send + Sync>) {}
+    fn storage_wait_cancelled(&self) -> bool {
+        false
+    }
+    fn storage_unavailable(&self) -> bool {
+        false
+    }
     fn storage_admission(&self) -> Option<crate::session_store::StorageAdmission> {
         None
     }
@@ -31,6 +38,20 @@ pub(crate) trait StoreFaults: Send + Sync {
     /// A transient refusal for the calls whose port error carries one.
     fn refusal(&self, _call: StoreCall) -> Option<crate::error::StoreRefusal> {
         None
+    }
+
+    fn before_write(
+        &self,
+        call: StoreCall,
+        session: Option<&SessionRecord>,
+    ) -> Result<(), crate::session_store::RecordStoreError> {
+        if let Some(refusal) = self.refusal(call) {
+            return Err(crate::session_store::RecordStoreError::refused(
+                refusal,
+                "injected store write refusal",
+            ));
+        }
+        self.before(call, session).map_err(Into::into)
     }
 }
 
@@ -60,6 +81,20 @@ impl FaultStore<RefuseAll> {
 }
 
 impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
+    fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
+        self.faults.set_storage_interrupt(probe.clone());
+        self.inner.set_storage_interrupt(probe);
+    }
+    fn storage_wait_cancelled(&self) -> bool {
+        self.faults.storage_wait_cancelled() || self.inner.storage_wait_cancelled()
+    }
+    fn recover_storage(&self) -> Result<(), crate::session_store::RecordStoreError> {
+        self.inner.recover_storage()
+    }
+    fn storage_unavailable(&self) -> bool {
+        self.faults.storage_unavailable() || self.inner.storage_unavailable()
+    }
+
     fn storage_admission(&self) -> crate::session_store::StorageAdmission {
         self.faults
             .storage_admission()
@@ -74,8 +109,9 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         id: &str,
         suppress_wake: bool,
         pause: Option<sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
-        self.faults.before(StoreCall::WriteHostControls, None)?;
+    ) -> Result<(), crate::session_store::RecordStoreError> {
+        self.faults
+            .before_write(StoreCall::WriteHostControls, None)?;
         self.inner.write_host_controls(id, suppress_wake, pause)
     }
 
@@ -89,8 +125,11 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         self.inner.load_queue_head(id)
     }
 
-    fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
-        self.faults.before(StoreCall::Save, Some(session))?;
+    fn save(
+        &self,
+        session: &mut SessionRecord,
+    ) -> Result<(), crate::session_store::RecordStoreError> {
+        self.faults.before_write(StoreCall::Save, Some(session))?;
         self.inner.save(session)
     }
 
@@ -99,14 +138,8 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         session: &mut SessionRecord,
         submission: &sessions::projector::Submission,
     ) -> Result<(), crate::session_store::RecordStoreError> {
-        if let Some(refusal) = self.faults.refusal(StoreCall::SaveSubmission) {
-            return Err(crate::session_store::RecordStoreError::refused(
-                refusal,
-                "injected submission refusal",
-            ));
-        }
         self.faults
-            .before(StoreCall::SaveSubmission, Some(session))?;
+            .before_write(StoreCall::SaveSubmission, Some(session))?;
         self.inner.save_submission(session, submission)
     }
 
@@ -115,9 +148,9 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         session: &mut SessionRecord,
         command_id: &str,
         pause_cause: Option<sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.faults
-            .before(StoreCall::DiscardSubmission, Some(session))?;
+            .before_write(StoreCall::DiscardSubmission, Some(session))?;
         self.inner
             .discard_submission(session, command_id, pause_cause)
     }
@@ -126,9 +159,9 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         &self,
         session: &mut SessionRecord,
         request: &sessions::projector::WorkflowRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.faults
-            .before(StoreCall::SubmitWorkflowRequest, Some(session))?;
+            .before_write(StoreCall::SubmitWorkflowRequest, Some(session))?;
         self.inner.submit_workflow_request(session, request)
     }
 
@@ -136,9 +169,9 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         &self,
         session: &mut SessionRecord,
         operation_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.faults
-            .before(StoreCall::DiscardUnadmittedWorkflow, Some(session))?;
+            .before_write(StoreCall::DiscardUnadmittedWorkflow, Some(session))?;
         self.inner
             .discard_unadmitted_workflow(session, operation_id)
     }
@@ -146,9 +179,9 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
     fn withdraw_unadmitted_workflows(
         &self,
         session: &mut SessionRecord,
-    ) -> Result<Vec<TranscriptRow>, String> {
+    ) -> Result<Vec<TranscriptRow>, crate::session_store::RecordStoreError> {
         self.faults
-            .before(StoreCall::WithdrawUnadmittedWorkflows, Some(session))?;
+            .before_write(StoreCall::WithdrawUnadmittedWorkflows, Some(session))?;
         self.inner.withdraw_unadmitted_workflows(session)
     }
 
@@ -184,8 +217,9 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         id: &str,
         writes: &sessions::projector::ViewWrites,
         views: &sessions::projector::SessionViewState,
-    ) -> Result<sessions::projector::ProjectionCommit, String> {
-        self.faults.before(StoreCall::CommitProjectionViews, None)?;
+    ) -> Result<sessions::projector::ProjectionCommit, crate::session_store::RecordStoreError> {
+        self.faults
+            .before_write(StoreCall::CommitProjectionViews, None)?;
         self.inner.commit_projection_views(id, writes, views)
     }
 }

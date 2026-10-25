@@ -83,6 +83,7 @@ pub(super) fn run<P: plakous_host_protocol::ProtocolExtension>(
 
 /// Sole owner of the attachment, durable session record, queue, and publication.
 struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
+    _storage_notices: Option<super::storage::StorageNotices>,
     config: HostConfig<P>,
     actions: &'a crate::surface_protocol::UserActionReceiver<P>,
     events: Sender<P>,
@@ -103,6 +104,7 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     job_events: super::job_events::JobEvents,
     last_tree_observed_at: Instant,
     child_wake: wake::ChildWake,
+    storage_interrupted: bool,
     pending_track: pending::PendingTrack,
     recovery_blocked: bool,
     /// This attachment's own open closed an unfinished turn and said so.
@@ -169,6 +171,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// first prompt stores it mid-turn, and the passes before that refuse
     /// on the missing session row and change nothing.
     fn project(&mut self) {
+        if self.config.store.storage_unavailable() {
+            self.storage_interrupted |= self.config.store.storage_wait_cancelled();
+            if self.storage_interrupted {
+                return;
+            }
+        }
         let target = self.live_target();
         // A stopped task (it panicked or was aborted) is replaced: the new
         // one loads the views again and reconciles the settled rows once.
@@ -411,6 +419,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     fn commit_notice_intents(&mut self) {
+        if self.storage_interrupted && self.config.store.storage_unavailable() {
+            return;
+        }
         super::events::commit_notice_intents(
             &self.events,
             &*self.config.store,
@@ -492,6 +503,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
 
         loop {
+            if self.config.store.storage_unavailable() {
+                self.storage_interrupted |= self.config.store.storage_wait_cancelled();
+            } else {
+                self.storage_interrupted = false;
+            }
             self.commit_notice_intents();
             self.project();
             if !passive_checkpoint_scheduled && self.actions.is_promptable() {
@@ -505,14 +521,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     break;
                 }
             }
-            let (raw_text, queued_delivery, user_echoed) = match if let Some(state) =
-                one_shot.as_deref_mut()
+            let next = if let Some(state) = one_shot.as_deref_mut()
                 && state.attempted
             {
-                self.next_run_prompt(state)?
+                self.next_run_prompt(state)
             } else {
-                self.next_prompt(one_shot.as_deref_mut())?
-            } {
+                self.next_prompt(one_shot.as_deref_mut())
+            };
+            let next = match next {
+                Ok(next) => next,
+                Err(error) if self.retain_interrupted_storage(&error) => continue,
+                Err(error) => return Err(error),
+            };
+            let (raw_text, queued_delivery, user_echoed) = match next {
                 HostStep::Continue => continue,
                 HostStep::Quit => break,
                 HostStep::Prompt {
@@ -522,12 +543,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 } => (text, queued_delivery, user_echoed),
             };
             let before = self.config.session.root_turn_count;
-            let step = self.run_prompt(
+            let step = match self.run_prompt(
                 raw_text,
                 queued_delivery,
                 user_echoed,
                 one_shot.as_deref_mut(),
-            )?;
+            ) {
+                Ok(step) => step,
+                Err(error) if self.retain_interrupted_storage(&error) => continue,
+                Err(error) => return Err(error),
+            };
             if let Some(run) = one_shot.as_deref_mut().and_then(|state| state.run.as_mut()) {
                 run.turns = run
                     .turns
@@ -540,6 +565,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 
         self.commit_notice_intents();
         self.finish_projection(one_shot.is_some())
+    }
+
+    fn retain_interrupted_storage(&mut self, error: &CliFailure) -> bool {
+        if error.store_refusal() != Some(crate::error::StoreRefusal::StorageFull)
+            || !(self.config.store.storage_wait_cancelled() || self.storage_interrupted)
+        {
+            return false;
+        }
+        self.storage_interrupted = true;
+        self.config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
+        self.pending_start = None;
+        let _ = self.events.notice(sessions::TranscriptRow::info(
+            sessions::NoticeScope::Settings,
+            "storage write interrupted; retained work and queued inputs remain available",
+        ));
+        true
     }
 }
 
