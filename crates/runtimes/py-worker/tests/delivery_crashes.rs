@@ -64,7 +64,7 @@ async fn cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance() {
         };
         let mut delivery = tokio::spawn(responder.resolve(serde_json::json!(7)));
         tokio::time::timeout(Duration::from_secs(10), async {
-            while !ready.is_file() {
+            while !std::fs::read_to_string(&ready).is_ok_and(|marker| marker == cut) {
                 tokio::task::yield_now().await;
             }
         })
