@@ -856,6 +856,7 @@ pub(in crate::runtime) fn running_pass_outcome(
 
 pub(super) mod live;
 pub(super) mod presentation;
+pub(super) mod transcript;
 
 #[cfg(test)]
 mod tests;

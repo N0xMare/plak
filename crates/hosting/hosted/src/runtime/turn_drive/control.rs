@@ -641,6 +641,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 Ok(UserAction::RetryAttach) => {
                     note_idle_only(self.host.events, "binding");
                 }
+                Ok(UserAction::ResyncTranscript { scope }) => {
+                    self.host.events.resync_transcript(&scope);
+                }
                 Ok(UserAction::Recover) => {
                     note_idle_only(self.host.events, "recover");
                 }

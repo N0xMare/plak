@@ -267,7 +267,12 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
         detail: Some("terminal".into()),
     }));
     let drained = rx.try_iter().collect::<Vec<_>>();
-    assert!(drained.contains(&logging::project_session_snapshot(&session)));
+    let HostEvent::PresentationSnapshot(expected) =
+        logging::project_session_snapshot::<TestExtension>(&session)
+    else {
+        unreachable!("session presentation");
+    };
+    assert!(drained.iter().any(|event| matches!(event, HostEvent::PresentationSnapshot(snapshot) if snapshot.items == expected.items && snapshot.revision > 0)));
     assert!(drained.contains(&HostEvent::SetBusy(false)));
     assert!(drained.iter().any(|event| matches!(
         event,

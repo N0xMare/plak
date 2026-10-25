@@ -9,11 +9,16 @@ use std::time::Instant;
 use super::App;
 use crate::tui::{UserAction, UserActionSender};
 use plakous_host_protocol::views::transcript::TranscriptRow;
+use plakous_host_protocol::views::transcript::{TranscriptScope, TranscriptState};
 
 use crate::tui::blocks::{self, ScrollBlock, TranscriptChange, TranscriptRenderCache};
 
 pub(crate) struct TranscriptPane {
     pub(crate) blocks: Vec<ScrollBlock>,
+    pub(super) presentation: TranscriptState,
+    pub(super) presentation_ready: bool,
+    pub(super) resync: Option<TranscriptScope>,
+    resync_sent: bool,
     /// Monotonic identity for every transcript content/layout mutation.
     pub(super) transcript_revision: u64,
     /// Coalesced mutation consumed by the next transcript presentation.
@@ -65,6 +70,10 @@ impl TranscriptPane {
         let transcript_bytes = blocks.iter().map(ScrollBlock::retained_bytes).sum();
         Self {
             blocks,
+            presentation: TranscriptState::default(),
+            presentation_ready: false,
+            resync: None,
+            resync_sent: false,
             transcript_revision: 0,
             pending_transcript_change: TranscriptChange::Structural,
             transcript_bytes,
@@ -375,6 +384,10 @@ impl App {
         let Some(tx) = actions else {
             return;
         };
+        self.with_root_pane(|app| app.sync_transcript_resync(tx));
+        if self.viewed_agent_id().is_some() {
+            self.sync_transcript_resync(tx);
+        }
         let wanted = self
             .agent_view
             .as_ref()
@@ -399,6 +412,46 @@ impl App {
             }
         }
         self.host_agent_transcript = wanted;
+    }
+
+    fn sync_transcript_resync(&mut self, actions: &UserActionSender) {
+        if !self.pane.resync_sent
+            && let Some(scope) = &self.pane.resync
+            && actions
+                .send(UserAction::ResyncTranscript {
+                    scope: scope.clone(),
+                })
+                .is_ok()
+        {
+            self.pane.resync_sent = true;
+        }
+    }
+
+    pub(super) fn note_transcript_gaps(&mut self, events: &crate::tui::HostEventReceiver) {
+        if events.transcript_resnapshot_required_for(&TranscriptScope::Root) {
+            self.with_root_pane(|app| {
+                app.pane.resync.get_or_insert(TranscriptScope::Root);
+            });
+        }
+        if let Some(agent_id) = self.viewed_agent_id() {
+            let scope = TranscriptScope::Agent(agent_id.to_owned());
+            if events.transcript_resnapshot_required_for(&scope) {
+                self.pane.resync.get_or_insert(scope);
+            }
+        }
+    }
+
+    pub(super) fn presentation_replaced(&mut self) {
+        self.pane.presentation_ready = true;
+        self.pane.resync = None;
+        self.pane.resync_sent = false;
+    }
+
+    pub(super) fn clear_presentation(&mut self) {
+        self.pane.presentation = TranscriptState::default();
+        self.pane.presentation_ready = false;
+        self.pane.resync = None;
+        self.pane.resync_sent = false;
     }
 
     /// Pointer, selection and click state address the pane that was on

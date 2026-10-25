@@ -69,6 +69,7 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
             snapshot.items.iter().map(|item| &item.row).any(
                 |row| matches!(row, TranscriptRow::Tool(tool) if tool.name == "hosted_interpreter")
             ),
+        HostEvent::TranscriptPatch(patch) => patch.upserts.iter().any(|item| matches!(&item.row, TranscriptRow::Tool(tool) if tool.name == "hosted_interpreter")),
         HostEvent::Row(TranscriptRow::Tool(tool)) => tool.name == "hosted_interpreter",
         _ => false,
     }));
@@ -615,15 +616,20 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
         if detail.as_deref() == Some("steering..."))
     });
     gate.release();
-    let HostEvent::PresentationSnapshot(snapshot) = next(&|event| {
-        matches!(event, HostEvent::PresentationSnapshot(snapshot)
-            if snapshot.items.iter().map(|item| &item.row).any(|row| matches!(row,
-                TranscriptRow::Steer { text, .. } if text == "edited send-now")))
-    }) else {
-        unreachable!()
+    let update = next(&|event| {
+        let items = match event {
+            HostEvent::PresentationSnapshot(snapshot) => &snapshot.items,
+            HostEvent::TranscriptPatch(patch) => &patch.upserts,
+            _ => return false,
+        };
+        items.iter().any(|item| matches!(&item.row, TranscriptRow::Steer { text, .. } if text == "edited send-now"))
+    });
+    let items = match update {
+        HostEvent::PresentationSnapshot(snapshot) => snapshot.items,
+        HostEvent::TranscriptPatch(patch) => patch.upserts,
+        _ => unreachable!("presentation update"),
     };
-    let steers: Vec<_> = snapshot
-        .items
+    let steers: Vec<_> = items
         .iter()
         .map(|item| &item.row)
         .filter(|row| {

@@ -37,6 +37,7 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::JobTerminal { .. } => "job_terminal",
         SessionObservation::ChildLive { .. } => "child_live",
         SessionObservation::PresentationSnapshot(_) => "presentation",
+        SessionObservation::TranscriptPatch(_) => "transcript_patch",
         SessionObservation::ProviderSnapshot { .. } => "provider_snapshot",
         SessionObservation::Activity { .. } => "activity",
         SessionObservation::AgentAttached(_) => "attached",
@@ -537,6 +538,7 @@ pub fn project_host_event<P: ProtocolExtension>(
         // traffic have no v1 line. Listed one by one so a new observation
         // variant is a decision here, not a silent drop.
         SessionObservation::PresentationSnapshot(_)
+        | SessionObservation::TranscriptPatch(_)
         | SessionObservation::ProviderSnapshot { .. }
         | SessionObservation::Activity { .. }
         | SessionObservation::AgentAttached(_)

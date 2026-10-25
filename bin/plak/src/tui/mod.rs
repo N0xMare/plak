@@ -366,6 +366,7 @@ pub mod control {
             | UserAction::OpenTopologyNavigator
             | UserAction::OpenAgentTranscript { .. }
             | UserAction::CloseAgentTranscript
+            | UserAction::ResyncTranscript { .. }
             | UserAction::RefreshTopologyTree
             | UserAction::ResumeTopologyTree
             | UserAction::InterruptTopologyNode { .. }

@@ -91,8 +91,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     acknowledgement = Some(guard);
                     action
                 });
-            let cancelled_resume = received.is_ok() && self.pending_resume.is_some();
-            if received.is_ok() {
+            let cancels_resume =
+                received.is_ok() && !matches!(&received, Ok(UserAction::ResyncTranscript { .. }));
+            let cancelled_resume = cancels_resume && self.pending_resume.is_some();
+            if cancels_resume {
                 self.cancel_transient_resume();
             }
             // A session a fenced turn stopped recovers on the next action that
@@ -794,6 +796,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 }
                 Ok(UserAction::RefreshReadiness) => {
                     self.readiness.start(&self.config);
+                    None
+                }
+                Ok(UserAction::ResyncTranscript { scope }) => {
+                    self.events.resync_transcript(&scope);
                     None
                 }
                 Ok(UserAction::RetryAttach) => {

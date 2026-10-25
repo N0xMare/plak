@@ -1,4 +1,53 @@
 #[test]
+fn patch_overflow_and_replacements_are_isolated_by_scope() {
+    use crate::views::transcript::{TranscriptPatch, TranscriptScope};
+    let (sender, receiver) = observation_channel::<Core>();
+    for index in 0..OBSERVATION_QUEUE_CAPACITY {
+        sender
+            .send(SessionObservation::Row(TranscriptRow::error(
+                NoticeScope::Host,
+                format!("error {index}"),
+            )))
+            .unwrap();
+    }
+    let root = TranscriptScope::Root;
+    let child = TranscriptScope::Agent("c1".into());
+    for scope in [&root, &child] {
+        assert!(
+            sender
+                .send(SessionObservation::TranscriptPatch(TranscriptPatch {
+                    scope: scope.clone(),
+                    from_revision: 1,
+                    to_revision: 2,
+                    upserts: Vec::new(),
+                    deletes: Vec::new(),
+                }))
+                .is_err()
+        );
+        assert!(sender.transcript_resnapshot_required_for(scope));
+    }
+    let _ = receiver.try_iter().count();
+    sender
+        .send(SessionObservation::PresentationSnapshot(
+            crate::views::PresentationSnapshot::empty(3),
+        ))
+        .unwrap();
+    assert!(!sender.transcript_resnapshot_required_for(&root));
+    assert!(sender.transcript_resnapshot_required_for(&child));
+    let mut snapshot = crate::views::PresentationSnapshot::empty(4);
+    snapshot.scope = child.clone();
+    sender
+        .send(SessionObservation::PresentationSnapshot(snapshot))
+        .unwrap();
+    assert!(!sender.transcript_resnapshot_required_for(&child));
+    assert_eq!(
+        receiver.try_iter().count(),
+        2,
+        "a child snapshot never supersedes the root snapshot"
+    );
+}
+
+#[test]
 fn child_live_deltas_coalesce_and_flood_leaves_room_for_root() {
     let (sender, receiver) = observation_channel::<Core>();
     for _ in 0..(128 * crate::limits::COALESCED_DELTA_BYTES / 4096 + 256) {

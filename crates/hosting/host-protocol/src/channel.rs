@@ -16,7 +16,7 @@
 //! (a terminal's `poll`) installs a notifier, which the queue calls on each
 //! empty to non-empty edge and when the last producer leaves.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use crate::intent::{Core, ObservationExtension, ProtocolExtension, SessionIntent};
 use crate::limits::{COALESCED_DELTA_BYTES, INTENT_QUEUE_CAPACITY, OBSERVATION_QUEUE_CAPACITY};
 use crate::observation::SessionObservation;
-use crate::views::transcript::{NoticeScope, NoticeTone, TranscriptRow};
+use crate::views::transcript::{NoticeScope, NoticeTone, TranscriptRow, TranscriptScope};
 
 /// Where a hosted session publishes its observations.
 ///
@@ -662,7 +662,7 @@ type Notifier = Arc<dyn Fn() + Send + Sync>;
 struct ObservationQueue<P: ProtocolExtension> {
     queue: Mutex<VecDeque<SessionObservation<P>>>,
     ready: Condvar,
-    transcript_gap: AtomicBool,
+    transcript_gaps: Mutex<BTreeSet<TranscriptScope>>,
     correlation_gap: AtomicBool,
     senders: AtomicUsize,
     notify: Mutex<Option<Notifier>>,
@@ -731,7 +731,7 @@ pub fn observation_channel<P: ProtocolExtension>() -> (ObservationSender<P>, Obs
     let shared = Arc::new(ObservationQueue {
         queue: Mutex::new(VecDeque::with_capacity(OBSERVATION_QUEUE_CAPACITY)),
         ready: Condvar::new(),
-        transcript_gap: AtomicBool::new(false),
+        transcript_gaps: Mutex::default(),
         correlation_gap: AtomicBool::new(false),
         senders: AtomicUsize::new(1),
         notify: Mutex::new(None),
@@ -843,7 +843,9 @@ fn transcript_observation<P: ProtocolExtension>(event: &SessionObservation<P>) -
         SessionObservation::Row(TranscriptRow::Notice(_)) => false,
         SessionObservation::Row(_)
         | SessionObservation::UserMessage { .. }
-        | SessionObservation::AssistantDelta(_) => true,
+        | SessionObservation::AssistantDelta(_)
+        | SessionObservation::TranscriptPatch(_)
+        | SessionObservation::PresentationSnapshot(_) => true,
         _ => false,
     }
 }
@@ -855,6 +857,10 @@ fn same_kind<P: ProtocolExtension>(
     event: &SessionObservation<P>,
 ) -> bool {
     match (queued, event) {
+        (
+            SessionObservation::PresentationSnapshot(queued),
+            SessionObservation::PresentationSnapshot(event),
+        ) => queued.scope == event.scope,
         (SessionObservation::Extension(queued), SessionObservation::Extension(event)) => {
             queued.same_kind(event)
         }
@@ -1006,7 +1012,34 @@ impl<P: ProtocolExtension> ObservationSender<P> {
     /// successfully queued transcript replacement.
     #[must_use]
     pub fn transcript_resnapshot_required(&self) -> bool {
-        self.0.transcript_gap.load(Ordering::Acquire)
+        self.transcript_resnapshot_required_for(&TranscriptScope::Root)
+    }
+
+    /// Whether this scope lost a content update since its latest queued
+    /// baseline. A root replacement never clears a child's projection debt.
+    #[must_use]
+    pub fn transcript_resnapshot_required_for(&self, scope: &TranscriptScope) -> bool {
+        self.0
+            .transcript_gaps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(scope)
+    }
+
+    fn note_transcript_gap(&self, event: &SessionObservation<P>) {
+        if !transcript_observation(event) {
+            return;
+        }
+        let scope = match event {
+            SessionObservation::TranscriptPatch(patch) => patch.scope.clone(),
+            SessionObservation::PresentationSnapshot(snapshot) => snapshot.scope.clone(),
+            _ => TranscriptScope::Root,
+        };
+        self.0
+            .transcript_gaps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(scope);
     }
 
     /// Bounded delivery that never waits for renderer capacity. Mutex ownership
@@ -1063,12 +1096,34 @@ impl<P: ProtocolExtension> ObservationSender<P> {
             {
                 self.0.correlation_gap.store(true, Ordering::Release);
             }
+            if let SessionObservation::PresentationSnapshot(snapshot) = &event {
+                // A new baseline covers every older queued patch in this scope.
+                queue.retain(|queued| !matches!(queued, SessionObservation::TranscriptPatch(patch) if patch.scope == snapshot.scope));
+                if matches!(snapshot.scope, TranscriptScope::Agent(_)) {
+                    // A face has one open agent view. Replacing it retires
+                    // queued content and gap bookkeeping for the old agent.
+                    queue.retain(|queued| match queued {
+                        SessionObservation::PresentationSnapshot(old) => {
+                            old.scope == TranscriptScope::Root || old.scope == snapshot.scope
+                        }
+                        SessionObservation::TranscriptPatch(old) => {
+                            old.scope == TranscriptScope::Root || old.scope == snapshot.scope
+                        }
+                        _ => true,
+                    });
+                    self.0
+                        .transcript_gaps
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .retain(|scope| {
+                            *scope == TranscriptScope::Root || *scope == snapshot.scope
+                        });
+                }
+            }
         }
         if queue.len() >= OBSERVATION_QUEUE_CAPACITY {
             let Some(index) = eviction_index(&event, queue) else {
-                if transcript_observation(&event) {
-                    self.0.transcript_gap.store(true, Ordering::Release);
-                }
+                self.note_transcript_gap(&event);
                 if correlation_receipt(&event) {
                     self.0.correlation_gap.store(true, Ordering::Release);
                     self.0.ready.notify_one();
@@ -1076,18 +1131,25 @@ impl<P: ProtocolExtension> ObservationSender<P> {
                 return Err(event);
             };
             if let Some(evicted) = queue.remove(index) {
-                if transcript_observation(&evicted) {
-                    self.0.transcript_gap.store(true, Ordering::Release);
-                }
+                self.note_transcript_gap(&evicted);
                 if correlation_receipt(&evicted) {
                     self.0.correlation_gap.store(true, Ordering::Release);
                 }
             }
         }
-        let replaces_transcript = matches!(event, SessionObservation::PresentationSnapshot(_));
+        let replaces_transcript = if let SessionObservation::PresentationSnapshot(snapshot) = &event
+        {
+            Some(snapshot.scope.clone())
+        } else {
+            None
+        };
         queue.push_back(event);
-        if replaces_transcript {
-            self.0.transcript_gap.store(false, Ordering::Release);
+        if let Some(scope) = replaces_transcript {
+            self.0
+                .transcript_gaps
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&scope);
         }
         self.0.ready.notify_one();
         Ok(())
@@ -1095,6 +1157,18 @@ impl<P: ProtocolExtension> ObservationSender<P> {
 }
 
 impl<P: ProtocolExtension> ObservationReceiver<P> {
+    /// A producer lost a scoped update and has not queued its replacement
+    /// yet. A consumer can request resync even if the last patch was lost and
+    /// no later patch arrives to reveal a revision mismatch.
+    #[must_use]
+    pub fn transcript_resnapshot_required_for(&self, scope: &TranscriptScope) -> bool {
+        self.0
+            .transcript_gaps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(scope)
+    }
+
     /// Install the hook a consumer that waits outside this mailbox is woken
     /// by. It runs on the producer's thread, outside the queue lock, once per
     /// empty to non-empty edge (the edge re-arms when [`Self::try_recv`] or

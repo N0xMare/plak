@@ -57,6 +57,9 @@ pub enum SessionObservation<P: ProtocolExtension = Core> {
     },
     /// Replace the typed, observational conversation/activity presentation.
     PresentationSnapshot(PresentationSnapshot),
+    /// Atomic keyed content update for one exact transcript scope/revision.
+    /// In-process only; JSONL v1 retains its existing root event projection.
+    TranscriptPatch(crate::views::transcript::TranscriptPatch),
     /// Replace product-interpreted provider presentation data.
     ProviderSnapshot {
         /// Every provider supported by this product build, including signed-out rows.

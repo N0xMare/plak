@@ -1808,6 +1808,20 @@ foreign scope or resulting bound overflow leaves the baseline unchanged and
 requires a scope resync, never blind folding. Presentation revisions are not
 feed cursors or tree revisions. Neither snapshots nor patches change the
 closed JSONL v1 projection, canonical history or any persisted encoding.
+The host retains the last keyed baseline per face (the root and at most its
+one open agent scope). Ordinary root turn settlement publishes a patch, not
+a full transcript snapshot. An empty patch still advances the presentation
+revision: it reconciles droppable live-only previews when the committed view
+did not change. Full snapshots establish attach/session-switch and clear
+baselines, or answer overflow and `ResyncTranscript { scope }`. Root live
+text/tool/reasoning observations remain droppable previews; the canonical
+settlement patch replaces them with committed rows.
+The TUI keeps a keyed baseline and applies only exact-revision patches. A gap
+keeps the last good presentation and requests one scope resync; later patches
+are ignored until a valid snapshot replaces it. An observation-channel gap is
+scoped: a root snapshot does not pay an agent's presentation debt. Replacing
+the one open agent view retires its previous scope's queued patches and gap
+bookkeeping. Presentation refreshes do not cancel a pending root continuation.
 A runtime-derived row's anchor is its record's sequence, lane 0, and its ordinal
 is its position among the rows that record derives. An operator notice's anchor
 is the cursor the authoring host had applied when it wrote the notice, lane 1,
@@ -2803,6 +2817,8 @@ Live child transcript operations (`ChildLive`) and the agent transcript
 (`OpenAgentTranscript`, `CloseAgentTranscript`, and the `AgentTranscript`
 answer; chapter 03 §16) are in-process observations/intents: JSONL v1 does not
 project them into root assistant/tool/usage lines. `schema_v` stays 1.
+Keyed `TranscriptPatch` observations and `ResyncTranscript` intents are also
+in-process only, with no JSONL v1 event or command kind.
 The existing `tree` row gains optional `live_progress` with `turn_id`, `activity`,
 `tool_calls`, `last_activity_unix_ms`, `input_tokens`, `output_tokens`,
 `reasoning_tokens`, `cached_input_tokens`, and `cache_write_tokens`. It is absent

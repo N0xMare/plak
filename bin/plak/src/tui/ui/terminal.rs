@@ -429,6 +429,7 @@ pub(super) fn drain_host_events(
     host_connected: &mut bool,
     budget: usize,
 ) -> HostDrain {
+    app.note_transcript_gaps(events);
     let mut drain = HostDrain::default();
     for _ in 0..budget {
         match events.try_recv() {

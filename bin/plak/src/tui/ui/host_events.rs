@@ -76,6 +76,36 @@ impl App {
         self.with_root_pane(|app| app.apply_root_host_event(event));
     }
 
+    fn install_keyed_transcript(&mut self) {
+        self.accepted_drafts.clear();
+        self.pane.assistant_stream_active = false;
+        let rows = self
+            .pane
+            .presentation
+            .items()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        self.restore_tip_clocks(&rows);
+        let full_window = rows.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
+        let mut blocks = blocks::blocks_from_rows(rows);
+        self.restore_opening_note(&mut blocks, full_window);
+        for note in self.take_open_notes() {
+            let already = blocks.iter().any(|block| match (block, &note) {
+                (ScrollBlock::System(have), ScrollBlock::System(want))
+                | (ScrollBlock::Error(have), ScrollBlock::Error(want)) => have == want,
+                _ => false,
+            });
+            if !already {
+                blocks.push(note);
+            }
+        }
+        let old = std::mem::replace(&mut self.pane.blocks, blocks);
+        self.carry_item_state(&old);
+        self.mark_transcript_replaced();
+        self.warm_transcript_projection();
+    }
+
     /// One live transcript op, of the root or of the open agent view, applied
     /// to the pane on screen. The root's turn bookkeeping (the HUD's model
     /// and phase clocks) runs only for the root pane.
@@ -487,41 +517,32 @@ impl App {
                 {
                     return;
                 }
-                self.accepted_drafts.clear();
-                if let Err(error) = snapshot.validate() {
+                if let Err(error) = self.pane.presentation.replace(snapshot) {
                     self.pane.blocks.push(ScrollBlock::Error(format!(
                         "invalid presentation snapshot refused: {error:?}"
                     )));
+                    self.pane.resync.get_or_insert(
+                        plakous_host_protocol::views::transcript::TranscriptScope::Root,
+                    );
                     self.mark_transcript_replaced();
                     return;
                 }
-                self.pane.assistant_stream_active = false;
-                self.restore_tip_clocks(
-                    &snapshot
-                        .items
-                        .iter()
-                        .map(|item| item.row.clone())
-                        .collect::<Vec<_>>(),
-                );
-                let full_window =
-                    snapshot.items.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
-                let mut blocks =
-                    blocks::blocks_from_rows(snapshot.items.into_iter().map(|item| item.row));
-                self.restore_opening_note(&mut blocks, full_window);
-                for note in self.take_open_notes() {
-                    let already = blocks.iter().any(|block| match (block, &note) {
-                        (ScrollBlock::System(have), ScrollBlock::System(want))
-                        | (ScrollBlock::Error(have), ScrollBlock::Error(want)) => have == want,
-                        _ => false,
-                    });
-                    if !already {
-                        blocks.push(note);
-                    }
+                self.presentation_replaced();
+                self.install_keyed_transcript();
+            }
+            HostEvent::TranscriptPatch(patch) => {
+                if patch.scope != plakous_host_protocol::views::transcript::TranscriptScope::Root {
+                    return;
                 }
-                let old = std::mem::replace(&mut self.pane.blocks, blocks);
-                self.carry_item_state(&old);
-                self.mark_transcript_replaced();
-                self.warm_transcript_projection();
+                if self.pane.resync.is_some() {
+                    return;
+                }
+                let scope = patch.scope.clone();
+                if !self.pane.presentation_ready || self.pane.presentation.apply(patch).is_err() {
+                    self.pane.resync = Some(scope);
+                    return;
+                }
+                self.install_keyed_transcript();
             }
             HostEvent::ProviderSnapshot { providers } => {
                 self.providers = providers;
@@ -609,6 +630,7 @@ impl App {
                 self.clear_pending = false;
                 self.last_turn = None;
                 self.pane.blocks.clear();
+                self.clear_presentation();
                 self.pane.assistant_stream_active = false;
                 self.open_approval = None;
                 self.pane.scroll_from_bottom = 0;

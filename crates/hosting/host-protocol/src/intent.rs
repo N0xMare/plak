@@ -175,6 +175,12 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     },
     /// Close the open agent transcript and drop its live subscription.
     CloseAgentTranscript,
+    /// Replace a missing or refused presentation baseline. This reads only
+    /// the face's current observational view, never session recovery authority.
+    ResyncTranscript {
+        /// The exact transcript that needs a new baseline.
+        scope: crate::views::transcript::TranscriptScope,
+    },
     /// Ask the host to re-emit the current tree snapshot (canvas `R`). The host
     /// answers even when the revision has not advanced, so a dropped push can
     /// always be recovered by hand.
@@ -261,6 +267,7 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::OpenTopologyNavigator => "OpenTopologyNavigator",
             Self::OpenAgentTranscript { .. } => "OpenAgentTranscript(..)",
             Self::CloseAgentTranscript => "CloseAgentTranscript",
+            Self::ResyncTranscript { .. } => "ResyncTranscript(..)",
             Self::RefreshTopologyTree => "RefreshTopologyTree",
             Self::ResumeTopologyTree => "ResumeTopologyTree",
             Self::InterruptTopologyNode { .. } => "InterruptTopologyNode(..)",

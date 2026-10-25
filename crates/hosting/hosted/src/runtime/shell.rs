@@ -284,6 +284,9 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             ));
         }
         UserAction::CloseAgentTranscript => {}
+        UserAction::ResyncTranscript { scope } => {
+            events.resync_transcript(&scope);
+        }
         UserAction::OpenTopologyNavigator
         | UserAction::RefreshTopologyTree
         | UserAction::ResumeTopologyTree

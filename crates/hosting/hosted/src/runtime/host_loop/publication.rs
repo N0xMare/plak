@@ -97,12 +97,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             let _ = self.events.send(HostEvent::AssistantDone);
                         }
                         if finish_reason == plakous::model::FinishReason::Refusal {
-                            // Discard streamed previews in favor of the published view.
-                            let _ =
-                                self.events
-                                    .send(super::super::logging::project_session_snapshot(
-                                        &self.config.session,
-                                    ));
                             let _ = self.events.send(HostEvent::ModelRefusal {
                                 detail: finish_detail,
                             });

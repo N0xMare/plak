@@ -245,6 +245,7 @@ const IDLE_OBSERVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core> {
     inner: crate::surface_protocol::HostEventSender<P>,
     notices: Arc<std::sync::Mutex<VecDeque<PendingNoticeIntent>>>,
+    presentations: Arc<std::sync::Mutex<projection::transcript::Presentations>>,
     session_id: Option<Arc<str>>,
 }
 
@@ -269,6 +270,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         Self {
             inner,
             notices: Arc::default(),
+            presentations: Arc::default(),
             session_id: None,
         }
     }
@@ -279,13 +281,55 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         Self {
             inner: self.inner.clone(),
             notices: Arc::clone(&self.notices),
+            presentations: Arc::clone(&self.presentations),
             session_id: Some(Arc::from(session_id)),
         }
     }
     /// Publish one observation; false when the driver has gone. This is
     /// presentation only, including when the observation carries a row.
     pub fn send(&self, value: HostEvent<P>) -> bool {
-        self.inner.send(value).is_ok()
+        if let HostEvent::PresentationSnapshot(snapshot) = value {
+            return self
+                .presentations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .snapshot(snapshot, &self.inner);
+        }
+        if matches!(value, HostEvent::ClearView) {
+            self.presentations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+        }
+        let boundary = matches!(value, HostEvent::Status { .. } | HostEvent::SetBusy(false));
+        let sent = self.inner.send(value).is_ok();
+        if boundary {
+            self.presentations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .resync_gaps(&self.inner);
+        }
+        sent
+    }
+
+    pub(crate) fn publish_transcript(
+        &self,
+        snapshot: plakous_host_protocol::views::PresentationSnapshot,
+    ) -> bool {
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .publish(snapshot, &self.inner)
+    }
+
+    pub(crate) fn resync_transcript(
+        &self,
+        scope: &plakous_host_protocol::views::transcript::TranscriptScope,
+    ) -> bool {
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .resync(scope, &self.inner)
     }
 
     /// Author a notice intent separately from its live observation. Only

@@ -1211,6 +1211,8 @@ mod detail_tests;
 )]
 mod models_tests;
 #[cfg(test)]
+mod patch_tests;
+#[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
