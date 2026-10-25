@@ -1681,6 +1681,7 @@ fn child_session_fence_follows_the_tier() {
     }
     for name in [
         "apply_patch",
+        "edit_files",
         "merge_workspace",
         "TaskOutput",
         "process_session_escape",
@@ -1710,6 +1711,63 @@ fn occupancy_plan_allowlist_uses_canonical_names_not_presentation_aliases() {
         "todo_write",
         ToolEffect::Mutating
     ));
+}
+
+#[tokio::test]
+async fn read_execute_admission_refuses_a_forged_sdk_edit() -> Result<(), Box<dyn std::error::Error>>
+{
+    use plakous::tools::{
+        ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, FilesToolPack,
+        ToolPolicyDecision, ToolRegistryBuilder,
+    };
+    let root = tempfile::tempdir()?;
+    let run: RunId = "00000000-0000-0000-0000-000000000901".parse()?;
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(run),
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    let mut builder = ToolRegistryBuilder::default();
+    builder.register(FilesToolPack::edit_files_registration()?)?;
+    let registry = builder.freeze();
+    for fence in [
+        SessionToolFence::OccupancyReadOnly,
+        SessionToolFence::OccupancyExecute,
+    ] {
+        let invocation = registry.prepare(ToolInvocationRequest::new(
+            run,
+            "00000000-0000-0000-0000-000000000902".parse()?,
+            "00000000-0000-0000-0000-000000000903".parse()?,
+            "00000000-0000-0000-0000-000000000904".parse()?,
+            ToolName::new("edit_files")?,
+            ToolCorrelation::new(None, None, ToolCallerLineage::default())?,
+            Arc::<str>::from(r#"{"ops":[{"op":"write","path":"forged","content":"no"}]}"#),
+        ))?;
+        let definition = registry
+            .definition(invocation.identity().name())
+            .ok_or("missing edit_files")?
+            .clone();
+        let policy = session_tool_policy(fence);
+        let binding = plakous_tools::internal::authorization_binding(
+            &invocation,
+            environment.descriptor().clone(),
+            policy.revision(),
+        )?;
+        let request = plakous_tools::internal::policy_request(
+            invocation,
+            definition,
+            environment.clone(),
+            policy.revision(),
+            binding,
+        );
+        assert!(matches!(
+            policy.evaluate(request).await?,
+            ToolPolicyDecision::Denied(_)
+        ));
+        assert!(!root.path().join("forged").exists());
+    }
+    Ok(())
 }
 
 #[test]

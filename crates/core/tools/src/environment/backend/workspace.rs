@@ -31,6 +31,7 @@ use super::{
     WorkspaceReadSliceRequest, WorkspaceReplacement, backend_error, conflict_error, io_error, lock,
     recovery_required_error, resource_error, validate_relative_path, workspace_error,
 };
+mod aliases;
 mod query;
 
 use query::{
@@ -515,7 +516,12 @@ pub(super) fn query_repository_sync(
     // still named relative to the workspace root, and every containment
     // rule still applies to the pruned start.
     // The glob is relative to the query root.
-    let walk_root = match query.path_glob.as_deref().and_then(glob_walk_prefix) {
+    let walk_root = match query
+        .path_glob
+        .as_deref()
+        .filter(|_| query.list_depth.is_none())
+        .and_then(glob_walk_prefix)
+    {
         Some(prefix) => query.root().join(prefix),
         None => query.root().to_path_buf(),
     };
@@ -531,6 +537,10 @@ pub(super) fn query_repository_sync(
         .map_err(|_| io_error("repository query root metadata failed"))?;
     let mut pending = BTreeMap::new();
     let root_ignores = ancestor_ignores(workspace, &walk_root);
+    if query.list_depth.is_some() && is_ignored(&root_ignores, &walk_root, start_metadata.is_dir())
+    {
+        return Ok(empty_repository_query_result(0));
+    }
     let mut files = Vec::new();
     if start_metadata.is_file() {
         files.push((
@@ -552,7 +562,7 @@ pub(super) fn query_repository_sync(
         mut files,
         entries_skipped,
         mut stop_reason,
-    } = walk_repository_query_directories(control, limits, pending, files)?;
+    } = walk_repository_query_directories(control, limits, pending, files, query)?;
     retain_repository_query_glob_matches(query, &mut files)?;
     let files_considered = files.len().min(limits.max_files);
     if files.len() > files_considered {
@@ -561,7 +571,7 @@ pub(super) fn query_repository_sync(
     if query.list_only {
         return list_repository_query_paths(
             control,
-            limits,
+            query,
             files,
             files_considered,
             entries_skipped,
@@ -971,6 +981,7 @@ pub(super) fn mutate_workspace_sync(
         });
     }
 
+    aliases::check_path_aliases(workspace, &preflight)?;
     // Revalidate every precondition after all fallible staging and before the
     // first external publication. A conflict here is therefore zero-effect.
     for (item, _prepared) in transaction.mutations().iter().zip(&preflight) {

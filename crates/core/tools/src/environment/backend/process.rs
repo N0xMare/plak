@@ -266,6 +266,35 @@ mod process_policy_tests {
         };
         assert!(resolve_host_process_program("tool", &only_shadow, &[]).is_err());
     }
+
+    #[test]
+    fn program_lookup_never_consults_relative_path_entries() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().expect("tempdir");
+        fs::write(root.path().join("tool"), "#!/bin/sh\n").expect("tool");
+        fs::set_permissions(root.path().join("tool"), fs::Permissions::from_mode(0o755))
+            .expect("mode");
+        let cwd = std::env::current_dir().expect("cwd");
+        let levels = cwd
+            .components()
+            .filter(|component| matches!(component, std::path::Component::Normal(_)))
+            .count();
+        let relative = PathBuf::from("../".repeat(levels))
+            .join(root.path().strip_prefix("/").expect("absolute tempdir"));
+        assert!(relative.join("tool").is_file());
+        let process = HostProcessContext {
+            fallback_path: format!(".::{}", relative.display()),
+            home: None,
+            prefix: None,
+            discovery_ceiling: None,
+        };
+        assert!(resolve_host_process_program("tool", &process, &[]).is_err());
+        assert!(resolve_host_process_program("./Cargo.toml", &process, &[]).is_err());
+        assert_eq!(
+            resolve_host_process_program("/bin/sh", &process, &[]).expect("absolute"),
+            Path::new("/bin/sh")
+        );
+    }
 }
 
 #[cfg(test)]

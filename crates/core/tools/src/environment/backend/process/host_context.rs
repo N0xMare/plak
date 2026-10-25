@@ -198,7 +198,7 @@ pub(in crate::environment::backend) fn resolve_host_process_program(
     }
     let path_value = host_process_path(process, environment)?;
     for directory in path_value.split(':') {
-        if directory.is_empty() {
+        if !Path::new(directory).is_absolute() {
             continue;
         }
         let candidate = Path::new(directory).join(program);

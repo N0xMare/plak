@@ -72,6 +72,23 @@ pub(super) fn start_joined_host_process(
     control: ExecutionOperationControl,
     pending_spool: Option<PendingJobOutput>,
 ) -> Result<JoinedSession, ExecutionBackendError> {
+    let mut resolved = request.clone();
+    if let JoinedProcessCommand::Literal {
+        executable,
+        arguments,
+    } = &request.command
+        && !executable.is_absolute()
+    {
+        let program = super::resolve_host_process_program(
+            executable
+                .to_str()
+                .ok_or_else(|| invalid_request("process program is not UTF-8"))?,
+            process,
+            environment,
+        )?;
+        resolved.command = JoinedProcessCommand::literal(program, arguments.iter().cloned())?;
+    }
+    let request = &resolved;
     match request.terminal_mode {
         JoinedProcessTerminalMode::Pipes => start_joined_pipes_process(
             workspace,

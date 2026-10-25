@@ -9,6 +9,7 @@
     reason = "doc comments name exact provider tool identifiers"
 )]
 
+mod list_entries;
 mod text;
 
 pub use text::{
@@ -691,6 +692,18 @@ mod tests {
 /// search, directory listing, and every provider lowering of them.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SearchToolPack;
+
+impl SearchToolPack {
+    /// Registers repository listing for an explicitly enrolled SDK catalog.
+    /// Existing search packs do not enroll this capability.
+    ///
+    /// # Errors
+    ///
+    /// Returns a definition or executor-identity error.
+    pub fn list_entries_registration() -> Result<ToolRegistration, ToolRuntimeError> {
+        standard_registration("list-entries", list_entries::ListEntriesTool::new())
+    }
+}
 
 impl ToolPack for SearchToolPack {
     fn id(&self) -> &'static str {

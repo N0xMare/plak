@@ -252,9 +252,9 @@ impl fmt::Debug for JoinedProcessShellProfile {
 #[derive(Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum JoinedProcessCommand {
-    /// An absolute executable and exact literal argv.
+    /// An absolute executable or PATH basename and exact literal argv.
     Literal {
-        /// Absolute executable.
+        /// Absolute executable or PATH basename, resolved by the host backend.
         executable: Arc<PathBuf>,
         /// Exact argv values.
         arguments: Arc<[String]>,
@@ -269,6 +269,33 @@ pub enum JoinedProcessCommand {
 }
 
 impl JoinedProcessCommand {
+    /// Creates a literal argv command, resolving a basename on the prepared PATH.
+    /// Only absolute PATH entries participate in resolution; no shell runs.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty program, relative paths with separators, or invalid argv.
+    pub fn argv(
+        program: String,
+        arguments: impl IntoIterator<Item = String>,
+    ) -> Result<Self, ExecutionBackendError> {
+        if program.is_empty()
+            || (!Path::new(&program).is_absolute()
+                && (program.contains('/') || program.contains('\\')))
+        {
+            return Err(invalid_request(
+                "process program must be absolute or a PATH basename",
+            ));
+        }
+        validate_process_value(&program)?;
+        let arguments = arguments.into_iter().collect::<Vec<_>>();
+        validate_process_values(&arguments)?;
+        Ok(Self::Literal {
+            executable: Arc::new(PathBuf::from(program)),
+            arguments: arguments.into(),
+        })
+    }
+
     /// Creates an exact literal command.
     ///
     /// # Errors

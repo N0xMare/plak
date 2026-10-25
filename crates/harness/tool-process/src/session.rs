@@ -277,27 +277,10 @@ impl ToolExecutor for ProcessSessionTools {
     fn execute(self: Arc<Self>, invocation: ToolInvocation, context: ToolContext) -> ToolFuture {
         Box::pin(async move {
             let identity = invocation.identity();
-            let canonical = match (identity.name().as_str(), identity.tool_id().as_str()) {
-                (PROCESS_SESSION_CAPABILITY_NAME, PROCESS_SESSION_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Start)
-                }
-                (PROCESS_SESSION_WRITE_NAME, PROCESS_SESSION_WRITE_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Write)
-                }
-                (PROCESS_SESSION_POLL_NAME, PROCESS_SESSION_POLL_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Poll)
-                }
-                (PROCESS_SESSION_TERMINATE_NAME, PROCESS_SESSION_TERMINATE_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Terminate)
-                }
-                _ => None,
-            }
-            .ok_or_else(|| {
-                ToolRuntimeError::new(
-                    ToolRuntimeErrorKind::InvalidArguments,
-                    "canonical process registration identity is not enrolled",
-                )
-            })?;
+            let exec = identity.name().as_str() == "process_session_exec"
+                && identity.tool_id().as_str() == "plakous.process.exec.v1";
+            let canonical =
+                canonical_operation(identity.name().as_str(), identity.tool_id().as_str())?;
             let mut value = invocation.arguments().value().as_ref().clone();
             let (operation, hint_source) = process_observation_labels(canonical, &mut value);
             if canonical == CanonicalProcessOperationV2::Poll {
@@ -319,6 +302,14 @@ impl ToolExecutor for ProcessSessionTools {
                     .await;
             }
             let result = match canonical {
+                CanonicalProcessOperationV2::Start if exec => {
+                    self.exec_canonical(
+                        &environment,
+                        serde_json::from_value(value).map_err(projection_arguments)?,
+                        control,
+                    )
+                    .await
+                }
                 CanonicalProcessOperationV2::Start => {
                     self.start_canonical(
                         &environment,
@@ -388,6 +379,31 @@ impl ToolExecutor for ProcessSessionTools {
                 Err(error) => Err(error),
             }
         })
+    }
+}
+
+fn canonical_operation(
+    name: &str,
+    tool_id: &str,
+) -> Result<CanonicalProcessOperationV2, ToolRuntimeError> {
+    match (name, tool_id) {
+        (PROCESS_SESSION_CAPABILITY_NAME, PROCESS_SESSION_REGISTERED_TOOL_ID)
+        | ("process_session_exec", "plakous.process.exec.v1") => {
+            Ok(CanonicalProcessOperationV2::Start)
+        }
+        (PROCESS_SESSION_WRITE_NAME, PROCESS_SESSION_WRITE_REGISTERED_TOOL_ID) => {
+            Ok(CanonicalProcessOperationV2::Write)
+        }
+        (PROCESS_SESSION_POLL_NAME, PROCESS_SESSION_POLL_REGISTERED_TOOL_ID) => {
+            Ok(CanonicalProcessOperationV2::Poll)
+        }
+        (PROCESS_SESSION_TERMINATE_NAME, PROCESS_SESSION_TERMINATE_REGISTERED_TOOL_ID) => {
+            Ok(CanonicalProcessOperationV2::Terminate)
+        }
+        _ => Err(ToolRuntimeError::new(
+            ToolRuntimeErrorKind::InvalidArguments,
+            "canonical process registration identity is not enrolled",
+        )),
     }
 }
 
@@ -656,6 +672,34 @@ impl ProcessSessionTools {
             .nested_eligible())
         })
         .collect()
+    }
+
+    /// Registers literal argv execution for an explicitly enrolled SDK catalog.
+    /// Existing process packs do not enroll this capability.
+    ///
+    /// # Errors
+    ///
+    /// Returns a definition or executor-identity error.
+    pub fn exec_registration(self: Arc<Self>) -> Result<ToolRegistration, ToolRuntimeError> {
+        let definition = plakous_tools::standard_definition(
+            "process_session_exec",
+            "Start a joined process with literal argv and no shell. stdin keeps a non-TTY input pipe open.",
+            super::projection::process_exec_schema()?
+                .document()
+                .value()
+                .as_ref()
+                .clone(),
+            ToolConcurrency::Serial,
+            ToolEffect::Mutating,
+        )?;
+        Ok(ToolRegistration::new(
+            RegisteredToolId::new("plakous.process.exec.v1")?,
+            ToolExecutorId::new("plakous.process.exec.v1")?,
+            ToolExecutorBindingIdentity::new(1, &[b"literal-argv-joined-process"])?,
+            definition,
+            self,
+        )
+        .nested_eligible())
     }
 
     pub(crate) fn reported_canonical(

@@ -287,6 +287,21 @@ follow the `full output: <path>` line its own tools print. The Claude `Read`
 description, Grok `read_file`, and the canonical `read_file` description state
 the exception and its earlier-process refusal.
 
+The opt-in `edit_files` capability preflights every operation and submits one
+workspace mutation transaction with original-content/absence comparisons.
+Its paths use the same workspace normalization and backend no-symlink opens as
+existing edit tools, additionally refusing `.git` and `.jj` components with
+ASCII-case-insensitive comparison. `.plak` is not a protected component: like
+existing edit tools, this capability may edit it when it is inside the
+workspace. The mutation backend groups target parent directories by identity
+and rejects names that alias the same directory entry under the target
+filesystem's case folding or Unicode normalization before target publication;
+this applies to `apply_patch` too. Distinct hardlinked entries remain editable:
+temporary-file replacement breaks each edited path's link to the original inode.
+Repository listing also stays in the descriptor-relative workspace backend,
+never follows symlinks, and reads ignore rules only within the workspace;
+operator-global and workspace-parent rules confer no authority.
+
 ### 2.2 Shells are not constrained
 
 JJ copies request a reconstructive, provider-neutral repository-discovery
@@ -323,10 +338,17 @@ material; an existing HOME is resolved to its physical directory, and the root
 directory is never used as HOME.
 Literal process
 requests accept an absolute executable or resolve a basename on that prepared
-PATH, retaining argv and stdin literally, with no shell. It creates one fresh Unix
+PATH, retaining argv and stdin literally, with no shell. Every host basename
+lookup uses only absolute PATH entries, including literal processes, joined
+argv processes, and service processes (MCP stdio included); empty and relative
+entries never participate. It creates one fresh Unix
 process group and applies TERM, KILL, direct-child reaping, group-absence
 verification, pipe-worker shutdown, and supervisor join within one configured
 cleanup attempt.
+
+The opt-in `process_session_exec` capability uses literal argv with those same
+admission, environment and cleanup rules. Keeping non-TTY stdin open is
+explicit and does not add a shell or reduce the process's full host authority.
 
 Joined shell leader exit does not terminate still-live group members: they
 remain owned and killable as a leftover background job (chapter 01 §8.5),

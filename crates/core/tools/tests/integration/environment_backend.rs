@@ -2932,6 +2932,50 @@ fn query_environment(workspace: &Path, id: u8) -> Result<ExecutionEnvironment, T
     )?)
 }
 
+#[tokio::test]
+async fn repository_listing_reports_match_and_retained_byte_bounds() -> Result<(), TestError> {
+    let root = tempfile::tempdir()?;
+    for name in ["a", "b", "c"] {
+        fs::write(root.path().join(name), "")?;
+    }
+    let environment = query_environment(root.path(), 99)?;
+    for (matches, bytes, reason) in [
+        (2, 1024, plakous_tools::RepositoryQueryStopReason::Matches),
+        (
+            10,
+            65,
+            plakous_tools::RepositoryQueryStopReason::ResultBytes,
+        ),
+    ] {
+        let limits = RepositoryQueryLimits::new(10, 20, 1, 1, matches, 1, bytes)?;
+        let result = environment
+            .query_repository(RepositoryQuery::list(".", None, 1, limits)?, control())
+            .await?;
+        assert!(result.incomplete());
+        assert_eq!(result.stop_reason(), Some(reason));
+        assert!(result.matches().len() <= 2);
+        assert!(result.matches().iter().all(|entry| !entry.is_directory()));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn repository_listing_bounds_escaped_json_paths() -> Result<(), TestError> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("\u{1}".repeat(20)), "")?;
+    let environment = query_environment(root.path(), 98)?;
+    let limits = RepositoryQueryLimits::new(10, 20, 1, 1, 10, 1, 100)?;
+    let result = environment
+        .query_repository(RepositoryQuery::list(".", None, 1, limits)?, control())
+        .await?;
+    assert_eq!(result.matches(), []);
+    assert_eq!(
+        result.stop_reason(),
+        Some(plakous_tools::RepositoryQueryStopReason::ResultBytes)
+    );
+    Ok(())
+}
+
 /// A repository query surveys a live tree. An entry it cannot open is skipped
 /// and counted, never a reason to abandon the whole query: a socket bound by a
 /// neighbouring process must not make search stop working.

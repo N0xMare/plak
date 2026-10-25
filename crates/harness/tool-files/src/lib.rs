@@ -13,6 +13,7 @@
 )]
 
 mod codex_patch;
+mod edit_files;
 mod image;
 mod patch;
 mod read;
@@ -110,6 +111,18 @@ fn codex_patch_envelope_registration(
 /// that makes them exact.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FilesToolPack;
+
+impl FilesToolPack {
+    /// Registers transactional file operations for an explicitly enrolled SDK catalog.
+    /// Existing files packs do not enroll this capability.
+    ///
+    /// # Errors
+    ///
+    /// Returns a definition or executor-identity error.
+    pub fn edit_files_registration() -> Result<ToolRegistration, ToolRuntimeError> {
+        standard_registration("edit-files", edit_files::EditFilesTool::new())
+    }
+}
 
 impl ToolPack for FilesToolPack {
     fn id(&self) -> &'static str {

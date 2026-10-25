@@ -31,6 +31,7 @@ pub(super) fn walk_repository_query_directories(
     limits: RepositoryQueryLimits,
     mut pending: BTreeMap<PathBuf, (fs::File, IgnoreChain)>,
     mut files: Vec<OpenedRepositoryFile>,
+    query: &RepositoryQuery,
 ) -> Result<RepositoryQueryWalk, ExecutionBackendError> {
     let mut entries_skipped = 0_usize;
     let mut stop_reason = None;
@@ -57,7 +58,10 @@ pub(super) fn walk_repository_query_directories(
             let name = entry.file_name().to_bytes();
             // Version-control metadata is never repository content. Other
             // dot entries (`.github`, `.cargo`) are walked unless ignored.
-            if matches!(name, b"." | b".." | b".git" | b".jj") {
+            if matches!(name, b"." | b".." | b".git" | b".jj")
+                || (query.list_depth.is_some()
+                    && (name.eq_ignore_ascii_case(b".git") || name.eq_ignore_ascii_case(b".jj")))
+            {
                 continue;
             }
             if query_entry_kind_is_walkable(entry.file_type()) == Some(false) {
@@ -93,6 +97,24 @@ pub(super) fn walk_repository_query_directories(
                 continue;
             };
             if metadata.is_dir() {
+                if let Some(depth) = query.list_depth {
+                    let Ok(listed) = child.try_clone() else {
+                        entries_skipped = entries_skipped.saturating_add(1);
+                        continue;
+                    };
+                    files.push((
+                        relative.clone(),
+                        0,
+                        FileObservation::capture(&metadata),
+                        listed,
+                    ));
+                    let level = relative
+                        .strip_prefix(query.root())
+                        .map_or(usize::MAX, |path| path.components().count());
+                    if level >= depth {
+                        continue;
+                    }
+                }
                 pending.insert(relative, (child, Arc::clone(&ignores)));
             } else if metadata.is_file() {
                 files.push((
@@ -138,21 +160,40 @@ pub(super) fn retain_repository_query_glob_matches(
 
 pub(super) fn list_repository_query_paths(
     control: &ExecutionOperationControl,
-    limits: RepositoryQueryLimits,
+    query: &RepositoryQuery,
     files: Vec<OpenedRepositoryFile>,
     files_considered: usize,
     entries_skipped: usize,
     mut stop_reason: Option<RepositoryQueryStopReason>,
 ) -> Result<RepositoryQueryResult, ExecutionBackendError> {
     let mut matches = Vec::new();
+    let limits = query.limits();
     let empty = WorkspaceContentIdentity::from_bytes(&[])?;
-    for (relative, _, _, _) in files.into_iter().take(files_considered) {
+    let mut result_bytes = 0_usize;
+    for (relative, _, _, file) in files.into_iter().take(files_considered) {
         control.check_cancelled()?;
         if matches.len() == limits.max_matches {
             stop_reason = Some(RepositoryQueryStopReason::Matches);
             break;
         }
+        let is_directory = file.metadata().is_ok_and(|metadata| metadata.is_dir());
+        if query.list_depth.is_some() {
+            // Match the SDK's lossy JSON encoding, including escapes and separators.
+            let row_bytes = serde_json::json!({
+                "path":relative.to_string_lossy(),
+                "kind":if is_directory { "directory" } else { "file" }
+            })
+            .to_string()
+            .len()
+            .saturating_add(1);
+            if row_bytes > limits.max_result_bytes.saturating_sub(result_bytes) {
+                stop_reason = Some(RepositoryQueryStopReason::ResultBytes);
+                break;
+            }
+            result_bytes = result_bytes.saturating_add(row_bytes);
+        }
         matches.push(RepositoryQueryMatch {
+            is_directory,
             path: relative,
             line: 1,
             column: 1,
@@ -266,6 +307,7 @@ pub(super) fn scan_repository_query_files(
                         break 'files;
                     }
                     matches.push(RepositoryQueryMatch {
+                        is_directory: false,
                         path: relative.clone(),
                         line: line_number,
                         column: u64::try_from(column.saturating_add(1)).unwrap_or(u64::MAX),
@@ -313,6 +355,7 @@ pub(super) fn scan_repository_query_files(
                     break 'files;
                 }
                 matches.push(RepositoryQueryMatch {
+                    is_directory: false,
                     path: relative.clone(),
                     line: line_number,
                     column: u64::try_from(column.saturating_add(1)).unwrap_or(u64::MAX),

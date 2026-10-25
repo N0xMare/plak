@@ -550,6 +550,7 @@ pub struct RepositoryQuery {
     pub(super) limits: RepositoryQueryLimits,
     pub(super) path_glob: Option<Arc<str>>,
     pub(super) list_only: bool,
+    pub(super) list_depth: Option<usize>,
     pub(super) regex: Option<Arc<str>>,
 }
 
@@ -580,6 +581,7 @@ impl RepositoryQuery {
             limits,
             path_glob: None,
             list_only: false,
+            list_depth: None,
             regex: None,
         })
     }
@@ -612,6 +614,7 @@ impl RepositoryQuery {
             limits,
             path_glob: None,
             list_only: false,
+            list_depth: None,
             regex: Some(pattern.into()),
         })
     }
@@ -639,8 +642,41 @@ impl RepositoryQuery {
             limits,
             path_glob: Some(pattern.into()),
             list_only: true,
+            list_depth: None,
             regex: None,
         })
+    }
+
+    /// Lists files and directories beneath `root` without reading their contents.
+    /// Depth one lists immediate children; globs are relative to the query root.
+    /// Ignore rules are anchored at the workspace root, never the host home.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an invalid root, glob, or depth outside 1..=128.
+    pub fn list(
+        root: impl Into<PathBuf>,
+        glob: Option<String>,
+        depth: usize,
+        limits: RepositoryQueryLimits,
+    ) -> Result<Self, ExecutionBackendError> {
+        if !(1..=128).contains(&depth) {
+            return Err(invalid_request(
+                "repository listing depth must be in 1..=128",
+            ));
+        }
+        let mut query = Self::glob(root, glob.unwrap_or_else(|| String::from("**")), limits)?;
+        query.list_depth = Some(depth);
+        if query.root.components().any(|component| {
+            component.as_os_str().to_str().is_some_and(|name| {
+                name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case(".jj")
+            })
+        }) {
+            return Err(invalid_request(
+                "repository listing refuses version-control metadata paths",
+            ));
+        }
+        Ok(query)
     }
 
     /// Restricts an existing content query to paths matching `pattern`.
@@ -697,6 +733,7 @@ pub(super) fn compile_query_regex(
 /// One deterministic repository match.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepositoryQueryMatch {
+    pub(super) is_directory: bool,
     pub(super) path: PathBuf,
     pub(super) line: u64,
     pub(super) column: u64,
@@ -705,6 +742,11 @@ pub struct RepositoryQueryMatch {
     pub(super) content: WorkspaceContentIdentity,
 }
 impl RepositoryQueryMatch {
+    /// Whether this listing entry is a directory (false for content matches).
+    #[must_use]
+    pub const fn is_directory(&self) -> bool {
+        self.is_directory
+    }
     /// Returns the matched path relative to the environment cwd.
     #[must_use]
     pub fn path(&self) -> &Path {

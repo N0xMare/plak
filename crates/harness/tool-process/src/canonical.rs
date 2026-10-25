@@ -53,6 +53,21 @@ impl CanonicalProcessStartRequest {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ProcessExecRequest {
+    pub(crate) argv: Vec<String>,
+    pub(crate) workdir: PathBuf,
+    #[serde(default)]
+    pub(crate) stdin: bool,
+    #[serde(default)]
+    pub(crate) tty: bool,
+    #[serde(deserialize_with = "deserialize_semantic_u64")]
+    pub(crate) yield_time_ms: u64,
+    #[serde(deserialize_with = "deserialize_semantic_usize")]
+    pub(crate) max_output_bytes: usize,
+}
+
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CanonicalProcessInputDisposition {
@@ -530,10 +545,6 @@ impl ProcessSessionTools {
         } else {
             &self.shell
         };
-        let sessions = environment
-            .joined_process_sessions()
-            .map_err(backend_runtime_error)?;
-        let observation_control = control.clone();
         let request = JoinedProcessStartRequest::new(
             JoinedProcessCommand::shell(profile.clone(), request.command)
                 .map_err(backend_runtime_error)?,
@@ -547,6 +558,71 @@ impl ProcessSessionTools {
             },
         )
         .map_err(backend_runtime_error)?;
+        self.start_joined(
+            environment,
+            request,
+            yield_time_ms,
+            max_output_bytes,
+            control,
+        )
+        .await
+    }
+
+    pub(crate) async fn exec_canonical(
+        &self,
+        environment: &plakous_tools::ExecutionEnvironment,
+        request: ProcessExecRequest,
+        control: ExecutionOperationControl,
+    ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
+        let mut argv = request.argv.into_iter();
+        let program = argv.next().ok_or_else(|| {
+            ToolRuntimeError::new(
+                ToolRuntimeErrorKind::InvalidArguments,
+                "process argv must not be empty",
+            )
+        })?;
+        if request.yield_time_ms > 600_000
+            || !(1..=PROCESS_OBSERVATION_BYTES).contains(&request.max_output_bytes)
+        {
+            return Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::InvalidArguments,
+                "process exec bounds are invalid",
+            ));
+        }
+        let start = JoinedProcessStartRequest::new(
+            JoinedProcessCommand::argv(program, argv).map_err(backend_runtime_error)?,
+            request.workdir,
+            Vec::new(),
+            request.stdin,
+            if request.tty {
+                JoinedProcessTerminalMode::UnixPty
+            } else {
+                JoinedProcessTerminalMode::Pipes
+            },
+        )
+        .map_err(backend_runtime_error)?;
+        self.start_joined(
+            environment,
+            start,
+            request.yield_time_ms.clamp(250, 600_000),
+            request.max_output_bytes,
+            control,
+        )
+        .await
+    }
+
+    async fn start_joined(
+        &self,
+        environment: &plakous_tools::ExecutionEnvironment,
+        request: JoinedProcessStartRequest,
+        yield_time_ms: u64,
+        max_output_bytes: usize,
+        control: ExecutionOperationControl,
+    ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
+        let sessions = environment
+            .joined_process_sessions()
+            .map_err(backend_runtime_error)?;
+        let observation_control = control.clone();
         let start_sessions = sessions.clone();
         let id = process_backend(move || {
             plakous_tools::internal::start_process_with_output_limit(

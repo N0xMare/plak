@@ -29,6 +29,9 @@ use plakous_tools::{
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[path = "sdk_tools.rs"]
+mod sdk_tools;
+
 #[derive(Clone, Copy)]
 struct Ids {
     run: RunId,

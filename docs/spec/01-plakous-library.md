@@ -4697,6 +4697,12 @@ requires `OutcomeUnknown`. Child environments are frozen
 and filtered, starting from a captured environment rather than ambient process
 state; credentials require explicit delegation.
 
+Host literal-process requests accept an absolute executable or a basename on
+the prepared PATH, with literal argv and no shell. Every host basename lookup
+ignores empty and relative PATH entries, including joined argv execution and
+service processes such as MCP stdio; this is not limited to
+`process_session_exec`.
+
 Network authority is granted by selection, not by approval. The one Plakous
 tool that reaches the network on the model's behalf, `fetch_url`
 (`plakous::tools::web::FetchUrlPack`, built whenever the facade links
@@ -4780,6 +4786,70 @@ one more request as a retrieval side request; a 401 head made no image.
 once. The Codex, OpenAI API, xAI API and SuperGrok rows are `Supported` on
 live receipts (generate, save, and read back as image input on a vision
 route); the Claude, Anthropic API and OpenRouter rows are unoffered.
+
+Three additional canonical capabilities have explicit opt-in registration
+entry points, not default pack registrations or presentation menus:
+`FilesToolPack::edit_files_registration`,
+`ProcessSessionTools::exec_registration`, and
+`SearchToolPack::list_entries_registration`. They are nested-eligible when a
+host enrolls them. No existing Direct, Code Mode, js-ptc or py-ptc catalog
+includes them; their frozen registries, descriptions and pins are unchanged.
+
+`edit_files` takes a nonempty bounded `ops` array. Each operation has an `op`
+tag: `patch` takes a Codex `patch` envelope; `replace` takes `path`, `old`,
+`new` and optional `all` (false); `write` takes `path` and `content`; `delete`
+takes `path`; `move` takes `path` and `to`. Optional `expect` is `absent` or
+the complete content's `WorkspaceContentIdentity` digest string. Preconditions
+and operations run in order against a private overlay, so a later operation
+sees earlier changes. A patch's `expect` applies to each source in its
+envelope. Replacement requires a nonempty exact match, unique unless `all` is
+true; moves require an absent destination in the overlay. A move copies bounded
+bytes (including non-UTF-8 content) and deletes the source; it does not preserve
+source permission bits or inode identity. A newly created destination has mode
+0600. If earlier operations deleted an originally existing destination, final
+publication replaces it using that destination's original permissions.
+Patch parsing, including
+`*** Move to:`, uses the same parser as `apply_patch`. Every path is
+workspace-contained and `.git` and `.jj` components are refused using
+ASCII-case-insensitive comparison. A failing
+operation names its one-based index and publishes nothing. After all
+operations validate, one `mutate_workspace` transaction compares the original
+content or absence of every touched file and publishes the final states.
+The backend groups target parents by (device, inode) and rejects sibling names
+that alias the same directory entry under the filesystem's own case folding or
+normalization. A case-only rename on a case-insensitive filesystem is refused
+as a conflict. Distinct hardlinked entries may be edited independently;
+replacement uses a temporary file and rename, breaking the edited path's link
+to the original inode. For a multi-name parent with at least one changed target,
+preflight creates and removes a private `.plak-alias-*` directory in that
+parent to probe names. An all-Unchanged parent needs no probe or write access.
+Host loss can leave probe directories, like `.plak-mutation-*` staging files;
+neither is replay authority. After revalidating all preconditions it publishes
+per file, with no rollback once publication starts. A publication failure is
+`RecoveryRequired`; some targets may already have changed. Cancellation before
+publication changes no target. This claims neither isolation from other
+filesystem readers nor atomicity across host loss. The result reports
+`changed_files`.
+
+`process_session_exec` takes nonempty `argv`, `workdir`, `yield_time_ms` and
+`max_output_bytes`, with optional `stdin` and `tty` (both false). It never
+interprets argv as shell source. The program is absolute or a basename
+resolved against absolute entries of the construction-captured prepared PATH;
+relative PATH entries never participate. `stdin: true` retains a pipe for
+non-TTY jobs independently of `tty`. The canonical start's admission,
+environment, observation, promotion, write/poll/terminate handles and bounded
+cleanup apply unchanged.
+
+`list_entries` takes `path`, optional `glob`, and optional `depth` (default 1,
+range 1..=128). `RepositoryQuery::list` executes through the workspace
+backend's blocking repository-query machinery, returning sorted file and
+directory paths with their kind, skip count, incompleteness and stopping
+resource. Depth one means immediate children; deeper walks still visit
+directories that do not match the glob. Rules are workspace-root anchored;
+parent and global ignore files are never read. Explicit `.git` and `.jj`
+paths are refused, and symlinks are never followed. It surveys the live tree,
+does not read file contents, and obeys traversal, match and retained-byte
+bounds like other repository queries.
 
 A repository query walks a live tree, so it surveys rather than transacts. Every
 directory child is opened relative to its parent descriptor with `O_NOFOLLOW`:
@@ -5461,7 +5531,10 @@ that leaves that group leaves its cleanup authority.
 
 **Service processes.** `ExecutionEnvironment::spawn_service` starts one
 long-lived child with piped stdin and stdout, the sealed backend operation a
-stdio protocol server (an MCP server) runs on. The `ServiceProcessRequest` is
+stdio protocol server (an MCP server) runs on. All host basename lookups use
+only absolute entries of the prepared PATH: this applies to literal processes,
+joined argv processes, and service processes, including MCP stdio. Empty and
+relative PATH entries are ignored. The `ServiceProcessRequest` is
 built by the embedder from frozen configuration: a program (absolute, or a
 basename looked up on the child's PATH), separate arguments, declared literal
 environment values, resolved secret values (`ServiceSecretValue`: not
