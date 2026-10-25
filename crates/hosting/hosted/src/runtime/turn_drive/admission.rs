@@ -113,13 +113,13 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                     base_text: &command,
                     batch: result_batch.map_or(BatchRule::None, BatchRule::RootResults),
                 })
-                .map_err(String::from)
+                .map_err(crate::session_store::RecordStoreError::from)
                 .inspect_err(|error| {
                     log_queue_persist_failed(
                         home,
                         session,
                         QueuePersistAction::RootDelivery,
-                        error,
+                        error.message(),
                     );
                 })?;
             candidate

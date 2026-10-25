@@ -42,6 +42,8 @@ use std::sync::Arc;
 use plakous::model::SessionId;
 use plakous::sessions::AgentSessions;
 
+use crate::agent_tree::{ProductAgentTree, TopologyError};
+use crate::agent_tree_protocol::TopologyErrorCode;
 use crate::driver::ledger::{
     BatchRule, CommandIntent, CommandKind, CommandLedger, LedgerError, LedgerFuture, Prepared,
     Settlement,
@@ -60,8 +62,8 @@ fn record_root_batch(
     command_id: &str,
     command: &str,
     batch: &ResultMailBatch,
-) -> Result<(), String> {
-    let record = |tree: &mut crate::agent_tree::ProductAgentTree| {
+) -> Result<(), TopologyError> {
+    let record = |tree: &mut ProductAgentTree| {
         tree.record_command(crate::agent_tree::AgentCommand::intent(
             command_id,
             batch.recipient.clone(),
@@ -70,39 +72,43 @@ fn record_root_batch(
             command,
             batch.message_ids.clone(),
         ))
-        .map_err(|error| error.message)
     };
-    if let Some(runtime) = crate::topology_runtime::lookup(&batch.tree_id) {
-        return runtime.mutate_then_emit(false, record);
-    }
-    let mut tree = rows
-        .tree(&batch.tree_id)?
-        .ok_or_else(|| "result tree is unavailable".to_owned())?;
-    let revision = tree.revision;
-    record(&mut tree)?;
-    if tree.revision != revision {
-        rows.save_tree(&mut tree)?;
-    }
-    Ok(())
+    mutate_root_batch(rows, batch, record)
 }
 
 fn withdraw_root_batch(
     rows: &dyn TopologyRows,
     command_id: &str,
     batch: &ResultMailBatch,
-) -> Result<(), String> {
-    let withdraw = |tree: &mut crate::agent_tree::ProductAgentTree| {
+) -> Result<(), TopologyError> {
+    let withdraw = |tree: &mut ProductAgentTree| {
         tree.withdraw_command(command_id);
-        Ok::<(), String>(())
+        Ok(())
     };
+    mutate_root_batch(rows, batch, withdraw)
+}
+
+fn mutate_root_batch(
+    rows: &dyn TopologyRows,
+    batch: &ResultMailBatch,
+    work: impl FnOnce(&mut ProductAgentTree) -> Result<(), TopologyError>,
+) -> Result<(), TopologyError> {
     if let Some(runtime) = crate::topology_runtime::lookup(&batch.tree_id) {
-        return runtime.mutate_then_emit(false, withdraw);
+        return runtime.mutate_then_emit_typed(false, work);
     }
     let mut tree = rows
-        .tree(&batch.tree_id)?
-        .ok_or_else(|| "result tree is unavailable".to_owned())?;
+        .tree(&batch.tree_id)
+        .map_err(|message| {
+            TopologyError::new(TopologyErrorCode::OperationRecoveryRequired, message)
+        })?
+        .ok_or_else(|| {
+            TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "result tree is unavailable",
+            )
+        })?;
     let revision = tree.revision;
-    withdraw(&mut tree)?;
+    work(&mut tree)?;
     if tree.revision != revision {
         rows.save_tree(&mut tree)?;
     }
@@ -175,6 +181,16 @@ impl CommandLedger for RootLedger<'_> {
                     "root steer cannot carry a tree batch".into(),
                 ));
             }
+            if self
+                .session
+                .queue_commands
+                .pending_for(self.item)
+                .is_some_and(|stored| stored != &submission)
+            {
+                return Err(LedgerError::Integrity(
+                    "root steer differs from its stored submission".into(),
+                ));
+            }
             // A live steer writes in place, including an exact retry. It must
             // neither touch the session nor reject an already-pending intent.
             self.store.save_submission(self.session, &submission)?;
@@ -201,7 +217,7 @@ impl CommandLedger for RootLedger<'_> {
         let mut candidate = self.session.clone();
         if let Some(batch) = &batch {
             record_root_batch(self.rows, intent.command_id, intent.base_text, batch)
-                .map_err(LedgerError::Unavailable)?;
+                .map_err(LedgerError::from)?;
         }
         if batch_preparation {
             candidate.touch();
@@ -212,7 +228,7 @@ impl CommandLedger for RootLedger<'_> {
                 && let Some(batch) = &batch
             {
                 withdraw_root_batch(self.rows, intent.command_id, batch)
-                    .map_err(LedgerError::Unavailable)?;
+                    .map_err(LedgerError::from)?;
             }
             return Err(error.into());
         }

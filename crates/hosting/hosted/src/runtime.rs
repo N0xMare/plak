@@ -1043,6 +1043,7 @@ struct DrivenTurn {
 struct DriveTurnError {
     message: String,
     quit_after_terminal: bool,
+    store_refusal: Option<crate::error::StoreRefusal>,
 }
 
 /// Operator-facing refusal for an approval handle the host never offered.

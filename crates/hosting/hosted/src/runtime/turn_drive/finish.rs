@@ -48,6 +48,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     },
                 ),
                 quit_after_terminal: true,
+                store_refusal: None,
             });
         }
 
@@ -163,6 +164,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     Err(DriveTurnError {
                         message: error,
                         quit_after_terminal: self.quit_after_terminal,
+                        store_refusal: None,
                     })
                 } else {
                     emit_turn_lifecycle(
@@ -175,6 +177,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     Err(DriveTurnError {
                         message: operator_facing_agent_error("agent turn failed", &err),
                         quit_after_terminal: self.quit_after_terminal,
+                        store_refusal: None,
                     })
                 }
             }
@@ -188,6 +191,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 Err(DriveTurnError {
                     message: "turn ended without result".into(),
                     quit_after_terminal: self.quit_after_terminal,
+                    store_refusal: None,
                 })
             }
         }

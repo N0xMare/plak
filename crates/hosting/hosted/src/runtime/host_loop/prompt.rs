@@ -613,6 +613,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if self.actions.abandon_and_release_requested() && driven.is_err() {
             return Ok(HostStep::Quit);
         }
+        if let Err(error) = &driven
+            && let Some(failure) = error.storage_failure()
+        {
+            return Err(failure);
+        }
         // The row used to move only when a binding was republished.
         send_session_info(&self.events, &self.config);
         let quit_after_terminal = match &driven {

@@ -28,7 +28,11 @@ pub trait TreeRows {
     fn tree_exists(&self, tree_id: &str) -> Result<bool, String>;
 
     /// Publish a whole tree through the store's compare-and-swap.
-    fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), String>;
+    /// A capacity refusal retains its typed recovery-storage classification.
+    fn save_tree(
+        &self,
+        tree: &mut ProductAgentTree,
+    ) -> Result<(), crate::agent_tree::TopologyError>;
 }
 
 /// Tree rows plus session ancestry through the supplied product record service.
@@ -233,7 +237,7 @@ pub fn install_successor_epoch_headless(
     };
     tree.begin_successor_epoch(snapshot)
         .map_err(|error| error.message)?;
-    rows.save_tree(&mut tree)?;
+    rows.save_tree(&mut tree).map_err(|error| error.message)?;
     if let (Some(session_id), Some(tree_id_text)) = (
         crate::product_observation::session_id_from_text(tree_id),
         crate::product_observation::BoundedText64::new(tree_id),
@@ -287,11 +291,20 @@ impl TreeRows for HostRows<'_> {
             .map_err(|error| error.detail.clone())
     }
 
-    fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), String> {
+    fn save_tree(
+        &self,
+        tree: &mut ProductAgentTree,
+    ) -> Result<(), crate::agent_tree::TopologyError> {
         let acknowledged = self
-            .trees()?
+            .trees()
+            .map_err(|message| {
+                crate::agent_tree::TopologyError::new(
+                    crate::agent_tree_protocol::TopologyErrorCode::OperationRecoveryRequired,
+                    message,
+                )
+            })?
             .save(tree)
-            .map_err(|error| error.detail.clone())?;
+            .map_err(crate::agent_tree::TopologyError::from)?;
         tree.acknowledge_revision(acknowledged);
         Ok(())
     }

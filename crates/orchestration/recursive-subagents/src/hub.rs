@@ -617,34 +617,44 @@ impl ProductTopologyRuntime {
         epoch_advanced: bool,
         work: impl FnOnce(&mut ProductAgentTree) -> Result<R, String>,
     ) -> Result<R, String> {
+        self.mutate_then_emit_typed(epoch_advanced, |tree| {
+            work(tree).map_err(|message| {
+                crate::tree::TopologyError::new(
+                    crate::protocol::TopologyErrorCode::OperationRecoveryRequired,
+                    message,
+                )
+            })
+        })
+        .map_err(|error| error.message)
+    }
+
+    /// Publishes and settles one mutation while preserving typed tree refusals.
+    ///
+    /// # Errors
+    /// Refuses a poisoned mutex, failed mutation, publication or settlement.
+    /// A refused publication rolls back consequences without draining effects.
+    pub fn mutate_then_emit_typed<R>(
+        &self,
+        epoch_advanced: bool,
+        work: impl FnOnce(&mut ProductAgentTree) -> Result<R, crate::tree::TopologyError>,
+    ) -> Result<R, crate::tree::TopologyError> {
         let (result, effects) = {
-            let mut tree = self
-                .driver
-                .lock()
-                .map_err(|_| "topology tree lock is poisoned".to_owned())?;
+            let mut tree = self.driver.lock().map_err(|_| {
+                crate::tree::TopologyError::new(
+                    crate::protocol::TopologyErrorCode::OperationRecoveryRequired,
+                    "topology tree lock is poisoned",
+                )
+            })?;
             if tree.revision != tree.stored_revision {
-                self.driver
-                    .save_guarded(&mut tree)
-                    .map_err(|error| error.message)?;
+                self.driver.save_guarded(&mut tree)?;
             }
-            let result = self
-                .driver
-                .fold_and_commit_guarded(&mut tree, |tree| {
-                    work(tree).map_err(|message| {
-                        crate::tree::TopologyError::new(
-                            crate::protocol::TopologyErrorCode::OperationRecoveryRequired,
-                            message,
-                        )
-                    })
-                })
-                .map_err(|error| error.message)?;
+            let result = self.driver.fold_and_commit_guarded(&mut tree, work)?;
             if epoch_advanced && let Some(observer) = self.observer.as_ref() {
                 observer.epoch_advanced(&tree.tree_id);
             }
             (result, tree.take_effects())
         };
-        let settled = self.driver.settle(effects).map_err(|error| error.message);
-        settled?;
+        self.driver.settle(effects)?;
         Ok(result)
     }
 

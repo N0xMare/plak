@@ -62,7 +62,7 @@ pub(super) async fn settle_waits(
         runtime.mutate_then_emit(false, settle)?;
     } else if let Some(mut tree) = stored {
         settle(&mut tree)?;
-        rows.save_tree(&mut tree)?;
+        rows.save_tree(&mut tree).map_err(|error| error.message)?;
     }
     Ok(())
 }
@@ -195,7 +195,9 @@ impl crate::sessions::projector::ProductTreeJoin for RootBatchJoin<'_> {
         {
             return Ok(());
         }
-        self.rows.save_tree(&mut tree)
+        self.rows
+            .save_tree(&mut tree)
+            .map_err(|error| error.message)
     }
 }
 

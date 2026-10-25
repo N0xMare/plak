@@ -119,8 +119,17 @@ impl plakous_hosted::runtime::TreeRows for crate::home::paths::PlakPaths {
         crate::store::tree::tree_exists(self, tree_id)
     }
 
-    fn save_tree(&self, tree: &mut ProductAgentTree) -> Result<(), String> {
-        crate::store::tree::save_tree(self, tree)
+    fn save_tree(
+        &self,
+        tree: &mut ProductAgentTree,
+    ) -> Result<(), plakous_recursive_subagents::tree::TopologyError> {
+        use plakous_recursive_subagents::tree::{TopologyError, TreeStore as _, TreeStoreError};
+        let revision = crate::store::tree::open_tree_store(self)
+            .map_err(TreeStoreError::unavailable)?
+            .save(tree)
+            .map_err(TopologyError::from)?;
+        tree.acknowledge_revision(revision);
+        Ok(())
     }
 }
 

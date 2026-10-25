@@ -2048,7 +2048,15 @@ from an acceptance fact, or consume an absent fact only below a positive
 retained feed boundary; a rejected fact is never consumption. Child mail never
 enters the product queue. Product-store refusals and interrupted tree-capacity
 refusals retain their typed classification through preparation and settlement;
-child publication waits belong to the command recipient. Command identities use these pinned spellings:
+root batch recording and withdrawal reach the host as
+`RecordStoreError::refused(StorageFull)` on an interrupted capacity refusal.
+Attached root and child tree publications park until written or interrupted;
+child publication waits belong to the command recipient. A refused root batch
+leaves the queued input and unread mail retryable. Retrying a batch written
+before its product submission reuses the same command identity and bytes
+without adding a second tree command. The hub's guarded mutation preserves
+queued effects on a refused publication; its typed result reaches the ledger
+without prose conversion. Command identities use these pinned spellings:
 `plak.queue.`, `plak:child-wake:`, `plak:resume-transient:root:`,
 `plak:park-wake:`, `plak:resume-transient:{agent}:`, `plak:submit-harness:`,
 `plak:spawn-start:`, `plak:mail:{id}:{start|follow-up|steer}`, and
@@ -2056,6 +2064,8 @@ child publication waits belong to the command recipient. Command identities use 
 root adapter with its exact target turn and the stored `send_now_steer` kind.
 Preparation saves the pending intent in place on the live session, including
 an exact retry, without a session touch, a clone, or an existence pre-read.
+The rebuilt submission must match the session's joined pending submission
+field for field; a mismatch is an integrity refusal rather than a new write.
 Consumed settlement discards the intent; an unrecorded definite refusal
 discards it with its pause cause, while uncertain outcomes retain it.
 

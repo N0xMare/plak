@@ -52,12 +52,6 @@ pub(crate) struct Prepared {
     pub(crate) instruction: bool,
 }
 
-impl Prepared {
-    pub(crate) const fn is_instruction(&self) -> bool {
-        self.instruction
-    }
-}
-
 impl CommandKind {
     pub(crate) const fn is_instruction(self) -> bool {
         matches!(

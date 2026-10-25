@@ -357,7 +357,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     };
     let mut acknowledged = Some(acknowledged);
     let submission = loop {
-        let command = if result_context.is_instruction() {
+        let command = if result_context.instruction {
             plakous::agent::TurnCommand::StartInstruction {
                 command_id,
                 text: result_context.prompt.clone(),

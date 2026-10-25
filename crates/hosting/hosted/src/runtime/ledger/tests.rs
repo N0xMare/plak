@@ -1,6 +1,76 @@
 use super::accepted_duplicate_consumed;
 use crate::sessions;
 
+#[cfg(test)]
+mod root_batch_tests;
+
+#[allow(clippy::unwrap_used, reason = "test assertions")]
+#[test]
+fn reloaded_pending_steer_retries_the_identical_submission() {
+    use super::RootLedger;
+    use crate::driver::ledger::{
+        BatchRule, CommandIntent, CommandKind, CommandLedger, LedgerError,
+    };
+    use crate::runtime::test_kit::MemoryRows;
+    use crate::session_store::SessionRecordStore as _;
+    let rows = MemoryRows::new();
+    let mut session = sessions::SessionRecord::new(std::path::PathBuf::from("workspace"));
+    session.updated_at_unix = 1;
+    let mut item = sessions::QueueItem::new("steer");
+    item.submitted_at_ms = 42;
+    rows.records().save(&mut session).unwrap();
+    let command = format!("plak.send-now.{}.{}", item.id, item.revision);
+    let turn = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+    let intent = || CommandIntent {
+        command_id: &command,
+        kind: CommandKind::RootSteer(turn),
+        base_text: "steer",
+        batch: BatchRule::None,
+    };
+    RootLedger::new(&rows, rows.records(), &mut session, &item)
+        .prepare(intent())
+        .unwrap();
+    let stored = rows
+        .records()
+        .load_intents(&session.id)
+        .unwrap()
+        .submission(&command)
+        .unwrap()
+        .clone();
+    session = rows.records().load(&session.id).unwrap();
+    assert_eq!(session.queue_commands.pending_for(&item), Some(&stored));
+    let revision = session.store_revision;
+    RootLedger::new(&rows, rows.records(), &mut session, &item)
+        .prepare(intent())
+        .unwrap();
+    assert!(
+        session.store_revision > revision,
+        "an exact retry saves in place again"
+    );
+    assert_eq!(session.updated_at_unix, 1);
+    assert_eq!(
+        rows.records()
+            .load_intents(&session.id)
+            .unwrap()
+            .submissions,
+        std::slice::from_ref(&stored)
+    );
+    let before = session.clone();
+    item.submitted_at_ms += 1;
+    assert!(matches!(
+        RootLedger::new(&rows, rows.records(), &mut session, &item).prepare(intent()),
+        Err(LedgerError::Integrity(_))
+    ));
+    assert_eq!(session, before);
+    assert_eq!(
+        rows.records()
+            .load_intents(&session.id)
+            .unwrap()
+            .submissions,
+        [stored]
+    );
+}
+
 #[allow(clippy::unwrap_used, reason = "test assertions")]
 #[test]
 fn live_steer_skips_intent_reads_and_preserves_typed_store_refusals() {

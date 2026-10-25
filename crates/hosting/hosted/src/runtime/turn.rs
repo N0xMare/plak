@@ -48,13 +48,30 @@ impl From<String> for DriveTurnError {
         Self {
             message,
             quit_after_terminal: false,
+            store_refusal: None,
         }
     }
 }
 
 impl From<crate::session_store::RecordStoreError> for DriveTurnError {
     fn from(error: crate::session_store::RecordStoreError) -> Self {
-        error.to_string().into()
+        Self {
+            store_refusal: error.refusal(),
+            message: error.to_string(),
+            quit_after_terminal: false,
+        }
+    }
+}
+
+impl DriveTurnError {
+    pub(super) fn storage_failure(&self) -> Option<crate::error::CliFailure> {
+        (self.store_refusal == Some(crate::error::StoreRefusal::StorageFull)).then(|| {
+            crate::session_store::RecordStoreError::refused(
+                crate::error::StoreRefusal::StorageFull,
+                self.message.clone(),
+            )
+            .into()
+        })
     }
 }
 

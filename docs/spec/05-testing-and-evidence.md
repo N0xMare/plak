@@ -1617,18 +1617,25 @@ contain none of the selector's strings. The harness also carries
 one product edge to transport fault injection as well.
 
 Hosted ledger equivalence tests `root_ledger_prechange_bytes`,
-`root_batched_command_bytes`, `child_ledger_prechange_bytes`, and
-`mail_start_batched_command_bytes`, and `root_send_now_command_bytes` pin product submission and tree-command
-fields and exact prompt bytes. Batched root Start and host wake fixtures check
-the tree `RootBatch` row and session touch; send-now pins its target turn,
-untouched session timestamp and repeated pending-intent save. Mail Start carries its primary
-envelope, another unread envelope and a child result. The explicit-intent
-matrices cover root Start, host wake and transient resume, and child spawn,
-wake, transient resume, corrective, mail Start, follow-up and steer.
+`root_batched_command_bytes`, `child_ledger_prechange_bytes`,
+`mail_start_batched_command_bytes`, and `root_send_now_command_bytes` pin
+product submission and tree-command fields and exact prompt bytes. Batched
+root Start and host wake fixtures check the tree `RootBatch` row and session
+touch; send-now pins its target turn, untouched session timestamp and repeated
+pending-intent save. Mail Start carries its primary envelope, another unread
+envelope and a child result. The explicit-intent matrices cover root Start,
+host wake and transient resume, and child spawn, wake, transient resume,
+corrective, mail Start, follow-up and steer.
 `interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable` checks
 typed preparation/settlement refusals, retained unread mail and exact retry;
 `live_steer_skips_intent_reads_and_preserves_typed_store_refusals` checks typed
 product capacity refusal before dispatch and during root settlement.
+`root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated`
+checks attached and stored-only tree-batch recording and withdrawal refusals,
+retained input/mail and exact retry without a duplicate tree command.
+`reloaded_pending_steer_retries_the_identical_submission` checks a pending
+steer's field-for-field identity after session reload and refuses a changed
+submission without saving it.
 
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
