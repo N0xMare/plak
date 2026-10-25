@@ -2312,7 +2312,9 @@ Closed child control ingress is skipped; child ingress backpressure leaves
 terminal recording to the driver's cancellation/release commit. Neither is a
 publication failure or changes exit 6/4. Actual checkpoint publication failures
 remain fatal.
-Every run exit persists the queue drain as `restored_paused`. `turn.auto_continue`
+Every run exit pauses the process-local queue drain. Retained queued work
+reopens as `restored_paused`; an empty queue without a pause cause loads as
+`live_auto_drain`. No drain flag is persisted (§2.6, §4.2). `turn.auto_continue`
 does not apply. The root uses root-wake guidance: end its turn when only
 waiting remains.
 

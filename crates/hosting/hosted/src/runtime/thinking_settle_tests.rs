@@ -297,6 +297,12 @@ fn a_quit_after_an_interrupt_records_exactly_one_cancel_command() {
         })
         .count();
     assert_eq!(cancels, 1, "{records:#?}");
+    assert_eq!(record.pending_queue.len(), 0);
+    assert_eq!(
+        record.queue_drain_state,
+        sessions::QueueDrainState::LiveAutoDrain,
+        "quit pauses only the live drain; an empty restored queue has no stored pause flag"
+    );
     assert_eq!(
         crate::runtime::turn_drive::quit_trace::steps(&session_id),
         ["bounded", "notice committed", "queue paused"],
