@@ -263,9 +263,19 @@ async fn crash_then_recovery_release_preserves_jobs(working: bool) -> TestResult
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fast_abandon_stops_jobs_and_records_terminal_before_releasing_lease() -> TestResult {
-    abandon_hosted_job(false, false).await
+    // This proves stop/publication/release order, not the wall-clock exit budget.
+    // Keep Tokio time fixed while real process supervision gets scheduled.
+    let completion = abandon_hosted_job(false, false);
+    tokio::pin!(completion);
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut completion => return result,
+            () = tokio::task::yield_now() => {}
+        }
+    }
 }
 
 #[tokio::test]
@@ -332,7 +342,10 @@ async fn abandon_hosted_job(fail_record: bool, fail_stop: bool) -> TestResult {
         assert!(lock_mutex(&store.state).active_lease.is_none());
         return Ok(());
     }
-    agent.abandon_and_release().await?;
+    agent
+        .abandon_and_release()
+        .await
+        .map_err(|error| format!("abandon stop/publication: {}", error.message()))?;
     assert_eq!(
         process.jobs()[0].status,
         plakous_tools::JobStatus::Stopped(plakous_tools::JobStopReason::SessionExit),
