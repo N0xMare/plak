@@ -603,8 +603,6 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/tui/activity.rs"): {"thread_local"},
     ("plakous-host-protocol", "src/jsonl.rs"): {"json"},
     ("plakous-hosted", "src/session_log.rs"): {"thread_local"},
-    # Canonical bounded result-context requests for the durable operation journal.
-    ("plakous-hosted", "src/agent/result_context.rs"): {"json"},
     # Explicit unreachable operation in the feature-gated hosted test fixture.
     ("plakous-hosted", "src/runtime/test_kit.rs"): {"panic"},
     ("plakous-hosted", "src/sessions.rs"): {"thread_local"},

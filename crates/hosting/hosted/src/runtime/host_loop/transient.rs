@@ -164,6 +164,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             &text,
             None,
             &command,
+            crate::driver::ledger::CommandKind::Resume,
         )
         .map_err(CliFailure::new)?;
         Ok(HostStep::Prompt {

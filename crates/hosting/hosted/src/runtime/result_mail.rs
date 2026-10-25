@@ -5,6 +5,7 @@
 //! Neither observation nor selection starts inference.
 
 use super::TopologyRows;
+use super::ledger::RootLedger;
 use crate::sessions::{ResultMailBatch, SessionRecord};
 
 pub(crate) const CHILD_MAIL_FRAME: &str =
@@ -154,64 +155,6 @@ pub(crate) fn child_message_block(mail: &crate::agent_tree::MailRecord, first: b
     )
 }
 
-/// Records the exact batch a root command carries as a tree intent keyed by
-/// its command id, before the product writes the submission (spec 03
-/// section 8). Writing the same batch again is a no-op, so a resubmission
-/// reuses it. Stored-only trees record the same intent through their rows.
-fn record_root_batch(
-    rows: &dyn TopologyRows,
-    command_id: &str,
-    command: &str,
-    batch: &ResultMailBatch,
-) -> Result<(), String> {
-    let record = |tree: &mut crate::agent_tree::ProductAgentTree| {
-        tree.record_command(crate::agent_tree::AgentCommand::intent(
-            command_id,
-            batch.recipient.clone(),
-            None,
-            crate::agent_tree::AgentCommandKind::RootBatch,
-            command,
-            batch.message_ids.clone(),
-        ))
-        .map_err(|error| error.message)
-    };
-    if let Some(runtime) = crate::topology_runtime::lookup(&batch.tree_id) {
-        return runtime.mutate_then_emit(false, record);
-    }
-    let mut tree = rows
-        .tree(&batch.tree_id)?
-        .ok_or_else(|| "result tree is unavailable".to_owned())?;
-    let revision = tree.revision;
-    record(&mut tree)?;
-    if tree.revision != revision {
-        rows.save_tree(&mut tree)?;
-    }
-    Ok(())
-}
-
-fn withdraw_root_batch(
-    rows: &dyn TopologyRows,
-    command_id: &str,
-    batch: &ResultMailBatch,
-) -> Result<(), String> {
-    let withdraw = |tree: &mut crate::agent_tree::ProductAgentTree| {
-        tree.withdraw_command(command_id);
-        Ok::<(), String>(())
-    };
-    if let Some(runtime) = crate::topology_runtime::lookup(&batch.tree_id) {
-        return runtime.mutate_then_emit(false, withdraw);
-    }
-    let mut tree = rows
-        .tree(&batch.tree_id)?
-        .ok_or_else(|| "result tree is unavailable".to_owned())?;
-    let revision = tree.revision;
-    withdraw(&mut tree)?;
-    if tree.revision != revision {
-        rows.save_tree(&mut tree)?;
-    }
-    Ok(())
-}
-
 /// The tree side of the product-to-tree join at open (spec 03 section
 /// 14.3): the product names its pending root command ids and the tree
 /// withdraws every other unrecorded root batch of the session's tree, with
@@ -296,28 +239,8 @@ pub(super) fn select(
     Ok((command, batch))
 }
 
-pub(super) fn prepare(
-    rows: &dyn TopologyRows,
-    store: &dyn crate::session_store::SessionRecordStore,
-    session: &SessionRecord,
-    item: &crate::sessions::QueueItem,
-    command: &str,
-    batch: ResultMailBatch,
-) -> Result<SessionRecord, String> {
-    prepare_with_command(
-        rows,
-        store,
-        session,
-        item,
-        command,
-        Some(batch),
-        &format!("plak.queue.{}.{}", item.id, item.revision),
-    )
-    .map_err(String::from)
-}
-
 pub(super) fn prepare_instruction(
-    rows: &dyn TopologyRows,
+    rows: &(dyn TopologyRows + Sync),
     store: &dyn crate::session_store::SessionRecordStore,
     session: &SessionRecord,
     item: &crate::sessions::QueueItem,
@@ -344,58 +267,30 @@ pub(super) fn prepare_instruction(
                 .collect::<Vec<_>>()
                 .join("-")
         ),
+        crate::driver::ledger::CommandKind::HostWake,
     )
 }
 
 pub(super) fn prepare_with_command(
-    rows: &dyn TopologyRows,
+    rows: &(dyn TopologyRows + Sync),
     store: &dyn crate::session_store::SessionRecordStore,
     session: &SessionRecord,
     item: &crate::sessions::QueueItem,
     command: &str,
     batch: Option<ResultMailBatch>,
     command_id: &str,
+    kind: crate::driver::ledger::CommandKind,
 ) -> Result<SessionRecord, crate::session_store::RecordStoreError> {
-    if store
-        .load_intents(&session.id)?
-        .submission(command_id)
-        .is_some()
-    {
-        return Err("result delivery must reuse its existing immutable submission".into());
-    }
+    use crate::driver::ledger::{BatchRule, CommandIntent, CommandLedger};
     let mut candidate = session.clone();
-    if let Some(batch) = &batch {
-        record_root_batch(rows, command_id, command, batch)?;
-    }
-    candidate.touch();
-    let saved = store.save_submission(
-        &mut candidate,
-        &crate::sessions::projector::Submission {
-            command_id: command_id.to_owned(),
-            kind: if command_id.starts_with(super::host_loop::wake::WAKE_COMMAND_PREFIX)
-                || command_id.starts_with(super::host_loop::transient::COMMAND_PREFIX)
-            {
-                crate::sessions::projector::SubmissionKind::HostWake
-            } else {
-                crate::sessions::projector::SubmissionKind::RootStart
-            },
-            queue_item_id: item.id.clone(),
-            queue_item_revision: item.revision,
-            target_turn_id: None,
-            canonical_command: command.to_owned(),
-            submitted_at_ms: item.submitted_at_ms,
-        },
-    );
-    if let Err(error) = saved {
-        // A refused submission wrote nothing, so its batch is withdrawn with
-        // the mail unread and a retry records a fresh one.
-        if error.refusal().is_some()
-            && let Some(batch) = &batch
-        {
-            withdraw_root_batch(rows, command_id, batch)?;
-        }
-        return Err(error);
-    }
+    RootLedger::new(rows, store, &mut candidate, item)
+        .prepare(CommandIntent {
+            command_id,
+            kind,
+            base_text: command,
+            batch: batch.map_or(BatchRule::None, BatchRule::RootResults),
+        })
+        .map_err(crate::session_store::RecordStoreError::from)?;
     Ok(candidate)
 }
 

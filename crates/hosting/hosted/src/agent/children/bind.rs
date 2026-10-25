@@ -532,7 +532,10 @@ async fn start_spawned_child(
                 &spawned.agent_id,
                 attached,
                 command_id,
-                prompt,
+                super::turns::ChildCommand::fresh(
+                    prompt,
+                    crate::driver::ledger::CommandKind::Start,
+                ),
                 startup,
             )
             .await?;

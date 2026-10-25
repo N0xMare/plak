@@ -3,8 +3,10 @@
 
 use super::*;
 use crate::agent::children::ChildTurnIdentity;
+use crate::agent::ledger::ChildLedger;
 use crate::agent::park::{self, TurnEnd};
 use crate::agent_tree_tools::MailDeliveryRequest;
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger};
 use plakous::sessions::{
     AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend, SessionOperationId,
 };
@@ -187,14 +189,15 @@ impl Fixture {
         String,
     ) {
         let command = CommandId::new("fixture:follow-up").unwrap();
-        let prompt = crate::agent::result_context::prepare(
-            self.runtime.driver(),
-            &self.child,
-            command.as_str(),
-            "follow up",
-        )
-        .unwrap()
-        .prompt;
+        let prompt = ChildLedger::new(self.runtime.driver(), &self.child)
+            .prepare(CommandIntent {
+                command_id: command.as_str(),
+                kind: CommandKind::Followup,
+                base_text: "follow up",
+                batch: BatchRule::Results,
+            })
+            .unwrap()
+            .prompt;
         let delivery = self
             .runtime
             .live
@@ -316,6 +319,7 @@ async fn restart_drains_follow_up_without_holding_the_live_map() {
             &identity,
             CommandId::new("fixture:restart").unwrap(),
             "restart".into(),
+            CommandKind::Corrective,
         ));
         assert_pending(restart.as_mut()).await;
         assert!(fixture.runtime.live.try_lock().is_ok());

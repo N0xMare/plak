@@ -1,8 +1,11 @@
 use super::bind::{StartupWorker, child_create_failure};
+
 use super::reopen::reconcile_reopened_child_results;
 use super::turns::await_child_start;
 use super::waiter::{start_submit_harness_turn, wait_transient_gate};
 use super::*;
+use crate::agent::ledger::ChildLedger;
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger};
 use crate::topology_runtime::{LiveChildHandle, LiveRelease, ProductTopologyRuntime};
 use plakous::agent::TurnControl;
 
@@ -1276,19 +1279,18 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
                     )
                 })
                 .unwrap();
-            super::super::result_context::prepare(
-                runtime.driver(),
-                &parent.agent_id,
-                &command,
-                &prompt,
-            )
-            .expect("same-attempt corrective context replays exactly");
-            super::super::result_context::acknowledge(
-                runtime.driver(),
-                &command,
-                super::super::result_context::Submission::Recorded,
-            )
-            .unwrap();
+            ChildLedger::new(runtime.driver(), &parent.agent_id)
+                .prepare(CommandIntent {
+                    command_id: &command,
+                    kind: CommandKind::Corrective,
+                    base_text: &prompt,
+                    batch: BatchRule::Results,
+                })
+                .expect("same-attempt corrective context replays exactly");
+            ChildLedger::settlement_only(runtime.driver())
+                .settle(&command, crate::driver::ledger::Settlement::Recorded)
+                .map_err(String::from)
+                .unwrap();
             assert_eq!(
                 runtime.read(|tree| tree.commands().len()).unwrap(),
                 operations_before
@@ -1478,13 +1480,18 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
     } else {
         "result-recovery-start".to_owned()
     };
-    let context = super::super::result_context::prepare(
-        runtime.driver(),
-        &parent.agent_id,
-        &command,
-        "continue",
-    )
-    .unwrap();
+    let context = ChildLedger::new(runtime.driver(), &parent.agent_id)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: if corrective {
+                CommandKind::Corrective
+            } else {
+                CommandKind::Followup
+            },
+            base_text: "continue",
+            batch: BatchRule::Results,
+        })
+        .unwrap();
     let submission = session
         .agent()
         .start(CommandId::new(command.clone()).unwrap(), context.prompt)
@@ -1568,13 +1575,14 @@ async fn assert_reopened_result_reconciliation(corrective: bool, empty: bool) {
             .unwrap()
     );
     assert!(
-        super::super::result_context::prepare(
-            runtime.driver(),
-            &parent.agent_id,
-            "result-recovery-next",
-            "next"
-        )
-        .is_ok(),
+        ChildLedger::new(runtime.driver(), &parent.agent_id)
+            .prepare(CommandIntent {
+                command_id: "result-recovery-next",
+                kind: CommandKind::Followup,
+                base_text: "next",
+                batch: BatchRule::Results
+            })
+            .is_ok(),
         "recorded acceptance must not leave later commands permanently blocked"
     );
     let ChildReopen::Attached { session, .. } = reopened else {
@@ -1717,7 +1725,7 @@ async fn reclaimed_child_start_settles_consumed_without_binding() {
         &child,
         attached,
         command.clone(),
-        "work",
+        ChildCommand::fresh("work".to_owned(), CommandKind::Start),
         &startup,
         true,
         StartAdmission::Ordinary,
@@ -1793,7 +1801,14 @@ async fn child_start_control_fixture(
     };
     let agent = session.agent().clone();
     let command = CommandId::new("start-control-command").unwrap();
-    super::super::result_context::prepare(runtime.driver(), &id, command.as_str(), "work").unwrap();
+    ChildLedger::new(runtime.driver(), &id)
+        .prepare(CommandIntent {
+            command_id: command.as_str(),
+            kind: CommandKind::Followup,
+            base_text: "work",
+            batch: BatchRule::Results,
+        })
+        .unwrap();
     if duplicate {
         let first = agent.start(command.clone(), "work").await.unwrap();
         assert!(first.turn().is_some());
@@ -1813,7 +1828,7 @@ async fn child_start_control_fixture(
         &id,
         attached,
         command.clone(),
-        "work",
+        ChildCommand::fresh("work".to_owned(), CommandKind::Start),
         &startup,
         true,
         StartAdmission::Ordinary,
@@ -1888,7 +1903,13 @@ async fn child_start_control_fixture(
             message.contains("duplicate child start has no live turn"),
             "{message}"
         );
-        super::super::result_context::prepare(runtime.driver(), &id, command.as_str(), "work")
+        ChildLedger::new(runtime.driver(), &id)
+            .prepare(CommandIntent {
+                command_id: command.as_str(),
+                kind: CommandKind::Followup,
+                base_text: "work",
+                batch: BatchRule::Results,
+            })
             .unwrap();
         runtime
             .read(|tree| {
@@ -2014,7 +2035,7 @@ async fn real_session_late_start_ack_releases_after_deadline_without_redispatch(
             &worker_id,
             attached,
             CommandId::new("startup-real-command").unwrap(),
-            "run exactly once",
+            ChildCommand::fresh("run exactly once".to_owned(), CommandKind::Start),
             &startup,
             true,
             StartAdmission::Ordinary,
@@ -2287,7 +2308,7 @@ async fn child_start_refusal_under_pressure(delete_fresh_session: bool, cancel_a
         &id,
         attached,
         CommandId::new("start-under-pressure").unwrap(),
-        "never runs",
+        ChildCommand::fresh("never runs".to_owned(), CommandKind::Start),
         &startup,
         delete_fresh_session,
         StartAdmission::Ordinary,

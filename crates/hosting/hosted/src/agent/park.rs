@@ -6,6 +6,9 @@
 //! processes need it); [`park_until_wake`] watches its own processes, its
 //! children and its mail, and [`start_wake_turn`] admits the wake as an
 //! ordinary host instruction on the same attempt and turn token.
+use crate::driver::ledger::CommandLedger as _;
+
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
 
 use std::future::Future;
 use std::sync::Arc;
@@ -407,17 +410,25 @@ async fn start_wake_turn(
     let prompt = crate::child_prompts::PLAK_CHILD_WAKE_PROMPT;
     let command_id = CommandId::new(command_text.clone())
         .map_err(|error| WakeRefusal::Failed(error.to_string()))?;
-    let context = super::result_context::prepare(driver, agent_id, &command_text, prompt)
+    let context = crate::agent::ledger::ChildLedger::new(driver, agent_id)
+        .prepare(CommandIntent {
+            command_id: &command_text,
+            kind: CommandKind::Wake,
+            base_text: prompt,
+            batch: BatchRule::WakeAll,
+        })
+        .map_err(String::from)
         .map_err(WakeRefusal::Failed)?;
     let Ok((mut live_map, delivery)) =
         super::live::lock_for_transition(live, agent_id, identity.turn).await
     else {
-        super::result_context::acknowledge(
-            driver,
-            &command_text,
-            super::result_context::Submission::Refused,
-        )
-        .map_err(WakeRefusal::Failed)?;
+        crate::agent::ledger::ChildLedger::settlement_only(driver)
+            .settle(
+                &command_text,
+                crate::driver::ledger::Settlement::Refused { pause: None },
+            )
+            .map_err(String::from)
+            .map_err(WakeRefusal::Failed)?;
         return Err(WakeRefusal::ParkEnded);
     };
     // Re-checked under the live lock: an interrupt's cancel needs this lock,
@@ -430,12 +441,13 @@ async fn start_wake_turn(
         .filter(|child| admissible && child.turn_id() == identity.turn);
     let Some(child) = child else {
         drop(live_map);
-        super::result_context::acknowledge(
-            driver,
-            &command_text,
-            super::result_context::Submission::Refused,
-        )
-        .map_err(WakeRefusal::Failed)?;
+        crate::agent::ledger::ChildLedger::settlement_only(driver)
+            .settle(
+                &command_text,
+                crate::driver::ledger::Settlement::Refused { pause: None },
+            )
+            .map_err(String::from)
+            .map_err(WakeRefusal::Failed)?;
         return Err(WakeRefusal::ParkEnded);
     };
     let result = match child
@@ -456,25 +468,21 @@ async fn start_wake_turn(
                     None,
                 )
                 .await;
-            } else if error == super::children::CHILD_COMMAND_CONSUMED {
-                // Recorded below the feed's retention: its batch is in
-                // history, and nothing is derived from it.
-                if let Err(settle) = super::result_context::acknowledge(
-                    driver,
-                    &command_text,
-                    super::result_context::Submission::Consumed,
-                ) {
-                    return Err(WakeRefusal::Failed(format!("{error}; {settle}")));
-                }
-            } else if error.starts_with(super::live::RESTART_REJECTED) {
-                // Nothing ran: the batch returns to unread for whatever
-                // admits the child next, and blocks no later command.
-                if let Err(settle) = super::result_context::acknowledge(
-                    driver,
-                    &command_text,
-                    super::result_context::Submission::Refused,
-                ) {
-                    return Err(WakeRefusal::Failed(format!("{error}; {settle}")));
+            } else {
+                // Consumption records a below-retention batch; definite
+                // refusal withdraws it with the mail unread. Other failures
+                // retain the intent for reconciliation.
+                let settlement = if error == super::children::CHILD_COMMAND_CONSUMED {
+                    Some(crate::driver::ledger::Settlement::Consumed)
+                } else if error.starts_with(super::live::RESTART_REJECTED) {
+                    Some(crate::driver::ledger::Settlement::Refused { pause: None })
+                } else {
+                    None
+                };
+                if let Some(settlement) = settlement {
+                    crate::agent::ledger::ChildLedger::new(driver, agent_id)
+                        .settle(&command_text, settlement)
+                        .map_err(|settle| WakeRefusal::Failed(format!("{error}; {settle}")))?;
                 }
             }
             return Err(WakeRefusal::Failed(error));
@@ -501,11 +509,9 @@ async fn start_wake_turn(
         .unwrap_or_else(|error| (Err(error.message), crate::agent_tree::Effects::default()));
     settle_or_fault(driver, effects, agent_id);
     let acknowledged = published.and_then(|()| {
-        super::result_context::acknowledge(
-            driver,
-            &command_text,
-            super::result_context::Submission::Recorded,
-        )
+        crate::agent::ledger::ChildLedger::settlement_only(driver)
+            .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
+            .map_err(String::from)
     });
     if let Err(error) = acknowledged {
         // The wake was admitted (and possibly bound) but its batch could not
@@ -581,7 +587,7 @@ fn settle_prepared(
     command_id: &str,
     admitted: bool,
 ) -> Result<(), String> {
-    for command in super::result_context::prepared_commands(driver, agent_id)? {
+    for command in crate::agent::ledger::prepared_commands(driver, agent_id)? {
         if command.command_id == command_id {
             command.settle(driver, admitted)?;
         }
@@ -617,7 +623,7 @@ pub(super) async fn wake_reopened(
         Ok(ReopenedWake::Start(command)) => {
             let (command_id, prompt) = if let Some(journaled) = command {
                 let remaining =
-                    super::result_context::prepared_commands(runtime.driver(), agent_id)?;
+                    crate::agent::ledger::prepared_commands(runtime.driver(), agent_id)?;
                 let remaining = runtime
                     .read(|tree| {
                         remaining
@@ -644,8 +650,9 @@ pub(super) async fn wake_reopened(
                 match command {
                     Ok(command) => (
                         command,
-                        super::children::ChildCommand::Fresh(
+                        super::children::ChildCommand::fresh(
                             crate::child_prompts::PLAK_CHILD_WAKE_PROMPT.to_owned(),
+                            CommandKind::Wake,
                         ),
                     ),
                     Err(error) => {
@@ -689,7 +696,7 @@ pub(super) async fn wake_reopened(
                 .release_opened()
                 .await
                 .map_err(|error| error.to_string())?;
-            super::result_context::project_feed(runtime, agent_id, &sessions, session_id).await?;
+            crate::agent::ledger::project_feed(runtime, agent_id, &sessions, session_id).await?;
             let terminal = super::children::read_finalize_terminal(
                 runtime.driver(),
                 &sessions,
@@ -711,7 +718,7 @@ enum ReopenedWake {
     /// A saved continuation decision, joined to its exact canonical failure.
     Resume(ReopenedResume),
     /// Start the wake, or retry the journaled command exactly.
-    Start(Option<super::result_context::JournaledCommand>),
+    Start(Option<crate::agent::ledger::JournaledCommand>),
     /// `max_turns` is spent: the attempt ends instead.
     Spent,
 }
@@ -785,7 +792,7 @@ async fn start_reopened_resume(
             &id,
             attached,
             resume.command_id,
-            prompt,
+            super::children::ChildCommand::fresh(prompt, CommandKind::Resume),
             &startup,
             false,
             super::children::StartAdmission::ReopenWake,
@@ -894,10 +901,10 @@ async fn prepare_reopened_wake(
             .ok_or_else(|| "saved continuation has no attempt".to_owned())?;
         let command_id = CommandId::new(format!(
             "{}{agent_id}:{attempt}:{round}",
-            super::result_context::TRANSIENT_RESUME_PREFIX
+            crate::agent::ledger::TRANSIENT_RESUME_PREFIX
         ))
         .map_err(|error| error.to_string())?;
-        for prior in super::result_context::prepared_commands(driver, agent_id)? {
+        for prior in crate::agent::ledger::prepared_commands(driver, agent_id)? {
             // The exact pending Resume keeps its original prompt and mail;
             // withdrawing it would make an accepted retry impossible to bind.
             if prior.command_id != command_id.as_str() {
@@ -918,7 +925,7 @@ async fn prepare_reopened_wake(
         })
         .map_err(|error| error.message)?;
     let mut unrecorded = Vec::new();
-    for command in super::result_context::prepared_commands(driver, agent_id)? {
+    for command in crate::agent::ledger::prepared_commands(driver, agent_id)? {
         // An earlier attempt's command is never submitted onto this one, and
         // an unrecorded corrective round is re-derived from the attempt's
         // state: both are withdrawn, their mail unread.
@@ -1059,11 +1066,11 @@ async fn admitted_command(
     turn: plakous::model::TurnId,
 ) -> Result<String, String> {
     let driver = &runtime.driver().for_agent(agent_id);
-    super::result_context::project_child_feed(runtime, agent_id, attached).await?;
-    for command in super::result_context::prepared_commands(driver, agent_id)? {
+    crate::agent::ledger::project_child_feed(runtime, agent_id, attached).await?;
+    for command in crate::agent::ledger::prepared_commands(driver, agent_id)? {
         command.settle(driver, false)?;
     }
-    super::result_context::accepted_command(driver, agent_id, turn)?.ok_or_else(|| {
+    crate::agent::ledger::accepted_command(driver, agent_id, turn)?.ok_or_else(|| {
         "a reopened parked child runs a turn no journaled command admitted; recovery required"
             .to_owned()
     })
@@ -1079,7 +1086,7 @@ async fn project_cancelled(
     sessions: &plakous::sessions::AgentSessions,
     session_id: plakous::model::SessionId,
 ) {
-    let _ = super::result_context::project_feed(runtime, agent_id, sessions, session_id).await;
+    let _ = crate::agent::ledger::project_feed(runtime, agent_id, sessions, session_id).await;
 }
 
 /// Settles the journaled command that admitted a turn a mail-delivered

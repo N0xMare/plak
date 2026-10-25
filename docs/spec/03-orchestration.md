@@ -2039,6 +2039,18 @@ interrupted; remaining envelopes stay in the same tree inbox.
 Interrupting a child without completing its attempt produces no result, and
 closed children do not publish completion mail.
 
+Root and child admissions use one hosted write-ahead command ledger port.
+Its role adapters have separate storage authority: a root records its tree
+batch before its product submission; a child records only its tree intent.
+Fresh intents name their command kind and batching rule explicitly. Duplicate
+settlement projects through the role's reader, then applies one rule: settle
+from an acceptance fact, or consume an absent fact only below a positive
+retained feed boundary; a rejected fact is never consumption. Child mail never
+enters the product queue. Command identities use these pinned spellings:
+`plak.queue.`, `plak:child-wake:`, `plak:resume-transient:root:`,
+`plak:park-wake:`, `plak:resume-transient:{agent}:`, `plak:submit-harness:`,
+`plak:spawn-start:`, and `plak:mail:{id}:{start|follow-up|steer}`.
+
 Nested parents receive the same bounded context on their next authorized child
 start. The command is first written as an `agent_commands` intent (§14.3) with
 the original prompt digest, command identity, exact augmented prompt, and result

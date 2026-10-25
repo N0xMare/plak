@@ -1,5 +1,9 @@
 //! Live mail delivery and turn cancellation for bound children.
 
+use crate::driver::ledger::CommandLedger as _;
+
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
+
 use super::{
     Arc, ChildAssignmentStartKind, ChildBoundBind, ChildReopen, ChildReopenMode, ChildStartFailure,
     CommandId, FromStr, Future, LiveRelease, Pin, SpawnParent, TreeDriver, TurnId,
@@ -130,9 +134,7 @@ impl ProductMailDeliverer {
             let result = if recovered.is_some() {
                 Err(refused("child session has an admitted turn".to_owned()))
             } else {
-                match crate::agent::result_context::feed_bounds(&attached.sessions, session_id)
-                    .await
-                {
+                match crate::agent::ledger::feed_bounds(&attached.sessions, session_id).await {
                     Ok((_, tail)) => driver.withdraw_unstarted_followup(
                         &agent_id,
                         &message_id,
@@ -320,7 +322,7 @@ impl ProductMailDeliverer {
             &request.agent_id,
             attached,
             command_id,
-            prompt,
+            super::turns::ChildCommand::mail_start(prompt, request.message_id.clone()),
         )
         .await
         .map_err(|failure| match failure {
@@ -349,12 +351,15 @@ impl ProductMailDeliverer {
     > {
         self.ensure_live(&request).await?;
         let command_id = mail_command_id(&request.message_id, "follow-up")?;
-        let context = crate::agent::result_context::prepare(
-            self.runtime.driver(),
-            &request.agent_id,
-            command_id.as_str(),
-            &request.body,
-        )?;
+        let context =
+            crate::agent::ledger::ChildLedger::new(self.runtime.driver(), &request.agent_id)
+                .prepare(CommandIntent {
+                    command_id: command_id.as_str(),
+                    kind: CommandKind::Followup,
+                    base_text: &request.body,
+                    batch: BatchRule::Delivered(&request.message_id),
+                })
+                .map_err(String::from)?;
         let (delivery, turn_id, read) = {
             let live = self.runtime.live.lock().await;
             let child = live
@@ -393,12 +398,15 @@ impl ProductMailDeliverer {
     > {
         self.ensure_live(&request).await?;
         let command_id = mail_command_id(&request.message_id, "steer")?;
-        let context = crate::agent::result_context::prepare(
-            self.runtime.driver(),
-            &request.agent_id,
-            command_id.as_str(),
-            &request.body,
-        )?;
+        let context =
+            crate::agent::ledger::ChildLedger::new(self.runtime.driver(), &request.agent_id)
+                .prepare(CommandIntent {
+                    command_id: command_id.as_str(),
+                    kind: CommandKind::Followup,
+                    base_text: &request.body,
+                    batch: BatchRule::Delivered(&request.message_id),
+                })
+                .map_err(String::from)?;
         let (control, turn_id) = {
             let live = self.runtime.live.lock().await;
             let child = live

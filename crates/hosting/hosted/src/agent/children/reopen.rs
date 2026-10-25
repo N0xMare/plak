@@ -328,7 +328,7 @@ pub(in crate::agent) async fn reattach_inflight_children(
                         let locator = target.to_string();
                         let projected = match parent.state_roots().runtime_sessions() {
                             Ok(sessions) => {
-                                crate::agent::result_context::project_feed(
+                                crate::agent::ledger::project_feed(
                                     runtime,
                                     &child.agent_id,
                                     &sessions,
@@ -1033,10 +1033,10 @@ pub(in crate::agent) async fn reconcile_reopened_results(
     // Only unresolved command intents need their facts here; with none, the
     // reopen's own feed pass (recovery's release, the wake's preparation)
     // applies the feed with the terminal reads it needs.
-    if crate::agent::result_context::prepared_commands(runtime.driver(), agent_id)?.is_empty() {
+    if crate::agent::ledger::prepared_commands(runtime.driver(), agent_id)?.is_empty() {
         return Ok(());
     }
-    crate::agent::result_context::project_child_feed(runtime, agent_id, session)
+    crate::agent::ledger::project_child_feed(runtime, agent_id, session)
         .await
         .map(|_| ())
 }
@@ -1109,8 +1109,7 @@ pub(super) async fn reconcile_reopened_child_results(
         if mode.recovery {
             return Err(error);
         }
-        crate::agent::result_context::project_feed(runtime, agent_id, &sessions, session_id)
-            .await?;
+        crate::agent::ledger::project_feed(runtime, agent_id, &sessions, session_id).await?;
         runtime.record_then_apply(agent_id, |tree| {
             tree.record_host_retirement(agent_id, error.clone())
         })?;

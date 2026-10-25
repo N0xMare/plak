@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "offline park fixtures")]
 
+use crate::agent::ledger::ChildLedger;
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger};
 use std::time::Duration;
 
 use plakous::sessions::{
@@ -493,13 +495,14 @@ async fn assert_reopened_transient_resume(journaled: bool) {
             failure: error.message(),
         }
         .render();
-        super::super::result_context::prepare(
-            fixture.runtime.driver(),
-            &fixture.child,
-            &format!("plak:resume-transient:{}:{attempt}:1", fixture.child),
-            &prompt,
-        )
-        .unwrap();
+        ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+            .prepare(CommandIntent {
+                command_id: &format!("plak:resume-transient:{}:{attempt}:1", fixture.child),
+                kind: CommandKind::Resume,
+                base_text: &prompt,
+                batch: BatchRule::WakeAll,
+            })
+            .unwrap();
     }
     wake_held(&fixture, attached).await;
     fixture.provider_gates[0].entered().await;
@@ -1170,13 +1173,14 @@ async fn a_lost_wake_start_is_retried_exactly_after_a_reopen() {
         .unwrap()
         .unwrap()
         .replace(":1:", ":7:");
-    let prepared = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &lost,
-        crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
-    )
-    .unwrap();
+    let prepared = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &lost,
+            kind: CommandKind::Wake,
+            base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+            batch: BatchRule::WakeAll,
+        })
+        .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the wake turn", turns(2)).await;
     let wakes = fixture
@@ -1227,13 +1231,14 @@ async fn behind_retention_retry_survives_a_consumed_command_and_a_caught_up_curs
         format!("{stem}:9"),
     ];
     for id in &ids {
-        super::super::result_context::prepare(
-            fixture.runtime.driver(),
-            &fixture.child,
-            id,
-            "exact lost wake",
-        )
-        .unwrap();
+        ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+            .prepare(CommandIntent {
+                command_id: id,
+                kind: CommandKind::Wake,
+                base_text: "exact lost wake",
+                batch: BatchRule::WakeAll,
+            })
+            .unwrap();
     }
     fixture.mutate(ProductAgentTree::clear_feed_views);
     // Retain only the release/open suffix, not the assignment's facts.
@@ -1286,13 +1291,14 @@ async fn reopened_wake_consumes_the_whole_retention_queue_on_one_attachment() {
     let stem = base.rsplit_once(':').unwrap().0;
     let ids = [base.clone(), format!("{stem}:2"), format!("{stem}:3")];
     for id in &ids {
-        let context = super::super::result_context::prepare(
-            fixture.runtime.driver(),
-            &fixture.child,
-            id,
-            "exact lost wake",
-        )
-        .unwrap();
+        let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+            .prepare(CommandIntent {
+                command_id: id,
+                kind: CommandKind::Wake,
+                base_text: "exact lost wake",
+                batch: BatchRule::WakeAll,
+            })
+            .unwrap();
         let submission = attached
             .agent()
             .unwrap()
@@ -1346,13 +1352,14 @@ async fn reopened_wake_consumes_a_reclaimed_command_without_binding_it() {
         .read(|tree| wake_command(tree, &fixture.child))
         .unwrap()
         .unwrap();
-    let context = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &id,
-        "exact lost wake",
-    )
-    .unwrap();
+    let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &id,
+            kind: CommandKind::Wake,
+            base_text: "exact lost wake",
+            batch: BatchRule::WakeAll,
+        })
+        .unwrap();
     attached
         .agent()
         .unwrap()
@@ -1470,13 +1477,14 @@ async fn an_unrecorded_corrective_round_is_withdrawn_at_the_reopen_wake() {
             )
         })
         .unwrap();
-    super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &corrective,
-        "submit your result",
-    )
-    .unwrap();
+    ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &corrective,
+            kind: CommandKind::Corrective,
+            base_text: "submit your result",
+            batch: BatchRule::Results,
+        })
+        .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the wake turn", turns(2)).await;
     let (command, spent) = fixture
@@ -1649,13 +1657,14 @@ async fn a_retried_mail_start_acknowledges_its_mail() {
         crate::agent_tree::MailDisposition::Started
     );
     let command = format!("plak:mail:{}:start", sent.message_id);
-    super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &command,
-        "assignment\n\nMessage:\nuse the v2 schema",
-    )
-    .unwrap();
+    ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::MailStart,
+            base_text: "assignment\n\nMessage:\nuse the v2 schema",
+            batch: BatchRule::MailStart(&sent.message_id),
+        })
+        .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the retried Start", turns(2)).await;
     let unread = fixture
@@ -1824,7 +1833,7 @@ async fn an_interrupt_racing_the_wake_admission_keeps_the_attempt() {
         })
         .unwrap();
     assert!(
-        super::super::result_context::prepared_commands(fixture.runtime.driver(), &fixture.child)
+        crate::agent::ledger::prepared_commands(fixture.runtime.driver(), &fixture.child)
             .unwrap()
             .is_empty(),
         "the released wake batch blocks no later command"
@@ -2121,7 +2130,7 @@ async fn a_start_whose_slot_is_taken_before_its_reservation_does_not_fault_the_c
         &fixture.child,
         attached,
         CommandId::new("plak:mail:m-taken:start").unwrap(),
-        "assignment",
+        crate::agent::children::ChildCommand::fresh("assignment".to_owned(), CommandKind::Start),
     )
     .await;
     let (fault, status) = fixture
@@ -2219,17 +2228,18 @@ async fn a_reopen_does_not_retry_another_attempts_wake() {
         })
         .unwrap();
     assert_eq!(
-        super::super::result_context::command_attempt(&current),
+        crate::agent::ledger::command_attempt(&current),
         Some(attempt.as_str())
     );
     let stale = current.replace(&format!(":{attempt}:"), ":c1-a0:");
-    super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &stale,
-        crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
-    )
-    .unwrap();
+    ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &stale,
+            kind: CommandKind::Wake,
+            base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+            batch: BatchRule::WakeAll,
+        })
+        .unwrap();
     wake_held(&fixture, attached).await;
     fixture.until("the wake turn", turns(2)).await;
     let wakes = fixture
@@ -2297,13 +2307,14 @@ async fn an_admitted_mail_start_rejoins_after_the_reopen_reconcile() {
         crate::agent_tree::MailDisposition::Started
     );
     let command = format!("plak:mail:{}:start", sent.message_id);
-    let context = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &command,
-        "assignment\n\nMessage:\nuse the v2 schema",
-    )
-    .unwrap();
+    let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::MailStart,
+            base_text: "assignment\n\nMessage:\nuse the v2 schema",
+            batch: BatchRule::MailStart(&sent.message_id),
+        })
+        .unwrap();
     // The lost process admitted the Start and died before binding its turn.
     let submission = attached
         .agent()
@@ -2335,7 +2346,7 @@ async fn an_admitted_mail_start_rejoins_after_the_reopen_reconcile() {
         })
         .unwrap();
     assert!(
-        super::super::result_context::prepared_commands(fixture.runtime.driver(), &fixture.child)
+        crate::agent::ledger::prepared_commands(fixture.runtime.driver(), &fixture.child)
             .unwrap()
             .is_empty()
     );
@@ -2376,13 +2387,14 @@ async fn a_mail_start_never_claims_a_recovered_turn_another_command_admitted() {
     };
     let journaled = send("use the v2 schema");
     let command = format!("plak:mail:{}:start", journaled.message_id);
-    let context = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &command,
-        "assignment\n\nMessage:\nuse the v2 schema",
-    )
-    .unwrap();
+    let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::MailStart,
+            base_text: "assignment\n\nMessage:\nuse the v2 schema",
+            batch: BatchRule::MailStart(&journaled.message_id),
+        })
+        .unwrap();
     // The lost process admitted that Start and died before binding it.
     let submission = attached
         .agent()
@@ -2471,13 +2483,14 @@ async fn a_recovered_turn_that_ends_before_the_rejoin_returns_stays_ended() {
     };
     let journaled = send("use the v2 schema");
     let command = format!("plak:mail:{}:start", journaled.message_id);
-    let context = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &command,
-        "assignment\n\nMessage:\nuse the v2 schema",
-    )
-    .unwrap();
+    let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::MailStart,
+            base_text: "assignment\n\nMessage:\nuse the v2 schema",
+            batch: BatchRule::MailStart(&journaled.message_id),
+        })
+        .unwrap();
     let submission = attached
         .agent()
         .unwrap()
@@ -2585,13 +2598,14 @@ async fn a_recovered_turn_on_an_attempt_bound_to_another_turn_is_refused() {
         .unwrap()
     });
     let command = format!("plak:mail:{}:start", sent.message_id);
-    let context = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &command,
-        "assignment\n\nMessage:\nuse the v2 schema",
-    )
-    .unwrap();
+    let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::MailStart,
+            base_text: "assignment\n\nMessage:\nuse the v2 schema",
+            batch: BatchRule::MailStart(&sent.message_id),
+        })
+        .unwrap();
     let submission = attached
         .agent()
         .unwrap()
@@ -2669,13 +2683,14 @@ async fn an_admitted_wake_with_mail_rejoins_after_the_reopen_reconcile() {
         .read(|tree| wake_command(tree, &fixture.child))
         .unwrap()
         .unwrap();
-    let context = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &command,
-        crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
-    )
-    .unwrap();
+    let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::Wake,
+            base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+            batch: BatchRule::WakeAll,
+        })
+        .unwrap();
     assert!(context.prompt.ends_with("\n\nMessage:\nstatus?"));
     let submission = attached
         .agent()
@@ -2722,13 +2737,14 @@ async fn an_interrupt_of_a_held_child_cancels_its_rejoined_turn() {
         .read(|tree| wake_command(tree, &fixture.child))
         .unwrap()
         .unwrap();
-    let context = super::super::result_context::prepare(
-        fixture.runtime.driver(),
-        &fixture.child,
-        &command,
-        crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
-    )
-    .unwrap();
+    let context = ChildLedger::new(fixture.runtime.driver(), &fixture.child)
+        .prepare(CommandIntent {
+            command_id: &command,
+            kind: CommandKind::Wake,
+            base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+            batch: BatchRule::WakeAll,
+        })
+        .unwrap();
     let submission = attached
         .agent()
         .unwrap()
@@ -2786,7 +2802,7 @@ async fn an_interrupt_of_a_held_child_cancels_its_rejoined_turn() {
             .contains_key(&fixture.child)
     );
     assert!(
-        super::super::result_context::prepared_commands(fixture.runtime.driver(), &fixture.child)
+        crate::agent::ledger::prepared_commands(fixture.runtime.driver(), &fixture.child)
             .unwrap()
             .is_empty(),
         "the released batch blocks no later command"
@@ -2898,7 +2914,10 @@ async fn an_interrupt_during_a_reopen_wake_start_is_not_overwritten() {
         &fixture.child,
         attached,
         CommandId::new(command).unwrap(),
-        crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+        crate::agent::children::ChildCommand::fresh(
+            crate::child_prompts::PLAK_CHILD_WAKE_PROMPT.to_owned(),
+            CommandKind::Wake,
+        ),
         super::super::children::StartAdmission::ReopenWake,
     )
     .await;
@@ -2977,7 +2996,7 @@ async fn an_interrupt_after_a_reopen_wake_was_admitted_settles_its_batch_read() 
         })
         .unwrap();
     let prepared =
-        super::super::result_context::prepared_commands(fixture.runtime.driver(), &fixture.child)
+        crate::agent::ledger::prepared_commands(fixture.runtime.driver(), &fixture.child)
             .unwrap()
             .len();
     fixture
@@ -3018,19 +3037,21 @@ async fn a_wake_fact_outranks_a_pre_admission_withdrawal() {
                     .read(|tree| wake_command(tree, &child))
                     .unwrap()
                     .unwrap();
-                super::super::result_context::prepare(
-                    runtime.driver(),
-                    &child,
-                    &command,
-                    crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
-                )
-                .unwrap();
-                super::super::result_context::acknowledge(
-                    runtime.driver(),
-                    &command,
-                    super::super::result_context::Submission::Refused,
-                )
-                .unwrap();
+                ChildLedger::new(runtime.driver(), &child)
+                    .prepare(CommandIntent {
+                        command_id: &command,
+                        kind: CommandKind::Wake,
+                        base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+                        batch: BatchRule::WakeAll,
+                    })
+                    .unwrap();
+                ChildLedger::settlement_only(runtime.driver())
+                    .settle(
+                        &command,
+                        crate::driver::ledger::Settlement::Refused { pause: None },
+                    )
+                    .map_err(String::from)
+                    .unwrap();
             })
         }),
     );

@@ -9,6 +9,8 @@ use plakous_offline_crash_harness::{BoundaryController, terminal_failure_runtime
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::agent::ledger::ChildLedger;
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger};
 #[tokio::test]
 async fn fresh_restart_retains_control_after_terminal_before_ack() {
     restart_control_fixture(false, false).await;
@@ -43,13 +45,14 @@ async fn restart_control_fixture(below_retention: bool, reclaimed: bool) {
         None,
     )
     .unwrap();
-    super::super::result_context::prepare(
-        runtime.driver(),
-        "root",
-        "restart-next",
-        "submit result",
-    )
-    .unwrap();
+    ChildLedger::new(runtime.driver(), "root")
+        .prepare(CommandIntent {
+            command_id: "restart-next",
+            kind: CommandKind::Followup,
+            base_text: "submit result",
+            batch: BatchRule::Results,
+        })
+        .unwrap();
     let evidence = root.path().join("restart-evidence.jsonl");
     let controller =
         BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence).unwrap();

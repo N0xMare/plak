@@ -1,5 +1,7 @@
 //! Submit an immutable root intent and settle its queue through the projector.
 
+use crate::runtime::ledger::RootLedger;
+
 use super::super::admission::{QueuePersistAction, log_queue_persist_failed};
 use super::{
     Agent, CommandAckDisposition, CommandId, DriveTurnError, DrivenTurn,
@@ -8,6 +10,7 @@ use super::{
     operator_facing_agent_error, sessions, settle_cancel, terminal_turn_outcome, turn_lifecycle,
 };
 use super::{HostBoundary, HostWorkflow, observe_boundary};
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger, Settlement};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::ProtocolExtension>(
@@ -101,31 +104,15 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             .map_err(|_| "queued command identity is invalid".to_owned())?;
         let prepared = if existing_submission.is_some() {
             session.clone()
-        } else if let Some(batch) = result_batch {
-            super::super::result_mail::prepare(rows, store, session, item, &command, batch)
-                .inspect_err(|error| {
-                    log_queue_persist_failed(
-                        home,
-                        session,
-                        QueuePersistAction::RootDelivery,
-                        error,
-                    );
-                })?
         } else {
             let mut candidate = session.clone();
-            store
-                .save_submission(
-                    &mut candidate,
-                    &sessions::projector::Submission {
-                        command_id: command_text.clone(),
-                        kind: sessions::projector::SubmissionKind::RootStart,
-                        queue_item_id: item.id.clone(),
-                        queue_item_revision: item.revision,
-                        target_turn_id: None,
-                        canonical_command: command.clone(),
-                        submitted_at_ms: item.submitted_at_ms,
-                    },
-                )
+            RootLedger::new(rows, store, &mut candidate, item)
+                .prepare(CommandIntent {
+                    command_id: &command_text,
+                    kind: CommandKind::RootStart,
+                    base_text: &command,
+                    batch: result_batch.map_or(BatchRule::None, BatchRule::RootResults),
+                })
                 .map_err(String::from)
                 .inspect_err(|error| {
                     log_queue_persist_failed(
@@ -191,8 +178,9 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                         if existing_submission.is_none() {
                             let mut candidate = session.clone();
                             forget_unadmitted_root_submission(&mut candidate, item, host_authored);
-                            store
-                                .discard_submission(&mut candidate, &command_text, None)
+                            RootLedger::new(rows, store, &mut candidate, item)
+                                .settle(&command_text, Settlement::Refused { pause: None })
+                                .map_err(String::from)
                                 .inspect_err(|save_error| {
                                     log_queue_persist_failed(
                                         home,
@@ -305,15 +293,19 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                     if rejection.session_wide {
                         candidate.queue_drain_state = sessions::QueueDrainState::RestoredPaused;
                     }
-                    if let Err(error) = store.discard_submission(
-                        &mut candidate,
-                        &command_text,
-                        rejection.session_wide.then(|| {
-                            sessions::projector::HostPauseCause::UnrecordedRefusal {
-                                reason: rejection.admission_message.clone(),
-                            }
-                        }),
-                    ) {
+                    if let Err(error) = RootLedger::new(rows, store, &mut candidate, item)
+                        .settle(
+                            &command_text,
+                            Settlement::Refused {
+                                pause: rejection.session_wide.then(|| {
+                                    sessions::projector::HostPauseCause::UnrecordedRefusal {
+                                        reason: rejection.admission_message.clone(),
+                                    }
+                                }),
+                            },
+                        )
+                        .map_err(String::from)
+                    {
                         log_queue_persist_failed(
                             home,
                             session,
@@ -339,16 +331,19 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             .as_ref()
             .filter(|submission| submission.acknowledgement().is_accepted())
         {
-            duplicate_consumed(
-                runtime,
-                projection_store,
-                &session.id,
-                submission,
-                session
-                    .plakous_locator
-                    .ok_or_else(|| "submission has no runtime locator".to_owned())?,
-            )
-            .await?
+            if submission.acknowledgement().disposition() == CommandAckDisposition::Duplicate {
+                RootLedger::new(rows, store, session, item)
+                    .with_projection(projection_store)
+                    .duplicate_consumed(
+                        runtime,
+                        runtime_session,
+                        submission.acknowledgement().command_id().as_str(),
+                    )
+                    .await
+                    .map_err(String::from)?
+            } else {
+                false
+            }
         } else {
             return Err("queued command acknowledgement is unsupported".into());
         };
@@ -362,8 +357,9 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 .pending_queue
                 .retain(|queued| queued.id != item.id || queued.revision != item.revision);
             candidate.record_notice(row.clone());
-            store
-                .discard_submission(&mut candidate, &command_text, None)
+            RootLedger::new(rows, store, &mut candidate, item)
+                .settle(&command_text, Settlement::Consumed)
+                .map_err(String::from)
                 .inspect_err(|error| {
                     log_queue_persist_failed(
                         home,
@@ -622,53 +618,15 @@ pub(in crate::runtime) async fn duplicate_consumed(
     if ack.disposition() != CommandAckDisposition::Duplicate || !ack.is_accepted() {
         return Ok(false);
     }
-    let views = tokio::time::timeout(
-        super::super::host_loop::FINAL_PROJECTION_BOUND,
-        super::super::projection::project_to_tail(runtime, store, product_id, locator),
+    crate::runtime::ledger::project_duplicate(
+        runtime,
+        store,
+        product_id,
+        locator,
+        ack.command_id().as_str(),
     )
     .await
-    .map_err(|_| "duplicate settlement projector pass exceeded its bound".to_owned())??;
-    accepted_duplicate_consumed(&views, ack.command_id().as_str())
-}
-
-fn accepted_duplicate_consumed(
-    views: &sessions::projector::SessionViews,
-    command_id: &str,
-) -> Result<bool, String> {
-    if views.state.deliveries.contains_key(command_id) {
-        return Ok(false);
-    }
-    if views
-        .state
-        .retained_from
-        .is_some_and(|retained_from| retained_from > 0)
-    {
-        return Ok(true);
-    }
-    Err("accepted duplicate has no acceptance fact in the unpruned feed".to_owned())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn accepted_duplicate_settles_from_the_fact_or_the_retained_feed_floor() {
-        let mut views = sessions::projector::SessionViews::empty();
-        for retained_from in [None, Some(0)] {
-            views.state.retained_from = retained_from;
-            assert!(accepted_duplicate_consumed(&views, "command").is_err());
-        }
-        views.state.retained_from = Some(7);
-        assert_eq!(accepted_duplicate_consumed(&views, "command"), Ok(true));
-        views.state.deliveries.insert(
-            "command".to_owned(),
-            sessions::projector::Delivery::Accepted,
-        );
-        assert_eq!(accepted_duplicate_consumed(&views, "command"), Ok(false));
-        views.state.retained_from = None;
-        assert_eq!(accepted_duplicate_consumed(&views, "command"), Ok(false));
-    }
+    .map_err(String::from)
 }
 
 struct StartRefusal {

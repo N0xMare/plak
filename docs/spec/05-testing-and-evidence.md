@@ -1605,6 +1605,15 @@ contain none of the selector's strings. The harness also carries
 `plakous-http/fault-injection` (§2.8) unconditionally, so `test-hooks` is the
 one product edge to transport fault injection as well.
 
+Hosted ledger equivalence tests `root_ledger_prechange_bytes`,
+`root_batched_command_bytes`, `child_ledger_prechange_bytes`, and
+`mail_start_batched_command_bytes` pin product submission and tree-command
+fields and exact prompt bytes. Batched root Start and host wake fixtures check
+the tree `RootBatch` row and session touch; mail Start carries its primary
+envelope, another unread envelope and a child result. The explicit-intent
+matrices cover root Start, host wake and transient resume, and child spawn,
+wake, transient resume, corrective, mail Start, follow-up and steer.
+
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,

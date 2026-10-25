@@ -3,10 +3,94 @@
 use super::*;
 use crate::agent_tree::{MailDurableState, ProductAgentTree};
 use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
+use crate::runtime::ledger::RootLedger;
 use crate::runtime::test_kit::MemoryRows;
 use crate::runtime::topology_state::TreeRows as _;
 use crate::session_store::{MemoryStore, SessionRecordStore as _};
 use crate::sessions::QueueItem;
+
+fn prepare(
+    rows: &(dyn TopologyRows + Sync),
+    store: &dyn crate::session_store::SessionRecordStore,
+    session: &SessionRecord,
+    item: &QueueItem,
+    command: &str,
+    batch: ResultMailBatch,
+) -> Result<SessionRecord, String> {
+    prepare_with_command(
+        rows,
+        store,
+        session,
+        item,
+        command,
+        Some(batch),
+        &format!("plak.queue.{}.{}", item.id, item.revision),
+        crate::driver::ledger::CommandKind::RootStart,
+    )
+    .map_err(Into::into)
+}
+
+#[test]
+fn root_batched_command_bytes() {
+    for wake in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = MemoryRows::new();
+        let mut session = SessionRecord::new(dir.path().to_owned());
+        session.updated_at_unix = 1;
+        rows.records().save(&mut session).unwrap();
+        let mut tree = completed_tree(&session);
+        rows.save_tree(&mut tree).unwrap();
+        let mut item = QueueItem::new("continue");
+        item.id = "00000000-0000-4000-8000-000000000001".into();
+        item.submitted_at_ms = 42;
+        let id = if wake {
+            "plak:child-wake:00000000-0000-4000-8000-000000000001.1:p1"
+        } else {
+            "plak.queue.00000000-0000-4000-8000-000000000001.1"
+        };
+        let (command, batch) = select(&rows, &session, &item.text).unwrap();
+        let prepared = prepare_with_command(
+            &rows,
+            rows.records(),
+            &session,
+            &item,
+            &command,
+            batch,
+            id,
+            if wake {
+                crate::driver::ledger::CommandKind::HostWake
+            } else {
+                crate::driver::ledger::CommandKind::RootStart
+            },
+        )
+        .unwrap();
+        assert!(prepared.updated_at_unix > session.updated_at_unix);
+        let tree = rows.tree(&session.id).unwrap().unwrap();
+        let row = tree.command(id).unwrap();
+        let intents = rows.records().load_intents(&session.id).unwrap();
+        let submission = intents.submission(id).unwrap();
+        let bytes = serde_json::to_string(&serde_json::json!({
+            "submission": {
+                "command_id": submission.command_id, "kind": submission.kind.as_str(),
+                "queue_item_id": submission.queue_item_id, "queue_item_revision": submission.queue_item_revision,
+                "target_turn_id": submission.target_turn_id, "canonical_command": submission.canonical_command,
+                "submitted_at_ms": submission.submitted_at_ms,
+            },
+            "tree": {
+                "command_id": row.command_id, "recipient": row.recipient,
+                "attempt_id": row.attempt_id, "kind": row.kind, "text": row.text,
+                "message_ids": row.message_ids, "withdrawn": row.withdrawn,
+                "fact": row.fact, "turn_id": row.turn_id, "accepted_seq": row.accepted_seq,
+            },
+        })).unwrap();
+        let golden = if wake {
+            include_str!("fixtures/host-wake-batch.json")
+        } else {
+            include_str!("fixtures/root-start-batch.json")
+        };
+        assert_eq!(bytes.as_bytes(), golden.trim_end().as_bytes());
+    }
+}
 
 #[test]
 fn root_ledger_prechange_bytes() {
@@ -17,16 +101,80 @@ fn root_ledger_prechange_bytes() {
     item.id = "00000000-0000-4000-8000-000000000001".into();
     item.submitted_at_ms = 42;
     rows.records().save(&mut session).unwrap();
-    let prepared = prepare_with_command(&rows, rows.records(), &session, &item,
-        "continue", None, "plak:resume-transient:failed-turn").unwrap();
+    let prepared = prepare_with_command(
+        &rows,
+        rows.records(),
+        &session,
+        &item,
+        "continue",
+        None,
+        "plak:resume-transient:root:failed-turn",
+        crate::driver::ledger::CommandKind::Resume,
+    )
+    .unwrap();
     let intents = rows.records().load_intents(&prepared.id).unwrap();
-    let submission = intents.submission("plak:resume-transient:failed-turn").unwrap();
+    let submission = intents
+        .submission("plak:resume-transient:root:failed-turn")
+        .unwrap();
     assert_eq!(serde_json::to_string(&serde_json::json!({
         "command_id": submission.command_id, "kind": submission.kind.as_str(),
         "queue_item_id": submission.queue_item_id, "queue_item_revision": submission.queue_item_revision,
         "target_turn_id": submission.target_turn_id, "canonical_command": submission.canonical_command,
         "submitted_at_ms": submission.submitted_at_ms,
-    })).unwrap(), r#"{"canonical_command":"continue","command_id":"plak:resume-transient:failed-turn","kind":"root_start","queue_item_id":"00000000-0000-4000-8000-000000000001","queue_item_revision":1,"submitted_at_ms":42,"target_turn_id":null}"#);
+    })).unwrap(), r#"{"canonical_command":"continue","command_id":"plak:resume-transient:root:failed-turn","kind":"host_wake","queue_item_id":"00000000-0000-4000-8000-000000000001","queue_item_revision":1,"submitted_at_ms":42,"target_turn_id":null}"#);
+}
+
+#[test]
+fn explicit_root_intents_match_pre_port_submission_fields() {
+    use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger};
+    use crate::sessions::projector::{Submission, SubmissionKind};
+    for (id, kind, stored) in [
+        (
+            "plak.queue.00000000-0000-4000-8000-000000000001.1",
+            CommandKind::RootStart,
+            SubmissionKind::RootStart,
+        ),
+        (
+            "plak:child-wake:00000000-0000-4000-8000-000000000001.1:p1-p2",
+            CommandKind::HostWake,
+            SubmissionKind::HostWake,
+        ),
+        (
+            "plak:resume-transient:root:failed-turn",
+            CommandKind::Resume,
+            SubmissionKind::HostWake,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = MemoryRows::new();
+        let mut session = SessionRecord::new(dir.path().to_owned());
+        rows.records().save(&mut session).unwrap();
+        let mut item = QueueItem::new("continue");
+        item.id = "00000000-0000-4000-8000-000000000001".into();
+        item.submitted_at_ms = 42;
+        let prepared = RootLedger::new(&rows, rows.records(), &mut session, &item)
+            .prepare(CommandIntent {
+                command_id: id,
+                kind,
+                base_text: "continue",
+                batch: BatchRule::None,
+            })
+            .unwrap();
+        let intents = rows.records().load_intents(&session.id).unwrap();
+        assert_eq!(
+            intents.submission(id),
+            Some(&Submission {
+                command_id: id.into(),
+                kind: stored,
+                queue_item_id: item.id.clone(),
+                queue_item_revision: 1,
+                target_turn_id: None,
+                canonical_command: "continue".into(),
+                submitted_at_ms: 42,
+            })
+        );
+        assert_eq!(prepared.prompt.as_bytes(), b"continue");
+    }
 }
 
 #[test]

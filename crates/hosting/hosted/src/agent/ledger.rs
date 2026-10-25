@@ -6,30 +6,86 @@
 //! that view, records below-retention consumption, or withdraws a command the
 //! runtime definitely refused before admitting it.
 
+#[cfg(test)]
+mod tests;
+
 use crate::agent_tree::{AgentCommand, AgentCommandKind, MailDurableState};
 use crate::agent_tree_protocol::AttemptId;
 use crate::agent_tree_tools::TreeDriver;
 
-/// A command's exact text and the mail its batch carries.
-#[derive(Clone, Debug)]
-pub(super) struct PreparedResultContext {
-    pub(super) prompt: String,
-    message_ids: Vec<String>,
-}
+use crate::driver::ledger::{
+    BatchRule, CommandIntent, CommandKind, CommandLedger, LedgerError, LedgerFuture, Prepared,
+    Settlement,
+};
 
-impl PreparedResultContext {
+impl Prepared {
     fn of(command: &AgentCommand) -> Self {
         Self {
             prompt: command.text.clone(),
             message_ids: command.message_ids.clone(),
+            instruction: matches!(
+                command.kind,
+                AgentCommandKind::Wake | AgentCommandKind::Corrective | AgentCommandKind::Resume
+            ),
         }
+    }
+}
+
+pub(super) struct ChildLedger<'a> {
+    driver: &'a TreeDriver,
+    recipient: Option<&'a str>,
+}
+
+impl<'a> ChildLedger<'a> {
+    pub(super) fn new(driver: &'a TreeDriver, recipient: &'a str) -> Self {
+        Self {
+            driver,
+            recipient: Some(recipient),
+        }
+    }
+
+    pub(super) fn settlement_only(driver: &'a TreeDriver) -> Self {
+        Self {
+            driver,
+            recipient: None,
+        }
+    }
+}
+
+impl CommandLedger for ChildLedger<'_> {
+    fn prepare(&mut self, intent: CommandIntent<'_>) -> Result<Prepared, LedgerError> {
+        let recipient = self.recipient.ok_or_else(|| {
+            LedgerError::Integrity("child preparation requires a recipient".into())
+        })?;
+        prepare(self.driver, recipient, intent)
+    }
+
+    fn settle(&mut self, command_id: &str, settlement: Settlement) -> Result<(), LedgerError> {
+        if matches!(settlement, Settlement::Refused { pause: Some(_) }) {
+            return Err(LedgerError::Integrity(
+                "child settlement cannot pause the product queue".into(),
+            ));
+        }
+        acknowledge(self.driver, command_id, settlement)
+    }
+
+    fn duplicate_consumed<'a>(
+        &'a self,
+        sessions: &'a plakous::sessions::AgentSessions,
+        session: plakous::model::SessionId,
+        command_id: &'a str,
+    ) -> LedgerFuture<'a> {
+        Box::pin(
+            async move { reconcile_duplicate(self.driver, sessions, session, command_id).await },
+        )
     }
 }
 
 fn persist_context<T>(
     driver: &TreeDriver,
     work: impl FnOnce(&mut crate::agent_tree::ProductAgentTree) -> Result<T, String>,
-) -> Result<T, String> {
+) -> Result<T, LedgerError> {
+    let mut integrity = None;
     let (result, effects) = driver
         .mutate(|tree| {
             if tree.revision != tree.stored_revision {
@@ -37,6 +93,7 @@ fn persist_context<T>(
             }
             driver.fold_and_commit(tree, |tree| {
                 work(tree).map_err(|message| {
+                    integrity = Some(message.clone());
                     crate::agent_tree_protocol::TopologyError::new(
                         crate::agent_tree_protocol::TopologyErrorCode::OperationRecoveryRequired,
                         message,
@@ -44,32 +101,13 @@ fn persist_context<T>(
                 })
             })
         })
-        .map_err(|error| error.message)?;
-    let result = result.map_err(|error| error.message)?;
-    driver.settle(effects).map_err(|error| error.message)?;
+        .map_err(LedgerError::from)?;
+    let result = result.map_err(|error| match integrity {
+        Some(message) => LedgerError::Integrity(message),
+        None => LedgerError::from(error),
+    })?;
+    driver.settle(effects).map_err(LedgerError::from)?;
     Ok(result)
-}
-
-fn is_wake(command_id: &str) -> bool {
-    command_id.starts_with(super::park::WAKE_COMMAND_PREFIX)
-}
-
-/// The mail a mail-delivered Start (`plak:mail:{id}:start`) carries in its
-/// prompt. Its batch names it, so an accepted settlement (including an exact
-/// retry after a reopen) acknowledges it like the result mail beside it.
-fn started_mail(command_id: &str) -> Option<&str> {
-    command_id
-        .strip_prefix("plak:mail:")?
-        .strip_suffix(":start")
-        .filter(|id| !id.is_empty())
-}
-
-fn delivered_mail(command_id: &str) -> Option<&str> {
-    let mail = command_id.strip_prefix("plak:mail:")?;
-    [":start", ":follow-up", ":steer"]
-        .into_iter()
-        .find_map(|suffix| mail.strip_suffix(suffix))
-        .filter(|id| !id.is_empty())
 }
 
 /// Prefix of every submit-harness corrective command; its identity is
@@ -78,14 +116,11 @@ pub(super) const TRANSIENT_RESUME_PREFIX: &str = "plak:resume-transient:";
 
 const SUBMIT_HARNESS_PREFIX: &str = "plak:submit-harness:";
 
-/// Prefix of a spawn's first Start.
-const SPAWN_START_PREFIX: &str = "plak:spawn-start:";
-
 /// The attempt a wake or corrective command was written for: both
 /// identities end `{attempt}:{count}`. Other commands do not name theirs.
 pub(super) fn command_attempt(command_id: &str) -> Option<&str> {
     let rest = command_id
-        .strip_prefix(super::park::WAKE_COMMAND_PREFIX)
+        .strip_prefix("plak:park-wake:")
         .or_else(|| command_id.strip_prefix(SUBMIT_HARNESS_PREFIX))
         .or_else(|| command_id.strip_prefix(TRANSIENT_RESUME_PREFIX))?;
     let mut parts = rest.rsplitn(3, ':');
@@ -93,23 +128,6 @@ pub(super) fn command_attempt(command_id: &str) -> Option<&str> {
     let attempt = parts.next()?;
     parts.next()?;
     Some(attempt)
-}
-
-/// Which child command an identity names.
-fn command_kind(command_id: &str) -> AgentCommandKind {
-    if is_wake(command_id) {
-        AgentCommandKind::Wake
-    } else if command_id.starts_with(SUBMIT_HARNESS_PREFIX) {
-        AgentCommandKind::Corrective
-    } else if command_id.starts_with(TRANSIENT_RESUME_PREFIX) {
-        AgentCommandKind::Resume
-    } else if started_mail(command_id).is_some() {
-        AgentCommandKind::MailStart
-    } else if command_id.starts_with(SPAWN_START_PREFIX) {
-        AgentCommandKind::Start
-    } else {
-        AgentCommandKind::Followup
-    }
 }
 
 /// A batch of unread, unclaimed envelopes, in mailbox order: every one for a
@@ -121,7 +139,7 @@ fn command_kind(command_id: &str) -> AgentCommandKind {
 fn mail_batch(
     tree: &crate::agent_tree::ProductAgentTree,
     recipient: &str,
-    prepared: &mut PreparedResultContext,
+    prepared: &mut Prepared,
     include: impl Fn(&crate::agent_tree::MailRecord) -> bool,
 ) {
     let parent = tree
@@ -158,12 +176,17 @@ fn mail_batch(
 /// batch (or is a corrective round) refuses a different command until it has
 /// a fact or is withdrawn; a wake or corrective round written for an earlier
 /// attempt never blocks the current one.
-pub(super) fn prepare(
+fn prepare(
     driver: &TreeDriver,
     recipient: &str,
-    command_id: &str,
-    prompt: &str,
-) -> Result<PreparedResultContext, String> {
+    intent: CommandIntent<'_>,
+) -> Result<Prepared, LedgerError> {
+    let CommandIntent {
+        command_id,
+        kind,
+        base_text: prompt,
+        batch,
+    } = intent;
     persist_context(&driver.for_agent(recipient), |tree| {
         if let Some(stored) = tree.command(command_id) {
             let exact = stored.recipient == recipient
@@ -174,7 +197,7 @@ pub(super) fn prepare(
             if !exact {
                 return Err("child command id conflicts with a different stored command".to_owned());
             }
-            return Ok(PreparedResultContext::of(stored));
+            return Ok(Prepared::of(stored));
         }
         let current_attempt = tree
             .attempt(recipient)
@@ -202,15 +225,18 @@ pub(super) fn prepare(
                 return Err("prior child result command requires exact acknowledgement reconciliation before another command".to_owned());
             }
         }
-        let mut prepared = PreparedResultContext {
+        let mut prepared = Prepared {
             prompt: prompt.to_owned(),
             message_ids: Vec::new(),
+            instruction: kind.is_instruction(),
         };
-        if is_wake(command_id) || command_id.starts_with(TRANSIENT_RESUME_PREFIX) {
+        if matches!(batch, BatchRule::WakeAll) {
             mail_batch(tree, recipient, &mut prepared, |_| true);
         } else {
-            if let Some(started) = delivered_mail(command_id).and_then(|id| tree.mail(id))
-                && started.to == recipient
+            if let Some(started) = match &batch {
+                BatchRule::MailStart(id) | BatchRule::Delivered(id) => tree.mail(id),
+                _ => None,
+            } && started.to == recipient
                 && started.durable == MailDurableState::Accepted
             {
                 prepared.message_ids.push(started.message_id.clone());
@@ -218,7 +244,7 @@ pub(super) fn prepare(
             // Other mail that is still unread rides the Start too: mail sent
             // to an interrupted child while its turn unwound has no wake
             // to carry it (spec 03 section 9).
-            if let Some(started) = started_mail(command_id) {
+            if let BatchRule::MailStart(started) = batch {
                 mail_batch(tree, recipient, &mut prepared, |mail| {
                     mail.message_id != started
                         && mail.purpose != crate::agent_tree_protocol::MessagePurpose::Result
@@ -247,7 +273,17 @@ pub(super) fn prepare(
             command_id,
             recipient,
             attempt_id,
-            command_kind(command_id),
+            match kind {
+                CommandKind::Start => AgentCommandKind::Start,
+                CommandKind::Wake => AgentCommandKind::Wake,
+                CommandKind::MailStart => AgentCommandKind::MailStart,
+                CommandKind::Followup => AgentCommandKind::Followup,
+                CommandKind::Corrective => AgentCommandKind::Corrective,
+                CommandKind::Resume => AgentCommandKind::Resume,
+                CommandKind::RootStart | CommandKind::HostWake => {
+                    return Err("root command passed to child ledger".into());
+                }
+            },
             prepared.prompt.clone(),
             prepared.message_ids.clone(),
         ))
@@ -278,6 +314,18 @@ pub(super) async fn consumed_below_retention(
     if disposition != plakous::agent::CommandAckDisposition::Duplicate {
         return Ok(false);
     }
+    ChildLedger::settlement_only(driver)
+        .duplicate_consumed(sessions, session, command_id)
+        .await
+        .map_err(Into::into)
+}
+
+async fn reconcile_duplicate(
+    driver: &TreeDriver,
+    sessions: &plakous::sessions::AgentSessions,
+    session: plakous::model::SessionId,
+    command_id: &str,
+) -> Result<bool, LedgerError> {
     let (recipient, cursor) = driver
         .read(|tree| {
             tree.command(command_id).map(|command| {
@@ -287,19 +335,30 @@ pub(super) async fn consumed_below_retention(
                 )
             })
         })
-        .map_err(|error| error.message)?
-        .ok_or_else(|| "duplicate child command has no intent; integrity refusal".to_owned())?;
-    let feed = crate::agent::read_tree_feed(sessions, session, cursor).await?;
-    let (projection, _feed) = super::feed_projection::retry_tree_feed(sessions, feed, |feed| {
-        super::feed_projection::apply_on_driver(driver, feed, &recipient)
-    })
-    .await
-    .map_err(|error| error.message)?;
+        .map_err(LedgerError::from)?
+        .ok_or_else(|| {
+            LedgerError::Integrity(
+                "duplicate child command has no intent; integrity refusal".to_owned(),
+            )
+        })?;
+    let feed = crate::agent::read_tree_feed(sessions, session, cursor)
+        .await
+        .map_err(|error| LedgerError::Unavailable(error.to_string()))?;
+    let (projection, _feed) =
+        crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
+            crate::agent::feed_projection::apply_on_driver(driver, feed, &recipient)
+        })
+        .await
+        .map_err(LedgerError::from)?;
     let conflicts = !projection.conflicts.is_empty();
     if conflicts {
-        return Err("duplicate child command has a conflicting turn binding".to_owned());
+        return Err(LedgerError::Integrity(
+            "duplicate child command has a conflicting turn binding".to_owned(),
+        ));
     }
-    let (retained_from, tail) = feed_bounds(sessions, session).await?;
+    let (retained_from, tail) = feed_bounds(sessions, session)
+        .await
+        .map_err(LedgerError::Unavailable)?;
     let (fact, cursor) = driver
         .read(|tree| {
             (
@@ -307,28 +366,33 @@ pub(super) async fn consumed_below_retention(
                 tree.feed_cursor(&session.to_string()),
             )
         })
-        .map_err(|error| error.message)?;
+        .map_err(LedgerError::from)?;
     if cursor < tail {
-        return Err(
+        return Err(LedgerError::Integrity(
             "duplicate child feed has not reached its tail; projection required".to_owned(),
-        );
+        ));
     }
-    duplicate_consumed(fact, retained_from)
+    duplicate_consumed(fact, retained_from).map_err(LedgerError::Integrity)
 }
 
 fn duplicate_consumed(
     fact: Option<crate::agent_tree::CommandFact>,
     retained_from: u64,
 ) -> Result<bool, String> {
-    match fact {
-        Some(
-            crate::agent_tree::CommandFact::Accepted | crate::agent_tree::CommandFact::Returned,
-        ) => Ok(false),
-        None if retained_from > 0 => Ok(true),
-        _ => {
-            Err("duplicate child command has no matching acceptance; integrity refusal".to_owned())
-        }
-    }
+    crate::driver::ledger::duplicate_consumed(
+        match fact {
+            Some(
+                crate::agent_tree::CommandFact::Accepted | crate::agent_tree::CommandFact::Returned,
+            ) => crate::driver::ledger::AcceptanceFact::Present,
+            Some(crate::agent_tree::CommandFact::Rejected) => {
+                crate::driver::ledger::AcceptanceFact::Rejected
+            }
+            None => crate::driver::ledger::AcceptanceFact::Absent,
+        },
+        retained_from,
+        "duplicate child command has no matching acceptance; integrity refusal",
+    )
+    .map_err(Into::into)
 }
 
 /// The retained boundary and tail of `session`'s feed.
@@ -359,43 +423,32 @@ pub(super) async fn feed_bounds(
     }
 }
 
-/// What a child command's submission learned.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum Submission {
-    /// The feed already recorded admission; validate its projected outcome.
-    Recorded,
-    /// Exact resubmission proved consumption below retention, without a turn.
-    Consumed,
-    /// Definitely refused before admission: withdraw, leaving its mail unread.
-    Refused,
-}
-
 /// Validates feed settlement or writes the host's no-fact decision.
-pub(super) fn acknowledge(
+fn acknowledge(
     driver: &TreeDriver,
     command_id: &str,
-    submission: Submission,
-) -> Result<(), String> {
+    submission: Settlement,
+) -> Result<(), LedgerError> {
     let recipient = driver
         .read(|tree| {
             tree.command(command_id)
                 .map(|command| command.recipient.clone())
         })
-        .map_err(|error| error.message)?;
+        .map_err(LedgerError::from)?;
     let driver = recipient
         .as_deref()
         .map_or_else(|| driver.clone(), |recipient| driver.for_agent(recipient));
     persist_context(&driver, |tree| {
         use crate::agent_tree::CommandFact;
         match submission {
-            Submission::Recorded => match tree.command(command_id).and_then(|command| command.fact)
+            Settlement::Recorded => match tree.command(command_id).and_then(|command| command.fact)
             {
                 Some(CommandFact::Accepted | CommandFact::Returned) => Ok(()),
                 _ => {
                     Err("child admission has no projected acceptance; integrity refusal".to_owned())
                 }
             },
-            Submission::Consumed => {
+            Settlement::Consumed => {
                 let recipient = tree
                     .command(command_id)
                     .ok_or_else(|| "consumed command has no intent".to_owned())?
@@ -406,7 +459,7 @@ pub(super) fn acknowledge(
                 tree.project_mail_decisions(&recipient)
                     .map_err(|error| error.message)
             }
-            Submission::Refused => {
+            Settlement::Refused { .. } => {
                 if tree.command(command_id).is_some_and(|command| {
                     matches!(
                         command.fact,
@@ -427,7 +480,7 @@ pub(super) struct JournaledCommand {
     pub(super) command_id: String,
     kind: AgentCommandKind,
     attempt_id: Option<AttemptId>,
-    pub(super) context: PreparedResultContext,
+    pub(super) context: Prepared,
 }
 
 impl JournaledCommand {
@@ -444,11 +497,13 @@ impl JournaledCommand {
     /// Settles the command without submitting it.
     pub(super) fn settle(&self, driver: &TreeDriver, accepted: bool) -> Result<(), String> {
         let submission = if accepted {
-            Submission::Consumed
+            Settlement::Consumed
         } else {
-            Submission::Refused
+            Settlement::Refused { pause: None }
         };
-        acknowledge(driver, &self.command_id, submission)
+        ChildLedger::settlement_only(driver)
+            .settle(&self.command_id, submission)
+            .map_err(Into::into)
     }
 }
 
@@ -470,7 +525,7 @@ pub(super) fn prepared_commands(
                     command_id: command.command_id.clone(),
                     kind: command.kind,
                     attempt_id: command.attempt_id.clone(),
-                    context: PreparedResultContext::of(command),
+                    context: Prepared::of(command),
                 })
                 .collect()
         })
@@ -506,7 +561,7 @@ pub(super) fn accepted_command(
 pub(super) async fn project_child_feed(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     recipient: &str,
-    attached: &super::AttachedCodingSession,
+    attached: &crate::agent::AttachedCodingSession,
 ) -> Result<bool, String> {
     project_feed(
         runtime,
@@ -530,11 +585,12 @@ pub(super) async fn project_feed(
         .read(|tree| tree.feed_read_cursor(&key))
         .map_err(|error| error.message)?;
     let feed = crate::agent::read_tree_feed(sessions, session, cursor).await?;
-    let (projection, feed) = super::feed_projection::retry_tree_feed(sessions, feed, |feed| {
-        super::feed_projection::apply_on_runtime(runtime, feed, recipient)
-    })
-    .await
-    .map_err(|error| error.message)?;
+    let (projection, feed) =
+        crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
+            crate::agent::feed_projection::apply_on_runtime(runtime, feed, recipient)
+        })
+        .await
+        .map_err(|error| error.message)?;
     let conflicts = projection.conflicts;
     if let Some(conflict) = conflicts.first() {
         return Err(format!(
@@ -545,6 +601,3 @@ pub(super) async fn project_feed(
     }
     Ok(feed.went_behind_retention())
 }
-
-#[cfg(test)]
-mod tests;

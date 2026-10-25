@@ -117,6 +117,7 @@ mod fork;
 mod host_loop;
 mod info;
 pub(crate) mod job_events;
+mod ledger;
 mod logging;
 mod models;
 pub mod network_watch;

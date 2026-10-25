@@ -1,5 +1,9 @@
 //! The turn waiter: what runs when a child turn ends, and resuming it.
 
+use crate::driver::ledger::CommandLedger as _;
+
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
+
 use super::{
     Arc, AttachedCodingSession, ChildReopen, ChildReopenMode, ChildStartup, ChildTurnIdentity,
     CommandId, Duration, StartAdmission, SubmitNudgeBudget, TreeDriver, TurnId, TurnOutcome,
@@ -650,7 +654,7 @@ async fn recycle_fenced_child(driver: &TreeDriver, agent_id: &str) -> Option<Fen
     let sessions = Arc::clone(&session.sessions);
     let session_id = session.locator().session_id();
     let _ = session.release_opened().await;
-    crate::agent::result_context::project_feed(&runtime, agent_id, &sessions, session_id)
+    crate::agent::ledger::project_feed(&runtime, agent_id, &sessions, session_id)
         .await
         .ok()?;
     Some(recycled)
@@ -1218,7 +1222,7 @@ async fn try_transient_resume(
     }
     let command_id = CommandId::new(format!(
         "{}{}:{}:{round}",
-        crate::agent::result_context::TRANSIENT_RESUME_PREFIX,
+        crate::agent::ledger::TRANSIENT_RESUME_PREFIX,
         agent_id,
         identity.attempt
     ))
@@ -1227,8 +1231,16 @@ async fn try_transient_resume(
         failure: error.message(),
     }
     .render();
-    if let Ok(next) =
-        start_instruction_turn(driver, live, agent_id, identity, command_id, prompt).await
+    if let Ok(next) = start_instruction_turn(
+        driver,
+        live,
+        agent_id,
+        identity,
+        command_id,
+        prompt,
+        CommandKind::Resume,
+    )
+    .await
     {
         Some(Ok(next))
     } else {
@@ -1297,7 +1309,16 @@ pub(super) async fn start_submit_harness_turn(
         .map_err(|error| error.message)?;
     driver.settle(effects).map_err(|error| error.message)?;
     decision?;
-    start_instruction_turn(driver, live, agent_id, identity, command_id, prompt).await
+    start_instruction_turn(
+        driver,
+        live,
+        agent_id,
+        identity,
+        command_id,
+        prompt,
+        CommandKind::Corrective,
+    )
+    .await
 }
 
 pub(in crate::agent) async fn start_instruction_turn(
@@ -1307,13 +1328,24 @@ pub(in crate::agent) async fn start_instruction_turn(
     identity: &ChildTurnIdentity,
     command_id: CommandId,
     prompt: String,
+    kind: CommandKind,
 ) -> Result<TurnResultHandle, String> {
     let command_text = command_id.as_str().to_owned();
-    let result_context =
-        crate::agent::result_context::prepare(driver, agent_id, &command_text, &prompt)?;
+    let transient = kind == CommandKind::Resume;
+    let result_context = crate::agent::ledger::ChildLedger::new(driver, agent_id)
+        .prepare(CommandIntent {
+            command_id: &command_text,
+            kind,
+            base_text: &prompt,
+            batch: if transient {
+                BatchRule::WakeAll
+            } else {
+                BatchRule::Results
+            },
+        })
+        .map_err(String::from)?;
     let (mut live_map, delivery) =
         crate::agent::live::lock_for_transition(live, agent_id, identity.turn).await?;
-    let transient = command_text.starts_with(crate::agent::result_context::TRANSIENT_RESUME_PREFIX);
     let admissible = if transient {
         resume_allowed(driver, agent_id, identity)
     } else {
@@ -1330,11 +1362,12 @@ pub(in crate::agent) async fn start_instruction_turn(
             .unwrap_or(false)
     };
     if !admissible {
-        crate::agent::result_context::acknowledge(
-            driver,
-            &command_text,
-            crate::agent::result_context::Submission::Refused,
-        )?;
+        crate::agent::ledger::ChildLedger::settlement_only(driver)
+            .settle(
+                &command_text,
+                crate::driver::ledger::Settlement::Refused { pause: None },
+            )
+            .map_err(String::from)?;
         return Err(if transient {
             "transient continuation was cancelled"
         } else {
@@ -1385,7 +1418,7 @@ pub(in crate::agent) async fn start_instruction_turn(
             if !identity.still_owns(tree, agent_id) {
                 return Err("child attempt has already been replaced".into());
             }
-            if command_text.starts_with(crate::agent::result_context::TRANSIENT_RESUME_PREFIX) {
+            if transient {
                 tree.unpark_child(agent_id);
             }
             tree.bind_turn_owner(agent_id, turn_id.to_string());
@@ -1408,11 +1441,10 @@ pub(in crate::agent) async fn start_instruction_turn(
         }
         return Err(error);
     }
-    if let Err(error) = crate::agent::result_context::acknowledge(
-        driver,
-        &command_text,
-        crate::agent::result_context::Submission::Recorded,
-    ) {
+    if let Err(error) = crate::agent::ledger::ChildLedger::settlement_only(driver)
+        .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
+        .map_err(String::from)
+    {
         settle_or_fault(driver, effects, agent_id);
         if let Err(retirement_error) =
             crate::topology_runtime::retire_live(driver, live, agent_id, Some(turn_id), true).await

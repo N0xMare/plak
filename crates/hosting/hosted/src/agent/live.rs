@@ -177,7 +177,7 @@ impl ProductLiveChild {
             .await
             .map_err(|error| error.to_string())?;
         acknowledged.await;
-        if super::result_context::consumed_below_retention(
+        if crate::agent::ledger::consumed_below_retention(
             driver,
             &self.attached.sessions,
             self.attached.locator().session_id(),

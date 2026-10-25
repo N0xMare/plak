@@ -1,5 +1,9 @@
 //! Starting a child turn, and the attempt bookkeeping around it.
 
+use crate::driver::ledger::CommandLedger as _;
+
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
+
 use super::{
     Arc, AttachedCodingSession, ChildFeedSource, ChildStartup, ChildStartupStage, CommandId,
     Future, LiveRelease, SPAWN_MATERIALIZE_TIMEOUT, SessionLocator, StartupCaller, TreeDriver,
@@ -108,7 +112,7 @@ pub(in crate::agent) async fn start_child_turn(
     agent_id: &str,
     attached: AttachedCodingSession,
     command_id: CommandId,
-    prompt: impl Into<ChildCommand>,
+    prompt: ChildCommand,
 ) -> Result<TurnId, ChildStartFailure> {
     start_child_turn_as(
         runtime,
@@ -131,10 +135,9 @@ pub(in crate::agent) async fn start_child_turn_as(
     agent_id: &str,
     attached: AttachedCodingSession,
     command_id: CommandId,
-    prompt: impl Into<ChildCommand>,
+    prompt: ChildCommand,
     admission: StartAdmission,
 ) -> Result<TurnId, ChildStartFailure> {
-    let prompt = prompt.into();
     let deadline = tokio::time::Instant::now() + SPAWN_MATERIALIZE_TIMEOUT;
     let reserved = tokio::time::timeout_at(
         deadline,
@@ -231,7 +234,7 @@ pub(super) async fn start_child_turn_owned(
     agent_id: &str,
     attached: AttachedCodingSession,
     command_id: CommandId,
-    prompt: String,
+    prompt: ChildCommand,
     startup: &ChildStartup,
 ) -> Result<TurnId, ChildStartFailure> {
     start_child_turn_owned_with_ack(
@@ -251,30 +254,33 @@ pub(super) async fn start_child_turn_owned(
 /// What a child Start admits: a fresh prompt the result journal prepares,
 /// or a command the journal already holds, retried exactly after a reopen.
 pub(in crate::agent) enum ChildCommand {
-    Fresh(String),
+    Fresh {
+        prompt: String,
+        kind: CommandKind,
+        mail_id: Option<String>,
+    },
     Reopened {
-        first: crate::agent::result_context::JournaledCommand,
-        remaining: std::collections::VecDeque<crate::agent::result_context::JournaledCommand>,
+        first: crate::agent::ledger::JournaledCommand,
+        remaining: std::collections::VecDeque<crate::agent::ledger::JournaledCommand>,
     },
 }
 
-impl From<String> for ChildCommand {
-    fn from(prompt: String) -> Self {
-        Self::Fresh(prompt)
+impl ChildCommand {
+    pub(in crate::agent) fn fresh(prompt: String, kind: CommandKind) -> Self {
+        Self::Fresh {
+            prompt,
+            kind,
+            mail_id: None,
+        }
     }
-}
 
-impl From<&str> for ChildCommand {
-    fn from(prompt: &str) -> Self {
-        Self::Fresh(prompt.to_owned())
+    pub(super) fn mail_start(prompt: String, mail_id: String) -> Self {
+        Self::Fresh {
+            prompt,
+            kind: CommandKind::MailStart,
+            mail_id: Some(mail_id),
+        }
     }
-}
-
-/// Wakes and corrective rounds are host instructions, never user input.
-fn is_instruction_command(command: &str) -> bool {
-    command.starts_with(crate::agent::park::WAKE_COMMAND_PREFIX)
-        || command.starts_with("plak:submit-harness:")
-        || command.starts_with(crate::agent::result_context::TRANSIENT_RESUME_PREFIX)
 }
 
 // Keeping acknowledgement delivery separate from admission lets the offline
@@ -284,7 +290,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     agent_id: &str,
     attached: AttachedCodingSession,
     command_id: CommandId,
-    prompt: impl Into<ChildCommand>,
+    prompt: ChildCommand,
     startup: &ChildStartup,
     delete_on_definite_refusal: bool,
     admission: StartAdmission,
@@ -300,8 +306,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         release_startup(runtime, agent_id, startup, attached).await;
         return Err(error.into());
     }
-    if let Err(error) =
-        crate::agent::result_context::project_child_feed(runtime, agent_id, &attached).await
+    if let Err(error) = crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await
     {
         release_startup(runtime, agent_id, startup, attached).await;
         return Err(error.into());
@@ -312,14 +317,30 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     }
     let mut command_id = command_id;
     let mut command_text = command_id.as_str().to_owned();
-    let (mut result_context, mut remaining) = match prompt.into() {
-        ChildCommand::Fresh(prompt) => {
-            match crate::agent::result_context::prepare(
-                runtime.driver(),
-                agent_id,
-                &command_text,
-                &prompt,
-            ) {
+    let (mut result_context, mut remaining) = match prompt {
+        ChildCommand::Fresh {
+            prompt,
+            kind,
+            mail_id,
+        } => {
+            let batch = match kind {
+                CommandKind::Wake | CommandKind::Resume => BatchRule::WakeAll,
+                CommandKind::MailStart => BatchRule::MailStart(
+                    mail_id
+                        .as_deref()
+                        .ok_or("mail Start has no message identity")?,
+                ),
+                _ => BatchRule::Results,
+            };
+            match crate::agent::ledger::ChildLedger::new(runtime.driver(), agent_id)
+                .prepare(CommandIntent {
+                    command_id: &command_text,
+                    kind,
+                    base_text: &prompt,
+                    batch,
+                })
+                .map_err(String::from)
+            {
                 Ok(context) => (context, None),
                 Err(error) => {
                     release_startup(runtime, agent_id, startup, attached).await;
@@ -336,7 +357,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     };
     let mut acknowledged = Some(acknowledged);
     let submission = loop {
-        let command = if is_instruction_command(&command_text) {
+        let command = if result_context.is_instruction() {
             plakous::agent::TurnCommand::StartInstruction {
                 command_id,
                 text: result_context.prompt.clone(),
@@ -360,7 +381,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         }
         // A resubmission whose original was recorded below the feed's retention
         // started nothing now: it settles consumed (spec 03 section 14.1).
-        match crate::agent::result_context::consumed_below_retention(
+        match crate::agent::ledger::consumed_below_retention(
             runtime.driver(),
             &attached.sessions,
             attached.locator().session_id(),
@@ -378,11 +399,9 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             Ok(false) => break submission,
             consumed => {
                 let settled = consumed.and_then(|_| {
-                    crate::agent::result_context::acknowledge(
-                        runtime.driver(),
-                        &command_text,
-                        crate::agent::result_context::Submission::Consumed,
-                    )
+                    crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
+                        .settle(&command_text, crate::driver::ledger::Settlement::Consumed)
+                        .map_err(String::from)
                 });
                 if let Err(error) = settled {
                     release_startup(runtime, agent_id, startup, attached).await;
@@ -413,13 +432,15 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                         .map_err(|error| error.message)
                         .and_then(std::convert::identity)
                         .and_then(|id| {
-                            crate::agent::result_context::prepare(
-                                runtime.driver(),
-                                agent_id,
-                                &id,
-                                crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
-                            )
-                            .map(|context| (id, context))
+                            crate::agent::ledger::ChildLedger::new(runtime.driver(), agent_id)
+                                .prepare(CommandIntent {
+                                    command_id: &id,
+                                    kind: CommandKind::Wake,
+                                    base_text: crate::child_prompts::PLAK_CHILD_WAKE_PROMPT,
+                                    batch: BatchRule::WakeAll,
+                                })
+                                .map_err(String::from)
+                                .map(|context| (id, context))
                         })
                 };
                 match next.and_then(|(id, context)| {
@@ -444,11 +465,12 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         let storage_pressure =
             rejection.kind() == plakous::agent::ControlErrorKind::StoragePressure;
         let rejection = rejection.to_string();
-        let settled = crate::agent::result_context::acknowledge(
-            runtime.driver(),
-            &command_text,
-            crate::agent::result_context::Submission::Refused,
-        );
+        let settled = crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
+            .settle(
+                &command_text,
+                crate::driver::ledger::Settlement::Refused { pause: None },
+            )
+            .map_err(String::from);
         // Claim removal authority before the first cleanup await. A caller
         // cancellation that wins first keeps the uncertain fresh genesis for
         // later GC; a cleanup claim that wins fences all later cancellation
@@ -506,22 +528,19 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         // Projection precedes release: the construction attachment is not
         // itself evidence that the command was admitted.
         let projection =
-            crate::agent::result_context::project_child_feed(runtime, agent_id, &attached).await;
+            crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await;
         release_startup(runtime, agent_id, startup, attached).await;
         if error == crate::agent::park::REOPEN_HOLD_ENDED {
             projection.map_err(ChildStartFailure::from)?;
-            crate::agent::result_context::acknowledge(
-                runtime.driver(),
-                &command_text,
-                crate::agent::result_context::Submission::Recorded,
-            )
-            .map_err(ChildStartFailure::from)?;
+            crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
+                .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
+                .map_err(String::from)
+                .map_err(ChildStartFailure::from)?;
             return Err(ChildStartFailure::HoldEndedAfterAdmission(error));
         }
         return Err(error.into());
     }
-    if let Err(error) =
-        crate::agent::result_context::project_child_feed(runtime, agent_id, &attached).await
+    if let Err(error) = crate::agent::ledger::project_child_feed(runtime, agent_id, &attached).await
     {
         drop(registration.take());
         release_startup(runtime, agent_id, startup, attached).await;
@@ -564,11 +583,9 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             | plakous::agent::CommandAckDisposition::Duplicate
     );
     let bound = if accepted {
-        crate::agent::result_context::acknowledge(
-            runtime.driver(),
-            &command_text,
-            crate::agent::result_context::Submission::Recorded,
-        )
+        crate::agent::ledger::ChildLedger::settlement_only(runtime.driver())
+            .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
+            .map_err(String::from)
     } else {
         Err("child command was not admitted; result context retained".to_owned())
     };
