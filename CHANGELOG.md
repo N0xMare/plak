@@ -9,6 +9,11 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plakous
 
+- `plakous-code-mode` is folded into `plakous-compose`'s `cell::codex_exec`
+  implementation and removed from the published cohort; the workspace has
+  38 packages. Compose exposes the inert `HostApi`, `python_bootstrap`, its
+  interpreter-neutral `PythonBootstrap` data, and `codex_exec` at its crate
+  root. Presentation building blocks and fixture constructors are private.
 - The harness compaction instruction asks for fixed sections (Requests,
   Constraints, Values, Work done, Decisions, Open errors, Plan, Next step),
   each written once. Standing user constraints from any request stay quoted
@@ -33,7 +38,7 @@ one cross-build carrier (a build imports its own and the previous version).
   graph. `plakous-py-worker` builds `plakous-py-host`, which drives the pinned
   Monty 1.2.0 child state machine in process; the binary `monty` is gone, and
   `PLAK_MONTY_WORKER` is replaced by `PLAK_PY_HOST` (else a sibling
-  `plakous-py-host`). The workspace has 39 packages.
+  `plakous-py-host`).
 
 - The context meter counts each image on Claude routes at 4,784 tokens,
   Anthropic's current high-resolution maximum (`ceil(w/28) * ceil(h/28)`
@@ -58,7 +63,6 @@ one cross-build carrier (a build imports its own and the previous version).
   the Python profile, presentation, result, catalog and limits component
   facts remain unchanged. Model-visible text and outer and nested projection
   digests are unchanged.
-  - Cell attachment identities: pending the unified facade attachment change.
   State key `r25.e33.p33.t8`; carry a session with `/reload` or export and
   import. Export document version 8 is unchanged.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine

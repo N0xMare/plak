@@ -1,5 +1,5 @@
-use crate::ToolDefinition;
-use crate::ToolNamespaceDescription;
+use super::ToolDefinition;
+use super::ToolNamespaceDescription;
 use plakous_codex_code_mode_protocol::ImageDetailVisibility;
 use std::collections::BTreeMap;
 

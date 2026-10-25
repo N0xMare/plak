@@ -53,7 +53,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 39 packages: five supported, 31 published internal
+The workspace contains 38 packages: five supported, 30 published internal
 (the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
@@ -105,7 +105,6 @@ classes and directory policy.
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v1`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |
-| `plakous-code-mode` | `crates/runtimes/code-mode` | `engine` | Parse/DTO helpers for the Code Mode presentation (source parsing, tool-description rendering, result truncation). Not an evaluator |
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family kernel: wire grammar, stream framing, limits, sequencing |
 | `plakous-responses-dialect` | `crates/protocols/responses-dialect` | `protocol` | Generic Responses dialect host shapes shared by the Responses commercial routes |
 | `plakous-messages` | `crates/protocols/messages` | `protocol` | Messages-family kernel: request grammar, block ordering, thinking/signature replay, stream grammar, wire accounting |
@@ -117,7 +116,7 @@ classes and directory policy.
 | `plakous-openrouter` | `crates/providers/openrouter` | `provider` | Dynamic OpenRouter route, discovery, authz, and capability tables across three wire dialects |
 | `plakous-store` | `crates/store` | `store` | `SessionStore` backends: bounded in-memory by default, SQLite behind the `sqlite` feature |
 | `plakous-prompts` | `crates/harness/prompts` | `harness` | Model-visible instruction text, the first-turn assembler, the recommended profiles, and `AGENTS.md` discovery. Depends on no pack |
-| `plakous-compose` | `crates/harness/compose` | `harness` | The js/py cell outer tools, the Codex Code Mode `exec`/`wait` compilers, nested catalogs, and the `SidecarLocator` port |
+| `plakous-compose` | `crates/harness/compose` | `harness` | Cell presentations and their single compiler, the host-API descriptor and TypeScript/Python generators, Codex exec parsing/DTO helpers, nested catalogs, and the `SidecarLocator` port |
 | `plakous-tool-files` | `crates/harness/tool-files` | `harness` | Bounded reads, exact-content patching, image inspection, and the Codex patch envelope, behind `ToolPack` |
 | `plakous-tool-search` | `crates/harness/tool-search` | `harness` | Bounded deterministic repository search and directory listing, behind `ToolPack` |
 | `plakous-tool-web` | `crates/harness/tool-web` | `harness` | Local wrapper tools for provider-hosted web search, page fetch and X search over a `RetrievalPort`, behind `ToolPack` |
@@ -147,13 +146,13 @@ upstream child state machine in process and speaks the cell protocol; the host
 side is the same `plakous-cell` client and session as for JavaScript, and no
 pool library or WebSocket transport is linked.
 
-`plakous-code-mode` consumes the reviewed vendor snapshot at
+`plakous-compose::cell::codex_exec` consumes the reviewed vendor snapshot at
 `vendor/codex-code-mode-protocol`, packaged as
 `plakous-codex-code-mode-protocol` (upstream `codex-code-mode-protocol`, renamed),
 which carries only the description and schema-rendering closure Plakous calls,
 with its upstream identity and license recorded in its `PROVENANCE.md`. It is
 the one member of the `vendor` layer, with no internal dependencies, and keeps
-its upstream edition, rust-version, license and lints; `plakous-code-mode`
+its upstream edition, rust-version, license and lints; `plakous-compose`
 depends on it by path and exact version, so no consumer carries a Codex
 `[patch]` table.
 

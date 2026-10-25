@@ -42,7 +42,6 @@ auth = [
 # This is the whole evaluator capability a Custom-model embedder needs; it
 # carries no credential, subscription, or HTTP machinery.
 composition = [
-    "dep:plakous-code-mode",
     "dep:plakous-cell",
     "dep:serde",
     "dep:serde_json",
@@ -89,7 +88,6 @@ plakous-exchange = { workspace = true, optional = true }
 plakous-agent.workspace = true
 plakous-anthropic = { workspace = true, optional = true }
 plakous-auth = { workspace = true, optional = true }
-plakous-code-mode = { workspace = true, optional = true }
 plakous-cell = { workspace = true, optional = true }
 plakous-compose.workspace = true
 plakous-mcp = { workspace = true, optional = true }

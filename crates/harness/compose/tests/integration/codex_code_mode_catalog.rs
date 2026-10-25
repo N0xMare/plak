@@ -63,6 +63,100 @@ fn descriptor() -> Result<CodexNativeLocalCodeModeDescriptorV1, TestError> {
     )?)
 }
 
+#[test]
+fn cell_descriptor_v3_identities_pin_every_presentation() -> Result<(), TestError> {
+    use plakous_compose::{ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1};
+    use plakous_tool_plan::InMemoryPlanState;
+    use plakous_tools::PlanStateIdentity;
+
+    let mut builder = ToolRegistryBuilder::default();
+    let packs = plakous_compose::standard_coding_packs(
+        Arc::new(InMemoryPlanState::with_identity(PlanStateIdentity::new(
+            "golden.plan",
+            1,
+        )?)),
+        Arc::new(ProcessSessionTools::posix_sh()?),
+    );
+    register_packs(&packs, &mut builder)?;
+    CodexNativeLocalCodeModeV1::register_markers_into(&mut builder)?;
+    ProductJavaScriptCompositionV1::register_markers_into(&mut builder)?;
+    PythonPtcV1::register_markers_into(&mut builder)?;
+    let registry =
+        super::durable_descriptor_identity_golden::stable_serialization_fixture(&builder.freeze())?;
+    let target = target(b"cell-descriptor-v3")?;
+    let job = plakous_tools::JobConfig::default();
+    let names = [ToolName::new("read_file")?, ToolName::new("update_plan")?];
+    let identities = [
+        (
+            "codex-native",
+            CodexNativeLocalCodeModeV1::compile(job, registry.clone(), target.clone())?.identity(),
+        ),
+        (
+            "codex-minimal",
+            CodexMinimalLocalCodeModeV1::compile(job, registry.clone(), target.clone())?.identity(),
+        ),
+        (
+            "javascript",
+            ProductJavaScriptCompositionV1::compile(
+                registry.clone(),
+                target.clone(),
+                names.clone(),
+            )?
+            .identity(),
+        ),
+        (
+            "python-structured",
+            PythonPtcV1::compile(
+                registry.clone(),
+                target.clone(),
+                PythonPtcPresentationV1::StructuredFunctions,
+                names.clone(),
+            )?
+            .identity(),
+        ),
+        (
+            "python-custom",
+            PythonPtcV1::compile(
+                registry,
+                target,
+                PythonPtcPresentationV1::CustomRunFunctionWait,
+                names,
+            )?
+            .identity(),
+        ),
+    ];
+    let actual = identities.map(|(name, identity)| {
+        assert_eq!(identity.version(), 3);
+        (name, plakous_model::hex_lower(identity.bytes()))
+    });
+    assert_eq!(
+        actual,
+        [
+            (
+                "codex-native",
+                "96c094f0fa4073048044c11bbac78ca4165bbc20d5735d07069709de6d219b9d".to_owned()
+            ),
+            (
+                "codex-minimal",
+                "3e8b6d8466c5042c670ac345f05ab99615c5d5f102db987436c6022bf44a93fd".to_owned()
+            ),
+            (
+                "javascript",
+                "f0dd2ca40bea33fb5ed480e8c591ba5dddb46c3c52b0bc92cb3764898dc79b3e".to_owned()
+            ),
+            (
+                "python-structured",
+                "c08ca7b6ccf462c05a6516539254443128c067fb574a9f592ce3bd6f8114c9e9".to_owned()
+            ),
+            (
+                "python-custom",
+                "e4677b3be8def61b40580fa4cea79c3f10f5330bf6f0b32870fe8eb8b3e86525".to_owned()
+            ),
+        ]
+    );
+    Ok(())
+}
+
 fn request(name: &str, arguments: &str) -> Result<ToolInvocationRequest, TestError> {
     Ok(ToolInvocationRequest::new(
         RunId::from_str("00000000-0000-0000-0000-000000000201")?,
@@ -351,10 +445,12 @@ fn production_exec_preamble_advertises_enrolled_helpers_only() -> Result<(), Tes
             wait_description,
             format!(
                 "Waits on a yielded `exec` cell and returns new output or completion.\n{}",
-                plakous_code_mode::build_wait_description().trim().replace(
-                    "Defaults to 10000 ms.",
-                    "Defaults to 10000 ms; clamped to at most 600000 ms."
-                )
+                plakous_compose::codex_exec::build_wait_description()
+                    .trim()
+                    .replace(
+                        "Defaults to 10000 ms.",
+                        "Defaults to 10000 ms; clamped to at most 600000 ms."
+                    )
             )
         );
     }

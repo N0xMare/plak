@@ -18,7 +18,6 @@ members = [
     "crates/runtimes/cell",
     "crates/runtimes/js-runtime",
     "crates/runtimes/py-worker",
-    "crates/runtimes/code-mode",
     "crates/harness/compose",
     "crates/common/http",
     "crates/protocols/chat-completions",
@@ -128,7 +127,6 @@ plakous-attempt = { version = "0.0.2", path = "crates/common/attempt", default-f
 plakous-auth = { version = "0.0.2", path = "crates/common/auth", default-features = false }
 plakous-cell = { version = "0.0.2", path = "crates/runtimes/cell", default-features = false }
 plakous-chat-completions = { version = "0.0.2", path = "crates/protocols/chat-completions", default-features = false }
-plakous-code-mode = { version = "0.0.2", path = "crates/runtimes/code-mode", default-features = false }
 plakous-compose = { version = "0.0.2", path = "crates/harness/compose", default-features = false }
 plakous-exchange = { version = "0.0.2", path = "crates/protocols/exchange", default-features = false }
 plakous-host-protocol = { version = "0.0.2", path = "crates/hosting/host-protocol", default-features = false }
@@ -189,6 +187,8 @@ test = ["*"]
 vendor = []
 
 [workspace.metadata.plakous.edge-exceptions]
+# The composition compiler owns the pinned Codex description/grammar renderer.
+plakous-compose = ["plakous-codex-code-mode-protocol"]
 # The facade shares lookup backoff policy, never a second catalog retry copy.
 plakous = ["plakous-exchange"]
 plak = [

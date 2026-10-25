@@ -381,6 +381,56 @@ fn limits_result_and_component_identities_are_explicit_and_exact() -> Result<(),
 }
 
 #[test]
+fn python_host_api_generates_the_exact_sorted_worker_bootstrap() -> Result<(), TestError> {
+    use plakous_compose::python_bootstrap;
+
+    let descriptor = PythonPtcV1::compile(
+        registry([
+            registration("read-file", "test.read.v1", true, true)?,
+            registration("helper", "test.helper.v1", true, true)?,
+        ])?,
+        target(b"host-api-bootstrap")?,
+        PythonPtcPresentationV1::StructuredFunctions,
+        [ToolName::new("read-file")?, ToolName::new("helper")?],
+    )?;
+    let bootstrap = python_bootstrap(descriptor.host_api())?.ok_or("missing bootstrap")?;
+    assert_eq!(
+        bootstrap.source,
+        concat!(
+            "async def helper(arguments):\n    return await _plakous_host_0(arguments)\n",
+            "async def read_file(arguments):\n    return await _plakous_host_1(arguments)\n",
+        )
+    );
+    let bindings = bootstrap
+        .bindings
+        .iter()
+        .map(|binding| {
+            (
+                binding.function.as_str(),
+                binding.tool.as_str(),
+                binding.input,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        bindings,
+        [
+            (
+                "_plakous_host_0",
+                "helper",
+                plakous_compose::PythonInput::Dictionary
+            ),
+            (
+                "_plakous_host_1",
+                "read-file",
+                plakous_compose::PythonInput::Dictionary
+            ),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
 fn catalog_order_target_and_presentation_rotate_only_the_bound_identities() -> Result<(), TestError>
 {
     let registry = registry([

@@ -998,7 +998,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 39)
+        self.assertEqual(len(workspace.packages), 38)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -1075,7 +1075,6 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-attempt",
                 "plakous-auth",
                 "plakous-chat-completions",
-                "plakous-code-mode",
                 "plakous-codex-code-mode-protocol",
                 "plakous-exchange",
                 "plakous-cell",
@@ -1099,7 +1098,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 39)
+        self.assertEqual(sum(map(len, actual.values())), 38)
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
@@ -1230,6 +1229,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         self.assertEqual(
             self.workspace.policy.edge_exceptions,
             {
+                "plakous-compose": ("plakous-codex-code-mode-protocol",),
                 "plakous": ("plakous-exchange",),
                 "plak": (
                     "plakous-host-protocol",
@@ -1286,11 +1286,11 @@ class RepositoryPolicyTests(unittest.TestCase):
         )
 
         missing_inheritance = copy.deepcopy(workspace_manifests)
-        missing_inheritance["plakous-code-mode"].pop("lints")
+        missing_inheritance["plakous-compose"].pop("lints")
         errors = workspace_policy.validate_local_production_lints(
             missing_inheritance
         )
-        self.assertTrue(any("plakous-code-mode" in error for error in errors), errors)
+        self.assertTrue(any("plakous-compose" in error for error in errors), errors)
 
         weakened_js = copy.deepcopy(workspace_manifests)
         weakened_js["plakous-cell"]["lints"]["rust"]["unsafe_code"] = "allow"
@@ -2156,10 +2156,10 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(edges["plakous-agent"], {"plakous-model", "plakous-tools"})
         self.assertEqual(edges["plakous-store"], {"plakous-agent"})
         self.assertIn("plakous-responses-dialect", edges["plakous-openai"])
-        self.assertEqual(edges["plakous-code-mode"], {"plakous-codex-code-mode-protocol"})
+        self.assertIn("plakous-codex-code-mode-protocol", edges["plakous-compose"])
         self.assertEqual(edges["plakous-codex-code-mode-protocol"], set())
         self.assertNotIn("plakous-dispatch", edges)
-        self.assertEqual(self.workspace.policy.edge_exceptions.get("plakous-code-mode"), None)
+        self.assertEqual(self.workspace.policy.edge_exceptions.get("plakous-compose"), ("plakous-codex-code-mode-protocol",))
         self.assertIn(
             ("plakous", "sessions-sqlite", "plakous-store/sqlite"),
             feature_policy.REQUIRED_DEPENDENCY_FEATURE_EDGES,
@@ -2281,6 +2281,7 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous",
                 "plakous-agent",
                 "plakous-compose",
+                "plakous-codex-code-mode-protocol",
                 "plakous-model",
                 "plakous-prompts",
                 "plakous-store",
@@ -2292,10 +2293,11 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-tools",
             },
         )
+        self.assertNotIn("plakous-cell", minimal)
         native = feature_policy.expected_closure(
             "plakous", ("native-subscriptions",), False, manifests
         )
-        self.assertIn("plakous-code-mode", native)
+        self.assertIn("plakous-codex-code-mode-protocol", native)
         self.assertIn("plakous-cell", native)
         self.assertIn("plakous-auth", native)
         self.assertNotIn("plakous-openrouter", native)
@@ -2329,7 +2331,7 @@ class DensityScopeTests(unittest.TestCase):
         self.assertEqual(scopes["plakous-model"], "l0")
         self.assertEqual(scopes["plakous"], "l0")
         self.assertEqual(scopes["plakous-openai"], "below_facade")
-        self.assertEqual(scopes["plakous-code-mode"], "below_facade")
+        self.assertEqual(scopes["plakous-cell"], "below_facade")
         self.assertEqual(scopes["plakous-hosted"], "host")
         self.assertEqual(scopes["plak"], "product")
         self.assertEqual(scopes["plakous-test-support"], "test")

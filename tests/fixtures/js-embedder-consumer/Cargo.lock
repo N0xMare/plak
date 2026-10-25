@@ -446,7 +446,6 @@ version = "0.0.2"
 dependencies = [
  "plakous-agent",
  "plakous-cell",
- "plakous-code-mode",
  "plakous-compose",
  "plakous-model",
  "plakous-prompts",
@@ -490,16 +489,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plakous-code-mode"
-version = "0.0.2"
-dependencies = [
- "plakous-codex-code-mode-protocol",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "plakous-codex-code-mode-protocol"
 version = "0.153.3"
 dependencies = [
@@ -511,6 +500,7 @@ dependencies = [
 name = "plakous-compose"
 version = "0.0.2"
 dependencies = [
+ "plakous-codex-code-mode-protocol",
  "plakous-model",
  "plakous-tool-files",
  "plakous-tool-plan",
@@ -519,6 +509,7 @@ dependencies = [
  "plakous-tools",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

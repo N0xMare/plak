@@ -100,7 +100,6 @@ class ResponsibilityReportTests(unittest.TestCase):
             ("plakous-agent", "src/runtime/driver/mod.rs"): "runtime",
             ("plakous-agent", "src/event/projection.rs"): "event/presentation",
             ("plakous-cell", "src/lib.rs"): "runtime",
-            ("plakous-code-mode", "src/lib.rs"): "runtime",
             ("plakous-agent", "src/manifest.rs"): "checkpoint/rehydration",
             ("plakous-agent", "src/session.rs"): "session/facade",
             ("plakous-store", "src/sqlite.rs"): "store",

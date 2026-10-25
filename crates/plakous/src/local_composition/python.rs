@@ -10,7 +10,6 @@ use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::integration::Presentation;
-use super::python_bindings::{PythonToolBinding, python_bootstrap};
 use super::session::{SessionCore, SessionEngine, SessionFuture, child_exit, response};
 use plakous_agent::internal::{
     ChildProcessExit, ChildProcessKind, LocalCompositionExecuteRequest, LocalCompositionResponse,
@@ -18,6 +17,7 @@ use plakous_agent::internal::{
     LocalCompositionTerminateResult, LocalCompositionWaitOutcome,
 };
 use plakous_cell::{CellPrelude, MontyBootstrap, ObservationMode, WaitOutcome};
+use plakous_compose::{PythonBootstrap, PythonInput, python_bootstrap};
 
 /// Bound on one uninterrupted stretch of Python computation: from a start, a
 /// nested call or an accepted result to the next nested call, wait or
@@ -36,24 +36,9 @@ pub(super) fn python_presentation(
         .iter()
         .map(|tool| tool.canonical_name().clone())
         .collect::<Vec<_>>();
-    let python_bindings = descriptor
-        .nested_tools()
-        .iter()
-        .map(|tool| {
-            (
-                tool.python_name().to_owned(),
-                PythonToolBinding {
-                    tool_name: tool.canonical_name().as_str().to_owned(),
-                    input_kind: if tool.string_input() {
-                        plakous_cell::BindingInput::String
-                    } else {
-                        plakous_cell::BindingInput::Dictionary
-                    },
-                },
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let bootstrap = python_bootstrap(python_bindings).map_err(invalid)?;
+    let bootstrap = python_bootstrap(descriptor.host_api())
+        .map_err(invalid)?
+        .map(worker_bootstrap);
     Ok(PythonPresentation {
         nested_names: nested_names.into(),
         bootstrap,
@@ -61,6 +46,24 @@ pub(super) fn python_presentation(
         presentation_kind,
         evidence,
     })
+}
+
+pub(super) fn worker_bootstrap(bootstrap: PythonBootstrap) -> MontyBootstrap {
+    MontyBootstrap {
+        source: bootstrap.source,
+        bindings: bootstrap
+            .bindings
+            .into_iter()
+            .map(|binding| plakous_cell::MontyBinding {
+                function: binding.function,
+                tool: binding.tool,
+                input: match binding.input {
+                    PythonInput::Dictionary => plakous_cell::BindingInput::Dictionary,
+                    PythonInput::String => plakous_cell::BindingInput::String,
+                },
+            })
+            .collect(),
+    }
 }
 
 /// Python PTC exec_py cell, prefix before the active cell id in a concurrent-start refusal.

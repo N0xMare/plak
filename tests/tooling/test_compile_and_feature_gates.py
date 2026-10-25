@@ -627,7 +627,7 @@ class FeatureGateTests(unittest.TestCase):
         closure = feature_gate.expected_closure(
             "plakous", ("native-subscriptions",), False, manifests
         )
-        self.assertIn("plakous-code-mode", closure)
+        self.assertIn("plakous-codex-code-mode-protocol", closure)
         self.assertIn("plakous-cell", closure)
         self.assertNotIn("plak-compose-protocol", closure)
 

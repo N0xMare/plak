@@ -6231,6 +6231,22 @@ bytes is not exactly reopened; it moves by export/carry. A child recorded under
 a different occupancy policy identity likewise moves by export/carry (chapter
 02 §6.7). There is no descriptor or policy fallback.
 
+All local cell presentations compile through one `plakous-compose::cell`
+compiler. `CellPresentation` supplies the outer markers, input contracts,
+catalog style, limits, yield mode, lifecycle, result grammar and revisions.
+The ordered `HostApi` describes namespaces, functions, parameters and return
+shapes; it generates the TypeScript declarations, Python authoring signatures
+and the bounded Python worker bootstrap. The worker receives that bootstrap
+from the host; it does not generate an independent catalog.
+
+Every cell descriptor uses `sha256(ToolDefinition, 3, [profile, revisions...,
+execute text, wait text, grammar, limits JSON, presentation semantics JSON,
+outer projection digest, nested projection digest, host API JSON])`.
+Runtime epoch 33 separates these identities from the former presentation-local
+recipes. Model-visible text and projection digests are unchanged. Python's
+profile, presentation, result, catalog and limits component facts remain
+available independently and do not replace the v3 descriptor identity.
+
 A composition `wait` accepts a `cell_id` written as a JSON number and
 normalises it to the string form before validation. This is an **accepted
 superset, not a schema change**: the presented schema and description stay
@@ -8346,14 +8362,14 @@ and are provider internals rather than a presentation surface. `auth` adds the
 secret, credential-store, OAuth, pin, and account-binding foundations and
 implies `openai` and `xai`.
 
-The default facade closure reaches neither `plakous-code-mode` nor its
-vendored Codex protocol dependency. `plakous-compose` uses the reviewed
-description constants directly; `plakous-code-mode` is only its dev-dependency
-for offline protocol comparisons.
+The default facade closure includes `plakous-compose` and its reviewed
+vendored Codex protocol dependency for the pinned description and grammar
+renderers. It does not include `plakous-cell`: the composition compiler returns
+interpreter-neutral bootstrap data and links no worker client or interpreter.
 
 `composition` is the evaluator capability on its own: the `plakous::agent`
 local composition attachment seam, the Code Mode presentation, and the cell client. It links
-`plakous-code-mode` and `plakous-cell` and no other optional Plakous crate,
+`plakous-cell` and no other optional Plakous crate,
 so it reaches neither `plakous-auth` nor `plakous-http`, and it links neither
 rquickjs nor any Monty crate. Both JavaScript and Python PTC use this same
 feature, attach path and cell client; the Monty interpreter lives only in

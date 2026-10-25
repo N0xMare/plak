@@ -76,7 +76,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely and never published |
 
-The workspace holds 39 packages: five supported, 31 published internal, three
+The workspace holds 38 packages: five supported, 30 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -88,12 +88,12 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (31)**
+**Published internal (30)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
 `plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
-`plakous-chat-completions`, `plakous-code-mode`, `plakous-codex-code-mode-protocol`,
+`plakous-chat-completions`, `plakous-codex-code-mode-protocol`,
 `plakous-compose`, `plakous-exchange`,
 `plakous-http`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`,
@@ -120,7 +120,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
 | `crates/common/` | attempt, http, auth | common |
-| `crates/runtimes/` | cell, js-runtime, py-worker, code-mode | engine |
+| `crates/runtimes/` | cell, js-runtime, py-worker | engine |
 | `crates/protocols/` | Responses, its shared dialect, Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
 | `crates/store/` | session-store implementations | store |
@@ -140,7 +140,9 @@ production, so instruction text never acquires an opinion about which tools
 exist. The `host` layer sits above the facade and consumes only `plakous` and
 other `host` packages; nothing in it is re-exported by the facade. The
 `vendor` layer holds `plakous-codex-code-mode-protocol` alone; it depends on
-no workspace package and only `engine` may depend on it. It is a member so the
+no workspace package. The `engine` layer may depend on it; the composition
+compiler's explicit `plakous-compose` exception is the only harness edge.
+It is a member so the
 cohort packages together (§6.5), and it keeps its upstream edition,
 rust-version, Apache-2.0 license and `unsafe_code = "forbid"` lint table rather
 than the workspace's.
@@ -938,13 +940,16 @@ evaluator. Only building the Python worker package itself selects the reviewed
 `monty-typeshed` snapshot (§7.3), and a consumer that omits it builds the
 upstream crate, whose type-checker archive is not byte-reproducible.
 
-There is no Codex patch table. `plakous-code-mode` depends on the
+There is no Codex patch table. `plakous-compose` owns the Code Mode parse/DTO
+and description helpers in `cell::codex_exec` and depends on the
 reviewed vendor snapshot `vendor/codex-code-mode-protocol`, the package
 `plakous-codex-code-mode-protocol` (the upstream crate renamed so it can be
 published without claiming the upstream name), by path and version; its
 `PROVENANCE.md` records the upstream repository, revision
 `b1a547b1f73ce86205d9222ac19cff334b3b7a2e`, version `0.153.3`, Apache-2.0
 license, and the exact files and line ranges copied.
+The composition package alone has the harness-to-vendor dependency exception;
+other harness packages cannot depend on the vendor layer.
 
 #### Runnable external examples
 

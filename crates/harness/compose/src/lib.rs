@@ -23,16 +23,12 @@
 )]
 
 mod candidate;
-mod codex_code_mode;
+mod cell;
 mod coding_menu;
-mod javascript;
-mod python;
 mod sidecar;
 mod text;
 
 pub use candidate::*;
-pub use codex_code_mode::*;
+pub use cell::*;
 pub use coding_menu::*;
-pub use javascript::*;
-pub use python::*;
 pub use sidecar::SidecarLocator;

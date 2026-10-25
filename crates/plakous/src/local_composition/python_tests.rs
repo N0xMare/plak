@@ -24,11 +24,111 @@ use plakous_agent::internal::{
 use plakous_cell::{BindingInput, CellClient, EngineConfig, MONTY_WORKER};
 
 use super::python::{Monty, PYTHON_WORKER_REQUEST_BOUND};
-use super::python_bindings::{PythonToolBinding, python_bootstrap};
 use super::session::session_bundle;
+use plakous_compose::{PythonInput, PythonPtcPresentationV1, PythonPtcV1, python_bootstrap};
 
 const MAX_OUTSTANDING_NESTED: usize = 16;
 const MAX_PRINT_BYTES: usize = 1_048_576 - 64;
+
+struct PythonToolBinding {
+    tool_name: String,
+    input_kind: BindingInput,
+}
+
+fn fixture_registry(
+    names: &[plakous_model::ToolName],
+) -> Result<plakous_tools::FrozenToolRegistry, Box<dyn std::error::Error>> {
+    use plakous_model::{
+        ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolOutputContract,
+    };
+    use plakous_tools::{
+        RegisteredToolId, ToolExecutorBindingIdentity, ToolExecutorId, ToolRegistration,
+        ToolRegistryBuilder,
+    };
+
+    let mut registry = ToolRegistryBuilder::default();
+    for (index, name) in names.iter().enumerate() {
+        registry.register(
+            ToolRegistration::new(
+                RegisteredToolId::new(format!("fixture.python.{index}"))?,
+                ToolExecutorId::new(format!("fixture.python.{index}"))?,
+                ToolExecutorBindingIdentity::new(1, &[name.as_str().as_bytes()])?,
+                ToolDefinition::new(
+                    name.clone(),
+                    "fixture",
+                    "Python worker fixture tool.",
+                    ToolInputContract::structured(plakous_tools::object_schema(
+                        serde_json::json!({}),
+                        &[],
+                    ))?,
+                    ToolOutputContract::utf8(4096)?,
+                    ToolConcurrency::Parallel,
+                    ToolEffect::ReadOnly,
+                )?,
+                Arc::new(plakous_test_support::ScriptedTool::new([])),
+            )
+            .nested_eligible(),
+        )?;
+    }
+    PythonPtcV1::register_markers_into(&mut registry)?;
+    Ok(registry.freeze())
+}
+
+fn fixture_bootstrap(
+    bindings: &BTreeMap<String, PythonToolBinding>,
+) -> Result<Option<plakous_cell::MontyBootstrap>, Box<dyn std::error::Error>> {
+    use plakous_model::{Digest, DigestDomain, IntegrationClass, ToolName};
+
+    if bindings.is_empty() {
+        return Ok(None);
+    }
+    let names = bindings
+        .keys()
+        .map(|name| ToolName::new(name.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let configuration = serde_json::from_value(serde_json::to_value(Digest::sha256(
+        DigestDomain::EffectiveProviderConfiguration,
+        5,
+        &[b"python-worker-fixture"],
+    )?)?)?;
+    let target = plakous_tools::ProviderModelProjectionIdentityV2::new(
+        IntegrationClass::Custom,
+        "custom.responses",
+        "fixture.route",
+        "fixture.python",
+        "responses-family",
+        "fixture.model",
+        "fixture.model",
+        configuration,
+        1,
+    )?;
+    let descriptor = PythonPtcV1::compile(
+        fixture_registry(&names)?,
+        target,
+        PythonPtcPresentationV1::StructuredFunctions,
+        names,
+    )?;
+    if descriptor
+        .nested_tools()
+        .iter()
+        .any(|tool| tool.python_name() != tool.canonical_name().as_str())
+    {
+        return Err("fixture exports must already be valid Python identifiers".into());
+    }
+    let mut bootstrap =
+        python_bootstrap(descriptor.host_api())?.ok_or("fixture bootstrap missing")?;
+    // Worker protocol tests select dispatch aliases and string/dictionary codecs
+    // independently of the registry used to generate the coroutine source.
+    for binding in &mut bootstrap.bindings {
+        let fixture = &bindings[&binding.tool];
+        binding.tool.clone_from(&fixture.tool_name);
+        binding.input = match fixture.input_kind {
+            BindingInput::Dictionary => PythonInput::Dictionary,
+            BindingInput::String => PythonInput::String,
+        };
+    }
+    Ok(Some(super::python::worker_bootstrap(bootstrap)))
+}
 
 /// The built `plakous-py-host`: `PLAK_PY_HOST`, else the test build's own.
 fn py_host() -> Option<PathBuf> {
@@ -56,7 +156,7 @@ async fn python_session_within(
     bindings: BTreeMap<String, PythonToolBinding>,
     request_bound: Duration,
 ) -> Result<LocalCompositionSessionBundle, String> {
-    let bootstrap = python_bootstrap(bindings)?;
+    let bootstrap = fixture_bootstrap(&bindings).map_err(|error| error.to_string())?;
     let client = CellClient::spawn(worker, MONTY_WORKER, EngineConfig::MONTY).await?;
     Ok(session_bundle(
         Arc::new(client),

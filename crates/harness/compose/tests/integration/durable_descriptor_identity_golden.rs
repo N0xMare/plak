@@ -224,7 +224,7 @@ fn registry(with_topology: bool) -> Result<FrozenToolRegistry, TestError> {
 // Keep the real pack's definitions, IDs, eligibility and other bindings exact;
 // use existing registration construction to substitute only the process binding.
 // These executors are never invoked by descriptor/projection serialization.
-fn stable_serialization_fixture(
+pub(super) fn stable_serialization_fixture(
     real: &FrozenToolRegistry,
 ) -> Result<FrozenToolRegistry, TestError> {
     let shell = JoinedProcessShellProfile::new("/bin/sh", [String::from("-c")])?;

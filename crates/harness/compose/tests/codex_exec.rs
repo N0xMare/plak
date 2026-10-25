@@ -1,7 +1,7 @@
 //! Focused parse/DTO and exact protocol-helper contracts.
 #![allow(clippy::expect_used, reason = "focused sidecar boundary tests")]
 
-use plakous_code_mode::*;
+use plakous_compose::codex_exec::*;
 use serde_json::json;
 use std::collections::BTreeMap;
 

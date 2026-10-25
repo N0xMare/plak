@@ -1,4 +1,4 @@
-use crate::ContentItem;
+use super::ContentItem;
 
 const BYTES_PER_TOKEN: usize = 4;
 

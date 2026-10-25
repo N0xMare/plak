@@ -1,13 +1,5 @@
-//! Parse/DTO helpers for Code Mode presentation.
-//!
-//! This published-internal package exposes bounded Code Mode values used to
-//! parse `exec` source, render tool descriptions, and truncate results. It is
-//! not a process-sidecar evaluator and does not spawn `codex-code-mode-host`.
-//!
-//! The pinned Codex protocol types remain implementation details of the DTO
-//! and description helpers.
+//! Pinned Codex exec parsing, descriptions and bounded result DTOs.
 
-#![forbid(unsafe_code)]
 #![allow(
     missing_docs,
     reason = "published-internal DTO inventory is documented at the module contract boundary"

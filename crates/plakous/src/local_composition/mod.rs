@@ -16,7 +16,6 @@
 //! }
 //! ```
 
-use std::collections::BTreeMap;
 use std::{
     fmt,
     fs::File,
@@ -37,7 +36,7 @@ use plakous_agent::internal::{
     LocalCompositionRuntimeContract, LocalCompositionSessionBundle, LocalCompositionShutdownResult,
     LocalCompositionToolDefinition, LocalCompositionWaitInput,
 };
-use plakous_code_mode as native;
+use plakous_compose::codex_exec as native;
 use plakous_compose::{
     CodexMinimalLocalCodeModeDescriptorV1, CodexNativeLocalCodeModeDescriptorV1,
     ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
@@ -69,7 +68,6 @@ mod evidence;
 mod integration;
 mod javascript;
 mod python;
-mod python_bindings;
 #[cfg(all(test, unix))]
 mod python_tests;
 mod session;
