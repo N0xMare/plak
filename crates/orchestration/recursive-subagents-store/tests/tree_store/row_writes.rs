@@ -484,6 +484,30 @@ impl Model {
     }
 
     fn tree(&self, templates: &Templates, tree_id: &str, stored_revision: u64) -> ProductAgentTree {
+        let mut operations = self.operations.clone();
+        for attempt in self.attempts.values() {
+            if let Some(output) = &attempt.output_json {
+                let id = format!("submitted:{}", attempt.attempt_id);
+                let canonical = serde_json::json!({
+                    "attempt_id": attempt.attempt_id,
+                    "decision": {"Submitted": {"output_json": output}},
+                })
+                .to_string();
+                operations.insert(
+                    id.clone(),
+                    OperationRecord {
+                        fold: Some(FoldAnchor { seq: 0, order: 1 }),
+                        operation_id: id,
+                        caller_agent_id: attempt.agent_id.clone(),
+                        tool_name: "submitted".into(),
+                        request_digest: plakous::model::sha256_hex(&[canonical.as_bytes()]),
+                        canonical_request: canonical,
+                        terminal_code: None,
+                        terminal_response: Some("effects_reserved".into()),
+                    },
+                );
+            }
+        }
         let mut tree = PersistedTree::from_rows(
             tree_id.to_owned(),
             ROOT.to_owned(),
@@ -500,7 +524,7 @@ impl Model {
             self.candidates.clone(),
             self.workspaces.clone(),
             self.messages.clone(),
-            self.operations.clone(),
+            operations,
         )
         .with_feed_rows(self.commands.clone(), self.cursors.clone())
         .rows()
@@ -694,6 +718,9 @@ impl Harness {
         assert_eq!(loaded.commands(), expected.commands());
         assert_eq!(loaded.feed_cursors(), expected.feed_cursors());
         assert_eq!(loaded.nodes(), expected.nodes());
+        let tx = self.reference.0.unchecked_transaction().unwrap();
+        let whole = rows::load_agent_tree(&tx, TREE).unwrap().unwrap();
+        assert_eq!(whole.rows().attempts(), expected.attempts());
     }
 }
 

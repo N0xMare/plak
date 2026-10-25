@@ -1649,6 +1649,13 @@ an existing sibling worker is never treated as build evidence. This is the
 same prerequisite the gate prepares for the offline e2e harness. Standalone
 offline e2e runs likewise require `cargo test --no-run --locked --workspace
 --all-features` before selecting the product tests.
+The opt-in `tree_child_submit_adopt` shape persists a scripted child tree
+through spawn, validated submission and adoption. Its pilot inspects the stored
+output and landing provenance. Its indexed cuts exercise tree transactions and
+derived-output reload with the fake VCS port; real Git pin publication and
+collection are covered separately by the workspace transaction and GC laws.
+Relaunching this shape explicitly requests `--resume-tree`; the product's
+paused-tree admission policy is unchanged.
 The process pilots prove a real shell job was promoted and quit settled it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.

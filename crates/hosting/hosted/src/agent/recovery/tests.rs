@@ -282,7 +282,7 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
     rusqlite::Connection::open(&database).unwrap().execute_batch(
         "UPDATE agent_nodes SET fold_order=NULL;
          UPDATE agent_nodes SET status='running',active_turn=0,session_locator=NULL WHERE parent_agent_id IS NOT NULL;
-         UPDATE agent_attempts SET status='running',output_json=NULL,candidate_id=NULL,turn_id=NULL,ended_at=NULL,
+         UPDATE agent_attempts SET status='running',candidate_id=NULL,turn_id=NULL,ended_at=NULL,
              blocked_kind=NULL,blocked_account=NULL,blocked_resets_at=NULL,failure_kind=NULL,failure_message=NULL,
              turns=0,tool_calls=0,input_tokens=0,output_tokens=0,submit_harness_nudge=0;
          UPDATE agent_commands SET fact=NULL,turn_id=NULL,accepted_seq=NULL;

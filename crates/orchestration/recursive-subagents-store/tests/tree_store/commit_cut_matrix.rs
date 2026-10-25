@@ -507,6 +507,9 @@ fn snapshot(tree: &ProductAgentTree) -> Value {
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>();
+        if table == "agent_attempts" {
+            assert!(!columns.iter().any(|column| column == "output_json"));
+        }
         let records = statement
             .query_map([], |row| {
                 let mut record = serde_json::Map::new();
@@ -533,6 +536,17 @@ fn snapshot(tree: &ProductAgentTree) -> Value {
             .unwrap();
         result.insert(table, json!(records));
     }
+    result.insert(
+        "derived_attempt_outputs".into(),
+        json!(
+            tree.attempts()
+                .values()
+                .map(|attempt| {
+                    json!({"attempt_id": attempt.attempt_id, "output_json": attempt.output_json})
+                })
+                .collect::<Vec<_>>()
+        ),
+    );
     Value::Object(result)
 }
 

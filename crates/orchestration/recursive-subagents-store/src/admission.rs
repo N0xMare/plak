@@ -19,7 +19,7 @@ pub struct Schema {
     /// The store's name in messages: `tree` reads "tree store".
     pub noun: &'static str,
     /// The file stem, which also names the schema and its identity table:
-    /// `subagents` is `subagents.sqlite3`, "subagents schema 8" and
+    /// `subagents` is `subagents.sqlite3`, "subagents schema 9" and
     /// `subagents_schema`.
     pub stem: &'static str,
     /// What an operator archives before retrying over an unversioned file.

@@ -197,6 +197,9 @@ Tree schema 9 records candidate `target_before` provenance and each workspace's
 `input_candidate_id`; retained snapshots have independent Git-backend pins.
 Copy names use an eight-hex tree prefix, protected by immutable full-digest
 ownership evidence in the shared Git directory.
+Submitted intents own exact child outputs; attempt outputs are derived on load
+and submit-result replay receipts keep a digest summary. Provisional wait
+receipts retain the exact views they returned.
 The canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Builds open
 only their current version tuple as state authority. Export v8 carries

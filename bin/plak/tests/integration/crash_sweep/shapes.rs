@@ -212,6 +212,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: sw3a::assert_sealed,
     },
     Shape {
+        name: "tree_child_submit_adopt",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: tree_child_submit_adopt,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: assert_tree_child_submit_adopt,
+    },
+    Shape {
         name: "non_stop_finish_length",
         subset: false,
         terminal: ExpectedTerminal::Answer,
@@ -448,6 +458,65 @@ fn assert_final_only(fixture: &Fixture, outcome: &AgentOutcome, state: &summary:
 
 fn assert_direct_tool(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
     assert_live(fixture, outcome, state, 1, 2);
+}
+
+fn tree_child_submit_adopt() -> Value {
+    json!({"version": 1, "tree": true, "durable_tree": true, "steps": [
+        {"output": {"tool": {"name": "spawn_agent", "arguments": {
+            "template": "implement", "tier": "mutate", "workspace": "fork",
+            "description": "tree output sweep child", "prompt": "make the scripted change",
+            "output_schema_json": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
+        }}}, "finish": "tool_calls"},
+        {"output": {"tool": {"name": "wait_agent", "arguments": {
+            "agent_ids": ["$result.agent_id"]
+        }}}, "finish": "tool_calls"},
+        {"output": {"tool": {"name": "adopt_candidate", "arguments": {
+            "candidate_id": "$result.candidate"
+        }}}, "finish": "tool_calls"},
+        {"output": {"text": ANSWER}, "finish": "stop"}
+    ]})
+}
+
+fn assert_tree_child_submit_adopt(
+    fixture: &Fixture,
+    outcome: &AgentOutcome,
+    state: &summary::Summary,
+) {
+    assert_live(fixture, outcome, state, 3, 4);
+    let id = state
+        .tree_nodes
+        .iter()
+        .find(|row| row["agent"] == "c1")
+        .unwrap()["tree"]
+        .as_str()
+        .unwrap();
+    let plakous_recursive_subagents_store::TreeInspection::Tree(tree) =
+        plakous_recursive_subagents_store::SqliteTreeStore::inspect(
+            &summary::paths(fixture).subagents_database(),
+            id,
+        )
+        .unwrap()
+    else {
+        panic!("pilot must persist its tree");
+    };
+    assert_eq!(
+        tree.rows().attempt("c1").unwrap().output_json.as_deref(),
+        Some("{\"summary\":\"offline scripted child done\"}")
+    );
+    assert!(
+        tree.rows()
+            .candidates()
+            .values()
+            .any(|candidate| candidate.adopted_by.as_deref() == Some("root")
+                && candidate.target_before.is_some())
+    );
+}
+
+#[test]
+fn tree_child_submit_adopt_pilot_proves_persisted_output_and_landing() {
+    let shape = "tree_child_submit_adopt";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
 }
 
 fn assert_live(

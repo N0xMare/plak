@@ -318,7 +318,7 @@ pub struct AttemptRecord {
     pub turn_id: Option<String>,
     /// Own-position abandonment reads applied by this attempt's fold.
     pub applied_terminal_read_seqs: BTreeSet<u64>,
-    /// The result the child submitted, still as the exact text it sent.
+    /// The exact submitted text, derived from its intent rather than persisted as a view.
     pub output_json: Option<String>,
     /// Admitted submit-harness Starts on this attempt. Persisted so a
     /// crash-cut rejoin cannot reset the 1+1 budget.
@@ -1540,6 +1540,7 @@ mod lifecycle;
 mod mail;
 pub mod observer;
 mod operator_intents;
+pub use operator_intents::submitted_output;
 mod park;
 mod projection;
 mod projector;

@@ -270,7 +270,6 @@ impl Row for AttemptRecord {
             "status",
             "turn_token",
             "turn_id",
-            "output_json",
             "submit_harness_nudge",
             "candidate_id",
             "retry_of",
@@ -315,7 +314,6 @@ impl Row for AttemptRecord {
                 agent_tree_enum_text(attempt.status)?,
                 to_i64(attempt.turn_token)?,
                 attempt.turn_id,
-                attempt.output_json,
                 i64::from(attempt.submit_harness_nudge.rounds()),
                 attempt.candidate_id.as_ref().map(CandidateId::as_str),
                 attempt.retry_of.as_ref().map(AttemptId::as_str),
@@ -361,6 +359,48 @@ impl Row for AttemptRecord {
                     .map_err(|_| "applied terminal reads are not serializable".to_owned())?,
             ],
         ))
+    }
+
+    fn same_row(&self, other: &Self) -> bool {
+        let Self {
+            output_json: _,
+            output_schema_json,
+            schema_digest,
+            attempt_id,
+            agent_id,
+            retry_of,
+            request_key,
+            spawn_identity,
+            started_at,
+            ended_at,
+            blocked,
+            failure,
+            usage,
+            status,
+            turn_token,
+            turn_id,
+            applied_terminal_read_seqs,
+            submit_harness_nudge,
+            candidate_id,
+        } = self;
+        *output_schema_json == other.output_schema_json
+            && *schema_digest == other.schema_digest
+            && *attempt_id == other.attempt_id
+            && *agent_id == other.agent_id
+            && *retry_of == other.retry_of
+            && *request_key == other.request_key
+            && *spawn_identity == other.spawn_identity
+            && *started_at == other.started_at
+            && *ended_at == other.ended_at
+            && *blocked == other.blocked
+            && *failure == other.failure
+            && *usage == other.usage
+            && *status == other.status
+            && *turn_token == other.turn_token
+            && *turn_id == other.turn_id
+            && *applied_terminal_read_seqs == other.applied_terminal_read_seqs
+            && *submit_harness_nudge == other.submit_harness_nudge
+            && *candidate_id == other.candidate_id
     }
 }
 

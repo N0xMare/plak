@@ -1129,10 +1129,12 @@ MUST NOT deserialize.
 ## 5. Attempts
 
 **The attempt, not the node, is the unit of work.** `status`, `turn_token`,
-`turn_id`, `output_json`, `submit_harness_nudge`, the `blocked` reason, the
+`turn_id`, `submit_harness_nudge`, the `blocked` reason, the
 `failure`, the per-attempt usage row, `retry_of`, `request_key`, and
 `candidate_id` all live on `agent_attempts`, keyed `(tree_id, attempt_id)`.
 `attempt_id` is `<agent_id>-a<seq>`.
+The in-memory attempt's exact `output_json` is joined from its submitted
+intent on load and fold; it has no duplicate attempt-table column.
 
 `AttemptStatus` is `running`, `submitted`, `completed`,
 `completed_without_submission`, `failed`, `cancelled`, `recovery_required`,
@@ -2769,7 +2771,7 @@ operator must not repair it by guessing a new tree locator.
 | `agent_grants` | `(tree_id, agent_id)` | `may_spawn`, `may_adopt`, depth and node and child ceilings, and the visible / peer / managed / interrupt / close id sets |
 | `agent_operations` | `(tree_id, operation_id)` | the canonical request, its digest, the terminal code and response for replay, and paired nullable INTEGER `fold_anchor` / `fold_order` for host fold intents |
 | `agent_messages` | `(tree_id, message_id)` | body, `purpose` (including `followup` and the host-authored `result`), priority, reply link, disposition, durable state |
-| `agent_attempts` | `(tree_id, attempt_id)` | `AttemptStatus`, turn token and plain turn id, `output_json`, the 0–2 harness nudge count, `candidate_id`, `retry_of`, `request_key`, start and end stamps, the blocked reason, the failure `{kind, message}`, and the five usage counters |
+| `agent_attempts` | `(tree_id, attempt_id)` | `AttemptStatus`, turn token and plain turn id, the 0–2 harness nudge count, `candidate_id`, `retry_of`, `request_key`, start and end stamps, the blocked reason, the failure `{kind, message}`, and the five usage counters; submitted output is derived from its intent |
 | `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, target-before snapshot commit, evidence |
 | `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, nullable `input_candidate_id`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
 | `agent_commands` | `(tree_id, command_id)` | every runtime command the tree prepares — a root admission's result-mail batch, a child Start, wake, mail Start, followup or corrective round — with its recipient, attempt, kind, exact canonical text and message ids, all immutable; the tree's withdrawal of a command no fact settled; and, as a view, the fact the recipient's feed recorded for it (`accepted`, `rejected`, or `returned` by a withheld terminal) with the plain turn id it bound and nullable INTEGER `accepted_seq` |
@@ -3247,7 +3249,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Failed-turn rescue snapshot ownership | external-effect record | `agent_operations` of kind `rescue_pin`, keyed by rescue id and owned by its producing agent, captures pin ids before the VCS write; conversation collection transfers cleanup ownership to `candidate_unpin` (§6.7) |
 | Tool and root descendant interruption | intent, joined into views | anchored `agent_operations` of kind `interrupt`, per target attempt; captures whether live ownership or a non-ending park made the request effective, and derives only that agent's interrupted status |
 | Session bound after materialization failure | intent, joined into views | `agent_operations` of kind `session_bound_after_failure`, keyed by the exact materialization intent, ordered with the other host intents |
-| Submitted output and submitted attempt status | intent, joined into views | anchored `agent_operations` of kind `submitted`, per attempt, captures the validated exact `output_json`; its agent-local fold derives output and status, including historical attempts |
+| Submitted output and submitted attempt status | intent, joined into views | anchored `agent_operations` of kind `submitted`, per attempt, owns the validated exact `output_json`; store load joins output onto the in-memory attempt even without refolding, and its agent-local fold derives output and status, including historical attempts. `agent_attempts` has no output column and submit tool receipts keep no payload copy; provisional wait receipts retain their exact returned views |
 | Topology operation receipts (`agent_operations`), wait receipts | intent | the runtime call id; terminal responses replay for the same full canonical request digest; `submit_result` stores only turn token, output SHA-256 and byte length in its canonical request column |
 | Mail body, sender, purpose, priority, reply link, disposition | intent | the sending call |
 | Mail durable state beyond `accepted` (`acknowledged`, `delivered`), returned admissions | view | wait receipt settlement (§4.4) and `agent_commands` batches against `CommandAccepted`, `CommandRejected` and withheld `TurnTerminal` facts (§8) |

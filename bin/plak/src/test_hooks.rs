@@ -167,6 +167,15 @@ fn prepare_scripted_tree(
     } else {
         inner
     };
+    if let Some(persisted) = store.load(bootstrap_id).map_err(|error| {
+        format!(
+            "offline scripted tree could not be loaded: {}",
+            error.detail
+        )
+    })? {
+        tree = ProductAgentTree::reopen(persisted);
+        tree.set_vcs(Arc::clone(&vcs));
+    }
     let revision = store
         .save(&tree)
         .map_err(|error| format!("offline scripted tree could not be saved: {}", error.detail))?;

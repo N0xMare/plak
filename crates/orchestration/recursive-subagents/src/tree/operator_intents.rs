@@ -37,6 +37,31 @@ pub(super) enum Decision {
     },
 }
 
+/// The attempt and exact output carried by a submitted intent, without folding views.
+///
+/// # Errors
+///
+/// Refuses a malformed submitted intent or one without an attempt identity.
+pub fn submitted_output(
+    operation: &OperationRecord,
+) -> Result<Option<(AttemptId, String)>, TopologyError> {
+    if operation.tool_name != SUBMITTED_KIND {
+        return Ok(None);
+    }
+    let invalid = || {
+        TopologyError::new(
+            TopologyErrorCode::OperationRecoveryRequired,
+            "submitted intent is invalid",
+        )
+    };
+    let intent: OperatorIntent =
+        serde_json::from_str(&operation.canonical_request).map_err(|_| invalid())?;
+    let Decision::Submitted { output_json } = intent.decision else {
+        return Err(invalid());
+    };
+    Ok(Some((intent.attempt_id.ok_or_else(invalid)?, output_json)))
+}
+
 impl ProductAgentTree {
     pub(super) fn record_operator_intent(
         &mut self,

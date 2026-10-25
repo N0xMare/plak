@@ -416,29 +416,29 @@ pub fn load_agent_tree(
     let mut attempts = BTreeMap::new();
     let mut attempt_statement = tx
         .prepare(
-            "SELECT attempt_id, agent_id, status, turn_token, turn_id, output_json, submit_harness_nudge, candidate_id, retry_of, request_key, started_at, ended_at, blocked_kind, blocked_account, blocked_resets_at, failure_kind, failure_message, elapsed_ms, turns, tool_calls, input_tokens, output_tokens, spawn_identity, output_schema_json, schema_digest, applied_terminal_read_seqs FROM agent_attempts WHERE tree_id=?1",
+            "SELECT attempt_id, agent_id, status, turn_token, turn_id, submit_harness_nudge, candidate_id, retry_of, request_key, started_at, ended_at, blocked_kind, blocked_account, blocked_resets_at, failure_kind, failure_message, elapsed_ms, turns, tool_calls, input_tokens, output_tokens, spawn_identity, output_schema_json, schema_digest, applied_terminal_read_seqs FROM agent_attempts WHERE tree_id=?1",
         )
         .map_err(|_| "could not query agent attempts".to_owned())?;
     let attempt_rows = attempt_statement
         .query_map([tree_id], |row| {
             let blocked = match (
+                row.get::<_, Option<String>>(11)?,
                 row.get::<_, Option<String>>(12)?,
-                row.get::<_, Option<String>>(13)?,
             ) {
                 (Some(quota), Some(account)) => Some(BlockedReason {
                     quota,
                     account,
-                    resets_at: row.get::<_, Option<i64>>(14)?.map(from_i64).transpose()?,
+                    resets_at: row.get::<_, Option<i64>>(13)?.map(from_i64).transpose()?,
                 }),
                 _ => None,
             };
             Ok(AttemptRecord {
-                output_schema_json: row.get(23)?,
-                schema_digest: row.get(24)?,
-                applied_terminal_read_seqs: serde_json::from_str(&row.get::<_, String>(25)?)
+                output_schema_json: row.get(22)?,
+                schema_digest: row.get(23)?,
+                applied_terminal_read_seqs: serde_json::from_str(&row.get::<_, String>(24)?)
                     .map_err(|_| {
                         rusqlite::Error::InvalidColumnType(
-                            25,
+                            24,
                             "applied_terminal_read_seqs".to_owned(),
                             rusqlite::types::Type::Text,
                         )
@@ -448,9 +448,9 @@ pub fn load_agent_tree(
                 status: parse_sql_enum(&row.get::<_, String>(2)?)?,
                 turn_token: from_i64(row.get(3)?)?,
                 turn_id: row.get(4)?,
-                output_json: row.get(5)?,
+                output_json: None,
                 submit_harness_nudge: {
-                    let value: i64 = row.get(6)?;
+                    let value: i64 = row.get(5)?;
                     // The column's own CHECK admits 0..=2; a row past the
                     // ceiling is a corrupt file, not a budget to clamp.
                     u8::try_from(value)
@@ -458,59 +458,59 @@ pub fn load_agent_tree(
                         .and_then(SubmitNudgeBudget::spent)
                         .ok_or_else(|| {
                             rusqlite::Error::InvalidColumnType(
-                                6,
+                                5,
                                 "submit_harness_nudge".to_owned(),
                                 rusqlite::types::Type::Integer,
                             )
                         })?
                 },
                 candidate_id: row
-                    .get::<_, Option<String>>(7)?
+                    .get::<_, Option<String>>(6)?
                     .map(CandidateId::from_persisted),
                 retry_of: row
-                    .get::<_, Option<String>>(8)?
+                    .get::<_, Option<String>>(7)?
                     .map(AttemptId::from_persisted),
-                request_key: row.get(9)?,
+                request_key: row.get(8)?,
                 spawn_identity: row
-                    .get::<_, Option<String>>(22)?
+                    .get::<_, Option<String>>(21)?
                     .map(|value| {
                         serde_json::from_str(&value).map_err(|_| {
                             rusqlite::Error::InvalidColumnType(
-                                22,
+                                21,
                                 "spawn_identity".to_owned(),
                                 rusqlite::types::Type::Text,
                             )
                         })
                     })
                     .transpose()?,
-                started_at: from_i64(row.get(10)?)?,
-                ended_at: row.get::<_, Option<i64>>(11)?.map(from_i64).transpose()?,
+                started_at: from_i64(row.get(9)?)?,
+                ended_at: row.get::<_, Option<i64>>(10)?.map(from_i64).transpose()?,
                 blocked,
                 failure: match (
+                    row.get::<_, Option<String>>(14)?,
                     row.get::<_, Option<String>>(15)?,
-                    row.get::<_, Option<String>>(16)?,
                 ) {
                     (Some(kind), Some(message)) => Some(AttemptFailure { kind, message }),
                     _ => None,
                 },
                 usage: UsageRow {
-                    elapsed_ms: from_i64(row.get(17)?)?,
-                    turns: u32::try_from(row.get::<_, i64>(18)?).map_err(|_| {
+                    elapsed_ms: from_i64(row.get(16)?)?,
+                    turns: u32::try_from(row.get::<_, i64>(17)?).map_err(|_| {
                         rusqlite::Error::InvalidColumnType(
-                            18,
+                            17,
                             "turns".to_owned(),
                             rusqlite::types::Type::Integer,
                         )
                     })?,
-                    tool_calls: u32::try_from(row.get::<_, i64>(19)?).map_err(|_| {
+                    tool_calls: u32::try_from(row.get::<_, i64>(18)?).map_err(|_| {
                         rusqlite::Error::InvalidColumnType(
-                            19,
+                            18,
                             "tool_calls".to_owned(),
                             rusqlite::types::Type::Integer,
                         )
                     })?,
-                    input_tokens: from_i64(row.get(20)?)?,
-                    output_tokens: from_i64(row.get(21)?)?,
+                    input_tokens: from_i64(row.get(19)?)?,
+                    output_tokens: from_i64(row.get(20)?)?,
                 },
             })
         })
@@ -660,6 +660,22 @@ pub fn load_agent_tree(
         operations.insert(operation.operation_id.clone(), operation);
     }
     drop(operation_statement);
+    for operation in operations.values() {
+        if let Some((id, output)) = plakous_recursive_subagents::tree::submitted_output(operation)
+            .map_err(|_| "submitted intent is invalid".to_owned())?
+            && let Some(attempt) = attempts.get_mut(&id)
+        {
+            if attempt.agent_id != operation.caller_agent_id
+                || attempt
+                    .output_json
+                    .as_ref()
+                    .is_some_and(|prior| prior != &output)
+            {
+                return Err("submitted intent conflicts with its attempt".to_owned());
+            }
+            attempt.output_json = Some(output);
+        }
+    }
     let commands = load_commands(tx, tree_id)?;
     let feed_cursors = load_feed_cursors(tx, tree_id)?;
     Ok(Some(

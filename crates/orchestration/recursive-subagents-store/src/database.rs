@@ -50,7 +50,7 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "agent_attempts",
-        "CREATE TABLE agent_attempts(tree_id TEXT NOT NULL,attempt_id TEXT NOT NULL,agent_id TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('running','submitted','completed','completed_without_submission','failed','cancelled','recovery_required','closed','blocked','adopted')),turn_token INTEGER NOT NULL CHECK(turn_token>=1),turn_id TEXT,output_json TEXT,submit_harness_nudge INTEGER NOT NULL CHECK(submit_harness_nudge>=0 AND submit_harness_nudge<=2),candidate_id TEXT,retry_of TEXT,request_key TEXT,started_at INTEGER NOT NULL CHECK(started_at>=0),ended_at INTEGER CHECK(ended_at IS NULL OR ended_at>=0),blocked_kind TEXT,blocked_account TEXT,blocked_resets_at INTEGER,failure_kind TEXT,failure_message TEXT,elapsed_ms INTEGER NOT NULL CHECK(elapsed_ms>=0),turns INTEGER NOT NULL CHECK(turns>=0),tool_calls INTEGER NOT NULL CHECK(tool_calls>=0),input_tokens INTEGER NOT NULL CHECK(input_tokens>=0),output_tokens INTEGER NOT NULL CHECK(output_tokens>=0),spawn_identity TEXT CHECK((request_key IS NULL) = (spawn_identity IS NULL)),output_schema_json TEXT NOT NULL,schema_digest TEXT NOT NULL,applied_terminal_read_seqs TEXT NOT NULL CHECK(json_valid(applied_terminal_read_seqs) AND json_type(applied_terminal_read_seqs)='array'),PRIMARY KEY(tree_id,attempt_id),FOREIGN KEY(tree_id,agent_id) REFERENCES agent_nodes(tree_id,agent_id))",
+        "CREATE TABLE agent_attempts(tree_id TEXT NOT NULL,attempt_id TEXT NOT NULL,agent_id TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('running','submitted','completed','completed_without_submission','failed','cancelled','recovery_required','closed','blocked','adopted')),turn_token INTEGER NOT NULL CHECK(turn_token>=1),turn_id TEXT,submit_harness_nudge INTEGER NOT NULL CHECK(submit_harness_nudge>=0 AND submit_harness_nudge<=2),candidate_id TEXT,retry_of TEXT,request_key TEXT,started_at INTEGER NOT NULL CHECK(started_at>=0),ended_at INTEGER CHECK(ended_at IS NULL OR ended_at>=0),blocked_kind TEXT,blocked_account TEXT,blocked_resets_at INTEGER,failure_kind TEXT,failure_message TEXT,elapsed_ms INTEGER NOT NULL CHECK(elapsed_ms>=0),turns INTEGER NOT NULL CHECK(turns>=0),tool_calls INTEGER NOT NULL CHECK(tool_calls>=0),input_tokens INTEGER NOT NULL CHECK(input_tokens>=0),output_tokens INTEGER NOT NULL CHECK(output_tokens>=0),spawn_identity TEXT CHECK((request_key IS NULL) = (spawn_identity IS NULL)),output_schema_json TEXT NOT NULL,schema_digest TEXT NOT NULL,applied_terminal_read_seqs TEXT NOT NULL CHECK(json_valid(applied_terminal_read_seqs) AND json_type(applied_terminal_read_seqs)='array'),PRIMARY KEY(tree_id,attempt_id),FOREIGN KEY(tree_id,agent_id) REFERENCES agent_nodes(tree_id,agent_id))",
     ),
     (
         "agent_attempts_request_key",
@@ -287,13 +287,13 @@ fn resolved_path(database: &Path) -> Result<PathBuf, OpenError> {
 mod tests {
     use super::{SCHEMA_OBJECTS, SCHEMA_VERSION, SubagentsDatabase, expected_schema_fingerprint};
 
-    /// Identity golden for the unreleased t7 cohort's durable format.
+    /// Identity golden for the unreleased t9 cohort's durable format.
     #[test]
     fn the_tree_schema_fingerprint_is_pinned() {
         assert_eq!(SCHEMA_VERSION, 9);
         assert_eq!(
             expected_schema_fingerprint(),
-            "2881756c6bbc8d45ef680b0f34676310786108159189a1644aa69ce25c2f84e0"
+            "8c6a5164633f53c78c9f64758201337197b47a806dda9ec0934d2505487cd375"
         );
     }
 

@@ -1510,6 +1510,11 @@ fn sqlite_submitted_rebuilds_output_and_status_from_its_intent() {
     let expected_node = tree.node(child).unwrap().clone();
     let store = SqliteTreeStore::open(&database).unwrap();
     let _ = store.save(&tree).unwrap();
+    let cold = ProductAgentTree::reopen(store.load("tree").unwrap().unwrap());
+    assert_eq!(
+        cold.attempt(child).unwrap().output_json,
+        expected_attempt.output_json
+    );
     tree.clear_feed_views();
     tree.project_feed(child, SESSION, &[], &TreeFeedReads::default())
         .unwrap();
@@ -2351,7 +2356,7 @@ fn delete_views(database: &std::path::Path) {
                  WHERE agent_attempts.tree_id=agent_nodes.tree_id
                  AND agent_attempts.agent_id=agent_nodes.agent_id AND retry_of IS NULL)
                  WHERE parent_agent_id IS NOT NULL;
-             UPDATE agent_attempts SET applied_terminal_read_seqs='[]',status='running',output_json=NULL,candidate_id=NULL,turn_id=NULL,ended_at=NULL,blocked_kind=NULL,blocked_account=NULL,blocked_resets_at=NULL,
+             UPDATE agent_attempts SET applied_terminal_read_seqs='[]',status='running',candidate_id=NULL,turn_id=NULL,ended_at=NULL,blocked_kind=NULL,blocked_account=NULL,blocked_resets_at=NULL,
                  failure_kind=NULL,failure_message=NULL,turns=0,tool_calls=0,
                  input_tokens=0,output_tokens=0,submit_harness_nudge=0;
              UPDATE agent_messages SET durable='accepted' WHERE durable='acknowledged' AND (

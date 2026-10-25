@@ -826,6 +826,8 @@ inventory accepts tree schemas from 1 through the tree store's current
 For schemas through 8 it derives legacy `refs/heads/plak/<directory>` names;
 schema 9 reads recorded Git branches from `agent_nodes.branch`, including
 `plak/<tree8>/<agent>`, and inventories base, candidate-base and adoption pins.
+Schema 9 also derives child outputs from submitted intents rather than an
+attempt output column; the export document does not carry tree rows.
 Doctor uses the same version bound for its unowned-worktree inventory. Current
 sessions and their lineage, including carried-forward source ids in the
 reference ledger, protect their artifacts by exact id membership, including shared
