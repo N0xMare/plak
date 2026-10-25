@@ -97,6 +97,7 @@ pub(super) fn finalize_completed_fold(
 
 #[cfg(test)]
 mod tests {
+    use super::super::abandonment::abandoned_turn_note;
     use super::super::*;
     use crate::runtime::durable::tests::SessionUpdateFixtureMode;
     use crate::runtime::durable::tests::landed_round_abandonment::completed_tool_round_cut;

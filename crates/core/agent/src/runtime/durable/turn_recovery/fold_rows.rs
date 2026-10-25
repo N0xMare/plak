@@ -232,9 +232,11 @@ impl FoldRow {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::super::abandonment::abandoned_turn_note;
     use super::super::*;
     use super::FoldRow;
     use super::replay::RoundBoundary;
+    use crate::RuntimeCheckpointCodec;
     use crate::runtime::durable::tests::SessionUpdateFixtureMode;
     use crate::runtime::durable::tests::landed_round_abandonment::{
         completed_text_round_cut, completed_tool_round_cut, root_without_provider_cut,

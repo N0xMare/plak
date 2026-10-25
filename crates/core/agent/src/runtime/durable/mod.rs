@@ -6,9 +6,9 @@ use crate::runtime::{
     Agent, AgentBuilder, OperationId, RecoveredTurnHandle, RuntimeInstanceNonce, StoreTimeouts,
 };
 use crate::{
-    AgentError, AgentErrorKind, BranchHead, BranchLease, CheckpointId, CheckpointObjectBundle,
-    CommandId, ModelRouteBinding, ReconstructiveComponent, RuntimeCheckpoint, RuntimeDurability,
-    RuntimeLifecycle, RuntimeOperationLedger, SessionStore, SessionWorkflowId, ToolRuntimeManifest,
+    AgentError, AgentErrorKind, CheckpointId, CommandId, ModelRouteBinding,
+    ReconstructiveComponent, RuntimeDurability, RuntimeLifecycle, RuntimeOperationLedger,
+    SessionStore, SessionWorkflowId, ToolRuntimeManifest,
 };
 use plakous_model::{
     BranchId, CanonicalHistory, CompiledProviderConfiguration, ConversationItem, Digest,
@@ -26,6 +26,8 @@ pub(in crate::runtime) mod compaction_recovery;
 pub(in crate::runtime) use compaction_inspection::checkpoint_can_abandon_compaction;
 pub(in crate::runtime) mod composition_recovery;
 pub(in crate::runtime) mod effect_recovery;
+mod recovery_publication;
+use recovery_publication::RecoveryPublicationOwner;
 mod retention;
 pub(super) mod session;
 pub(in crate::runtime) mod turn_recovery;
@@ -482,14 +484,6 @@ pub(in crate::runtime) struct CodeCellAbandonmentFold {
     pub(in crate::runtime) operations: Vec<(OperationId, DurableCodeCellAbandonmentDisposition)>,
 }
 
-pub(in crate::runtime) struct CompactionRecoveryOwner<'a> {
-    store: Arc<dyn SessionStore>,
-    store_timeout: Duration,
-    lease: &'a mut BranchLease,
-    head: BranchHead,
-    checkpoint: Arc<RuntimeCheckpoint>,
-    bundle: CheckpointObjectBundle,
-}
 /// What a checkpoint's ledger holds for one compaction workflow identity.
 ///
 /// The ladder has a paid rung and an offline one. A paid compaction carries a

@@ -3,28 +3,27 @@
 use crate::recovery_scope::require_recoverable;
 use crate::runtime::OperationId;
 use crate::runtime::checkpoint::identity::{CheckpointCommitFacts, checkpoint_commit_identity};
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
 use crate::runtime::composition::record::{
     DurableLocalCompositionContinuationRequestV1, DurableLocalCompositionEvaluationRequestV2,
     decode_local_composition_evaluation_request, encode_local_composition_continuation_request,
 };
 use crate::runtime::continuation::{runtime_component, terminal_record_at_checkpoint};
-use crate::runtime::durable::bootstrap::release_store_lease;
-use crate::runtime::durable::branch::{operation_run_id, validate_session_operation_id};
+use crate::runtime::durable::branch::validate_session_operation_id;
 use crate::runtime::durable::turn_recovery::{recover_root_turn_publication, verdict_closure};
 use crate::runtime::durable::{
-    CodeCellAbandonmentFold, CompactionRecoveryOwner, DurableCodeCellAbandonmentDisposition,
+    CodeCellAbandonmentFold, DurableCodeCellAbandonmentDisposition,
     DurableCodeCellAbandonmentEvidence, DurableCodeCellAbandonmentIdentity,
     DurableCodeCellAbandonmentOutcome, DurableCodeCellAbandonmentRequest, DurableSessionAddress,
-    DurableSessionRuntime,
+    DurableSessionRuntime, RecoveryPublicationOwner,
 };
 use crate::runtime::observation::canonical_tool_result_item;
 use crate::runtime::operation_record::{is_accepted_root, operation_turn_id, working_lifecycle};
 use crate::runtime::terminal::{DurableTerminalOutcome, decode_pending_terminal_record};
 use crate::runtime::{DurableActorCommandEffect, DurableCommandEnvelope};
 use crate::{
-    AcquireBranch, AgentError, AgentErrorKind, CommandId, CommittedCheckpoint,
-    DurableCommandDisposition, DurableOperationKind, DurableOperationRecord, DurableOperationState,
+    AgentError, AgentErrorKind, CommandId, CommittedCheckpoint, DurableCommandDisposition,
+    DurableOperationKind, DurableOperationRecord, DurableOperationState,
     DurableOperationTransition, ReconstructiveComponent, RecoveryAction, RecoveryObligationKind,
     RuntimeCheckpoint, RuntimeComponentKind, RuntimeLifecycle, RuntimeWorkingRoot, SessionStore,
     SessionStoreError, WorkingRecoveryPhase,
@@ -52,40 +51,16 @@ impl DurableSessionRuntime {
         if let Some(outcome) = self.code_cell_abandonment_receipt(identity).await? {
             return Ok(outcome);
         }
-        let owner_id = operation_run_id(&self.instance_nonce, request.operation_id())?;
-        let mut lease = capacity_store_call(
-            StorePhase::Acquire,
-            self.store_timeouts.operation,
-            || {
-                self.store.acquire(AcquireBranch::new(
-                    identity.source.session(),
-                    owner_id,
-                    self.lease_seconds,
-                ))
-            },
-            || self.store.storage_wait_cancelled(),
-        )
-        .await
-        .map_err(StoreCallError::into_agent)?;
+        let mut lease = self
+            .acquire_recovery_lease(request.operation_id(), identity.source)
+            .await?;
         let recovery = async {
             if let Some(outcome) = self.code_cell_abandonment_receipt(identity).await? {
                 return Ok(outcome);
             }
-            let loaded = store_call(
-                StorePhase::LoadBranch,
-                self.store_timeouts.operation,
-                self.store.load_branch(identity.source.session()),
-            )
-            .await
-            .map_err(StoreCallError::into_agent)?;
-            let mut owner = CompactionRecoveryOwner {
-                store: Arc::clone(&self.store),
-                store_timeout: self.store_timeouts.operation,
-                lease: &mut lease,
-                head: loaded.head(),
-                checkpoint: Arc::clone(loaded.checkpoint().checkpoint()),
-                bundle: loaded.checkpoint().bundle().clone(),
-            };
+            let mut owner = self
+                .load_recovery_owner(&mut lease, identity.source)
+                .await?;
             if owner.checkpoint.id() == identity.source.checkpoint_id {
                 require_recoverable(&owner.checkpoint).map_err(|_| {
                     AgentError::new(
@@ -129,12 +104,7 @@ impl DurableSessionRuntime {
             })
         }
         .await;
-        let cleanup =
-            release_store_lease(Arc::clone(&self.store), lease, self.store_timeouts.cleanup).await;
-        match (recovery, cleanup) {
-            (Ok(outcome), Ok(())) => Ok(outcome),
-            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-        }
+        self.release_recovery_lease(lease, recovery).await
     }
 
     pub(super) async fn code_cell_abandonment_receipt(
@@ -768,7 +738,7 @@ pub(in crate::runtime) fn reopen_code_cell_abandonment_identity(
 }
 
 async fn publish_code_cell_abandonment_evidence(
-    owner: &mut CompactionRecoveryOwner<'_>,
+    owner: &mut RecoveryPublicationOwner<'_>,
     identity: DurableCodeCellAbandonmentIdentity,
 ) -> Result<(), AgentError> {
     let (history, ledger, lifecycle) =

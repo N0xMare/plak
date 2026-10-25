@@ -8,7 +8,9 @@ use super::super::tests::landed_round_abandonment::{
     completed_tool_round_cut, root_without_provider_cut,
 };
 use super::*;
+use crate::runtime::checkpoint::identity::{CheckpointCommitFacts, checkpoint_commit_identity};
 use crate::runtime::terminal::decode_terminal_result_record;
+use crate::{RuntimeCanonicalState, RuntimeManifest};
 use plakous_model::{AttemptId, CanonicalHistory};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

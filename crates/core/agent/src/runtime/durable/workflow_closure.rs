@@ -15,7 +15,7 @@ use super::compaction_recovery::{
     decode_paid_compaction_operations, recovery_fail_compaction,
     recovery_publish_compaction_success,
 };
-use super::{CompactionRecoveryOwner, DurableCompactionOperations};
+use super::{DurableCompactionOperations, RecoveryPublicationOwner};
 use crate::runtime::PostCompactionNote;
 use crate::runtime::compaction::fold::reconstruct_compaction_cut;
 use crate::runtime::compaction::{
@@ -181,7 +181,7 @@ pub(in crate::runtime) async fn publish_workflow_closure(
     closure: WorkflowClosure,
     runtime: WorkflowClosureRuntime<'_>,
 ) -> Result<(Arc<RuntimeCheckpoint>, CheckpointObjectBundle, BranchHead), AgentError> {
-    let mut owner = CompactionRecoveryOwner {
+    let mut owner = RecoveryPublicationOwner {
         store: branch.store,
         store_timeout: branch.store_timeout,
         lease: branch.lease,
@@ -194,7 +194,7 @@ pub(in crate::runtime) async fn publish_workflow_closure(
 }
 
 async fn publish_row(
-    owner: &mut CompactionRecoveryOwner<'_>,
+    owner: &mut RecoveryPublicationOwner<'_>,
     closure: WorkflowClosure,
     runtime: WorkflowClosureRuntime<'_>,
 ) -> Result<(), AgentError> {

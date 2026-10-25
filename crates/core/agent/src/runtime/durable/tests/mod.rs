@@ -81,6 +81,8 @@ mod named_state;
 mod pending_decisions;
 mod placeholders;
 mod provenance;
+mod publication_goldens;
+mod publication_protocol;
 mod record_tests;
 mod reopen_and_lease;
 mod seeded_carry;

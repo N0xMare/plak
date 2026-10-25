@@ -35,24 +35,14 @@ use abandonment::{
 };
 pub(in crate::runtime) use abandonment::{abandoned_turn_claim, abandonment_cause};
 
-#[cfg(test)]
-use abandonment::abandoned_turn_note;
-
 use abandonment_rows::{ClosureFacts, TurnFoldFacts, TurnRow};
 pub use verdict::{CheckpointRecoveryVerdict, checkpoint_recovery_verdict};
 pub(in crate::runtime) use verdict::{RecoveryEvidence, RecoveryVerdict, recovery_verdict};
 
-#[cfg(test)]
-use crate::recovery_scope::require_recoverable;
-use crate::runtime::checkpoint::identity::{
-    CheckpointCommitFacts, checkpoint_commit_identity, history_segment_kind,
-};
-use crate::runtime::checkpoint::io::{
-    DurabilityCommitTelemetry, commit_with_acknowledgement_recovery,
-};
+use crate::runtime::checkpoint::identity::history_segment_kind;
+use crate::runtime::checkpoint::io::DurabilityCommitTelemetry;
 use crate::runtime::continuation::{
-    checkpoint_bundle_error, runtime_component, runtime_manifest_error,
-    terminal_record_at_checkpoint, terminal_record_for_command,
+    runtime_component, runtime_manifest_error, terminal_record_for_command,
 };
 use crate::runtime::durable::bootstrap::checkpoint_has_code_cell_obligation;
 use crate::runtime::durable::composition_recovery::{
@@ -74,13 +64,12 @@ use crate::runtime::terminal::{
 use crate::runtime::{AbandonedTurnClaim, AbandonmentCause, OperationId};
 use crate::{
     AgentError, AgentErrorKind, BranchHead, BranchLease, BranchRevision, CheckpointId,
-    CheckpointObjectBundle, CheckpointObjectRef, CommandId, CommitCheckpoint,
-    DurableCommandDisposition, DurableCommandRecord, DurableOperationKind, DurableOperationRecord,
-    DurableOperationState, DurableOperationTransition, ReconstructiveComponent, RecoveryAction,
-    RecoveryObligation, RecoveryObligationKind, RuntimeCanonicalState, RuntimeCheckpoint,
-    RuntimeCheckpointCodec, RuntimeComponentKind, RuntimeDurability, RuntimeLifecycle,
-    RuntimeManifest, RuntimeOperationLedger, RuntimeTopology, RuntimeWorkingRoot, SessionStore,
-    SessionStoreError, StoreAdmission, StoredCheckpoint, TurnUsage, WorkingRecoveryPhase,
+    CheckpointObjectBundle, CommandId, DurableCommandDisposition, DurableCommandRecord,
+    DurableOperationKind, DurableOperationRecord, DurableOperationState,
+    DurableOperationTransition, ReconstructiveComponent, RecoveryAction, RecoveryObligation,
+    RecoveryObligationKind, RuntimeCheckpoint, RuntimeComponentKind, RuntimeDurability,
+    RuntimeLifecycle, RuntimeOperationLedger, RuntimeWorkingRoot, SessionStore, SessionStoreError,
+    StoredCheckpoint, TurnUsage, WorkingRecoveryPhase,
 };
 use plakous_model::{
     Actor, ContentBlock, ConversationItem, Digest, DigestDomain, EntryId, HistorySegment,

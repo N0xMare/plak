@@ -1,13 +1,6 @@
 //! Recover or abandon one paid compaction without redispatch.
 
-use crate::manifest::RuntimeContextState;
-use crate::runtime::checkpoint::candidate::{
-    CheckpointCandidate, SuccessorFacts, successor_candidate,
-};
-use crate::runtime::checkpoint::io::{
-    StoreCallError, StorePhase, capacity_store_call, commit_with_acknowledgement_recovery,
-    store_call,
-};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
 use crate::runtime::compaction::continuation::with_post_compaction_note;
 use crate::runtime::compaction::fold::{build_compaction_success_fold, reconstruct_compaction_cut};
 use crate::runtime::compaction::record::{
@@ -20,13 +13,11 @@ use crate::runtime::compaction::{
 };
 use crate::runtime::continuation::{runtime_component, runtime_manifest_error};
 use crate::runtime::driver::model_cleanup::ambiguous_compaction_error;
-use crate::runtime::durable::bootstrap::release_store_lease;
-use crate::runtime::durable::branch::operation_run_id;
 use crate::runtime::durable::turn_recovery::verdict_refusal;
 use crate::runtime::durable::{
-    CompactionRecoveryOwner, DecodedCompactionWorkflow, DurableCompactionOperations,
-    DurableCompactionReceipt, DurableCompactionRecoveryOutcome, DurableSessionAddress,
-    DurableSessionRuntime,
+    DecodedCompactionWorkflow, DurableCompactionOperations, DurableCompactionReceipt,
+    DurableCompactionRecoveryOutcome, DurableSessionAddress, DurableSessionRuntime,
+    RecoveryPublicationOwner,
 };
 use crate::runtime::operation_record::{
     compaction_success_lifecycle, operation_result_component, working_lifecycle_for_root,
@@ -34,19 +25,35 @@ use crate::runtime::operation_record::{
 use crate::runtime::terminal::DurableAgentError;
 use crate::runtime::{AgentBuilder, OperationId, PostCompactionNote};
 use crate::{
-    AcquireBranch, AgentError, AgentErrorKind, CheckpointId, CommitCheckpoint,
-    DurableOperationKind, DurableOperationRecord, DurableOperationState,
-    DurableOperationTransition, FamilyArtifact, ReconstructiveComponent, RuntimeCheckpoint,
-    RuntimeComponentKind, RuntimeLifecycle, RuntimeOperationLedger, RuntimeTopology,
-    RuntimeWorkingRoot, SessionStoreError, StoreAdmission,
+    AgentError, AgentErrorKind, DurableOperationKind, DurableOperationRecord,
+    DurableOperationState, DurableOperationTransition, ReconstructiveComponent, RuntimeCheckpoint,
+    RuntimeComponentKind, RuntimeLifecycle, RuntimeTopology, RuntimeWorkingRoot, SessionStoreError,
 };
 use plakous_model::{
-    CanonicalHistory, Clock, CompiledProviderConfiguration, EntryId, IdGenerator, LanguageModel,
+    Clock, CompiledProviderConfiguration, EntryId, IdGenerator, LanguageModel,
     ModelCallRecoveryOutcome, ModelOperationRoot, ModelResponse, PreparedCallRecord,
     ProviderCallRecoveryLocator,
 };
 use std::sync::Arc;
 use std::time::Duration;
+
+fn finalized_outcome(
+    receipt: DurableCompactionReceipt,
+) -> Option<DurableCompactionRecoveryOutcome> {
+    match receipt {
+        DurableCompactionReceipt::Compacted { source, target } => {
+            Some(DurableCompactionRecoveryOutcome::Compacted { source, target })
+        }
+        DurableCompactionReceipt::Failed { source, target } => {
+            Some(DurableCompactionRecoveryOutcome::Failed { source, target })
+        }
+        DurableCompactionReceipt::Abandoned { source, target } => {
+            Some(DurableCompactionRecoveryOutcome::Abandoned { source, target })
+        }
+        DurableCompactionReceipt::NotFound | DurableCompactionReceipt::RecoveryRequired(_) => None,
+    }
+}
+
 impl DurableSessionRuntime {
     /// Searches deterministic finalized compaction receipts before consulting
     /// current branch freshness.
@@ -158,57 +165,11 @@ impl DurableSessionRuntime {
         source: DurableSessionAddress,
         builder: AgentBuilder,
     ) -> Result<DurableCompactionRecoveryOutcome, AgentError> {
-        match self.compaction_receipt(operation_id, source).await? {
-            DurableCompactionReceipt::Compacted { source, target } => {
-                return Ok(DurableCompactionRecoveryOutcome::Compacted { source, target });
-            }
-            DurableCompactionReceipt::Failed { source, target } => {
-                return Ok(DurableCompactionRecoveryOutcome::Failed { source, target });
-            }
-            DurableCompactionReceipt::Abandoned { source, target } => {
-                return Ok(DurableCompactionRecoveryOutcome::Abandoned { source, target });
-            }
-            DurableCompactionReceipt::NotFound => {
-                let loaded = store_call(
-                    StorePhase::LoadBranch,
-                    self.store_timeouts.operation,
-                    self.store.load_branch(source.session()),
-                )
-                .await
-                .map_err(StoreCallError::into_agent)?;
-                let manifest = loaded.checkpoint().checkpoint().manifest();
-                let topology = manifest.topology();
-                if topology.checkpoint_id == source.checkpoint_id
-                    && matches!(manifest.lifecycle(), RuntimeLifecycle::Quiescent)
-                {
-                    return Ok(DurableCompactionRecoveryOutcome::NotRequired(source));
-                }
-                if matches!(manifest.lifecycle(), RuntimeLifecycle::Working { .. }) {
-                    return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                        head_address(topology),
-                    ));
-                }
-                return Err(AgentError::from_store(SessionStoreError::IdentityConflict));
-            }
-            DurableCompactionReceipt::RecoveryRequired(_) => {}
+        let receipt = self.compaction_receipt(operation_id, source).await?;
+        if let Some(outcome) = finalized_outcome(receipt) {
+            return Ok(outcome);
         }
-        let identity = DurableCompactionIdentity::new(operation_id, source)?;
-        let owner_id = operation_run_id(&self.instance_nonce, operation_id)?;
-        let mut lease = capacity_store_call(
-            StorePhase::Acquire,
-            self.store_timeouts.operation,
-            || {
-                self.store.acquire(AcquireBranch::new(
-                    source.session(),
-                    owner_id,
-                    self.lease_seconds,
-                ))
-            },
-            || self.store.storage_wait_cancelled(),
-        )
-        .await
-        .map_err(StoreCallError::into_agent)?;
-        let recovery = Box::pin(async {
+        if matches!(receipt, DurableCompactionReceipt::NotFound) {
             let loaded = store_call(
                 StorePhase::LoadBranch,
                 self.store_timeouts.operation,
@@ -216,7 +177,26 @@ impl DurableSessionRuntime {
             )
             .await
             .map_err(StoreCallError::into_agent)?;
-            let checkpoint = loaded.checkpoint().checkpoint();
+            let manifest = loaded.checkpoint().checkpoint().manifest();
+            let topology = manifest.topology();
+            if topology.checkpoint_id == source.checkpoint_id
+                && matches!(manifest.lifecycle(), RuntimeLifecycle::Quiescent)
+            {
+                return Ok(DurableCompactionRecoveryOutcome::NotRequired(source));
+            }
+            if matches!(manifest.lifecycle(), RuntimeLifecycle::Working { .. }) {
+                return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
+                    head_address(topology),
+                ));
+            }
+            return Err(AgentError::from_store(SessionStoreError::IdentityConflict));
+        }
+        let identity = DurableCompactionIdentity::new(operation_id, source)?;
+        let mut lease = self.acquire_recovery_lease(operation_id, source).await?;
+        let recovery = Box::pin(async {
+            let mut owner = self.load_recovery_owner(&mut lease, source).await?;
+            let source_checkpoint = Arc::clone(&owner.checkpoint);
+            let checkpoint = &source_checkpoint;
             if !matches!(
                 checkpoint.manifest().lifecycle(),
                 RuntimeLifecycle::Working {
@@ -224,30 +204,20 @@ impl DurableSessionRuntime {
                     ..
                 } if *workflow_id == identity.workflow_id
             ) {
-                return match self.compaction_receipt(operation_id, source).await? {
-                    DurableCompactionReceipt::Compacted { source, target } => {
-                        Ok(DurableCompactionRecoveryOutcome::Compacted { source, target })
-                    }
-                    DurableCompactionReceipt::Failed { source, target } => {
-                        Ok(DurableCompactionRecoveryOutcome::Failed { source, target })
-                    }
-                    DurableCompactionReceipt::Abandoned { source, target } => {
-                        Ok(DurableCompactionRecoveryOutcome::Abandoned { source, target })
-                    }
-                    DurableCompactionReceipt::NotFound
-                        if checkpoint.manifest().topology().checkpoint_id
-                            == source.checkpoint_id =>
-                    {
-                        Ok(DurableCompactionRecoveryOutcome::NotRequired(source))
-                    }
-                    DurableCompactionReceipt::RecoveryRequired(address) => {
-                        Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(address))
-                    }
-                    DurableCompactionReceipt::NotFound => Err(AgentError::new(
-                        AgentErrorKind::Session,
-                        "compaction recovery source was superseded by an unrelated head",
-                    )),
-                };
+                let receipt = self.compaction_receipt(operation_id, source).await?;
+                if let Some(outcome) = finalized_outcome(receipt) {
+                    return Ok(outcome);
+                }
+                if let DurableCompactionReceipt::RecoveryRequired(address) = receipt {
+                    return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(address));
+                }
+                if checkpoint.id() == source.checkpoint_id {
+                    return Ok(DurableCompactionRecoveryOutcome::NotRequired(source));
+                }
+                return Err(AgentError::new(
+                    AgentErrorKind::Session,
+                    "compaction recovery source was superseded by an unrelated head",
+                ));
             }
             // The explicit workflow reads the same verdict as an open and
             // keeps its typed integrity failure.
@@ -271,15 +241,6 @@ impl DurableSessionRuntime {
                 operations.request.request.metadata().run_id(),
             )
             .await?;
-            let bundle = loaded.checkpoint().bundle().clone();
-            let mut owner = CompactionRecoveryOwner {
-                store: Arc::clone(&self.store),
-                store_timeout: self.store_timeouts.operation,
-                lease: &mut lease,
-                head: loaded.head(),
-                checkpoint: Arc::clone(checkpoint),
-                bundle,
-            };
             let DurableCompactionOperations {
                 compaction,
                 provider,
@@ -529,12 +490,7 @@ impl DurableSessionRuntime {
             }
         })
         .await;
-        let cleanup =
-            release_store_lease(Arc::clone(&self.store), lease, self.store_timeouts.cleanup).await;
-        match (recovery, cleanup) {
-            (Ok(outcome), Ok(())) => Ok(outcome),
-            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-        }
+        self.release_recovery_lease(lease, recovery).await
     }
 
     /// Deliberately terminalizes one exact ambiguous compaction without lookup
@@ -545,46 +501,19 @@ impl DurableSessionRuntime {
         operation_id: &str,
         source: DurableSessionAddress,
     ) -> Result<DurableCompactionRecoveryOutcome, AgentError> {
-        match self.compaction_receipt(operation_id, source).await? {
-            DurableCompactionReceipt::Compacted { source, target } => {
-                return Ok(DurableCompactionRecoveryOutcome::Compacted { source, target });
-            }
-            DurableCompactionReceipt::Failed { source, target } => {
-                return Ok(DurableCompactionRecoveryOutcome::Failed { source, target });
-            }
-            DurableCompactionReceipt::Abandoned { source, target } => {
-                return Ok(DurableCompactionRecoveryOutcome::Abandoned { source, target });
-            }
-            DurableCompactionReceipt::NotFound => {
-                return Ok(DurableCompactionRecoveryOutcome::NotRequired(source));
-            }
-            DurableCompactionReceipt::RecoveryRequired(_) => {}
+        let receipt = self.compaction_receipt(operation_id, source).await?;
+        if let Some(outcome) = finalized_outcome(receipt) {
+            return Ok(outcome);
+        }
+        if matches!(receipt, DurableCompactionReceipt::NotFound) {
+            return Ok(DurableCompactionRecoveryOutcome::NotRequired(source));
         }
         let identity = DurableCompactionIdentity::new(operation_id, source)?;
-        let owner_id = operation_run_id(&self.instance_nonce, operation_id)?;
-        let mut lease = capacity_store_call(
-            StorePhase::Acquire,
-            self.store_timeouts.operation,
-            || {
-                self.store.acquire(AcquireBranch::new(
-                    source.session(),
-                    owner_id,
-                    self.lease_seconds,
-                ))
-            },
-            || self.store.storage_wait_cancelled(),
-        )
-        .await
-        .map_err(StoreCallError::into_agent)?;
+        let mut lease = self.acquire_recovery_lease(operation_id, source).await?;
         let abandonment = async {
-            let loaded = store_call(
-                StorePhase::LoadBranch,
-                self.store_timeouts.operation,
-                self.store.load_branch(source.session()),
-            )
-            .await
-            .map_err(StoreCallError::into_agent)?;
-            let checkpoint = loaded.checkpoint().checkpoint();
+            let mut owner = self.load_recovery_owner(&mut lease, source).await?;
+            let source_checkpoint = Arc::clone(&owner.checkpoint);
+            let checkpoint = &source_checkpoint;
             if !matches!(
                 checkpoint.manifest().lifecycle(),
                 RuntimeLifecycle::Working {
@@ -592,30 +521,20 @@ impl DurableSessionRuntime {
                     ..
                 } if *workflow_id == identity.workflow_id
             ) {
-                return match self.compaction_receipt(operation_id, source).await? {
-                    DurableCompactionReceipt::Compacted { source, target } => {
-                        Ok(DurableCompactionRecoveryOutcome::Compacted { source, target })
-                    }
-                    DurableCompactionReceipt::Failed { source, target } => {
-                        Ok(DurableCompactionRecoveryOutcome::Failed { source, target })
-                    }
-                    DurableCompactionReceipt::Abandoned { source, target } => {
-                        Ok(DurableCompactionRecoveryOutcome::Abandoned { source, target })
-                    }
-                    DurableCompactionReceipt::NotFound
-                        if checkpoint.manifest().topology().checkpoint_id
-                            == source.checkpoint_id =>
-                    {
-                        Ok(DurableCompactionRecoveryOutcome::NotRequired(source))
-                    }
-                    DurableCompactionReceipt::RecoveryRequired(address) => {
-                        Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(address))
-                    }
-                    DurableCompactionReceipt::NotFound => Err(AgentError::new(
-                        AgentErrorKind::Session,
-                        "compaction abandonment source was superseded by an unrelated head",
-                    )),
-                };
+                let receipt = self.compaction_receipt(operation_id, source).await?;
+                if let Some(outcome) = finalized_outcome(receipt) {
+                    return Ok(outcome);
+                }
+                if let DurableCompactionReceipt::RecoveryRequired(address) = receipt {
+                    return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(address));
+                }
+                if checkpoint.id() == source.checkpoint_id {
+                    return Ok(DurableCompactionRecoveryOutcome::NotRequired(source));
+                }
+                return Err(AgentError::new(
+                    AgentErrorKind::Session,
+                    "compaction abandonment source was superseded by an unrelated head",
+                ));
             }
             // The explicit workflow reads the same verdict as an open and
             // keeps its typed integrity failure.
@@ -638,15 +557,6 @@ impl DurableSessionRuntime {
                     head_address(topology),
                 ));
             }
-            let bundle = loaded.checkpoint().bundle().clone();
-            let mut owner = CompactionRecoveryOwner {
-                store: Arc::clone(&self.store),
-                store_timeout: self.store_timeouts.operation,
-                lease: &mut lease,
-                head: loaded.head(),
-                checkpoint: Arc::clone(checkpoint),
-                bundle,
-            };
             let settled = [compaction, provider].map(|operation| {
                 owner
                     .checkpoint
@@ -689,82 +599,7 @@ impl DurableSessionRuntime {
             }
         }
         .await;
-        let cleanup =
-            release_store_lease(Arc::clone(&self.store), lease, self.store_timeouts.cleanup).await;
-        match (abandonment, cleanup) {
-            (Ok(outcome), Ok(())) => Ok(outcome),
-            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-        }
-    }
-}
-
-impl CompactionRecoveryOwner<'_> {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "recovery publication consumes the exact immutable checkpoint groups"
-    )]
-    pub(in crate::runtime) async fn publish(
-        &mut self,
-        checkpoint_id: CheckpointId,
-        lifecycle: RuntimeLifecycle,
-        history: CanonicalHistory,
-        ledger: RuntimeOperationLedger,
-        context: RuntimeContextState,
-        family: Option<FamilyArtifact>,
-    ) -> Result<(), AgentError> {
-        let prior = self.checkpoint.manifest();
-        let topology = prior.topology();
-        if self.head.checkpoint().checkpoint_id() != topology.checkpoint_id {
-            return Err(AgentError::new(
-                AgentErrorKind::OutcomeUnknown,
-                "compaction recovery head changed before publication",
-            ));
-        }
-        let CheckpointCandidate {
-            checkpoint,
-            bundle,
-            expected_ref,
-            commit_identity,
-        } = successor_candidate(
-            &self.checkpoint,
-            &self.bundle,
-            SuccessorFacts {
-                checkpoint_id,
-                lifecycle,
-                history,
-                ledger,
-                jobs: prior.jobs().clone(),
-                named_state: prior.named_state().clone(),
-                context,
-                family,
-            },
-            self.lease.fence().get(),
-            prior.interpreter_observation().cloned(),
-        )?;
-        let commit = CommitCheckpoint::new(self.lease.clone(), self.head, bundle.clone())
-            .with_admission(StoreAdmission::Recovery)
-            .with_feed_facts(crate::feed::facts::commit_facts(
-                &self.checkpoint,
-                &checkpoint,
-            )?);
-        let receipt = Box::pin(commit_with_acknowledgement_recovery(
-            &self.store,
-            self.store_timeout,
-            checkpoint_id,
-            commit,
-            self.head,
-            expected_ref,
-            commit_identity,
-            // Open-time recovery has no session telemetry context; durability
-            // telemetry covers turn-time commits only.
-            None,
-            self.lease,
-        ))
-        .await?;
-        self.head = receipt.head();
-        self.checkpoint = checkpoint;
-        self.bundle = bundle;
-        Ok(())
+        self.release_recovery_lease(lease, abandonment).await
     }
 }
 
@@ -781,8 +616,8 @@ fn abandonment_error() -> AgentError {
 /// not dispatched, an uncertain one is closed with the abandonment evidence,
 /// and both are finalized in the same commit, which therefore carries the
 /// workflow's `WorkflowSettled { Abandoned }` fact.
-pub(in crate::runtime) async fn close_abandoned_compaction(
-    owner: &mut CompactionRecoveryOwner<'_>,
+pub(super) async fn close_abandoned_compaction(
+    owner: &mut RecoveryPublicationOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,
@@ -1041,7 +876,7 @@ pub(in crate::runtime) fn decode_paid_compaction_operations(
 }
 
 async fn recovery_complete_compaction_call(
-    owner: &mut CompactionRecoveryOwner<'_>,
+    owner: &mut RecoveryPublicationOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,
@@ -1108,8 +943,8 @@ async fn recovery_complete_compaction_call(
         .await
 }
 
-pub(in crate::runtime) async fn recovery_fail_compaction(
-    owner: &mut CompactionRecoveryOwner<'_>,
+pub(super) async fn recovery_fail_compaction(
+    owner: &mut RecoveryPublicationOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,
@@ -1287,8 +1122,8 @@ pub(in crate::runtime) fn decode_compaction_failure_evidence(
     clippy::too_many_arguments,
     reason = "restart publication consumes the exact persisted compaction operation tuple"
 )]
-pub(in crate::runtime) async fn recovery_publish_compaction_success(
-    owner: &mut CompactionRecoveryOwner<'_>,
+pub(super) async fn recovery_publish_compaction_success(
+    owner: &mut RecoveryPublicationOwner<'_>,
     identity: DurableCompactionIdentity,
     compaction: OperationId,
     provider: OperationId,

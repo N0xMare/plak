@@ -1,15 +1,13 @@
 use super::{
-    AgentError, AgentErrorKind, Arc, BranchHead, BranchLease, CheckpointCommitFacts, CheckpointId,
-    CheckpointObjectBundle, CheckpointObjectRef, CommitCheckpoint, DurabilityCommitTelemetry,
-    DurableOperationKind, DurableOperationRecord, DurableOperationState,
+    AgentError, AgentErrorKind, Arc, BranchHead, BranchLease, CheckpointId, CheckpointObjectBundle,
+    DurabilityCommitTelemetry, DurableOperationKind, DurableOperationRecord, DurableOperationState,
     DurableOperationTransition, Duration, RecoveryObligation, RootClosure, RootClosureState,
-    RuntimeCanonicalState, RuntimeCheckpoint, RuntimeCheckpointCodec, RuntimeComponentKind,
-    RuntimeLifecycle, RuntimeManifest, RuntimeOperationLedger, RuntimeTopology, SessionStore,
-    SessionStoreError, StoreAdmission, WorkingProjection, abandonment_closure_state,
-    checkpoint_bundle_error, checkpoint_commit_identity, commit_with_acknowledgement_recovery,
-    runtime_component, runtime_manifest_error, terminal_closure_state,
-    terminal_record_at_checkpoint, working_lifecycle,
+    RuntimeCheckpoint, RuntimeComponentKind, RuntimeLifecycle, RuntimeOperationLedger,
+    SessionStore, SessionStoreError, abandonment_closure_state, runtime_component,
+    runtime_manifest_error, terminal_closure_state, terminal_record_for_command, working_lifecycle,
 };
+use crate::runtime::checkpoint::candidate::{SuccessorFacts, successor_candidate};
+use crate::runtime::durable::RecoveryPublicationOwner;
 
 #[allow(
     clippy::too_many_arguments,
@@ -117,74 +115,43 @@ pub(in crate::runtime) async fn recover_root_turn_publication(
         .context()
         .retained_for_exact_resume();
     let lifecycle = RuntimeLifecycle::Quiescent;
-    let commit_identity = checkpoint_commit_identity(CheckpointCommitFacts {
-        checkpoint_id,
-        parent_checkpoint_id: source.id(),
-        branch_revision,
-        lifecycle: &lifecycle,
-        history_identity: history.identity(),
-        ledger: &ledger,
-        context_identity: context.identity(),
-        named_state: source_manifest.named_state(),
-        family_artifact: family_artifact.as_ref(),
-    })?;
-    let canonical = RuntimeCanonicalState::new(
-        source_manifest.canonical().stable_prefix().clone(),
-        history,
-        WorkingProjection::default(),
-        context,
-    )
-    .map_err(runtime_manifest_error)?;
-    let checkpoint = Arc::new(
-        RuntimeCheckpoint::new(
-            RuntimeManifest::new(
-                source_manifest.provenance().clone(),
-                RuntimeTopology {
-                    session_id: source_manifest.topology().session_id,
-                    branch_id: source_manifest.topology().branch_id,
-                    checkpoint_id,
-                    parent_checkpoint_id: Some(source.id()),
-                    branch_revision,
-                    fork: source_manifest.topology().fork,
-                    lease_fence: lease.fence().get(),
-                    commit_identity,
-                },
-                lifecycle,
-                source_manifest.harness_plan_component().clone(),
-                source_manifest.provider_configuration().clone(),
-                canonical,
-                source_manifest.binding().clone(),
-                source_manifest.tools().clone(),
-                ledger,
-                family_artifact,
-                source_manifest.interpreter_observation().cloned(),
-                source_manifest.jobs().clone(),
-                source_manifest.named_state().clone(),
-                source_manifest.durability(),
+    let command = ledger
+        .commands()
+        .into_iter()
+        .find(|command| command.command_id() == command_id.as_str())
+        .ok_or_else(|| {
+            AgentError::new(
+                AgentErrorKind::Session,
+                "terminal checkpoint omitted its admitted root command",
             )
-            .map_err(runtime_manifest_error)?,
-        )
-        .map_err(runtime_manifest_error)?,
-    );
-    terminal_record_at_checkpoint(&checkpoint, &command_id)?;
-    let bundle = RuntimeCheckpointCodec::advance(&checkpoint, source_bundle)
-        .map_err(checkpoint_bundle_error)?;
-    let request = CommitCheckpoint::new(lease.clone(), head, bundle.clone())
-        .with_admission(StoreAdmission::Recovery)
-        .with_feed_facts(crate::feed::facts::commit_facts(source, &checkpoint)?);
-    let expected =
-        CheckpointObjectRef::from_store(checkpoint_id, bundle.root(), checkpoint.integrity());
-    let receipt = Box::pin(commit_with_acknowledgement_recovery(
-        store,
-        timeout,
-        checkpoint_id,
-        request,
-        head,
-        expected,
-        checkpoint.manifest().topology().commit_identity,
-        durability_telemetry,
+        })?;
+    terminal_record_for_command(&ledger, command)?;
+    let candidate = successor_candidate(
+        source,
+        source_bundle,
+        SuccessorFacts {
+            checkpoint_id,
+            lifecycle,
+            history,
+            ledger,
+            jobs: source_manifest.jobs().clone(),
+            named_state: source_manifest.named_state().clone(),
+            context,
+            family: family_artifact,
+        },
+        lease.fence().get(),
+        source_manifest.interpreter_observation().cloned(),
+    )?;
+    let mut owner = RecoveryPublicationOwner {
+        store: Arc::clone(store),
+        store_timeout: timeout,
         lease,
-    ))
-    .await?;
-    Ok((checkpoint, bundle, receipt.head()))
+        head,
+        checkpoint: Arc::clone(source),
+        bundle: source_bundle.clone(),
+    };
+    owner
+        .publish_candidate(candidate, durability_telemetry)
+        .await?;
+    Ok((owner.checkpoint, owner.bundle, owner.head))
 }

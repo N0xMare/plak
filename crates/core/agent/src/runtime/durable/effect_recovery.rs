@@ -3,14 +3,13 @@
 use crate::recovery_scope::require_recoverable;
 use crate::runtime::ToolExecutionResult;
 use crate::runtime::checkpoint::identity::history_segment_kind;
-use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, capacity_store_call, store_call};
+use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
 use crate::runtime::continuation::runtime_manifest_error;
 use crate::runtime::driver::execution::canonicalize_tool_execution;
 use crate::runtime::driver::{DurableEffectIntentEnvelope, DurableUndispatchedToolRequest};
-use crate::runtime::durable::bootstrap::release_store_lease;
-use crate::runtime::durable::branch::{operation_run_id, validate_session_operation_id};
+use crate::runtime::durable::branch::validate_session_operation_id;
 use crate::runtime::durable::{
-    CompactionRecoveryOwner, DurableEffectEvidenceIdentity, DurableEffectEvidenceRecoveryOutcome,
+    DurableEffectEvidenceIdentity, DurableEffectEvidenceRecoveryOutcome,
     DurableEffectEvidenceRecoveryRequest, DurableSessionAddress, DurableSessionRuntime,
     EffectEvidencePreparation,
 };
@@ -19,9 +18,9 @@ use crate::runtime::operation_record::{
 };
 use crate::runtime::terminal::finalized_operation_evidence;
 use crate::{
-    AcquireBranch, AgentError, AgentErrorKind, CheckpointId, DurableOperationKind,
-    DurableOperationRecord, DurableOperationState, DurableOperationTransition, RecoveryAction,
-    RuntimeCheckpoint, RuntimeLifecycle, RuntimeManifest, RuntimeWorkingRoot, SessionStoreError,
+    AgentError, AgentErrorKind, CheckpointId, DurableOperationKind, DurableOperationRecord,
+    DurableOperationState, DurableOperationTransition, RecoveryAction, RuntimeCheckpoint,
+    RuntimeLifecycle, RuntimeManifest, RuntimeWorkingRoot, SessionStoreError,
 };
 use plakous_model::{
     Digest, DigestDomain, EntryId, HistorySegment, ToolCallBlock, ToolResultBlock, ToolResultKind,
@@ -30,7 +29,6 @@ use plakous_tools::{
     FrozenToolRegistryDescriptor, TOOL_REGISTRY_DESCRIPTOR_CODEC_REVISION,
     TOOL_REGISTRY_DESCRIPTOR_V2_CODEC_REVISION, ToolExecutorId, ToolOutcome, ToolOutcomeKind,
 };
-use std::sync::Arc;
 impl DurableSessionRuntime {
     /// Finalizes one exact Working effect from caller-supplied terminal evidence.
     ///
@@ -48,40 +46,16 @@ impl DurableSessionRuntime {
         if let Some(outcome) = self.effect_evidence_receipt(identity, &request).await? {
             return Ok(outcome);
         }
-        let owner_id = operation_run_id(&self.instance_nonce, request.operation_id())?;
-        let mut lease = capacity_store_call(
-            StorePhase::Acquire,
-            self.store_timeouts.operation,
-            || {
-                self.store.acquire(AcquireBranch::new(
-                    identity.source.session(),
-                    owner_id,
-                    self.lease_seconds,
-                ))
-            },
-            || self.store.storage_wait_cancelled(),
-        )
-        .await
-        .map_err(StoreCallError::into_agent)?;
+        let mut lease = self
+            .acquire_recovery_lease(request.operation_id(), identity.source)
+            .await?;
         let recovery = async {
             if let Some(outcome) = self.effect_evidence_receipt(identity, &request).await? {
                 return Ok(outcome);
             }
-            let loaded = store_call(
-                StorePhase::LoadBranch,
-                self.store_timeouts.operation,
-                self.store.load_branch(identity.source.session()),
-            )
-            .await
-            .map_err(StoreCallError::into_agent)?;
-            let mut owner = CompactionRecoveryOwner {
-                store: Arc::clone(&self.store),
-                store_timeout: self.store_timeouts.operation,
-                lease: &mut lease,
-                head: loaded.head(),
-                checkpoint: Arc::clone(loaded.checkpoint().checkpoint()),
-                bundle: loaded.checkpoint().bundle().clone(),
-            };
+            let mut owner = self
+                .load_recovery_owner(&mut lease, identity.source)
+                .await?;
             if owner.checkpoint.id() != identity.source.checkpoint_id {
                 return Err(AgentError::from_store(SessionStoreError::IdentityConflict));
             }
@@ -132,12 +106,7 @@ impl DurableSessionRuntime {
             }
         }
         .await;
-        let cleanup =
-            release_store_lease(Arc::clone(&self.store), lease, self.store_timeouts.cleanup).await;
-        match (recovery, cleanup) {
-            (Ok(outcome), Ok(())) => Ok(outcome),
-            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-        }
+        self.release_recovery_lease(lease, recovery).await
     }
 
     pub(super) async fn effect_evidence_receipt(

@@ -8,6 +8,8 @@
 
 use super::fold_rows::tests::{decided_round, with_fold};
 use super::*;
+use crate::RuntimeCheckpointCodec;
+use crate::recovery_scope::require_recoverable;
 use crate::runtime::durable::tests::SessionUpdateFixtureMode;
 use crate::runtime::durable::tests::landed_round_abandonment::{
     completed_text_round_cut, completed_tool_round_cut, root_without_provider_cut,

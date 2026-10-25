@@ -23,6 +23,7 @@ pub(super) struct TestCreateStore {
     pub(super) admission_usage: AtomicBool,
     pub(super) reclaim_admission_pressure: AtomicBool,
     pub(super) state: Mutex<CreateStoreState>,
+    pub(super) branch_after_acquire: Mutex<Option<crate::LoadedBranch>>,
     pub(super) genesis: Mutex<Option<StoredCheckpoint>>,
     pub(super) feed_records: Mutex<Vec<crate::feed::FeedRecord>>,
     pub(super) feed_retained_from: AtomicU64,
@@ -76,6 +77,7 @@ pub(super) struct TestCreateStore {
     pub(super) full_until: Mutex<Option<tokio::time::Instant>>,
     pub(super) remain_full_after_round: AtomicBool,
     pub(super) full_writes: AtomicBool,
+    pub(super) full_on_release: AtomicBool,
     pub(super) full_commits: AtomicBool,
     pub(super) full_renewals: AtomicUsize,
     pub(super) full_next_acquire: AtomicBool,
@@ -498,6 +500,9 @@ impl SessionStore for TestCreateStore {
             state.previous_lease = None;
             state.active_lease = Some(lease.clone());
             state.released_lease = None;
+            if let Some(loaded) = lock_mutex(&self.branch_after_acquire).take() {
+                state.loaded = Some(loaded);
+            }
             Ok(lease)
         })
     }
@@ -659,6 +664,9 @@ impl SessionStore for TestCreateStore {
 
     fn release(&self, lease: BranchLease) -> crate::StoreFuture<'_, ()> {
         self.record_admission_job("release");
+        if self.full_on_release.swap(false, Ordering::AcqRel) {
+            self.full_writes.store(true, Ordering::Release);
+        }
         let call = self
             .releases
             .fetch_add(1, Ordering::AcqRel)
