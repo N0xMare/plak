@@ -1132,7 +1132,7 @@ pub mod openrouter {
 /// ```
 pub mod tools {
     pub use plakous_compose::{
-        CodexMinimalLocalCodeModeDescriptorV1, CodexMinimalLocalCodeModeV1,
+        CellDescriptor, CodexMinimalLocalCodeModeDescriptorV1, CodexMinimalLocalCodeModeV1,
         CodexNativeLocalCodeModeDescriptorV1, CodexNativeLocalCodeModeV1, CodingPresentationExt,
         ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
         PythonPtcDescriptorV1, PythonPtcLimitsV1, PythonPtcPresentationV1, PythonPtcV1,

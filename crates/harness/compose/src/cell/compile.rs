@@ -30,7 +30,7 @@ pub(super) enum NestedProjection<'a> {
     },
 }
 
-pub(super) struct CellDescriptor {
+pub(super) struct CompiledCell {
     pub outer_projection: ToolProjectionMap,
     pub nested_projection: ToolProjectionMap,
     pub api: HostApi,
@@ -45,7 +45,7 @@ pub(super) fn compile_cell(
     target: ProviderModelProjectionIdentityV2,
     names: &[ToolName],
     strategy: NestedProjection<'_>,
-) -> Result<CellDescriptor, ToolRuntimeError> {
+) -> Result<CompiledCell, ToolRuntimeError> {
     let is_codex = matches!(
         presentation.catalog,
         CatalogStyle::CodexExact | CatalogStyle::CodexMinimal
@@ -108,7 +108,7 @@ pub(super) fn compile_cell(
         &api,
         outer_projection.entries()[0].description(),
     )?;
-    Ok(CellDescriptor {
+    Ok(CompiledCell {
         outer_projection,
         nested_projection,
         api,

@@ -2932,7 +2932,7 @@ fn scripted_local_composition_attachment(
             .chain(extensions.iter().cloned()),
         )?;
         assert!(compiled.outer_projection().is_for_registry(registry));
-        let profile = plakous::agent::LocalCompositionProfile::product_javascript_v1(&compiled)?;
+        let profile = plakous::agent::LocalCompositionProfile::cell(&(&compiled).into())?;
         let identity = Digest::sha256(
             DigestDomain::ExecutionEnvironment,
             1,
@@ -2958,10 +2958,7 @@ fn scripted_local_composition_attachment(
             extensions,
         )?;
         assert!(compiled.outer_projection().is_for_registry(registry));
-        let profile =
-            plakous::agent::LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(
-                &compiled,
-            )?;
+        let profile = plakous::agent::LocalCompositionProfile::cell(&(&compiled).into())?;
         plakous::agent::LocalCompositionAttachment::builder(profile)
             .engine_artifact(artifact)
             .build()?

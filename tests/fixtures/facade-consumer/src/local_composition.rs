@@ -3,13 +3,11 @@ use plakous::agent::{
     LocalCompositionEngineArtifact, LocalCompositionLanguage, LocalCompositionProfile,
     attach_local_composition,
 };
-use plakous::tools::CodexNativeLocalCodeModeDescriptorV1;
+use plakous::tools::CellDescriptor;
 
 pub fn surface_is_nameable() {
-    fn select_profile(
-        descriptor: &CodexNativeLocalCodeModeDescriptorV1,
-    ) -> Result<LocalCompositionProfile, AgentError> {
-        LocalCompositionProfile::codex_native_local_code_mode_host_v1(descriptor)
+    fn select_profile(descriptor: &CellDescriptor) -> Result<LocalCompositionProfile, AgentError> {
+        LocalCompositionProfile::cell(descriptor)
     }
     fn verify_artifact(
         path: &std::path::Path,

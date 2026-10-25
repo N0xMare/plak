@@ -170,8 +170,7 @@ pub(crate) fn attach_codex_minimal(
     descriptor: &plakous::tools::CodexMinimalLocalCodeModeDescriptorV1,
     host_path: &Path,
 ) -> Result<AgentBuilder, AgentError> {
-    let profile =
-        plakous::agent::LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(descriptor)?;
+    let profile = plakous::agent::LocalCompositionProfile::cell(&descriptor.into())?;
     let artifact = plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1(host_path)?;
     let attachment = plakous::agent::LocalCompositionAttachment::builder(profile)
         .engine_artifact(artifact)
@@ -187,8 +186,7 @@ pub(crate) fn product_javascript_candidate_attachment(
 ) -> Option<plakous::agent::LocalCompositionAttachment> {
     let artifact =
         plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1(host_path).ok()?;
-    let profile =
-        plakous::agent::LocalCompositionProfile::product_javascript_v1(descriptor).ok()?;
+    let profile = plakous::agent::LocalCompositionProfile::cell(&descriptor.into()).ok()?;
     let issuer = plakous::model::Digest::sha256(
         plakous::model::DigestDomain::ExecutionEnvironment,
         1,
@@ -232,7 +230,7 @@ pub(crate) fn product_python_attachment(
 ) -> CliResult<plakous::agent::LocalCompositionAttachment> {
     let artifact = plakous::agent::LocalCompositionEngineArtifact::monty_worker_v1(host_path)
         .map_err(|error| CliFailure::new(format!("Python host identity is invalid: {error}")))?;
-    let profile = plakous::agent::LocalCompositionProfile::python_ptc_v1(descriptor)
+    let profile = plakous::agent::LocalCompositionProfile::cell(&descriptor.into())
         .map_err(|error| CliFailure::new(format!("Python profile identity is invalid: {error}")))?;
     let issuer = plakous::model::Digest::sha256(
         plakous::model::DigestDomain::ExecutionEnvironment,

@@ -175,8 +175,8 @@ pub(super) fn validate_python_configuration(
     let (_, _, catalog, presentation_fact, limits, _) = evidence.extension_facts();
     if neutral.identity != descriptor.identity
         || exact.outer_projection().digest() != projection.digest()
-        || catalog != exact.catalog_identity()
-        || presentation_fact != exact.presentation_identity()
+        || catalog != exact.nested_projection().digest()
+        || presentation_fact != exact.outer_projection().digest()
         || limits != python_extension_limits()
     {
         return Err("Python descriptor, receipt, or outer projection drifted".into());

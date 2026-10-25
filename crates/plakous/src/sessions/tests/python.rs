@@ -256,7 +256,7 @@ async fn real_monty_driver_yields_steers_and_waits_for_the_result() -> TestResul
         plakous_tools::CodingPresentation::Pi,
         [ToolName::new("probe")?],
     )?;
-    let profile = LocalCompositionProfile::python_ptc_v1(&exact)?;
+    let profile = LocalCompositionProfile::cell(&(&exact).into())?;
     let artifact = LocalCompositionEngineArtifact::monty_worker_v1(&worker)?;
     let evidence = ProductExtensionEvidence::cell(
         &profile,

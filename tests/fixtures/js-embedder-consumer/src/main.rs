@@ -25,24 +25,25 @@ use plakous::model::{
 };
 use plakous::sessions::{AgentSessions, SessionBackend};
 use plakous::tools::{
-    ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
+    CellDescriptor, ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
     PythonPtcDescriptorV1, ToolRegistryBuilder, WorkspacePolicy,
 };
 
 /// Names the composition-only surface for both JavaScript and Python cell workers.
 fn composition_surface_is_nameable() {
-    fn select_sidecar_profile(
-        descriptor: &ProductJavaScriptCompositionDescriptorV1,
+    fn select_cell_profile(
+        descriptor: &CellDescriptor,
     ) -> Result<LocalCompositionProfile, AgentError> {
-        LocalCompositionProfile::product_javascript_v1(descriptor)
+        LocalCompositionProfile::cell(descriptor)
+    }
+    fn from_python(descriptor: &PythonPtcDescriptorV1) -> CellDescriptor {
+        CellDescriptor::from(descriptor)
+    }
+    fn from_javascript(descriptor: &ProductJavaScriptCompositionDescriptorV1) -> CellDescriptor {
+        CellDescriptor::from(descriptor)
     }
     fn verify_host(path: &std::path::Path) -> Result<LocalCompositionEngineArtifact, AgentError> {
         LocalCompositionEngineArtifact::quickjs_worker_v1(path)
-    }
-    fn select_python_profile(
-        descriptor: &PythonPtcDescriptorV1,
-    ) -> Result<LocalCompositionProfile, AgentError> {
-        LocalCompositionProfile::python_ptc_v1(descriptor)
     }
     fn verify_python_host(
         path: &std::path::Path,
@@ -79,12 +80,11 @@ fn composition_surface_is_nameable() {
     hold(&std::any::type_name::<LocalCompositionLanguage>());
     hold(&std::any::type_name::<ProductExtensionEvidence>());
     hold(&std::any::type_name::<ProductExtensionLimits>());
-    hold(&std::any::type_name::<
-        ProductJavaScriptCompositionDescriptorV1,
-    >());
-    hold(&select_sidecar_profile);
+    hold(&std::any::type_name::<CellDescriptor>());
+    hold(&select_cell_profile);
+    hold(&from_python);
+    hold(&from_javascript);
     hold(&verify_host);
-    hold(&select_python_profile);
     hold(&verify_python_host);
     hold(&qualify_cell);
     hold(&close_binding);

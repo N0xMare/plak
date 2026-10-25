@@ -9,6 +9,10 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plakous
 
+- All local cell profiles use `LocalCompositionProfile::cell(&CellDescriptor)`.
+  The four per-engine profile constructors and Python-only component identity
+  accessors are removed. `CellDescriptor` is available at the compose crate
+  root and through `plakous::tools`.
 - `plakous-code-mode` is folded into `plakous-compose`'s `cell::codex_exec`
   implementation and removed from the published cohort; the workspace has
   38 packages. Compose exposes the inert `HostApi`, `python_bootstrap`, its
@@ -59,10 +63,13 @@ one cross-build carrier (a build imports its own and the previous version).
 
 - Runtime format epoch 33: the cell compiler uses one v3 descriptor identity
   recipe for product JavaScript, Python PTC (structured and freeform), and
-  Codex Code Mode (native and minimal). Their descriptor identities rotate;
+  Codex Code Mode (native and minimal). Their descriptor identities, all
+  product-extension receipts and attachment bindings rotate in this epoch;
   the Python profile, presentation, result, catalog and limits component
-  facts remain unchanged. Model-visible text and outer and nested projection
-  digests are unchanged.
+  identities are removed. Python product evidence now binds the exact outer
+  and nested projection digests instead of the removed component identities.
+  Model-visible text, engine/artifact/host identities and projection digests
+  are unchanged.
   State key `r25.e33.p33.t8`; carry a session with `/reload` or export and
   import. Export document version 8 is unchanged.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine

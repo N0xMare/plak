@@ -13,87 +13,48 @@ use super::*;
 /// Plakous. It contains no evaluator, dispatcher, registry, or operation authority.
 #[derive(Clone)]
 pub struct LocalCompositionProfile {
-    pub(super) kind: LocalCompositionProfileKind,
+    pub(super) descriptor: plakous_compose::CellDescriptor,
     profile_identity: Digest,
     engine_contract_identity: Digest,
 }
 
-#[derive(Clone)]
-pub(super) enum LocalCompositionProfileKind {
-    CodexNativeLocalCodeModeV1(CodexNativeLocalCodeModeDescriptorV1),
-    CodexMinimalLocalCodeModeV1(CodexMinimalLocalCodeModeDescriptorV1),
-    ProductJavaScriptV1(ProductJavaScriptCompositionDescriptorV1),
-    PythonPtcV1(PythonPtcDescriptorV1),
-}
-
-impl LocalCompositionProfileKind {
-    /// Reports whether this profile is a product PTC lane that names a
-    /// coding presentation kind.
-    const fn requires_presentation_kind(&self) -> bool {
-        match self {
-            Self::CodexNativeLocalCodeModeV1(_) | Self::CodexMinimalLocalCodeModeV1(_) => false,
-            Self::ProductJavaScriptV1(_) | Self::PythonPtcV1(_) => true,
-        }
-    }
-}
-
 impl LocalCompositionProfile {
-    /// Codex `exec`/`wait` bound to a rquickjs sidecar host.
+    /// Selects one exact compiled cell presentation and its required worker contract.
+    ///
+    /// Retired per-engine constructors are not aliases for this entry point:
+    ///
+    /// ```compile_fail,E0599
+    /// use plakous::agent::LocalCompositionProfile;
+    /// use plakous::tools::PythonPtcDescriptorV1;
+    /// fn obsolete(descriptor: &PythonPtcDescriptorV1) {
+    ///     let _ = LocalCompositionProfile::python_ptc_v1(descriptor);
+    /// }
+    /// ```
     ///
     /// # Errors
-    ///
-    /// Returns an identity error if the sidecar engine contract cannot be identified.
-    pub fn codex_native_local_code_mode_host_v1(
-        descriptor: &CodexNativeLocalCodeModeDescriptorV1,
-    ) -> Result<Self, AgentError> {
+    /// Returns an identity error if the required worker contract cannot be identified.
+    pub fn cell(descriptor: &plakous_compose::CellDescriptor) -> Result<Self, AgentError> {
+        let worker = match descriptor {
+            plakous_compose::CellDescriptor::PythonPtcV1(_) => &plakous_cell::MONTY_WORKER,
+            plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
+            | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_)
+            | plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => {
+                &plakous_cell::QUICKJS_WORKER
+            }
+        };
         Ok(Self {
-            kind: LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(descriptor.clone()),
+            descriptor: descriptor.clone(),
             profile_identity: descriptor.identity(),
-            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
+            engine_contract_identity: cell_engine_contract_identity(worker)?,
         })
     }
 
-    /// Code Mode `exec`/`wait` over the minimal nested coding catalog.
-    ///
-    /// # Errors
-    ///
-    /// Returns an identity error if the sidecar engine contract cannot be identified.
-    pub fn codex_minimal_local_code_mode_host_v1(
-        descriptor: &CodexMinimalLocalCodeModeDescriptorV1,
-    ) -> Result<Self, AgentError> {
-        Ok(Self {
-            kind: LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(descriptor.clone()),
-            profile_identity: descriptor.identity(),
-            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
-        })
-    }
-
-    /// Selects one product-owned JavaScript profile over an exact Standard or Custom target.
-    ///
-    /// # Errors
-    ///
-    /// Returns an identity error if the pinned engine contract cannot be identified.
-    pub fn product_javascript_v1(
-        descriptor: &ProductJavaScriptCompositionDescriptorV1,
-    ) -> Result<Self, AgentError> {
-        Ok(Self {
-            kind: LocalCompositionProfileKind::ProductJavaScriptV1(descriptor.clone()),
-            profile_identity: descriptor.identity(),
-            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
-        })
-    }
-
-    /// Selects the exact backend-independent local Python projection.
-    ///
-    /// # Errors
-    ///
-    /// Returns an identity error if the pinned Monty contract cannot be identified.
-    pub fn python_ptc_v1(descriptor: &PythonPtcDescriptorV1) -> Result<Self, AgentError> {
-        Ok(Self {
-            kind: LocalCompositionProfileKind::PythonPtcV1(descriptor.clone()),
-            profile_identity: descriptor.identity(),
-            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?,
-        })
+    const fn requires_presentation_kind(&self) -> bool {
+        matches!(
+            self.descriptor,
+            plakous_compose::CellDescriptor::ProductJavaScriptV1(_)
+                | plakous_compose::CellDescriptor::PythonPtcV1(_)
+        )
     }
 
     /// Returns this profile's exact semantic identity.
@@ -111,13 +72,13 @@ impl LocalCompositionProfile {
     /// Returns the exact source language, without implying cross-language compatibility.
     #[must_use]
     pub const fn language(&self) -> LocalCompositionLanguage {
-        match self.kind {
-            LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(_)
-            | LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(_)
-            | LocalCompositionProfileKind::ProductJavaScriptV1(_) => {
+        match self.descriptor {
+            plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
+            | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_)
+            | plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => {
                 LocalCompositionLanguage::JavaScript
             }
-            LocalCompositionProfileKind::PythonPtcV1(_) => LocalCompositionLanguage::Python,
+            plakous_compose::CellDescriptor::PythonPtcV1(_) => LocalCompositionLanguage::Python,
         }
     }
 }
@@ -250,15 +211,15 @@ impl LocalCompositionAttachmentBuilder {
             self.profile.engine_contract_identity,
             artifact.engine_contract_identity,
         )?;
-        let evidence = match (&self.profile.kind, self.evidence) {
+        let evidence = match (&self.profile.descriptor, self.evidence) {
             (
-                LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(_)
-                | LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(_),
+                plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
+                | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_),
                 None,
             ) => None,
             (
-                LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(_)
-                | LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(_),
+                plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
+                | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_),
                 Some(_),
             ) => {
                 return Err(AgentError::new(
@@ -267,16 +228,16 @@ impl LocalCompositionAttachmentBuilder {
                 ));
             }
             (
-                LocalCompositionProfileKind::ProductJavaScriptV1(_)
-                | LocalCompositionProfileKind::PythonPtcV1(_),
+                plakous_compose::CellDescriptor::ProductJavaScriptV1(_)
+                | plakous_compose::CellDescriptor::PythonPtcV1(_),
                 Some(evidence),
             ) => {
                 validate_product_evidence(&self.profile, &artifact, &evidence)?;
                 Some(evidence)
             }
             (
-                LocalCompositionProfileKind::ProductJavaScriptV1(_)
-                | LocalCompositionProfileKind::PythonPtcV1(_),
+                plakous_compose::CellDescriptor::ProductJavaScriptV1(_)
+                | plakous_compose::CellDescriptor::PythonPtcV1(_),
                 None,
             ) => {
                 return Err(invalid(
@@ -284,7 +245,7 @@ impl LocalCompositionAttachmentBuilder {
                 ));
             }
         };
-        if self.profile.kind.requires_presentation_kind() && self.presentation_kind.is_none() {
+        if self.profile.requires_presentation_kind() && self.presentation_kind.is_none() {
             return Err(AgentError::new(
                 AgentErrorKind::InvalidInput,
                 "product PTC local composition requires a coding presentation kind",
@@ -362,12 +323,12 @@ pub fn attach_local_composition(
         evidence_receipt,
     };
     let (descriptor, presentation): (_, Box<dyn integration::Presentation>) =
-        match (profile.kind, evidence) {
-            (LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(descriptor), None) => (
+        match (profile.descriptor, evidence) {
+            (plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(descriptor), None) => (
                 neutral_descriptor(&descriptor).map_err(invalid)?,
                 Box::new(JavaScriptPresentation::CodexExact),
             ),
-            (LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(descriptor), None) => {
+            (plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(descriptor), None) => {
                 let nested_catalog = descriptor
                     .nested_tools()
                     .iter()
@@ -378,7 +339,7 @@ pub fn attach_local_composition(
                     Box::new(JavaScriptPresentation::CodexMinimal { nested_catalog }),
                 )
             }
-            (LocalCompositionProfileKind::ProductJavaScriptV1(descriptor), Some(evidence)) => {
+            (plakous_compose::CellDescriptor::ProductJavaScriptV1(descriptor), Some(evidence)) => {
                 let presentation_kind = presentation_kind.ok_or_else(|| {
                     invalid("product JavaScript attachment requires presentation kind")
                 })?;
@@ -391,7 +352,7 @@ pub fn attach_local_composition(
                     )?),
                 )
             }
-            (LocalCompositionProfileKind::PythonPtcV1(descriptor), Some(evidence)) => {
+            (plakous_compose::CellDescriptor::PythonPtcV1(descriptor), Some(evidence)) => {
                 let presentation_kind = presentation_kind.ok_or_else(|| {
                     invalid("product Python attachment requires presentation kind")
                 })?;

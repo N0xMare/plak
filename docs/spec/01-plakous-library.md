@@ -6253,9 +6253,9 @@ Every cell descriptor uses `sha256(ToolDefinition, 3, [profile, revisions...,
 execute text, wait text, grammar, limits JSON, presentation semantics JSON,
 outer projection digest, nested projection digest, host API JSON])`.
 Runtime epoch 33 separates these identities from the former presentation-local
-recipes. Model-visible text and projection digests are unchanged. Python's
-profile, presentation, result, catalog and limits component facts remain
-available independently and do not replace the v3 descriptor identity.
+recipes. Model-visible text and projection digests are unchanged. The v3
+descriptor replaces Python's separate profile, presentation, result, catalog
+and limits component identities.
 
 A composition `wait` accepts a `cell_id` written as a JSON number and
 normalises it to the string form before validation. This is an **accepted
@@ -6306,6 +6306,19 @@ presentation, and semantic revisions are all frozen before dispatch.
 `yield_control` parks until `wait`.
 
 ### 9.4 Engines and deployment
+
+`LocalCompositionProfile::cell(&CellDescriptor)` is the sole profile
+constructor. The crate-root `plakous-compose::CellDescriptor` (also exposed as
+`plakous::tools::CellDescriptor`) holds an exact native/minimal Codex,
+JavaScript or Python compiler output. Converting a typed compiler descriptor
+into it preserves the v3 identity and both projections; it does not admit a
+different engine. The selected variant determines the required worker contract.
+The enum is exhaustive: adding a variant is a deliberate breaking API change,
+and attachment code matches every supported presentation explicitly.
+There are no per-engine profile-constructor aliases.
+
+Product extension receipts bind the complete v3 descriptor identity and the
+outer/nested projection digests for both JavaScript and Python.
 
 The composition axis has four values. `direct` is no PTC. `native-ptc` is the
 vertical's **own** programmatic tool calling system, whatever its execution
@@ -8394,6 +8407,9 @@ so it reaches neither `plakous-auth` nor `plakous-http`, and it links neither
 rquickjs nor any Monty crate. Both JavaScript and Python PTC use this same
 feature, attach path and cell client; the Monty interpreter lives only in
 `plakous-py-host`.
+All presentations select profiles through `LocalCompositionProfile::cell`
+using the compiled `plakous::tools::CellDescriptor`; language-specific profile
+constructors and Python-only component identity accessors are absent.
 
 `native-subscriptions` adds the subscription tier —
 `subscriptions`, and the provider crates' native-auth facets — and implies `composition`.

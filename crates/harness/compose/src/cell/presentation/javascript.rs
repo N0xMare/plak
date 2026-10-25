@@ -5,7 +5,7 @@
 //! extension evidence, provider admission, nested dispatch, and recovery remain
 //! owned by the facade and the private runtime driver.
 
-use super::super::compile::{CellDescriptor, NestedProjection, compile_cell};
+use super::super::compile::{CompiledCell, NestedProjection, compile_cell};
 use super::CellPresentation;
 use plakous_model::{Digest, ToolName};
 use plakous_tools::{
@@ -230,7 +230,7 @@ impl ProductJavaScriptNestedToolV1 {
 impl ProductJavaScriptCompositionDescriptorV1 {
     fn from_cell(
         job_config: plakous_tools::JobConfig,
-        cell: CellDescriptor,
+        cell: CompiledCell,
     ) -> Result<Self, ToolRuntimeError> {
         Ok(Self {
             job_config,

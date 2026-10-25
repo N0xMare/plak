@@ -106,6 +106,21 @@ attachment/refusal. The command above runs the actual worker workflow.
 
 ## Pick a presentation
 
+Compile the desired presentation, convert its typed descriptor into
+`plakous::tools::CellDescriptor`, and select it with the single profile constructor:
+
+```rust,ignore
+let descriptor: plakous::tools::CellDescriptor = compiled.into();
+let profile = plakous::agent::LocalCompositionProfile::cell(&descriptor)?;
+```
+
+The descriptor selects the exact worker contract; supply a verified QuickJS or
+Monty worker artifact accordingly. Product JavaScript and Python require
+`ProductExtensionEvidence::cell` and the coding presentation kind. Native
+Codex profiles forbid product extension evidence. Python has no separate
+component identities: its receipt binds the complete descriptor and its exact
+outer/nested projections, just as JavaScript does.
+
 Use Direct for the smallest Custom-tool integration. Put your frozen registry's
 selected definitions into `ProviderBehaviorConfiguration.tools` as local
 `ConfiguredTool` entries; registering an executor alone does not expose it.

@@ -5163,30 +5163,35 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
             plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
         )?;
         let profile = match kind {
-            0 => LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(
-                &CodexMinimalLocalCodeModeV1::compile(
+            0 => LocalCompositionProfile::cell(
+                &(&CodexMinimalLocalCodeModeV1::compile(
                     plakous_tools::JobConfig::default(),
                     registry.clone(),
                     target,
-                )?,
+                )?)
+                    .into(),
             )?,
-            1 => LocalCompositionProfile::product_javascript_v1(
-                &ProductJavaScriptCompositionV1::compile_for_kind(
+            1 => LocalCompositionProfile::cell(
+                &(&ProductJavaScriptCompositionV1::compile_for_kind(
                     plakous_tools::JobConfig::default(),
                     registry.clone(),
                     target,
                     plakous_tools::CodingPresentation::Codex,
                     [ToolName::new("read_file")?],
-                )?,
+                )?)
+                    .into(),
             )?,
-            2 => LocalCompositionProfile::python_ptc_v1(&PythonPtcV1::compile_for_kind(
-                plakous_tools::JobConfig::default(),
-                registry.clone(),
-                target,
-                PythonPtcPresentationV1::StructuredFunctions,
-                plakous_tools::CodingPresentation::Codex,
-                [ToolName::new("read_file")?],
-            )?)?,
+            2 => LocalCompositionProfile::cell(
+                &(&PythonPtcV1::compile_for_kind(
+                    plakous_tools::JobConfig::default(),
+                    registry.clone(),
+                    target,
+                    PythonPtcPresentationV1::StructuredFunctions,
+                    plakous_tools::CodingPresentation::Codex,
+                    [ToolName::new("read_file")?],
+                )?)
+                    .into(),
+            )?,
             _ => return Err("unknown composition fixture".into()),
         };
         let evidence = if kind == 0 {

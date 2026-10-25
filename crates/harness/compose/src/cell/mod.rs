@@ -2,12 +2,14 @@
 
 pub mod codex_exec;
 mod compile;
+mod descriptor;
 mod host_api;
 mod identity;
 mod presentation;
 mod render_py;
 mod render_ts;
 
+pub use descriptor::CellDescriptor;
 pub use host_api::HostApi;
 pub use presentation::*;
 pub use render_py::{PythonBootstrap, PythonBootstrapBinding, PythonInput, python_bootstrap};

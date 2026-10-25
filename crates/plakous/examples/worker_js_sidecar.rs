@@ -128,7 +128,7 @@ async fn main() -> Fallible<()> {
         CodingPresentation::Pi,
         [nested],
     )?;
-    let profile = LocalCompositionProfile::product_javascript_v1(&composition)?;
+    let profile = LocalCompositionProfile::cell(&(&composition).into())?;
     let artifact = LocalCompositionEngineArtifact::quickjs_worker_v1(host)?;
     let issuer = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"example-embedder"])?;
     let qualification = Digest::sha256(

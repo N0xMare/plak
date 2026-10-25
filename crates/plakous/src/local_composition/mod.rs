@@ -12,7 +12,7 @@
 //! ```compile_fail
 //! use plakous::agent::LocalCompositionProfile;
 //! fn forge() -> LocalCompositionProfile {
-//!     LocalCompositionProfile { kind: todo!(), profile_identity: todo!(), engine_contract_identity: todo!() }
+//!     LocalCompositionProfile { descriptor: todo!(), profile_identity: todo!(), engine_contract_identity: todo!() }
 //! }
 //! ```
 

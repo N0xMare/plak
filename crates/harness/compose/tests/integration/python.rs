@@ -304,20 +304,23 @@ fn custom_run_is_raw_bounded_utf8() -> Result<(), TestError> {
         Some(source)
     );
     assert_eq!(custom.outer_projection().entries().len(), 2);
-    assert_eq!(structured.profile_identity(), custom.profile_identity());
-    assert_eq!(structured.catalog_identity(), custom.catalog_identity());
-    assert_eq!(structured.result_identity(), custom.result_identity());
-    assert_eq!(structured.limits_identity(), custom.limits_identity());
+    assert_eq!(structured.authoring_contract(), custom.authoring_contract());
+    assert_eq!(
+        structured.nested_projection().digest(),
+        custom.nested_projection().digest()
+    );
+    assert_eq!(structured.result_grammar(), custom.result_grammar());
+    assert_eq!(structured.limits(), custom.limits());
     assert_ne!(
-        structured.presentation_identity(),
-        custom.presentation_identity()
+        structured.outer_projection().digest(),
+        custom.outer_projection().digest()
     );
     assert_ne!(structured.identity(), custom.identity());
     Ok(())
 }
 
 #[test]
-fn limits_result_and_component_identities_are_explicit_and_exact() -> Result<(), TestError> {
+fn limits_result_and_descriptor_identity_are_explicit_and_exact() -> Result<(), TestError> {
     let descriptor = PythonPtcV1::compile(
         registry([registration("read", "test.read.v1", true, true)?])?,
         target(b"identities")?,
@@ -354,29 +357,9 @@ fn limits_result_and_component_identities_are_explicit_and_exact() -> Result<(),
     ] {
         assert!(descriptor.result_grammar().contains(fact));
     }
-    let identities = [
-        descriptor.profile_identity(),
-        descriptor.presentation_identity(),
-        descriptor.result_identity(),
-        descriptor.catalog_identity(),
-        descriptor.limits_identity(),
-        descriptor.identity(),
-    ];
-    assert!(
-        identities
-            .iter()
-            .all(|identity| identity.domain() == DigestDomain::ToolDefinition)
-    );
-    assert!(
-        identities
-            .iter()
-            .all(|identity| identity.bytes() != &[0; 32])
-    );
-    assert!(identities.iter().enumerate().all(|(index, identity)| {
-        identities[index + 1..]
-            .iter()
-            .all(|other| identity != other)
-    }));
+    assert_eq!(descriptor.identity().domain(), DigestDomain::ToolDefinition);
+    assert_eq!(descriptor.identity().version(), 3);
+    assert_ne!(descriptor.identity().bytes(), &[0; 32]);
     Ok(())
 }
 
@@ -462,12 +445,21 @@ fn catalog_order_target_and_presentation_rotate_only_the_bound_identities() -> R
         [ToolName::new("alpha")?, ToolName::new("beta")?],
     )?;
     assert_eq!(first.identity(), same.identity());
-    assert_eq!(first.catalog_identity(), same.catalog_identity());
-    assert_ne!(first.catalog_identity(), reversed.catalog_identity());
+    assert_eq!(
+        first.nested_projection().digest(),
+        same.nested_projection().digest()
+    );
+    assert_eq!(
+        first.nested_projection().digest(),
+        reversed.nested_projection().digest()
+    );
     assert_ne!(first.identity(), reversed.identity());
-    assert_ne!(first.catalog_identity(), other_target.catalog_identity());
+    assert_ne!(
+        first.nested_projection().digest(),
+        other_target.nested_projection().digest()
+    );
     assert_ne!(first.identity(), other_target.identity());
-    assert_eq!(first.limits_identity(), other_target.limits_identity());
+    assert_eq!(first.limits(), other_target.limits());
     Ok(())
 }
 

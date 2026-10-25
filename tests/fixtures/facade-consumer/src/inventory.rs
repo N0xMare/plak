@@ -59,35 +59,15 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
         attach_local_composition,
     };
     use plakous::model::{CompiledProviderConfiguration, Digest};
-    use plakous::tools::{
-        CodexMinimalLocalCodeModeDescriptorV1, CodexNativeLocalCodeModeDescriptorV1,
-        ProductJavaScriptCompositionDescriptorV1, PythonPtcDescriptorV1,
-    };
+    use plakous::tools::CellDescriptor;
 
-    fn select_profile(
-        descriptor: &CodexNativeLocalCodeModeDescriptorV1,
-    ) -> Result<LocalCompositionProfile, AgentError> {
-        LocalCompositionProfile::codex_native_local_code_mode_host_v1(descriptor)
-    }
-    fn select_minimal_profile(
-        descriptor: &CodexMinimalLocalCodeModeDescriptorV1,
-    ) -> Result<LocalCompositionProfile, AgentError> {
-        LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(descriptor)
+    fn select_profile(descriptor: &CellDescriptor) -> Result<LocalCompositionProfile, AgentError> {
+        LocalCompositionProfile::cell(descriptor)
     }
     fn verify_sidecar_artifact(
         path: &std::path::Path,
     ) -> Result<LocalCompositionEngineArtifact, AgentError> {
         LocalCompositionEngineArtifact::quickjs_worker_v1(path)
-    }
-    fn select_product_profile(
-        descriptor: &ProductJavaScriptCompositionDescriptorV1,
-    ) -> Result<LocalCompositionProfile, AgentError> {
-        LocalCompositionProfile::product_javascript_v1(descriptor)
-    }
-    fn select_python_profile(
-        descriptor: &PythonPtcDescriptorV1,
-    ) -> Result<LocalCompositionProfile, AgentError> {
-        LocalCompositionProfile::python_ptc_v1(descriptor)
     }
     fn verify_python_artifact(
         host: &std::path::Path,
@@ -135,10 +115,7 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     hold(&std::any::type_name::<LocalCompositionProfile>());
     hold(&std::any::type_name::<ProductExtensionLimits>());
     hold(&select_profile);
-    hold(&select_minimal_profile);
     hold(&verify_sidecar_artifact);
-    hold(&select_product_profile);
-    hold(&select_python_profile);
     hold(&verify_python_artifact);
     hold(&close_binding);
     hold(&close_product_binding);
@@ -264,10 +241,8 @@ pub(crate) mod codex_local_composition_reconstruction {
             native.outer_projection().digest()
         );
 
-        let minimal_profile =
-            LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(&reconstructed_minimal)?;
-        let native_profile =
-            LocalCompositionProfile::codex_native_local_code_mode_host_v1(&reconstructed_native)?;
+        let minimal_profile = LocalCompositionProfile::cell(&(&reconstructed_minimal).into())?;
+        let native_profile = LocalCompositionProfile::cell(&(&reconstructed_native).into())?;
         assert_eq!(minimal_profile.identity(), minimal.identity());
         assert_eq!(native_profile.identity(), native.identity());
         require_exact_profile(minimal.identity(), &minimal_profile)?;
@@ -285,7 +260,7 @@ pub(crate) mod codex_local_composition_reconstruction {
             registry,
             target,
         )?;
-        let profile = LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(&minimal)?;
+        let profile = LocalCompositionProfile::cell(&(&minimal).into())?;
         // This contract checks attachment identity, not sidecar execution. Use
         // a file present on every test host, including BusyBox-only systems.
         let host = std::fs::canonicalize(std::env::current_exe()?)?;

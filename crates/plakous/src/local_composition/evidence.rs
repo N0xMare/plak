@@ -274,24 +274,26 @@ struct ExtensionFacts {
 }
 
 fn extension_facts(profile: &LocalCompositionProfile) -> Result<ExtensionFacts, AgentError> {
-    match &profile.kind {
-        LocalCompositionProfileKind::ProductJavaScriptV1(descriptor) => Ok(ExtensionFacts {
-            target: descriptor.outer_projection().target().integration_class(),
-            catalog: descriptor.nested_projection().digest(),
-            presentation: descriptor.outer_projection().digest(),
-            limits: javascript_extension_limits(),
-        }),
-        LocalCompositionProfileKind::PythonPtcV1(descriptor) => Ok(ExtensionFacts {
-            target: descriptor.outer_projection().target().integration_class(),
-            catalog: descriptor.catalog_identity(),
-            presentation: descriptor.presentation_identity(),
-            limits: python_extension_limits(),
-        }),
-        LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(_)
-        | LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(_) => Err(invalid(
-            "native Codex local composition forbids product-extension evidence",
-        )),
-    }
+    let limits = match &profile.descriptor {
+        plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => javascript_extension_limits(),
+        plakous_compose::CellDescriptor::PythonPtcV1(_) => python_extension_limits(),
+        plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
+        | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_) => {
+            return Err(invalid(
+                "native Codex local composition forbids product-extension evidence",
+            ));
+        }
+    };
+    Ok(ExtensionFacts {
+        target: profile
+            .descriptor
+            .outer_projection()
+            .target()
+            .integration_class(),
+        catalog: profile.descriptor.nested_projection().digest(),
+        presentation: profile.descriptor.outer_projection().digest(),
+        limits,
+    })
 }
 
 #[cfg(test)]
@@ -329,29 +331,35 @@ mod tests {
         )?;
         let job = plakous_tools::JobConfig::default();
         Ok(vec![
-            LocalCompositionProfile::codex_native_local_code_mode_host_v1(
-                &CodexNativeLocalCodeModeV1::compile(job, registry.clone(), target.clone())?,
+            LocalCompositionProfile::cell(
+                &(&CodexNativeLocalCodeModeV1::compile(job, registry.clone(), target.clone())?)
+                    .into(),
             )?,
-            LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(
-                &CodexMinimalLocalCodeModeV1::compile(job, registry.clone(), target.clone())?,
+            LocalCompositionProfile::cell(
+                &(&CodexMinimalLocalCodeModeV1::compile(job, registry.clone(), target.clone())?)
+                    .into(),
             )?,
-            LocalCompositionProfile::product_javascript_v1(
-                &ProductJavaScriptCompositionV1::compile_for_kind(
+            LocalCompositionProfile::cell(
+                &(&ProductJavaScriptCompositionV1::compile_for_kind(
                     job,
                     registry.clone(),
                     target.clone(),
                     plakous_tools::CodingPresentation::Codex,
                     [ToolName::new("read_file")?],
-                )?,
+                )?)
+                    .into(),
             )?,
-            LocalCompositionProfile::python_ptc_v1(&PythonPtcV1::compile_for_kind(
-                job,
-                registry,
-                target,
-                plakous_compose::PythonPtcPresentationV1::StructuredFunctions,
-                plakous_tools::CodingPresentation::Codex,
-                [ToolName::new("read_file")?],
-            )?)?,
+            LocalCompositionProfile::cell(
+                &(&PythonPtcV1::compile_for_kind(
+                    job,
+                    registry,
+                    target,
+                    plakous_compose::PythonPtcPresentationV1::StructuredFunctions,
+                    plakous_tools::CodingPresentation::Codex,
+                    [ToolName::new("read_file")?],
+                )?)
+                    .into(),
+            )?,
         ])
     }
 
@@ -387,6 +395,36 @@ mod tests {
                 )?,
             )?)?,
         })
+    }
+
+    #[test]
+    fn cell_profiles_preserve_the_complete_descriptor_and_projection_evidence() -> TestResult {
+        for (index, profile) in profiles()?.into_iter().enumerate() {
+            assert_eq!(profile.identity(), profile.descriptor.identity());
+            assert_eq!(profile.identity().version(), 3);
+            assert_eq!(
+                profile.language(),
+                if index == 3 {
+                    LocalCompositionLanguage::Python
+                } else {
+                    LocalCompositionLanguage::JavaScript
+                }
+            );
+            if index >= 2 {
+                let facts = extension_facts(&profile)?;
+                assert_eq!(
+                    facts.catalog,
+                    profile.descriptor.nested_projection().digest()
+                );
+                assert_eq!(
+                    facts.presentation,
+                    profile.descriptor.outer_projection().digest()
+                );
+            } else {
+                assert!(extension_facts(&profile).is_err());
+            }
+        }
+        Ok(())
     }
 
     #[test]

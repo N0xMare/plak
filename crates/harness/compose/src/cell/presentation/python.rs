@@ -4,25 +4,18 @@
 //! select or expose an evaluator backend, attach a host, admit provider
 //! evidence, dispatch nested tools, or own recovery.
 
-use super::super::compile::{CellDescriptor, NestedProjection, compile_cell};
+use super::super::compile::{CompiledCell, NestedProjection, compile_cell};
 use super::super::host_api::HostApi;
 use super::CellPresentation;
-use plakous_model::{Digest, DigestDomain, ToolName};
+use plakous_model::{Digest, ToolName};
 use plakous_tools::{
-    FrozenToolRegistry, PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1, PYTHON_PTC_PROFILE_REVISION_V1,
-    PYTHON_PTC_SOURCE_BYTES_V1, PortableToolSchemaV2, ProviderModelProjectionIdentityV2,
-    ToolExecutorId, ToolProjectionMap, ToolRegistryBuilder, ToolRuntimeError, ToolRuntimeErrorKind,
-    register_python_ptc_markers_into,
+    FrozenToolRegistry, PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1, PYTHON_PTC_SOURCE_BYTES_V1,
+    PortableToolSchemaV2, ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionMap,
+    ToolRegistryBuilder, ToolRuntimeError, register_python_ptc_markers_into,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
-
-const PRESENTATION_REVISION: &str = "plakous.python-ptc-presentation.v4";
-const CATALOG_REVISION: &str = "plakous.python-ptc-catalog.v2";
-const LIMITS_REVISION: &str = "plakous.python-ptc-limits.v2";
-const RESULT_REVISION: &str = "plakous.python-ptc-result.v1";
-const COMPONENT_DIGEST_VERSION: u32 = 1;
 
 /// Exact backend-independent profile name.
 pub const PYTHON_PTC_PROFILE_V1: &str = "PythonPtcV1";
@@ -180,11 +173,6 @@ pub struct PythonPtcDescriptorV1 {
     pub(in crate::cell) nested_tools: Arc<[PythonPtcNestedToolV1]>,
     pub(in crate::cell) authoring_contract: Arc<str>,
     pub(in crate::cell) presentation: PythonPtcPresentationV1,
-    pub(in crate::cell) profile_identity: Digest,
-    pub(in crate::cell) presentation_identity: Digest,
-    pub(in crate::cell) result_identity: Digest,
-    pub(in crate::cell) catalog_identity: Digest,
-    pub(in crate::cell) limits_identity: Digest,
     pub(in crate::cell) identity: Digest,
 }
 
@@ -224,31 +212,6 @@ impl PythonPtcDescriptorV1 {
     #[must_use]
     pub const fn limits(&self) -> PythonPtcLimitsV1 {
         PythonPtcLimitsV1::EXACT
-    }
-    /// Profile/authoring identity.
-    #[must_use]
-    pub const fn profile_identity(&self) -> Digest {
-        self.profile_identity
-    }
-    /// Outer-presentation identity.
-    #[must_use]
-    pub const fn presentation_identity(&self) -> Digest {
-        self.presentation_identity
-    }
-    /// Result-grammar identity.
-    #[must_use]
-    pub const fn result_identity(&self) -> Digest {
-        self.result_identity
-    }
-    /// Ordered catalog identity.
-    #[must_use]
-    pub const fn catalog_identity(&self) -> Digest {
-        self.catalog_identity
-    }
-    /// Limits identity.
-    #[must_use]
-    pub const fn limits_identity(&self) -> Digest {
-        self.limits_identity
     }
     /// Complete descriptor identity.
     #[must_use]
@@ -318,35 +281,6 @@ impl PythonPtcNestedToolV1 {
     }
 }
 
-fn component_identity(revision: &str, bytes: &[u8]) -> Result<Digest, ToolRuntimeError> {
-    Digest::sha256(
-        DigestDomain::ToolDefinition,
-        COMPONENT_DIGEST_VERSION,
-        &[revision.as_bytes(), bytes],
-    )
-    .map_err(digest_error)
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "this function is used directly as a Result::map_err adapter"
-)]
-fn encoding_error(error: serde_json::Error) -> ToolRuntimeError {
-    ToolRuntimeError::from_sensitive_source(
-        ToolRuntimeErrorKind::InvalidDefinition,
-        "local Python profile identity could not be encoded",
-        &error,
-    )
-}
-
-fn digest_error(error: plakous_model::DigestError) -> ToolRuntimeError {
-    ToolRuntimeError::from_sensitive_source(
-        ToolRuntimeErrorKind::InvalidDefinition,
-        "local Python profile identity could not be built",
-        &error,
-    )
-}
-
 impl PythonPtcDescriptorV1 {
     /// Host API that generates both the authoring contract and the worker bootstrap.
     #[must_use]
@@ -357,28 +291,10 @@ impl PythonPtcDescriptorV1 {
     fn from_cell(
         job_config: plakous_tools::JobConfig,
         presentation: PythonPtcPresentationV1,
-        cell: CellDescriptor,
+        cell: CompiledCell,
     ) -> Result<Self, ToolRuntimeError> {
         let nested_tools = cell.api.python_tools()?;
         let authoring_contract = cell.execute_text;
-        let limits_identity = component_identity(
-            LIMITS_REVISION,
-            &serde_json::to_vec(&PythonPtcLimitsV1::EXACT).map_err(encoding_error)?,
-        )?;
-        let catalog_identity = component_identity(
-            CATALOG_REVISION,
-            &serde_json::to_vec(&nested_tools).map_err(encoding_error)?,
-        )?;
-        let presentation_identity = component_identity(
-            PRESENTATION_REVISION,
-            &serde_json::to_vec(&presentation).map_err(encoding_error)?,
-        )?;
-        let result_identity =
-            component_identity(RESULT_REVISION, PYTHON_PTC_RESULT_GRAMMAR_V1.as_bytes())?;
-        let profile_identity = component_identity(
-            PYTHON_PTC_PROFILE_REVISION_V1,
-            authoring_contract.as_bytes(),
-        )?;
         Ok(Self {
             job_config,
             api: Arc::new(cell.api),
@@ -387,11 +303,6 @@ impl PythonPtcDescriptorV1 {
             nested_tools: nested_tools.into(),
             authoring_contract: authoring_contract.into(),
             presentation,
-            profile_identity,
-            presentation_identity,
-            result_identity,
-            catalog_identity,
-            limits_identity,
             identity: cell.identity,
         })
     }

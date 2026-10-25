@@ -122,7 +122,8 @@ model with Direct tools needs no interpreter or provider credentials.
 `composition` adds consumer-owned JavaScript through the `plakous-js-host`
 worker, with no credential, HTTP or Python machinery and no `[patch]` table.
 Native Codex Code Mode is restricted to enrolled Codex/OpenAI targets; a Custom
-model instead uses `LocalCompositionProfile::product_javascript_v1` with the
+model instead selects a product JavaScript descriptor through
+`LocalCompositionProfile::cell` with the
 neutral Pi vocabulary and explicit extension evidence. These are library options, not different Plak executables.
 
 ```sh
