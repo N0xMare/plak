@@ -58,13 +58,15 @@ impl ObservationWait {
 impl ProcessExecutionResult {
     #[cfg(test)]
     pub(crate) fn into_outcome(self) -> Result<ToolOutcome, ToolRuntimeError> {
-        self.into_outcome_with_promotion(None)
+        self.into_outcome_with_promotion(None, false)
     }
 
     pub(crate) fn into_outcome_with_promotion(
         mut self,
         promotion: Option<(u64, plakous_tools::ToolPreempt)>,
+        want_value: bool,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
+        let value_output = want_value.then(|| self.projection.output.clone());
         let mut output = std::mem::take(&mut self.projection.output);
         if self.first_promotion || self.truncated {
             append_output_file(&mut output, &self.sessions, self.session_id);
@@ -82,6 +84,22 @@ impl ProcessExecutionResult {
                 JoinedProcessSessions::job_number(self.session_id)
             );
         }
+        let value = value_output.map(|output| {
+            plakous_tools::ExecutionValue::Process(plakous_tools::ProcessValue {
+                status: self.status.to_owned(),
+                exit_code: self.projection.exit_code,
+                session_id: self.projection.session_id,
+                output,
+                truncated: self.truncated || self.skipped != 0,
+                full_output: if self.first_promotion || self.truncated {
+                    self.sessions
+                        .job_output_file(JoinedProcessSessions::job_number(self.session_id))
+                        .map(|file| file.path)
+                } else {
+                    None
+                },
+            })
+        });
         let mut canonical = json!({
             "status": self.status,
             "exit_code": self.projection.exit_code,
@@ -109,6 +127,10 @@ impl ProcessExecutionResult {
                     &error,
                 )
             })?)?;
+        let outcome = match value {
+            Some(value) => outcome.with_value(value)?,
+            None => outcome,
+        };
         let outcome = if self.first_promotion {
             if let Some((hint_ms, preempt)) = promotion {
                 plakous_tools::internal::with_process_telemetry(
@@ -353,6 +375,7 @@ impl ToolExecutor for ProcessSessionTools {
                     process_result
                         .into_outcome_with_promotion(
                             promotion_hint.map(|hint| (hint, *preempt.borrow())),
+                            invocation.want_value(),
                         )
                         .map(|outcome| {
                             classify_process_outcome(outcome, operation, hint_source, yielded)
@@ -546,7 +569,7 @@ impl ProcessSessionTools {
         let sessions = result.sessions.clone();
         let session_id = result.session_id;
         let canonical = classify_process_outcome(
-            result.into_outcome_with_promotion(None)?,
+            result.into_outcome_with_promotion(None, false)?,
             operation,
             hint_source,
             false,

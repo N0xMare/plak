@@ -22,6 +22,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -66,6 +67,11 @@ pub(crate) struct SearchRepositoryTool;
 struct BoundedSearchResult {
     text: String,
     max_bytes: usize,
+}
+
+struct RegexEntry {
+    text: String,
+    hits: Range<usize>,
 }
 
 impl BoundedSearchResult {
@@ -120,6 +126,7 @@ fn query_root(context: &ToolContext, path: &Path) -> Result<PathBuf, ToolRuntime
 fn execute_list_directory(
     context: &ToolContext,
     args: &SearchArgs,
+    want_value: bool,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     context.check_cancelled()?;
     let directory = context.workspace().resolve_existing(&args.path)?;
@@ -132,6 +139,7 @@ fn execute_list_directory(
     if !metadata.is_dir() {
         return ToolOutcome::failure_text("list_dir target is not a directory");
     }
+    let mut incomplete = false;
     let mut entries = fs::read_dir(&directory)
         .map_err(|_| {
             ToolRuntimeError::new(
@@ -139,7 +147,14 @@ fn execute_list_directory(
                 "list_dir could not read the directory",
             )
         })?
-        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            if let Ok(entry) = entry {
+                Some(entry)
+            } else {
+                incomplete = true;
+                None
+            }
+        })
         .filter(|entry| {
             entry
                 .file_name()
@@ -157,13 +172,44 @@ fn execute_list_directory(
         .collect::<Vec<_>>();
     entries.sort();
     let stamp = generation_stamp_prefix(context);
-    ToolOutcome::success_text(format!("{stamp}{}", entries.join("\n")))
+    let outcome = ToolOutcome::success_text(format!("{stamp}{}", entries.join("\n")))?;
+    Ok(if want_value {
+        let count =
+            bounded_value_count::<plakous_tools::ListedEntry>(entries.iter().map(String::len));
+        let entries_cut = (entries.len() - count) as u64;
+        let mut values = Vec::with_capacity(count);
+        values.extend(entries.into_iter().take(count).map(|name| {
+            let path = name.trim_end_matches('/').to_owned();
+            let metadata = fs::symlink_metadata(directory.join(&path)).ok();
+            incomplete |= metadata.is_none();
+            let kind = match metadata.as_ref().map(fs::Metadata::file_type) {
+                Some(kind) if kind.is_file() => plakous_tools::ListedEntryKind::File,
+                Some(kind) if kind.is_dir() => plakous_tools::ListedEntryKind::Directory,
+                Some(kind) if kind.is_symlink() => plakous_tools::ListedEntryKind::Link,
+                _ => plakous_tools::ListedEntryKind::Other,
+            };
+            let size = metadata
+                .filter(fs::Metadata::is_file)
+                .map_or(0, |metadata| metadata.len());
+            plakous_tools::ListedEntry { path, kind, size }
+        }));
+        outcome.with_value(plakous_tools::ExecutionValue::Listing(
+            plakous_tools::ListingValue {
+                entries: values,
+                entries_cut,
+                incomplete,
+            },
+        ))?
+    } else {
+        outcome
+    })
 }
 
 async fn execute_regex_search(
     context: &ToolContext,
     args: &SearchArgs,
     advice: &str,
+    want_value: bool,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     context.check_cancelled()?;
     let pattern = args.query.as_deref().ok_or_else(|| {
@@ -232,10 +278,14 @@ async fn execute_regex_search(
     let mut output = BoundedSearchResult::new(STANDARD_SEARCH_RESULT_BYTES - 1024);
     let stamp = generation_stamp_prefix(context);
     let mut clipped = false;
-    for line in entries.into_iter().skip(offset).take(head_limit) {
-        if writeln!(output, "{line}").is_err() {
+    let mut presented = want_value.then(Vec::new);
+    for entry in entries.into_iter().skip(offset).take(head_limit) {
+        if writeln!(output, "{}", entry.text).is_err() {
             clipped = true;
             break;
+        }
+        if let Some(presented) = &mut presented {
+            presented.push(entry.hits);
         }
     }
     let mut notes = search_limit_notes(&result, match_cap, STANDARD_SEARCH_REGEX_RESULT_BYTES);
@@ -246,7 +296,90 @@ async fn execute_regex_search(
         ));
     }
     let header = search_notes_header(&notes, result.incomplete(), clipped, advice);
-    ToolOutcome::success_text(format!("{stamp}{header}{}", output.finish()))
+    let outcome = ToolOutcome::success_text(format!("{stamp}{header}{}", output.finish()))?;
+    let hits = presented
+        .into_iter()
+        .flatten()
+        .flat_map(|range| result.matches()[range].iter());
+    with_search_hits(
+        outcome,
+        want_value,
+        hits,
+        result.matches().len(),
+        result.incomplete(),
+    )
+}
+
+fn bounded_value_count<T>(sizes: impl Iterator<Item = usize>) -> usize {
+    let mut room = plakous_tools::MAX_TOOL_OUTCOME_BYTES
+        .saturating_sub(size_of::<plakous_tools::ExecutionValue>());
+    sizes
+        .take_while(|size| {
+            let bytes = size.saturating_add(size_of::<T>());
+            if bytes > room {
+                return false;
+            }
+            room -= bytes;
+            true
+        })
+        .count()
+}
+
+fn with_search_hits<'a>(
+    outcome: ToolOutcome,
+    want_value: bool,
+    matches: impl Iterator<Item = &'a plakous_tools::RepositoryQueryMatch>,
+    known_matches: usize,
+    incomplete: bool,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    if !want_value {
+        return Ok(outcome);
+    }
+    let mut hits = Vec::new();
+    let mut strings = 0_usize;
+    let room = plakous_tools::MAX_TOOL_OUTCOME_BYTES
+        .saturating_sub(size_of::<plakous_tools::ExecutionValue>());
+    for hit in matches {
+        let mut path = hit.path().to_string_lossy().into_owned();
+        let mut text = String::from_utf8_lossy(hit.bytes()).into_owned();
+        path.shrink_to_fit();
+        text.shrink_to_fit();
+        let next_strings = strings
+            .saturating_add(path.capacity())
+            .saturating_add(text.capacity());
+        if next_strings.saturating_add((hits.len() + 1) * size_of::<plakous_tools::SearchHit>())
+            > room
+        {
+            break;
+        }
+        if hits.len() == hits.capacity() {
+            // Grow geometrically, never past the slots the remaining room can hold.
+            let slots = room.saturating_sub(next_strings) / size_of::<plakous_tools::SearchHit>();
+            let target = (hits.capacity() * 2).max(8).min(slots);
+            hits.reserve_exact(target - hits.len());
+        }
+        if next_strings.saturating_add(hits.capacity() * size_of::<plakous_tools::SearchHit>())
+            > room
+        {
+            break;
+        }
+        hits.push(plakous_tools::SearchHit {
+            path,
+            line: hit.line(),
+            text,
+            truncated: hit.truncated(),
+        });
+        strings = next_strings;
+    }
+    hits.shrink_to_fit();
+    let hits_cut = known_matches.saturating_sub(hits.len()) as u64;
+    outcome.with_value(plakous_tools::ExecutionValue::SearchHits(
+        plakous_tools::SearchHitsValue {
+            hits,
+            hits_cut,
+            incomplete,
+        },
+    ))
 }
 
 fn search_narrowing_advice(exposed_name: &str) -> &'static str {
@@ -277,7 +410,7 @@ fn regex_entries(
     after: usize,
     counts_only: bool,
     paths_only: bool,
-) -> Result<Vec<String>, ToolRuntimeError> {
+) -> Result<Vec<RegexEntry>, ToolRuntimeError> {
     let mut entries = Vec::new();
     let mut by_file: Vec<(&Path, Vec<&plakous_tools::RepositoryQueryMatch>)> = Vec::new();
     for matched in result.matches() {
@@ -286,21 +419,33 @@ fn regex_entries(
             _ => by_file.push((matched.path(), vec![matched])),
         }
     }
+    let mut first_hit = 0;
     for (path, hits) in by_file {
+        let end_hit = first_hit + hits.len();
         let file_display = path.to_string_lossy();
         if counts_only {
-            entries.push(format!("{file_display}:{}", hits.len()));
+            entries.push(RegexEntry {
+                text: format!("{file_display}:{}", hits.len()),
+                hits: first_hit..end_hit,
+            });
         } else if paths_only {
-            entries.push(file_display.into_owned());
+            entries.push(RegexEntry {
+                text: file_display.into_owned(),
+                hits: first_hit..end_hit,
+            });
         } else if before == 0 && after == 0 {
-            for hit in hits {
+            for (index, hit) in hits.into_iter().enumerate() {
                 let line = String::from_utf8_lossy(hit.bytes());
                 let clipped = if hit.truncated() { " …" } else { "" };
-                entries.push(format!("{file_display}:{}:{line}{clipped}", hit.line()));
+                entries.push(RegexEntry {
+                    text: format!("{file_display}:{}:{line}{clipped}", hit.line()),
+                    hits: first_hit + index..first_hit + index + 1,
+                });
             }
         } else {
-            append_context_lines(context, path, &hits, before, after, &mut entries)?;
+            append_context_lines(context, path, &hits, before, after, &mut entries, first_hit)?;
         }
+        first_hit = end_hit;
     }
     Ok(entries)
 }
@@ -368,7 +513,8 @@ fn append_context_lines(
     hits: &[&plakous_tools::RepositoryQueryMatch],
     before: usize,
     after: usize,
-    entries: &mut Vec<String>,
+    entries: &mut Vec<RegexEntry>,
+    first_hit: usize,
 ) -> Result<(), ToolRuntimeError> {
     let resolved = context.workspace().resolve_existing(path)?;
     let bytes = fs::read(&resolved).map_err(|_| {
@@ -399,7 +545,14 @@ fn append_context_lines(
     }
     for (index, marker) in emitted {
         let line = file_lines.get(index).copied().unwrap_or_default();
-        entries.push(format!("{file_display}{marker}{}{marker}{line}", index + 1));
+        let hit = hits
+            .binary_search_by_key(&(index as u64 + 1), |hit| hit.line())
+            .ok();
+        let hits = hit.map_or(0..0, |hit| first_hit + hit..first_hit + hit + 1);
+        entries.push(RegexEntry {
+            text: format!("{file_display}{marker}{}{marker}{line}", index + 1),
+            hits,
+        });
     }
     Ok(())
 }
@@ -479,10 +632,11 @@ impl ToolExecutor for SearchRepositoryTool {
                     .as_str(),
             );
             if args.list_directory.unwrap_or(false) {
-                return execute_list_directory(&context, &args);
+                return execute_list_directory(&context, &args, invocation.want_value());
             }
             if args.use_regex.unwrap_or(false) {
-                return execute_regex_search(&context, &args, advice).await;
+                return execute_regex_search(&context, &args, advice, invocation.want_value())
+                    .await;
             }
             {
                 let q: String = args
@@ -568,7 +722,9 @@ impl ToolExecutor for SearchRepositoryTool {
                         .map_err(|_| search_result_bound_error())?;
                 }
                 write_entries_skipped(&mut output, result.entries_skipped())?;
-                return ToolOutcome::success_text(format!("{stamp}{header}{}", output.finish()));
+                let outcome =
+                    ToolOutcome::success_text(format!("{stamp}{header}{}", output.finish()))?;
+                return Ok(outcome);
             }
             let mut output = BoundedSearchResult::new(STANDARD_SEARCH_RESULT_BYTES);
             writeln!(
@@ -608,7 +764,14 @@ impl ToolExecutor for SearchRepositoryTool {
                 )
                 .map_err(|_| search_result_bound_error())?;
             }
-            ToolOutcome::success_text(output.finish())
+            let outcome = ToolOutcome::success_text(output.finish())?;
+            with_search_hits(
+                outcome,
+                invocation.want_value(),
+                result.matches().iter().take(match_limit),
+                result.matches().len(),
+                result.incomplete(),
+            )
         })
     }
 }

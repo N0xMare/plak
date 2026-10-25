@@ -362,7 +362,17 @@ fn task_join(task: Arc<TokioTask>) -> ToolTaskJoin {
     let mut completion = task.completion.subscribe();
     Box::pin(async move {
         loop {
-            if let Some(result) = lock(&task.state).result.clone() {
+            let result = {
+                let mut state = lock(&task.state);
+                state.result.as_mut().map(|result| {
+                    let value = result.as_mut().ok().and_then(ToolOutcome::take_value);
+                    match (result.clone(), value) {
+                        (Ok(outcome), Some(value)) => outcome.with_value(value),
+                        (result, _) => result,
+                    }
+                })
+            };
+            if let Some(result) = result {
                 return result;
             }
             if completion.changed().await.is_err() {
@@ -486,6 +496,47 @@ fn spawn_error() -> ToolRuntimeError {
 )]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn only_first_joiner_takes_the_executor_value_without_copying()
+    -> Result<(), ToolRuntimeError> {
+        use plakous_tools::{ExecutionValue, ProcessValue};
+        let output = "executor payload".repeat(100);
+        let pointer = output.as_ptr();
+        let executor: ToolTaskFuture = Box::pin(async move {
+            ToolOutcome::success_text("same text")?.with_value(ExecutionValue::Process(
+                ProcessValue {
+                    status: "exited".into(),
+                    exit_code: Some(0),
+                    session_id: None,
+                    output,
+                    truncated: false,
+                    full_output: None,
+                },
+            ))
+        });
+        let task = Arc::new(TokioTask::new());
+        task.complete(executor.await);
+        let mut first = task_join(Arc::clone(&task)).await?;
+        let Some(ExecutionValue::Process(value)) = first.take_value() else {
+            panic!("first joiner lost the value");
+        };
+        assert_eq!(value.output.as_ptr(), pointer);
+        assert!(
+            lock(&task.state)
+                .result
+                .as_mut()
+                .expect("stored result")
+                .as_mut()
+                .expect("success")
+                .take_value()
+                .is_none()
+        );
+        let mut second = task_join(task).await?;
+        assert!(second.take_value().is_none());
+        assert_eq!(first.parts(), second.parts());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn abort_is_observable_and_owner_drains() -> Result<(), ToolRuntimeError> {

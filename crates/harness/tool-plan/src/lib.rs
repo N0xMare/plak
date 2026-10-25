@@ -417,7 +417,16 @@ impl ToolExecutor for UpdatePlanTool {
                 .report("updating plan state", None, None)?;
             let snapshot = self.state.replace(replacement).await?;
             context.check_cancelled()?;
-            ToolOutcome::success_text(format_plan_snapshot(&snapshot))
+            let outcome = ToolOutcome::success_text(format_plan_snapshot(&snapshot))?;
+            Ok(if invocation.want_value() {
+                outcome.with_value(plakous_tools::ExecutionValue::Plan(
+                    plakous_tools::PlanValue {
+                        revision: snapshot.revision(),
+                    },
+                ))?
+            } else {
+                outcome
+            })
         })
     }
 }
@@ -535,7 +544,16 @@ impl ToolExecutor for MergePlanTool {
                 .report("updating plan state", None, None)?;
             let snapshot = self.state.replace(replacement).await?;
             context.check_cancelled()?;
-            ToolOutcome::success_text(format_plan_snapshot(&snapshot))
+            let outcome = ToolOutcome::success_text(format_plan_snapshot(&snapshot))?;
+            Ok(if invocation.want_value() {
+                outcome.with_value(plakous_tools::ExecutionValue::Plan(
+                    plakous_tools::PlanValue {
+                        revision: snapshot.revision(),
+                    },
+                ))?
+            } else {
+                outcome
+            })
         })
     }
 }

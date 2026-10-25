@@ -13,6 +13,9 @@ one cross-build carrier (a build imports its own and the previous version).
   The four per-engine profile constructors and Python-only component identity
   accessors are removed. `CellDescriptor` is available at the compose crate
   root and through `plakous::tools`.
+- Tools can return ephemeral typed execution values alongside text when an
+  in-process consumer requests them. The demand flag defaults off; model
+  results, recorded evidence, and existing prompt pins are unchanged.
 - `plakous-code-mode` is folded into `plakous-compose`'s `cell::codex_exec`
   implementation and removed from the published cohort; the workspace has
   38 packages. Compose exposes the inert `HostApi`, `python_bootstrap`, its

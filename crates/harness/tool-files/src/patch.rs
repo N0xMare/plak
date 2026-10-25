@@ -307,6 +307,11 @@ impl ToolExecutor for ApplyPatchTool {
                     return ToolOutcome::failure_text(error.message().as_str());
                 }
             };
+            let value_inputs = if invocation.want_value() {
+                file_change_inputs(&transaction)?
+            } else {
+                Vec::new()
+            };
             let result = context
                 .environment()
                 .mutate_workspace(transaction, operation_control(&context))
@@ -320,7 +325,37 @@ impl ToolExecutor for ApplyPatchTool {
                             item.disposition() != WorkspaceMutationDisposition::Unchanged
                         })
                         .count();
-                    ToolOutcome::success_text(format!("changed_files={changed_files}"))
+                    let outcome =
+                        ToolOutcome::success_text(format!("changed_files={changed_files}"))?;
+                    Ok(if invocation.want_value() {
+                        let mut changes = Vec::with_capacity(result.items().len());
+                        changes.extend(result.items().iter().zip(value_inputs).filter_map(
+                            |(item, (path, revision))| {
+                                let action = match item.disposition() {
+                                    WorkspaceMutationDisposition::Created => {
+                                        plakous_tools::FileChangeAction::Add
+                                    }
+                                    WorkspaceMutationDisposition::Updated => {
+                                        plakous_tools::FileChangeAction::Update
+                                    }
+                                    WorkspaceMutationDisposition::Deleted => {
+                                        plakous_tools::FileChangeAction::Delete
+                                    }
+                                    _ => return None,
+                                };
+                                Some(plakous_tools::FileChange {
+                                    path,
+                                    action,
+                                    revision,
+                                })
+                            },
+                        ));
+                        outcome.with_value(plakous_tools::ExecutionValue::FileChanges(
+                            plakous_tools::FileChangesValue { changes },
+                        ))?
+                    } else {
+                        outcome
+                    })
                 }
                 Err(error) if error.kind() == ExecutionBackendErrorKind::Conflict => {
                     ToolOutcome::failure_text(PLAKOUS_TOOL_PATCH_WORKSPACE_CONFLICT)
@@ -340,6 +375,33 @@ impl ToolExecutor for ApplyPatchTool {
             }
         })
     }
+}
+
+fn file_change_inputs(
+    transaction: &WorkspaceMutationTransaction,
+) -> Result<Vec<(String, Option<plakous_tools::WorkspaceContentIdentity>)>, ToolRuntimeError> {
+    let mut inputs = Vec::with_capacity(transaction.mutations().len());
+    let mut bytes = size_of::<plakous_tools::ExecutionValue>()
+        + transaction.mutations().len() * size_of::<plakous_tools::FileChange>();
+    for mutation in transaction.mutations() {
+        let mut path = mutation.path().to_string_lossy().into_owned();
+        path.shrink_to_fit();
+        bytes = bytes.saturating_add(path.capacity());
+        if bytes > plakous_tools::MAX_TOOL_OUTCOME_BYTES {
+            return Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::ResourceLimit,
+                "typed file changes exceed the outcome byte limit",
+            ));
+        }
+        let revision = mutation
+            .replacement()
+            .bytes()
+            .map(|bytes| plakous_tools::WorkspaceContentIdentity::from_bytes(bytes))
+            .transpose()
+            .map_err(backend_runtime_error)?;
+        inputs.push((path, revision));
+    }
+    Ok(inputs)
 }
 
 async fn search_replace_mutation(

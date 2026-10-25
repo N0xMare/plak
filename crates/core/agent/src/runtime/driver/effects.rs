@@ -179,7 +179,7 @@ impl Driver {
         let uncertainty_cause = report
             .uncertainty_cause()
             .map(|error| error.message().to_owned());
-        let outcome = report.into_result();
+        let mut outcome = report.into_result();
         if let Ok(outcome) = &outcome {
             observer.observe_job_outcome(outcome);
         }
@@ -187,34 +187,21 @@ impl Driver {
             .as_ref()
             .ok()
             .and_then(plakous_tools::internal::process_session_update);
-        let (result, presentation_subject) = match &outcome {
-            Ok(outcome) => {
-                let raised = self
-                    .tool_presentation
-                    .raise(projection_receipt.as_ref(), outcome.clone())
-                    .map_err(|error| AgentError::from_tool(&error));
-                match raised {
-                    Ok(raised) => {
-                        let presentation_subject = raised.presentation_subject().map(str::to_owned);
-                        let result = raised
-                            .to_model_result(&invocation)
-                            .map_err(|error| AgentError::from_tool(&error));
-                        (result, presentation_subject)
-                    }
-                    Err(error) => (Err(error), None),
-                }
-            }
-            Err(error) => (normalized_tool_failure(call, error), None),
-        };
-        let output_bytes = result.as_ref().map_or(0, tool_result_content_bytes);
+        let exact = present_effect_result(
+            &mut outcome,
+            &self.tool_presentation,
+            projection_receipt.as_ref(),
+            &invocation,
+            call,
+            dispatched,
+        );
+        let output_bytes = exact
+            .as_ref()
+            .map_or(0, |execution| tool_result_content_bytes(&execution.result));
         observer.emit_finished(
             tool_terminal_status(&outcome, self.shutdown.is_cancelled()),
             output_bytes,
         );
-        let exact = result.map(|result| {
-            ToolExecutionResult::new(result, dispatched)
-                .with_presentation_subject(presentation_subject)
-        });
         let evidence = completed_tool_outcome_component(&exact, result_entry_id)?;
         let terminal = if !dispatched {
             DurableOperationState::ProvenNotDispatched(evidence)
@@ -846,6 +833,37 @@ impl Driver {
         );
         self.remember_effect_decision(decision, resolution);
     }
+}
+
+pub(super) fn present_effect_result(
+    outcome: &mut Result<plakous_tools::ToolOutcome, ToolRuntimeError>,
+    presentation: &crate::runtime::ToolPresentation,
+    receipt: Option<&ToolProjectionReceiptV2>,
+    invocation: &ToolInvocation,
+    call: &ToolCallBlock,
+    dispatched: bool,
+) -> Result<ToolExecutionResult, AgentError> {
+    let value = outcome
+        .as_mut()
+        .ok()
+        .and_then(plakous_tools::ToolOutcome::take_value);
+    let (result, subject) = match outcome {
+        Ok(outcome) => {
+            let raised = presentation
+                .raise(receipt, outcome.clone())
+                .map_err(|error| AgentError::from_tool(&error))?;
+            (
+                raised
+                    .to_model_result(invocation)
+                    .map_err(|error| AgentError::from_tool(&error))?,
+                raised.presentation_subject().map(str::to_owned),
+            )
+        }
+        Err(error) => (normalized_tool_failure(call, error)?, None),
+    };
+    Ok(ToolExecutionResult::new(result, dispatched)
+        .with_presentation_subject(subject)
+        .with_value(value))
 }
 
 /// The source-ordered tool slots of a batch paused at its pending effect decision.

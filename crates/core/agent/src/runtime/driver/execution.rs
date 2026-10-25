@@ -29,6 +29,7 @@ use plakous_tools::{
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
 impl ProgressForwardingGuard {
     pub(in crate::runtime) fn close(&self) {
         self.0.close();
@@ -295,7 +296,11 @@ async fn execute_read_only_tool(
         &lineage,
     )
     .await;
-    let execution_outcome = outcome;
+    let mut execution_outcome = outcome;
+    let value = execution_outcome
+        .as_mut()
+        .ok()
+        .and_then(plakous_tools::ToolOutcome::take_value);
     if let Ok(outcome) = &execution_outcome {
         dispatch_observer.observe_job_outcome(outcome);
     }
@@ -328,10 +333,9 @@ async fn execute_read_only_tool(
     if let Some(error) = dispatch_observer.take_error() {
         return Err(error);
     }
-    Ok(
-        ToolExecutionResult::new(result, dispatched)
-            .with_presentation_subject(presentation_subject),
-    )
+    Ok(ToolExecutionResult::new(result, dispatched)
+        .with_presentation_subject(presentation_subject)
+        .with_value(value))
 }
 
 #[allow(
@@ -607,3 +611,7 @@ mod job_telemetry_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "execution_value_tests.rs"]
+mod value_tests;

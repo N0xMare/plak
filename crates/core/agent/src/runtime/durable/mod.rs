@@ -111,7 +111,7 @@ impl fmt::Debug for DurableSessionRuntime {
 pub(in crate::runtime) mod bootstrap;
 
 #[cfg(test)]
-mod tests;
+pub(in crate::runtime) mod tests;
 
 /// Exact semantic address accepted by the high-level durable runtime seam.
 #[allow(

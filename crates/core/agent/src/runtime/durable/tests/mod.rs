@@ -289,6 +289,33 @@ use provenance::*;
 use record_tests::*;
 use reopen_and_lease::*;
 use session_update::*;
+
+pub(in crate::runtime) fn execution_value_fixture(
+    registry: FrozenToolRegistry,
+    workspace: Arc<WorkspacePolicy>,
+) -> TestResult<crate::runtime::PreparedAgent> {
+    let model = artifact_test_model(0, 94_300)?;
+    let configured = configured_test_model(
+        model.clone(),
+        model.descriptor.clone(),
+        model.authority.clone(),
+        &registry,
+        LocalDurabilityDisposition::Ephemeral,
+        ContextAdmissionRequirement::AnyBounded,
+    )?;
+    Ok(crate::runtime::PreparedAgent::new(
+        AgentBuilder::new(configured, registry, workspace)
+            .request_policy(AgentRequestPolicy::new(
+                GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
+                ReasoningPolicy::Disabled,
+            ))
+            .tool_policy(Arc::new(AlwaysAllowPolicy))
+            .identity_sources(
+                Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
+                Arc::new(SystemIdGenerator),
+            ),
+    )?)
+}
 use store_fixtures::*;
 use telemetry::*;
 

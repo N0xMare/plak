@@ -4353,6 +4353,33 @@ Every local tool declares an explicit structured or bounded UTF-8 input
 contract and an explicit structured, bounded UTF-8, or bounded model-content
 output contract.
 
+Executors can additionally attach an ephemeral `ExecutionValue` to a
+`ToolOutcome`: `FileRead`, `SearchHits`, `Listing`, `FileChanges`,
+`Process`, or `Plan`. `ToolInvocation::want_value()` defaults to false;
+the executor builds the typed payload only when requested by an in-process
+consumer. Existing direct and text-only composition calls do not request it.
+The first task joiner moves the value out of the stored outcome; later joiners
+receive the same text without a value. The driver takes the value before
+cloning presentation evidence and carries it on the serial or parallel
+execution result. Canonical parts, their count/byte limits, and model-visible text are
+unchanged. Values are not operation evidence, canonical history, checkpoints,
+or export data; restored and replayed execution results have no value.
+Demanded values also fit the outcome's 1 MiB default retained-memory byte
+bound (including owned strings and collection capacity); runtime outcome
+limits can reduce it. Producers bound collection allocation before copying:
+searches and listings retain a prefix and count known omitted rows separately
+from an incomplete traversal. File reads keep the existing bounded page;
+file changes preflight their value bound before mutation. This in-memory
+producer bound is separate from canonical-part byte limits.
+Successful file reads, patches, content searches (including regex searches),
+directory listings, plan replacements, and single-session process observations
+produce values when demanded. Regex values contain the hits in the presented
+window: count/path rows select files, while content/context rows select their
+matching lines. Omitted-hit counts count known matching lines, not files or
+displayed context rows. Glob-only path queries, process awaits across sessions,
+`stop_job`, and failures produce no value even when demanded.
+No current presentation consumes these values.
+
 ### 8.2 Registry, exposure, and presentations
 
 Tools are registered under stable canonical identities with explicit contracts

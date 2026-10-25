@@ -61,6 +61,7 @@ impl ToolOutcomeLimits {
 /// One terminal outcome retaining canonical result-part order.
 #[derive(Clone, PartialEq)]
 pub struct ToolOutcome {
+    value: Option<Box<crate::ExecutionValue>>,
     kind: ToolOutcomeKind,
     parts: Vec<ToolResultPart>,
     retained_bytes: usize,
@@ -81,11 +82,36 @@ impl fmt::Debug for ToolOutcome {
             .field("process_telemetry", &self.process_telemetry)
             .field("presentation_subject", &self.presentation_subject)
             .field("parts", &"<redacted>")
+            .field("value", &self.value.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }
 
 impl ToolOutcome {
+    /// Attaches an ephemeral value without changing canonical result parts.
+    /// Executors must construct it only when the invocation requests it.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a value whose retained allocation exceeds the default byte bound.
+    pub fn with_value(mut self, value: crate::ExecutionValue) -> Result<Self, ToolRuntimeError> {
+        if value.retained_bytes() > MAX_TOOL_OUTCOME_BYTES {
+            return Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::ResourceLimit,
+                "typed execution value exceeds its byte limit",
+            )
+            .with_proven_no_effect(false));
+        }
+        self.value = Some(Box::new(value));
+        Ok(self)
+    }
+
+    /// Moves the typed result out before presentation or evidence is copied.
+    /// Values never enter canonical history, checkpoints, or replay.
+    pub fn take_value(&mut self) -> Option<crate::ExecutionValue> {
+        self.value.take().map(|value| *value)
+    }
+
     /// Attaches a neutral await observation from the tool's own typed wake result.
     /// `yielded` means observation was cut short by steering, not cancellation.
     #[must_use]
@@ -156,6 +182,7 @@ impl ToolOutcome {
             }
         }
         Ok(Self {
+            value: None,
             kind,
             parts,
             retained_bytes,
@@ -219,6 +246,7 @@ impl ToolOutcome {
         ) {
             Ok(outcome) => outcome,
             Err(_) => Self {
+                value: None,
                 kind: ToolOutcomeKind::OutcomeUnknown,
                 parts: Vec::new(),
                 retained_bytes: 0,
@@ -250,6 +278,7 @@ impl ToolOutcome {
                 outcome
             }
             Err(_) => Self {
+                value: None,
                 kind,
                 parts: Vec::new(),
                 retained_bytes: 0,
@@ -363,7 +392,12 @@ impl ToolOutcome {
             )
             .with_proven_no_effect(false));
         }
-        if self.retained_bytes > limits.max_bytes {
+        if self.retained_bytes > limits.max_bytes
+            || self
+                .value
+                .as_ref()
+                .is_some_and(|value| value.retained_bytes() > limits.max_bytes)
+        {
             return Err(ToolRuntimeError::new(
                 ToolRuntimeErrorKind::ResourceLimit,
                 "tool outcome exceeds the runtime byte limit",
@@ -495,6 +529,57 @@ fn bound_presentation_subject(raw: &str) -> Option<Arc<str>> {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_value_moves_without_changing_or_exposing_canonical_content()
+    -> Result<(), ToolRuntimeError> {
+        let value = crate::ExecutionValue::Process(crate::ProcessValue {
+            status: "exited".into(),
+            exit_code: Some(0),
+            session_id: None,
+            output: "private typed content".into(),
+            truncated: false,
+            full_output: None,
+        });
+        let plain = ToolOutcome::success_text("same text")?;
+        let mut typed = ToolOutcome::success_text("same text")?.with_value(value.clone())?;
+        assert_eq!(plain.parts(), typed.parts());
+        assert_eq!(plain.retained_bytes(), typed.retained_bytes());
+        assert!(!format!("{typed:?}").contains("private typed content"));
+        assert_eq!(typed.take_value(), Some(value));
+        assert!(typed.take_value().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn typed_payloads_obey_default_and_reduced_runtime_memory_bounds()
+    -> Result<(), ToolRuntimeError> {
+        let value = |bytes| {
+            crate::ExecutionValue::Process(crate::ProcessValue {
+                status: "exited".into(),
+                exit_code: Some(0),
+                session_id: None,
+                output: "x".repeat(bytes),
+                truncated: false,
+                full_output: None,
+            })
+        };
+        assert!(
+            ToolOutcome::success_text("small text")?
+                .with_value(value(MAX_TOOL_OUTCOME_BYTES))
+                .is_err()
+        );
+        let outcome = ToolOutcome::success_text("small text")?.with_value(value(1024))?;
+        assert!(
+            outcome
+                .enforce_limits(ToolOutcomeLimits {
+                    max_parts: 1,
+                    max_bytes: 512,
+                })
+                .is_err()
+        );
+        Ok(())
+    }
 
     fn structured_output() -> Result<ToolOutputContract, Box<dyn std::error::Error>> {
         Ok(ToolOutputContract::structured(serde_json::json!({

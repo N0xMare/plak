@@ -124,6 +124,7 @@ impl ToolExecutor for ReadFileTool {
             }
             let next_line = start_line.saturating_add(u64::try_from(selected).unwrap_or(0));
             let eof = complete && start_index.saturating_add(selected) >= lines.len();
+            let value_text = invocation.want_value().then(|| page.clone());
             if eof && let Some(written) = leading.write_failed_after {
                 push_incomplete_line(&mut page, written);
             }
@@ -137,16 +138,52 @@ impl ToolExecutor for ReadFileTool {
                 clipped_lines,
                 workspace_generation: context.workspace().generation_stamp(),
             };
-            let encoded = serde_json::to_string(&result).map_err(|error| {
-                ToolRuntimeError::from_sensitive_source(
-                    ToolRuntimeErrorKind::Execution,
-                    "workspace read result could not be encoded",
-                    &error,
-                )
-            })?;
-            ToolOutcome::success_text(encoded)
+            read_outcome(
+                path_display,
+                &result,
+                leading.revision,
+                lines
+                    .len()
+                    .saturating_sub(start_index)
+                    .min(take)
+                    .saturating_sub(selected) as u64,
+                value_text,
+            )
         })
     }
+}
+
+fn read_outcome(
+    path: String,
+    result: &plakous_tools::WorkspaceFileReadResult,
+    revision: Option<plakous_tools::WorkspaceContentIdentity>,
+    lines_cut: u64,
+    value_text: Option<String>,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    let encoded = serde_json::to_string(result).map_err(|error| {
+        ToolRuntimeError::from_sensitive_source(
+            ToolRuntimeErrorKind::Execution,
+            "workspace read result could not be encoded",
+            &error,
+        )
+    })?;
+    let outcome = ToolOutcome::success_text(encoded)?;
+    let Some(text) = value_text else {
+        return Ok(outcome);
+    };
+    outcome.with_value(plakous_tools::ExecutionValue::FileRead(
+        plakous_tools::FileReadValue {
+            path,
+            text,
+            first_line: result.offset,
+            lines: result.lines,
+            eof: result.eof,
+            lines_cut,
+            clipped_lines: result.clipped_lines,
+            lossy: result.lossy,
+            revision,
+        },
+    ))
 }
 
 /// A read gathers at most this many bytes of content for one page.
@@ -163,6 +200,7 @@ const READ_LINE_CHARS: usize = 2_000;
 
 /// The bytes one read page is cut from.
 struct LeadingBytes {
+    revision: Option<plakous_tools::WorkspaceContentIdentity>,
     /// Bytes from the start of line `1 + skipped_lines`.
     bytes: Vec<u8>,
     /// Whether `bytes` reach the end of the file.
@@ -198,7 +236,8 @@ async fn read_leading_lines(
         .map_err(backend_runtime_error)?;
     let mut bytes = Vec::new();
     let mut newlines = 0_u64;
-    let leading = |bytes, complete| LeadingBytes {
+    let leading = |bytes, complete, revision| LeadingBytes {
+        revision: Some(revision),
         bytes,
         complete,
         skipped_lines: 0,
@@ -218,13 +257,13 @@ async fn read_leading_lines(
             .fold(0_u64, |count, byte| count + u64::from(*byte == b'\n'));
         bytes.extend_from_slice(slice.bytes());
         let Some(next) = slice.next().cloned() else {
-            return Ok(leading(bytes, true));
+            return Ok(leading(bytes, true, slice.content()));
         };
         if newlines >= wanted_lines {
-            return Ok(leading(bytes, false));
+            return Ok(leading(bytes, false, slice.content()));
         }
         if bytes.len() as u64 >= plakous_tools::MAX_WORKSPACE_FILE_BYTES {
-            return Ok(leading(bytes, false));
+            return Ok(leading(bytes, false, slice.content()));
         }
         request = WorkspaceReadSliceRequest::resume(next, MAX_STANDARD_TEXT_BYTES)
             .map_err(backend_runtime_error)?;
@@ -246,6 +285,7 @@ async fn read_job_output_page(
     let mut slice = first;
     let mut offset = 0_u64;
     let mut page = LeadingBytes {
+        revision: None,
         bytes: Vec::new(),
         complete: false,
         skipped_lines: 0,
@@ -392,7 +432,8 @@ fn exact_u64(value: f64, message: &'static str) -> Result<u64, ToolRuntimeError>
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests {
-    use super::{clip_long_line, presented_line_bytes, push_incomplete_line};
+    use super::{clip_long_line, presented_line_bytes, push_incomplete_line, read_outcome};
+    use plakous_tools::ToolRuntimeError;
 
     #[test]
     fn a_presented_line_costs_its_twice_escaped_json_and_a_cat_n_prefix() {
@@ -418,6 +459,36 @@ mod tests {
         let mut page = String::new();
         push_incomplete_line(&mut page, 7);
         assert_eq!(page, format!("{line}\n"));
+    }
+
+    #[test]
+    fn typed_read_text_excludes_the_presentation_only_spool_marker() -> Result<(), ToolRuntimeError>
+    {
+        let mut presented = String::from("partial");
+        push_incomplete_line(&mut presented, 7);
+        let mut outcome = read_outcome(
+            "issued.log".into(),
+            &plakous_tools::WorkspaceFileReadResult {
+                content: presented,
+                offset: 1,
+                lines: 1,
+                eof: true,
+                next_offset: None,
+                lossy: false,
+                clipped_lines: 0,
+                workspace_generation: None,
+            },
+            None,
+            0,
+            Some("partial".into()),
+        )?;
+        assert!(outcome.joined_text().contains("write failed after 7 bytes"));
+        let Some(plakous_tools::ExecutionValue::FileRead(value)) = outcome.take_value() else {
+            panic!("typed read absent");
+        };
+        assert_eq!(value.text, "partial");
+        assert_eq!(value.lines, 1);
+        Ok(())
     }
 
     #[test]

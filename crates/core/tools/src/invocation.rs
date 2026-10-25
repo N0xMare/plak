@@ -138,6 +138,7 @@ pub struct ToolInvocation {
     exposure: Option<ToolExposureBinding>,
     effect_dispatch: Option<EffectExecutionBinding>,
     provenance: Arc<RegistryProvenance>,
+    want_value: bool,
 }
 
 impl fmt::Debug for ToolInvocation {
@@ -153,6 +154,7 @@ impl fmt::Debug for ToolInvocation {
             .field("arguments", &self.arguments)
             .field("exposure", &self.exposure)
             .field("effect_dispatch", &self.effect_dispatch)
+            .field("want_value", &self.want_value)
             .field("provenance", &"<bound>")
             .finish()
     }
@@ -176,7 +178,22 @@ impl ToolInvocation {
             exposure: None,
             effect_dispatch: None,
             provenance,
+            want_value: false,
         }
+    }
+
+    /// Requests an ephemeral typed result for a value-consuming nested caller.
+    /// Ordinary and text-only composition calls leave this disabled.
+    #[must_use]
+    pub const fn with_want_value(mut self, want_value: bool) -> Self {
+        self.want_value = want_value;
+        self
+    }
+
+    /// Whether the executor should build a typed execution value.
+    #[must_use]
+    pub const fn want_value(&self) -> bool {
+        self.want_value
     }
 
     /// Returns the canonical run ID.

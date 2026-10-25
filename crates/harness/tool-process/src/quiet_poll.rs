@@ -321,7 +321,7 @@ async fn bash_foreground_wait_returns_an_honest_partial_on_notice() -> TestResul
     assert_eq!(result.projection.output, "");
     let value: Value = serde_json::from_str(
         &result
-            .into_outcome_with_promotion(Some((600_000, ToolPreempt::Notice(false))))?
+            .into_outcome_with_promotion(Some((600_000, ToolPreempt::Notice(false))), false)?
             .joined_text(),
     )?;
     assert_eq!(value["status"], "running");

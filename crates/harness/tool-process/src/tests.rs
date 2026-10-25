@@ -48,6 +48,49 @@ fn a_failed_spool_is_reported_before_the_full_output_line() {
     assert_eq!(output, "full output: /p.log");
 }
 
+#[tokio::test]
+async fn process_values_are_demand_driven_and_leave_canonical_text_unchanged()
+-> Result<(), Box<dyn Error>> {
+    let workspace = tempfile::tempdir()?;
+    let run = RunId::from_str("00000000-0000-0000-0000-000000000580")?;
+    let environment = Arc::new(ExecutionEnvironment::host(
+        plakous_tools::ExecutionEnvironmentScope::Run(run),
+        workspace.path(),
+        ".",
+        plakous_tools::ExecutionEnvironmentConfig::default(),
+    )?);
+    let registry = process_session_registry()?;
+    let mut texts = Vec::new();
+    for want_value in [false, true] {
+        let invocation = registry.prepare(ToolInvocationRequest::new(
+            run,
+            TurnId::from_str("00000000-0000-0000-0000-000000000581")?,
+            AttemptId::from_str("00000000-0000-0000-0000-000000000582")?,
+            CallId::from_str("00000000-0000-0000-0000-000000000583")?,
+            ToolName::new(PROCESS_SESSION_CAPABILITY_NAME)?,
+            ToolCorrelation::default(),
+            r#"{"command":"printf typed-output","workdir":".","login":false,"tty":false,"keep_stdin_open":false,"yield_time_ms":1000,"max_output_bytes":4096}"#,
+        ))?.with_want_value(want_value);
+        let mut outcome =
+            execute_process_invocation(&registry, environment.clone(), invocation).await?;
+        texts.push(outcome.joined_text());
+        match outcome.take_value() {
+            Some(plakous_tools::ExecutionValue::Process(value)) if want_value => {
+                assert_eq!(value.output, "typed-output");
+                assert_eq!(value.exit_code, Some(0));
+                assert_eq!(value.status, "exited");
+                assert!(value.session_id.is_none());
+                assert!(!value.truncated);
+                assert!(value.full_output.is_none());
+            }
+            None if !want_value => (),
+            _ => return Err("unexpected process value".into()),
+        }
+    }
+    assert_eq!(texts[0], texts[1]);
+    Ok(())
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn leftover_jobs_raise_leader_status_and_handle_in_every_shell_vocabulary()

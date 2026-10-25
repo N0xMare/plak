@@ -710,6 +710,9 @@ struct QueuedSteering {
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub(crate) struct ToolExecutionResult {
+    /// Ephemeral executor value; never part of operation evidence or replay.
+    #[serde(skip)]
+    pub(crate) value: Option<plakous_tools::ExecutionValue>,
     pub(crate) result: ToolResultBlock,
     dispatched: bool,
     /// Host-only presentation subject. Not part of [`Self::result`].
@@ -721,6 +724,7 @@ pub(crate) struct ToolExecutionResult {
 impl ToolExecutionResult {
     fn new(result: ToolResultBlock, dispatched: bool) -> Self {
         Self {
+            value: None,
             result,
             dispatched,
             presentation_subject: None,
@@ -729,6 +733,11 @@ impl ToolExecutionResult {
 
     fn with_presentation_subject(mut self, subject: Option<String>) -> Self {
         self.presentation_subject = subject.filter(|subject| !subject.is_empty());
+        self
+    }
+
+    fn with_value(mut self, value: Option<plakous_tools::ExecutionValue>) -> Self {
+        self.value = value;
         self
     }
 }
@@ -748,4 +757,41 @@ struct RestoredEffectDecision {
     invocation: ToolInvocation,
     projection_receipt: Option<ToolProjectionReceiptV2>,
     pending: PendingEffectDecision,
+}
+
+#[cfg(test)]
+mod execution_value_tests {
+    use super::ToolExecutionResult;
+
+    #[test]
+    fn typed_execution_values_never_enter_recorded_evidence_or_replay()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use plakous_model::{
+            CallId, TextBlock, ToolCorrelation, ToolExecutionOwner, ToolResultBlock,
+            ToolResultKind, ToolResultPart,
+        };
+        let result = ToolResultBlock::new(
+            CallId::try_from(uuid::Uuid::from_u128(902))?,
+            ToolExecutionOwner::Local,
+            ToolResultKind::Success,
+            vec![ToolResultPart::Text(TextBlock::new("unchanged", None)?)],
+            ToolCorrelation::default(),
+        )?;
+        let plain = ToolExecutionResult::new(result.clone(), true);
+        let typed = ToolExecutionResult::new(result, true).with_value(Some(
+            plakous_tools::ExecutionValue::Process(plakous_tools::ProcessValue {
+                status: "exited".into(),
+                exit_code: Some(0),
+                session_id: None,
+                output: "not persisted".into(),
+                truncated: false,
+                full_output: None,
+            }),
+        ));
+        let bytes = serde_json::to_vec(&typed)?;
+        assert_eq!(bytes, serde_json::to_vec(&plain)?);
+        let restored: ToolExecutionResult = serde_json::from_slice(&bytes)?;
+        assert!(restored.value.is_none());
+        Ok(())
+    }
 }
