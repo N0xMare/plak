@@ -6930,16 +6930,23 @@ reject `tool_use`/`tool_result` without a `tools` array. OpenRouter also sends
 middle-out truncation is not a compaction facet.
 
 **The summary input must admit before dispatch.** The full sealed input is
-preferred. If its measured disposition overflows, the driver probes a finite
-sequence that replaces selected-span tool-result bodies oldest-first with
+preferred. If its measured disposition overflows, or preparation refuses it
+with a typed capacity error, the driver probes a finite sequence that replaces
+selected-span tool-result bodies oldest-first with
 the same bounded, tool/call/argument-naming placeholders used by the offline
 rung. These are summary-request transformations only: they do not publish a
 placeholder checkpoint, alter the source, remove a user request or assistant
 text, rewrite a prior summary, or touch the retained tail. Each candidate is
 measured under its own offline attempt identity; the selected input is
-prepared separately under the workflow's sole dispatch attempt. Unrelated
-preparation errors do not authorize further elision. A candidate is never
-assumed to fit merely because its byte size decreased.
+prepared separately under the workflow's sole dispatch attempt. A typed
+`ContextLimit` refusal advances to the next candidate even when it carries no
+`ContextStatus`; this is defensive for adapters that omit the status and for
+an oversized prepared-call record. Descriptor-owned overflow denials already
+retain their status and advance by their measured disposition. Unrelated
+preparation errors, including diagnostic text that merely mentions capacity,
+do not authorize further elision; the reported error belongs to that candidate,
+not an earlier capacity-refused one. A candidate is never assumed to fit merely
+because its byte size decreased.
 
 The durable request records the exact selected input. Completion and recovery
 verify byte-for-byte membership in this closed source-derived sequence,
@@ -6948,7 +6955,12 @@ prefix, configuration, metadata and prepared-call checks. A familiar marker
 or arbitrary truncated body is not evidence. Recovery neither chooses a new
 depth using current measurements nor redispatches the summary. If no input
 admits, the existing unpaid fallback/refusal applies; no paid request is
-sent. The canonical fold still replaces exactly the original sealed cut.
+sent. Exhausted capacity with no fitting offline successor reports the capacity
+refusal, states that no summary was dispatched and the source is unchanged,
+and explains that a new session or a fork with a handoff is needed when the
+session runs out of headroom. It does not
+drop arbitrary history or summarize slices outside this closed sequence.
+The canonical fold still replaces exactly the original sealed cut.
 
 **The summary bound.** The compaction output limit is
 `semantic_compaction_output_bound(turn bound, reasoning)`: 8,192 tokens of

@@ -737,15 +737,44 @@ async fn a_failed_paid_fold_without_an_eligible_placeholder_continues_when_histo
 
 #[tokio::test]
 async fn manual_summary_fits_by_reducing_old_results_and_reopens_without_dispatch() -> TestResult {
-    manual_summary_fit_case(false).await
+    manual_summary_fit_case(false, None).await
 }
 
 #[tokio::test]
 async fn paid_fold_fit_probe_uses_anchor_and_dispatches_depth_zero_without_elision() -> TestResult {
-    manual_summary_fit_case(true).await
+    manual_summary_fit_case(true, None).await
 }
 
-async fn manual_summary_fit_case(anchored: bool) -> TestResult {
+#[tokio::test]
+async fn summary_capacity_without_status_reduces_old_results_before_its_only_dispatch() -> TestResult
+{
+    manual_summary_fit_case(false, Some(SummaryCapacityRefusal::BareContextLimit)).await
+}
+
+#[tokio::test]
+async fn oversized_summary_record_reduces_old_results_before_its_only_dispatch() -> TestResult {
+    manual_summary_fit_case(false, Some(SummaryCapacityRefusal::RecordTooLarge)).await
+}
+
+#[tokio::test]
+async fn unrelated_summary_preparation_failure_does_not_authorize_elision() -> TestResult {
+    manual_summary_fit_case(false, Some(SummaryCapacityRefusal::InvalidConfiguration)).await
+}
+
+#[tokio::test]
+async fn reduced_summary_preparation_failure_reports_its_own_error_not_prior_capacity() -> TestResult
+{
+    manual_summary_fit_case(
+        false,
+        Some(SummaryCapacityRefusal::CapacityThenInvalidConfiguration),
+    )
+    .await
+}
+
+async fn manual_summary_fit_case(
+    anchored: bool,
+    refusal: Option<SummaryCapacityRefusal>,
+) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let store = Arc::new(TestCreateStore::default());
@@ -814,6 +843,7 @@ async fn manual_summary_fit_case(anchored: bool) -> TestResult {
         LocalDurabilityDisposition::DurableRequired,
     )?;
     model.item_context.store(true, Ordering::Release);
+    *lock_mutex(&model.summary_capacity_refusal) = refusal;
     // The 32k-byte result plus 30k of summary framing cannot fit the 40k fold window.
     // Only a matching anchor can admit depth zero; otherwise the whole-wire
     // bound requires source-derived elision before dispatch.
@@ -832,8 +862,37 @@ async fn manual_summary_fit_case(anchored: bool) -> TestResult {
             AgentCompactionReason::Manual,
             builder,
         ))
-        .await
-        .map_err(|error| format!("summary-fit compact rejected: {error:?}"))?;
+        .await;
+    if matches!(
+        refusal,
+        Some(
+            SummaryCapacityRefusal::InvalidConfiguration
+                | SummaryCapacityRefusal::CapacityThenInvalidConfiguration
+        )
+    ) {
+        assert!(
+            matches!(outcome, Err(AgentSessionEndpointError::Rejected { ref reason })
+            if reason.contains("InvalidConfiguration")
+                && !reason.contains("summary request exceeds capacity"))
+        );
+        assert_eq!(model.calls.load(Ordering::Acquire), 0);
+        assert_eq!(
+            lock_mutex(&model.compaction_wire_estimates).len(),
+            if refusal == Some(SummaryCapacityRefusal::InvalidConfiguration) {
+                2
+            } else {
+                3
+            },
+            "no probes may follow the unrelated refusal"
+        );
+        assert_eq!(
+            agent.checkpoint().manifest().canonical().history(),
+            &source_history
+        );
+        agent.shutdown().await?;
+        return Ok(());
+    }
+    let outcome = outcome.map_err(|error| format!("summary-fit compact rejected: {error:?}"))?;
     assert!(
         matches!(outcome, AgentCompactSessionOutcome::Compacted { .. }),
         "{outcome:?}"
@@ -843,6 +902,15 @@ async fn manual_summary_fit_case(anchored: bool) -> TestResult {
         1,
         "one physical summary start"
     );
+    if refusal.is_some() {
+        let errors = lock_mutex(&model.summary_preparation_errors);
+        assert_eq!(errors.len(), 1, "only the full-input probe is refused");
+        assert!(errors[0].context_status().is_none());
+        assert_eq!(
+            ModelError::from(errors[0].clone()).kind(),
+            ModelErrorKind::ContextLimit
+        );
+    }
     let prepared = lock_mutex(&store.state)
         .stored_commits
         .get(&identity.prepared_checkpoint)
@@ -931,6 +999,21 @@ async fn manual_summary_fit_case(anchored: bool) -> TestResult {
 
 #[tokio::test]
 async fn irreducible_summary_capacity_denial_keeps_source_and_dispatches_nothing() -> TestResult {
+    irreducible_summary_capacity_case(None).await
+}
+
+#[tokio::test]
+async fn irreducible_summary_without_status_exhausts_reductions_and_preserves_source() -> TestResult
+{
+    irreducible_summary_capacity_case(Some(SummaryCapacityRefusal::BareContextLimit)).await
+}
+
+#[tokio::test]
+async fn irreducible_summary_record_exhausts_reductions_and_preserves_source() -> TestResult {
+    irreducible_summary_capacity_case(Some(SummaryCapacityRefusal::RecordTooLarge)).await
+}
+
+async fn irreducible_summary_capacity_case(refusal: Option<SummaryCapacityRefusal>) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let (builder, _) = placeholder_fixture(
@@ -962,6 +1045,7 @@ async fn irreducible_summary_capacity_denial_keeps_source_and_dispatches_nothing
     )?;
     model.item_context.store(true, Ordering::Release);
     model.item_system_bytes.store(80_000, Ordering::Release);
+    *lock_mutex(&model.summary_capacity_refusal) = refusal;
     model
         .summary_context_overhead
         .store(40_000, Ordering::Release);
@@ -978,7 +1062,29 @@ async fn irreducible_summary_capacity_denial_keeps_source_and_dispatches_nothing
         .await;
     assert!(
         matches!(outcome, Err(AgentSessionEndpointError::Rejected { ref reason })
-        if reason.contains("harness summary preparation failed") && reason.contains("ContextLimit"))
+        if reason.contains("harness summary preparation failed")
+            && reason.contains("ContextLimit")
+            && reason.contains("source is unchanged")
+            && reason.contains("start a new session or fork with a handoff"))
+    );
+    let projection = before.manifest().canonical().projection();
+    let cut = plakous_model::SemanticCompactionCut::seal(
+        &projection,
+        &plakous_model::ContextHistoryPlan::new(&projection)?,
+    )?;
+    let errors = lock_mutex(&model.summary_preparation_errors).clone();
+    assert_eq!(
+        errors.len(),
+        crate::runtime::compaction::request::harness_compaction_reduction_count(&cut) + 2,
+        "every candidate must be probed before final preparation refuses without dispatch"
+    );
+    if refusal.is_some() {
+        assert!(errors.iter().all(|error| error.context_status().is_none()));
+    }
+    assert!(
+        errors.iter().all(|error| {
+            ModelError::from(error.clone()).kind() == ModelErrorKind::ContextLimit
+        })
     );
     assert!(
         lock_mutex(&model.compaction_wire_estimates)

@@ -67,6 +67,14 @@ fn native_fixture_error(error: impl fmt::Display) -> ModelError {
     ModelError::new(ModelErrorKind::InvalidEvent, error.to_string())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SummaryCapacityRefusal {
+    BareContextLimit,
+    RecordTooLarge,
+    InvalidConfiguration,
+    CapacityThenInvalidConfiguration,
+}
+
 #[allow(
     clippy::struct_excessive_bools,
     reason = "the private poison fixture exposes independent orthogonal failure switches to prove Driver fences"
@@ -147,6 +155,8 @@ pub(super) struct ArtifactModel {
     pub(super) context_token_multiplier: AtomicUsize,
     /// Exercises a summary-only envelope tighter than ordinary round input.
     pub(super) summary_context_overhead: AtomicUsize,
+    pub(super) summary_capacity_refusal: Mutex<Option<SummaryCapacityRefusal>>,
+    pub(super) summary_preparation_errors: Mutex<Vec<ModelPreparationError>>,
     pub(super) ordinary_context_overhead: AtomicUsize,
     pub(super) tool_successor_capacity_loss: AtomicUsize,
     pub(super) capacity_loss_after_fold: AtomicBool,
@@ -269,6 +279,8 @@ impl ArtifactModel {
             byte_derived_context_tokens: false,
             context_token_multiplier: AtomicUsize::new(1),
             summary_context_overhead: AtomicUsize::new(0),
+            summary_capacity_refusal: Mutex::new(None),
+            summary_preparation_errors: Mutex::new(Vec::new()),
             ordinary_context_overhead: AtomicUsize::new(0),
             tool_successor_capacity_loss: AtomicUsize::new(0),
             capacity_loss_after_fold: AtomicBool::new(false),
@@ -921,8 +933,52 @@ impl LanguageModel for ArtifactModel {
             cache_use,
             output_limit,
         )?;
+        if paid_compaction_request
+            && *lock_mutex(&self.summary_capacity_refusal)
+                == Some(SummaryCapacityRefusal::CapacityThenInvalidConfiguration)
+            && plan
+                .request()
+                .input()
+                .history()
+                .retained_bytes_upper_bound()
+                < 32_000
+        {
+            let error = ModelPreparationError::rejected(
+                ModelPreparationErrorKind::InvalidConfiguration,
+                "reduced summary input is not configured",
+            );
+            lock_mutex(&self.summary_preparation_errors).push(error.clone());
+            return Err(error);
+        }
         let record =
-            PreparedCallRecord::for_prepared(&self.descriptor, &plan, projection, &context)?;
+            PreparedCallRecord::for_prepared(&self.descriptor, &plan, projection, &context)
+                .map_err(|error| {
+                    if !paid_compaction_request
+                        || ModelError::from(error.clone()).kind() != ModelErrorKind::ContextLimit
+                    {
+                        return error;
+                    }
+                    // Exercise the same over-capacity input with adapter errors
+                    // that do not carry a reconstructable ContextStatus.
+                    let error = match (*lock_mutex(&self.summary_capacity_refusal), error) {
+                        (
+                            Some(SummaryCapacityRefusal::BareContextLimit),
+                            ModelPreparationError::ContextAdmissionDenied { error, .. },
+                        ) => ModelPreparationError::ContextAdmission(error),
+                        (Some(SummaryCapacityRefusal::RecordTooLarge), _) => {
+                            PreparedCallError::RecordTooLarge.into()
+                        }
+                        (Some(SummaryCapacityRefusal::InvalidConfiguration), _) => {
+                            ModelPreparationError::rejected(
+                                ModelPreparationErrorKind::InvalidConfiguration,
+                                "ContextLimit text is not a capacity refusal",
+                            )
+                        }
+                        (_, error) => error,
+                    };
+                    lock_mutex(&self.summary_preparation_errors).push(error.clone());
+                    error
+                })?;
         let cache_affinity = context.cache_affinity().map(ModelCacheAffinity::identity);
         lock_mutex(&self.prepared_records).push(record.clone());
         let failing_compaction =

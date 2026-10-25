@@ -277,10 +277,19 @@ impl Driver {
                         break;
                     }
                 }
+                // A lowering can refuse capacity without a ContextStatus,
+                // including when its prepared record exceeds the size bound.
+                // No dispatch exists, so try the next source-derived depth.
+                Err(error) if error.model_kind() == Some(ModelErrorKind::ContextLimit) => {
+                    *request = candidate;
+                }
                 // Unrelated preparation failures do not authorize further
                 // elision. The unchanged preparation/fallback path below
                 // reports the actual failure with no paid dispatch.
-                Err(_) => break,
+                Err(_) => {
+                    *request = candidate;
+                    break;
+                }
             }
         }
         Ok(())
@@ -498,9 +507,18 @@ impl Driver {
                 // outcome for a rung that never got to run.
                 AgentCompactSessionOutcome::NoEligibleRange => {
                     committed_detail.exhausted = true;
-                    Err(compact_runtime_endpoint_rejected(format!(
-                        "{preparation_refusal}; no fitting offline successor (tool-result placeholders or replay omission)"
-                    )))
+                    let guidance = if error.model_kind() != Some(ModelErrorKind::ContextLimit) {
+                        ""
+                    } else if attempt.origin.is_turn_fence() {
+                        "; summary request exceeds capacity; no summary was dispatched and the source is unchanged; start a new session or fork with a handoff"
+                    } else {
+                        "; compaction cannot proceed within capacity; no summary was dispatched and the source is unchanged; when the session runs out of headroom, start a new session or fork with a handoff"
+                    };
+                    let reason = format!(
+                        "{preparation_refusal}; no fitting offline successor (tool-result placeholders or replay omission){guidance}"
+                    );
+                    committed_detail.diagnostic = Some(reason.clone());
+                    Err(compact_runtime_endpoint_rejected(reason))
                 }
                 outcome => Ok(outcome),
             })
