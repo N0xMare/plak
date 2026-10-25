@@ -40,28 +40,16 @@ impl App {
                 self.mark_dirty();
             }
         }
-        if let HostEvent::ChildLive {
-            agent_id,
-            turn_id,
-            op,
-        } = event
-        {
-            self.semantic_revision = self.semantic_revision.saturating_add(1);
-            if self.shows_live_turn(&agent_id, &turn_id)
-                && let Some(op) = child_transcript_op(*op)
-            {
-                self.apply_live_op(op);
+        let scope = match &event {
+            HostEvent::PresentationSnapshot(snapshot) => Some(&snapshot.scope),
+            HostEvent::TranscriptPatch(patch) => Some(&patch.scope),
+            _ => None,
+        };
+        if let Some(plakous_host_protocol::views::transcript::TranscriptScope::Agent(id)) = scope {
+            if self.viewed_agent_id() == Some(id.as_str()) {
+                self.semantic_revision = self.semantic_revision.saturating_add(1);
+                self.apply_presentation(event);
             }
-            return;
-        }
-        if let HostEvent::AgentTranscript(transcript) = event {
-            self.semantic_revision = self.semantic_revision.saturating_add(1);
-            self.replace_agent_rows(
-                &transcript.agent_id,
-                transcript.rows,
-                transcript.live_turn_id,
-                transcript.note,
-            );
             return;
         }
         if let HostEvent::CallDetail(detail) = &event
@@ -77,7 +65,10 @@ impl App {
     }
 
     fn install_keyed_transcript(&mut self) {
-        self.accepted_drafts.clear();
+        let root = self.viewed_agent_id().is_none();
+        if root {
+            self.accepted_drafts.clear();
+        }
         self.pane.assistant_stream_active = false;
         let rows = self
             .pane
@@ -88,9 +79,68 @@ impl App {
             .collect::<Vec<_>>();
         self.restore_tip_clocks(&rows);
         let full_window = rows.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
-        let mut blocks = blocks::blocks_from_rows(rows);
-        self.restore_opening_note(&mut blocks, full_window);
-        for note in self.take_open_notes() {
+        let mut blocks: Vec<_> = self
+            .pane
+            .presentation
+            .items()
+            .iter()
+            .filter_map(|(key, row)| {
+                let mut block = ScrollBlock::from_row(row.clone())?;
+                if key.anchor >= 1_u64 << 63
+                    && let ScrollBlock::Thinking {
+                        sealed,
+                        elapsed_ms: None,
+                        ..
+                    } = &mut block
+                {
+                    *sealed = false;
+                }
+                Some(block)
+            })
+            .collect();
+        let live_tools: std::collections::BTreeSet<_> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ScrollBlock::Tool {
+                    call_id: Some(id),
+                    state,
+                    ..
+                } if tool_is_running(state) => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        let live_thinking: std::collections::BTreeSet<_> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ScrollBlock::Thinking {
+                    location_key,
+                    sealed: false,
+                    ..
+                } => Some(location_key.clone()),
+                _ => None,
+            })
+            .collect();
+        self.pane
+            .tool_started
+            .retain(|id, _| live_tools.contains(id));
+        self.pane
+            .thinking_started
+            .retain(|id, _| live_thinking.contains(id));
+        let now = self.now();
+        for id in live_tools {
+            self.pane.tool_started.entry(id).or_insert(now);
+        }
+        for id in live_thinking {
+            self.pane.thinking_started.entry(id).or_insert(now);
+        }
+        if root {
+            self.restore_opening_note(&mut blocks, full_window);
+        }
+        for note in if root {
+            self.take_open_notes()
+        } else {
+            Vec::new()
+        } {
             let already = blocks.iter().any(|block| match (block, &note) {
                 (ScrollBlock::System(have), ScrollBlock::System(want))
                 | (ScrollBlock::Error(have), ScrollBlock::Error(want)) => have == want,
@@ -102,8 +152,91 @@ impl App {
         }
         let old = std::mem::replace(&mut self.pane.blocks, blocks);
         self.carry_item_state(&old);
+        self.refresh_keyed_item_details(&old);
+        self.pane.assistant_stream_active = self
+            .pane
+            .presentation
+            .items()
+            .last_key_value()
+            .is_some_and(|(key, row)| {
+                key.anchor >= 1_u64 << 63
+                    && matches!(row, crate::store::sessions::TranscriptRow::Assistant { .. })
+            });
         self.mark_transcript_replaced();
         self.warm_transcript_projection();
+    }
+
+    fn refresh_keyed_item_details(&mut self, old: &[ScrollBlock]) {
+        let running: std::collections::BTreeSet<_> = old
+            .iter()
+            .filter_map(|block| match block {
+                ScrollBlock::Tool {
+                    call_id: Some(id),
+                    state,
+                    ..
+                } if tool_is_running(state) => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        let ended: Vec<_> = self
+            .pane
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, block)| match block {
+                ScrollBlock::Tool {
+                    call_id: Some(id),
+                    state,
+                    ..
+                } if !tool_is_running(state) && running.contains(id.as_str()) => {
+                    Some((index, id.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        for (index, id) in ended {
+            if let Some(key) = self.detail_key(&id) {
+                self.call_details.note_ended(key);
+            }
+            self.request_item_detail(index);
+        }
+    }
+
+    fn apply_presentation(&mut self, event: HostEvent) {
+        match event {
+            HostEvent::PresentationSnapshot(snapshot) => {
+                if self.busy
+                    && self.pane.presentation_ready
+                    && snapshot.revision <= self.pane.presentation.revision()
+                {
+                    return;
+                }
+                let scope = snapshot.scope.clone();
+                if let Err(error) = self.pane.presentation.replace(snapshot) {
+                    self.pane.blocks.push(ScrollBlock::Error(format!(
+                        "invalid presentation snapshot refused: {error:?}"
+                    )));
+                    self.pane.resync.get_or_insert(scope);
+                    self.mark_transcript_replaced();
+                    return;
+                }
+                self.presentation_replaced();
+                self.install_keyed_transcript();
+            }
+            HostEvent::TranscriptPatch(patch) => {
+                if self.pane.resync.is_some() {
+                    self.rearm_transcript_resync();
+                    return;
+                }
+                let scope = patch.scope.clone();
+                if !self.pane.presentation_ready || self.pane.presentation.apply(patch).is_err() {
+                    self.pane.resync = Some(scope);
+                    return;
+                }
+                self.install_keyed_transcript();
+            }
+            _ => {}
+        }
     }
 
     /// One live transcript op, of the root or of the open agent view, applied
@@ -512,46 +645,8 @@ impl App {
             HostEvent::ToolInvocationOrigin { .. }
             | HostEvent::PromptStarted(None)
             | HostEvent::IntentStarted(_) => {}
-            HostEvent::PresentationSnapshot(snapshot) => {
-                if snapshot.scope != plakous_host_protocol::views::transcript::TranscriptScope::Root
-                {
-                    return;
-                }
-                if self.busy
-                    && self.pane.presentation_ready
-                    && snapshot.revision <= self.pane.presentation.revision()
-                {
-                    // A repeated baseline is not settlement and cannot erase
-                    // the active turn's preview overlay.
-                    return;
-                }
-                if let Err(error) = self.pane.presentation.replace(snapshot) {
-                    self.pane.blocks.push(ScrollBlock::Error(format!(
-                        "invalid presentation snapshot refused: {error:?}"
-                    )));
-                    self.pane.resync.get_or_insert(
-                        plakous_host_protocol::views::transcript::TranscriptScope::Root,
-                    );
-                    self.mark_transcript_replaced();
-                    return;
-                }
-                self.presentation_replaced();
-                self.install_keyed_transcript();
-            }
-            HostEvent::TranscriptPatch(patch) => {
-                if patch.scope != plakous_host_protocol::views::transcript::TranscriptScope::Root {
-                    return;
-                }
-                if self.pane.resync.is_some() {
-                    self.rearm_transcript_resync();
-                    return;
-                }
-                let scope = patch.scope.clone();
-                if !self.pane.presentation_ready || self.pane.presentation.apply(patch).is_err() {
-                    self.pane.resync = Some(scope);
-                    return;
-                }
-                self.install_keyed_transcript();
+            event @ (HostEvent::PresentationSnapshot(_) | HostEvent::TranscriptPatch(_)) => {
+                self.apply_presentation(event);
             }
             HostEvent::ProviderSnapshot { providers } => {
                 self.providers = providers;
@@ -818,8 +913,6 @@ impl App {
                 self.tree_epoch_state = Some(snap.state.clone());
                 self.apply_topology_navigator_snapshot(snap);
             }
-            // Child operations never reach the root pane.
-            HostEvent::ChildLive { .. } | HostEvent::AgentTranscript(_) => {}
             HostEvent::TopologyNavigatorUnavailable { reason } => {
                 self.tree_navigator = None;
                 self.agents_unavailable = Some(reason);
@@ -1080,50 +1173,4 @@ impl App {
             }
         }
     }
-}
-
-/// A child turn's op in the TUI's vocabulary, when it is a transcript op.
-/// Usage and busy ops describe the child's own turn, not the main view, and
-/// are dropped.
-fn child_transcript_op(
-    op: plakous_host_protocol::SessionObservation<plakous_host_protocol::Core>,
-) -> Option<HostEvent> {
-    use plakous_host_protocol::SessionObservation as Op;
-    Some(match op {
-        Op::Row(row) => HostEvent::Row(row),
-        Op::AssistantDelta(delta) => HostEvent::AssistantDelta(delta),
-        Op::AssistantDone => HostEvent::AssistantDone,
-        Op::ToolLine {
-            call_id,
-            name,
-            state,
-            subject,
-            detail,
-            parent_call_id,
-            cell_id,
-            kind,
-            duration_ms,
-            started_at_ms,
-            finished_at_ms,
-            wait,
-        } => HostEvent::ToolLine {
-            call_id,
-            name,
-            state,
-            subject,
-            detail,
-            parent_call_id,
-            cell_id,
-            kind,
-            duration_ms,
-            started_at_ms,
-            finished_at_ms,
-            wait,
-        },
-        Op::ReasoningDelta { location_key, text } => {
-            HostEvent::ReasoningDelta { location_key, text }
-        }
-        Op::ReasoningSealed { location_key } => HostEvent::ReasoningSealed { location_key },
-        _ => return None,
-    })
 }

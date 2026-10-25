@@ -30,6 +30,47 @@ use unicode_width::UnicodeWidthStr as _;
 /// than a wall-clock read.
 pub(super) const FIXED_NOW: u64 = 1_788_436_800;
 
+pub(super) fn agent_snapshot(agent: &str, revision: u64, rows: Vec<TranscriptRow>) -> HostEvent {
+    use plakous_host_protocol::views::PresentationSnapshot;
+    use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptScope};
+    HostEvent::PresentationSnapshot(PresentationSnapshot {
+        scope: TranscriptScope::Agent(agent.to_owned()),
+        revision,
+        items: rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| TranscriptItem {
+                key: RowKey::new(index as u64 + 1, Lane::Runtime, 0),
+                row,
+            })
+            .collect(),
+        ..PresentationSnapshot::default()
+    })
+}
+
+pub(super) fn agent_patch(
+    agent: &str,
+    from_revision: u64,
+    rows: Vec<(u64, TranscriptRow)>,
+) -> HostEvent {
+    use plakous_host_protocol::views::transcript::{
+        Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptScope,
+    };
+    HostEvent::TranscriptPatch(TranscriptPatch {
+        scope: TranscriptScope::Agent(agent.to_owned()),
+        from_revision,
+        to_revision: from_revision + 1,
+        upserts: rows
+            .into_iter()
+            .map(|(id, row)| TranscriptItem {
+                key: RowKey::new((1_u64 << 63) + id, Lane::Runtime, 0),
+                row,
+            })
+            .collect(),
+        deletes: Vec::new(),
+    })
+}
+
 pub(super) fn assert_visible_transcript_rows_match_projection(app: &App, buffer: &Buffer) {
     let body = app.transcript_body_area.expect("transcript body");
     let plain = app.pane.transcript_cache.plain();

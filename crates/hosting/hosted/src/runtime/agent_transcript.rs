@@ -14,6 +14,7 @@ use plakous_host_protocol::views::presentation::{
     MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, row_bytes,
 };
 use plakous_host_protocol::views::transcript::ThinkingRow;
+use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem};
 
 use super::events::{
     ProcessContext, StartedToolText, completed_tool_detail, completed_tool_state,
@@ -29,18 +30,22 @@ const UNSETTLED_STATE: &str = "interrupted";
 /// Maps committed items to rows, oldest first. `locator` is the session the
 /// items belong to, for a process call's subject; `processes` is the job
 /// registry as the host sees it now.
-pub(super) fn rows_from_items(
+fn items_from_reads(
     items: &[TranscriptRead<'_>],
     locator: SessionLocator,
     processes: &[ProcessView],
     task_tools: bool,
-) -> Vec<TranscriptRow> {
-    let mut rows = Vec::new();
+) -> Vec<TranscriptItem> {
+    let mut rows = KeyedRows::default();
     let mut calls: HashMap<String, Call> = HashMap::new();
     // Process commands by registry key, learnt from the registry and from
     // earlier process starts in this history, as the live path learns them.
     let mut commands: HashMap<String, String> = HashMap::new();
-    for (item_index, item) in items.iter().enumerate() {
+    for item in items {
+        if rows.items.is_empty() || rows.anchor != item.position {
+            rows.ordinal = 1;
+        }
+        rows.anchor = item.position;
         let mut text = String::new();
         for (block_index, part) in item.parts.iter().enumerate() {
             match part {
@@ -63,7 +68,12 @@ pub(super) fn rows_from_items(
                     flush_text(&mut rows, item, &mut text);
                     if reasoning_visibility_admits(*visibility) && !value.trim().is_empty() {
                         rows.push(TranscriptRow::Thinking(ThinkingRow {
-                            location_key: format!("{item_index}:{block_index}"),
+                            location_key: format!(
+                                "{}:{}",
+                                item.position,
+                                item.part_offset
+                                    .saturating_add(u32::try_from(block_index).unwrap_or(u32::MAX))
+                            ),
                             text: (*value).to_owned(),
                             elapsed_ms: None,
                         }));
@@ -216,7 +226,7 @@ pub(super) fn rows_from_items(
                 TranscriptPart::Compaction => {
                     flush_text(&mut rows, item, &mut text);
                     rows.push(TranscriptRow::Tool(ToolItem {
-                        call_id: format!("compaction-{item_index}"),
+                        call_id: format!("compaction-{}-{}", item.position, item.part_offset),
                         name: "compact".to_owned(),
                         exposed_name: None,
                         kind: crate::activity::tool_activity_kind("compact"),
@@ -234,7 +244,51 @@ pub(super) fn rows_from_items(
         }
         flush_text(&mut rows, item, &mut text);
     }
-    rows
+    rows.items
+}
+
+#[derive(Default)]
+struct KeyedRows {
+    items: Vec<TranscriptItem>,
+    anchor: u64,
+    ordinal: u32,
+}
+
+impl KeyedRows {
+    fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    fn push(&mut self, row: TranscriptRow) {
+        self.items.push(TranscriptItem {
+            key: RowKey::new(self.anchor, Lane::Runtime, self.ordinal),
+            row,
+        });
+        self.ordinal = self.ordinal.saturating_add(1);
+    }
+
+    fn get_mut(&mut self, index: usize) -> Option<&mut TranscriptRow> {
+        self.items.get_mut(index).map(|item| &mut item.row)
+    }
+
+    fn extend(&mut self, rows: impl IntoIterator<Item = TranscriptRow>) {
+        for row in rows {
+            self.push(row);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(super) fn rows_from_items(
+    items: &[TranscriptRead<'_>],
+    locator: SessionLocator,
+    processes: &[ProcessView],
+    task_tools: bool,
+) -> Vec<TranscriptRow> {
+    items_from_reads(items, locator, processes, task_tools)
+        .into_iter()
+        .map(|item| item.row)
+        .collect()
 }
 
 // A cell id without a parent denotes a marker/yield to the renderer, not an
@@ -320,7 +374,7 @@ fn settle(tool: &mut ToolItem, succeeded: bool, preview: &str, wait_ids: Option<
 
 /// Inbound mail is one tree notice, a prompt's child-mail batch one per
 /// child; a harness note is not the operator's.
-fn flush_text(rows: &mut Vec<TranscriptRow>, item: &TranscriptRead<'_>, text: &mut String) {
+fn flush_text(rows: &mut KeyedRows, item: &TranscriptRead<'_>, text: &mut String) {
     if text.trim().is_empty() {
         text.clear();
         return;
@@ -354,19 +408,20 @@ fn flush_text(rows: &mut Vec<TranscriptRow>, item: &TranscriptRead<'_>, text: &m
 /// `max_rows` and `max_bytes`, behind one `Truncated` row when anything older
 /// was dropped here or by the read. The marker takes a row and its bytes only
 /// when something is dropped: rows that exactly fit are all kept.
-pub(super) fn bound_rows(
-    rows: Vec<TranscriptRow>,
+fn bound_items(
+    rows: Vec<TranscriptItem>,
     mut truncated: bool,
     max_rows: usize,
     max_bytes: usize,
-) -> Vec<TranscriptRow> {
+) -> Vec<TranscriptItem> {
     if max_rows == 0 {
         return Vec::new();
     }
-    let mut kept: Vec<(TranscriptRow, usize)> = Vec::new();
+    let mut kept: Vec<(TranscriptItem, usize)> = Vec::new();
     let mut bytes = 0_usize;
-    for row in rows.into_iter().rev().map(bound_row) {
-        let size = row_bytes(&row);
+    for mut row in rows.into_iter().rev() {
+        row.row = bound_row(row.row);
+        let size = row_bytes(&row.row);
         if kept.len() >= max_rows || bytes.saturating_add(size) > max_bytes {
             truncated = true;
             break;
@@ -382,8 +437,11 @@ pub(super) fn bound_rows(
             };
             bytes = bytes.saturating_sub(size);
         }
-        let mut kept: Vec<TranscriptRow> = kept.into_iter().map(|(row, _)| row).collect();
-        kept.push(TranscriptRow::Truncated);
+        let mut kept: Vec<TranscriptItem> = kept.into_iter().map(|(row, _)| row).collect();
+        kept.push(TranscriptItem {
+            key: RowKey::TRUNCATION,
+            row: TranscriptRow::Truncated,
+        });
         kept
     } else {
         kept.into_iter().map(|(row, _)| row).collect()
@@ -392,10 +450,10 @@ pub(super) fn bound_rows(
     // A composition parent outside the window cannot own a visible row.
     let calls: std::collections::BTreeSet<String> = kept
         .iter()
-        .filter_map(|row| row.call_id().map(str::to_owned))
+        .filter_map(|item| item.row.call_id().map(str::to_owned))
         .collect();
-    for row in &mut kept {
-        if let TranscriptRow::Tool(tool) = row
+    for item in &mut kept {
+        if let TranscriptRow::Tool(tool) = &mut item.row
             && tool
                 .parent_call_id
                 .as_ref()
@@ -419,11 +477,11 @@ pub(super) const MAX_AGENT_TRANSCRIPT_ITEMS: usize = 512;
 
 /// Projects `source`'s newest items to bounded rows. Synchronous CPU work:
 /// callers run it off the async workers.
-pub(super) fn rows_from_source(
+pub(super) fn items_from_source(
     source: &SessionTranscriptSource,
     processes: &[ProcessView],
     task_tools: bool,
-) -> Vec<TranscriptRow> {
+) -> Vec<TranscriptItem> {
     rows_within(
         source,
         processes,
@@ -441,15 +499,48 @@ fn rows_within(
     max_items: usize,
     max_rows: usize,
     max_bytes: usize,
-) -> Vec<TranscriptRow> {
+) -> Vec<TranscriptItem> {
     let tail = source.tail(max_items, max_bytes);
-    let rows = rows_from_items(
+    let rows = items_from_reads(
         &transcript_tail(&tail),
         tail.locator(),
         processes,
         task_tools,
     );
-    bound_rows(rows, tail.truncated(), max_rows, max_bytes)
+    bound_items(rows, tail.truncated(), max_rows, max_bytes)
+}
+
+#[cfg(test)]
+pub(super) fn rows_from_source(
+    source: &SessionTranscriptSource,
+    processes: &[ProcessView],
+    task_tools: bool,
+) -> Vec<TranscriptRow> {
+    items_from_source(source, processes, task_tools)
+        .into_iter()
+        .map(|item| item.row)
+        .collect()
+}
+
+#[cfg(test)]
+fn bound_rows(
+    rows: Vec<TranscriptRow>,
+    truncated: bool,
+    max_rows: usize,
+    max_bytes: usize,
+) -> Vec<TranscriptRow> {
+    let items = rows
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| TranscriptItem {
+            key: RowKey::new(index as u64 + 1, Lane::Runtime, 0),
+            row,
+        })
+        .collect();
+    bound_items(items, truncated, max_rows, max_bytes)
+        .into_iter()
+        .map(|item| item.row)
+        .collect()
 }
 
 /// Reads `locator`'s committed history at the current head of its session
@@ -492,7 +583,10 @@ pub(super) async fn read_rows_within(
         max_rows.min(MAX_AGENT_TRANSCRIPT_ITEMS),
         max_rows,
         max_bytes,
-    ))
+    )
+    .into_iter()
+    .map(|item| item.row)
+    .collect())
 }
 
 #[cfg(test)]

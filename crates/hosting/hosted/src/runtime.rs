@@ -328,6 +328,33 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .publish(snapshot, &self.inner)
     }
 
+    pub(crate) fn replace_transcript(
+        &self,
+        snapshot: plakous_host_protocol::views::PresentationSnapshot,
+    ) -> bool {
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .snapshot(snapshot, &self.inner)
+    }
+
+    fn observe_agent(
+        &self,
+        agent_id: &str,
+        event: &HostEvent<plakous_host_protocol::Core>,
+    ) -> bool {
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .observe(
+                plakous_host_protocol::views::transcript::TranscriptScope::Agent(
+                    agent_id.to_owned(),
+                ),
+                event,
+                &self.inner,
+            )
+    }
+
     pub(crate) fn resync_transcript(
         &self,
         scope: &plakous_host_protocol::views::transcript::TranscriptScope,

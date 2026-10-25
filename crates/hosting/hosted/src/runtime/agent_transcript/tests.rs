@@ -306,6 +306,8 @@ fn locator() -> SessionLocator {
 
 fn item(actor: Actor, parts: Vec<TranscriptPart<'_>>) -> TranscriptRead<'_> {
     TranscriptRead {
+        position: 0,
+        part_offset: 0,
         actor,
         harness_authored: false,
         parts,
@@ -579,6 +581,10 @@ async fn a_finished_sessions_history_reads_as_root_rows() -> TestResult {
         .await?
         .tail(512, usize::MAX);
     assert_eq!(before_reopen.items(), full.items());
+    let keyed = |tail: &plakous::sessions::SessionTranscriptTail| {
+        super::items_from_reads(&super::transcript_tail(tail), target, &[], false)
+    };
+    assert_eq!(keyed(&before_reopen), keyed(&full));
     let narrow = reopened
         .transcript_source(target)
         .await?
@@ -590,6 +596,13 @@ async fn a_finished_sessions_history_reads_as_root_rows() -> TestResult {
                 .any(|full| full.position() == item.position()
                     && full.part_offset() == item.part_offset()
                     && full == item)
+        );
+    }
+    let full_rows = keyed(&full);
+    for retained in keyed(&narrow) {
+        assert!(
+            full_rows.contains(&retained),
+            "retained row key moved: {retained:?}"
         );
     }
     Ok(())

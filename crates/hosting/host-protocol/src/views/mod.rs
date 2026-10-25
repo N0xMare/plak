@@ -6,7 +6,6 @@
 pub mod presentation;
 pub mod transcript;
 
-mod agent_transcript;
 mod call_detail;
 mod catalog;
 mod navigator;
@@ -15,7 +14,6 @@ mod resume;
 mod templates;
 mod tree;
 
-pub use agent_transcript::AgentTranscript;
 pub use call_detail::{
     CallDetail, CallDetailOutcome, CallDetailSource, MAX_SOURCE_LINKS, SourceLink,
     parse_source_links,

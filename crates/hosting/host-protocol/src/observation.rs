@@ -6,9 +6,8 @@ use crate::intent::{Core, Draft, ProtocolExtension, SessionIntent};
 use crate::selection::{CompositionSelection, ProtocolSelection};
 use crate::views::transcript::TranscriptRow;
 use crate::views::{
-    ActivityKind, AgentTranscript, CallDetail, ContextUsage, PresentationSnapshot, ProviderDef,
-    ResumeSessionEntry, SessionInfoView, SubscriptionUsageView, TemplateRow, TreeView,
-    UsageLimitsView,
+    ActivityKind, CallDetail, ContextUsage, PresentationSnapshot, ProviderDef, ResumeSessionEntry,
+    SessionInfoView, SubscriptionUsageView, TemplateRow, TreeView, UsageLimitsView,
 };
 
 /// Observations the hosted session publishes to its driver: transcript and
@@ -390,26 +389,10 @@ pub enum SessionObservation<P: ProtocolExtension = Core> {
     },
     /// Replace the inert agent-tree navigator snapshot. Never patch locally.
     TopologyNavigatorSnapshot(TreeView),
-    /// One agent's committed transcript, answering
-    /// [`SessionIntent::OpenAgentTranscript`] and re-sent when its live turn
-    /// ends or a new one starts. Replaces the agent view's rows. In-process only.
-    AgentTranscript(AgentTranscript),
     /// The answer to one [`SessionIntent::RequestCallDetail`]. In-process only,
     /// an ordinary delta: saturation may drop it, and the surface asks again.
     /// At most one answer is sent per request.
     CallDetail(CallDetail),
-    /// A child-only presentation operation. Never apply to the root transcript.
-    /// The operation uses the root block constructors (text, reasoning, tool,
-    /// usage and terminal), or a system note marking a retained-history gap.
-    /// This observation is in-process only.
-    ChildLive {
-        /// Exact child agent.
-        agent_id: String,
-        /// Exact running turn the operation belongs to.
-        turn_id: String,
-        /// Root presentation vocabulary, isolated from root state mutation.
-        op: Box<SessionObservation<Core>>,
-    },
     /// Navigator cannot open (no hub, flag off, or detached shell).
     TopologyNavigatorUnavailable {
         /// Operator-facing reason. Contains no secrets.

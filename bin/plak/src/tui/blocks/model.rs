@@ -726,12 +726,6 @@ fn truncate_string_tail(text: &mut String, limit: usize) {
     *text = format!("{TRANSCRIPT_TRUNCATION_MARKER}\n{}", &text[start..]);
 }
 
-/// Render typed transcript rows as blocks.
-#[must_use]
-pub fn blocks_from_rows(rows: impl IntoIterator<Item = TranscriptRow>) -> Vec<ScrollBlock> {
-    rows.into_iter().filter_map(ScrollBlock::from_row).collect()
-}
-
 fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
 }

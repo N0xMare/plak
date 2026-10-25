@@ -12,9 +12,7 @@ use crate::tui::presentation::ActivityKind;
 use crate::tui::{HostEvent, UserAction, user_action_channel};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptRow};
-use plakous_host_protocol::views::{
-    AgentTranscript, CallDetail, CallDetailOutcome, CallDetailSource, TreeView,
-};
+use plakous_host_protocol::views::{CallDetail, CallDetailOutcome, CallDetailSource, TreeView};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -54,12 +52,7 @@ fn root_app() -> App {
 }
 
 fn transcript(agent: &str, rows: Vec<TranscriptRow>, live: Option<&str>) -> HostEvent {
-    HostEvent::AgentTranscript(AgentTranscript {
-        agent_id: agent.into(),
-        rows,
-        live_turn_id: live.map(str::to_owned),
-        note: None,
-    })
+    super::test_support::agent_snapshot(agent, if live == Some("t2") { 10 } else { 1 }, rows)
 }
 
 /// The agent view of a finished agent: its committed rows, no live turn.
@@ -228,12 +221,14 @@ fn cells_have_identical_outlines_in_root_and_agent_transcripts() {
 fn a_fail_closed_note_renders_as_a_notice_row() {
     let mut app = root_app();
     app.open_agent_view(AGENT.into(), "#c3 · reviewer".into());
-    app.apply_host_event(HostEvent::AgentTranscript(AgentTranscript {
-        agent_id: AGENT.into(),
-        rows: Vec::new(),
-        live_turn_id: None,
-        note: Some("this agent has no session yet".into()),
-    }));
+    app.apply_host_event(transcript(
+        AGENT,
+        vec![TranscriptRow::info(
+            plakous_host_protocol::views::transcript::NoticeScope::Tree,
+            "this agent has no session yet",
+        )],
+        None,
+    ));
     assert_eq!(
         app.pane.blocks,
         vec![ScrollBlock::System("this agent has no session yet".into())]
@@ -241,28 +236,34 @@ fn a_fail_closed_note_renders_as_a_notice_row() {
 }
 
 #[test]
-fn a_re_emitted_transcript_binds_the_next_turn() {
+fn a_resync_baseline_retires_old_revisions_before_the_next_patch() {
     let mut app = root_app();
     open_live_agent(&mut app, Some("t1"));
-    app.apply_host_event(child_op(
+    app.apply_host_event(super::test_support::agent_patch(
         AGENT,
-        "t1",
-        ChildOp::AssistantDelta("first".into()),
+        1,
+        vec![(20, TranscriptRow::assistant("first"))],
     ));
     let mut converged = agent_rows();
     converged.push(TranscriptRow::Assistant {
         text: "first".into(),
     });
     app.apply_host_event(transcript(AGENT, converged.clone(), Some("t2")));
-    app.apply_host_event(child_op(
+    app.apply_host_event(super::test_support::agent_patch(
         AGENT,
-        "t1",
-        ChildOp::AssistantDelta("stale".into()),
+        1,
+        vec![(20, TranscriptRow::assistant("stale"))],
     ));
-    app.apply_host_event(child_op(
+    assert!(app.pane.resync.is_some());
+    app.apply_host_event(super::test_support::agent_snapshot(
         AGENT,
-        "t2",
-        ChildOp::AssistantDelta("second".into()),
+        11,
+        converged.clone(),
+    ));
+    app.apply_host_event(super::test_support::agent_patch(
+        AGENT,
+        11,
+        vec![(21, TranscriptRow::assistant("second"))],
     ));
     assert_eq!(app.pane.blocks.len(), converged.len() + 1);
     assert_eq!(
@@ -388,31 +389,13 @@ fn back_follows_the_root_tail_when_it_was_at_the_bottom() {
     assert!(screen.contains("root·reply·while·away"), "{screen}");
 }
 
-type ChildOp = plakous_host_protocol::SessionObservation<plakous_host_protocol::Core>;
-
-fn child_op(agent: &str, turn: &str, op: ChildOp) -> HostEvent {
-    HostEvent::ChildLive {
-        agent_id: agent.into(),
-        turn_id: turn.into(),
-        op: Box::new(op),
-    }
-}
-
-fn running_tool(call_id: &str, subject: &str) -> ChildOp {
-    ChildOp::ToolLine {
-        call_id: Some(call_id.into()),
-        name: "exec_command".into(),
+fn running_tool(call_id: &str, subject: &str) -> TranscriptRow {
+    TranscriptRow::Tool(ToolItem {
         state: "running".into(),
         subject: Some(subject.into()),
-        detail: None,
-        parent_call_id: None,
-        cell_id: None,
         kind: ActivityKind::Process,
-        duration_ms: None,
-        started_at_ms: None,
-        finished_at_ms: None,
-        wait: None,
-    }
+        ..tool_item(call_id, "exec_command")
+    })
 }
 
 #[test]
@@ -421,13 +404,12 @@ fn the_open_agents_live_turn_streams_into_its_pane_and_never_the_roots() {
     open_live_agent(&mut app, Some("t1"));
     let root_blocks = app.root_pane().blocks.clone();
     let clocks = (app.model_request_started, app.phase_started);
-    for op in [
-        running_tool("call-a2", "cargo clippy"),
-        ChildOp::AssistantDelta("Checking ".into()),
-        ChildOp::AssistantDelta("lints.".into()),
-        ChildOp::SetBusy(false),
+    for (revision, rows) in [
+        (1, vec![(20, running_tool("call-a2", "cargo clippy"))]),
+        (2, vec![(21, TranscriptRow::assistant("Checking "))]),
+        (3, vec![(21, TranscriptRow::assistant("Checking lints."))]),
     ] {
-        app.apply_host_event(child_op(AGENT, "t1", op));
+        app.apply_host_event(super::test_support::agent_patch(AGENT, revision, rows));
     }
     assert_eq!(
         app.pane.blocks.last(),
@@ -451,21 +433,29 @@ fn the_open_agents_live_turn_streams_into_its_pane_and_never_the_roots() {
 }
 
 #[test]
-fn ops_for_another_agent_another_turn_or_a_closed_view_are_dropped() {
+fn patches_for_another_agent_an_old_revision_or_a_closed_view_are_dropped() {
     let mut app = root_app();
     open_live_agent(&mut app, Some("t1"));
     let blocks = app.pane.blocks.clone();
-    app.apply_host_event(child_op(
+    app.apply_host_event(super::test_support::agent_patch(
         "agent-other",
-        "t1",
-        ChildOp::AssistantDelta("x".into()),
+        1,
+        vec![(20, TranscriptRow::assistant("x"))],
     ));
-    app.apply_host_event(child_op(AGENT, "t0", ChildOp::AssistantDelta("y".into())));
+    app.apply_host_event(super::test_support::agent_patch(
+        AGENT,
+        0,
+        vec![(20, TranscriptRow::assistant("y"))],
+    ));
     assert_eq!(app.pane.blocks, blocks);
 
     app.handle_key(key(KeyCode::Esc));
     let root_blocks = app.pane.blocks.clone();
-    app.apply_host_event(child_op(AGENT, "t1", ChildOp::AssistantDelta("z".into())));
+    app.apply_host_event(super::test_support::agent_patch(
+        AGENT,
+        1,
+        vec![(20, TranscriptRow::assistant("z"))],
+    ));
     assert_eq!(app.pane.blocks, root_blocks, "a closed view takes nothing");
 }
 
@@ -610,10 +600,10 @@ fn pilot_story_open_an_agent_watch_it_live_and_go_back() {
         }]
     );
     app.apply_host_event(transcript(AGENT, agent_rows(), Some("t1")));
-    app.apply_host_event(child_op(
+    app.apply_host_event(super::test_support::agent_patch(
         AGENT,
-        "t1",
-        ChildOp::AssistantDelta("Checking lints.".into()),
+        1,
+        vec![(20, TranscriptRow::assistant("Checking lints."))],
     ));
     let watching = app.semantic_snapshot().transcript;
     assert!(watching.streaming);

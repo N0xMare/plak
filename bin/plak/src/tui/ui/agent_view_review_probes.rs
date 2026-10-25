@@ -8,16 +8,12 @@ use crate::tui::presentation::ActivityKind;
 use crate::tui::{HostEvent, UserAction, user_action_channel};
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptRow};
-use plakous_host_protocol::views::{
-    AgentTranscript, CallDetail, CallDetailOutcome, CallDetailSource,
-};
+use plakous_host_protocol::views::{CallDetail, CallDetailOutcome, CallDetailSource};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 const AGENT: &str = "agent-c3";
 const OTHER: &str = "agent-d4";
-
-type ChildOp = plakous_host_protocol::SessionObservation<plakous_host_protocol::Core>;
 
 fn paint(app: &mut App) {
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
@@ -47,12 +43,11 @@ fn agent_rows() -> Vec<TranscriptRow> {
 }
 
 fn transcript(agent: &str, live: Option<&str>) -> HostEvent {
-    HostEvent::AgentTranscript(AgentTranscript {
-        agent_id: agent.into(),
-        rows: agent_rows(),
-        live_turn_id: live.map(str::to_owned),
-        note: None,
-    })
+    super::test_support::agent_snapshot(
+        agent,
+        if live == Some("t2") { 10 } else { 1 },
+        agent_rows(),
+    )
 }
 
 fn sent(app: &mut App) -> Vec<UserAction> {
@@ -77,29 +72,13 @@ fn open_served(app: &mut App, agent: &str, live: Option<&str>) {
     assert_ne!(app.pane.blocks, [] as [ScrollBlock; 0]);
 }
 
-fn child_op(agent: &str, turn: &str, op: ChildOp) -> HostEvent {
-    HostEvent::ChildLive {
-        agent_id: agent.into(),
-        turn_id: turn.into(),
-        op: Box::new(op),
-    }
-}
-
-fn tool_op(call_id: &str, state: &str) -> ChildOp {
-    ChildOp::ToolLine {
-        call_id: Some(call_id.into()),
-        name: "exec_command".into(),
+fn tool_op(call_id: &str, state: &str) -> TranscriptRow {
+    TranscriptRow::Tool(ToolItem {
         state: state.into(),
         subject: Some("cargo clippy".into()),
-        detail: None,
-        parent_call_id: None,
-        cell_id: None,
         kind: ActivityKind::Process,
-        duration_ms: None,
-        started_at_ms: None,
-        finished_at_ms: None,
-        wait: None,
-    }
+        ..tool_item(call_id, "exec_command")
+    })
 }
 
 /// The host re-sends a same-session `PresentationSnapshot` after a root
@@ -219,7 +198,11 @@ fn a_send_failure_notice_lands_in_the_root_transcript() {
 fn an_agent_preview_answer_in_the_commit_race_is_asked_again() {
     let mut app = root_app();
     open_served(&mut app, AGENT, Some("t1"));
-    app.apply_host_event(child_op(AGENT, "t1", tool_op("call-a2", "running")));
+    app.apply_host_event(super::test_support::agent_patch(
+        AGENT,
+        1,
+        vec![(20, tool_op("call-a2", "running"))],
+    ));
     let idx = app
         .pane
         .blocks
@@ -227,7 +210,11 @@ fn an_agent_preview_answer_in_the_commit_race_is_asked_again() {
         .rposition(|block| matches!(block, ScrollBlock::Tool { .. }))
         .unwrap();
     app.toggle_tool_expand_at(idx);
-    app.apply_host_event(child_op(AGENT, "t1", tool_op("call-a2", "done")));
+    app.apply_host_event(super::test_support::agent_patch(
+        AGENT,
+        2,
+        vec![(20, tool_op("call-a2", "done"))],
+    ));
     let (tx, rx) = user_action_channel();
     app.maybe_request_call_details(Some(&tx));
     assert!(rx.try_recv().is_ok(), "the ended item asks");
@@ -337,14 +324,16 @@ fn agent_ops_never_touch_root_bookkeeping() {
         app.root_pane().blocks.clone(),
         app.root_pane().tool_started.len(),
     );
-    for op in [
-        tool_op("call-a2", "running"),
-        tool_op("call-a2", "done"),
-        ChildOp::SetBusy(false),
-        ChildOp::AssistantDelta("x".into()),
-        ChildOp::AssistantDone,
+    for (revision, row) in [
+        (1, tool_op("call-a2", "running")),
+        (2, tool_op("call-a2", "done")),
+        (3, TranscriptRow::assistant("x")),
     ] {
-        app.apply_host_event(child_op(AGENT, "t1", op));
+        app.apply_host_event(super::test_support::agent_patch(
+            AGENT,
+            revision,
+            vec![(20, row)],
+        ));
     }
     let after = (
         app.busy,
@@ -363,10 +352,10 @@ fn the_open_agents_stream_gets_the_streaming_cadence() {
     let mut app = root_app();
     app.busy = true;
     open_served(&mut app, AGENT, Some("t1"));
-    app.apply_host_event(child_op(
+    app.apply_host_event(super::test_support::agent_patch(
         AGENT,
-        "t1",
-        ChildOp::AssistantDelta("streaming".into()),
+        1,
+        vec![(20, TranscriptRow::assistant("streaming"))],
     ));
     assert!(app.pane.assistant_stream_active);
     assert!(

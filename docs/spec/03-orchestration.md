@@ -3976,16 +3976,17 @@ retained for later viewing. An atomic snapshot does not replay prior uncommitted
 streaming blocks: when prior activity is not covered, or the tail loses activity
 or lags out, an addressed `earlier activity not shown` marker makes the gap
 explicit. Closing drops this subscription; a lagged tail reattaches, at most once
-a second, with an explicit gap. Adjacent live text deltas coalesce
-only for the same `(agent_id, turn_id)`; child traffic occupies at most 128 of the
-512 observation slots, with a single addressed gap when its share is exceeded.
+a second, with an explicit gap. Live content uses the same keyed row reducer
+and bounded scoped publication channel as the root. A refused patch marks that
+scope for a full resync baseline, including its current previews.
 Dropping the host drops all of its child observers. Unread presentation debt
 never backpressures the child or its terminal result.
 
 Child text, reasoning (under the root's visibility gate), tool start/completion,
-usage and terminal observations use the root block constructors inside
-`HostEvent::ChildLive { agent_id, turn_id, op }`. They never enter the root's
-`apply_event` or mutate its transcript, usage, queue, or turn control.
+usage and terminal observations feed the shared row projector; content is sent
+as `TranscriptPatch { scope: Agent(id), .. }`. They never enter the root's
+`apply_event` or mutate its transcript, usage, queue, or turn control. Progress
+and usage remain tree observations rather than transcript authority.
 
 **Agent transcript.** `OpenAgentTranscript { agent_id }` opens one agent's
 transcript for the surface's main view; at most one is open per host face, and
@@ -4015,11 +4016,19 @@ Root feed reads and child atomic-history reads use one hosted
 lineage before their row projection. Canonical-history read positions and
 fragment offsets are defined in chapter 01 §12; they are not bounded-window
 indices and remain identical for retained items across reopen and window slides.
+Child keys use that canonical position as `anchor`, the runtime lane, and the
+one-based derived-row ordinal within that canonical item, including its
+synthetic fragments in order. Tail reads retain whole canonical items before
+expanding their fragments, so sliding the window cannot restart that ordinal
+inside an item. The zero key is reserved for truncation; neither row indices in
+a bounded window nor process-local sequence numbers participate. A compaction marker's call
+identity and a reasoning location also use the canonical position and fragment
+offset rather than the tail index.
 The derived notice retains the carried body's full text up to a UTF-8-safe
 2 KiB bound, using the existing `… cut at N KiB of M KiB` marker when cut;
 the TUI owns first-line summaries and expansion (chapter 02 §5.4).
 Existing stored notices retain their earlier first-line-only text until the
-projection is rebuilt; no row type or schema changes. Local nested calls retain their canonical cell identity and
+projection is rebuilt; their persisted row format does not change. Local nested calls retain their canonical cell identity and
 their explicit evaluation owner from the same checkpoint's retained operation
 ledger (chapter 01), with an exact child receipt required before the evaluation
 lookup. Marker cell identities come from linked nested lineage in the retained
@@ -4048,18 +4057,19 @@ each string over at most the history redaction window (chapter 01), as
 synchronous work on the blocking pool behind one permit per host face. Rows are
 bounded like stored rows and the newest that fit the presentation bounds are
 kept; one `Truncated` row leads them only when something older was dropped, and
-rows that exactly fit are all kept. The answer is one
-`AgentTranscript { agent_id, rows, live_turn_id, note }`; a live turn is named in
-`live_turn_id` and its ops stream as `ChildLive`. When that turn ends the host
-sends a fresh `AgentTranscript` from a new atomic read without a live turn; when
-a new turn of the agent starts it sends a fresh one naming it and streams that
-turn. Reopening the open agent on the same live turn is a no-op. A failed later
-read re-sends the last good rows beside its `note` rather than empty rows; only
+rows that exactly fit are all kept. The attachment is a schema-3
+`PresentationSnapshot` scoped to `Agent(id)`; live content and canonical
+settlement use `TranscriptPatch`. Settlement reads the canonical history anew
+and replaces provisional rows through one patch, not a full snapshot. When a
+new turn starts, a new atomic attachment patches its canonical baseline and
+follows its tail; it does not send a full snapshot to an already attached face.
+Reopening the open agent on the same live turn is a no-op. A failed later
+read keeps the last good rows beside a notice rather than empty rows; only
 a send that passes the generation check below replaces the last good rows. An
 unknown agent, the root, a node without a bound session, a host without a hub or
-session store, and an unreadable first read answer at once with empty rows and a
-`note`, and open nothing. Every send of a view (`AgentTranscript` and
-`ChildLive`) is checked, under one lock, against the face's view generation it
+session store, and an unreadable first read answer at once with a notice row
+and open nothing. Every scoped snapshot or patch is checked, under one lock,
+against the face's view generation it
 was started under; close, replace, a new turn and a session switch bump that
 generation under the same lock, so nothing of an earlier serve arrives after
 them. `/clear`, `/resume`, fork and a profile rebind close the view before the

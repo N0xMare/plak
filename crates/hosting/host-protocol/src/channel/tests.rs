@@ -57,47 +57,6 @@ fn presentation_revisions_are_allocated_by_the_channel_not_a_sender_wrapper() {
 }
 
 #[test]
-fn child_live_deltas_coalesce_and_flood_leaves_room_for_root() {
-    let (sender, receiver) = observation_channel::<Core>();
-    for _ in 0..(128 * crate::limits::COALESCED_DELTA_BYTES / 4096 + 256) {
-        let _ = sender.send(SessionObservation::ChildLive {
-            agent_id: "c1".into(),
-            turn_id: "t1".into(),
-            op: Box::new(SessionObservation::AssistantDelta("x".repeat(4096))),
-        });
-    }
-    sender
-        .send(SessionObservation::Row(TranscriptRow::assistant("root")))
-        .unwrap();
-    let events = receiver.try_iter().collect::<Vec<_>>();
-    assert!(events.len() <= 130);
-    assert_eq!(events.iter().filter(|event| matches!(event, SessionObservation::ChildLive {op, ..} if op.as_ref() == &super::child_gap_notice())).count(), 1);
-    let SessionObservation::Row(TranscriptRow::Notice(gap)) = super::child_gap_notice::<Core>()
-    else {
-        panic!("the gap marker is a notice row");
-    };
-    assert_eq!(
-        gap.placement(),
-        crate::views::transcript::NoticePlacement::NoticeRow,
-        "the operator must see that child rows were dropped"
-    );
-    let (sender, receiver) = observation_channel::<Core>();
-    for text in ["a", "b"] {
-        sender
-            .send(SessionObservation::ChildLive {
-                agent_id: "c1".into(),
-                turn_id: "t1".into(),
-                op: Box::new(SessionObservation::AssistantDelta(text.into())),
-            })
-            .unwrap();
-    }
-    assert!(
-        matches!(receiver.try_recv().unwrap(), SessionObservation::ChildLive {op, ..} if matches!(*op, SessionObservation::AssistantDelta(ref text) if text == "ab"))
-    );
-    assert!(receiver.try_recv().is_err());
-}
-
-#[test]
 fn root_interrupt_is_not_process_shutdown_and_quit_remains_latched_after_dequeue() {
     let (sender, receiver) = intent_channel::<Core>();
     let interrupt = receiver.storage_interrupt_probe();

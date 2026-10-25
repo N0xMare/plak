@@ -10,7 +10,8 @@ use plakous::agent::{
 use plakous::model::{ModelEvent, TurnId, Usage};
 use plakous::sessions::{AgentSessions, SessionLocator, SessionTranscriptSource};
 use plakous_host_protocol::Core;
-use plakous_host_protocol::views::{AgentTranscript, ChildProgress, TreeView};
+use plakous_host_protocol::views::transcript::{TranscriptItem, TranscriptScope};
+use plakous_host_protocol::views::{ChildProgress, PresentationSnapshot, TreeView};
 use tokio::task::JoinHandle;
 
 use super::{HostEvent, Sender, TurnProjection, UserAction};
@@ -115,7 +116,7 @@ impl Drop for Observer {
 
 /// Restarts an open agent view's serving task, optionally on a live turn,
 /// under a send generation.
-type ServeAgent = Box<dyn Fn(Option<(TurnId, Agent)>, u64) -> JoinHandle<()> + Send>;
+type ServeAgent = Box<dyn Fn(Option<(TurnId, Agent)>, u64, bool) -> JoinHandle<()> + Send>;
 
 /// The send generation of a face's agent view. A serve sends only while the
 /// generation it was started under is current; close, replace, a new turn
@@ -365,7 +366,7 @@ impl ChildObservers {
         view.task.abort();
         view.turn_id = Some(*turn_id);
         let generation = self.gate.bump();
-        view.task = (view.serve)(Some((*turn_id, agent.clone())), generation);
+        view.task = (view.serve)(Some((*turn_id, agent.clone())), generation, false);
     }
 
     /// Closes the open agent view; nothing it started sends afterwards.
@@ -409,7 +410,7 @@ impl ChildObservers {
             (Ok(locator), Some(sessions)) => (locator, sessions),
             (Err(note), _) => {
                 self.close_agent_view();
-                send_agent_transcript(events, agent_id, Err(note), None);
+                send_agent_transcript(events, agent_id, Err(note));
                 return;
             }
             (Ok(_), None) => {
@@ -418,7 +419,6 @@ impl ChildObservers {
                     events,
                     agent_id,
                     Err("transcript unavailable: no session store is open".to_owned()),
-                    None,
                 );
                 return;
             }
@@ -474,17 +474,18 @@ impl ChildObservers {
             last_good: Arc::new(Mutex::new(None)),
             task_tools,
         };
-        let serve: ServeAgent = Box::new(move |live, generation| {
+        let serve: ServeAgent = Box::new(move |live, generation, replace| {
             tokio::spawn(serve_agent(
                 ServeContext {
                     generation,
                     ..context.clone()
                 },
                 live,
+                replace,
             ))
         });
         let turn_id = live.as_ref().map(|(turn_id, _)| *turn_id);
-        let task = serve(live, self.gate.bump());
+        let task = serve(live, self.gate.bump(), true);
         self.agent_view = Some(AgentView {
             agent_id: agent_id.to_owned(),
             session_id: session_id.to_owned(),
@@ -537,19 +538,20 @@ fn node_presents_task_tools(tree: &crate::agent_tree::ProductAgentTree, agent_id
 pub(super) fn send_agent_transcript<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     agent_id: &str,
-    rows: Result<Vec<TranscriptRow>, String>,
-    live_turn_id: Option<TurnId>,
+    rows: Result<Vec<TranscriptItem>, String>,
 ) {
-    let (rows, note) = match rows {
-        Ok(rows) => (rows, None),
-        Err(note) => (Vec::new(), Some(note)),
+    let items = match rows {
+        Ok(items) => items,
+        Err(note) => vec![TranscriptItem {
+            key: crate::sessions::provisional_key(),
+            row: TranscriptRow::info(NoticeScope::Tree, note),
+        }],
     };
-    let _ = events.send(HostEvent::AgentTranscript(AgentTranscript {
-        agent_id: agent_id.to_owned(),
-        rows,
-        live_turn_id: live_turn_id.map(|turn_id| turn_id.to_string()),
-        note,
-    }));
+    let _ = events.replace_transcript(PresentationSnapshot {
+        scope: TranscriptScope::Agent(agent_id.to_owned()),
+        items,
+        ..PresentationSnapshot::default()
+    });
 }
 
 /// What one serve of an agent view reads from and sends through.
@@ -563,7 +565,7 @@ struct ServeContext<P: plakous_host_protocol::ProtocolExtension> {
     generation: u64,
     reads: Arc<tokio::sync::Semaphore>,
     /// The rows of the view's last good read, re-sent beside a failure note.
-    last_good: Arc<Mutex<Option<Vec<TranscriptRow>>>>,
+    last_good: Arc<Mutex<Option<Vec<TranscriptItem>>>>,
     /// This node presents the await and interrupt as Grok's task tools, so a
     /// restored output or kill call naming a child reads as that slot. A leaf
     /// does not, and a refused process call keeps its own name.
@@ -591,7 +593,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> ServeContext<P> {
     /// Projects `source` to rows on the blocking pool, one projection per
     /// face at a time. The permit moves into the projection, so a serve
     /// aborted mid-read still holds it until the work ends.
-    async fn project(&self, source: SessionTranscriptSource) -> Result<Vec<TranscriptRow>, String> {
+    async fn project(
+        &self,
+        source: SessionTranscriptSource,
+    ) -> Result<Vec<TranscriptItem>, String> {
         let permit = Arc::clone(&self.reads)
             .acquire_owned()
             .await
@@ -604,21 +609,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> ServeContext<P> {
         let task_tools = self.task_tools;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            super::agent_transcript::rows_from_source(&source, &processes, task_tools)
+            super::agent_transcript::items_from_source(&source, &processes, task_tools)
         })
         .await
         .map_err(|_| "transcript unavailable: the read did not finish".to_owned())
     }
 
     /// The node's committed rows from its bound session in the store.
-    async fn stored_rows(&self) -> Result<Vec<TranscriptRow>, String> {
+    async fn stored_rows(&self) -> Result<Vec<TranscriptItem>, String> {
         let source = super::agent_transcript::read_source(&self.sessions, self.locator).await?;
         self.project(source).await
     }
 
     /// A live agent's committed rows from an atomic attach, or from the
     /// store when it cannot be attached.
-    async fn committed_rows(&self, agent: &Agent) -> Result<Vec<TranscriptRow>, String> {
+    async fn committed_rows(&self, agent: &Agent) -> Result<Vec<TranscriptItem>, String> {
         match SessionTranscriptSource::attach(agent, ViewRequest::content()) {
             Ok((_, source)) => self.project(source).await,
             Err(_) => self.stored_rows().await,
@@ -626,11 +631,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> ServeContext<P> {
     }
 
     /// Sends the view's rows, or its last good rows beside the failure note.
-    fn send_transcript(
-        &self,
-        rows: Result<Vec<TranscriptRow>, String>,
-        live_turn_id: Option<TurnId>,
-    ) -> bool {
+    fn send_transcript(&self, rows: Result<Vec<TranscriptItem>, String>, replace: bool) -> bool {
         // The last good rows change only under the gate, so a serve whose
         // generation is retired never replaces what a current one sent.
         self.gate.send_if_current(self.generation, || {
@@ -638,26 +639,37 @@ impl<P: plakous_host_protocol::ProtocolExtension> ServeContext<P> {
                 .last_good
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (rows, note) = match rows {
+            let mut items = match rows {
                 Ok(rows) => {
                     *last_good = Some(rows.clone());
-                    (rows, None)
+                    rows
                 }
-                Err(note) => (last_good.clone().unwrap_or_default(), Some(note)),
+                Err(note) => {
+                    let mut items = last_good.clone().unwrap_or_default();
+                    items.push(TranscriptItem {
+                        key: crate::sessions::provisional_key(),
+                        row: TranscriptRow::info(NoticeScope::Tree, note),
+                    });
+                    items
+                }
             };
             drop(last_good);
-            self.events
-                .send(HostEvent::AgentTranscript(AgentTranscript {
-                    agent_id: self.agent_id.clone(),
-                    rows,
-                    live_turn_id: live_turn_id.map(|turn_id| turn_id.to_string()),
-                    note,
-                }))
+            items.sort_by_key(|item| item.key);
+            let snapshot = PresentationSnapshot {
+                scope: TranscriptScope::Agent(self.agent_id.clone()),
+                items,
+                ..PresentationSnapshot::default()
+            };
+            if replace {
+                self.events.replace_transcript(snapshot)
+            } else {
+                self.events.publish_transcript(snapshot)
+            }
         })
     }
 
-    fn emitter(&self, turn_id: TurnId) -> impl Fn(HostEvent<Core>) -> bool + Send + 'static {
-        let emit = child_live_emitter(&self.agent_id, turn_id, &self.events);
+    fn emitter(&self) -> impl Fn(HostEvent<Core>) -> bool + Send + 'static {
+        let emit = child_live_emitter(&self.agent_id, &self.events);
         let gate = Arc::clone(&self.gate);
         let generation = self.generation;
         move |op| gate.send_if_current(generation, || emit(op))
@@ -675,10 +687,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> ServeContext<P> {
 async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
     context: ServeContext<P>,
     live: Option<(TurnId, Agent)>,
+    replace: bool,
 ) {
     let Some((turn_id, agent)) = live else {
         let rows = context.stored_rows().await;
-        context.send_transcript(rows, None);
+        context.send_transcript(rows, replace);
         return;
     };
     #[cfg(test)]
@@ -686,19 +699,19 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
     let Ok((attachment, source)) = SessionTranscriptSource::attach(&agent, ViewRequest::content())
     else {
         let rows = context.stored_rows().await;
-        context.send_transcript(rows, None);
+        context.send_transcript(rows, replace);
         return;
     };
     let (snapshot, tail) = attachment.into_parts();
     let rows = context.project(source).await;
     if turn_ended(&snapshot, turn_id) {
-        context.send_transcript(rows, None);
+        context.send_transcript(rows, replace);
         return;
     }
-    if !context.send_transcript(rows, Some(turn_id)) {
+    if !context.send_transcript(rows, replace) {
         return;
     }
-    let emit = context.emitter(turn_id);
+    let emit = context.emitter();
     emit_attach_prefix(&snapshot, turn_id, &emit);
     follow_turn(
         agent.clone(),
@@ -709,25 +722,17 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
     )
     .await;
     let rows = context.committed_rows(&agent).await;
-    context.send_transcript(rows, None);
+    context.send_transcript(rows, false);
 }
 
-/// Sends one op of `agent_id`'s `turn_id` as a `ChildLive` observation;
-/// `false` when the face dropped it.
+/// Reduces one agent observation through the root's keyed row projector.
 fn child_live_emitter<P: plakous_host_protocol::ProtocolExtension>(
     agent_id: &str,
-    turn_id: TurnId,
     events: &Sender<P>,
 ) -> impl Fn(HostEvent<Core>) -> bool + Send + 'static {
     let id = agent_id.to_owned();
     let sender = events.clone();
-    move |op| {
-        sender.send(HostEvent::ChildLive {
-            agent_id: id.clone(),
-            turn_id: turn_id.to_string(),
-            op: Box::new(op),
-        })
-    }
+    move |op| sender.observe_agent(&id, &op)
 }
 
 /// What an attachment says before its tail. An atomic attachment covers

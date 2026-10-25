@@ -9,7 +9,10 @@ use plakous::sessions::{
     SESSION_HISTORY_VISIBILITY_REVISION, SessionHistoryDirection, SessionHistoryPageRequest,
     SessionHistoryVisibility, SessionLocator,
 };
-use plakous_host_protocol::views::{AgentTranscript, TreeView};
+use plakous_host_protocol::views::transcript::{
+    RowKey, TranscriptItem as KeyedItem, TranscriptScope,
+};
+use plakous_host_protocol::views::{PresentationSnapshot, TreeView};
 
 use crate::agent_tree::ProductAgentTree;
 use crate::agent_tree_protocol::AttemptScopedRequest;
@@ -47,11 +50,16 @@ pub(crate) async fn dispatch_topology_navigator_action<
     let Some(runtime) = crate::topology_runtime::lookup(&tree_id) else {
         match action {
             UserAction::OpenAgentTranscript { agent_id } => {
-                send(HostEvent::AgentTranscript(AgentTranscript {
-                    agent_id: agent_id.clone(),
-                    rows: Vec::new(),
-                    live_turn_id: None,
-                    note: Some("no agent tree is attached to this session".to_owned()),
+                send(HostEvent::PresentationSnapshot(PresentationSnapshot {
+                    scope: TranscriptScope::Agent(agent_id.clone()),
+                    items: vec![KeyedItem {
+                        key: RowKey::TRUNCATION,
+                        row: TranscriptRow::info(
+                            NoticeScope::Tree,
+                            "no agent tree is attached to this session",
+                        ),
+                    }],
+                    ..PresentationSnapshot::default()
                 }));
                 return;
             }
@@ -243,7 +251,7 @@ fn lines_from_items(items: Vec<plakous::sessions::SessionHistoryItem>) -> Vec<Tr
 #[doc(hidden)]
 pub fn rehearse_child_presentation_snapshot(
     items: Vec<plakous::sessions::SessionHistoryItem>,
-) -> plakous_host_protocol::views::presentation::PresentationSnapshot {
+) -> PresentationSnapshot {
     let transcript = lines_from_items(items)
         .into_iter()
         .map(|line| match line.actor.as_str() {

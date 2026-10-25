@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use crate::intent::{Core, ObservationExtension, ProtocolExtension, SessionIntent};
 use crate::limits::{COALESCED_DELTA_BYTES, INTENT_QUEUE_CAPACITY, OBSERVATION_QUEUE_CAPACITY};
 use crate::observation::SessionObservation;
-use crate::views::transcript::{NoticeScope, NoticeTone, TranscriptRow, TranscriptScope};
+use crate::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope};
 
 /// Where a hosted session publishes its observations.
 ///
@@ -773,22 +773,10 @@ fn latest_state_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bo
             | SessionObservation::SessionOpening
             | SessionObservation::SessionOpened { .. }
             | SessionObservation::TopologyNavigatorSnapshot(_)
-            | SessionObservation::AgentTranscript(_)
             | SessionObservation::TopologyNavigatorUnavailable { .. }
             | SessionObservation::PendingContinuation { .. }
             | SessionObservation::LastUserPromptAt(_)
     )
-}
-
-/// The marker a coalesced child stream carries in place of dropped rows: a
-/// `tree` notice in the child's live view (spec 02 §5.4), so the operator
-/// sees that rows are missing. It describes the live stream, not the child's
-/// conversation, so it is never persisted.
-pub(crate) fn child_gap_notice<P: ProtocolExtension>() -> SessionObservation<P> {
-    SessionObservation::Row(TranscriptRow::info(
-        NoticeScope::Tree,
-        "earlier activity not shown",
-    ))
 }
 
 /// A non-error notice row: the one transcript row a full queue may replace.
@@ -955,60 +943,6 @@ fn eviction_index<P: ProtocolExtension>(
     }
 }
 
-fn coalesce_child_live<P: ProtocolExtension>(
-    event: &mut SessionObservation<P>,
-    queue: &mut VecDeque<SessionObservation<P>>,
-) -> bool {
-    let SessionObservation::ChildLive {
-        agent_id,
-        turn_id,
-        op,
-    } = event
-    else {
-        return false;
-    };
-    if let SessionObservation::AssistantDelta(delta) = op.as_mut()
-        && let Some(SessionObservation::ChildLive {
-            agent_id: prior_id,
-            turn_id: prior_turn,
-            op: prior,
-        }) = queue.back_mut()
-        && prior_id == agent_id
-        && prior_turn == turn_id
-        && let SessionObservation::AssistantDelta(pending) = prior.as_mut()
-        && pending.len().saturating_add(delta.len()) <= COALESCED_DELTA_BYTES
-    {
-        pending.push_str(delta);
-        return true;
-    }
-    let child_count = queue
-        .iter()
-        .filter(|queued| matches!(queued, SessionObservation::ChildLive { .. }))
-        .count();
-    if child_count < 120 {
-        return false;
-    }
-    let same_child = |queued: &SessionObservation<P>| matches!(queued, SessionObservation::ChildLive {agent_id: id, turn_id: turn, ..} if id == agent_id && turn == turn_id);
-    if queue.iter().any(|queued| same_child(queued) && matches!(queued, SessionObservation::ChildLive {op, ..} if op.as_ref() == &child_gap_notice())) { return true; }
-    let replace = (child_count >= 128)
-        .then(|| {
-            queue.iter().rposition(same_child).or_else(|| {
-                queue
-                    .iter()
-                    .position(|queued| matches!(queued, SessionObservation::ChildLive { .. }))
-            })
-        })
-        .flatten();
-    // Reserve eight addressed gap slots inside the child's total queue share.
-    **op = child_gap_notice();
-    if let Some(index) = replace {
-        queue.remove(index);
-        queue.push_back(event.clone());
-        return true;
-    }
-    false
-}
-
 impl<P: ProtocolExtension> ObservationSender<P> {
     /// Allocates the next presentation revision for this face. Every sender
     /// wrapper over the channel shares the counter; exhaustion refuses rather
@@ -1091,10 +1025,6 @@ impl<P: ProtocolExtension> ObservationSender<P> {
         mut event: SessionObservation<P>,
         queue: &mut VecDeque<SessionObservation<P>>,
     ) -> Result<(), SessionObservation<P>> {
-        if coalesce_child_live(&mut event, queue) {
-            self.0.ready.notify_one();
-            return Ok(());
-        }
         if let SessionObservation::AssistantDelta(delta) = &mut event
             && let Some(SessionObservation::AssistantDelta(pending)) = queue.back_mut()
             && pending.len().saturating_add(delta.len()) <= COALESCED_DELTA_BYTES

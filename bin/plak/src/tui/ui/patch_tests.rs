@@ -225,3 +225,103 @@ fn losing_the_last_patch_requests_resync_without_waiting_for_a_later_revision() 
     ));
     assert_eq!(app.pane.presentation.revision(), 1);
 }
+
+#[test]
+fn agent_reasoning_keeps_its_live_clock_across_resync_and_seals_on_patch() {
+    use crate::tui::blocks::ScrollBlock;
+    use plakous_host_protocol::views::transcript::ThinkingRow;
+    let mut app = App::new(launch_basic(), true);
+    pin_clock(&mut app);
+    app.open_agent_view("c1".into(), "child".into());
+    app.apply_host_event(super::test_support::agent_snapshot("c1", 1, Vec::new()));
+    let row = TranscriptRow::Thinking(ThinkingRow {
+        location_key: "thought".into(),
+        text: "still considering".into(),
+        elapsed_ms: None,
+    });
+    app.apply_host_event(super::test_support::agent_patch(
+        "c1",
+        1,
+        vec![(20, row.clone())],
+    ));
+    let started = app.pane.thinking_started["thought"];
+    assert!(matches!(
+        app.pane.blocks.as_slice(),
+        [ScrollBlock::Thinking { sealed: false, .. }]
+    ));
+    let mut baseline = snapshot(3, app.pane.presentation.items());
+    baseline.scope = TranscriptScope::Agent("c1".into());
+    app.apply_host_event(HostEvent::PresentationSnapshot(baseline));
+    assert_eq!(app.pane.thinking_started["thought"], started);
+    assert!(matches!(
+        app.pane.blocks.as_slice(),
+        [ScrollBlock::Thinking { sealed: false, .. }]
+    ));
+    let TranscriptRow::Thinking(mut sealed) = row else {
+        unreachable!()
+    };
+    sealed.elapsed_ms = Some(1200);
+    app.apply_host_event(super::test_support::agent_patch(
+        "c1",
+        3,
+        vec![(20, TranscriptRow::Thinking(sealed))],
+    ));
+    assert!(matches!(
+        app.pane.blocks.as_slice(),
+        [ScrollBlock::Thinking {
+            sealed: true,
+            elapsed_ms: Some(1200),
+            ..
+        }]
+    ));
+    assert!(app.pane.thinking_started.is_empty());
+}
+
+#[test]
+fn expanded_live_tool_keeps_its_state_when_settlement_moves_its_key() {
+    let mut app = App::new(launch_basic(), true);
+    pin_clock(&mut app);
+    app.render_prefs.reduced_motion = true;
+    let prompt = RowKey::new(2, Lane::Runtime, 0);
+    let preview = RowKey::new(1_u64 << 63, Lane::Runtime, 0);
+    let committed = RowKey::new(5, Lane::Runtime, 0);
+    let mut tool = tool_item("stable-call", "read_file");
+    tool.state = "running".into();
+    tool.subject = Some("src/parser.rs".into());
+    tool.detail = Some("the source text".into());
+    let before = BTreeMap::from([
+        (prompt, TranscriptRow::user("inspect the parser")),
+        (preview, TranscriptRow::Tool(tool.clone())),
+    ]);
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(1, &before)));
+    app.toggle_tool_expand_at(1);
+    tool.state = "succeeded".into();
+    let after = BTreeMap::from([
+        (prompt, TranscriptRow::user("inspect the parser")),
+        (committed, TranscriptRow::Tool(tool)),
+        (
+            RowKey::new(8, Lane::Runtime, 0),
+            TranscriptRow::assistant("The parser is correct."),
+        ),
+    ]);
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch::between(
+        TranscriptScope::Root,
+        1,
+        2,
+        &before,
+        &after,
+    )));
+    let mut restored = App::new(launch_basic(), true);
+    pin_clock(&mut restored);
+    restored.render_prefs.reduced_motion = true;
+    restored.apply_host_event(HostEvent::PresentationSnapshot(snapshot(2, &after)));
+    restored.toggle_tool_expand_at(1);
+    let actual = paint(&mut app);
+    assert_eq!(actual, paint(&mut restored));
+    let path = "tests/goldens/transcript-patch-settlement-100x30.frame";
+    if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
+        std::fs::write(path, &actual).unwrap();
+    } else {
+        assert_eq!(actual, std::fs::read_to_string(path).unwrap());
+    }
+}

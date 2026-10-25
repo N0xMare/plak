@@ -167,8 +167,8 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// Open the inert agent-tree navigator overlay.
     OpenTopologyNavigator,
     /// Open one agent's transcript for the main view. The host answers with one
-    /// `AgentTranscript` of its committed history, then streams the agent's live
-    /// turn as `ChildLive` ops. Opening another agent replaces it.
+    /// an agent-scope presentation snapshot, followed by keyed transcript
+    /// patches. Opening another agent replaces it.
     OpenAgentTranscript {
         /// Exact agent id from the tree.
         agent_id: String,

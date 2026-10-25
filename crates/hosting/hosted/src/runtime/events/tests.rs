@@ -258,13 +258,13 @@ fn notice_intents_commit_by_scope_and_session_not_by_observation() {
     for scope in scopes {
         events.notice(TranscriptRow::warning(scope, format!("{scope:?}")));
     }
-    events.send(HostEvent::ChildLive {
-        agent_id: "c1".into(),
-        turn_id: "t1".into(),
-        op: Box::new(plakous_host_protocol::SessionObservation::Row(
-            TranscriptRow::info(NoticeScope::Tree, "a child's row"),
+    events.observe_agent(
+        "c1",
+        &plakous_host_protocol::SessionObservation::Row(TranscriptRow::info(
+            NoticeScope::Tree,
+            "a child's row",
         )),
-    });
+    );
     events.send(HostEvent::Row(TranscriptRow::info(
         NoticeScope::Turn,
         "stored by its producer",

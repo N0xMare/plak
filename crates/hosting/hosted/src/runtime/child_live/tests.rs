@@ -265,6 +265,8 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
     let rows = rows_from_items(
         &[
             TranscriptRead {
+                position: 0,
+                part_offset: 0,
                 actor: Actor::Assistant,
                 harness_authored: false,
                 parts: vec![TranscriptPart::Call {
@@ -277,6 +279,8 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
                 }],
             },
             TranscriptRead {
+                position: 0,
+                part_offset: 0,
                 actor: Actor::Tool,
                 harness_authored: false,
                 parts: vec![TranscriptPart::Result {
@@ -288,6 +292,8 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
                 }],
             },
             TranscriptRead {
+                position: 0,
+                part_offset: 0,
                 actor: Actor::Assistant,
                 harness_authored: false,
                 parts: vec![TranscriptPart::Call {
@@ -300,6 +306,8 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
                 }],
             },
             TranscriptRead {
+                position: 0,
+                part_offset: 0,
                 actor: Actor::Tool,
                 harness_authored: false,
                 parts: vec![TranscriptPart::Result {
@@ -410,6 +418,8 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
         let rows = rows_from_items(
             &[
                 TranscriptRead {
+                    position: 0,
+                    part_offset: 0,
                     actor: Actor::Assistant,
                     harness_authored: false,
                     parts: vec![
@@ -432,6 +442,8 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
                     ],
                 },
                 TranscriptRead {
+                    position: 0,
+                    part_offset: 0,
                     actor: Actor::Tool,
                     harness_authored: false,
                     parts: vec![TranscriptPart::Result {
@@ -585,9 +597,9 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
         &sender,
     );
     let mut ops = Vec::new();
-    let first = next_agent_transcript(&received, &mut ops).await;
+    let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
+    let first = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert!(ops.is_empty(), "{ops:?}");
-    assert_eq!(first.live_turn_id, Some(turn.id().to_string()));
     assert!(
         first
             .rows
@@ -597,8 +609,7 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
     );
     let gap = next_event(&received).await;
     assert!(
-        matches!(&gap, HostEvent::ChildLive { agent_id, turn_id, op }
-        if agent_id.as_str() == "c1" && *turn_id == turn.id().to_string() && **op == HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP))),
+        matches!(&gap, HostEvent::TranscriptPatch(patch) if patch.scope == TranscriptScope::Agent("c1".into()) && carries_text(&gap, GAP)),
         "{gap:?}"
     );
     let ops = transcript_ops(
@@ -736,15 +747,55 @@ async fn next_event(received: &crate::surface_protocol::HostEventReceiver) -> Ho
     .expect("an observation")
 }
 
+#[derive(Debug)]
+struct TestView {
+    agent_id: String,
+    rows: Vec<TranscriptRow>,
+    note: Option<String>,
+}
+
 async fn next_agent_transcript(
     received: &crate::surface_protocol::HostEventReceiver,
+    state: &mut plakous_host_protocol::views::transcript::TranscriptState,
     ops: &mut Vec<HostEvent>,
-) -> AgentTranscript {
+) -> TestView {
     loop {
-        match next_event(received).await {
-            HostEvent::AgentTranscript(view) => return view,
-            other => ops.push(other),
+        let event = next_event(received).await;
+        let settled = match &event {
+            HostEvent::PresentationSnapshot(snapshot) => {
+                state.replace(snapshot.clone()).unwrap();
+                true
+            }
+            HostEvent::TranscriptPatch(patch) => {
+                state.apply(patch.clone()).unwrap();
+                !patch.deletes.is_empty()
+                    || patch.upserts.is_empty()
+                    || patch
+                        .upserts
+                        .iter()
+                        .any(|item| item.key.anchor < 1_u64 << 63)
+            }
+            _ => false,
+        };
+        if settled {
+            let TranscriptScope::Agent(agent_id) = state.scope() else {
+                panic!("agent scope");
+            };
+            let mut rows: Vec<_> = state.items().values().cloned().collect();
+            let note = rows
+                .iter()
+                .position(|row| {
+                    row.text()
+                        .is_some_and(|text| text.starts_with("transcript unavailable:"))
+                })
+                .map(|index| rows.remove(index).text().unwrap().to_owned());
+            return TestView {
+                agent_id: agent_id.clone(),
+                rows,
+                note,
+            };
         }
+        ops.push(event);
     }
 }
 
@@ -752,6 +803,10 @@ fn carries_text(op: &HostEvent, text: &str) -> bool {
     match op {
         HostEvent::AssistantDelta(delta) => delta.contains(text),
         HostEvent::Row(row) => row.text().is_some_and(|value| value.contains(text)),
+        HostEvent::TranscriptPatch(patch) => patch
+            .upserts
+            .iter()
+            .any(|item| item.row.text().is_some_and(|value| value.contains(text))),
         _ => false,
     }
 }
@@ -798,10 +853,10 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
         &sender,
     );
     let mut ops = Vec::new();
-    let first = next_agent_transcript(&received, &mut ops).await;
+    let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
+    let first = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert!(ops.is_empty(), "{ops:?}");
     assert_eq!(first.agent_id, "c1");
-    assert_eq!(first.live_turn_id, Some(turn.id().to_string()));
     assert_eq!(first.note, None);
     assert!(
         first.rows.contains(&TranscriptRow::user("prefix")),
@@ -820,9 +875,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     turn.control().cancel().await.unwrap();
     turn.result().await.unwrap();
-    let ended = next_agent_transcript(&received, &mut ops).await;
-    let turn_id_text = turn_id.to_string();
-    assert_eq!(ended.live_turn_id, None, "{ended:?}");
+    let ended = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert!(
         ended
             .rows
@@ -830,15 +883,10 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     );
     assert_ne!(ops, [] as [plakous_host_protocol::SessionObservation; 0]);
     for op in &ops {
-        let HostEvent::ChildLive {
-            agent_id,
-            turn_id,
-            op,
-        } = op
-        else {
-            panic!("only ChildLive ops follow the transcript: {op:?}");
+        let HostEvent::TranscriptPatch(patch) = op else {
+            panic!("agent patch: {op:?}");
         };
-        assert_eq!((agent_id.as_str(), turn_id), ("c1", &turn_id_text));
+        assert_eq!(patch.scope, TranscriptScope::Agent("c1".to_owned()));
         assert!(!carries_text(op, "committed prefix"), "{op:?}");
     }
     assert!(received.try_recv().is_err(), "the turn's end re-sends once");
@@ -846,8 +894,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     let follow_up = agent.prompt("again").await.unwrap();
     observations.sync_children(vec![("c1".to_owned(), follow_up.id(), agent.clone())]);
     ops.clear();
-    let next = next_agent_transcript(&received, &mut ops).await;
-    assert_eq!(next.live_turn_id, Some(follow_up.id().to_string()));
+    let next = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert!(
         next.rows.contains(&TranscriptRow::user("prefix")),
         "{next:?}"
@@ -871,7 +918,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     assert!(
         received.try_iter().all(|event| !matches!(
             event,
-            HostEvent::ChildLive { .. } | HostEvent::AgentTranscript(_)
+            HostEvent::TranscriptPatch(_) | HostEvent::PresentationSnapshot(_)
         )),
         "nothing arrives for a closed view"
     );
@@ -953,12 +1000,16 @@ async fn unknown_root_unbound_and_another_trees_agents_answer_with_a_note() {
                 &sender,
             )
             .await;
-        let HostEvent::AgentTranscript(view) = next_event(&received).await else {
+        let HostEvent::PresentationSnapshot(view) = next_event(&received).await else {
             panic!("an agent transcript answers");
         };
-        assert_eq!(view.agent_id, agent_id);
-        assert!(view.rows.is_empty() && view.live_turn_id.is_none());
-        assert!(view.note.is_some(), "{agent_id}");
+        assert_eq!(view.scope, TranscriptScope::Agent(agent_id.to_owned()));
+        assert!(
+            view.items
+                .iter()
+                .any(|item| matches!(item.row, TranscriptRow::Notice(_))),
+            "{agent_id}"
+        );
         assert!(observations.agent_view.is_none());
     }
     turn.control().cancel().await.unwrap();
@@ -991,11 +1042,15 @@ async fn turn_end_resend_holds_the_finished_turn() {
         &sender,
     );
     let mut ops = Vec::new();
-    let first = next_agent_transcript(&received, &mut ops).await;
-    assert_eq!(first.live_turn_id, Some(turn.id().to_string()), "{first:?}");
+    let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
+    let first = next_agent_transcript(&received, &mut state, &mut ops).await;
     turn.result().await.unwrap();
-    let ended = next_agent_transcript(&received, &mut ops).await;
-    assert_eq!(ended.live_turn_id, None, "{ended:?}");
+    let ended = next_agent_transcript(&received, &mut state, &mut ops).await;
+    assert!(
+        first
+            .rows
+            .contains(&TranscriptRow::assistant("committed prefix"))
+    );
     assert!(
         ended.rows.contains(&TranscriptRow::user("live")),
         "{:?}",
@@ -1065,8 +1120,8 @@ async fn a_commit_while_the_view_opens_is_in_its_rows() {
         &sender,
     );
     let mut ops = Vec::new();
-    let first = next_agent_transcript(&received, &mut ops).await;
-    assert_eq!(first.live_turn_id, Some(turn.id().to_string()), "{first:?}");
+    let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
+    let first = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert!(
         first.rows.iter().any(|row| row
             .as_tool()
@@ -1102,23 +1157,35 @@ async fn a_failed_read_keeps_the_last_good_rows_and_stale_serves_send_nothing() 
         task_tools: false,
     };
     let rows = vec![TranscriptRow::user("kept")];
+    let items = vec![TranscriptItem {
+        key: crate::sessions::projector::RowKey::new(
+            1,
+            crate::sessions::projector::Lane::Runtime,
+            0,
+        ),
+        row: rows[0].clone(),
+    }];
     let mut ops = Vec::new();
-    assert!(context.send_transcript(Ok(rows.clone()), None));
-    let good = next_agent_transcript(&received, &mut ops).await;
+    let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
+    assert!(context.send_transcript(Ok(items.clone()), true));
+    let good = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert_eq!((good.rows.clone(), good.note.clone()), (rows.clone(), None));
-    assert!(context.send_transcript(Err("transcript unavailable: gone".to_owned()), None));
-    let failed = next_agent_transcript(&received, &mut ops).await;
+    assert!(context.send_transcript(Err("transcript unavailable: gone".to_owned()), true));
+    let failed = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert_eq!(failed.rows, rows);
     assert_eq!(failed.note.as_deref(), Some("transcript unavailable: gone"));
 
     gate.bump();
-    let stale = vec![TranscriptRow::user("stale")];
-    assert!(!context.send_transcript(Ok(stale), None));
-    assert!(!(context.emitter(turn.id()))(HostEvent::AssistantDone));
+    let retired = vec![TranscriptItem {
+        row: TranscriptRow::user("stale"),
+        ..items[0].clone()
+    }];
+    assert!(!context.send_transcript(Ok(retired), true));
+    assert!(!(context.emitter())(HostEvent::AssistantDone));
     assert!(received.try_recv().is_err(), "a stale serve sends nothing");
     assert_eq!(
         *context.last_good.lock().unwrap(),
-        Some(rows),
+        Some(items),
         "a stale serve's rows are not the view's last good rows"
     );
     turn.control().cancel().await.unwrap();
@@ -1304,24 +1371,26 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
         &sender,
     );
     let mut ops = Vec::new();
+    let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
     let held = |rows: &[TranscriptRow]| {
         rows.iter()
             .find_map(TranscriptRow::as_tool)
             .filter(|tool| tool.name == "held_tool")
             .map(|tool| tool.state.clone())
     };
-    let first = next_agent_transcript(&received, &mut ops).await;
-    assert_eq!(first.live_turn_id, Some(turn.id().to_string()), "{first:?}");
+    let first = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert_eq!(held(&first.rows), None, "{:?}", first.rows);
     let gap = next_event(&received).await;
     assert!(
-        matches!(&gap, HostEvent::ChildLive { op, .. } if carries_text(op, GAP)),
+        matches!(&gap, HostEvent::TranscriptPatch(_) if carries_text(&gap, GAP)),
         "{gap:?}"
     );
+    if let HostEvent::TranscriptPatch(patch) = gap {
+        state.apply(patch).unwrap();
+    }
     release.notify_one();
     turn.result().await.unwrap();
-    let ended = next_agent_transcript(&received, &mut ops).await;
-    assert_eq!(ended.live_turn_id, None, "{ended:?}");
+    let ended = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert_eq!(
         held(&ended.rows).as_deref(),
         Some("succeeded"),

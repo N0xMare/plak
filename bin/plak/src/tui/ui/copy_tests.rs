@@ -3,9 +3,7 @@
 
 use super::App;
 use super::test_support::{left_mouse, say, transcript_fixture};
-use crate::tui::HostEvent;
 use crossterm::event::{MouseButton, MouseEventKind};
-use plakous_host_protocol::views::AgentTranscript;
 use plakous_host_protocol::views::transcript::TranscriptRow;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -238,14 +236,13 @@ fn agent_transcript_copy_drops_the_same_code_rails() {
     const HEIGHT: u16 = 40;
     let mut app = transcript_fixture();
     app.open_agent_view("agent-c3".into(), "#c3 · reviewer".into());
-    app.apply_host_event(HostEvent::AgentTranscript(AgentTranscript {
-        agent_id: "agent-c3".into(),
-        rows: vec![TranscriptRow::Assistant {
+    app.apply_host_event(super::test_support::agent_snapshot(
+        "agent-c3",
+        1,
+        vec![TranscriptRow::Assistant {
             text: fenced("bash", SHELL),
         }],
-        live_turn_id: None,
-        note: None,
-    }));
+    ));
     paint(&mut app, WIDTH, HEIGHT);
     let rows = plain(&app);
     let claude = rows_containing(&rows, "plak logout claude");

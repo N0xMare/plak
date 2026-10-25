@@ -35,7 +35,6 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::JobStarted { .. } => "job_started",
         SessionObservation::JobPromoted { .. } => "job_promoted",
         SessionObservation::JobTerminal { .. } => "job_terminal",
-        SessionObservation::ChildLive { .. } => "child_live",
         SessionObservation::PresentationSnapshot(_) => "presentation",
         SessionObservation::TranscriptPatch(_) => "transcript_patch",
         SessionObservation::ProviderSnapshot { .. } => "provider_snapshot",
@@ -86,7 +85,6 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::SessionOpened { .. } => "session_opened",
         SessionObservation::TopologyNavigatorSnapshot(_) => "tree",
         SessionObservation::CallDetail(_) => "call_detail",
-        SessionObservation::AgentTranscript(_) => "agent_transcript",
         SessionObservation::TopologyNavigatorUnavailable { .. } => "tree_unavailable",
         SessionObservation::PendingContinuation { .. } => "pending_continuation",
         SessionObservation::LastUserPromptAt(_) => "last_user_prompt_at",
@@ -569,8 +567,6 @@ pub fn project_host_event<P: ProtocolExtension>(
         | SessionObservation::ModelRequestStarted
         | SessionObservation::SessionOpened { .. }
         | SessionObservation::CallDetail(_)
-        | SessionObservation::AgentTranscript(_)
-        | SessionObservation::ChildLive { .. }
         | SessionObservation::PendingContinuation { .. }
         | SessionObservation::LastUserPromptAt(_)
         | SessionObservation::Extension(_) => return None,
@@ -586,28 +582,6 @@ mod tests {
     use crate::intent::{Core, ObservationExtension, ProtocolExtension};
     use crate::observation::{SessionObservation, TurnLifecycle, TurnPhase};
     use crate::views::transcript::{NoticeScope, TranscriptRow};
-
-    #[test]
-    fn child_live_is_addressed_in_process_and_omitted_from_jsonl_v1() {
-        let event: SessionObservation = SessionObservation::ChildLive {
-            agent_id: "c1".into(),
-            turn_id: "turn-c1".into(),
-            op: Box::new(SessionObservation::AssistantDelta("child text".into())),
-        };
-        assert_eq!(host_event_kind(&event), "child_live");
-        assert!(
-            project_host_event(
-                &event,
-                JsonlCorrelation {
-                    prompt_id: Some("root-command"),
-                    omit_unknown_turn_id: false,
-                    command_id: None,
-                    pending_tree_snapshot_id: None,
-                }
-            )
-            .is_none()
-        );
-    }
 
     #[test]
     fn last_user_prompt_time_is_in_process_and_omitted_from_jsonl_v1() {

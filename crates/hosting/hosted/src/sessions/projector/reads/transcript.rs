@@ -31,6 +31,8 @@ pub(crate) enum TranscriptPart<'a> {
 }
 
 pub(crate) struct TranscriptRead<'a> {
+    pub(crate) position: u64,
+    pub(crate) part_offset: u32,
     pub(crate) actor: Actor,
     pub(crate) harness_authored: bool,
     pub(crate) parts: Vec<TranscriptPart<'a>>,
@@ -41,6 +43,8 @@ fn transcript_item<'a>(
     owner: impl Fn(CallId) -> Option<CallId> + 'a,
 ) -> TranscriptRead<'a> {
     TranscriptRead {
+        position: item.position(),
+        part_offset: item.part_offset(),
         actor: item.actor(),
         harness_authored: item.is_harness_authored(),
         parts: transcript_parts(item, owner).collect(),

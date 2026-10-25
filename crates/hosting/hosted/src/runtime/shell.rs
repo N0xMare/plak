@@ -274,14 +274,11 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
         }
         UserAction::RefreshReadiness => state.readiness.start(config),
         UserAction::OpenAgentTranscript { agent_id } => {
-            let _ = events.send(HostEvent::AgentTranscript(
-                plakous_host_protocol::views::AgentTranscript {
-                    agent_id,
-                    rows: Vec::new(),
-                    live_turn_id: None,
-                    note: Some("no session is attached yet".to_owned()),
-                },
-            ));
+            super::child_live::send_agent_transcript(
+                events,
+                &agent_id,
+                Err("no session is attached yet".to_owned()),
+            );
         }
         UserAction::CloseAgentTranscript => {}
         UserAction::ResyncTranscript { scope } => {

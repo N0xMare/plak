@@ -8,7 +8,6 @@ use std::time::Instant;
 
 use super::App;
 use crate::tui::{UserAction, UserActionSender};
-use plakous_host_protocol::views::transcript::TranscriptRow;
 use plakous_host_protocol::views::transcript::{TranscriptScope, TranscriptState};
 
 use crate::tui::blocks::{self, ScrollBlock, TranscriptChange, TranscriptRenderCache};
@@ -98,8 +97,6 @@ pub(super) struct AgentView {
     pub(super) agent_id: String,
     /// The label the Agents list shows for this agent.
     pub(super) label: String,
-    /// The agent's live turn whose ops follow its committed rows.
-    live_turn: Option<String>,
     /// Bumped for every fresh agent pane. A pane installed for the agent
     /// the host already serves (Esc then Enter, or A -> B -> A, within one
     /// loop pass) is empty and has to be fetched again.
@@ -208,7 +205,6 @@ impl App {
                 self.agent_pane_serial += 1;
                 view.agent_id = agent_id;
                 view.label = label;
-                view.live_turn = None;
                 view.serial = self.agent_pane_serial;
                 self.pane = TranscriptPane::new(Vec::new());
             }
@@ -218,7 +214,6 @@ impl App {
                 self.agent_view = Some(AgentView {
                     agent_id,
                     label,
-                    live_turn: None,
                     serial: self.agent_pane_serial,
                     hidden: root,
                     root_in_front: false,
@@ -243,48 +238,6 @@ impl App {
         // Render preferences may have changed while the root pane was hidden.
         self.mark_transcript_structural();
         true
-    }
-
-    /// Whether `turn_id` is the live turn of the agent on screen, so its ops
-    /// apply to the agent pane.
-    pub(super) fn shows_live_turn(&self, agent_id: &str, turn_id: &str) -> bool {
-        self.viewed_agent_id() == Some(agent_id)
-            && self
-                .agent_view
-                .as_ref()
-                .is_some_and(|view| view.live_turn.as_deref() == Some(turn_id))
-    }
-
-    /// Replaces the open agent view's rows with that agent's committed
-    /// history, converted exactly as the root's restored snapshot is, and
-    /// binds the live turn whose ops follow. A `note` renders as a notice
-    /// row. The camera keeps its anchor, or
-    /// follows the tail when it was there. Rows for an agent not on screen
-    /// are dropped.
-    pub(super) fn replace_agent_rows(
-        &mut self,
-        agent_id: &str,
-        rows: Vec<TranscriptRow>,
-        live_turn: Option<String>,
-        note: Option<String>,
-    ) {
-        // `viewed_agent_id` is `None` while the root pane is swapped in, so
-        // agent rows never land in it.
-        if self.viewed_agent_id() != Some(agent_id) {
-            return;
-        }
-        if let Some(view) = self.agent_view.as_mut() {
-            view.live_turn = live_turn;
-        }
-        self.pane.tool_started.clear();
-        self.pane.thinking_started.clear();
-        self.pane.assistant_stream_active = false;
-        self.restore_tip_clocks(&rows);
-        let mut blocks = blocks::blocks_from_rows(rows);
-        blocks.extend(note.map(ScrollBlock::System));
-        let old = std::mem::replace(&mut self.pane.blocks, blocks);
-        self.carry_item_state(&old);
-        self.mark_transcript_replaced();
     }
 
     /// Carries what the operator did to the agent's rows across a re-sent

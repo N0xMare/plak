@@ -1798,6 +1798,11 @@ deriving identities from vector positions. The synthetic session header uses
 presented at `(0, runtime, 1)`, without changing the stored key. Live rows not
 yet replaced by their projector rows use an attachment-local, non-persisted
 key namespace (anchors starting at 2^63).
+Tool expansion, detail and timing use semantic call identity (`call_id`), so
+they survive the provisional key's replacement at settlement. A provisional
+thinking row without elapsed time is still streaming, while a canonical
+thinking row without a recorded duration is sealed. Resync preserves live
+clocks; a sealed-thinking patch retires that live clock.
 An unsaved notice receives its provisional identity once; projector reloads
 carry that identity with the pending notice rather than allocating one from
 the rebuilt window length. Skipped headers and blank thinking rows claim no
@@ -2829,12 +2834,11 @@ tree does after that.
 
 ### 4.3 The JSONL host
 
-Live child transcript operations (`ChildLive`) and the agent transcript
-(`OpenAgentTranscript`, `CloseAgentTranscript`, and the `AgentTranscript`
-answer; chapter 03 §16) are in-process observations/intents: JSONL v1 does not
-project them into root assistant/tool/usage lines. `schema_v` stays 1.
-Keyed `TranscriptPatch` observations and `ResyncTranscript` intents are also
-in-process only, with no JSONL v1 event or command kind.
+Agent transcript intents (`OpenAgentTranscript`, `CloseAgentTranscript`;
+chapter 03 §16), scoped presentation snapshots, keyed `TranscriptPatch`
+observations and `ResyncTranscript` intents are in-process only. JSONL v1 does
+not project them into root assistant/tool/usage lines or introduce an event or
+command kind. `schema_v` stays 1.
 The existing `tree` row gains optional `live_progress` with `turn_id`, `activity`,
 `tool_calls`, `last_activity_unix_ms`, `input_tokens`, `output_tokens`,
 `reasoning_tokens`, `cached_input_tokens`, and `cache_write_tokens`. It is absent
@@ -5090,11 +5094,11 @@ return. Scrolling, selection, copy, folding and
 item detail act on the transcript on screen; an agent's item detail asks the
 host with its agent id and is cached per session, agent and call. Showing an
 agent sends the in-process `OpenAgentTranscript` intent and leaving the view
-sends `CloseAgentTranscript`. Each `AgentTranscript` observation for the agent
-on screen replaces the view's rows (its fail-closed note becomes a notice row)
-and names the live turn whose `ChildLive` ops then apply to the view through
-the root's live-transcript path; ops of any other agent or turn are dropped,
-and none ever reaches the root transcript or the root turn's HUD clocks.
+sends `CloseAgentTranscript`. The attachment is an agent-scope presentation
+snapshot; subsequent keyed patches apply through the same reducer as the root.
+A failed read supplies a notice row beside the last good rows. Updates for any
+other agent are dropped; a revision gap requests resync, never blind folding.
+No agent update reaches the root transcript or the root turn's HUD clocks.
 
 The list **observes**. It never asks the operator to adopt, discard, or
 choose between candidates; the root agent is the only interface for those. It
