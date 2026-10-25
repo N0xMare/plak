@@ -57,6 +57,8 @@ pub enum TopologyCallFacts {
     AdoptConflict {
         /// Every conflicting path, as the VCS named it.
         paths: Vec<String>,
+        /// New pinned resolution input, absent for a plain refusal.
+        candidate: Option<String>,
     },
 }
 
@@ -66,7 +68,10 @@ impl TopologyCallFacts {
         match self {
             Self::Wait(result) => result.to_string().len(),
             Self::Adopted { .. } => size_of::<u32>(),
-            Self::AdoptConflict { paths } => paths.iter().map(String::len).sum(),
+            Self::AdoptConflict { paths, candidate } => {
+                paths.iter().map(String::len).sum::<usize>()
+                    + candidate.as_ref().map_or(0, String::len)
+            }
         }
     }
 }

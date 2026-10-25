@@ -285,6 +285,7 @@ impl ProductAgentTree {
                 let protected = self.candidates.values().any(|candidate| {
                     candidate.producing_agent_id == ticket.agent_id
                         && candidate.adopted_by.is_none()
+                        && candidate.adopted_via.is_none()
                         && candidate.content != candidate.base_content
                         && !self.input_was_relinquished(candidate)
                 });
@@ -373,6 +374,7 @@ impl ProductAgentTree {
             .filter(|candidate| {
                 candidate.producing_agent_id == ticket.agent_id
                     && candidate.adopted_by.is_none()
+                    && candidate.adopted_via.is_none()
                     && candidate.content != candidate.base_content
                     && !self.input_was_relinquished(candidate)
             })

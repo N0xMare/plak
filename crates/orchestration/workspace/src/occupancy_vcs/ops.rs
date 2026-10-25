@@ -25,6 +25,14 @@ pub struct MintRequest<'a> {
 
 /// One three-way landing and the identity of its retained provenance.
 pub struct AdoptRequest<'a> {
+    /// Explicit permission to land marker-bearing work.
+    pub accept_conflicts: bool,
+    /// Reserved id for a new textual conflict, absent on resolution retries.
+    pub conflict_pin: Option<&'a super::ConflictPin>,
+    /// Paths whose markers a resolver must remove unless explicitly accepted.
+    pub resolver_paths: &'a [String],
+    /// Original candidate accepted by a conflict resolution.
+    pub resolved_source: Option<super::ResolvedSource<'a>>,
     /// Checkout receiving the patch.
     pub target_path: &'a Path,
     /// Copy that produced the candidate.

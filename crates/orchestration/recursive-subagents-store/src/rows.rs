@@ -523,12 +523,32 @@ pub fn load_agent_tree(
     let mut candidates = BTreeMap::new();
     let mut candidate_statement = tx
         .prepare(
-            "SELECT candidate_id, workspace_id, producing_agent_id, producing_attempt_id, base_commit, base_content, base_change_id, commit_id, content, change_id, sealed_at, adopted_by, adopted_evidence, merged_at, target_before FROM agent_candidates WHERE tree_id=?1",
+            "SELECT candidate_id, workspace_id, producing_agent_id, producing_attempt_id, base_commit, base_content, base_change_id, commit_id, content, change_id, sealed_at, adopted_by, adopted_evidence, merged_at, target_before, kind, source_candidate_id, conflict_target, conflict_paths, resolves, adopted_via FROM agent_candidates WHERE tree_id=?1",
         )
         .map_err(|_| "could not query agent candidates".to_owned())?;
     let candidate_rows = candidate_statement
         .query_map([tree_id], |row| {
             Ok(CandidateRecord {
+                kind: parse_sql_enum(&row.get::<_, String>(15)?)?,
+                source_candidate_id: row
+                    .get::<_, Option<String>>(16)?
+                    .map(CandidateId::from_persisted),
+                conflict_target: row.get(17)?,
+                conflict_paths: serde_json::from_str(&row.get::<_, String>(18)?).map_err(
+                    |error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            18,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    },
+                )?,
+                resolves: row
+                    .get::<_, Option<String>>(19)?
+                    .map(CandidateId::from_persisted),
+                adopted_via: row
+                    .get::<_, Option<String>>(20)?
+                    .map(CandidateId::from_persisted),
                 candidate_id: CandidateId::from_persisted(row.get::<_, String>(0)?),
                 workspace_id: row.get(1)?,
                 producing_agent_id: row.get(2)?,

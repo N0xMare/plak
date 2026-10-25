@@ -530,6 +530,12 @@ is `input_not_sealed`, not `candidate_unknown` — an attempt id is a legal thin
 to name and simply has not sealed. Inherit (the default) with any input is
 `schema_mismatch`: a candidate needs a minted copy, so pass `workspace=fork`.
 
+A textual Git conflict candidate is also a valid input. Its resolver starts
+with the pinned conflicted files, but its recorded merge base and copy-base
+pin are the original adopter's target snapshot, not the marker-bearing input.
+The resolver's sealed work records `resolves` as the original source candidate.
+Only that conflict's target may adopt its resolution.
+
 ### 4.2 `list_agents`
 
 JJ ahead counts non-empty commits in `base..@`. Behind counts non-empty
@@ -565,6 +571,13 @@ by (parent path, base); the cache is never reused by a later render.
 A row that names `candidate` also names non-empty `candidate_commit` and
 `candidate_base` from that record. Compare those immutable snapshots using
 the checkout's VCS (`git diff <candidate_base> <candidate_commit>` on Git).
+Candidate-bearing rows expose `candidate_kind` (`work` or `conflict`), and applicable
+`source_candidate`, `conflict_target`, `conflict_paths`, `resolves` and
+`adopted_via`. `candidates` lists retained unadopted candidate objects with
+the same metadata and immutable commit/base ids, including conflict candidates
+which do not replace the attempt's ordinary candidate. A displayed conflict-path
+list keeps at most 16 whole `{path, kind}` entries and marks truncation;
+the durable record retains every path.
 
 Arguments, optional booleans: `include_self`, `include_completed`, `include_read`.
 
@@ -1049,7 +1062,9 @@ refused calls; a differing retry of the same operation id requires recovery.
 
 ### 4.7 `adopt_candidate`
 
-`{ candidate_id, expected_target?, evidence?: [attempt_id] }`. Receipt:
+`{ candidate_id, expected_target?, evidence?: [attempt_id], accept_conflicts?: bool }`.
+`accept_conflicts` defaults false. It explicitly allows text markers into the
+caller's checkout, including the root's launch checkout. Receipt:
 `{ candidate_id, target_before, target_after, files_changed, files?,
 files_truncated? }`. `files` names at most 64 paths as `"M src/lib.rs"` or
 `"R old.rs -> new.rs"`; `files_changed` is the full count and
@@ -1767,14 +1782,14 @@ receipts, command and acknowledged mail records. A durable allocation watermark
 prevents reuse of collected child identities and does not refund spent attempts.
 Immutable receipts belonging to still-retained callers remain replay authority.
 
-Retention never deletes work. Unadopted, nonempty candidate refs never expire
+Retention never deletes work. Unadopted, nonsuperseded, nonempty candidate refs never expire
 automatically: only explicit discard or user deletion relinquishes them.
 After conversation retirement, keep each such candidate plus a minimal listable
 closed child record naming all retained candidates, and minimal ancestor rows
 needed to retain their tree membership. It says the conversation
 was retired, accepts no follow-up, and remains adoptable and usable as spawn
 inputs. Each collected candidate releases its candidate, candidate-base and
-adopted-before/after refs together. Adopted and empty refs may be collected; their exact unpin intents stay
+adopted-before/after refs together. Adopted, superseded and empty refs may be collected; their exact unpin intents stay
 until cleanup succeeds. Unknown ignored/secret or uncertain checkout contents
 prevent sealing, reclamation and retirement, regardless of either bound.
 Bounds are soft where safe collection is unavailable or protected work remains.
@@ -1795,7 +1810,7 @@ up through the same idempotent rule.
 
 ## 7. Adoption
 
-`adopt_candidate { candidate_id, expected_target?, evidence? }` lands a sealed
+`adopt_candidate { candidate_id, expected_target?, evidence?, accept_conflicts? }` lands a sealed
 candidate into the **caller's own copy**, which is canonical for its subtree;
 the root lands into the launch checkout. Integration is three-way, with the
 candidate's recorded base as the merge base, against the *current* target
@@ -1811,8 +1826,11 @@ Three rules govern every landing:
   commit freely on `plak/<tree8>/<agent_id>` branches inside `.plak/`. Commit, push, and
   pull request happen only when the user instructs the root, which then uses the
   `git`, `gh`, or `jj` CLIs itself. **Plak ships no commit or PR tool.**
-- **A conflict never destroys the only copy.** Conflicts stay in the retained
-  child copy and are a failed result, never a success status.
+- **A conflict never destroys the only copy or lands implicitly.** A textual
+  Git conflict pins a separate conflict candidate and fails without changing
+  the target. Markers land only with explicit `accept_conflicts=true`.
+  Non-textual or mixed conflicts remain plain failed results; all child files
+  remain untouched.
 
 Admission runs under the tree lock, the VCS landing runs unlocked under an
 `adopting` workspace status, and the outcome is recorded on re-lock. A reopen
@@ -1846,15 +1864,17 @@ full token, the commit alone, or the content alone. A mismatch is
    <candidate_commit>`.
 4. `git diff --no-ext-diff --no-textconv --name-status -z -M <target_tree>
    <merged_tree>` gives `files_changed` and the receipt's `files`. A rename is
-   `R <old> -> <new>`. A zero count lands nothing and reports
-   `target_after == target_before`.
+   `R <old> -> <new>`. A zero count lands no files but retains exact before/after
+   provenance through the ordinary wrapper publication.
 5. `git diff --no-ext-diff --no-textconv --binary -M <target_tree> <merged_tree>`
    produces the patch; a repository-configured diff driver or textconv filter
    never runs and never alters the patch.
 6. `git apply <patch>` in the caller's own path, the patch a `0600` file in a
    private directory — atomic by default,
    worktree-only, binary-safe, no commit.
-7. Snapshot the target again for `target_after`. The child copy is untouched.
+7. Wrap the exact merged tree, parented by the target snapshot, and atomically
+   publish before/after provenance plus the producing copy's advanced base.
+   The child copy is untouched.
 
 **Failure classification is typed, never collapsed.** `merge-tree` exiting
 **1** is `merge_conflict{paths, child_path}`. Each path carries the kind git
@@ -1875,6 +1895,46 @@ worktree moved under the adopt. Anything else — modes, line endings,
 permissions — is a typed VCS failure rather than a silent "target moved". That
 closes the snapshot-to-apply race without taking a second snapshot.
 
+**Textual conflict candidates.** When every conflicting path is `contents`
+or `add/add`, an ordinary Git adopt pins the conflicted tree as
+`<source>-x<ordinal>`, together with its target-snapshot base. The ordinal is
+reserved under the tree lock; only one adopt may own a source copy at a time.
+Publication uses a fixed-identity/date wrapper parented by that target snapshot,
+under the namespace lock, and one transaction for candidate and candidate-base
+refs. The target's files, index and HEAD are unchanged. The refusal names the
+new candidate and the resolver/accept recipes. Mixed or non-textual conflicts
+pin no candidate and retain the path/kind refusal.
+
+A conflict inherits its source's workspace, producer, attempt and retention
+authority, and records the exact target node and every conflict path/kind.
+The source remains directly adoptable until some acceptance succeeds.
+`spawn_agent {workspace:"fork", inputs:[conflict_id]}` starts a resolver over
+the marker-bearing snapshot with the original target snapshot as its merge
+base. A later landing therefore computes `current target + resolution - original
+target`, preserving later, nonconflicting target edits.
+Before landing a resolver, Git checks only its recorded conflict paths for
+lines starting `<<<<<<<` or `>>>>>>>` followed by a space or end of line.
+Remaining markers fail `merge_conflict` naming those paths, unless explicitly
+accepted. A conflict candidate itself requires `accept_conflicts=true`.
+A second merge conflict after the target moved is a plain refusal, not another
+conflict candidate.
+
+Acceptance through a conflict or resolver marks the source adopted with
+`adopted_via` naming that resolution, marks the conflict adopted, and advances
+the source copy's base/pin to the original source commit, never to the markers.
+A resolver's own base advances to its accepted work. Both workspaces hold
+`adopting` through the unlocked phase. The original source, its conflicts and
+other resolvers cannot be adopted again after acceptance; refusals name the
+accepting candidate when applicable. No commits enter the receiving branch.
+Every acceptance, including a direct source adoption, supersedes all remaining
+conflict candidates for that source and every unadopted resolver candidate.
+Superseded rows record the accepting id in `adopted_via` without `adopted_by`;
+they leave `list_agents`' `candidates` and no longer protect retention or count
+as unadopted maintenance artifacts. Normal producer collection queues their
+candidate and base refs for unpinning, just like other spent candidate records.
+A follow-up in the accepted resolver copy seals an ordinary delta over that
+advanced base, not another resolution of the original source.
+
 ### 7.3 The native JJ recipe
 
 Adoption merges the immutable recorded base tree, sealed candidate tree, and
@@ -1883,6 +1943,10 @@ history, and it never includes edits made after sealing. Conflicts return
 `merge_conflict` before any target checkout or transaction publication. A jj
 conflict names every path with kind `contents`; git is what names `binary`
 and `modify/delete`.
+JJ does not create conflict candidates. A JJ conflict with explicit
+`accept_conflicts` refuses `adopt_not_applicable` with
+`conflict candidates are not yet available for jj`; a clean ordinary JJ adopt
+still succeeds with that flag.
 
 The target is snapshotted, the expected target checked, and then the working
 copy is locked and re-snapshotted before publication. Working-file changes
@@ -1912,9 +1976,11 @@ Typed refusals: `not_sealed`, `not_authorized`, `candidate_unknown`,
 `merge_conflict{paths, child_path}`, `mint_unavailable`, and
 `adopt_not_applicable`.
 
-`adopt_not_applicable` covers five cases:
+`adopt_not_applicable` covers:
 
 - an already-adopted candidate;
+- a conflict or resolver belonging to a different `conflict_target`;
+- a resolution whose source was already accepted or explicitly discarded;
 - a node adopting its own candidate;
 - a copy whose recorded base is a previous candidate adopted by a **different** node,
   unless the caller already holds an adopted carrier of that base —
@@ -2804,7 +2870,7 @@ operator must not repair it by guessing a new tree locator.
 | `agent_operations` | `(tree_id, operation_id)` | the canonical request, its digest, the terminal code and response for replay, and paired nullable INTEGER `fold_anchor` / `fold_order` for host fold intents |
 | `agent_messages` | `(tree_id, message_id)` | body, `purpose` (including `followup` and the host-authored `result`), priority, reply link, disposition, durable state |
 | `agent_attempts` | `(tree_id, attempt_id)` | `AttemptStatus`, turn token and plain turn id, the 0–2 harness nudge count, `candidate_id`, `retry_of`, `request_key`, start and end stamps, the blocked reason, the failure `{kind, message}`, and the five usage counters; submitted output is derived from its intent |
-| `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, target-before snapshot commit, evidence |
+| `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, target-before snapshot commit, evidence, `kind` (`work\|conflict`), source candidate, conflict target and JSON path/kind array, `resolves`, `adopted_via` |
 | `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, nullable `input_candidate_id`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
 | `agent_commands` | `(tree_id, command_id)` | every runtime command the tree prepares — a root admission's result-mail batch, a child Start, wake, mail Start, followup or corrective round — with its recipient, attempt, kind, exact canonical text and message ids, all immutable; the tree's withdrawal of a command no fact settled; and, as a view, the fact the recipient's feed recorded for it (`accepted`, `rejected`, or `returned` by a withheld terminal) with the plain turn id it bound and nullable INTEGER `accepted_seq` |
 | `agent_feed_cursors` | `(tree_id, runtime_session_id)` | the last feed sequence the tree projector applied for that session, root or child |
@@ -3004,6 +3070,13 @@ returned is never marked active again. A running turn that no tree command
 admitted is left to recovery.
 
 ### 14.2 Settling `recovery_required`
+
+Conflict pinning and acceptance run under ordinary `adopting` workspace holds.
+An interrupted pin may exist without a candidate record: a later explicit
+conflicting adopt reuses that unrecorded ordinal and overwrites its pin pair,
+or orphan-reference maintenance removes it. Reopen never retries the landing.
+Resolution acceptance also holds the source workspace so its advanced base pin
+can be reconciled from the committed row after a cut.
 
 A failed retry of an unsettled interrupted adoption retains the `adopting` row
 and recovery hold for every failure outcome, including conflict, target changed,
@@ -4167,6 +4240,10 @@ as proof that cancellation completed.
 
 These are shipped gaps, stated so nothing above reads as a promise it does not
 keep.
+
+Conflict candidates, resolver marker checks and explicit marker acceptance are
+Git-only. JJ retains its plain conflict refusal; no non-textual conflict
+candidate is manufactured on either backend.
 
 1. **No depth-remaining term on the template card**, and no observed duration.
 2. **A snapshot copy minted over a candidate can answer `git status` with "no

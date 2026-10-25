@@ -201,6 +201,11 @@ one cross-build carrier (a build imports its own and the previous version).
   with a full-digest prefix collision guard. Base, candidate and landing
   provenance pins retain work independently of checkout removal. Submitted
   output is stored in its intent, not duplicated in attempt rows or submit receipts.
+  Schema 9 also records textual Git conflict candidates, their target and
+  resolver lineage, and `adopted_via`. A conflict leaves the checkout untouched;
+  resolve it in a fork over the named conflict candidate or explicitly land
+  markers with `adopt_candidate {accept_conflicts:true}`. Non-textual conflicts
+  and JJ retain plain conflict refusals.
 
 - Conversations carry across builds and configuration changes: `/reload` and
   `session import` move the full neutral conversation through export

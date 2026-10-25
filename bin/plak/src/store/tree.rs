@@ -607,6 +607,12 @@ mod tests {
             };
         }
         tree.insert_candidate_for_test(CandidateRecord {
+            kind: plakous_recursive_subagents::tree::CandidateKind::Work,
+            source_candidate_id: None,
+            conflict_target: None,
+            conflict_paths: Vec::new(),
+            resolves: None,
+            adopted_via: None,
             target_before: None,
             candidate_id: CandidateId::from_persisted("cand-c1-1".to_owned()),
             workspace_id: child.workspace.id.clone(),

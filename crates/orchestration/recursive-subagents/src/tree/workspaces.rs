@@ -778,7 +778,11 @@ impl ProductAgentTree {
                 if row.workspace_id == request.workspace_id {
                     continue;
                 }
-                let based_here = row
+                let based_here = row.input_candidate_id.as_ref().is_some_and(|input| {
+                    self.candidates
+                        .get(input)
+                        .is_some_and(|candidate| candidate.workspace_id == request.workspace_id)
+                }) || row
                     .base_commit
                     .as_ref()
                     .is_some_and(|base| sealed_here.contains(base));
@@ -852,12 +856,21 @@ impl ProductAgentTree {
 
     /// Records every path of a `merge_conflict` adopt refusal for the call
     /// that began the adopt.
-    pub(crate) fn record_adopt_conflict(&mut self, candidate_id: &str, paths: Vec<String>) {
-        self.adopt_conflicts.insert(candidate_id.to_owned(), paths);
+    pub(crate) fn record_adopt_conflict(
+        &mut self,
+        candidate_id: &str,
+        paths: Vec<String>,
+        conflict: Option<String>,
+    ) {
+        self.adopt_conflicts
+            .insert(candidate_id.to_owned(), (paths, conflict));
     }
 
     /// Takes the conflicting paths an adopt of `candidate_id` recorded.
-    pub(crate) fn take_adopt_conflict(&mut self, candidate_id: &str) -> Option<Vec<String>> {
+    pub(crate) fn take_adopt_conflict(
+        &mut self,
+        candidate_id: &str,
+    ) -> Option<(Vec<String>, Option<String>)> {
         self.adopt_conflicts.remove(candidate_id)
     }
 
@@ -1169,6 +1182,7 @@ impl ProductAgentTree {
         workspace: SpawnWorkspace,
         reserved_agent_id: &str,
         input_base: Option<&VcsSnapshot>,
+        input_id: Option<&str>,
     ) -> Result<WorkspacePlan, TopologyError> {
         let caller = self.node(caller_id)?;
         let inherit = workspace.is_inherit() && input_base.is_none();
@@ -1205,6 +1219,18 @@ impl ProductAgentTree {
             caller_path: caller.path.clone(),
             mode,
             input_base: input_base.cloned(),
+            merge_base: input_id
+                .and_then(|id| {
+                    self.candidates
+                        .get(&super::CandidateId::from_persisted(id.to_owned()))
+                })
+                .filter(|candidate| candidate.kind == super::CandidateKind::Conflict)
+                .map(|candidate| VcsSnapshot {
+                    commit: candidate.base_commit.clone(),
+                    content: candidate.base_content.clone(),
+                    change_id: candidate.base_change_id.clone(),
+                    ..VcsSnapshot::default()
+                }),
         }))
     }
 

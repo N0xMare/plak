@@ -201,15 +201,19 @@ pub(super) fn adopt_milestone(
     facts: TopologyCallFacts,
     producer: impl FnOnce(&str) -> Option<(String, Option<String>)>,
 ) -> Option<AgentMilestone> {
-    let (event, files, paths) = match facts {
+    let (event, files, paths, conflict_candidate) = match facts {
         TopologyCallFacts::Adopted { files_changed } => (
             MilestoneEvent::Adopted,
             Some(u64::from(files_changed)),
             Vec::new(),
+            None,
         ),
-        TopologyCallFacts::AdoptConflict { mut paths } => {
+        TopologyCallFacts::AdoptConflict {
+            mut paths,
+            candidate,
+        } => {
             paths.truncate(MAX_CONFLICT_PATHS);
-            (MilestoneEvent::AdoptConflict, None, paths)
+            (MilestoneEvent::AdoptConflict, None, paths, candidate)
         }
         TopologyCallFacts::Wait(_) => return None,
     };
@@ -222,7 +226,7 @@ pub(super) fn adopt_milestone(
         template,
         text: None,
         duration_ms: None,
-        candidate: Some(candidate.to_owned()),
+        candidate: Some(conflict_candidate.unwrap_or_else(|| candidate.to_owned())),
         files,
         paths,
     })
@@ -371,12 +375,14 @@ mod tests {
             "cand-c23-a1",
             TopologyCallFacts::AdoptConflict {
                 paths: vec!["src/lib.rs".to_owned(), "README.md".to_owned()],
+                candidate: Some("cand-c23-a1-x1".to_owned()),
             },
             producer,
         )
         .unwrap();
         assert_eq!(conflict.event, MilestoneEvent::AdoptConflict);
         assert_eq!(conflict.paths, ["src/lib.rs", "README.md"]);
+        assert_eq!(conflict.candidate.as_deref(), Some("cand-c23-a1-x1"));
         let unresolved = adopt_milestone(
             "cand-c7-a2",
             TopologyCallFacts::Adopted { files_changed: 1 },
@@ -406,6 +412,7 @@ mod tests {
             "cand-c23-a1",
             TopologyCallFacts::AdoptConflict {
                 paths: paths.clone(),
+                candidate: None,
             },
             |_| None,
         )

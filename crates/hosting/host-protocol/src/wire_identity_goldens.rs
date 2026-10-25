@@ -156,7 +156,7 @@ const TOPOLOGY_PAYLOAD_PINS: &[(&str, &str)] = &[
     ("workspace_id", r#"{"workspace_id":"w1"}"#),
     (
         "adopt_candidate/full",
-        r#"{"candidate_id":"cand-a2-1","expected_target":"0000000000000000000000000000000000000000","evidence":["a3-1"]}"#,
+        r#"{"accept_conflicts":true,"candidate_id":"cand-a2-1","expected_target":"0000000000000000000000000000000000000000","evidence":["a3-1"]}"#,
     ),
     ("adopt_candidate/minimal", r#"{"candidate_id":"cand-a2-1"}"#),
     (
@@ -497,6 +497,7 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "adopt_candidate/full",
         &encoded(&AdoptCandidateRequest {
+            accept_conflicts: true,
             candidate_id: CandidateId::from_persisted("cand-a2-1".to_owned()),
             expected_target: Some("0".repeat(40)),
             evidence: Some(vec!["a3-1".into()]),
@@ -508,6 +509,7 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "adopt_candidate/minimal",
         &encoded(&AdoptCandidateRequest {
+            accept_conflicts: false,
             candidate_id: CandidateId::from_persisted("cand-a2-1".to_owned()),
             expected_target: None,
             evidence: None,

@@ -126,6 +126,10 @@ pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Valu
         TopologyKind::Adopt => object_schema(
             json!({
                 "candidate_id": { "type": "string" },
+                "accept_conflicts": {
+                    "type": "boolean",
+                    "description": "Explicitly accept text conflict markers into your checkout. Required for a conflict candidate or an unresolved resolver."
+                },
                 "expected_target": {
                     "type": "string",
                     "description": "Snapshot of your copy the adoption must land on; a moved copy is refused target_changed."

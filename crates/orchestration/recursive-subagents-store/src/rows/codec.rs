@@ -426,6 +426,12 @@ impl Row for CandidateRecord {
             "adopted_evidence",
             "merged_at",
             "target_before",
+            "kind",
+            "source_candidate_id",
+            "conflict_target",
+            "conflict_paths",
+            "resolves",
+            "adopted_via",
         ],
     };
 
@@ -461,6 +467,16 @@ impl Row for CandidateRecord {
                     .map_err(|_| "candidate evidence could not be encoded".to_owned())?,
                 candidate.merged_at,
                 candidate.target_before,
+                agent_tree_enum_text(candidate.kind)?,
+                candidate
+                    .source_candidate_id
+                    .as_ref()
+                    .map(CandidateId::as_str),
+                candidate.conflict_target,
+                serde_json::to_string(&candidate.conflict_paths)
+                    .map_err(|_| "candidate conflicts could not be encoded".to_owned())?,
+                candidate.resolves.as_ref().map(CandidateId::as_str),
+                candidate.adopted_via.as_ref().map(CandidateId::as_str),
             ],
         ))
     }

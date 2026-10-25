@@ -346,6 +346,7 @@ mod recovery_tests {
             .adopt_candidate(
                 "root",
                 &AdoptCandidateRequest {
+                    accept_conflicts: false,
                     candidate_id: id.clone(),
                     expected_target: None,
                     evidence: None,

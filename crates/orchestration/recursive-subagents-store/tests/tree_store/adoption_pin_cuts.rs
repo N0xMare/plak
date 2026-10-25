@@ -91,6 +91,7 @@ fn adoption_cut(jj: bool, cut: Cut) {
     tree.begin_adopt(
         "root",
         &AdoptCandidateRequest {
+            accept_conflicts: false,
             candidate_id: candidate.clone(),
             expected_target: None,
             evidence: None,
@@ -120,6 +121,7 @@ fn adoption_cut(jj: bool, cut: Cut) {
     let mut reopened = ProductAgentTree::reopen(store.load("pin-cuts").unwrap().unwrap());
     let expected = row_base(&reopened, &child.workspace.id);
     let retry = (!jj && cut == Cut::AfterLanding).then_some(AdoptCandidateRequest {
+        accept_conflicts: false,
         candidate_id: candidate,
         expected_target: None,
         evidence: None,

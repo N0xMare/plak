@@ -173,6 +173,10 @@ fn assert_adoption_pin_failure(already_present: bool) {
     );
     let failure = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &copy.path,
             source_agent_id: Some("c1"),
@@ -291,6 +295,10 @@ fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
         .unwrap();
     let landing = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &first.path,
             source_agent_id: fixture_source(&first.path),
@@ -344,6 +352,10 @@ fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
         .unwrap();
     let no_op = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &first.path,
             source_agent_id: Some("c1"),
@@ -418,6 +430,10 @@ fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
         .unwrap();
     SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &second.path,
             source_agent_id: fixture_source(&second.path),
@@ -831,6 +847,10 @@ fn adopted_child_with_uncommitted_work_reports_zero_ahead() {
         .unwrap();
     SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &minted.path,
             source_agent_id: fixture_source(&minted.path),
@@ -1139,6 +1159,10 @@ fn git_fork_seals_after_launch_colocation() {
     );
     let refused = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &minted.path,
             source_agent_id: fixture_source(&minted.path),
@@ -1203,6 +1227,10 @@ fn colocated_launch_keeps_all_copy_queries_and_maintenance_on_git() {
     );
     let refused = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &copy.path,
             source_agent_id: fixture_source(&copy.path),
@@ -1264,6 +1292,10 @@ fn jj_adoption_omits_file_listing_even_when_files_changed_is_nonzero() {
         .unwrap();
     let landing = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &copy.path,
             source_agent_id: fixture_source(&copy.path),
@@ -1620,6 +1652,10 @@ fn binary_and_modify_delete_conflicts_name_their_kinds() {
         .unwrap();
     let failure = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &minted.path,
             source_agent_id: fixture_source(&minted.path),
@@ -1631,7 +1667,7 @@ fn binary_and_modify_delete_conflicts_name_their_kinds() {
             candidate_id: "cand-1",
         })
         .unwrap_err();
-    let AdoptFailure::Conflict(paths) = failure else {
+    let AdoptFailure::Conflict { paths, .. } = failure else {
         panic!("expected a conflict, got {failure:?}");
     };
     let kind = |name: &str| {
@@ -1839,6 +1875,10 @@ fn repository_hooks_never_run_in_plak_git_steps() {
         .unwrap();
     SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &minted.path,
             source_agent_id: fixture_source(&minted.path),
@@ -1899,6 +1939,10 @@ fn adopt_ignores_external_diff_and_textconv() {
         .unwrap();
     let landing = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &minted.path,
             source_agent_id: fixture_source(&minted.path),
@@ -1976,6 +2020,10 @@ fn adopt_receipt_lists_changed_files_with_status_and_bounds_at_64() {
         .unwrap();
     let landing = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &minted.path,
             source_agent_id: fixture_source(&minted.path),
@@ -2047,6 +2095,10 @@ fn adopt_receipt_uses_lossy_names_without_losing_non_utf8_files() {
         .unwrap();
     let landing = SystemVcs
         .adopt(&AdoptRequest {
+            accept_conflicts: false,
+            conflict_pin: None,
+            resolver_paths: &[],
+            resolved_source: None,
             target_path: repo.path(),
             child_path: &minted.path,
             source_agent_id: fixture_source(&minted.path),

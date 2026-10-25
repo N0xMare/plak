@@ -3,6 +3,7 @@ use super::super::offline_support::{
 };
 use super::{invariants, summary};
 use plak::store::session_records::SessionRecordStore as _;
+use plakous_recursive_subagents::protocol::CandidateId;
 use serde_json::{Value, json};
 pub(super) mod c1;
 mod sw3a;
@@ -227,6 +228,26 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: no_setup,
         lifecycle: prompt_then_quit,
         assert_live: assert_tree_child_submit_adopt,
+    },
+    Shape {
+        name: "tree_conflict_accept",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: tree_conflict_accept,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: assert_tree_conflict_accept,
+    },
+    Shape {
+        name: "tree_conflict_resolver",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: tree_conflict_resolver,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: assert_tree_conflict_resolver,
     },
     Shape {
         name: "non_stop_finish_length",
@@ -492,6 +513,133 @@ fn tree_child_submit_adopt() -> Value {
         }}}, "finish": "tool_calls"},
         {"output": {"text": ANSWER}, "finish": "stop"}
     ]})
+}
+
+fn tree_conflict_accept() -> Value {
+    let mut script = tree_child_submit_adopt();
+    script["tree_conflict"] = Value::Bool(true);
+    script["steps"].as_array_mut().unwrap().insert(
+        3,
+        json!({
+            "output": {"tool": {"name": "adopt_candidate", "arguments": {
+                "candidate_id": "cand-c1-a1-x1", "accept_conflicts": true
+            }}}, "finish": "tool_calls"
+        }),
+    );
+    script
+}
+
+fn assert_tree_conflict_accept(
+    fixture: &Fixture,
+    outcome: &AgentOutcome,
+    state: &summary::Summary,
+) {
+    assert_live(fixture, outcome, state, 4, 5);
+    let id = state
+        .tree_nodes
+        .iter()
+        .find(|row| row["agent"] == "c1")
+        .unwrap()["tree"]
+        .as_str()
+        .unwrap();
+    let plakous_recursive_subagents_store::TreeInspection::Tree(tree) =
+        plakous_recursive_subagents_store::SqliteTreeStore::inspect(
+            &summary::paths(fixture).subagents_database(),
+            id,
+        )
+        .unwrap()
+    else {
+        panic!("pilot must persist its conflict tree")
+    };
+    let source = tree
+        .rows()
+        .candidates()
+        .values()
+        .find(|row| row.source_candidate_id.is_none())
+        .unwrap();
+    assert_eq!(source.adopted_by.as_deref(), Some("root"));
+    assert_eq!(
+        source.adopted_via.as_ref().map(CandidateId::as_str),
+        Some("cand-c1-a1-x1")
+    );
+    let conflict = tree
+        .rows()
+        .candidates()
+        .values()
+        .find(|row| row.source_candidate_id.is_some())
+        .unwrap();
+    assert_eq!(conflict.adopted_by.as_deref(), Some("root"));
+    assert_eq!(conflict.conflict_target.as_deref(), Some("root"));
+}
+
+fn tree_conflict_resolver() -> Value {
+    let mut script = tree_child_submit_adopt();
+    script["tree_conflict"] = Value::Bool(true);
+    let spawn = json!({"output": {"tool": {"name": "spawn_agent", "arguments": {
+        "template": "implement", "tier": "mutate", "workspace": "fork",
+        "inputs": ["cand-c1-a1-x1"], "description": "resolve conflict",
+        "prompt": "resolve the conflict",
+        "output_schema_json": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
+    }}}, "finish": "tool_calls"});
+    let steps = script["steps"].as_array_mut().unwrap();
+    steps.insert(3, spawn);
+    steps.insert(
+        4,
+        json!({"output": {"tool": {"name": "wait_agent", "arguments": {
+        "agent_ids": ["$result.agent_id"]
+    }}}, "finish": "tool_calls"}),
+    );
+    steps.insert(
+        5,
+        json!({"output": {"tool": {"name": "adopt_candidate", "arguments": {
+        "candidate_id": "$result.candidate"
+    }}}, "finish": "tool_calls"}),
+    );
+    script
+}
+
+fn assert_tree_conflict_resolver(
+    fixture: &Fixture,
+    outcome: &AgentOutcome,
+    state: &summary::Summary,
+) {
+    assert_live(fixture, outcome, state, 6, 7);
+    let id = state
+        .tree_nodes
+        .iter()
+        .find(|row| row["agent"] == "c1")
+        .unwrap()["tree"]
+        .as_str()
+        .unwrap();
+    let plakous_recursive_subagents_store::TreeInspection::Tree(tree) =
+        plakous_recursive_subagents_store::SqliteTreeStore::inspect(
+            &summary::paths(fixture).subagents_database(),
+            id,
+        )
+        .unwrap()
+    else {
+        panic!("pilot must persist resolver tree")
+    };
+    let rows = tree.rows().candidates();
+    let source = &rows[&CandidateId::from_persisted("cand-c1-a1".into())];
+    let resolver = &rows[&CandidateId::from_persisted("cand-c2-a1".into())];
+    assert_eq!(source.adopted_via.as_ref(), Some(&resolver.candidate_id));
+    assert_eq!(resolver.resolves.as_ref(), Some(&source.candidate_id));
+    assert_eq!(resolver.adopted_by.as_deref(), Some("root"));
+}
+
+#[test]
+fn tree_conflict_resolver_pilot_proves_two_workspace_resolution() {
+    let shape = "tree_conflict_resolver";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
+}
+
+#[test]
+fn tree_conflict_accept_pilot_proves_persisted_resolution_lineage() {
+    let shape = "tree_conflict_accept";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
 }
 
 fn assert_tree_child_submit_adopt(

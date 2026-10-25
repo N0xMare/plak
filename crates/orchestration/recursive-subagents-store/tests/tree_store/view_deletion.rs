@@ -1747,6 +1747,7 @@ fn sqlite_spawn_adopt_and_cleanup_outcomes_survive_view_deletion() {
             tree.begin_adopt(
                 "root",
                 &AdoptCandidateRequest {
+                    accept_conflicts: false,
                     candidate_id: candidate,
                     expected_target: None,
                     evidence: None,
@@ -1840,6 +1841,7 @@ fn sqlite_vcs_fault_captures_prior_diagnostic_and_replays_its_settlement() {
         tree.begin_adopt(
             "root",
             &AdoptCandidateRequest {
+                accept_conflicts: false,
                 candidate_id: tree.attempt(child).unwrap().candidate_id.clone().unwrap(),
                 expected_target: None,
                 evidence: None,
@@ -2636,6 +2638,7 @@ fn sqlite_orphaned_vcs_faults_survive_view_deletion_and_a_second_reopen() {
             tree.begin_adopt(
                 "root",
                 &AdoptCandidateRequest {
+                    accept_conflicts: false,
                     candidate_id: candidate,
                     expected_target: None,
                     evidence: None,

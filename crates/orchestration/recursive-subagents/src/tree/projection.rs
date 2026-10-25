@@ -5,14 +5,49 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::{
-    AttemptStatus, ListAgentsOutput, ListAgentsRequest, NodeRecord, NodeStatus, ProductAgentTree,
-    RecoveryNeed, TopologyError, TopologyErrorCode, TopologyGrant, VcsOps, WaitAgentRow,
-    bounded_text,
+    AttemptStatus, CandidateRecord, ListAgentsOutput, ListAgentsRequest, NodeRecord, NodeStatus,
+    ProductAgentTree, RecoveryNeed, TopologyError, TopologyErrorCode, TopologyGrant, VcsOps,
+    WaitAgentRow, bounded_text,
 };
 
 /// The most prompt or result text one `list_agents` row carries; a wait on
 /// the id returns the whole result.
 const LIST_TEXT_PREVIEW_BYTES: usize = 1024;
+
+fn candidate_details(candidate: &CandidateRecord) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "candidate_id": candidate.candidate_id,
+        "candidate_kind": candidate.kind,
+    });
+    for (key, id) in [
+        ("candidate_commit", &candidate.commit),
+        ("candidate_base", &candidate.base_commit),
+    ] {
+        if !id.is_empty() {
+            value[key] = serde_json::json!(id);
+        }
+    }
+    for (key, id) in [
+        ("source_candidate", &candidate.source_candidate_id),
+        ("resolves", &candidate.resolves),
+        ("adopted_via", &candidate.adopted_via),
+    ] {
+        if let Some(id) = id {
+            value[key] = serde_json::json!(id);
+        }
+    }
+    if let Some(target) = &candidate.conflict_target {
+        value["conflict_target"] = serde_json::json!(target);
+    }
+    if !candidate.conflict_paths.is_empty() {
+        value["conflict_paths"] =
+            serde_json::json!(candidate.conflict_paths.iter().take(16).collect::<Vec<_>>());
+        if candidate.conflict_paths.len() > 16 {
+            value["conflict_paths_truncated"] = serde_json::Value::Bool(true);
+        }
+    }
+    value
+}
 
 /// The occupancy one `list_agents` render wants for one node: whether its
 /// copy is dirty, and how far it has moved from its parent's.
@@ -253,12 +288,12 @@ impl ProductAgentTree {
             if let Some(candidate) = &attempt.candidate_id {
                 value["candidate"] = serde_json::Value::String(candidate.to_string());
                 if let Some(row) = self.candidates.get(candidate) {
-                    if !row.commit.is_empty() {
-                        value["candidate_commit"] = serde_json::Value::String(row.commit.clone());
-                    }
-                    if !row.base_commit.is_empty() {
-                        value["candidate_base"] =
-                            serde_json::Value::String(row.base_commit.clone());
+                    if let Some(details) = candidate_details(row).as_object() {
+                        for (key, detail) in details {
+                            if key != "candidate_id" {
+                                value[key] = detail.clone();
+                            }
+                        }
                     }
                     if let Some(commit) = row.merged_at.as_ref() {
                         value["merged_at"] = serde_json::Value::String(commit.clone());
@@ -281,9 +316,10 @@ impl ProductAgentTree {
             .filter(|candidate| {
                 candidate.producing_agent_id == node.agent_id
                     && candidate.adopted_by.is_none()
+                    && candidate.adopted_via.is_none()
                     && candidate.content != candidate.base_content
             })
-            .map(|candidate| &candidate.candidate_id)
+            .map(candidate_details)
             .collect();
         if !retained.is_empty() {
             value["candidates"] = serde_json::json!(retained);

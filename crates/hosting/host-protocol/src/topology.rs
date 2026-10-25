@@ -1281,11 +1281,22 @@ pub struct WorkspaceIdRequest {
     pub workspace_id: String,
 }
 
-/// `adopt_candidate`: land a sealed candidate into the caller's
-/// own copy.
+/// One path a three-way merge could not resolve, with the VCS conflict kind.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConflictPath {
+    /// Path named by the merge, relative to the checkout.
+    pub path: String,
+    /// First non-contents conflict kind, otherwise contents; binary wins.
+    pub kind: String,
+}
+
+/// Land immutable work into the caller's checkout.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdoptCandidateRequest {
+    /// Explicitly allow conflict markers in the receiving checkout.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub accept_conflicts: bool,
     /// The sealed candidate to land.
     pub candidate_id: CandidateId,
     /// When given, must equal the current target snapshot or the call returns

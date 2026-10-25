@@ -240,12 +240,12 @@ impl TopologyTool {
                 ToolOutcome::success_text(outcome.to_string())
             }
             Err(error) => {
-                if let Some(paths) =
+                if let Some((paths, candidate)) =
                     conflict.filter(|_| error.code == TopologyErrorCode::MergeConflict)
                 {
                     crate::call_facts::leave(
                         operation_id,
-                        crate::call_facts::TopologyCallFacts::AdoptConflict { paths },
+                        crate::call_facts::TopologyCallFacts::AdoptConflict { paths, candidate },
                     );
                 }
                 if let Err(persist) = tree

@@ -384,6 +384,7 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
     {
         return Err(AdoptFailure::TargetChanged(target.token()));
     }
+    super::conflicts::check_resolver(request)?;
     let merged = git_run(
         target_path,
         &[
@@ -402,7 +403,7 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
         // anything else (bad base object, corrupt ref). Only the former is a
         // `merge_conflict`; the rest is the VCS refusing to run the merge.
         if merged.status.code() == Some(1) {
-            return Err(AdoptFailure::Conflict(parse_merge_tree_conflicts(&stdout)));
+            return Err(super::conflicts::pin_conflict(request, &target, &stdout)?);
         }
         return Err(AdoptFailure::Unavailable(format!(
             "git merge-tree exited {}: {}",
@@ -446,7 +447,7 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
     let files = parse_name_status(&names.stdout)?;
     let files_changed = u32::try_from(files.len()).unwrap_or(u32::MAX);
     if files_changed == 0 {
-        let after = commit_tree(target_path, merged_tree, &target.commit)
+        let after = commit_tree(target_path, merged_tree, &target.commit, "plak adoption")
             .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
         pin_adoption(request, &target.commit, &after)
             .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
@@ -497,7 +498,7 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
         )));
     }
     // Pin the exact merge result, not a second snapshot racing a target edit.
-    let after = commit_tree(target_path, merged_tree, &target.commit)
+    let after = commit_tree(target_path, merged_tree, &target.commit, "plak adoption")
         .map_err(|error| AdoptFailure::RecoveryRequired(error.detail))?;
     pin_adoption(request, &target.commit, &after).map_err(|error| {
         AdoptFailure::RecoveryRequired(format!(
@@ -514,10 +515,15 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
     })
 }
 
-fn commit_tree(path: &Path, tree: &str, parent: &str) -> Result<String, VcsError> {
+pub(super) fn commit_tree(
+    path: &Path,
+    tree: &str,
+    parent: &str,
+    label: &str,
+) -> Result<String, VcsError> {
     let mut command = git_command(path);
     command
-        .args(["commit-tree", tree, "-p", parent, "-m", "plak adoption"])
+        .args(["commit-tree", tree, "-p", parent, "-m", label])
         .env("GIT_AUTHOR_NAME", "plak")
         .env("GIT_AUTHOR_EMAIL", "plak@local")
         .env("GIT_COMMITTER_NAME", "plak")

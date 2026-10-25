@@ -514,8 +514,32 @@ pub const CANCELLED_KIND: &str = "cancelled";
 
 /// A sealed snapshot of one attempt's copy, pinned outside the
 /// worktree so discarding the copy cannot orphan it.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateKind {
+    /// Ordinary sealed child work.
+    #[default]
+    Work,
+    /// A textual merge pinned without touching the adopter's checkout.
+    Conflict,
+}
+
+/// Retained work or a pinned conflicted merge, with immutable resolution lineage.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateRecord {
+    /// Ordinary work or a conflicted merge.
+    pub kind: CandidateKind,
+    /// Original work from which this conflict was produced.
+    pub source_candidate_id: Option<CandidateId>,
+    /// Only this node may land the conflict or a resolver derived from it.
+    pub conflict_target: Option<String>,
+    /// Exact paths and kinds observed when the conflict was pinned.
+    pub conflict_paths: Vec<plakous_workspace::occupancy_vcs::ConflictPath>,
+    /// Original work which this resolver's candidate accepts.
+    pub resolves: Option<CandidateId>,
+    /// Candidate which accepted this work or superseded this resolution.
+    /// Without `adopted_by`, this row is superseded rather than adopted.
+    pub adopted_via: Option<CandidateId>,
     /// The candidate's durable id; an adopt names exactly this.
     pub candidate_id: CandidateId,
     /// The copy this was sealed from; the copy may be discarded afterwards.
@@ -912,6 +936,10 @@ fn diverged_from_base(snapshot: &VcsSnapshot, base_content: &str) -> bool {
 /// landing. Carries no tree reference for the same reason.
 #[derive(Clone, Debug)]
 pub struct AdoptTicket {
+    accept_conflicts: bool,
+    conflict_pin: Option<plakous_workspace::occupancy_vcs::ConflictPin>,
+    source: Option<CandidateRecord>,
+    source_copy_agent: Option<String>,
     interrupted_adopt: bool,
     namespace: String,
     advance_copy_base: bool,
@@ -930,6 +958,21 @@ impl AdoptTicket {
     /// reference so it can run with the tree mutex released.
     pub fn land(&self, vcs: &dyn VcsOps) -> Result<AdoptLanding, AdoptFailure> {
         vcs.adopt(&AdoptRequest {
+            accept_conflicts: self.accept_conflicts,
+            conflict_pin: self.conflict_pin.as_ref(),
+            resolver_paths: &self
+                .candidate
+                .conflict_paths
+                .iter()
+                .map(|path| path.path.clone())
+                .collect::<Vec<_>>(),
+            resolved_source: self.source.as_ref().map(|source| {
+                plakous_workspace::occupancy_vcs::ResolvedSource {
+                    candidate_id: source.candidate_id.as_str(),
+                    agent_id: self.source_copy_agent.as_deref(),
+                    commit: &source.commit,
+                }
+            }),
             target_path: &self.target_path,
             child_path: &self.child_path,
             base_commit: &self.candidate.base_commit,
@@ -989,6 +1032,7 @@ pub struct MintTicket {
     caller_path: PathBuf,
     mode: WorkspaceMode,
     input_base: Option<VcsSnapshot>,
+    merge_base: Option<VcsSnapshot>,
 }
 
 impl MintTicket {
@@ -1001,14 +1045,24 @@ impl MintTicket {
     /// The subprocess half of the mint. Holds no tree reference so it can
     /// run with the tree mutex released.
     pub fn mint(&self, vcs: &dyn VcsOps) -> Result<MintedCopy, VcsError> {
-        vcs.mint_from(&MintRequest {
+        let mut minted = vcs.mint_from(&MintRequest {
             launch: &self.launch_checkout,
             agent_id: &self.agent_id,
             namespace: &self.namespace,
             parent_cwd: &self.caller_path,
             mode: self.mode,
             base: self.input_base.as_ref(),
-        })
+        })?;
+        if let Some(base) = &self.merge_base {
+            if let Err(error) =
+                vcs.restore_copy_base(&minted.path, &self.namespace, &self.agent_id, &base.commit)
+            {
+                let _ = vcs.unmint(&self.launch_checkout, &minted.path, &self.namespace);
+                return Err(error);
+            }
+            minted.base.clone_from(base);
+        }
+        Ok(minted)
     }
 }
 
@@ -1450,6 +1504,8 @@ pub struct ProductAgentTree {
     /// Exact seal ownership survives draining the effect queue and changes to
     /// presentation status. Only the matching completion releases it.
     outstanding_seals: BTreeMap<String, Arc<()>>,
+    /// Unlocked adopts currently owned by this host, including interrupted retries.
+    inflight_adopts: BTreeSet<String>,
     /// In-process detach telemetry guard; never persisted.
     detach_emitted: HashSet<String>,
     /// Copies whose automatic prune failed in this process; they are not
@@ -1484,7 +1540,7 @@ pub struct ProductAgentTree {
     /// Every conflicting path of an adopt that refused with `merge_conflict`,
     /// by candidate id, until the adopting call takes it: the bounded refusal
     /// message cannot carry them all.
-    adopt_conflicts: BTreeMap<String, Vec<String>>,
+    adopt_conflicts: BTreeMap<String, (Vec<String>, Option<String>)>,
     /// Recovery refusals no retry can get past (an incompatible session, or a
     /// head that needs effect evidence the host does not hold), per node and
     /// for the attempt they were observed on. They let `close_agent` end the
@@ -1531,6 +1587,7 @@ impl LiveGeneration {
 mod await_output;
 mod candidates;
 mod commands;
+mod conflicts;
 mod dormancy;
 mod effect_outcomes;
 mod epoch;
@@ -1726,6 +1783,7 @@ impl ProductAgentTree {
             compaction_views: BTreeMap::new(),
             compaction_cursors: BTreeMap::new(),
             outstanding_seals: BTreeMap::new(),
+            inflight_adopts: BTreeSet::new(),
             detach_emitted: HashSet::new(),
             delivered: BTreeMap::new(),
             admission_marks: BTreeSet::new(),
@@ -2217,6 +2275,7 @@ impl ProductAgentTree {
             compaction_views: BTreeMap::new(),
             compaction_cursors: BTreeMap::new(),
             outstanding_seals: BTreeMap::new(),
+            inflight_adopts: BTreeSet::new(),
             detach_emitted: HashSet::new(),
             delivered: BTreeMap::new(),
             admission_marks: BTreeSet::new(),

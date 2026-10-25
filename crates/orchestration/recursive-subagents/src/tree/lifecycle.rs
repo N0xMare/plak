@@ -212,6 +212,7 @@ impl ProductAgentTree {
             request.workspace,
             &agent_id,
             input_base.as_ref(),
+            request.input_ids().first().map(String::as_str),
         ) {
             Ok(plan) => plan,
             Err(error) => {

@@ -1712,6 +1712,15 @@ derived-output reload with the fake VCS port; real Git pin publication and
 collection are covered separately by the workspace transaction and GC laws.
 Relaunching this shape explicitly requests `--resume-tree`; the product's
 paused-tree admission policy is unchanged.
+The opt-in `tree_conflict_accept` shape uses the fake VCS port to persist a
+textual conflict candidate and explicitly accept it. Its pilot verifies source,
+conflict and `adopted_via` ownership. Indexed cuts cover conflict-record
+publication and resolution acceptance; real Git tests separately verify marker
+contents, untouched targets, resolver bases, provenance pins and orphan-pin retry.
+The opt-in `tree_conflict_resolver` shape instead spawns a resolver over that
+conflict candidate and adopts its sealed resolution. Its pilot verifies both
+the resolver and source acceptance; indexed cuts exercise the two-workspace
+adopting hold and its interrupted recovery.
 The process pilots prove a real shell job was promoted and quit settled it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.

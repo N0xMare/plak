@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+mod conflicts;
 mod git;
 mod jj;
 pub mod maintenance;
@@ -102,26 +103,50 @@ pub struct MintedCopy {
     pub base: VcsSnapshot,
 }
 
-/// One path a three-way merge could not resolve, and the kind the VCS named.
-///
-/// Git's kind is the first non-`contents` `CONFLICT` type for the path
-/// (`binary`, `modify/delete`, and the rest), otherwise `contents`. A binary
-/// path is reported as both, so `binary` wins. jj names every path `contents`.
+pub use plakous_host_protocol::topology::ConflictPath;
+
+/// A pinned textual merge which has not changed the target checkout.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConflictPath {
-    /// The path as the VCS named it.
-    pub path: String,
-    /// `contents`, `binary`, `modify/delete`, or another `CONFLICT (...)` word.
-    pub kind: String,
+pub struct ConflictCandidate {
+    /// Conflicted merge result, including text markers.
+    pub snapshot: VcsSnapshot,
+    /// Exact target snapshot used as the merge's base.
+    pub base: VcsSnapshot,
+}
+
+/// Identity reserved by the tree for a conflict result.
+#[derive(Clone, Debug)]
+pub struct ConflictPin {
+    /// Candidate id, including its reserved conflict ordinal.
+    pub id: String,
+    /// Stable wrapper label.
+    pub label: String,
+}
+
+/// A resolution also accepts this source candidate and advances its copy.
+pub struct ResolvedSource<'a> {
+    /// Original work candidate's identity.
+    pub candidate_id: &'a str,
+    /// Retained copy's producer, absent after reclamation.
+    pub agent_id: Option<&'a str>,
+    /// Original work, never the conflict markers or resolver snapshot.
+    pub commit: &'a str,
 }
 
 /// Why an adopt did not land. Never a success status.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdoptFailure {
+    /// The backend cannot apply this adoption mode; nothing was applied.
+    NotApplicable(String),
     /// Repository publication or checkout needs explicit reconciliation.
     RecoveryRequired(String),
     /// Three-way merge conflicted; the child copy is retained untouched.
-    Conflict(Vec<ConflictPath>),
+    Conflict {
+        /// All conflicted paths and their kinds.
+        paths: Vec<ConflictPath>,
+        /// Present only for an ordinary, entirely textual Git conflict.
+        candidate: Option<Box<ConflictCandidate>>,
+    },
     /// The target moved under the adopt; nothing was applied. Carries the
     /// current target token.
     TargetChanged(String),
@@ -544,6 +569,11 @@ pub(crate) fn adopt_candidate(request: &AdoptRequest<'_>) -> Result<AdoptLanding
     } = *request;
     match detect_vcs(target_path).or_else(|_| detect_parent_vcs(target_path)) {
         Ok(SessionVcs::Git) => git_adopt(request),
+        Ok(SessionVcs::Jj) if request.resolved_source.is_some() => {
+            Err(AdoptFailure::NotApplicable(
+                "conflict candidates are not yet available for jj".to_owned(),
+            ))
+        }
         Ok(SessionVcs::Jj) if matches!(SessionVcs::of_copy(child_path), Ok(SessionVcs::Git)) => {
             Err(AdoptFailure::Unavailable(
                 "git candidate into a jj target: not yet supported".to_owned(),
@@ -557,7 +587,16 @@ pub(crate) fn adopt_candidate(request: &AdoptRequest<'_>) -> Result<AdoptLanding
                 base_change_id,
                 candidate,
                 expected_target,
-            )?;
+            )
+            .map_err(|failure| {
+                if request.accept_conflicts && matches!(failure, AdoptFailure::Conflict { .. }) {
+                    AdoptFailure::NotApplicable(
+                        "conflict candidates are not yet available for jj".to_owned(),
+                    )
+                } else {
+                    failure
+                }
+            })?;
             let refs = pins::adoption(
                 request,
                 landing

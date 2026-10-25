@@ -195,6 +195,8 @@ v7 document with 0.0.2 (§2.5.1 of chapter 02).
 
 Tree schema 9 records candidate `target_before` provenance and each workspace's
 `input_candidate_id`; retained snapshots have independent Git-backend pins.
+Candidate rows also record work/conflict kind, source and resolver lineage,
+conflict ownership and paths, and acceptance through a resolution candidate.
 Copy names use an eight-hex tree prefix, protected by immutable full-digest
 ownership evidence in the shared Git directory.
 Submitted intents own exact child outputs; attempt outputs are derived on load

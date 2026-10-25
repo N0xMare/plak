@@ -58,7 +58,7 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "agent_candidates",
-        "CREATE TABLE agent_candidates(tree_id TEXT NOT NULL,candidate_id TEXT NOT NULL,workspace_id TEXT NOT NULL,producing_agent_id TEXT NOT NULL,producing_attempt_id TEXT NOT NULL,base_commit TEXT NOT NULL,base_content TEXT NOT NULL,base_change_id TEXT,commit_id TEXT NOT NULL,content TEXT NOT NULL,change_id TEXT,sealed_at INTEGER NOT NULL CHECK(sealed_at>=0),adopted_by TEXT,adopted_evidence TEXT NOT NULL,merged_at TEXT,target_before TEXT,PRIMARY KEY(tree_id,candidate_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+        "CREATE TABLE agent_candidates(tree_id TEXT NOT NULL,candidate_id TEXT NOT NULL,workspace_id TEXT NOT NULL,producing_agent_id TEXT NOT NULL,producing_attempt_id TEXT NOT NULL,base_commit TEXT NOT NULL,base_content TEXT NOT NULL,base_change_id TEXT,commit_id TEXT NOT NULL,content TEXT NOT NULL,change_id TEXT,sealed_at INTEGER NOT NULL CHECK(sealed_at>=0),adopted_by TEXT,adopted_evidence TEXT NOT NULL,merged_at TEXT,target_before TEXT,kind TEXT NOT NULL CHECK(kind IN('work','conflict')),source_candidate_id TEXT,conflict_target TEXT,conflict_paths TEXT NOT NULL,resolves TEXT,adopted_via TEXT,PRIMARY KEY(tree_id,candidate_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
     ),
     (
         "agent_workspaces",
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(SCHEMA_VERSION, 9);
         assert_eq!(
             expected_schema_fingerprint(),
-            "8c6a5164633f53c78c9f64758201337197b47a806dda9ec0934d2505487cd375"
+            "ee55724647d83557761ff0ee7b3f5d52d4a4e1c23f25ea720814291fd2d0fe84"
         );
     }
 

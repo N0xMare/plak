@@ -223,12 +223,23 @@ impl ProductAgentTree {
             .is_some_and(|snapshot| snapshot.history_left_base);
         let sealed = sealed.filter(|snapshot| diverged_from_base(snapshot, &base_content));
         if let Some(snapshot) = sealed {
+            let resolver = self.resolver_input(&workspace_id).cloned();
             let producing_attempt_id = attempt_id
                 .clone()
                 .unwrap_or_else(|| AttemptId::new(&agent_id, 1));
             self.candidates.insert(
                 candidate_id.clone(),
                 CandidateRecord {
+                    kind: super::CandidateKind::Work,
+                    source_candidate_id: None,
+                    conflict_target: resolver
+                        .as_ref()
+                        .and_then(|input| input.conflict_target.clone()),
+                    conflict_paths: resolver
+                        .as_ref()
+                        .map_or_else(Vec::new, |input| input.conflict_paths.clone()),
+                    resolves: resolver.and_then(|input| input.source_candidate_id),
+                    adopted_via: None,
                     target_before: None,
                     candidate_id: candidate_id.clone(),
                     workspace_id: workspace_id.clone(),
@@ -697,11 +708,55 @@ impl ProductAgentTree {
                 "that candidate has no sealed commit; nothing was adopted",
             ));
         }
+        let target = &self.node(caller_id)?.path;
+        if (candidate.kind == super::CandidateKind::Conflict || candidate.resolves.is_some())
+            && (jj_layout_copy(target) || target.join(".jj").exists())
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::AdoptNotApplicable,
+                "conflict candidates are not yet available for jj",
+            ));
+        }
         self.check_base_pin_recovery(&candidate.workspace_id)?;
+        self.check_adopt_available(&candidate.workspace_id)?;
+        if let Some(via) = &candidate.adopted_via {
+            return Err(TopologyError::new(
+                TopologyErrorCode::AdoptNotApplicable,
+                format!("that candidate was already adopted via {via}"),
+            ));
+        }
         if let Some(adopter) = &candidate.adopted_by {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
                 format!("that candidate was already adopted by {adopter}"),
+            ));
+        }
+        let source = self.resolution_source(caller_id, &candidate)?;
+        if candidate.kind == super::CandidateKind::Conflict && !request.accept_conflicts {
+            let path = self
+                .workspaces
+                .get(&candidate.workspace_id)
+                .map_or(self.launch_checkout.as_path(), |row| row.path.as_path());
+            let message = merge_conflict_message_extra(
+                &candidate.conflict_paths,
+                path,
+                &format!(
+                    "; conflict candidate {}: spawn a resolver with workspace=fork and inputs=[\"{}\"], or adopt with accept_conflicts=true",
+                    candidate.candidate_id, candidate.candidate_id
+                ),
+            );
+            self.record_adopt_conflict(
+                candidate.candidate_id.as_str(),
+                candidate
+                    .conflict_paths
+                    .iter()
+                    .map(|path| path.path.clone())
+                    .collect(),
+                Some(candidate.candidate_id.to_string()),
+            );
+            return Err(TopologyError::new(
+                TopologyErrorCode::MergeConflict,
+                message,
             ));
         }
         if self
@@ -767,7 +822,9 @@ impl ProductAgentTree {
                 "a node cannot adopt its own copy into itself",
             ));
         }
-        if let Some(blocked) = self.stacked_input_blocker(caller_id, &candidate) {
+        if source.is_none()
+            && let Some(blocked) = self.stacked_input_blocker(caller_id, &candidate)
+        {
             return Err(blocked);
         }
         let producer_finished = self
@@ -892,14 +949,37 @@ impl ProductAgentTree {
         };
         let target_path = self.node(caller_id)?.path.clone();
         let advance_copy_base = !self.reclaimed(&candidate.workspace_id);
-        let interrupted_adopt = self.workspace_has_vcs_fault(&candidate.workspace_id);
+        let interrupted_adopt = self.workspace_has_vcs_fault(&candidate.workspace_id)
+            || source
+                .as_ref()
+                .is_some_and(|source| self.workspace_has_vcs_fault(&source.workspace_id));
+        let conflict_pin = self.reserve_conflict_pin(&candidate, caller_id);
+        let source_copy_agent = source
+            .as_ref()
+            .filter(|source| !self.reclaimed(&source.workspace_id))
+            .map(|source| source.producing_agent_id.clone());
+        if let Some(row) = source
+            .as_ref()
+            .and_then(|source| self.workspaces.get_mut(&source.workspace_id))
+        {
+            row.status = WorkspaceStatus::Adopting;
+            row.adopter_agent_id = Some(caller_id.to_owned());
+        }
         if let Some(row) = self.workspaces.get_mut(&candidate.workspace_id) {
             row.status = WorkspaceStatus::Adopting;
             row.adopter_agent_id = Some(caller_id.to_owned());
         }
+        self.inflight_adopts.insert(candidate.workspace_id.clone());
+        if let Some(source) = &source {
+            self.inflight_adopts.insert(source.workspace_id.clone());
+        }
         self.bump();
         self.take_adopt_conflict(candidate.candidate_id.as_str());
         self.effects.adopts.push(AdoptTicket {
+            accept_conflicts: request.accept_conflicts,
+            conflict_pin,
+            source,
+            source_copy_agent,
             interrupted_adopt,
             advance_copy_base,
             namespace: super::digest_text(&self.tree_id),
@@ -920,13 +1000,29 @@ impl ProductAgentTree {
         landed: Result<AdoptLanding, AdoptFailure>,
     ) -> Result<AdoptOutcome, TopologyError> {
         let workspace_id = ticket.candidate.workspace_id.clone();
-        let retain_hold = ticket.interrupted_adopt && landed.is_err();
+        self.inflight_adopts.remove(&workspace_id);
+        if let Some(source) = &ticket.source {
+            self.inflight_adopts.remove(&source.workspace_id);
+        }
+        let retain_hold = ticket.interrupted_adopt
+            && landed.is_err()
+            && !matches!(landed, Err(AdoptFailure::NotApplicable(_)));
         if !retain_hold {
             self.settle_workspace_faults(&workspace_id);
+            if let Some(source) = &ticket.source {
+                self.settle_workspace_faults(&source.workspace_id);
+            }
         }
         let reclaimed = self.reclaimed(&workspace_id);
         match landed {
             Ok(landing) => {
+                self.finish_resolution(ticket, &landing)?;
+                self.supersede_resolutions(ticket);
+                let accepted_base = if ticket.candidate.kind == super::CandidateKind::Conflict {
+                    ticket.source.as_ref().unwrap_or(&ticket.candidate)
+                } else {
+                    &ticket.candidate
+                };
                 if let Some(row) = self.workspaces.get_mut(&workspace_id) {
                     row.status = if reclaimed {
                         WorkspaceStatus::CleanRemoved
@@ -944,9 +1040,9 @@ impl ProductAgentTree {
                             base.change_id.clone(),
                         ),
                         None => (
-                            ticket.candidate.commit.clone(),
-                            ticket.candidate.content.clone(),
-                            ticket.candidate.change_id.clone(),
+                            accepted_base.commit.clone(),
+                            accepted_base.content.clone(),
+                            accepted_base.change_id.clone(),
                         ),
                     };
                     row.base_commit = Some(commit);
@@ -997,6 +1093,19 @@ impl ProductAgentTree {
                 })
             }
             Err(failure) => {
+                if let Some(source) = &ticket.source
+                    && !retain_hold
+                {
+                    let reclaimed = self.reclaimed(&source.workspace_id);
+                    if let Some(row) = self.workspaces.get_mut(&source.workspace_id) {
+                        row.status = if reclaimed {
+                            WorkspaceStatus::CleanRemoved
+                        } else {
+                            WorkspaceStatus::Active
+                        };
+                        row.adopter_agent_id = None;
+                    }
+                }
                 if let Some(row) = self
                     .workspaces
                     .get_mut(&workspace_id)
@@ -1011,10 +1120,18 @@ impl ProductAgentTree {
                 }
                 self.bump();
                 Err(match failure {
-                    AdoptFailure::Conflict(conflicts) => {
+                    AdoptFailure::Conflict {
+                        paths: conflicts,
+                        candidate,
+                    } => {
+                        let recorded = candidate.and_then(|merge| {
+                            self.record_conflict_candidate(ticket, &conflicts, *merge)
+                        });
+                        let notice = recorded.as_ref().map_or_else(String::new, |id| format!(
+                            "; conflict candidate {id} pins the merge onto your current state. Spawn a resolver with workspace=fork and inputs=[\"{id}\"], or adopt with accept_conflicts=true"));
                         let error = TopologyError::new(
                             TopologyErrorCode::MergeConflict,
-                            merge_conflict_message(&conflicts, &ticket.child_path),
+                            merge_conflict_message_extra(&conflicts, &ticket.child_path, &notice),
                         );
                         self.record_adopt_conflict(
                             ticket.candidate.candidate_id.as_str(),
@@ -1022,6 +1139,7 @@ impl ProductAgentTree {
                                 .into_iter()
                                 .map(|conflict| conflict.path)
                                 .collect(),
+                            recorded.map(|id| id.to_string()),
                         );
                         error
                     }
@@ -1031,6 +1149,9 @@ impl ProductAgentTree {
                     ),
                     AdoptFailure::RecoveryRequired(reason) => {
                         TopologyError::new(TopologyErrorCode::WorkspaceRecoveryRequired, reason)
+                    }
+                    AdoptFailure::NotApplicable(reason) => {
+                        TopologyError::new(TopologyErrorCode::AdoptNotApplicable, reason)
                     }
                     AdoptFailure::Unavailable(reason) if retain_hold => TopologyError::new(
                         TopologyErrorCode::WorkspaceRecoveryRequired,
@@ -1062,6 +1183,10 @@ const CONFLICT_MESSAGE_CAP: usize = 512;
 /// path, uncut.
 #[must_use]
 pub fn merge_conflict_message(paths: &[ConflictPath], child_path: &Path) -> String {
+    merge_conflict_message_extra(paths, child_path, "")
+}
+
+fn merge_conflict_message_extra(paths: &[ConflictPath], child_path: &Path, notice: &str) -> String {
     let mut seen = std::collections::HashSet::new();
     let entries: Vec<String> = paths
         .iter()
@@ -1072,8 +1197,8 @@ pub fn merge_conflict_message(paths: &[ConflictPath], child_path: &Path) -> Stri
         .collect();
     let head = format!("merge_conflict in {}{CONFLICT_PATHS_LEAD}", entries.len());
     let marker_room = format!("+{} more", entries.len()).len();
-    let child = capped_child_path(&head, child_path, marker_room);
-    let suffix = format!("{CONFLICT_PATHS_END}{child}{CONFLICT_TAIL}");
+    let child = capped_child_path(&head, child_path, marker_room + notice.len());
+    let suffix = format!("{CONFLICT_PATHS_END}{child}{CONFLICT_TAIL}{notice}");
     let budget = CONFLICT_MESSAGE_CAP.saturating_sub(head.len() + suffix.len());
     let take = entries_that_fit(&entries, budget);
     let omitted = entries.len() - take;
@@ -1551,10 +1676,13 @@ mod tests {
         let workspace_id = tree.node(&child.agent_id).unwrap().workspace_id.clone();
         for (failure, code) in [
             (
-                AdoptFailure::Conflict(vec![ConflictPath {
-                    path: "a.rs".to_owned(),
-                    kind: "contents".to_owned(),
-                }]),
+                AdoptFailure::Conflict {
+                    paths: vec![ConflictPath {
+                        path: "a.rs".to_owned(),
+                        kind: "contents".to_owned(),
+                    }],
+                    candidate: None,
+                },
                 TopologyErrorCode::MergeConflict,
             ),
             (
@@ -2145,6 +2273,7 @@ mod tests {
         let (_tmp, mut tree) = tree();
         let spawned = tree.spawn_agent("root", &spawn_req(), None).unwrap();
         let request = AdoptCandidateRequest {
+            accept_conflicts: false,
             candidate_id: CandidateId::from_persisted("cand-c1-1".to_owned()),
             expected_target: None,
             evidence: None,

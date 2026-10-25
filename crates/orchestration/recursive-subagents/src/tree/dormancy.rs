@@ -581,6 +581,7 @@ impl ProductAgentTree {
         match answer {
             Ok(DormancyAnswer::Sealed(snapshot)) => {
                 {
+                    let resolver = self.resolver_input(id).cloned();
                     let node = self.node(&ticket.agent_id)?;
                     let attempt = node.attempt_id.clone().ok_or_else(|| {
                         TopologyError::new(
@@ -592,6 +593,16 @@ impl ProductAgentTree {
                     self.candidates.insert(
                         candidate_id.clone(),
                         CandidateRecord {
+                            kind: super::CandidateKind::Work,
+                            source_candidate_id: None,
+                            conflict_target: resolver
+                                .as_ref()
+                                .and_then(|input| input.conflict_target.clone()),
+                            conflict_paths: resolver
+                                .as_ref()
+                                .map_or_else(Vec::new, |input| input.conflict_paths.clone()),
+                            resolves: resolver.and_then(|input| input.source_candidate_id),
+                            adopted_via: None,
                             target_before: None,
                             candidate_id,
                             workspace_id: id.clone(),

@@ -212,6 +212,7 @@ mod round_trip_tests {
         );
         round_trip(
             &AdoptCandidateRequest {
+                accept_conflicts: false,
                 candidate_id: CandidateId::from_persisted("c1".to_owned()),
                 expected_target: Some("deadbeef".into()),
                 evidence: Some(vec!["a2-a1".into()]),

@@ -3529,6 +3529,7 @@ fn assert_generated_host_interleavings(steps: &[HostInterleaving]) -> Result<(),
             live.begin_adopt(
                 "root",
                 &AdoptCandidateRequest {
+                    accept_conflicts: false,
                     candidate_id,
                     expected_target: None,
                     evidence: None,

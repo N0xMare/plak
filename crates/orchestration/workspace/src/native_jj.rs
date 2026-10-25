@@ -439,7 +439,7 @@ pub(super) fn adopt(
                         kind: "contents".to_owned(),
                     })
                     .collect();
-                return Ok(Err(AdoptFailure::Conflict(paths)));
+                return Ok(Err(AdoptFailure::Conflict { paths, candidate: None }));
             }
             let mut changes = head.tree().diff_stream(&merged, &EverythingMatcher);
             let mut files = 0u32;

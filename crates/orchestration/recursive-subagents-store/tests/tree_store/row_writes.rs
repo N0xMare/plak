@@ -301,6 +301,12 @@ impl Model {
                 self.candidates.insert(
                     id.clone(),
                     CandidateRecord {
+                        kind: plakous_recursive_subagents::tree::CandidateKind::Work,
+                        source_candidate_id: None,
+                        conflict_target: None,
+                        conflict_paths: Vec::new(),
+                        resolves: None,
+                        adopted_via: None,
                         target_before: seed.is_multiple_of(2).then(|| text("before", seed)),
                         candidate_id: id,
                         workspace_id: format!("w{slot}"),

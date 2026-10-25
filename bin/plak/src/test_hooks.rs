@@ -129,11 +129,11 @@ fn prepare_scripted_tree(
     sessions: Arc<dyn plakous_hosted::session_store::SessionRecordStore>,
     state_roots: product_agent::ProductStateRoots,
 ) -> Result<PreparedTree, String> {
-    use plakous_hosted::agent_tree::{FakeVcs, MemoryTreeStore, ProductAgentTree, TreeStore};
+    use plakous_hosted::agent_tree::{MemoryTreeStore, ProductAgentTree, TreeStore};
     use plakous_hosted::agent_tree_protocol::WriterMode;
     use plakous_hosted::occupancy_vcs::VcsOps;
 
-    let vcs: Arc<dyn VcsOps> = Arc::new(FakeVcs::new());
+    let vcs: Arc<dyn VcsOps> = scripted_tree_vcs(plan);
     // `plak session show` looks the tree up by the product session id. The
     // in-memory canvas uses the hub key and can keep a private tree id; a
     // durable publish has to use the session id or show reports no tree.
@@ -204,6 +204,34 @@ fn prepare_scripted_tree(
         state_roots,
     });
     Ok(PreparedTree { driver, binder })
+}
+
+fn scripted_tree_vcs(plan: &ScriptPlan) -> Arc<dyn plakous_hosted::occupancy_vcs::VcsOps> {
+    use plakous_hosted::occupancy_vcs::{
+        AdoptFailure, ConflictCandidate, ConflictPath, VcsSnapshot, fake::FakeVcs,
+    };
+    let fake = Arc::new(FakeVcs::new());
+    if plan.tree_conflict {
+        fake.adopt_next_with(Err(AdoptFailure::Conflict {
+            paths: vec![ConflictPath {
+                path: "conflicted.txt".to_owned(),
+                kind: "contents".to_owned(),
+            }],
+            candidate: Some(Box::new(ConflictCandidate {
+                snapshot: VcsSnapshot {
+                    commit: "conflict-commit".to_owned(),
+                    content: "conflicted-tree".to_owned(),
+                    ..VcsSnapshot::default()
+                },
+                base: VcsSnapshot {
+                    commit: "target-commit".to_owned(),
+                    content: "target-tree".to_owned(),
+                    ..VcsSnapshot::default()
+                },
+            })),
+        }));
+    }
+    fake
 }
 
 /// Fails the first bound child locator publish and every save after it.

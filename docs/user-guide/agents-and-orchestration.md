@@ -334,13 +334,22 @@ Two things can go wrong, and both are ordinary failed results rather than
 corruption:
 
 - **`merge_conflict`** — the merge did not apply. The child's copy is kept, so
-  nothing is lost.
+  nothing is lost. For an entirely textual Git conflict, the refusal names a
+  pinned conflict candidate. Spawn a resolver with `workspace=fork` and
+  `inputs=[conflict_candidate_id]`, then adopt its resolved candidate. Or
+  explicitly adopt the conflict candidate with `accept_conflicts=true` to take
+  its markers into your own checkout. A resolver with markers still present
+  also requires that explicit flag.
 - **`target_changed`** — your tree moved since the adopting agent last looked.
   Re-read and adopt again.
 
 On jj, adoption updates your working-copy tree while preserving the child's
 files. On git the child's copy is left untouched and only your working tree is
 patched.
+Conflict candidates and their resolvers belong to the original adopter's
+checkout only. Successful resolution accepts the source once; `adopted_via`
+names the conflict or resolver used. Non-textual Git conflicts and all JJ
+conflicts keep the plain refusal listing paths and kinds.
 
 Workspace rows carry a status you will see in the Agents inspector: `active`, `adopting`,
 `adopted`, `discarding`, `clean_removed`, `discarded`. (`blocked` is an *attempt* status, not

@@ -163,6 +163,9 @@ pub struct ScriptPlan {
     /// show would pass on an empty tree. Requires [`Self::tree`].
     #[serde(default)]
     pub durable_tree: bool,
+    /// Make the first scripted adopt return a pinned textual conflict.
+    #[serde(default)]
+    pub tree_conflict: bool,
     /// At the first bound child locator publish and thereafter, the store
     /// returns the classified `disk_full` category and does not write.
     ///

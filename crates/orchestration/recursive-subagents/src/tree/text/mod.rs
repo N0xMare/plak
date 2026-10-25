@@ -30,7 +30,7 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "topology.topology_list_description",
         PLAK_TOPOLOGY_LIST_DESCRIPTION,
-        "93225766e589decdd3d4a8605229fee576aa6271e981cd309668d96d9c553a21",
+        "b5aa5200c82580392f36dccecb7895429d9b3d1868f62916e62db45c7eae102c",
     ),
     PromptPin::new(
         "topology.topology_wait_description",
@@ -80,7 +80,7 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "topology.topology_adopt_description_template",
         PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE,
-        "1a62376d09e342ef500740a30f5edc671a7ba3a4ab9c12ddb91e6b608e999dd4",
+        "4416af5b3ccc4a89ec2fac03ab7111fa7b28d10b965a523daec75a7bc037e8e1",
     ),
     PromptPin::new(
         "topology.topology_discard_description",
@@ -123,7 +123,7 @@ pub const PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE: &str = "Spawn a child from a
 pub const PLAK_TOPOLOGY_SEND_DESCRIPTION: &str = "Send a message to another agent. A child is already working from spawn: mail is a follow-up on its running turn (priority=urgent steers; omitted priority is urgent from a parent to its running child, deferred otherwise), not how the prompt is assigned. A finished child takes purpose=followup, which re-tasks it on a new attempt with a new turn token and, if you give one, a new output_schema_json. purpose=reply requires in_reply_to set to a message_id from list_agents inbox[]; in_reply_to only when purpose=reply.";
 
 /// `list_agents` tool description on hub roots with topology granted.
-pub const PLAK_TOPOLOGY_LIST_DESCRIPTION: &str = "List visible agents with description and prompt_bytes, not prompt text. inbox[] includes only unread messages addressed to you; include_read=true adds the newest 64 acknowledged messages per recipient, newest first. Acknowledged rows carry message_id, from, purpose, priority, in_reply_to, body_bytes and a 160-byte body preview; unread rows carry body_bytes and previews capped at 2048 bytes; full model-authored bodies (up to 16384 bytes) reach session delivery and a parent's await. Result notices carry output_bytes and output_truncated; parents await the child for the full output. Send purpose=reply with in_reply_to set to inbox[].message_id. Sealed rows name candidate_commit and candidate_base; compare those immutable snapshots to inspect the work with the checkout's VCS.";
+pub const PLAK_TOPOLOGY_LIST_DESCRIPTION: &str = "List visible agents with description and prompt_bytes, not prompt text. inbox[] includes only unread messages addressed to you; include_read=true adds the newest 64 acknowledged messages per recipient, newest first. Acknowledged rows carry message_id, from, purpose, priority, in_reply_to, body_bytes and a 160-byte body preview; unread rows carry body_bytes and previews capped at 2048 bytes; full model-authored bodies (up to 16384 bytes) reach session delivery and a parent's await. Result notices carry output_bytes and output_truncated; parents await the child for the full output. Send purpose=reply with in_reply_to set to inbox[].message_id. Sealed rows name candidate_commit and candidate_base; compare those immutable snapshots to inspect the work with the checkout's VCS. Retained candidates are objects naming candidate_id, kind, source_candidate, conflict_target, conflict_paths (at most 16), resolves and adopted_via where applicable.";
 
 /// `wait_agent` tool description on hub roots with topology granted.
 pub const PLAK_TOPOLOGY_WAIT_DESCRIPTION: &str = "Wait until any watched child settles, sends a question or reply, or sends urgent mail (interrupted also settles). Deferred finding/coordinate mail does not wake; it stays unread and rides any later return. A bare wait with only non-waking mail pending returns it without parking. Omit agent_ids to watch the children that have not reported yet: each result comes back once, and no_pending_children means all have. Returns a row per watched id with its attempt status, mail[] in arrival order with full bodies and message ids of unread mail it consumed (result mail has only message_id, purpose, attempt_id when its result is in agents[]), and woke_by (settled, mail, timeout). Returned mail is acknowledged once; later waits do not wake on it again. Child results and questions arrive as mail; wait_agent returns them. A human or unwatched-parent steer returns woke_by=steer without its text; watched urgent mail still returns woke_by=mail with its body. If one of your own background processes becomes terminal after this wait starts, it returns woke_by=process with processes naming those ids; already-terminal processes do not wake it again. Process completion is reported automatically. Naming delivered and running children together waits for new mail or settlement; naming only delivered children re-reads without parking. Settlement is not success: relay output_json from rows that submitted; completed_without_submission has none. Settlement does not change your checkout. timed_out: true means none settled; call again. timeout_ms defaults to 300000, max 3600000.";
@@ -158,7 +158,7 @@ pub const PLAK_TOPOLOGY_RECOVER_DESCRIPTION: &str = "Recover a child whose list_
 
 /// `adopt_candidate` tool description on nodes granted `may_adopt`; `{await}`
 /// is the presented await tool.
-pub const PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE: &str = "Integrate a sealed candidate from your subtree into your own workspace by candidate_id, as working-tree changes with no commit. A forked child's edits are not in your checkout until this succeeds. merge_conflict is a failed result and keeps the child copy; target_changed means your copy moved since expected_target. A {await} or list_agents row names the candidate once the child has sealed. The receipt lists the changed files.";
+pub const PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE: &str = "Integrate a sealed candidate from your subtree into your own workspace by candidate_id, as working-tree changes with no commit. A forked child's edits are not in your checkout until this succeeds. A textual Git merge_conflict pins a conflict candidate without changing your checkout: spawn a resolver with workspace=fork and inputs=[conflict candidate], or explicitly pass accept_conflicts=true to land its markers. Every merge_conflict is a failed result that keeps the child copy; conflict candidates and resolvers belong only to the original adopter, and success accepts the source once. target_changed means your copy moved since expected_target. A {await} or list_agents row names the candidate once the child has sealed. The receipt lists the changed files.";
 
 /// `discard_workspace` tool description on spawn-capable owners.
 pub const PLAK_TOPOLOGY_DISCARD_DESCRIPTION: &str = "Drop a child fork by workspace_id, giving up its unadopted candidates and their pins without adopting anything from it.";

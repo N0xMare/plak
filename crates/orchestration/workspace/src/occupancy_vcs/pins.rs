@@ -24,8 +24,36 @@ pub(super) fn adoption(
     if let Some(agent) = request.source_agent_id {
         refs.push((
             reference(request.namespace, "bases", agent),
-            request.candidate.commit.clone(),
+            request
+                .resolved_source
+                .as_ref()
+                .filter(|source| source.agent_id == Some(agent))
+                .map_or_else(
+                    || request.candidate.commit.clone(),
+                    |source| source.commit.to_owned(),
+                ),
         ));
+    }
+    if let Some(source) = &request.resolved_source {
+        for (suffix, commit) in [("before", before), ("after", after)] {
+            refs.push((
+                reference(
+                    request.namespace,
+                    "adopted",
+                    &format!("{}-{suffix}", source.candidate_id),
+                ),
+                commit.to_owned(),
+            ));
+        }
+        if let Some(agent) = source
+            .agent_id
+            .filter(|agent| Some(*agent) != request.source_agent_id)
+        {
+            refs.push((
+                reference(request.namespace, "bases", agent),
+                source.commit.to_owned(),
+            ));
+        }
     }
     refs
 }
