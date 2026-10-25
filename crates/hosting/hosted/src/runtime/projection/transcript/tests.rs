@@ -121,6 +121,86 @@ fn scopes_share_the_publisher_but_never_each_others_baseline() {
 }
 
 #[test]
+fn overflowing_an_already_truncated_scope_keeps_one_marker_and_the_root_header() {
+    use plakous_host_protocol::views::presentation::MAX_SNAPSHOT_ROWS;
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        let (sink, receiver) = observation_channel::<Core>();
+        let mut publisher = Presentations::default();
+        let mut initial = snapshot(scope.clone(), &[]);
+        if scope == TranscriptScope::Root {
+            initial.items.push(TranscriptItem {
+                key: RowKey::TRUNCATION,
+                row: TranscriptRow::SessionHeader {
+                    session_id: "root".into(),
+                    carried_from: None,
+                },
+            });
+        }
+        initial.items.push(TranscriptItem {
+            key: truncation_key(&scope),
+            row: TranscriptRow::Truncated,
+        });
+        let count = MAX_SNAPSHOT_ROWS - initial.items.len();
+        initial
+            .items
+            .extend((1..=count).map(|index| TranscriptItem {
+                key: RowKey::new(index as u64, Lane::Runtime, 0),
+                row: TranscriptRow::assistant(format!("kept {index}")),
+            }));
+        assert!(publisher.snapshot(initial, &sink));
+        let HostEvent::PresentationSnapshot(first) = receiver.try_recv().unwrap() else {
+            panic!("attachment");
+        };
+        let mut folded = TranscriptState::default();
+        folded.replace(first).unwrap();
+        assert!(publisher.observe(
+            scope.clone(),
+            &HostEvent::<Core>::AssistantDelta("new tip".into()),
+            &sink
+        ));
+        let HostEvent::TranscriptPatch(patch) = receiver.try_recv().unwrap() else {
+            panic!("bounded live patch");
+        };
+        folded.apply(patch).unwrap();
+        assert_eq!(folded.items().len(), MAX_SNAPSHOT_ROWS);
+        assert_eq!(
+            folded
+                .items()
+                .values()
+                .filter(|row| matches!(row, TranscriptRow::Truncated))
+                .count(),
+            1
+        );
+        assert_eq!(
+            folded.items().get(&truncation_key(&scope)),
+            Some(&TranscriptRow::Truncated)
+        );
+        assert!(
+            !folded
+                .items()
+                .contains_key(&RowKey::new(1, Lane::Runtime, 0))
+        );
+        assert_eq!(
+            folded
+                .items()
+                .values()
+                .any(|row| matches!(row, TranscriptRow::SessionHeader { .. })),
+            scope == TranscriptScope::Root
+        );
+        assert!(publisher.resync(&scope, &sink));
+        let HostEvent::PresentationSnapshot(full) = receiver.try_recv().unwrap() else {
+            panic!("resync");
+        };
+        let restored: BTreeMap<_, _> = full
+            .items
+            .into_iter()
+            .map(|item| (item.key, item.row))
+            .collect();
+        assert_eq!(restored, *folded.items());
+    }
+}
+
+#[test]
 fn a_quiet_settlement_emits_an_empty_patch_not_a_snapshot() {
     let (sink, receiver) = observation_channel::<Core>();
     let mut publisher = Presentations::default();

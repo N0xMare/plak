@@ -6,7 +6,7 @@ use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::views::presentation::{
     MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, row_bytes,
 };
-use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptRow};
+use plakous_host_protocol::views::transcript::{TranscriptItem, TranscriptRow};
 
 pub(super) fn snapshot(snapshot: PresentationSnapshot) -> PresentationSnapshot {
     let mut rows: BTreeMap<_, _> = snapshot
@@ -38,7 +38,10 @@ pub(super) fn snapshot(snapshot: PresentationSnapshot) -> PresentationSnapshot {
         truncated = true;
     }
     if truncated {
-        rows.insert(RowKey::new(0, Lane::Runtime, 1), TranscriptRow::Truncated);
+        rows.insert(
+            super::truncation_key(&snapshot.scope),
+            TranscriptRow::Truncated,
+        );
     }
     PresentationSnapshot {
         scope: snapshot.scope,

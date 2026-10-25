@@ -13,6 +13,13 @@ use crate::surface_protocol::{HostEvent, HostEventSender};
 mod live;
 mod repair;
 
+fn truncation_key(scope: &TranscriptScope) -> RowKey {
+    match scope {
+        TranscriptScope::Root => RowKey::new(0, Lane::Runtime, 1),
+        TranscriptScope::Agent(_) => RowKey::TRUNCATION,
+    }
+}
+
 #[derive(Default)]
 pub(in crate::runtime) struct Presentations {
     // One root and at most the one agent this face serves. Revisions remain
@@ -235,7 +242,7 @@ impl Presentations {
         };
         // Retention removes the oldest body rows, never the session header.
         while state.apply(patch.clone()).is_err() {
-            let marker = RowKey::new(0, Lane::Runtime, 1);
+            let marker = truncation_key(&scope);
             if !patch.upserts.iter().any(|item| item.key == marker) {
                 patch.upserts.push(TranscriptItem {
                     key: marker,
