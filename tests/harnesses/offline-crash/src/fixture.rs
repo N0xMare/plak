@@ -2915,7 +2915,7 @@ fn scripted_local_composition_attachment(
         configured.configuration().effective_identity(),
         plakous::tools::PROCESS_TOOL_PROJECTION_REVISION,
     )?;
-    let artifact = plakous::agent::LocalCompositionEngineArtifact::rquickjs_sidecar_v1(
+    let artifact = plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1(
         std::fs::canonicalize(sidecar)?,
     )?;
     let attachment = if js_ptc {
@@ -2938,14 +2938,9 @@ fn scripted_local_composition_attachment(
             1,
             &[b"offline.scripted.js-ptc"],
         )?;
-        let evidence = plakous::agent::ProductExtensionEvidence::product_javascript_v1(
+        let evidence = plakous::agent::ProductExtensionEvidence::cell(
             &profile,
             &artifact,
-            plakous::agent::ProductExtensionLimits {
-                max_source_bytes: 1_048_576,
-                max_yield_time_ms: 10_000,
-                max_output_tokens: 10_000,
-            },
             identity,
             identity,
             configured.configuration(),

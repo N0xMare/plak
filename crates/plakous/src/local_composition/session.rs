@@ -424,7 +424,7 @@ impl LocalCompositionNotificationResponder for NotificationAdapter {
     }
 }
 
-#[cfg(all(test, feature = "composition-python"))]
+#[cfg(test)]
 #[allow(clippy::expect_used, reason = "persistent Python session regression")]
 mod python_tests {
     use super::*;

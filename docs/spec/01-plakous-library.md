@@ -6320,7 +6320,7 @@ an evaluator**, and no host is embedded by `include_bytes`.
 
 Hosted and Plak locate workers by environment variable or as a sibling of the
 running binary. The facade instead takes an explicit absolute canonical path
-(`LocalCompositionEngineArtifact::python_worker_v1` for Python):
+(`LocalCompositionEngineArtifact::quickjs_worker_v1` or `monty_worker_v1`):
 attachment records a regular file's path and SHA-256, not its provenance, and
 both cell clients re-check the path/hash immediately before spawning.
 This is not an atomic guarantee against replacement between the re-check and
@@ -6330,6 +6330,17 @@ a sibling `plakous-py-host`. Discovery MUST NOT fetch the official Codex
 NOT admit `PLAK_CODE_MODE_HOST`. Intel macOS and every other unsupported target
 fail closed. The sidecar MUST NOT receive credentials, stores, executors, or
 driver authority, and killing it MUST NOT kill the host process.
+
+All four profiles (Codex exact, Codex minimal, product JavaScript and Python
+PTC) use `LocalCompositionAttachment::builder` and the sole
+`attach_local_composition` path. Product profiles require
+`ProductExtensionEvidence::cell` and a coding presentation kind; native
+Codex profiles forbid product evidence. The evidence constructor derives
+the exact limits, catalog and presentation from the selected profile and
+refuses a foreign engine contract. A single validator compares those facts,
+the target class, profile, artifact, host, engine contract and containment at
+attachment. Configuration validation separately binds the selected and
+effective provider configuration.
 
 rquickjs construction-time limits are a 64 MiB heap, a 512 KiB JS stack, and
 interrupt cycles plus a wall bound, with no `console`, `WebAssembly`,
@@ -8344,13 +8355,12 @@ for offline protocol comparisons.
 local composition attachment seam, the Code Mode presentation, and the cell client. It links
 `plakous-code-mode` and `plakous-cell` and no other optional Plakous crate,
 so it reaches neither `plakous-auth` nor `plakous-http`, and it links neither
-rquickjs nor any Monty crate. `composition-python` adds the Python PTC
-projection over that same attach path and cell client and implies
-`composition`; the Monty interpreter lives only in `plakous-py-host`.
+rquickjs nor any Monty crate. Both JavaScript and Python PTC use this same
+feature, attach path and cell client; the Monty interpreter lives only in
+`plakous-py-host`.
 
 `native-subscriptions` adds the subscription tier —
-`subscriptions`, and the provider crates' native-auth facets — and implies both `composition`
-and `composition-python`.
+`subscriptions`, and the provider crates' native-auth facets — and implies `composition`.
 `mcp` re-exports `plakous-mcp` as `plakous::mcp` (`McpPool`, `McpServerSpec`,
 `McpToolPack`, the frozen listing and record types, the resource and prompt
 types, the OAuth settings, login and status types, `McpError`, and

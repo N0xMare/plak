@@ -739,7 +739,6 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "AgentEvent",
         "AgentEventKind",
         "AgentRequestPolicy",
-        "codex_minimal_local_code_mode_sidecar",
         "CapabilityRequirement",
         "CachePreferenceStrategy",
         "CommandAckDisposition",
@@ -1251,7 +1250,10 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-hosted": {
         **_SHARED_PLAKOUS_SYMBOLS,
         # Hidden, unsupported preview-minimization seam; not a product API.
-        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"] | {"preview_redaction"},
+        "tools": _SHARED_PLAKOUS_SYMBOLS["tools"] | {
+            "CodexMinimalLocalCodeModeDescriptorV1",
+            "preview_redaction",
+        },
     },
     "plakous-workspace": _SHARED_PLAKOUS_SYMBOLS,
     "plakous-recursive-subagents": _SHARED_PLAKOUS_SYMBOLS,
@@ -3548,9 +3550,8 @@ def rquickjs_linkage_errors(root: Path = ROOT) -> list[str]:
 # markers are v0-mangled crate names (`<length><crate>`) and carry both
 # supported platforms; the C markers are the engine's own entry points, and
 # Mach-O prefixes those with an underscore while ELF does not, so both
-# spellings are listed. Plakous' own `RquickjsCodeModeIntegration` type and
-# `rquickjs_sidecar_v1` constructor carry "rquickjs" in their names and are the
-# sidecar *client*, so a substring match on the crate name proves nothing.
+# spellings are listed. Host-side adapters are not the interpreter, so a
+# substring match on an engine name proves nothing.
 RQUICKJS_ENGINE_SYMBOL_MARKERS = (
     "13rquickjs_core",
     "12rquickjs_sys",
@@ -4242,7 +4243,6 @@ def main() -> int:
             "anthropic",
             "auth",
             "composition",
-            "composition-python",
             "default",
             "full",
             "test-clock",

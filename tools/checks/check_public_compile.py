@@ -249,10 +249,8 @@ DEPENDENCY_POSITIVE = (
         ),
     ),
 )
-# The two consumer manifests spec 06 and the embedding guide document on their
-# own. Every other positive selects a feature set that also pulls a session
-# backend or the whole product closure, so a consumer that selects only
-# `composition`, or only `composition-python`, was never type-checked. `check`
+# The composition-only manifest spec 06 and the embedding guide document on its
+# own. Other positives also pull a session backend or the product closure. `check`
 # rather than `build`: the question is whether the crate compiles under the
 # feature gates, not whether it links.
 CONSUMER_MANIFEST_POSITIVE = tuple(
@@ -270,7 +268,7 @@ CONSUMER_MANIFEST_POSITIVE = tuple(
             feature,
         ),
     )
-    for feature in ("composition", "composition-python")
+    for feature in ("composition",)
 )
 DOCUMENTATION_NEGATIVE = (
     (

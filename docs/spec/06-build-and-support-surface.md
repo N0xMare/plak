@@ -335,8 +335,7 @@ called out explicitly.
 | `plak` | `maintainer` | Empty feature gating only Plak's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (§6.2) |
 | `plak` | `otel` | OTLP export and the typed telemetry bridge. Default builds carry no `opentelemetry` dependency |
 | `plak` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
-| `plakous` | `composition` | Code Mode presentation and JavaScript evaluation through the `plakous-js-host` sidecar. This is the whole evaluator capability; it links no credential, HTTP, subscription, or Python machinery |
-| `plakous` | `composition-python` | The Python PTC projection over the same attach path and cell client, linking no Monty crate; implies `composition` |
+| `plakous` | `composition` | Code Mode, JavaScript and Python PTC through one attachment seam and the engine-free cell client. It links no credential, HTTP, subscription, or interpreter machinery |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
 | `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 §2.8). Enabled only by the repository harness crate, so `plak/test-hooks` is its one product edge; `check_features.py` refuses it in a default `plak` |
 | `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
@@ -379,7 +378,7 @@ declarations. Workspace-inherited features and local additions are additive.
 In particular, the facade's dev-dependency and the offline-crash harness's
 dependency explicitly enable `uuid/v4`; both support standalone
 `cargo check -p <package> --all-targets --locked`.
-`native-subscriptions` implies `composition` and `composition-python`, so the
+`native-subscriptions` implies `composition`, so the
 product closure is unchanged by the split.
 
 `plakous` carries ten public optional features. The reviewed closure cap in
@@ -405,26 +404,26 @@ directly; no cache is read or written.
 
 Closures prove dependency edges, not that the code compiles. Without
 `--build`, the checker therefore also runs `cargo check --lib` on `plakous`
-with no features and with each public feature alone (eleven profiles); a
+with no features and with each public feature alone (ten profiles); a
 rustc warning or error in any workspace crate of that profile fails it. Cargo's
 fingerprints are its cache: an unchanged profile is a no-op (about 1 s for
-all eleven), and a facade or dependency source change rechecks only the
+all ten), and a facade or dependency source change rechecks only the
 affected crates. `--build` checks every subset and skips this step.
 
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no
 `monty-proto`, `plakous-auth`, `plakous-http`, `plakous-py-worker`, or
-`rquickjs`, and `composition-python` reaches no `monty-proto` either. That is
+`rquickjs`. Both language presentations use this closure. That is
 what makes the decoupling provable rather than asserted.
 
 `cargo tree` proves the closure, not that the crate compiles under those gates.
-So `check_public_compile.py` also type-checks the two documented consumer
-manifests on their own: `cargo check -p plakous --no-default-features
---features composition` and the same for `composition-python`, both locked and
-offline. They are `check` rather than `build` because the question is whether
-the feature gates leave a compiling crate. Every other positive in that checker
-selects a session backend alongside the evaluator or the whole product closure,
-so without these two neither documented manifest would ever be compiled.
+So `check_public_compile.py` also type-checks the documented composition-only
+consumer manifest: `cargo check -p plakous --no-default-features
+--features composition`, locked and offline. It uses `check` rather than
+`build` because the question is whether the feature gates leave a compiling
+crate. Every other positive in that checker selects a session backend
+alongside the evaluator or the whole product closure, so without this check
+the minimal evaluator manifest would never be compiled.
 
 `tools/checks/check_workspace.py` checks the same split at the artifact level,
 not only in the manifests. It lists the symbols of the `plak`,
@@ -433,10 +432,9 @@ JavaScript worker contains QuickJS engine symbols, only the Python worker
 contains Monty interpreter or type-checking symbols, and that the three are
 separate files by digest.
 
-Two details make that check sound. Plakous's own `RquickjsCodeModeIntegration`
-type and `rquickjs_sidecar_v1` constructor carry "rquickjs" in their names and
-are the sidecar client, so the check matches the engine's v0-mangled crate
-names and C entry points rather than a substring. And it reads only
+Two details make that check sound. Host-side adapters are not interpreters,
+so the check matches the engine's v0-mangled crate names and C entry points
+rather than a substring. And it reads only
 `target/release`, the product build: gate runs build `target/debug` with
 `--all-features`, a different feature selection. Without a release build the
 checker says the linkage was not checked rather than passing quietly.

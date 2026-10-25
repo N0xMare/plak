@@ -77,7 +77,7 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     fn verify_sidecar_artifact(
         path: &std::path::Path,
     ) -> Result<LocalCompositionEngineArtifact, AgentError> {
-        LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path)
+        LocalCompositionEngineArtifact::quickjs_worker_v1(path)
     }
     fn select_product_profile(
         descriptor: &ProductJavaScriptCompositionDescriptorV1,
@@ -92,7 +92,7 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     fn verify_python_artifact(
         host: &std::path::Path,
     ) -> Result<LocalCompositionEngineArtifact, AgentError> {
-        LocalCompositionEngineArtifact::python_worker_v1(host)
+        LocalCompositionEngineArtifact::monty_worker_v1(host)
     }
     fn close_product_binding(
         profile: LocalCompositionProfile,
@@ -105,37 +105,14 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
             .coding_presentation_kind(plakous::tools::CodingPresentation::Codex)
             .build()
     }
-    fn qualify_product_binding(
-        profile: &LocalCompositionProfile,
-        artifact: &LocalCompositionEngineArtifact,
-        limits: ProductExtensionLimits,
-        issuer: Digest,
-        qualification: Digest,
-        configuration: &CompiledProviderConfiguration,
-    ) -> Result<ProductExtensionEvidence, AgentError> {
-        ProductExtensionEvidence::product_javascript_v1(
-            profile,
-            artifact,
-            limits,
-            issuer,
-            qualification,
-            configuration,
-        )
-    }
-    fn qualify_python_binding(
+    fn qualify_cell_binding(
         profile: &LocalCompositionProfile,
         artifact: &LocalCompositionEngineArtifact,
         issuer: Digest,
         qualification: Digest,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<ProductExtensionEvidence, AgentError> {
-        ProductExtensionEvidence::python_ptc_v1(
-            profile,
-            artifact,
-            issuer,
-            qualification,
-            configuration,
-        )
+        ProductExtensionEvidence::cell(profile, artifact, issuer, qualification, configuration)
     }
     fn close_binding(
         profile: LocalCompositionProfile,
@@ -156,6 +133,7 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     hold(&std::any::type_name::<LocalCompositionContainment>());
     hold(&std::any::type_name::<LocalCompositionLanguage>());
     hold(&std::any::type_name::<LocalCompositionProfile>());
+    hold(&std::any::type_name::<ProductExtensionLimits>());
     hold(&select_profile);
     hold(&select_minimal_profile);
     hold(&verify_sidecar_artifact);
@@ -164,8 +142,7 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     hold(&verify_python_artifact);
     hold(&close_binding);
     hold(&close_product_binding);
-    hold(&qualify_product_binding);
-    hold(&qualify_python_binding);
+    hold(&qualify_cell_binding);
     hold(&dormant);
 }
 
@@ -313,7 +290,7 @@ pub(crate) mod codex_local_composition_reconstruction {
         // a file present on every test host, including BusyBox-only systems.
         let host = std::fs::canonicalize(std::env::current_exe()?)?;
         let attachment = LocalCompositionAttachment::builder(profile)
-            .engine_artifact(LocalCompositionEngineArtifact::rquickjs_sidecar_v1(host)?)
+            .engine_artifact(LocalCompositionEngineArtifact::quickjs_worker_v1(host)?)
             .build()?;
         assert_eq!(attachment.profile().identity(), minimal.identity());
         Ok(())

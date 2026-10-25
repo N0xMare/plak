@@ -629,11 +629,11 @@ struct RecordedSidecar {
 
 impl plakous::tools::SidecarLocator for RecordedSidecar {
     fn javascript_host(&self) -> Result<PathBuf, String> {
-        self.host(plakous::agent::LocalCompositionEngineArtifact::rquickjs_sidecar_v1)
+        self.host(plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1)
     }
 
     fn python_host(&self) -> Result<PathBuf, String> {
-        self.host(plakous::agent::LocalCompositionEngineArtifact::python_worker_v1)
+        self.host(plakous::agent::LocalCompositionEngineArtifact::monty_worker_v1)
     }
 }
 
@@ -907,7 +907,7 @@ mod tests {
         roots.sidecars = Arc::new(Current(current.clone()));
         roots.reopen_sidecars = Some(Arc::new(super::RecordedSidecar {
             artifact: Some(
-                plakous::agent::LocalCompositionEngineArtifact::rquickjs_sidecar_v1(&historical)
+                plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1(&historical)
                     .unwrap(),
             ),
         }));

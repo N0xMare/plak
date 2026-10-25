@@ -1,4 +1,4 @@
-//! Product extension evidence: limits and per-language validation.
+//! Product extension evidence for exact cell attachments.
 
 #![allow(
     clippy::wildcard_imports,
@@ -52,130 +52,39 @@ pub struct ProductExtensionEvidence {
 }
 
 impl ProductExtensionEvidence {
-    /// Derives exact product-extension evidence for `PythonPtcV1`.
+    /// Derives a self-attested receipt for an exact product-owned cell profile.
     ///
     /// # Errors
     ///
-    /// Rejects a foreign profile, target, artifact, or provider configuration.
-    #[cfg(feature = "composition-python")]
-    pub fn python_ptc_v1(
+    /// Rejects a native profile, a foreign engine, or a provider configuration
+    /// from another target. Exact limits come from the selected profile.
+    /// This makes no provider-native or successful live-qualification claim.
+    pub fn cell(
         profile: &LocalCompositionProfile,
         artifact: &LocalCompositionEngineArtifact,
         product_issuer: Digest,
         qualification_receipt: Digest,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<Self, AgentError> {
-        let LocalCompositionProfileKind::PythonPtcV1(descriptor) = &profile.kind else {
-            return Err(invalid("Python extension evidence requires PythonPtcV1"));
-        };
-        let target = descriptor.outer_projection().target().integration_class();
+        let facts = extension_facts(profile)?;
+        validate_engine_contract_binding(
+            profile.engine_contract_identity(),
+            artifact.engine_contract_identity(),
+        )?;
+        let target = facts.target;
         if configuration.effective().descriptor().integration_class() != target {
             return Err(invalid(
-                "Python extension evidence disagrees with its admitted target",
+                "cell extension evidence disagrees with its admitted target",
             ));
         }
-        let limits = python_extension_limits();
         extension_evidence(
-            target,
             profile.identity(),
             artifact,
-            descriptor.catalog_identity(),
-            descriptor.presentation_identity(),
-            limits,
+            facts,
             product_issuer,
             qualification_receipt,
             configuration,
         )
-    }
-
-    /// Derives one self-attested product-extension receipt from the complete
-    /// product JavaScript attachment and an external qualification candidate.
-    ///
-    /// # Errors
-    ///
-    /// Rejects a native profile, any non-exact V1 limit tuple, an empty issuer
-    /// or qualification identity, or a target foreign to the compiled configuration.
-    /// This constructor makes no provider-native or context-evidence claim.
-    pub fn product_javascript_v1(
-        profile: &LocalCompositionProfile,
-        artifact: &LocalCompositionEngineArtifact,
-        limits: ProductExtensionLimits,
-        product_issuer: Digest,
-        qualification_receipt: Digest,
-        configuration: &CompiledProviderConfiguration,
-    ) -> Result<Self, AgentError> {
-        let LocalCompositionProfileKind::ProductJavaScriptV1(descriptor) = &profile.kind else {
-            return Err(AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "product extension evidence requires a product-owned JavaScript profile",
-            ));
-        };
-        let target = descriptor.outer_projection().target().integration_class();
-        if !product_javascript_limits_are_exact(limits)
-            || configuration.effective().descriptor().integration_class() != target
-        {
-            return Err(AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "product extension evidence disagrees with its exact admitted target",
-            ));
-        }
-        let profile = profile.identity();
-        let artifact_identity = artifact.identity();
-        let catalog = descriptor.nested_projection().digest();
-        let presentation = descriptor.outer_projection().digest();
-        let host = artifact.host_identity();
-        let engine_contract = artifact.engine_contract_identity();
-        let containment = artifact.containment().identity();
-        let selected_configuration = configuration.selected_identity();
-        let effective_configuration = configuration.effective_identity();
-        let receipt = Digest::sha256(
-            DigestDomain::ExecutionEnvironment,
-            1,
-            &[
-                b"plakous.product-extension-evidence.v1",
-                &[match target {
-                    IntegrationClass::Standard => 1,
-                    IntegrationClass::Custom => 2,
-                    _ => {
-                        return Err(AgentError::new(
-                            AgentErrorKind::InvalidInput,
-                            "unknown product extension target class",
-                        ));
-                    }
-                }],
-                &profile.identity_bytes(),
-                &artifact_identity.identity_bytes(),
-                &catalog.identity_bytes(),
-                &presentation.identity_bytes(),
-                &limits.max_source_bytes.to_be_bytes(),
-                &limits.max_yield_time_ms.to_be_bytes(),
-                &limits.max_output_tokens.to_be_bytes(),
-                &host.identity_bytes(),
-                &engine_contract.identity_bytes(),
-                &containment.identity_bytes(),
-                &product_issuer.identity_bytes(),
-                &qualification_receipt.identity_bytes(),
-                &selected_configuration.digest().identity_bytes(),
-                &effective_configuration.digest().identity_bytes(),
-            ],
-        )
-        .map_err(|error| AgentError::new(AgentErrorKind::Identity, error.to_string()))?;
-        Ok(Self {
-            target,
-            profile,
-            artifact: artifact_identity,
-            catalog,
-            presentation,
-            limits,
-            host,
-            engine_contract,
-            containment,
-            product_issuer,
-            qualification_receipt,
-            selected_configuration,
-            effective_configuration,
-            receipt,
-        })
     }
 
     /// Returns the product issuer and qualification-candidate receipt identities.
@@ -251,21 +160,21 @@ impl ProductExtensionEvidence {
 pub(super) fn validate_product_evidence(
     profile: &LocalCompositionProfile,
     artifact: &LocalCompositionEngineArtifact,
-    descriptor: &ProductJavaScriptCompositionDescriptorV1,
     evidence: &ProductExtensionEvidence,
 ) -> Result<(), AgentError> {
-    let (profile_fact, artifact_fact, catalog, presentation, _, host) = evidence.extension_facts();
-    let (_, _, _, _, limits, _) = evidence.extension_facts();
+    let facts = extension_facts(profile)?;
+    let (profile_fact, artifact_fact, catalog, presentation, limits, host) =
+        evidence.extension_facts();
     let (engine_contract, containment) = evidence.engine_identities();
-    if evidence.target() != descriptor.outer_projection().target().integration_class()
+    if evidence.target() != facts.target
         || profile_fact != profile.identity()
         || artifact_fact != artifact.identity()
-        || catalog != descriptor.nested_projection().digest()
-        || presentation != descriptor.outer_projection().digest()
+        || catalog != facts.catalog
+        || presentation != facts.presentation
         || host != artifact.host_identity()
         || engine_contract != artifact.engine_contract_identity()
         || containment != artifact.containment().identity()
-        || !product_javascript_limits_are_exact(limits)
+        || limits != facts.limits
     {
         return Err(AgentError::new(
             AgentErrorKind::InvalidInput,
@@ -275,15 +184,14 @@ pub(super) fn validate_product_evidence(
     Ok(())
 }
 
-pub(super) fn product_javascript_limits_are_exact(limits: ProductExtensionLimits) -> bool {
-    u64::try_from(native::MAX_SOURCE_BYTES).is_ok_and(|max_source_bytes| {
-        limits.max_source_bytes == max_source_bytes
-            && limits.max_yield_time_ms == PRODUCT_JAVASCRIPT_DEFAULT_YIELD_TIME_MS
-            && limits.max_output_tokens == PRODUCT_JAVASCRIPT_DEFAULT_OUTPUT_TOKENS
-    })
+pub(super) fn javascript_extension_limits() -> ProductExtensionLimits {
+    ProductExtensionLimits {
+        max_source_bytes: native::MAX_SOURCE_BYTES as u64,
+        max_yield_time_ms: PRODUCT_JAVASCRIPT_DEFAULT_YIELD_TIME_MS,
+        max_output_tokens: PRODUCT_JAVASCRIPT_DEFAULT_OUTPUT_TOKENS,
+    }
 }
 
-#[cfg(feature = "composition-python")]
 pub(super) const fn python_extension_limits() -> ProductExtensionLimits {
     ProductExtensionLimits {
         max_source_bytes: PythonPtcLimitsV1::EXACT.source_bytes,
@@ -292,22 +200,20 @@ pub(super) const fn python_extension_limits() -> ProductExtensionLimits {
     }
 }
 
-#[cfg(feature = "composition-python")]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the evidence receipt deliberately binds one closed reconstruction tuple"
-)]
 fn extension_evidence(
-    target: IntegrationClass,
     profile: Digest,
     artifact: &LocalCompositionEngineArtifact,
-    catalog: Digest,
-    presentation: Digest,
-    limits: ProductExtensionLimits,
+    facts: ExtensionFacts,
     product_issuer: Digest,
     qualification_receipt: Digest,
     configuration: &CompiledProviderConfiguration,
 ) -> Result<ProductExtensionEvidence, AgentError> {
+    let ExtensionFacts {
+        target,
+        catalog,
+        presentation,
+        limits,
+    } = facts;
     let artifact_identity = artifact.identity();
     let host = artifact.host_identity();
     let engine_contract = artifact.engine_contract_identity();
@@ -359,29 +265,227 @@ fn extension_evidence(
     })
 }
 
-#[cfg(feature = "composition-python")]
-pub(super) fn validate_python_evidence(
-    profile: &LocalCompositionProfile,
-    artifact: &LocalCompositionEngineArtifact,
-    descriptor: &PythonPtcDescriptorV1,
-    evidence: &ProductExtensionEvidence,
-) -> Result<(), AgentError> {
-    let (profile_fact, artifact_fact, catalog, presentation, limits, host) =
-        evidence.extension_facts();
-    let (engine_contract, containment) = evidence.engine_identities();
-    if evidence.target() != descriptor.outer_projection().target().integration_class()
-        || profile_fact != profile.identity()
-        || artifact_fact != artifact.identity()
-        || catalog != descriptor.catalog_identity()
-        || presentation != descriptor.presentation_identity()
-        || limits != python_extension_limits()
-        || host != artifact.host_identity()
-        || engine_contract != artifact.engine_contract_identity()
-        || containment != artifact.containment().identity()
-    {
-        return Err(invalid(
-            "Python extension evidence disagrees with the exact profile attachment",
-        ));
+#[derive(Clone, Copy)]
+struct ExtensionFacts {
+    target: IntegrationClass,
+    catalog: Digest,
+    presentation: Digest,
+    limits: ProductExtensionLimits,
+}
+
+fn extension_facts(profile: &LocalCompositionProfile) -> Result<ExtensionFacts, AgentError> {
+    match &profile.kind {
+        LocalCompositionProfileKind::ProductJavaScriptV1(descriptor) => Ok(ExtensionFacts {
+            target: descriptor.outer_projection().target().integration_class(),
+            catalog: descriptor.nested_projection().digest(),
+            presentation: descriptor.outer_projection().digest(),
+            limits: javascript_extension_limits(),
+        }),
+        LocalCompositionProfileKind::PythonPtcV1(descriptor) => Ok(ExtensionFacts {
+            target: descriptor.outer_projection().target().integration_class(),
+            catalog: descriptor.catalog_identity(),
+            presentation: descriptor.presentation_identity(),
+            limits: python_extension_limits(),
+        }),
+        LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(_)
+        | LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(_) => Err(invalid(
+            "native Codex local composition forbids product-extension evidence",
+        )),
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plakous_compose::{CodexMinimalLocalCodeModeV1, CodexNativeLocalCodeModeV1};
+
+    type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+    fn profiles() -> TestResult<Vec<LocalCompositionProfile>> {
+        let mut registry = plakous_tools::ToolRegistryBuilder::default();
+        plakous_tools::register_packs(
+            &plakous_compose::standard_coding_packs_in_memory()?,
+            &mut registry,
+        )?;
+        CodexNativeLocalCodeModeV1::register_markers_into(&mut registry)?;
+        ProductJavaScriptCompositionV1::register_markers_into(&mut registry)?;
+        PythonPtcV1::register_markers_into(&mut registry)?;
+        let registry = registry.freeze();
+        let configuration = serde_json::from_value(serde_json::to_value(Digest::sha256(
+            DigestDomain::EffectiveProviderConfiguration,
+            5,
+            &[b"cell-attachment-matrix"],
+        )?)?)?;
+        let target = ProviderModelProjectionIdentityV2::new(
+            IntegrationClass::Standard,
+            "openai.codex.responses",
+            "openai.codex_subscription",
+            "openai.codex.compat.0.153.3",
+            "responses-family",
+            "gpt-codex-code-mode-test",
+            "gpt-codex-code-mode-test",
+            configuration,
+            PROCESS_TOOL_PROJECTION_REVISION,
+        )?;
+        let job = plakous_tools::JobConfig::default();
+        Ok(vec![
+            LocalCompositionProfile::codex_native_local_code_mode_host_v1(
+                &CodexNativeLocalCodeModeV1::compile(job, registry.clone(), target.clone())?,
+            )?,
+            LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(
+                &CodexMinimalLocalCodeModeV1::compile(job, registry.clone(), target.clone())?,
+            )?,
+            LocalCompositionProfile::product_javascript_v1(
+                &ProductJavaScriptCompositionV1::compile_for_kind(
+                    job,
+                    registry.clone(),
+                    target.clone(),
+                    plakous_tools::CodingPresentation::Codex,
+                    [ToolName::new("read_file")?],
+                )?,
+            )?,
+            LocalCompositionProfile::python_ptc_v1(&PythonPtcV1::compile_for_kind(
+                job,
+                registry,
+                target,
+                plakous_compose::PythonPtcPresentationV1::StructuredFunctions,
+                plakous_tools::CodingPresentation::Codex,
+                [ToolName::new("read_file")?],
+            )?)?,
+        ])
+    }
+
+    fn evidence(
+        profile: &LocalCompositionProfile,
+        artifact: &LocalCompositionEngineArtifact,
+    ) -> TestResult<ProductExtensionEvidence> {
+        let facts = extension_facts(profile)?;
+        let identity = Digest::sha256(DigestDomain::ExecutionEnvironment, 1, &[b"receipt"])?;
+        Ok(ProductExtensionEvidence {
+            target: facts.target,
+            profile: profile.identity(),
+            artifact: artifact.identity(),
+            catalog: facts.catalog,
+            presentation: facts.presentation,
+            limits: facts.limits,
+            host: artifact.host_identity(),
+            engine_contract: artifact.engine_contract_identity(),
+            containment: artifact.containment().identity(),
+            product_issuer: identity,
+            qualification_receipt: identity,
+            receipt: identity,
+            selected_configuration: serde_json::from_value(serde_json::to_value(Digest::sha256(
+                DigestDomain::SelectedProviderConfiguration,
+                5,
+                &[b"matrix"],
+            )?)?)?,
+            effective_configuration: serde_json::from_value(serde_json::to_value(
+                Digest::sha256(
+                    DigestDomain::EffectiveProviderConfiguration,
+                    5,
+                    &[b"matrix"],
+                )?,
+            )?)?,
+        })
+    }
+
+    #[test]
+    fn attachment_accepts_only_the_exact_profile_engine_and_evidence_lane() -> TestResult {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("worker");
+        std::fs::write(&path, b"offline matrix worker")?;
+        let path = path.canonicalize()?;
+        let profiles = profiles()?;
+        for (index, profile) in profiles.iter().enumerate() {
+            for python in [false, true] {
+                for with_receipt in [false, true] {
+                    let artifact = if python {
+                        LocalCompositionEngineArtifact::monty_worker_v1(&path)?
+                    } else {
+                        LocalCompositionEngineArtifact::quickjs_worker_v1(&path)?
+                    };
+                    let receipt = if with_receipt {
+                        Some(evidence(
+                            if index >= 2 { profile } else { &profiles[2] },
+                            &artifact,
+                        )?)
+                    } else {
+                        None
+                    };
+                    let mut builder = LocalCompositionAttachment::builder(profile.clone())
+                        .engine_artifact(artifact)
+                        .coding_presentation_kind(plakous_tools::CodingPresentation::Codex);
+                    if let Some(receipt) = receipt {
+                        builder = builder.product_extension_evidence(receipt);
+                    }
+                    assert_eq!(
+                        builder.build().is_ok(),
+                        python == (index == 3) && with_receipt == (index >= 2),
+                        "profile {index}, python {python}, receipt {with_receipt}"
+                    );
+                }
+            }
+            assert!(
+                LocalCompositionAttachment::builder(profile.clone())
+                    .build()
+                    .is_err()
+            );
+            if index >= 2 {
+                let artifact = if index == 3 {
+                    LocalCompositionEngineArtifact::monty_worker_v1(&path)?
+                } else {
+                    LocalCompositionEngineArtifact::quickjs_worker_v1(&path)?
+                };
+                let receipt = evidence(profile, &artifact)?;
+                assert!(
+                    LocalCompositionAttachment::builder(profile.clone())
+                        .engine_artifact(artifact)
+                        .product_extension_evidence(receipt)
+                        .build()
+                        .is_err(),
+                    "missing presentation kind"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn every_attachment_evidence_fact_is_checked_for_both_languages() -> TestResult {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("worker");
+        std::fs::write(&path, b"offline evidence worker")?;
+        let path = path.canonicalize()?;
+        for (index, profile) in profiles()?.into_iter().enumerate().skip(2) {
+            let artifact = if index == 3 {
+                LocalCompositionEngineArtifact::monty_worker_v1(&path)?
+            } else {
+                LocalCompositionEngineArtifact::quickjs_worker_v1(&path)?
+            };
+            let receipt = evidence(&profile, &artifact)?;
+            assert!(validate_product_evidence(&profile, &artifact, &receipt).is_ok());
+            let neighbor = Digest::sha256(DigestDomain::ExecutionEnvironment, 1, &[b"neighbor"])?;
+            for axis in 0..11 {
+                let mut drifted = receipt.clone();
+                match axis {
+                    0 => drifted.target = IntegrationClass::Custom,
+                    1 => drifted.profile = neighbor,
+                    2 => drifted.artifact = neighbor,
+                    3 => drifted.catalog = neighbor,
+                    4 => drifted.presentation = neighbor,
+                    5 => drifted.host = neighbor,
+                    6 => drifted.engine_contract = neighbor,
+                    7 => drifted.containment = neighbor,
+                    8 => drifted.limits.max_source_bytes += 1,
+                    9 => drifted.limits.max_yield_time_ms += 1,
+                    _ => drifted.limits.max_output_tokens += 1,
+                }
+                assert!(
+                    validate_product_evidence(&profile, &artifact, &drifted).is_err(),
+                    "profile {index}, axis {axis}"
+                );
+            }
+        }
+        Ok(())
+    }
 }

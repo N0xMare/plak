@@ -19,8 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use plakous::agent::{
     AgentBuilder, HarnessProfileId, LocalCompositionAttachment, LocalCompositionEngineArtifact,
-    LocalCompositionProfile, ProductExtensionEvidence, ProductExtensionLimits, TurnResultOutcome,
-    attach_local_composition,
+    LocalCompositionProfile, ProductExtensionEvidence, TurnResultOutcome, attach_local_composition,
 };
 use plakous::construction::{compile_local_composition_plan, provider_model_projection_identity};
 use plakous::model::{
@@ -130,25 +129,15 @@ async fn main() -> Fallible<()> {
         [nested],
     )?;
     let profile = LocalCompositionProfile::product_javascript_v1(&composition)?;
-    let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(host)?;
+    let artifact = LocalCompositionEngineArtifact::quickjs_worker_v1(host)?;
     let issuer = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"example-embedder"])?;
     let qualification = Digest::sha256(
         DigestDomain::ModelBinding,
         1,
         &[b"example-offline-candidate"],
     )?;
-    let evidence = ProductExtensionEvidence::product_javascript_v1(
-        &profile,
-        &artifact,
-        ProductExtensionLimits {
-            max_source_bytes: 1_048_576,
-            max_yield_time_ms: 10_000,
-            max_output_tokens: 10_000,
-        },
-        issuer,
-        qualification,
-        &configuration,
-    )?;
+    let evidence =
+        ProductExtensionEvidence::cell(&profile, &artifact, issuer, qualification, &configuration)?;
     let attachment = LocalCompositionAttachment::builder(profile)
         .engine_artifact(artifact)
         .coding_presentation_kind(CodingPresentation::Pi)

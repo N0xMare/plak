@@ -1,6 +1,7 @@
 //! Session execution policy and budgets.
 
 use crate::binding::CompositionSelection;
+use plakous::agent::{AgentBuilder, AgentError};
 use plakous::model::{CompiledProviderConfiguration, ToolEffect};
 use plakous::subscriptions::{NativeProvider, NativeToolMode, SubscriptionRequestLimits};
 use plakous::tools::{
@@ -164,6 +165,20 @@ pub(in crate::agent) const PRODUCT_JAVASCRIPT_DIRECT_CANDIDATE_V1: &[u8] =
 pub(in crate::agent) const PYTHON_DIRECT_VERTICAL_CANDIDATE_V1: &[u8] =
     b"plak.candidate.product-python.wire-compatible-direct.v1";
 
+pub(crate) fn attach_codex_minimal(
+    builder: AgentBuilder,
+    descriptor: &plakous::tools::CodexMinimalLocalCodeModeDescriptorV1,
+    host_path: &Path,
+) -> Result<AgentBuilder, AgentError> {
+    let profile =
+        plakous::agent::LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(descriptor)?;
+    let artifact = plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1(host_path)?;
+    let attachment = plakous::agent::LocalCompositionAttachment::builder(profile)
+        .engine_artifact(artifact)
+        .build()?;
+    plakous::agent::attach_local_composition(builder, Some(attachment))
+}
+
 pub(crate) fn product_javascript_candidate_attachment(
     descriptor: &plakous::tools::ProductJavaScriptCompositionDescriptorV1,
     host_path: &Path,
@@ -171,7 +186,7 @@ pub(crate) fn product_javascript_candidate_attachment(
     presentation_kind: CodingPresentation,
 ) -> Option<plakous::agent::LocalCompositionAttachment> {
     let artifact =
-        plakous::agent::LocalCompositionEngineArtifact::rquickjs_sidecar_v1(host_path).ok()?;
+        plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1(host_path).ok()?;
     let profile =
         plakous::agent::LocalCompositionProfile::product_javascript_v1(descriptor).ok()?;
     let issuer = plakous::model::Digest::sha256(
@@ -193,14 +208,9 @@ pub(crate) fn product_javascript_candidate_attachment(
         ],
     )
     .ok()?;
-    let evidence = plakous::agent::ProductExtensionEvidence::product_javascript_v1(
+    let evidence = plakous::agent::ProductExtensionEvidence::cell(
         &profile,
         &artifact,
-        plakous::agent::ProductExtensionLimits {
-            max_source_bytes: 1_048_576,
-            max_yield_time_ms: 10_000,
-            max_output_tokens: 10_000,
-        },
         issuer,
         qualification_candidate,
         configuration,
@@ -220,7 +230,7 @@ pub(crate) fn product_python_attachment(
     configuration: &CompiledProviderConfiguration,
     presentation_kind: CodingPresentation,
 ) -> CliResult<plakous::agent::LocalCompositionAttachment> {
-    let artifact = plakous::agent::LocalCompositionEngineArtifact::python_worker_v1(host_path)
+    let artifact = plakous::agent::LocalCompositionEngineArtifact::monty_worker_v1(host_path)
         .map_err(|error| CliFailure::new(format!("Python host identity is invalid: {error}")))?;
     let profile = plakous::agent::LocalCompositionProfile::python_ptc_v1(descriptor)
         .map_err(|error| CliFailure::new(format!("Python profile identity is invalid: {error}")))?;
@@ -238,7 +248,7 @@ pub(crate) fn product_python_attachment(
         &[PYTHON_DIRECT_VERTICAL_CANDIDATE_V1, &selected, &effective],
     )
     .map_err(|error| CliFailure::new(format!("Python candidate identity is invalid: {error}")))?;
-    let evidence = plakous::agent::ProductExtensionEvidence::python_ptc_v1(
+    let evidence = plakous::agent::ProductExtensionEvidence::cell(
         &profile,
         &artifact,
         issuer,

@@ -16,7 +16,6 @@
 //! }
 //! ```
 
-#[cfg(feature = "composition-python")]
 use std::collections::BTreeMap;
 use std::{
     fmt,
@@ -43,7 +42,6 @@ use plakous_compose::{
     CodexMinimalLocalCodeModeDescriptorV1, CodexNativeLocalCodeModeDescriptorV1,
     ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
 };
-#[cfg(feature = "composition-python")]
 use plakous_compose::{PythonPtcDescriptorV1, PythonPtcLimitsV1, PythonPtcV1};
 use plakous_model::{
     CompiledProviderConfiguration, Digest, DigestDomain, EffectiveProviderConfigurationId,
@@ -55,17 +53,14 @@ use plakous_tools::{
     PRODUCT_JAVASCRIPT_WAIT_NAME_V1, ProviderModelProjectionIdentityV2, ToolExecutorId,
     ToolProjectionMap,
 };
-#[cfg(feature = "composition-python")]
 use plakous_tools::{
     PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1, PYTHON_PTC_RUN_NAME_V1, PYTHON_PTC_WAIT_NAME_V1,
 };
 
 const PRODUCT_JAVASCRIPT_DEFAULT_YIELD_TIME_MS: u64 = 10_000;
 const PRODUCT_JAVASCRIPT_DEFAULT_OUTPUT_TOKENS: u64 = 10_000;
-#[cfg(feature = "composition-python")]
 const PYTHON_DEFAULT_YIELD_TIME_MS: u64 = 10_000;
 /// Maximum UTF-8 source bytes in one cell.
-#[cfg(feature = "composition-python")]
 const PYTHON_SOURCE_MAX_BYTES: usize = 256 * 1024;
 
 mod artifact;
@@ -73,11 +68,9 @@ mod attach;
 mod evidence;
 mod integration;
 mod javascript;
-#[cfg(feature = "composition-python")]
 mod python;
-#[cfg(feature = "composition-python")]
 mod python_bindings;
-#[cfg(all(test, unix, feature = "composition-python"))]
+#[cfg(all(test, unix))]
 mod python_tests;
 mod session;
 mod validate;
@@ -87,10 +80,8 @@ pub use attach::*;
 pub use evidence::*;
 use integration::{CellIntegration, JavaScriptPresentation, ProductJavaScript};
 pub(crate) use javascript::*;
-#[cfg(feature = "composition-python")]
-use python::{attach_python, neutral_python_descriptor};
+use python::neutral_python_descriptor;
 use validate::validate_product_configuration;
-#[cfg(feature = "composition-python")]
 use validate::validate_python_configuration;
 
 fn invalid(message: impl Into<String>) -> AgentError {
@@ -111,8 +102,7 @@ mod shutdown_tests {
     use super::{
         Digest, DigestDomain, LocalCompositionContentItem, LocalCompositionEngineArtifact,
         ProductExtensionLimits, attachment_binding_identity, cell_engine_contract_identity,
-        product_javascript_limits_are_exact, python_extension_limits,
-        validate_engine_contract_binding,
+        javascript_extension_limits, python_extension_limits, validate_engine_contract_binding,
     };
 
     #[test]
@@ -160,7 +150,7 @@ mod shutdown_tests {
         let root = directory.path().canonicalize()?;
         let path = root.join("worker");
         std::fs::write(&path, b"original worker bytes")?;
-        let artifact = LocalCompositionEngineArtifact::python_worker_v1(&path)?;
+        let artifact = LocalCompositionEngineArtifact::monty_worker_v1(&path)?;
         assert_eq!(artifact.path(), path);
         assert_eq!(
             artifact.engine_contract_identity(),
@@ -170,13 +160,13 @@ mod shutdown_tests {
 
         let drifted_path = root.join("other-worker");
         std::fs::write(&drifted_path, b"different worker bytes")?;
-        let drifted = LocalCompositionEngineArtifact::python_worker_v1(&drifted_path)?;
+        let drifted = LocalCompositionEngineArtifact::monty_worker_v1(&drifted_path)?;
         assert_ne!(artifact.identity(), drifted.identity());
         assert_ne!(artifact.containment(), drifted.containment());
 
         // Content replacement at the same canonical path is also identity drift.
         std::fs::write(&path, b"replacement worker bytes")?;
-        let replaced = LocalCompositionEngineArtifact::python_worker_v1(&path)?;
+        let replaced = LocalCompositionEngineArtifact::monty_worker_v1(&path)?;
         assert_ne!(artifact.identity(), replaced.identity());
         assert_ne!(artifact.containment(), replaced.containment());
         Ok(())
@@ -291,7 +281,7 @@ mod shutdown_tests {
             max_yield_time_ms: 10_000,
             max_output_tokens: 10_000,
         };
-        assert!(product_javascript_limits_are_exact(exact));
+        assert_eq!(javascript_extension_limits(), exact);
         for neighbor in [
             ProductExtensionLimits {
                 max_source_bytes: 0,
@@ -310,7 +300,7 @@ mod shutdown_tests {
                 ..exact
             },
         ] {
-            assert!(!product_javascript_limits_are_exact(neighbor));
+            assert_ne!(javascript_extension_limits(), neighbor);
         }
     }
 

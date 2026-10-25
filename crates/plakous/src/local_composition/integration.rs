@@ -267,7 +267,7 @@ impl Presentation for JavaScriptPresentation {
     }
 
     fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), String> {
-        verify_sidecar_before_spawn(path, identity)
+        verify_cell_worker_before_spawn(CellEngine::Quickjs, path, identity)
     }
 
     fn session_engine(&self) -> Box<dyn SessionEngine> {

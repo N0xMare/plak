@@ -1,4 +1,4 @@
-//! Product JavaScript attachment and the JavaScript descriptor conversions.
+//! Product JavaScript presentation and the JavaScript descriptor conversions.
 
 #![allow(
     clippy::wildcard_imports,
@@ -7,15 +7,11 @@
 
 use super::*;
 
-pub(super) fn attach_product_javascript(
-    builder: AgentBuilder,
+pub(super) fn product_javascript_presentation(
     descriptor: &ProductJavaScriptCompositionDescriptorV1,
-    host: PathBuf,
-    identity: Vec<u8>,
-    attachment: LocalCompositionAttachmentIdentity,
     evidence: ProductExtensionEvidence,
     presentation_kind: plakous_tools::CodingPresentation,
-) -> Result<AgentBuilder, AgentError> {
+) -> Result<JavaScriptPresentation, AgentError> {
     let (_, _, _, _, limits, _) = evidence.extension_facts();
     let max_output_tokens = usize::try_from(limits.max_output_tokens).map_err(|_| {
         AgentError::new(
@@ -28,26 +24,15 @@ pub(super) fn attach_product_javascript(
         .iter()
         .map(|tool| tool.exposed_name().clone())
         .collect::<Vec<_>>();
-    let neutral = neutral_product_descriptor(descriptor)
-        .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
-    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(CellIntegration {
-        worker: host,
-        identity,
-        presentation: Box::new(JavaScriptPresentation::Product(Box::new(
-            ProductJavaScript {
-                nested_names: nested_names.into(),
-                presentation_kind,
-                evidence,
-                limits,
-                max_output_tokens,
-            },
-        ))),
-    });
-    builder.local_programmatic_composition(LocalCompositionConstruction {
-        descriptor: neutral,
-        integration,
-        attachment,
-    })
+    Ok(JavaScriptPresentation::Product(Box::new(
+        ProductJavaScript {
+            nested_names: nested_names.into(),
+            presentation_kind,
+            evidence,
+            limits,
+            max_output_tokens,
+        },
+    )))
 }
 
 #[derive(serde::Deserialize)]

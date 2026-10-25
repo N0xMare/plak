@@ -1,9 +1,8 @@
-//! The JavaScript-only embedding workflow.
+//! The composition-only embedding workflow, with either cell worker.
 //!
-//! This fixture exists to pin one acceptance property: a fresh external
-//! consumer that wants JavaScript composition and the JavaScript sidecar copies this
-//! manifest and nothing else. The `composition` feature reaches neither the
-//! Monty worker graph nor any git dependency.
+//! A fresh external consumer can select JavaScript or Python composition
+//! using this manifest alone. The `composition` feature reaches neither
+//! interpreter's worker graph nor any git dependency.
 //!
 //! It also shows that the composition surface is fully nameable without the
 //! subscription, credential, and HTTP machinery that used to come with it.
@@ -21,16 +20,16 @@ use plakous::construction::{
     compile_local_composition_plan, provider_model_projection_identity,
 };
 use plakous::model::{
-    ContextContract, Digest, ResolvedModelDescriptor, RuntimeModelAuthority,
-    RuntimeModelAuthorityError, Timestamp,
+    CompiledProviderConfiguration, ContextContract, Digest, ResolvedModelDescriptor,
+    RuntimeModelAuthority, RuntimeModelAuthorityError, Timestamp,
 };
 use plakous::sessions::{AgentSessions, SessionBackend};
 use plakous::tools::{
-    ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1, ToolRegistryBuilder,
-    WorkspacePolicy,
+    ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
+    PythonPtcDescriptorV1, ToolRegistryBuilder, WorkspacePolicy,
 };
 
-/// Names the composition surface a JavaScript embedder builds against.
+/// Names the composition-only surface for both JavaScript and Python cell workers.
 fn composition_surface_is_nameable() {
     fn select_sidecar_profile(
         descriptor: &ProductJavaScriptCompositionDescriptorV1,
@@ -38,7 +37,26 @@ fn composition_surface_is_nameable() {
         LocalCompositionProfile::product_javascript_v1(descriptor)
     }
     fn verify_host(path: &std::path::Path) -> Result<LocalCompositionEngineArtifact, AgentError> {
-        LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path)
+        LocalCompositionEngineArtifact::quickjs_worker_v1(path)
+    }
+    fn select_python_profile(
+        descriptor: &PythonPtcDescriptorV1,
+    ) -> Result<LocalCompositionProfile, AgentError> {
+        LocalCompositionProfile::python_ptc_v1(descriptor)
+    }
+    fn verify_python_host(
+        path: &std::path::Path,
+    ) -> Result<LocalCompositionEngineArtifact, AgentError> {
+        LocalCompositionEngineArtifact::monty_worker_v1(path)
+    }
+    fn qualify_cell(
+        profile: &LocalCompositionProfile,
+        artifact: &LocalCompositionEngineArtifact,
+        issuer: Digest,
+        qualification: Digest,
+        configuration: &CompiledProviderConfiguration,
+    ) -> Result<ProductExtensionEvidence, AgentError> {
+        ProductExtensionEvidence::cell(profile, artifact, issuer, qualification, configuration)
     }
     fn close_binding(
         profile: LocalCompositionProfile,
@@ -66,6 +84,9 @@ fn composition_surface_is_nameable() {
     >());
     hold(&select_sidecar_profile);
     hold(&verify_host);
+    hold(&select_python_profile);
+    hold(&verify_python_host);
+    hold(&qualify_cell);
     hold(&close_binding);
     hold(&dormant);
 }
@@ -135,6 +156,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _sessions = AgentSessions::new(SessionBackend::sqlite(
         directory.path().join("js-embedder.sqlite3"),
     )?)?;
-    println!("JavaScript-only embedding surface builds with no patch table");
+    println!("Composition-only embedding surface builds with no patch table");
     Ok(())
 }

@@ -52,7 +52,7 @@ ELF_WORKER_SYMBOLS = """\
 # nothing; none of these lines is an engine marker.
 CLIENT_ONLY_SYMBOLS = """\
 0000000100001234 T __ZN7plakous12js_code_mode27RquickjsCodeModeIntegration6attachE
-0000000100005678 T __ZN7plakous19rquickjs_sidecar_v117hcafef00dE
+0000000100005678 T __ZN7plakous17quickjs_worker_v117hcafef00dE
 0000000100009abc T _main
 """
 PYTHON_WORKER_SYMBOLS = """\

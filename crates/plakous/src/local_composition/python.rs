@@ -1,5 +1,4 @@
-//! The Python PTC presentation on the Monty cell worker (feature
-//! `composition-python`).
+//! The Python PTC presentation on the Monty cell worker.
 
 #![allow(
     clippy::wildcard_imports,
@@ -27,15 +26,11 @@ use plakous_cell::{CellPrelude, MontyBootstrap, ObservationMode, WaitOutcome};
 pub(super) const PYTHON_WORKER_REQUEST_BOUND: std::time::Duration =
     std::time::Duration::from_secs(90);
 
-pub(super) fn attach_python(
-    builder: AgentBuilder,
+pub(super) fn python_presentation(
     descriptor: &PythonPtcDescriptorV1,
-    worker: PathBuf,
-    identity: Vec<u8>,
-    attachment: LocalCompositionAttachmentIdentity,
     evidence: ProductExtensionEvidence,
     presentation_kind: plakous_tools::CodingPresentation,
-) -> Result<AgentBuilder, AgentError> {
+) -> Result<PythonPresentation, AgentError> {
     let nested_names = descriptor
         .nested_tools()
         .iter()
@@ -59,22 +54,12 @@ pub(super) fn attach_python(
         })
         .collect::<BTreeMap<_, _>>();
     let bootstrap = python_bootstrap(python_bindings).map_err(invalid)?;
-    let neutral = neutral_python_descriptor(descriptor).map_err(invalid)?;
-    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(CellIntegration {
-        worker,
-        identity,
-        presentation: Box::new(PythonPresentation {
-            nested_names: nested_names.into(),
-            bootstrap,
-            presentation: descriptor.presentation(),
-            presentation_kind,
-            evidence,
-        }),
-    });
-    builder.local_programmatic_composition(LocalCompositionConstruction {
-        descriptor: neutral,
-        integration,
-        attachment,
+    Ok(PythonPresentation {
+        nested_names: nested_names.into(),
+        bootstrap,
+        presentation: descriptor.presentation(),
+        presentation_kind,
+        evidence,
     })
 }
 
@@ -213,7 +198,7 @@ impl Presentation for PythonPresentation {
     }
 
     fn verify_worker(&self, path: &Path, identity: &[u8]) -> Result<(), String> {
-        verify_python_worker_before_spawn(path, identity)
+        verify_cell_worker_before_spawn(CellEngine::Monty, path, identity)
     }
 
     fn session_engine(&self) -> Box<dyn SessionEngine> {

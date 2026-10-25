@@ -166,16 +166,15 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` â€
 | --- | --- |
 | `openai`, `xai`, `anthropic`, `openrouter` | Re-export that provider crate as `plakous::<name>`. Provider internals, not a presentation surface |
 | `auth` | `plakous::auth` secret, credential-store, OAuth, pin, and account-binding foundations; implies `openai` and `xai` |
-| `composition` | The local composition attachment seam in `plakous::agent` (`LocalCompositionAttachment`, `attach_local_composition`): Code Mode presentation and JavaScript evaluation through the `plakous-js-host` sidecar. It reaches no credential, HTTP, subscription, or Python machinery |
-| `composition-python` | The Monty-backed Python PTC projection over the same composition API; implies `composition` |
-| `native-subscriptions` | The subscription tier: `subscriptions` and the native-auth facets of the provider crates. It implies `composition` and `composition-python` |
+| `composition` | The local composition attachment seam in `plakous::agent` (`LocalCompositionAttachment`, `attach_local_composition`): Code Mode, JavaScript and Python through the engine-free cell client and explicit worker artifacts. It reaches no credential, HTTP, subscription, or interpreter machinery |
+| `native-subscriptions` | The subscription tier: `subscriptions` and the native-auth facets of the provider crates. It implies `composition` |
 | `mcp` | Re-exports `plakous-mcp` as `plakous::mcp`, the MCP client (servers, tools, resources, prompts and MCP OAuth). It links `plakous-auth` for MCP OAuth without exposing `plakous::auth`; of the other features only `full` enables it. Plak's product closure is `native-subscriptions` plus `mcp` |
 | `sessions-sqlite` | The SQLite `SessionStore` backend |
 | `full` | All of the supported features above |
 
 Evaluator capability and subscription authentication are separate choices. A
-Custom-model embedder that wants JavaScript selects `composition` and links
-neither `plakous-auth` nor `plakous-http` nor the Python evaluator. No facade
+Custom-model embedder that wants JavaScript or Python selects `composition` and links
+neither `plakous-auth` nor `plakous-http` nor an interpreter. No facade
 consumer needs a `[patch]` table; chapter 06 states the one that building the
 Monty worker package needs.
 

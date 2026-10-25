@@ -83,7 +83,7 @@ mod capacity;
 mod debt;
 #[cfg(feature = "sessions-sqlite")]
 mod feed;
-#[cfg(feature = "composition-python")]
+#[cfg(feature = "composition")]
 mod python;
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 mod retention;
@@ -5066,7 +5066,7 @@ async fn product_javascript_receipt_round_trips_through_stored_binding() -> Test
     historical_evaluator_round_trip(1).await
 }
 
-#[cfg(feature = "composition-python")]
+#[cfg(feature = "composition")]
 #[tokio::test]
 async fn monty_receipt_round_trips_through_stored_binding() -> TestResult {
     historical_evaluator_round_trip(2).await
@@ -5076,10 +5076,9 @@ async fn monty_receipt_round_trips_through_stored_binding() -> TestResult {
 async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
     use crate::local_composition::{
         LocalCompositionAttachment, LocalCompositionEngineArtifact, LocalCompositionProfile,
-        ProductExtensionEvidence, ProductExtensionLimits,
+        ProductExtensionEvidence,
     };
     use plakous_compose::{CodexMinimalLocalCodeModeV1, ProductJavaScriptCompositionV1};
-    #[cfg(feature = "composition-python")]
     use plakous_compose::{PythonPtcPresentationV1, PythonPtcV1};
     let directory = tempfile::tempdir()?;
     let historical = directory.path().join("historical-host");
@@ -5097,7 +5096,6 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
     match kind {
         0 => CodexMinimalLocalCodeModeV1::register_markers_into(&mut registry)?,
         1 => ProductJavaScriptCompositionV1::register_markers_into(&mut registry)?,
-        #[cfg(feature = "composition-python")]
         2 => PythonPtcV1::register_markers_into(&mut registry)?,
         _ => return Err("unknown composition fixture".into()),
     }
@@ -5181,7 +5179,6 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
                     [ToolName::new("read_file")?],
                 )?,
             )?,
-            #[cfg(feature = "composition-python")]
             2 => LocalCompositionProfile::python_ptc_v1(&PythonPtcV1::compile_for_kind(
                 plakous_tools::JobConfig::default(),
                 registry.clone(),
@@ -5193,39 +5190,45 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
             _ => return Err("unknown composition fixture".into()),
         };
         let evidence = if kind == 0 {
+            let issuer = Digest::sha256(DigestDomain::ExecutionEnvironment, 1, &[b"product"])?;
+            assert!(
+                ProductExtensionEvidence::cell(
+                    &profile,
+                    &artifact,
+                    issuer,
+                    issuer,
+                    configured.configuration(),
+                )
+                .is_err(),
+                "native profiles cannot acquire product receipts"
+            );
             None
         } else {
             let issuer = Digest::sha256(DigestDomain::ExecutionEnvironment, 1, &[b"product"])?;
             let candidate = Digest::sha256(DigestDomain::ExecutionEnvironment, 1, &[candidate])?;
-            Some(if kind == 1 {
-                ProductExtensionEvidence::product_javascript_v1(
+            let foreign_artifact = if kind == 2 {
+                LocalCompositionEngineArtifact::quickjs_worker_v1(&historical)?
+            } else {
+                LocalCompositionEngineArtifact::monty_worker_v1(&historical)?
+            };
+            assert!(
+                ProductExtensionEvidence::cell(
                     &profile,
-                    &artifact,
-                    ProductExtensionLimits {
-                        max_source_bytes: 1_048_576,
-                        max_yield_time_ms: 10_000,
-                        max_output_tokens: 10_000,
-                    },
+                    &foreign_artifact,
                     issuer,
                     candidate,
                     configured.configuration(),
-                )?
-            } else {
-                #[cfg(feature = "composition-python")]
-                {
-                    ProductExtensionEvidence::python_ptc_v1(
-                        &profile,
-                        &artifact,
-                        issuer,
-                        candidate,
-                        configured.configuration(),
-                    )?
-                }
-                #[cfg(not(feature = "composition-python"))]
-                {
-                    return Err("Python fixture needs composition-python".into());
-                }
-            })
+                )
+                .is_err(),
+                "product receipts cannot qualify a foreign engine"
+            );
+            Some(ProductExtensionEvidence::cell(
+                &profile,
+                &artifact,
+                issuer,
+                candidate,
+                configured.configuration(),
+            )?)
         };
         let plan_model: Arc<dyn LanguageModel> = model.clone();
         let plan = crate::construction::compile_local_composition_plan(
@@ -5261,11 +5264,10 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
         ))
     };
     let artifact = |path: &Path| {
-        #[cfg(feature = "composition-python")]
         if kind == 2 {
-            return LocalCompositionEngineArtifact::python_worker_v1(path);
+            return LocalCompositionEngineArtifact::monty_worker_v1(path);
         }
-        LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path)
+        LocalCompositionEngineArtifact::quickjs_worker_v1(path)
     };
     let saved_artifact = artifact(&historical)?;
     let saved_identity = saved_artifact.identity();

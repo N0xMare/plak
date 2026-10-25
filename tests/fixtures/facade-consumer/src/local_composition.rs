@@ -14,7 +14,7 @@ pub fn surface_is_nameable() {
     fn verify_artifact(
         path: &std::path::Path,
     ) -> Result<LocalCompositionEngineArtifact, AgentError> {
-        LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path)
+        LocalCompositionEngineArtifact::quickjs_worker_v1(path)
     }
     fn close_binding(
         profile: LocalCompositionProfile,

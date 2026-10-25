@@ -427,7 +427,7 @@ env-ceiling = 29
 reason = "Capability registry entry sites and the explicit capacity-probe test hook; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous]
-feature-ceiling = 91
+feature-ceiling = 66
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]

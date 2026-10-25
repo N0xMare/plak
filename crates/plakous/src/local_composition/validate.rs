@@ -111,7 +111,6 @@ pub(super) fn validate_product_configuration(
     clippy::too_many_arguments,
     reason = "nested Direct pack is an extra exact identity, not a new concern"
 )]
-#[cfg(feature = "composition-python")]
 pub(super) fn validate_python_configuration(
     job_config: plakous_tools::JobConfig,
     descriptor: &LocalCompositionDescriptor,

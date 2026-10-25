@@ -27,13 +27,12 @@ prompts and session workflows (including the feed) are always available.
 
 | Feature | Adds |
 | --- | --- |
-| `composition` | JavaScript presentations and the sidecar client; no credentials, HTTP or Python |
-| `composition-python` | Python PTC on the cell client (the Monty interpreter stays in `plakous-py-host`); implies `composition` |
+| `composition` | Code Mode, JavaScript and Python PTC over the cell client; no credentials, HTTP or interpreter dependencies |
 | `sessions-sqlite` | `SessionBackend::sqlite` |
 | `anthropic`, `openrouter` | Provider integrations and explicit credential/model inputs |
 | `openai`, `xai` | Provider integration exports; `OpenAiLanguageModel`/`XaiLanguageModel` also require `native-subscriptions` |
 | `auth` | Credential store, OAuth, pins and account binding; implies `openai` and `xai` |
-| `native-subscriptions` | Subscription admission/authentication; implies both composition features |
+| `native-subscriptions` | Subscription admission/authentication; implies `composition` |
 | `full` | All of these features, including Python and subscription dependencies |
 
 The always-on `application::run_once_until_signal` takes your cancellation
@@ -120,9 +119,19 @@ Custom models instead select `ProductJavaScriptCompositionV1` (`exec_js` and
 `wait_js`), compile the Pi nested vocabulary, and attach independent
 `ProductExtensionEvidence` with caller issuer and qualification-candidate
 identities. Such a receipt is self-attestation, not successful live qualification.
-`PythonPtcV1` is the explicit Python alternative with its own worker and
-`composition-python` feature. Attach at most one profile/engine; there is no
+`PythonPtcV1` is the explicit Python alternative with its own worker, using
+the same `composition` feature. Attach at most one profile/engine; there is no
 language switching or fallback.
+
+Select the profile from its compiled descriptor, then verify the explicit
+worker path with `LocalCompositionEngineArtifact::quickjs_worker_v1` or
+`monty_worker_v1`. For either product-owned profile, derive the receipt with
+`ProductExtensionEvidence::cell(&profile, &artifact, issuer, qualification,
+&configuration)`; its limits come from the profile. Close the binding with
+`LocalCompositionAttachment::builder(profile)`, supplying the artifact,
+product evidence and coding presentation kind, and pass it to
+`attach_local_composition(builder, Some(attachment))`. Native Codex profiles
+use that same builder and attach path but forbid product evidence.
 
 ## Construction
 

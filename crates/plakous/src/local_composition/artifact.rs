@@ -41,101 +41,117 @@ impl LocalCompositionContainment {
 ///
 /// It carries no provider credential, executor, store, or dispatch authority.
 pub struct LocalCompositionEngineArtifact {
-    pub(super) kind: LocalCompositionEngineArtifactKind,
+    pub(super) worker: CellWorkerArtifact,
     pub(super) artifact_identity: Digest,
     pub(super) engine_contract_identity: Digest,
     host_identity: Digest,
     containment: LocalCompositionContainment,
 }
 
-pub(super) enum LocalCompositionEngineArtifactKind {
-    RquickjsSidecarV1 {
-        path: PathBuf,
-        environment_identity: Vec<u8>,
-    },
-    #[cfg(feature = "composition-python")]
-    MontyPythonPtcV1 {
-        path: PathBuf,
-        environment_identity: Vec<u8>,
-    },
+pub(super) struct CellWorkerArtifact {
+    engine: CellEngine,
+    pub(super) path: PathBuf,
+    sha256: [u8; 32],
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum CellEngine {
+    Quickjs,
+    Monty,
+}
+
+impl CellEngine {
+    pub(super) const fn worker(self) -> plakous_cell::WorkerIdentity {
+        match self {
+            Self::Quickjs => plakous_cell::QUICKJS_WORKER,
+            Self::Monty => plakous_cell::MONTY_WORKER,
+        }
+    }
+
+    const fn host_prefix(self) -> &'static [u8] {
+        match self {
+            Self::Quickjs => b"rquickjs-host",
+            Self::Monty => b"monty-host",
+        }
+    }
+}
+
+impl CellWorkerArtifact {
+    pub(super) fn environment_identity(&self) -> Vec<u8> {
+        [
+            self.engine.host_prefix(),
+            self.path.as_os_str().as_encoded_bytes(),
+            &self.sha256,
+        ]
+        .concat()
+    }
 }
 
 impl LocalCompositionEngineArtifact {
-    /// Digest-pinned `plakous-py-host` worker for product py-ptc.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the path is not a readable canonical regular file.
-    #[cfg(feature = "composition-python")]
-    pub fn python_worker_v1(worker_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
-        let (canonical, _dev, _ino, sha) = file_identity(&worker_path.into())?;
-        let environment_identity = [
-            b"monty-host".as_slice(),
-            canonical.as_os_str().as_encoded_bytes(),
-            &sha,
-        ]
-        .concat();
-        let artifact_identity =
-            digest_environment(b"plakous.monty-engine-artifact.v1", &environment_identity)?;
-        let host_identity =
-            digest_environment(b"plakous.monty-verified-host.v1", &environment_identity)?;
-        let containment = LocalCompositionContainment {
-            identity: Digest::sha256(
-                DigestDomain::ExecutionEnvironment,
-                1,
-                &[
-                    b"plakous.monty-containment.v1",
-                    b"cell-monty-worker",
-                    b"no-os-sandbox-claim",
-                    &host_identity.identity_bytes(),
-                ],
-            )
-            .map_err(identity_error)?,
-        };
-        Ok(Self {
-            kind: LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
-                path: canonical,
-                environment_identity,
-            },
-            artifact_identity,
-            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::MONTY_WORKER)?,
-            host_identity,
-            containment,
-        })
-    }
-
-    /// Records a caller-supplied JavaScript sidecar canonical path and SHA-256.
+    /// Records the canonical path and SHA-256 of a caller-supplied `plakous-py-host`.
     ///
     /// The absolute path must already be canonical, with no symlink components.
     /// This records the regular file at attachment, not proof of worker provenance.
-    /// The path and hash are re-checked immediately before each evaluator spawn.
+    /// The path and hash are re-checked immediately before each worker spawn.
     ///
     /// # Errors
     ///
     /// Fails when the path is not canonical or is not a readable regular file.
-    pub fn rquickjs_sidecar_v1(host_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
-        let (canonical, _dev, _ino, sha) = file_identity(&host_path.into())?;
-        let environment_identity = [
-            b"rquickjs-host".as_slice(),
-            canonical.as_os_str().as_encoded_bytes(),
-            &sha,
-        ]
-        .concat();
-        let artifact_identity = digest_environment(
-            b"plakous.local-composition.engine-artifact.v1",
-            &environment_identity,
-        )?;
-        let host_identity = digest_environment(
-            b"plakous.local-composition.verified-host.v1",
-            &environment_identity,
-        )?;
+    pub fn monty_worker_v1(worker_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
+        Self::cell_worker(CellEngine::Monty, &worker_path.into())
+    }
+
+    /// Records the canonical path and SHA-256 of a caller-supplied `plakous-js-host`.
+    ///
+    /// The absolute path must already be canonical, with no symlink components.
+    /// This records the regular file at attachment, not proof of worker provenance.
+    /// The path and hash are re-checked immediately before each worker spawn.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the path is not canonical or is not a readable regular file.
+    pub fn quickjs_worker_v1(host_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
+        Self::cell_worker(CellEngine::Quickjs, &host_path.into())
+    }
+
+    fn cell_worker(engine: CellEngine, path: &Path) -> Result<Self, AgentError> {
+        let (path, _dev, _ino, sha256) = file_identity(path)?;
+        let worker = CellWorkerArtifact {
+            engine,
+            path,
+            sha256,
+        };
+        let environment_identity = worker.environment_identity();
+        // These deployment labels remain identity-bearing even though both
+        // engines now share construction and supervision.
+        let (artifact_label, host_label, containment_label, deployment): (
+            &[u8],
+            &[u8],
+            &[u8],
+            &[u8],
+        ) = match engine {
+            CellEngine::Quickjs => (
+                b"plakous.local-composition.engine-artifact.v1",
+                b"plakous.local-composition.verified-host.v1",
+                b"plakous.local-composition.containment.v1",
+                b"sidecar-rquickjs",
+            ),
+            CellEngine::Monty => (
+                b"plakous.monty-engine-artifact.v1",
+                b"plakous.monty-verified-host.v1",
+                b"plakous.monty-containment.v1",
+                b"cell-monty-worker",
+            ),
+        };
+        let artifact_identity = digest_environment(artifact_label, &environment_identity)?;
+        let host_identity = digest_environment(host_label, &environment_identity)?;
         let containment = LocalCompositionContainment {
             identity: Digest::sha256(
                 DigestDomain::ExecutionEnvironment,
                 1,
                 &[
-                    b"plakous.local-composition.containment.v1",
-                    b"sidecar-rquickjs",
+                    containment_label,
+                    deployment,
                     b"no-os-sandbox-claim",
                     &host_identity.identity_bytes(),
                 ],
@@ -143,12 +159,9 @@ impl LocalCompositionEngineArtifact {
             .map_err(identity_error)?,
         };
         Ok(Self {
-            kind: LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-                path: canonical,
-                environment_identity,
-            },
+            worker,
             artifact_identity,
-            engine_contract_identity: cell_engine_contract_identity(&plakous_cell::QUICKJS_WORKER)?,
+            engine_contract_identity: cell_engine_contract_identity(&engine.worker())?,
             host_identity,
             containment,
         })
@@ -181,11 +194,7 @@ impl LocalCompositionEngineArtifact {
     /// Returns the verified canonical executable path.
     #[must_use]
     pub fn path(&self) -> &Path {
-        match &self.kind {
-            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 { path, .. } => path,
-            #[cfg(feature = "composition-python")]
-            LocalCompositionEngineArtifactKind::MontyPythonPtcV1 { path, .. } => path,
-        }
+        &self.worker.path
     }
 }
 
@@ -319,16 +328,9 @@ pub(crate) fn restore_stored_artifact(
         return Err(refused());
     }
     let artifact = if prefix == b"rquickjs-host" {
-        LocalCompositionEngineArtifact::rquickjs_sidecar_v1(&path).map_err(|_| refused())?
+        LocalCompositionEngineArtifact::quickjs_worker_v1(&path).map_err(|_| refused())?
     } else {
-        #[cfg(feature = "composition-python")]
-        {
-            LocalCompositionEngineArtifact::python_worker_v1(&path).map_err(|_| refused())?
-        }
-        #[cfg(not(feature = "composition-python"))]
-        {
-            return Err(refused());
-        }
+        LocalCompositionEngineArtifact::monty_worker_v1(&path).map_err(|_| refused())?
     };
     if artifact.identity().identity_bytes() != stored.artifact_identity
         || artifact.engine_contract_identity().identity_bytes() != stored.engine_contract_identity
@@ -338,37 +340,22 @@ pub(crate) fn restore_stored_artifact(
     Ok(artifact)
 }
 
-/// Refuses a Python worker whose bytes changed after attachment.
-#[cfg(feature = "composition-python")]
-pub(crate) fn verify_python_worker_before_spawn(
+/// Refuses a cell worker whose bytes changed after attachment.
+pub(super) fn verify_cell_worker_before_spawn(
+    engine: CellEngine,
     path: &Path,
     expected: &[u8],
 ) -> Result<(), String> {
-    let artifact = LocalCompositionEngineArtifact::python_worker_v1(path)
+    let artifact = LocalCompositionEngineArtifact::cell_worker(engine, path)
         .map_err(|error| error.to_string())?;
-    match artifact.kind {
-        LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
-            environment_identity,
-            ..
-        } if environment_identity == expected => Ok(()),
-        _ => Err("Python worker identity changed after attachment".to_owned()),
-    }
-}
-
-pub(crate) fn verify_sidecar_before_spawn(path: &Path, expected: &[u8]) -> Result<(), String> {
-    let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path)
-        .map_err(|error| error.to_string())?;
-    let unchanged = matches!(
-        &artifact.kind,
-        LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-            environment_identity,
-            ..
-        } if environment_identity.as_slice() == expected
-    );
-    if unchanged {
+    if artifact.worker.environment_identity() == expected {
         Ok(())
     } else {
-        Err("JavaScript sidecar identity changed after attachment".to_owned())
+        Err(match engine {
+            CellEngine::Quickjs => "JavaScript sidecar identity changed after attachment",
+            CellEngine::Monty => "Python worker identity changed after attachment",
+        }
+        .to_owned())
     }
 }
 
@@ -417,17 +404,8 @@ mod artifact_recovery_tests {
         let path = directory.path().join("host");
         std::fs::write(&path, b"attached sidecar candidate")?;
         let path = path.canonicalize()?;
-        let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(&path)?;
-        let identity = match artifact.kind {
-            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-                environment_identity,
-                ..
-            } => environment_identity,
-            #[cfg(feature = "composition-python")]
-            LocalCompositionEngineArtifactKind::MontyPythonPtcV1 { .. } => {
-                unreachable!("constructor always produces a JavaScript artifact")
-            }
-        };
+        let artifact = LocalCompositionEngineArtifact::quickjs_worker_v1(&path)?;
+        let identity = artifact.worker.environment_identity();
         let integration = CellIntegration {
             worker: path.clone(),
             identity,
@@ -448,12 +426,12 @@ mod artifact_recovery_tests {
     fn sidecar_artifact_rejects_relative_paths_and_accepts_canonical_paths()
     -> Result<(), Box<dyn std::error::Error>> {
         let relative = Path::new("Cargo.toml");
-        let error = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(relative)
+        let error = LocalCompositionEngineArtifact::quickjs_worker_v1(relative)
             .err()
             .ok_or("relative artifact path was accepted")?;
         assert!(error.to_string().contains("path must already be canonical"));
         let canonical = relative.canonicalize()?;
-        let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(&canonical)?;
+        let artifact = LocalCompositionEngineArtifact::quickjs_worker_v1(&canonical)?;
         assert_eq!(artifact.path(), canonical);
         Ok(())
     }
@@ -463,17 +441,7 @@ mod artifact_recovery_tests {
     fn recorded(
         artifact: &LocalCompositionEngineArtifact,
     ) -> Result<StoredCompositionArtifact, AgentError> {
-        let host = match &artifact.kind {
-            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-                environment_identity,
-                ..
-            } => environment_identity.clone(),
-            #[cfg(feature = "composition-python")]
-            LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
-                environment_identity,
-                ..
-            } => environment_identity.clone(),
-        };
+        let host = artifact.worker.environment_identity();
         Ok(StoredCompositionArtifact {
             profile_identity: artifact.engine_contract_identity().identity_bytes(),
             artifact_identity: artifact.identity().identity_bytes(),
@@ -496,7 +464,7 @@ mod artifact_recovery_tests {
         let path = directory.path().join("host");
         std::fs::write(&path, b"offline artifact")?;
         let path = path.canonicalize()?;
-        let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(&path)?;
+        let artifact = LocalCompositionEngineArtifact::quickjs_worker_v1(&path)?;
         let mut exact = recorded(&artifact)?;
         assert_eq!(
             restore_stored_artifact(&exact)?.identity(),
@@ -550,9 +518,8 @@ mod artifact_recovery_tests {
             host,
         };
         assert!(restore_stored_artifact(&noncanonical).is_err());
-        #[cfg(feature = "composition-python")]
         {
-            let python = LocalCompositionEngineArtifact::python_worker_v1(&path)?;
+            let python = LocalCompositionEngineArtifact::monty_worker_v1(&path)?;
             assert_eq!(
                 restore_stored_artifact(&recorded(&python)?)?.identity(),
                 python.identity()
@@ -619,17 +586,8 @@ mod quickjs_upgrade_tests {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("plakous-js-host");
         std::fs::write(&path, b"offline worker")?;
-        let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(path.canonicalize()?)?;
-        let environment_identity = match &artifact.kind {
-            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-                environment_identity,
-                ..
-            } => environment_identity,
-            #[cfg(feature = "composition-python")]
-            LocalCompositionEngineArtifactKind::MontyPythonPtcV1 { .. } => {
-                return Err("JavaScript artifact".into());
-            }
-        };
+        let artifact = LocalCompositionEngineArtifact::quickjs_worker_v1(path.canonicalize()?)?;
+        let environment_identity = artifact.worker.environment_identity();
         let previous = previous_quickjs_contract()?;
         assert_ne!(previous, artifact.engine_contract_identity());
         // A self-consistent record of the same worker bytes, bound under the
@@ -660,7 +618,7 @@ mod quickjs_upgrade_tests {
     }
 }
 
-#[cfg(all(test, feature = "composition-python"))]
+#[cfg(test)]
 mod monty_upgrade_tests {
     use super::*;
 
@@ -707,14 +665,8 @@ mod monty_upgrade_tests {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("monty");
         std::fs::write(&path, b"offline worker")?;
-        let artifact = LocalCompositionEngineArtifact::python_worker_v1(path.canonicalize()?)?;
-        let LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
-            environment_identity,
-            ..
-        } = &artifact.kind
-        else {
-            return Err("monty artifact".into());
-        };
+        let artifact = LocalCompositionEngineArtifact::monty_worker_v1(path.canonicalize()?)?;
+        let environment_identity = artifact.worker.environment_identity();
         let previous = previous_monty_contract()?;
         assert_ne!(previous, artifact.engine_contract_identity());
         // A self-consistent record of the same worker bytes, bound under the

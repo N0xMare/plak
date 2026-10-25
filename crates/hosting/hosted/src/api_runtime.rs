@@ -18,6 +18,7 @@ use plakous::tools::{
     ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1,
 };
 
+use crate::agent::build::attach_codex_minimal;
 use crate::agent::{
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT, SessionToolFence,
     enroll_product_instructions, product_javascript_candidate_attachment,
@@ -211,12 +212,7 @@ pub(crate) fn runtime_binding(
                     "Codex Code Mode sidecar is unavailable: {error}; set PLAK_JS_HOST or place plakous-js-host beside plak"
                 ))
             })?;
-            builder = plakous::agent::codex_minimal_local_code_mode_sidecar(
-                builder,
-                &descriptor,
-                host_path,
-            )
-            .map_err(|error| {
+            builder = attach_codex_minimal(builder, &descriptor, &host_path).map_err(|error| {
                 CliFailure::new(format!("Codex Code Mode could not attach: {error}"))
             })?;
         }

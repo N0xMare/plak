@@ -23,7 +23,6 @@ pub(super) enum LocalCompositionProfileKind {
     CodexNativeLocalCodeModeV1(CodexNativeLocalCodeModeDescriptorV1),
     CodexMinimalLocalCodeModeV1(CodexMinimalLocalCodeModeDescriptorV1),
     ProductJavaScriptV1(ProductJavaScriptCompositionDescriptorV1),
-    #[cfg(feature = "composition-python")]
     PythonPtcV1(PythonPtcDescriptorV1),
 }
 
@@ -33,9 +32,7 @@ impl LocalCompositionProfileKind {
     const fn requires_presentation_kind(&self) -> bool {
         match self {
             Self::CodexNativeLocalCodeModeV1(_) | Self::CodexMinimalLocalCodeModeV1(_) => false,
-            Self::ProductJavaScriptV1(_) => true,
-            #[cfg(feature = "composition-python")]
-            Self::PythonPtcV1(_) => true,
+            Self::ProductJavaScriptV1(_) | Self::PythonPtcV1(_) => true,
         }
     }
 }
@@ -91,7 +88,6 @@ impl LocalCompositionProfile {
     /// # Errors
     ///
     /// Returns an identity error if the pinned Monty contract cannot be identified.
-    #[cfg(feature = "composition-python")]
     pub fn python_ptc_v1(descriptor: &PythonPtcDescriptorV1) -> Result<Self, AgentError> {
         Ok(Self {
             kind: LocalCompositionProfileKind::PythonPtcV1(descriptor.clone()),
@@ -121,7 +117,6 @@ impl LocalCompositionProfile {
             | LocalCompositionProfileKind::ProductJavaScriptV1(_) => {
                 LocalCompositionLanguage::JavaScript
             }
-            #[cfg(feature = "composition-python")]
             LocalCompositionProfileKind::PythonPtcV1(_) => LocalCompositionLanguage::Python,
         }
     }
@@ -271,25 +266,21 @@ impl LocalCompositionAttachmentBuilder {
                     "native Codex local composition forbids product-extension evidence",
                 ));
             }
-            (LocalCompositionProfileKind::ProductJavaScriptV1(descriptor), Some(evidence)) => {
-                validate_product_evidence(&self.profile, &artifact, descriptor, &evidence)?;
+            (
+                LocalCompositionProfileKind::ProductJavaScriptV1(_)
+                | LocalCompositionProfileKind::PythonPtcV1(_),
+                Some(evidence),
+            ) => {
+                validate_product_evidence(&self.profile, &artifact, &evidence)?;
                 Some(evidence)
             }
-            (LocalCompositionProfileKind::ProductJavaScriptV1(_), None) => {
-                return Err(AgentError::new(
-                    AgentErrorKind::InvalidInput,
-                    "product JavaScript local composition requires product-extension evidence",
-                ));
-            }
-            #[cfg(feature = "composition-python")]
-            (LocalCompositionProfileKind::PythonPtcV1(descriptor), Some(evidence)) => {
-                validate_python_evidence(&self.profile, &artifact, descriptor, &evidence)?;
-                Some(evidence)
-            }
-            #[cfg(feature = "composition-python")]
-            (LocalCompositionProfileKind::PythonPtcV1(_), None) => {
+            (
+                LocalCompositionProfileKind::ProductJavaScriptV1(_)
+                | LocalCompositionProfileKind::PythonPtcV1(_),
+                None,
+            ) => {
                 return Err(invalid(
-                    "local Python composition requires product-extension evidence",
+                    "product local composition requires product-extension evidence",
                 ));
             }
         };
@@ -348,7 +339,6 @@ pub(super) fn attachment_binding_identity(
 /// # Errors
 ///
 /// Fails closed if the binding is not exact for the builder or one was already attached.
-#[allow(clippy::too_many_lines, reason = "closed profile/artifact match table")]
 pub fn attach_local_composition(
     builder: AgentBuilder,
     attachment: Option<LocalCompositionAttachment>,
@@ -371,149 +361,64 @@ pub fn attach_local_composition(
         engine_contract: profile.engine_contract_identity,
         evidence_receipt,
     };
-    match (profile.kind, artifact.kind, evidence) {
-        (
-            LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(descriptor),
-            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-                path,
-                environment_identity,
-            },
-            None,
-        ) => attach_codex_native_local_code_mode(
-            builder,
-            &descriptor,
-            environment_identity,
-            path,
-            attachment_identity,
-        ),
-        (
-            LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(descriptor),
-            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-                path,
-                environment_identity,
-            },
-            None,
-        ) => attach_codex_minimal_local_code_mode(
-            builder,
-            &descriptor,
-            environment_identity,
-            path,
-            attachment_identity,
-        ),
-        (
-            LocalCompositionProfileKind::ProductJavaScriptV1(descriptor),
-            LocalCompositionEngineArtifactKind::RquickjsSidecarV1 {
-                path,
-                environment_identity,
-            },
-            Some(evidence),
-        ) => {
-            let presentation_kind = presentation_kind.ok_or_else(|| {
-                invalid("product JavaScript attachment requires presentation kind")
-            })?;
-            attach_product_javascript(
-                builder,
-                &descriptor,
-                path,
-                environment_identity,
-                attachment_identity,
-                evidence,
-                presentation_kind,
-            )
-        }
-        #[cfg(feature = "composition-python")]
-        (
-            LocalCompositionProfileKind::PythonPtcV1(descriptor),
-            LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
-                path,
-                environment_identity,
-            },
-            Some(evidence),
-        ) => {
-            let presentation_kind = presentation_kind
-                .ok_or_else(|| invalid("product Python attachment requires presentation kind"))?;
-            attach_python(
-                builder,
-                &descriptor,
-                path,
-                environment_identity,
-                attachment_identity,
-                evidence,
-                presentation_kind,
-            )
-        }
-        _ => Err(AgentError::new(
-            AgentErrorKind::InvalidInput,
-            "local composition profile and product evidence lane disagree",
-        )),
-    }
-}
-
-/// Attaches `exec`/`wait` Code Mode on a digest-pinned `plakous-js-host` sidecar.
-///
-/// The worker path must be absolute and already canonical, without symlinks.
-/// Attachment records its SHA-256; it does not certify worker provenance or
-/// imply that the re-check before spawning is an atomic execution guarantee.
-///
-/// # Errors
-///
-/// Fails when the sidecar path or exact descriptor fails closed admission.
-pub fn codex_minimal_local_code_mode_sidecar(
-    builder: AgentBuilder,
-    descriptor: &CodexMinimalLocalCodeModeDescriptorV1,
-    host_path: impl Into<PathBuf>,
-) -> Result<AgentBuilder, AgentError> {
-    let profile = LocalCompositionProfile::codex_minimal_local_code_mode_host_v1(descriptor)?;
-    let artifact = LocalCompositionEngineArtifact::rquickjs_sidecar_v1(host_path)?;
-    let attachment = LocalCompositionAttachment::builder(profile)
-        .engine_artifact(artifact)
-        .build()?;
-    attach_local_composition(builder, Some(attachment))
-}
-
-fn attach_codex_native_local_code_mode(
-    builder: AgentBuilder,
-    descriptor: &CodexNativeLocalCodeModeDescriptorV1,
-    identity: Vec<u8>,
-    sidecar: PathBuf,
-    attachment: LocalCompositionAttachmentIdentity,
-) -> Result<AgentBuilder, AgentError> {
+    let (descriptor, presentation): (_, Box<dyn integration::Presentation>) =
+        match (profile.kind, evidence) {
+            (LocalCompositionProfileKind::CodexNativeLocalCodeModeV1(descriptor), None) => (
+                neutral_descriptor(&descriptor).map_err(invalid)?,
+                Box::new(JavaScriptPresentation::CodexExact),
+            ),
+            (LocalCompositionProfileKind::CodexMinimalLocalCodeModeV1(descriptor), None) => {
+                let nested_catalog = descriptor
+                    .nested_tools()
+                    .iter()
+                    .map(|tool| tool.exposed_name().clone())
+                    .collect();
+                (
+                    neutral_minimal_descriptor(&descriptor).map_err(invalid)?,
+                    Box::new(JavaScriptPresentation::CodexMinimal { nested_catalog }),
+                )
+            }
+            (LocalCompositionProfileKind::ProductJavaScriptV1(descriptor), Some(evidence)) => {
+                let presentation_kind = presentation_kind.ok_or_else(|| {
+                    invalid("product JavaScript attachment requires presentation kind")
+                })?;
+                (
+                    neutral_product_descriptor(&descriptor).map_err(invalid)?,
+                    Box::new(product_javascript_presentation(
+                        &descriptor,
+                        evidence,
+                        presentation_kind,
+                    )?),
+                )
+            }
+            (LocalCompositionProfileKind::PythonPtcV1(descriptor), Some(evidence)) => {
+                let presentation_kind = presentation_kind.ok_or_else(|| {
+                    invalid("product Python attachment requires presentation kind")
+                })?;
+                (
+                    neutral_python_descriptor(&descriptor).map_err(invalid)?,
+                    Box::new(python::python_presentation(
+                        &descriptor,
+                        evidence,
+                        presentation_kind,
+                    )?),
+                )
+            }
+            _ => {
+                return Err(AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    "local composition profile and product evidence lane disagree",
+                ));
+            }
+        };
     let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(CellIntegration {
-        worker: sidecar,
-        identity,
-        presentation: Box::new(JavaScriptPresentation::CodexExact),
+        identity: artifact.worker.environment_identity(),
+        worker: artifact.worker.path,
+        presentation,
     });
-    let descriptor = neutral_descriptor(descriptor)
-        .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
     builder.local_programmatic_composition(LocalCompositionConstruction {
         descriptor,
         integration,
-        attachment,
-    })
-}
-
-fn attach_codex_minimal_local_code_mode(
-    builder: AgentBuilder,
-    descriptor: &CodexMinimalLocalCodeModeDescriptorV1,
-    identity: Vec<u8>,
-    sidecar: PathBuf,
-    attachment: LocalCompositionAttachmentIdentity,
-) -> Result<AgentBuilder, AgentError> {
-    let nested_catalog = descriptor
-        .nested_tools()
-        .iter()
-        .map(|tool| tool.exposed_name().clone())
-        .collect();
-    let integration: Arc<dyn LocalCompositionIntegration> = Arc::new(CellIntegration {
-        worker: sidecar,
-        identity,
-        presentation: Box::new(JavaScriptPresentation::CodexMinimal { nested_catalog }),
-    });
-    let descriptor = neutral_minimal_descriptor(descriptor)
-        .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
-    builder.local_programmatic_composition(LocalCompositionConstruction {
-        descriptor,
-        integration,
-        attachment,
+        attachment: attachment_identity,
     })
 }

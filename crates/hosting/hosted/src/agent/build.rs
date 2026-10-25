@@ -36,7 +36,7 @@ pub use policy::{
 #[cfg(test)]
 pub(super) use policy::{NATIVE_RUN_ROUND_INPUT_LIABILITY_CEILING, PROCESS_SESSION_TOOLS};
 pub(crate) use policy::{
-    SessionToolFence, occupancy_read_only_allows, occupancy_session_fence,
+    SessionToolFence, attach_codex_minimal, occupancy_read_only_allows, occupancy_session_fence,
     product_javascript_candidate_attachment, product_python_attachment, session_tool_policy,
     stamped_workspace_policy,
 };

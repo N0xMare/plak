@@ -4,7 +4,7 @@ use crate::{CliFailure, CliResult};
 
 use super::policy::{
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT, RESPONSE_OUTPUT_CEILING,
-    SessionToolFence, composition_is_js_ptc, composition_is_py_ptc,
+    SessionToolFence, attach_codex_minimal, composition_is_js_ptc, composition_is_py_ptc,
     composition_requests_native_ptc, install_occupancy_fence, observation_budget_cap_bytes,
     product_javascript_candidate_attachment, product_python_attachment, session_tool_policy,
     stamped_workspace_policy,
@@ -879,13 +879,11 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
                 "Codex Code Mode sidecar is unavailable: {error}; set PLAK_JS_HOST or place plakous-js-host beside plak"
             ))
         })?;
-        builder =
-            plakous::agent::codex_minimal_local_code_mode_sidecar(builder, &descriptor, host_path)
-                .map_err(|error| {
-                    CliFailure::new(format!(
-                        "Codex Code Mode (rquickjs sidecar) could not attach: {error}"
-                    ))
-                })?;
+        builder = attach_codex_minimal(builder, &descriptor, &host_path).map_err(|error| {
+            CliFailure::new(format!(
+                "Codex Code Mode (rquickjs sidecar) could not attach: {error}"
+            ))
+        })?;
     } else if !opening_durable_session {
         let projection = exact_process_presentation_candidate(
             state_roots.job_config(),

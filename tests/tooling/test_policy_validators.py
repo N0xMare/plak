@@ -2262,7 +2262,7 @@ class FeaturePolicyTests(unittest.TestCase):
             )
             for package in packages
         }
-        self.assertEqual(profile_counts["plakous"], 2**10 + 2)
+        self.assertEqual(profile_counts["plakous"], 2**9 + 2)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2**3 + 1)
         # git-cli, jj, maintainer, otel, test-hooks, test-support.
