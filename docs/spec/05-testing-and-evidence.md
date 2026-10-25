@@ -1636,6 +1636,9 @@ retained input/mail and exact retry without a duplicate tree command.
 `reloaded_pending_steer_retries_the_identical_submission` checks a pending
 steer's field-for-field identity after session reload and refuses a changed
 submission without saving it.
+`uncancelled_stored_only_root_batch_full_keeps_run_loop_alive_and_retries_once`
+drives the host prompt/run loop with a non-cancelling full tree store, retains
+the queued input and unread mail, and admits one retry after storage recovers.
 
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on

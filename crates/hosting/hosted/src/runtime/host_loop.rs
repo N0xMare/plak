@@ -568,9 +568,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     fn retain_interrupted_storage(&mut self, error: &CliFailure) -> bool {
-        if error.store_refusal() != Some(crate::error::StoreRefusal::StorageFull)
-            || !(self.config.store.storage_wait_cancelled() || self.storage_interrupted)
-        {
+        if error.store_refusal() != Some(crate::error::StoreRefusal::StorageFull) {
             return false;
         }
         self.storage_interrupted = true;
@@ -578,7 +576,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.pending_start = None;
         let _ = self.events.notice(sessions::TranscriptRow::info(
             sessions::NoticeScope::Settings,
-            "storage write interrupted; retained work and queued inputs remain available",
+            "storage write unavailable; retained work and queued inputs remain available",
         ));
         true
     }

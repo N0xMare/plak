@@ -2120,8 +2120,12 @@ enters the product queue. Product-store refusals and interrupted tree-capacity
 refusals retain their typed classification through preparation and settlement;
 root batch recording and withdrawal reach the host as
 `RecordStoreError::refused(StorageFull)` on an interrupted capacity refusal.
-Attached root and child tree publications park until written or interrupted;
-child publication waits belong to the command recipient. A refused root batch
+Attached root and child tree publications park until written or interrupted.
+A stored-only root batch has no attached parking owner: its capacity refusal
+pauses the queue and retains input and unread mail without ending the host,
+even when no interrupt was requested. The operator may retry after storage
+recovers; no background retry or inference replay is scheduled.
+Child publication waits belong to the command recipient. A refused root batch
 leaves the queued input and unread mail retryable. Retrying a batch written
 before its product submission reuses the same command identity and bytes
 without adding a second tree command. The hub's guarded mutation preserves

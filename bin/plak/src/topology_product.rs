@@ -123,13 +123,7 @@ impl plakous_hosted::runtime::TreeRows for crate::home::paths::PlakPaths {
         &self,
         tree: &mut ProductAgentTree,
     ) -> Result<(), plakous_recursive_subagents::tree::TopologyError> {
-        use plakous_recursive_subagents::tree::{TopologyError, TreeStore as _, TreeStoreError};
-        let revision = crate::store::tree::open_tree_store(self)
-            .map_err(TreeStoreError::unavailable)?
-            .save(tree)
-            .map_err(TopologyError::from)?;
-        tree.acknowledge_revision(revision);
-        Ok(())
+        crate::store::tree::save_tree(self, tree)
     }
 }
 
@@ -405,7 +399,7 @@ async fn stop_all_now(paths: &crate::home::paths::PlakPaths, tree_id: &str) -> R
         let root = tree.root_agent_id.clone();
         tree.stop_all(&root, Some(&operation_id))
             .map_err(|error| error.message)?;
-        return crate::store::tree::save_tree(paths, &mut tree);
+        return crate::store::tree::save_tree(paths, &mut tree).map_err(|error| error.message);
     };
     let closed_ids = runtime.mutate_then_emit(false, |tree| {
         let root = tree.root_agent_id.clone();
@@ -576,7 +570,10 @@ mod tests {
             .begin_successor_epoch(OrchestrationSnapshot::unpinned("grok-4.6"))
             .unwrap();
         let refused = crate::store::tree::save_tree(&paths, &mut stale).unwrap_err();
-        assert!(refused.contains("refusing to overwrite"), "{refused}");
+        assert!(
+            refused.message.contains("refusing to overwrite"),
+            "{refused:?}"
+        );
         assert_ne!(
             store.load(&tree_id).unwrap().unwrap().rows().selected_tuple,
             "grok-4.6"
