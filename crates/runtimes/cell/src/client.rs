@@ -808,8 +808,19 @@ mod tests {
         );
         let program = worker(directory.path(), &opening);
         let source = std::fs::read_to_string(&program).expect("program");
-        std::fs::write(&program, source.replace("exec sleep 30", "exit 0"))
-            .expect("voluntary exit");
+        let configure = encode_frame(&HostFrame::Configure {
+            revision: CELL_PROTOCOL_REVISION.to_owned(),
+            engine: EngineConfig::QUICKJS,
+        })
+        .expect("configure frame");
+        // Keep stdin open through Configure rather than racing spawn's write
+        // with the voluntary exit this test exercises after the handshake.
+        let exit_after_configure = format!("head -c {} >/dev/null\nexit 0", configure.len());
+        std::fs::write(
+            &program,
+            source.replace("exec sleep 30", &exit_after_configure),
+        )
+        .expect("voluntary exit");
         let client = CellClient::spawn(&program, QUICKJS_WORKER, EngineConfig::QUICKJS)
             .await
             .expect("worker");
