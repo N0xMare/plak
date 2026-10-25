@@ -6943,12 +6943,14 @@ the values a done request produced; a request still in progress is named but
 not quoted, since the latest intent is retained verbatim after the cut
 (§10.1). Constraints quotes exactly every user-set rule, preference or
 requirement from any request that still applies, including older requests
-whose entries were shortened or merged. A finished request's values move to
+whose entries were shortened or merged. Constraints lists each rule even
+when it is also quoted under Requests. A finished request's values move to
 Values if its line cannot hold them: no value is dropped to meet a line cap.
 Values copies exactly every value the remaining work still needs
 (identifiers, tokens, numbers, short file contents, text to write or report
 later); Work done gives files with paths and commands with their results one
-line each. The whole summary aims under about 2,000 words, and no request,
+line each. Next step gives the next action or the question awaiting the user's
+answer. The whole summary aims under about 2,000 words, and no request,
 section or list is repeated. The instruction tells the model that the summary
 replaces the conversation and any earlier summary in its own context and is
 not a reply, so a user's rule about what a reply may show does not license

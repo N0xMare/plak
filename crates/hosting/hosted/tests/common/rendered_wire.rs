@@ -980,39 +980,39 @@ pub(crate) mod suite {
     const COMPACTION_WIRE_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root",
-            "253168b93b6b338ed136e163d6179685087fcee35b4004f04d7639381e61a8c9",
+            "952c4c9f873333db897375c2a8255a5800a81e0792e3e07bbc4d2ecd95e1fd6f",
         ),
         (
             "grok.direct.root",
-            "aa46c97393fbc31206490763141cbbd301cd7766c7dedb0457f501921cbc9b08",
+            "a6c5534c65efc229954f5929caf1423919b01f482776d6d3a8b86765838ad445",
         ),
         (
             "claude.direct.root",
-            "70c5598e70268b33d673a852dd7a0c0c431b9fae6c614a46eacdc6a5b168e63e",
+            "81a93551eab963132605373fe7b3ac603b1d2ed1f38d9dc1ad0370b419ff6596",
         ),
         (
             "openrouter-chat.direct.root",
-            "ad7cd348d0a7a1125360215513ef0df0c04a861d176dd0538044a61ff142a5e5",
+            "5eedcb4e65fb67bd1ae96fe22e56beaa2234297d0d266ba7abc77ab5a11422be",
         ),
         (
             "openrouter-responses.direct.root",
-            "9073f6eb5b21c774b24fd66500c512e4da04bb3f266dc5b8d2c7feadd80b4666",
+            "ced1169acd4e18435aedbc94b83feda1d47f637f3734213ddbfa86e097291425",
         ),
         (
             "openrouter-messages.direct.root",
-            "cfddc831694cdefa2eb0987d8a08c0f41c34385da0775a95ac3ab5d7f9c5121a",
+            "dfb061d941f9d3c30bdc394979b0aafc11b621a64257dabe9068918e6483fa70",
         ),
         (
             "openai-api.direct.root.single-agent",
-            "611d41db6cf6a8436c2509ca2504038d2e2dfec64be044d1423d65a2ac880e7d",
+            "7c458fd18b421e3610fb0bbb151ba6353f921501ad435e6902d83ba13a34760d",
         ),
         (
             "xai-api.direct.root.single-agent",
-            "9c8b1dfa71f67bad3cf787af20a78b3578c694ee8d0b1d25a3f60f1094b2f46c",
+            "6900e1bbdefd8f671abb6f2e765e854b1f3fef597a778812000996c471a10564",
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "8c2d143e004cc7f60beb96ab51484582de6b984aefbc90357a6a3fc203c9ccbb",
+            "bbaf9db59d612e0e731e8dfd36e8321a8f84e89e7b157b75fb6e4b98442ce41c",
         ),
     ];
 
@@ -1024,6 +1024,8 @@ pub(crate) mod suite {
     /// Keep this field set aligned with `runtime/compaction/request.rs`;
     /// the agent's `harness_compaction_prefix_matches_rendered_summary_request_contract`
     /// test compares it with production, including a nonempty tool projection.
+    /// The input shape follows production too: a trailing User item with
+    /// UserInput provenance in a RecentIntent segment, with default working.
     fn compaction_model_request(turn: &ModelRequest) -> ModelRequest {
         let source = turn.stable_prefix();
         let bound = plakous_model::semantic_compaction_output_bound(
@@ -1095,7 +1097,8 @@ pub(crate) mod suite {
                 )
             })
             .expect("summary history");
-        let input = ConversationView::from_shared(history, turn.input().working().clone());
+        let input =
+            ConversationView::from_shared(history, plakous_model::WorkingProjection::default());
         ModelRequest::from_parts(prefix, input, turn.metadata()).expect("summary request")
     }
 
