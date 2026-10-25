@@ -9,7 +9,8 @@ use crate::input::UserInput;
 use crate::runtime::compaction::fold::nested_observation_token_upper_bound;
 use crate::runtime::compaction::record::compaction_checkpoint_id;
 use crate::runtime::compaction::request::{
-    native_compaction_facet_enrolled, tool_group_fence_occupied_tokens, tool_group_fence_verdict,
+    native_compaction_facet_enrolled, scheduling_input_headroom, tool_group_fence_occupied_tokens,
+    tool_group_fence_verdict,
 };
 use crate::runtime::compaction::{CompactOrigin, DurableCompactionIdentity, FenceTrigger};
 use crate::runtime::driver::Driver;
@@ -212,6 +213,7 @@ impl Driver {
             status.kind(),
             self.anchored_occupied_tokens(&status),
             status.compaction_trigger_tokens(),
+            status.uses_unanchored_estimate(),
         );
         if !verdict.is_due() {
             if pressure {
@@ -364,8 +366,9 @@ impl Driver {
         // A seeded genesis has no provider usage anchor yet. Measure it on
         // the destination route instead of sending an above-trigger first turn.
         let unmeasured_seed = std::mem::take(&mut self.seed_compaction_pending);
-        // This fence keeps no observation reserve: the prompt is not yet
-        // appended, and the round's own admission measures it.
+        // Admission's bound can be tighter than anchored occupancy, or the
+        // anchor can belong to an earlier descriptor. Keep the same next-round
+        // reserve as the tool-group fence instead of waiting for refusal.
         let verdict = CompactionVerdict::of(CompactionMeasure {
             fit: MeasuredFit::of(status.kind()),
             occupancy: self.anchored_occupied_tokens(&status).or_else(|| {
@@ -374,10 +377,15 @@ impl Driver {
                     .flatten()
             }),
             trigger: status.compaction_trigger_tokens(),
-            input_headroom: None,
+            input_headroom: scheduling_input_headroom(
+                status.kind(),
+                status.uses_unanchored_estimate(),
+            ),
         });
-        let occupancy = verdict.occupancy() && !self.paid_fold_failed_since_last_round();
-        if !verdict.overflow() && !occupancy {
+        let failed_paid_fold = self.paid_fold_failed_since_last_round();
+        let occupancy = verdict.occupancy() && !failed_paid_fold;
+        let headroom = verdict.observation_headroom() && !failed_paid_fold;
+        if !verdict.overflow() && !occupancy && !headroom {
             self.compact_for_segment_pressure(command, pending_user_input())
                 .await?;
             return Ok(());

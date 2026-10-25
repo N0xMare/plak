@@ -6931,9 +6931,10 @@ middle-out truncation is not a compaction facet.
 
 **The summary input must admit before dispatch.** The full sealed input is
 preferred. If its measured disposition overflows, or preparation refuses it
-with a typed capacity error, the driver probes a finite sequence that replaces
-selected-span tool-result bodies oldest-first with
-the same bounded, tool/call/argument-naming placeholders used by the offline
+with a typed capacity error, the driver probes a finite sequence: unchanged
+full input `R0`, then `portable(R0)`, `portable(R1)`, through `portable(Rn)`.
+`Rk` replaces exactly the oldest k eligible selected-span tool-result bodies
+with the same bounded, tool/call/argument-naming placeholders used by the offline
 rung. These are summary-request transformations only: they do not publish a
 placeholder checkpoint, alter the source, remove a user request or assistant
 text, rewrite a prior summary, or touch the retained tail. Each candidate is
@@ -6947,6 +6948,22 @@ preparation errors, including diagnostic text that merely mentions capacity,
 do not authorize further elision; the reported error belongs to that candidate,
 not an earlier capacity-refused one. A candidate is never assumed to fit merely
 because its byte size decreased.
+
+The portable projection omits reasoning and replaces opaque replay only with
+its declared semantic-summary fallback, omitting it when none exists. Empty
+items and segments disappear;
+a surviving reasoning-replay segment becomes an ordinary conversation segment.
+This is a summary-request projection only: user and assistant text, tool
+calls and paired results, earlier summaries, and the retained tail are not
+otherwise rewritten. It is tried before withholding any tool facts, so those
+facts survive whenever replay omission alone admits. If a route already omits
+reasoning in lowering, the portable full-input probe may be a no-op; that does
+not authorize skipping admission. The canonical source stays exact. Recovery
+derives this same closed order from the source, never from a caller's marker
+or truncation.
+With no tool-result candidates and a byte-identical portable input, there is
+no distinct candidate to probe; the unchanged dispatch request still admits
+separately.
 
 The durable request records the exact selected input. Completion and recovery
 verify byte-for-byte membership in this closed source-derived sequence,
@@ -7196,12 +7213,22 @@ fresh successful anchor resets that term. The fence measures the complete live h
 Compaction acts only at a legal turn fence with empty working segments;
 non-empty working segments still receive the typed Busy refusal. Typed overflow
 or exhausted observation headroom can act even below the occupancy trigger.
+Before a new prompt, as after a tool group, the admission measure's remaining
+input headroom at or below 4096 tokens schedules compaction independently of
+the provider-usage occupancy trigger. An anchor missing or mismatching the
+current descriptor disables that occupancy trigger, not this admission reserve.
+The reserve applies only when admission rests on a conservative bound: when
+admission fell back to an unanchored estimate, headroom does not trigger it.
+This lets a conservative byte-derived bound trigger before the next prompt
+would be refused, including when encrypted reasoning/replay is much larger
+than the provider-reported token usage.
 An exhausted-capacity fence tries the portable native/placeholder projection
 and the final replay-omission rung before aborting; a measured fitting committed
 successor lets the turn continue without repeating a tool or paid compaction.
 An unanchored estimate alone never fires the percentage/token trigger; only the
-explicit pre-send overflow rule of §6.8 or a current-binding provider refusal
-can force compaction before a credible anchor exists.
+admission-headroom reserve, the explicit pre-send overflow rule of §6.8, or a
+current-binding provider refusal can force compaction before a credible anchor
+exists.
 
 The context-state encoding and digest are version 3. Compaction provenance
 records the retained segment count and how many of those segments follow the

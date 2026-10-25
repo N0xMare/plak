@@ -208,6 +208,8 @@ pub(super) struct ArtifactModel {
     pub(super) overflow_once_at_call: AtomicUsize,
     pub(super) foreign_overflow: AtomicBool,
     pub(super) item_context: AtomicBool,
+    pub(super) require_input_bound: AtomicBool,
+    pub(super) ordinary_capacity_refusals: AtomicUsize,
     pub(super) item_system_bytes: AtomicUsize,
     pub(super) item_provider_input_tokens: AtomicUsize,
     pub(super) usage_suppressed_until: AtomicUsize,
@@ -318,6 +320,8 @@ impl ArtifactModel {
             overflow_once_at_call: AtomicUsize::new(usize::MAX),
             foreign_overflow: AtomicBool::new(false),
             item_context: AtomicBool::new(false),
+            require_input_bound: AtomicBool::new(false),
+            ordinary_capacity_refusals: AtomicUsize::new(0),
             item_system_bytes: AtomicUsize::new(0),
             item_provider_input_tokens: AtomicUsize::new(0),
             usage_suppressed_until: AtomicUsize::new(0),
@@ -592,6 +596,11 @@ impl LanguageModel for ArtifactModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
+        let context = if self.require_input_bound.load(Ordering::Acquire) {
+            context.with_required_input_bound()
+        } else {
+            context
+        };
         let scheduling_measurement = matches!(
             plan.request().metadata().root(),
             ModelOperationRoot::Turn(_)
@@ -953,6 +962,16 @@ impl LanguageModel for ArtifactModel {
         let record =
             PreparedCallRecord::for_prepared(&self.descriptor, &plan, projection, &context)
                 .map_err(|error| {
+                    if !paid_compaction_request
+                        && matches!(
+                            plan.request().metadata().root(),
+                            ModelOperationRoot::Turn(_)
+                        )
+                        && ModelError::from(error.clone()).kind() == ModelErrorKind::ContextLimit
+                    {
+                        self.ordinary_capacity_refusals
+                            .fetch_add(1, Ordering::AcqRel);
+                    }
                     if !paid_compaction_request
                         || ModelError::from(error.clone()).kind() != ModelErrorKind::ContextLimit
                     {

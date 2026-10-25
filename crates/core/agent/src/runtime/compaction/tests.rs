@@ -70,8 +70,8 @@ fn tool_group_fence_occupied_tokens_adds_nested_local_composition_observations()
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!tool_group_fence_verdict(&fits, None, None,).is_due());
-    assert!(tool_group_fence_verdict(&fits, occupied, Some(232_000),).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
+    assert!(tool_group_fence_verdict(&fits, occupied, Some(232_000), false).is_due());
 }
 
 /// While the measure is unanchored (before a session's first completed
@@ -86,9 +86,18 @@ fn an_unanchored_measure_never_schedules_the_tool_group_fence() {
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!tool_group_fence_verdict(&fits, unanchored, Some(800_000),).is_due());
+    assert!(!tool_group_fence_verdict(&fits, unanchored, Some(800_000), false).is_due());
     let overflow = ContextStatusKind::WouldOverflow(fixture_overflow());
-    assert!(tool_group_fence_verdict(&overflow, unanchored, None,).is_due());
+    assert!(tool_group_fence_verdict(&overflow, unanchored, None, false).is_due());
+}
+
+#[test]
+fn estimated_headroom_never_schedules_the_tool_group_reserve() {
+    let fits = ContextStatusKind::Fits {
+        headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(0)),
+    };
+    assert!(!tool_group_fence_verdict(&fits, None, None, true).is_due());
+    assert!(tool_group_fence_verdict(&fits, None, None, false).observation_headroom());
 }
 
 /// The telemetry case: the provider counted 298,468 input tokens for a
@@ -114,14 +123,14 @@ fn tool_group_fence_is_anchored_on_the_last_provider_input() {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
     let anchored = tool_group_fence_occupied_tokens(Some(estimate), anchor, 0);
-    assert!(!tool_group_fence_verdict(&fits, anchored, trigger,).is_due());
+    assert!(!tool_group_fence_verdict(&fits, anchored, trigger, false).is_due());
     // The same estimate on the anchor's own scale would have fired it.
     let identity = ContextAnchor::new(850_715, 850_715);
     let whole = tool_group_fence_occupied_tokens(Some(estimate), identity, 0);
-    assert!(tool_group_fence_verdict(&fits, whole, trigger,).is_due());
+    assert!(tool_group_fence_verdict(&fits, whole, trigger, false).is_due());
     // Growth past the trigger on the anchored scale still fires it.
     let grown = tool_group_fence_occupied_tokens(Some(850_715 + 110_000), anchor, 0);
-    assert!(tool_group_fence_verdict(&fits, grown, trigger,).is_due());
+    assert!(tool_group_fence_verdict(&fits, grown, trigger, false).is_due());
 }
 
 /// The actionable meter uses the tighter of the reported window and the admitted
@@ -195,27 +204,43 @@ fn fence_base_is_the_tighter_of_window_and_admitted_ceiling() {
 fn should_schedule_mid_turn_compaction_matches_spec_thresholds() {
     let overflow = fixture_overflow();
     assert!(
-        tool_group_fence_verdict(&ContextStatusKind::WouldOverflow(overflow), None, None,).is_due()
+        tool_group_fence_verdict(
+            &ContextStatusKind::WouldOverflow(overflow),
+            None,
+            None,
+            false
+        )
+        .is_due()
     );
     assert!(
-        tool_group_fence_verdict(&ContextStatusKind::ProtectedOverflow(overflow), None, None,)
-            .is_due()
+        tool_group_fence_verdict(
+            &ContextStatusKind::ProtectedOverflow(overflow),
+            None,
+            None,
+            false
+        )
+        .is_due()
     );
     // The ladder gained the placeholder rung, so protected overflow schedules on
     // a route with no native facet too; the rung, not the fence, decides what
     // can actually be done with it.
     assert!(
-        tool_group_fence_verdict(&ContextStatusKind::ProtectedOverflow(overflow), None, None,)
-            .is_due()
+        tool_group_fence_verdict(
+            &ContextStatusKind::ProtectedOverflow(overflow),
+            None,
+            None,
+            false
+        )
+        .is_due()
     );
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
-    assert!(!tool_group_fence_verdict(&fits, None, None,).is_due());
-    assert!(!tool_group_fence_verdict(&fits, None, None,).is_due());
-    assert!(!tool_group_fence_verdict(&fits, None, None).is_due());
-    assert!(tool_group_fence_verdict(&fits, Some(400_000), Some(400_000),).is_due());
-    assert!(!tool_group_fence_verdict(&fits, Some(399_000), Some(400_000),).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
+    assert!(!tool_group_fence_verdict(&fits, None, None, false).is_due());
+    assert!(tool_group_fence_verdict(&fits, Some(400_000), Some(400_000), false).is_due());
+    assert!(!tool_group_fence_verdict(&fits, Some(399_000), Some(400_000), false).is_due());
 }
 
 #[test]
@@ -228,7 +253,7 @@ fn exhausted_admission_headroom_fences_even_below_anchored_occupancy() {
         };
         for occupied in [None, Some(346_950)] {
             assert_eq!(
-                tool_group_fence_verdict(&fits, occupied, Some(850_000),).is_due(),
+                tool_group_fence_verdict(&fits, occupied, Some(850_000), false).is_due(),
                 remaining <= 4_096,
             );
         }
@@ -624,15 +649,18 @@ mod placeholders {
             serde_json::to_vec(&zero).expect("bytes"),
             serde_json::to_vec(&original).expect("original bytes")
         );
-        assert_eq!(harness_compaction_reduction_count(&cut), 2);
+        assert_eq!(harness_compaction_reduction_count(&cut), 3);
         let retained = cut.retained_segments().to_vec();
-        for depth in 0..=2 {
+        for depth in 0_usize..=3 {
             let input = harness_compaction_input_at_depth(&cut, workflow(), depth).expect("input");
             assert_eq!(
                 validate_harness_compaction_input(&cut, workflow(), &input).expect("validate"),
                 Some(depth)
             );
-            assert_eq!(placeholder_bodies(input.history()).len(), depth);
+            assert_eq!(
+                placeholder_bodies(input.history()).len(),
+                depth.saturating_sub(1)
+            );
             assert_eq!(
                 input.history().segments().len(),
                 original.history().segments().len()
@@ -647,20 +675,20 @@ mod placeholders {
                 original.history().segments()[1],
                 "copied latest intent"
             );
-            // Prior summary, intent, two exchanges, assistant prose, instruction.
             assert_eq!(
-                input
-                    .history()
-                    .segments()
-                    .iter()
-                    .skip(4)
-                    .collect::<Vec<_>>(),
-                original
-                    .history()
-                    .segments()
-                    .iter()
-                    .skip(4)
-                    .collect::<Vec<_>>()
+                input.history().segments()[4].items()[0].blocks()[0],
+                original.history().segments()[4].items()[0].blocks()[0],
+                "assistant prose"
+            );
+            assert_eq!(
+                input.history().segments()[4].items()[0].blocks().len(),
+                if depth == 0 { 2 } else { 1 },
+                "private reasoning is portable-first"
+            );
+            assert_eq!(
+                input.history().segments().iter().last(),
+                original.history().segments().iter().last(),
+                "instruction"
             );
             for index in 2..=3 {
                 let before = &original.history().segments()[index];
@@ -676,7 +704,7 @@ mod placeholders {
                 assert_eq!(old.owner(), new.owner());
                 assert_eq!(old.kind(), new.kind());
                 assert_eq!(old.correlation(), new.correlation());
-                if index - 2 >= depth {
+                if index - 2 >= depth.saturating_sub(1) {
                     assert_eq!(before, after);
                 }
             }
@@ -686,10 +714,64 @@ mod placeholders {
             retained,
             "fresh exchange and retained intent"
         );
-        assert!(harness_compaction_input_at_depth(&cut, workflow(), 3).is_err());
-        let first = harness_compaction_input_at_depth(&cut, workflow(), 1).expect("R1");
+        assert!(harness_compaction_input_at_depth(&cut, workflow(), 4).is_err());
+        let first = harness_compaction_input_at_depth(&cut, workflow(), 2).expect("portable R1");
         assert!(placeholder_bodies(first.history())[0].contains("tool: read_file"));
         assert_eq!(harness_notes(first.history()), [] as [String; 0]);
+    }
+
+    #[test]
+    fn portable_summary_precedes_tool_elision_but_keeps_the_closed_result_order() {
+        use crate::runtime::compaction::placeholder::{
+            collect_compaction_reduction_candidates, replace_compaction_result_body,
+        };
+        use crate::runtime::compaction::request::{
+            harness_compaction_input_at_depth, portable_compaction_history,
+            validate_harness_compaction_input,
+        };
+        use plakous_model::{ConversationView, WorkingProjection};
+        let cut = reduction_cut();
+        let retained = cut.retained_segments().to_vec();
+        let deepest =
+            harness_compaction_input_at_depth(&cut, workflow(), 0).expect("original input");
+        let portable =
+            harness_compaction_input_at_depth(&cut, workflow(), 1).expect("portable candidate");
+        assert_eq!(
+            validate_harness_compaction_input(&cut, workflow(), &portable).expect("validate"),
+            Some(1)
+        );
+        assert_eq!(placeholder_bodies(portable.history()).len(), 0);
+        for index in 0..=3 {
+            assert_eq!(
+                portable.history().segments()[index],
+                deepest.history().segments()[index],
+                "prior summary, intent and paired exchanges stay exact"
+            );
+        }
+        let prose = &portable.history().segments()[4];
+        assert_eq!(prose.kind(), HistorySegmentKind::Conversation);
+        assert!(
+            matches!(prose.items()[0].blocks(), [ContentBlock::Text(text)] if text.text() == "assistant text")
+        );
+        assert_eq!(
+            portable.history().segments().iter().last(),
+            deepest.history().segments().iter().last(),
+            "instruction"
+        );
+        assert_eq!(cut.retained_segments(), retained);
+        let full = harness_compaction_input_at_depth(&cut, workflow(), 0).expect("full input");
+        let candidates = collect_compaction_reduction_candidates(&cut);
+        let second_only =
+            replace_compaction_result_body(full.history(), &candidates[1]).expect("second only");
+        let skipped = ConversationView::from_shared(
+            portable_compaction_history(&second_only).expect("portable non-prefix input"),
+            WorkingProjection::default(),
+        );
+        assert_eq!(
+            validate_harness_compaction_input(&cut, workflow(), &skipped).expect("validate"),
+            None,
+            "portable projection does not authorize non-prefix result elision"
+        );
     }
 
     #[test]
@@ -713,7 +795,7 @@ mod placeholders {
             validate_harness_compaction_input(&cut, workflow(), &subset).expect("validate"),
             None
         );
-        let one = harness_compaction_input_at_depth(&cut, workflow(), 1).expect("R1");
+        let one = harness_compaction_input_at_depth(&cut, workflow(), 2).expect("portable R1");
         for (from, to) in [
             ("removed_bytes: 4000", "removed_bytes: 3999"),
             (REPLACED_TOOL_RESULT_MARKER, "[plak: forged marker]"),
@@ -725,7 +807,12 @@ mod placeholders {
             // Rebuild identities so rejection is by the closed candidate
             // validator, not by the history codec's integrity check.
             let mut changed = false;
-            let segments = one
+            let base = if from == "reasoning text" {
+                &zero
+            } else {
+                &one
+            };
+            let segments = base
                 .history()
                 .segments()
                 .iter()
@@ -840,8 +927,8 @@ mod placeholders {
         let source = ConversationView::from_shared(history.clone(), WorkingProjection::default());
         let plan = ContextHistoryPlan::new(&source).expect("plan");
         let cut = SemanticCompactionCut::seal(&source, &plan).expect("cut");
-        assert_eq!(harness_compaction_reduction_count(&cut), 3);
-        let reduced = harness_compaction_input_at_depth(&cut, workflow(), 3).expect("R3");
+        assert_eq!(harness_compaction_reduction_count(&cut), 4);
+        let reduced = harness_compaction_input_at_depth(&cut, workflow(), 4).expect("portable R3");
         assert_eq!(placeholder_bodies(reduced.history()).len(), 3);
         assert_eq!(cut.retained_segments().len(), 2);
         assert_eq!(cut.retained_segments()[1], history.segments()[5]);
@@ -853,12 +940,12 @@ mod placeholders {
         let source = ConversationView::from_shared(history, WorkingProjection::default());
         let plan = ContextHistoryPlan::new(&source).expect("plan");
         let cut = SemanticCompactionCut::seal(&source, &plan).expect("cut");
-        assert_eq!(harness_compaction_reduction_count(&cut), 2);
-        let reduced = harness_compaction_input_at_depth(&cut, workflow(), 2).expect("R2");
+        assert_eq!(harness_compaction_reduction_count(&cut), 3);
+        let reduced = harness_compaction_input_at_depth(&cut, workflow(), 3).expect("portable R2");
         assert_eq!(placeholder_bodies(reduced.history()).len(), 3);
         assert_eq!(
             validate_harness_compaction_input(&cut, workflow(), &reduced).expect("validate"),
-            Some(2)
+            Some(3)
         );
     }
 

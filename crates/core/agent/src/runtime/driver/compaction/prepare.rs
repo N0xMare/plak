@@ -117,17 +117,23 @@ impl Driver {
                 return Ok(CompactionPhase::RetryWithoutNative);
             }
         }
-        if let Some(cut) = cut
-            && harness_compaction_reduction_count(&cut) > 0
-        {
-            self.fit_harness_summary_depth(
-                runtime,
-                identity.workflow_id,
-                &measured.cache_affinity,
-                &cut,
-                &mut plan.request,
-            )
-            .await?;
+        if let Some(cut) = cut {
+            // With no tool results and an identical portable input there is
+            // nothing to fit beyond the separately admitted dispatch request.
+            let has_distinct_candidate = harness_compaction_reduction_count(&cut) > 1
+                || harness_compaction_input_at_depth(&cut, identity.workflow_id, 1)
+                    .map_err(|error| compact_runtime_endpoint_error(&error))?
+                    != *plan.request.input();
+            if has_distinct_candidate {
+                self.fit_harness_summary_depth(
+                    runtime,
+                    identity.workflow_id,
+                    &measured.cache_affinity,
+                    &cut,
+                    &mut plan.request,
+                )
+                .await?;
+            }
         }
         Ok(CompactionPhase::Next(plan))
     }

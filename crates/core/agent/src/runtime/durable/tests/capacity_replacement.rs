@@ -727,9 +727,9 @@ async fn a_failed_paid_fold_without_an_eligible_placeholder_continues_when_histo
         "the only tool result is fresh, so the failed fold cannot discard it"
     );
     assert_eq!(
-        model.observed_compaction_contexts().len(),
+        model.paid_compaction_calls.load(Ordering::Acquire),
         1,
-        "exactly one paid fold was prepared and dispatched"
+        "offline fit probes must not add a paid dispatch"
     );
     agent.shutdown().await?;
     Ok(())
@@ -881,7 +881,7 @@ async fn manual_summary_fit_case(
             if refusal == Some(SummaryCapacityRefusal::InvalidConfiguration) {
                 2
             } else {
-                3
+                4
             },
             "no probes may follow the unrelated refusal"
         );
@@ -904,7 +904,11 @@ async fn manual_summary_fit_case(
     );
     if refusal.is_some() {
         let errors = lock_mutex(&model.summary_preparation_errors);
-        assert_eq!(errors.len(), 1, "only the full-input probe is refused");
+        assert_eq!(
+            errors.len(),
+            2,
+            "full input and its unchanged portable projection refuse"
+        );
         assert!(errors[0].context_status().is_none());
         assert_eq!(
             ModelError::from(errors[0].clone()).kind(),
@@ -928,7 +932,7 @@ async fn manual_summary_fit_case(
             identity.workflow_id,
             operations.request.request.input(),
         )?,
-        Some(usize::from(!anchored))
+        Some(usize::from(!anchored) * 2)
     );
     assert_eq!(
         prepared.checkpoint().manifest().canonical().history(),
@@ -944,7 +948,7 @@ async fn manual_summary_fit_case(
         if anchored {
             vec![true, true]
         } else {
-            vec![false, false, false]
+            vec![false, false, false, false]
         },
         "depth-zero anchored fit needs one probe and one dispatch preparation; no anchor needs an elided probe too"
     );
@@ -1168,5 +1172,386 @@ async fn an_unpreparable_fold_continues_when_history_fits_without_a_placeholder(
         "the failed capacity fence must retain its refusal and source measurement"
     );
     agent.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn admission_headroom_with_a_foreign_anchor_compacts_reasoning_before_the_next_prompt()
+-> TestResult {
+    Box::pin(summary_headroom_case(None, true, 6_000, Some(1))).await
+}
+
+#[tokio::test]
+async fn portable_summary_keeps_selected_tool_facts_when_replay_omission_alone_fits() -> TestResult
+{
+    Box::pin(summary_headroom_case(Some(4_000), true, 6_000, Some(1))).await
+}
+
+#[tokio::test]
+async fn portable_summary_elides_tool_facts_only_when_the_portable_full_input_still_overflows()
+-> TestResult {
+    Box::pin(summary_headroom_case(Some(12_000), true, 30_000, Some(2))).await
+}
+
+#[tokio::test]
+async fn estimated_headroom_without_a_required_bound_does_not_schedule_a_paid_summary() -> TestResult
+{
+    Box::pin(summary_headroom_case(None, false, 6_000, None)).await
+}
+
+async fn summary_headroom_case(
+    tool_bytes: Option<usize>,
+    required_bound: bool,
+    summary_overhead: usize,
+    expected_depth: Option<usize>,
+) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let bodies = tool_bytes.map_or_else(Vec::new, |bytes| vec![bytes]);
+    let rounds = tool_bytes.map_or_else(Vec::new, |_| vec![0]);
+    let (builder, _) = placeholder_fixture(
+        workspace.clone(),
+        140_000,
+        40_000,
+        &bodies,
+        &rounds,
+        false,
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    let agent = sessions
+        .create(
+            "create:summary-headroom",
+            builder.with_scheduled_compaction_enabled(false),
+        )
+        .await?;
+    for prompt in ["keep the earlier requirement", "latest protected intent"] {
+        assert!(matches!(
+            agent.prompt(prompt).await?.result().await?.outcome(),
+            TurnResultOutcome::Completed(_)
+        ));
+    }
+    let checkpoint = agent.checkpoint();
+    let source = DurableSessionAddress::new(agent.session_id(), agent.branch_id(), checkpoint.id());
+    agent.shutdown().await?;
+    let prior = checkpoint.manifest();
+    let mut segments = prior.canonical().history().segments().to_vec();
+    let old_answer = &segments[1].items()[0];
+    let mut blocks = old_answer.blocks().to_vec();
+    blocks.push(ContentBlock::Reasoning(ReasoningBlock::new(
+        ReasoningVisibility::Visible,
+        Some("r".repeat(if required_bound {
+            34_000 - tool_bytes.unwrap_or(0) - usize::from(tool_bytes.is_some()) * 1_000
+        } else {
+            145_000
+        })),
+        None,
+    )?));
+    let mut items = segments[1].items().to_vec();
+    items[0] = ConversationItem::new(
+        old_answer.id(),
+        old_answer.actor(),
+        blocks,
+        old_answer.provenance(),
+    )?;
+    segments[1] = HistorySegment::new(
+        if tool_bytes.is_some() {
+            HistorySegmentKind::ToolExchange
+        } else {
+            HistorySegmentKind::ReasoningReplay
+        },
+        items,
+    )?;
+    let history = CanonicalHistory::new(segments)?;
+    let descriptor = placeholder_test_descriptor(40_000, false)?;
+    let anchor = plakous_model::ContextRequestAnchor::new(
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"previous-descriptor"])?,
+        descriptor.route().clone(),
+        descriptor.requested_model().clone(),
+        Usage::new(32_000, 2, 0, 0, 0),
+        plakous_model::ContextWireInput::measure_wire(
+            br#"{"messages":[{"role":"user","content":"old"}]}"#,
+            None,
+        )?,
+    )
+    .ok_or("foreign anchor")?;
+    assert!(!anchor.matches_descriptor(&descriptor));
+    let context = prior
+        .canonical()
+        .context()
+        .with_request_anchor(Some(anchor))?;
+    let canonical = RuntimeCanonicalState::new(
+        prior.canonical().stable_prefix().clone(),
+        history.clone(),
+        WorkingProjection::default(),
+        context,
+    )?;
+    let identity = DurableCompactionIdentity::new("fixture:headroom", source)?;
+    let seeded = checkpoint_with_compaction_state(
+        &checkpoint,
+        identity,
+        prior.ledger().operations().into_iter().cloned().collect(),
+        canonical,
+    )?;
+    let bundle = RuntimeCheckpointCodec::bundle(&seeded, None)?;
+    let reference = CheckpointObjectRef::from_store(seeded.id(), bundle.root(), seeded.integrity());
+    let stored = StoredCheckpoint::from_store(reference, bundle)?;
+    {
+        let mut state = lock_mutex(&store.state);
+        let loaded = state.loaded.as_ref().ok_or("loaded branch")?;
+        let head = BranchHead::from_store(
+            source.session(),
+            BranchRevision::from_store(seeded.manifest().topology().branch_revision),
+            reference,
+        );
+        state.loaded = Some(crate::LoadedBranch::from_store(
+            loaded.session(),
+            head,
+            stored.clone(),
+        ));
+        state.stored = Some(stored.clone());
+        state.stored_commits.insert(source.checkpoint_id, stored);
+        state.active_lease = None;
+        state.released_lease = None;
+    }
+    let (builder, model) = placeholder_fixture(
+        workspace.clone(),
+        141_000,
+        40_000,
+        &[],
+        &[],
+        false,
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    model.item_context.store(true, Ordering::Release);
+    model
+        .require_input_bound
+        .store(required_bound, Ordering::Release);
+    model
+        .summary_context_overhead
+        .store(summary_overhead, Ordering::Release);
+    let DurableRuntimeOpen::Opened(agent) = sessions
+        .open("open:summary-headroom", source, builder)
+        .await?
+    else {
+        return Err("reasoning source did not reopen".into());
+    };
+    let before = agent.checkpoint();
+    let status = agent
+        .session_endpoint()
+        .context_status(agent.session_id(), agent.branch_id(), before.id(), None)
+        .await
+        .map_err(|error| format!("headroom status: {error:?}"))?;
+    assert!(
+        matches!(status.kind(), plakous_model::ContextStatusKind::Fits { headroom }
+        if crate::compaction_verdict::input_headroom_tokens(*headroom) <= 4096),
+        "{status:?}"
+    );
+    assert_eq!(status.uses_unanchored_estimate(), !required_bound);
+    if !required_bound {
+        assert_eq!(
+            crate::runtime::compaction::request::scheduling_input_headroom(
+                status.kind(),
+                status.uses_unanchored_estimate()
+            ),
+            None
+        );
+        let mut turn = agent.prompt("small follow-up").await?;
+        let mut events = turn.take_events()?;
+        let result = turn.result().await?;
+        assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+        while let Ok(event) = events.recv().await {
+            assert!(
+                !matches!(event.kind(), AgentEventKind::CompactionStarted { .. }),
+                "an estimate alone cannot start a paid fold"
+            );
+            if matches!(
+                event.kind(),
+                AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
+            ) {
+                break;
+            }
+        }
+        assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 0);
+        assert!(
+            result
+                .checkpoint()
+                .manifest()
+                .canonical()
+                .history()
+                .segments()
+                .iter()
+                .take(history.segments().len())
+                .eq(history.segments().iter())
+        );
+        agent.shutdown().await?;
+        return Ok(());
+    }
+    let pending = "next requirement ".repeat(500);
+    let status = agent
+        .session_endpoint()
+        .context_status(
+            agent.session_id(),
+            agent.branch_id(),
+            before.id(),
+            Some(pending.clone().into()),
+        )
+        .await
+        .map_err(|error| format!("pending status: {error:?}"))?;
+    assert!(matches!(
+        status.kind(),
+        plakous_model::ContextStatusKind::WouldOverflow(_)
+    ));
+    let refusals = model.ordinary_capacity_refusals.load(Ordering::Acquire);
+    let result = agent.prompt(pending).await?.result().await?;
+    assert_eq!(
+        model.ordinary_capacity_refusals.load(Ordering::Acquire),
+        refusals,
+        "scheduled compaction must precede ordinary admission's refusal, not recover after it"
+    );
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 1);
+    assert_eq!(
+        model.calls.load(Ordering::Acquire),
+        2,
+        "summary then the pending prompt"
+    );
+    assert!(
+        !lock_mutex(&model.summary_preparation_errors).is_empty(),
+        "the unabridged reasoning-heavy summary must refuse before its portable candidate fits"
+    );
+    let prepared = lock_mutex(&store.state)
+        .stored_commits
+        .values()
+        .find(|stored| {
+            stored
+                .checkpoint()
+                .manifest()
+                .ledger()
+                .operations()
+                .iter()
+                .any(|operation| {
+                    matches!(operation.kind(), DurableOperationKind::Compaction { .. })
+                        && matches!(operation.state(), DurableOperationState::Prepared)
+                })
+        })
+        .cloned()
+        .ok_or("prepared summary checkpoint")?;
+    assert_eq!(
+        prepared.checkpoint().manifest().canonical().history(),
+        &history
+    );
+    let prepared_projection = prepared.checkpoint().manifest().canonical().projection();
+    let cut = plakous_model::SemanticCompactionCut::seal(
+        &prepared_projection,
+        &plakous_model::ContextHistoryPlan::new(&prepared_projection)?,
+    )?;
+    let record = prepared
+        .checkpoint()
+        .manifest()
+        .ledger()
+        .operations()
+        .into_iter()
+        .find(|record| matches!(record.kind(), DurableOperationKind::Compaction { .. }))
+        .ok_or("summary operation")?;
+    let paid: crate::runtime::compaction::DurableCompactionRequestRecord =
+        serde_json::from_slice(record.request().bytes())?;
+    let identity = DurableCompactionIdentity::new(&paid.operation_id, paid.source())?;
+    let operations = decode_paid_compaction_operations(prepared.checkpoint(), identity)?;
+    assert_eq!(
+        crate::runtime::compaction::request::validate_harness_compaction_input(
+            &cut,
+            identity.workflow_id,
+            operations.request.request.input(),
+        )?,
+        expected_depth
+    );
+    let selected_results = operations
+        .request
+        .request
+        .input()
+        .items()
+        .iter()
+        .flat_map(ConversationItem::blocks)
+        .filter_map(|block| {
+            if let ContentBlock::ToolResult(result) = block {
+                Some(result)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(selected_results.len(), usize::from(tool_bytes.is_some()));
+    if let Some(bytes) = tool_bytes {
+        let [ToolResultPart::Text(text)] = selected_results[0].parts() else {
+            return Err("selected result shape".into());
+        };
+        if expected_depth == Some(1) {
+            assert_eq!(
+                text.text(),
+                "x".repeat(bytes),
+                "portable full input keeps tool facts"
+            );
+        } else {
+            assert!(
+                text.text().starts_with(
+                    crate::runtime::compaction::placeholder::REPLACED_TOOL_RESULT_MARKER
+                )
+            );
+        }
+    }
+    assert!(
+        !operations
+            .request
+            .request
+            .input()
+            .items()
+            .iter()
+            .flat_map(ConversationItem::blocks)
+            .any(|block| matches!(block, ContentBlock::Reasoning(_)))
+    );
+    let target = DurableSessionAddress::new(
+        agent.session_id(),
+        agent.branch_id(),
+        result.checkpoint().id(),
+    );
+    agent.shutdown().await?;
+    let (builder, reopened_model) = placeholder_fixture(
+        workspace,
+        142_000,
+        40_000,
+        &[],
+        &[],
+        false,
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    let DurableRuntimeOpen::Opened(reopened) = sessions
+        .open("open:portable-summary", target, builder)
+        .await?
+    else {
+        return Err("portable successor did not reopen".into());
+    };
+    assert_eq!(reopened_model.calls.load(Ordering::Acquire), 0);
+    assert_eq!(
+        crate::runtime::compaction::request::harness_compaction_reduction_count(&cut),
+        1 + usize::from(tool_bytes.is_some())
+    );
+    reopened.shutdown().await?;
+    assert!(matches!(
+        sessions
+            .compaction_receipt(&paid.operation_id, paid.source())
+            .await?,
+        DurableCompactionReceipt::Compacted { .. }
+    ));
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 1);
     Ok(())
 }

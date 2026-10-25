@@ -180,16 +180,26 @@ pub(in crate::runtime) fn tool_group_fence_verdict(
     kind: &ContextStatusKind,
     occupancy: Option<u64>,
     trigger: Option<u64>,
+    unanchored_estimate: bool,
 ) -> CompactionVerdict {
     CompactionVerdict::of(CompactionMeasure {
         fit: MeasuredFit::of(kind),
         occupancy,
         trigger,
-        input_headroom: match kind {
-            ContextStatusKind::Fits { headroom } => Some(input_headroom_tokens(*headroom)),
-            _ => None,
-        },
+        input_headroom: scheduling_input_headroom(kind, unanchored_estimate),
     })
+}
+
+pub(in crate::runtime) fn scheduling_input_headroom(
+    kind: &ContextStatusKind,
+    unanchored_estimate: bool,
+) -> Option<u64> {
+    match kind {
+        ContextStatusKind::Fits { headroom } if !unanchored_estimate => {
+            Some(input_headroom_tokens(*headroom))
+        }
+        _ => None,
+    }
 }
 
 /// The harness summary's generation limits: the turn's bound narrowed to
@@ -349,14 +359,15 @@ pub(in crate::runtime) fn harness_compaction_input(
     ))
 }
 
-/// Number of eligible selected-span result bodies, in source order. This is
-/// the maximum depth, not the number of inputs (R0 is also a candidate).
+/// Maximum depth: the portable full input, then oldest-first result-body
+/// reductions on that portable input. R0 is the unchanged original input.
 pub(in crate::runtime) fn harness_compaction_reduction_count(cut: &SemanticCompactionCut) -> usize {
-    collect_compaction_reduction_candidates(cut).len()
+    collect_compaction_reduction_candidates(cut).len() + 1
 }
 
-/// R0 is the original harness input. Rk replaces exactly the first k eligible
-/// selected-span bodies; retained history and canonical source are unchanged.
+/// R0 is the original input; R1 is its portable projection. Each later depth
+/// replaces one more oldest selected result on top of that portable history.
+/// Retained history and canonical source are unchanged.
 /// This is an offline request transformation, not a placeholder publication.
 pub(in crate::runtime) fn harness_compaction_input_at_depth(
     cut: &SemanticCompactionCut,
@@ -368,16 +379,20 @@ pub(in crate::runtime) fn harness_compaction_input_at_depth(
         return Ok(input);
     }
     let candidates = collect_compaction_reduction_candidates(cut);
-    let selected = candidates.get(..depth).ok_or_else(|| {
-        AgentError::new(
+    if depth > harness_compaction_reduction_count(cut) {
+        return Err(AgentError::new(
             AgentErrorKind::Internal,
             "summary reduction depth is out of range",
-        )
-    })?;
+        ));
+    }
+    let selected = &candidates[..depth - 1];
     let mut history = input.history().clone();
     for candidate in selected {
         history = replace_compaction_result_body(&history, candidate)?;
     }
+    // Candidate positions belong to the sealed input. Apply independent body
+    // replacements there before portable projection removes replay-only items.
+    history = portable_compaction_history(&history)?;
     Ok(ConversationView::from_shared(
         history,
         WorkingProjection::default(),
@@ -397,14 +412,20 @@ pub(in crate::runtime) fn validate_harness_compaction_input(
     if *input == expected {
         return Ok(Some(0));
     }
-    for (index, candidate) in collect_compaction_reduction_candidates(cut)
-        .iter()
-        .enumerate()
-    {
-        let history = replace_compaction_result_body(expected.history(), candidate)?;
-        expected = ConversationView::from_shared(history, WorkingProjection::default());
-        if *input == expected {
-            return Ok(Some(index + 1));
+    let candidates = collect_compaction_reduction_candidates(cut);
+    for depth in 0..=candidates.len() {
+        let portable = ConversationView::from_shared(
+            portable_compaction_history(expected.history())?,
+            WorkingProjection::default(),
+        );
+        if *input == portable {
+            return Ok(Some(depth + 1));
+        }
+        if let Some(candidate) = candidates.get(depth) {
+            expected = ConversationView::from_shared(
+                replace_compaction_result_body(expected.history(), candidate)?,
+                WorkingProjection::default(),
+            );
         }
     }
     Ok(None)
