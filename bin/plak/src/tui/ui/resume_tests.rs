@@ -881,7 +881,9 @@ fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
         let mut app = App::new(launch_basic(), true);
         let mut jsonl_rows = 0;
         let mut recovered = 0;
+        let mut trace = Vec::new();
         for event in events.try_iter() {
+            trace.push(format!("{event:?}"));
             if matches!(&event, HostEvent::Recovered { .. }) {
                 recovered += 1;
             }
@@ -898,7 +900,7 @@ fn abandoned_open_recovery_row_reaches_tui_and_jsonl_once() {
         assert_eq!(jsonl_rows, 1);
         assert_eq!(app.pane.blocks.iter().filter(|block| matches!(
             block, ScrollBlock::System(text) if text.contains("recovered an interrupted turn")
-        )).count(), 1, "the snapshot must neither erase nor duplicate the recovery row");
+        )).count(), 1, "the snapshot must neither erase nor duplicate the recovery row: {trace:#?}");
         let record = store.load(&id).unwrap();
         assert_eq!(
             record

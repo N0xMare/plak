@@ -6,6 +6,34 @@ use super::projector::{
 use crate::session_store::{MemoryStore, SessionRecordStore};
 
 #[test]
+fn skipped_stored_rows_do_not_leak_keys_and_pending_notice_identity_survives_reload() {
+    use super::projector::{Lane, RowKey};
+    let retained = vec![(
+        RowKey::new(5, Lane::Runtime, 0),
+        TranscriptRow::user("kept"),
+    )];
+    let mut input = retained.clone();
+    input.push((
+        RowKey::new(9, Lane::Runtime, 0),
+        TranscriptRow::SessionHeader {
+            session_id: "skipped".into(),
+            carried_from: None,
+        },
+    ));
+    let mut transcript = ProductTranscript::stored(input);
+    transcript.record_notice(TranscriptRow::info(NoticeScope::Tree, "pending"));
+    let pending = transcript.pending_notice_items();
+    let key = pending[0].key;
+    assert_ne!(key, RowKey::new(9, Lane::Runtime, 0));
+    assert_eq!(transcript.items().last().unwrap().key, key);
+    let mut reloaded = ProductTranscript::stored(retained);
+    for item in pending {
+        reloaded.record_notice_item(item);
+    }
+    assert_eq!(transcript.items(), reloaded.items());
+}
+
+#[test]
 fn stored_transcript_keeps_projector_keys_through_tool_updates_and_live_notices() {
     use super::projector::{Lane, RowKey};
     let mut tool = ToolItem {

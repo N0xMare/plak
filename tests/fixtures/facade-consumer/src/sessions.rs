@@ -22,6 +22,9 @@ pub(crate) fn surface_is_nameable() {
         AgentSessions::inspect_recovery_sqlite(path, locator)
     };
     let _ = |tail: &SessionTranscriptTail, call_id| tail.composition_owner(call_id);
+    let _ = |item: &plakous::sessions::SessionTranscriptItem| -> (u64, u32) {
+        (item.position(), item.part_offset())
+    };
     let _ = |part: &SessionTranscriptPart| match part {
         SessionTranscriptPart::ToolCall {
             call_id,

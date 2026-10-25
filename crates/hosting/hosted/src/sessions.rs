@@ -30,6 +30,7 @@ pub use plakous_host_protocol::views::transcript::{
 pub use queue::{QueueCommands, QueueDrainState, QueueItem};
 pub(crate) use transcript::bound_row;
 pub use transcript::named_image_chip;
+pub(crate) use transcript::provisional_key;
 pub use transcript::{ProductTranscript, TRANSCRIPT_TRUNCATION_MARKER};
 pub(crate) use transcript::{draft_image_chip, image_chip, with_image_chips};
 

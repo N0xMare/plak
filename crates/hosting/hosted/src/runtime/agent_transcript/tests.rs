@@ -569,6 +569,29 @@ async fn a_finished_sessions_history_reads_as_root_rows() -> TestResult {
         "{compacted:?}"
     );
     session.release().await?;
+    let before_reopen = sessions
+        .transcript_source(target)
+        .await?
+        .tail(512, usize::MAX);
+    let reopened = AgentSessions::new(SessionBackend::sqlite(workspace.join("runtime.sqlite"))?)?;
+    let full = reopened
+        .transcript_source(target)
+        .await?
+        .tail(512, usize::MAX);
+    assert_eq!(before_reopen.items(), full.items());
+    let narrow = reopened
+        .transcript_source(target)
+        .await?
+        .tail(2, usize::MAX);
+    for item in narrow.items() {
+        assert!(
+            full.items()
+                .iter()
+                .any(|full| full.position() == item.position()
+                    && full.part_offset() == item.part_offset()
+                    && full == item)
+        );
+    }
     Ok(())
 }
 

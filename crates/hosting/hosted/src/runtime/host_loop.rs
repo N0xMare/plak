@@ -309,11 +309,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let Ok(stored) = self.config.store.load_queue_head(&self.config.session.id) else {
             return;
         };
-        let unsaved = self.config.session.transcript.pending_notices().to_vec();
+        let unsaved = self.config.session.transcript.pending_notice_items();
         self.config.session.transcript =
             sessions::ProductTranscript::stored(views.transcript(&intents));
         for notice in unsaved {
-            self.config.session.record_notice(notice);
+            self.config.session.transcript.record_notice_item(notice);
         }
         self.config.session.root_turn_count = views.state.counters.root_turns;
         self.config.session.tool_call_count = views.state.counters.tool_calls;

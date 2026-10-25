@@ -8511,7 +8511,16 @@ commit lies after it. `SessionTranscriptSource::tail(max_items, max_bytes)` is
 synchronous CPU work that projects the newest items as typed presentation
 parts, oldest first: it projects from the newest backwards and stops at the
 first item past either bound (the newest item is always kept), reporting
-whether older items were left out. A part is text (text and refusal blocks),
+whether older items were left out.
+`SessionTranscriptItem::position()` is its zero-based canonical-history
+position, not its index in the requested window. Reopening or sliding a window
+over unchanged canonical history preserves it; rewriting history can rekey it.
+`part_offset()` gives the first presentation-part ordinal of a fragment:
+synthetic nested-effect fragments share their owning canonical item's position
+with disjoint increasing part ranges, so bounding away earlier fragments never
+renumbers retained ones. These are observational read positions, not new stored
+identities or export fields.
+A part is text (text and refusal blocks),
 reasoning that carries display text together with its declared visibility, a
 tool call (call id, canonical and exposed names from the call's
 `ToolCallBlock` (§8.2), and the `ToolCallObservation` a live `ToolStarted`

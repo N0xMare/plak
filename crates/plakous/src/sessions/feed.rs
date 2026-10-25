@@ -514,7 +514,7 @@ fn read_items(
     let items: Vec<ConversationItem> = held.iter().map(|item| (*item).clone()).collect();
     Ok(FeedItemsOutcome::Items {
         checkpoint: source.id(),
-        items: transcript::project_items(&items, manifest.ledger()),
+        items: transcript::project_items(&items, manifest.ledger(), request.first_ordinal),
     })
 }
 

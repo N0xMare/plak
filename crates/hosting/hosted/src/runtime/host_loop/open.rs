@@ -266,10 +266,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         if config.session.store_revision != 0
             && let Ok(stored) = config.store.load(&config.session.id)
         {
-            let unsaved = config.session.transcript.pending_notices().to_vec();
+            let unsaved = config.session.transcript.pending_notice_items();
             config.session.transcript = stored.transcript;
             for notice in unsaved {
-                config.session.record_notice(notice);
+                config.session.transcript.record_notice_item(notice);
             }
             config.session.root_turn_count = stored.root_turn_count;
             config.session.tool_call_count = stored.tool_call_count;

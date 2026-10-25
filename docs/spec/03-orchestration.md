@@ -4001,10 +4001,7 @@ item committed before the cursor is in neither, none is sent twice, and what the
 tail cannot replay is marked with the same gap notice. Items map to the
 row types the root's live path writes: a non-harness user prompt is `User`,
 with inline images represented by the same metadata-only image chips as the
-root transcript. Root feed reads and child atomic-history reads use one hosted
-`SessionTranscriptPart` reader, preserving result subjects and composition
-lineage before their row projection;
-assistant text is `Assistant`, reasoning is `Thinking` under the root's
+root transcript; assistant text is `Assistant`, reasoning is `Thinking` under the root's
 visibility gate, each call joined with its result by call id is one `Tool` row
 whose subject, detail, state and wait facts come from the functions the root's
 live path calls (a restored bare pi `wait` that ran the await takes its row
@@ -4013,6 +4010,11 @@ ids, not from the 2 KiB preview; a settled process wait's subject from the same 
 reading the host's job registry and the commands of earlier process starts in
 the same history), a compaction is the `compact` tool row, and delivered mail is
 one `tree` notice, whose text is `<purpose> · #<agent> · <body>`.
+Root feed reads and child atomic-history reads use one hosted
+`SessionTranscriptPart` reader, preserving result subjects and composition
+lineage before their row projection. Canonical-history read positions and
+fragment offsets are defined in chapter 01 §12; they are not bounded-window
+indices and remain identical for retained items across reopen and window slides.
 The derived notice retains the carried body's full text up to a UTF-8-safe
 2 KiB bound, using the existing `… cut at N KiB of M KiB` marker when cut;
 the TUI owns first-line summaries and expansion (chapter 02 §5.4).

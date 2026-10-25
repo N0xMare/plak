@@ -107,6 +107,18 @@ fn a_revision_gap_keeps_the_frame_and_requests_one_resync_until_replaced() {
             scope: TranscriptScope::Root
         }
     ));
+    assert!(matches!(
+        rx.try_recv().unwrap().into_parts().0,
+        UserAction::ResyncTranscript {
+            scope: TranscriptScope::Root
+        }
+    ));
+    assert!(matches!(
+        rx.try_recv().unwrap().into_parts().0,
+        UserAction::ResyncTranscript {
+            scope: TranscriptScope::Root
+        }
+    ));
     assert!(rx.try_recv().is_err());
     app.apply_host_event(restore_snapshot(
         12,
@@ -157,6 +169,24 @@ fn root_patches_reach_the_hidden_root_without_touching_the_agent_pane() {
     assert_eq!(app.pane.blocks, child);
     app.close_agent_view();
     assert!(app.pane.blocks.iter().any(|block| matches!(block, crate::tui::blocks::ScrollBlock::Assistant(text) if text == "root after")));
+}
+
+#[test]
+fn a_repeated_busy_baseline_does_not_clear_the_live_preview() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(restore_snapshot(
+        1,
+        vec![TranscriptRow::assistant("committed")],
+    ));
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.apply_host_event(HostEvent::AssistantDelta("in flight".into()));
+    let before = app.pane.blocks.clone();
+    app.apply_host_event(restore_snapshot(
+        1,
+        vec![TranscriptRow::assistant("committed")],
+    ));
+    assert_eq!(app.pane.blocks, before);
+    assert_eq!(app.pane.presentation.revision(), 1);
 }
 
 #[test]

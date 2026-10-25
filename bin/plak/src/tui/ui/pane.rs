@@ -447,6 +447,10 @@ impl App {
         self.pane.resync_sent = false;
     }
 
+    pub(super) fn rearm_transcript_resync(&mut self) {
+        self.pane.resync_sent = false;
+    }
+
     pub(super) fn clear_presentation(&mut self) {
         self.pane.presentation = TranscriptState::default();
         self.pane.presentation_ready = false;

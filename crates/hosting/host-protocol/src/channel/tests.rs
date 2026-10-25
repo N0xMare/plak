@@ -48,6 +48,15 @@ fn patch_overflow_and_replacements_are_isolated_by_scope() {
 }
 
 #[test]
+fn presentation_revisions_are_allocated_by_the_channel_not_a_sender_wrapper() {
+    let (sender, _receiver) = observation_channel::<Core>();
+    let clone = sender.clone();
+    assert_eq!(sender.next_presentation_revision(), Some(1));
+    assert_eq!(clone.next_presentation_revision(), Some(2));
+    assert_eq!(sender.next_presentation_revision(), Some(3));
+}
+
+#[test]
 fn child_live_deltas_coalesce_and_flood_leaves_room_for_root() {
     let (sender, receiver) = observation_channel::<Core>();
     for _ in 0..(128 * crate::limits::COALESCED_DELTA_BYTES / 4096 + 256) {

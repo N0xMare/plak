@@ -1325,15 +1325,29 @@ fn normalize(events: &[HostEvent], root: &Path, _script: Script) -> Vec<Record> 
     let mut presentations = std::collections::BTreeMap::new();
     let records = events
         .iter()
+        .enumerate()
         // Background projector settlements have no arrival-count or ordering
         // contract. Their complete values are compared in folded presentations.
-        .filter(|event| {
+        .filter(|(_, event)| {
             !matches!(
                 event,
                 HostEvent::Row(crate::store::sessions::TranscriptRow::Tool(_))
             )
         })
-        .map(|event| folded_presentation_record(event, root, &mut presentations))
+        .map(|(index, event)| {
+            let mut record = folded_presentation_record(event, root, &mut presentations);
+            if matches!(event, HostEvent::TranscriptPatch(patch) if !patch.upserts.is_empty() || !patch.deletes.is_empty())
+                && index > 0
+                && live_transcript_event(&events[index - 1])
+            {
+                // The legacy observation already pins this exact live change
+                // (and JSONL still projects it). Validate/fold its keyed twin,
+                // but compare canonical publication only once as complete rows.
+                record.kind = "live_presentation".into();
+            }
+            record
+        })
+        .filter(|record| record.kind != "live_presentation")
         // IntentStarted is an in-process correlation receipt consumed by the
         // JSONL adapter, not a user-visible observation on either surface.
         .filter(|record| record.kind != "intent_started")
@@ -1342,6 +1356,19 @@ fn normalize(events: &[HostEvent], root: &Path, _script: Script) -> Vec<Record> 
         .map(drop_cancelled_tool_detail)
         .collect();
     coalesce(records)
+}
+
+fn live_transcript_event(event: &HostEvent) -> bool {
+    matches!(
+        event,
+        HostEvent::Row(_)
+            | HostEvent::AssistantDelta(_)
+            | HostEvent::UserMessage { .. }
+            | HostEvent::ToolLine { .. }
+            | HostEvent::ReasoningDelta { .. }
+            | HostEvent::ReasoningSealed { .. }
+            | HostEvent::ModelRetry(_)
+    )
 }
 
 fn folded_presentation_record(
@@ -1368,7 +1395,7 @@ fn folded_presentation_record(
         }
         _ => unreachable!("presentation update"),
     }
-    let rows: Vec<_> = state.items().values().collect();
+    let rows: Vec<_> = state.items().iter().collect();
     let (kind, payload) = match scope {
         TranscriptScope::Root => ("presentation", format!("PresentationRows({rows:?})")),
         TranscriptScope::Agent(agent) => (

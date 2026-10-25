@@ -248,6 +248,9 @@ fn operator_facing_model_context_suffix_includes_http_status_and_provider_code()
 fn saturated_observation_channel_resnapshots_authoritative_assistant() {
     let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(tx);
+    let initial = SessionRecord::new(PathBuf::from("/workspace"));
+    assert!(events.send(logging::project_session_snapshot(&initial)));
+    let _ = rx.try_iter().count();
     for index in 0..2_000 {
         assert!(events.notice(TranscriptRow::error(
             NoticeScope::Host,
@@ -259,7 +262,12 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
     let mut session = SessionRecord::new(PathBuf::from("/workspace"));
     session.append_transcript(TranscriptRow::user("prompt"));
     session.append_transcript(TranscriptRow::assistant("authoritative TurnResult output"));
-    events.resnapshot_transcript_if_required(&session);
+    let HostEvent::PresentationSnapshot(canonical) =
+        logging::project_session_snapshot::<TestExtension>(&session)
+    else {
+        unreachable!("canonical presentation");
+    };
+    assert!(events.publish_transcript(canonical));
     assert!(events.send(HostEvent::SetBusy(false)));
     assert!(events.send(HostEvent::Status {
         phase: "idle".into(),

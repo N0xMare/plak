@@ -2,6 +2,7 @@
 //! by the feed projector; this buffer carries no transcript catch-up writes.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use plakous_host_protocol::views::presentation::row_bytes;
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptItem, TranscriptRow};
@@ -11,6 +12,21 @@ use super::{MAX_THINKING_ACTIVITY_BYTES, MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LI
 
 /// Text that replaces the dropped head of a single oversized row.
 pub const TRANSCRIPT_TRUNCATION_MARKER: &str = "[older product transcript projection omitted]";
+
+/// Process-local identities are allocated once, not from a window's length.
+/// Clones and re-projections carry the key; none is a persisted feed anchor.
+pub(crate) fn provisional_key() -> RowKey {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    provisional_sequence(NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+fn provisional_sequence(sequence: u64) -> RowKey {
+    RowKey::new(
+        (1_u64 << 63) + (sequence >> 32),
+        Lane::Product,
+        u32::try_from(sequence & u64::from(u32::MAX)).unwrap_or(u32::MAX),
+    )
+}
 
 /// The transcript chip of one image, from canonical facts alone (history
 /// keeps no file name): `[image: png 1280x720 412 KB]`.
@@ -118,6 +134,7 @@ pub struct ProductTranscript {
     /// Operator notices recorded since the last commit: the only rows a store
     /// persists from this projection, as notice intents (spec 02 §2.6).
     notices: Vec<TranscriptRow>,
+    notice_keys: Vec<RowKey>,
 }
 
 impl PartialEq for ProductTranscript {
@@ -251,7 +268,7 @@ impl ProductTranscript {
                     self.keys
                         .get(&sequence)
                         .copied()
-                        .unwrap_or_else(|| RowKey::uncommitted(sequence))
+                        .unwrap_or_else(|| provisional_sequence(sequence))
                 };
                 TranscriptItem {
                     key,
@@ -264,6 +281,7 @@ impl ProductTranscript {
     /// Forget notice intents once a store has committed them.
     pub fn mark_committed(&mut self) {
         self.notices.clear();
+        self.notice_keys.clear();
     }
 
     /// The operator notices recorded since the last commit, oldest first.
@@ -275,8 +293,30 @@ impl ProductTranscript {
     /// Shows `row` and records it as an operator notice the next commit
     /// writes as an intent at the cursor the store has applied.
     pub fn record_notice(&mut self, row: TranscriptRow) {
+        self.record_notice_item(TranscriptItem {
+            key: provisional_key(),
+            row,
+        });
+    }
+
+    pub(crate) fn pending_notice_items(&self) -> Vec<TranscriptItem> {
+        self.notice_keys
+            .iter()
+            .zip(&self.notices)
+            .map(|(key, row)| TranscriptItem {
+                key: *key,
+                row: row.clone(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn record_notice_item(&mut self, item: TranscriptItem) {
+        let TranscriptItem { key, row } = item;
         self.notices.push(row.clone());
-        self.append(row);
+        self.notice_keys.push(key);
+        if let Some(sequence) = self.insert(row, bound_row) {
+            self.keys.insert(sequence, key);
+        }
     }
 
     /// The projection of a stored transcript, as
@@ -300,18 +340,20 @@ impl ProductTranscript {
             transcript.bytes = marker_bytes();
         }
         for (key, row) in rows {
-            let sequence = row
-                .call_id()
-                .and_then(|id| transcript.calls.get(id).copied())
-                .unwrap_or_else(|| transcript.next_sequence());
-            match key.lane {
+            let inserted = match key.lane {
                 Lane::Runtime => transcript.insert(row, std::convert::identity),
                 Lane::Product => transcript.insert(row, bound_row),
-            }
-            if sequence >= transcript.base {
+            };
+            if let Some(sequence) = inserted {
                 transcript.keys.insert(sequence, key);
             }
         }
+        debug_assert!(
+            transcript
+                .items()
+                .windows(2)
+                .all(|items| items[0].key < items[1].key)
+        );
         transcript
     }
 
@@ -320,20 +362,32 @@ impl ProductTranscript {
     /// marker is the projection's own and the session header is derived from
     /// the record, so neither is ever appended; blank thinking is not a row.
     pub fn append(&mut self, row: TranscriptRow) {
-        self.insert(row, bound_row);
+        let _ = self.insert(row, bound_row);
     }
 
     /// [`Self::append`] with `bound` applied to each row it keeps.
-    fn insert(&mut self, row: TranscriptRow, bound: fn(TranscriptRow) -> TranscriptRow) {
+    fn insert(
+        &mut self,
+        row: TranscriptRow,
+        bound: fn(TranscriptRow) -> TranscriptRow,
+    ) -> Option<u64> {
         match row {
             TranscriptRow::Tool(tool) => {
                 let call_id = tool.call_id.clone();
-                self.upsert_row(bound(TranscriptRow::Tool(tool)), call_id);
+                self.upsert_row(bound(TranscriptRow::Tool(tool)), call_id.clone());
+                self.calls.get(&call_id).copied()
             }
-            TranscriptRow::Truncated | TranscriptRow::SessionHeader { .. } => {}
+            TranscriptRow::Truncated | TranscriptRow::SessionHeader { .. } => None,
             TranscriptRow::Thinking(thinking)
-                if thinking.location_key.trim().is_empty() || thinking.text.trim().is_empty() => {}
-            row => self.push_row(bound(row), None),
+                if thinking.location_key.trim().is_empty() || thinking.text.trim().is_empty() =>
+            {
+                None
+            }
+            row => {
+                let sequence = self.next_sequence();
+                self.push_row(bound(row), None);
+                (sequence >= self.base).then_some(sequence)
+            }
         }
     }
 
@@ -376,6 +430,7 @@ impl ProductTranscript {
 
     /// Push one bounded row.
     fn push_row(&mut self, row: TranscriptRow, call_id: Option<String>) {
+        self.keys.insert(self.next_sequence(), provisional_key());
         if let Some(call_id) = call_id {
             let sequence = self.next_sequence();
             self.calls.insert(call_id, sequence);

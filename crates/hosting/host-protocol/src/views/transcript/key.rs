@@ -49,17 +49,6 @@ impl RowKey {
     /// The key of the truncation marker: before every other row.
     pub const TRUNCATION: Self = Self::new(0, Lane::Runtime, 0);
 
-    /// Presentation identity of a row not yet replaced by its canonical
-    /// projector row. This namespace is never persisted as a feed anchor.
-    #[must_use]
-    pub fn uncommitted(sequence: u64) -> Self {
-        Self::new(
-            (1_u64 << 63) + (sequence >> 32),
-            Lane::Product,
-            u32::try_from(sequence & u64::from(u32::MAX)).unwrap_or(u32::MAX),
-        )
-    }
-
     /// A key.
     #[must_use]
     pub const fn new(anchor: u64, lane: Lane, ordinal: u32) -> Self {

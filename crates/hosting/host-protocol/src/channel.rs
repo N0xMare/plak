@@ -664,6 +664,7 @@ struct ObservationQueue<P: ProtocolExtension> {
     ready: Condvar,
     transcript_gaps: Mutex<BTreeSet<TranscriptScope>>,
     correlation_gap: AtomicBool,
+    presentation_revision: AtomicU64,
     senders: AtomicUsize,
     notify: Mutex<Option<Notifier>>,
     /// The notifier has fired since the receiver last found the queue empty.
@@ -733,6 +734,7 @@ pub fn observation_channel<P: ProtocolExtension>() -> (ObservationSender<P>, Obs
         ready: Condvar::new(),
         transcript_gaps: Mutex::default(),
         correlation_gap: AtomicBool::new(false),
+        presentation_revision: AtomicU64::new(0),
         senders: AtomicUsize::new(1),
         notify: Mutex::new(None),
         notified: AtomicBool::new(false),
@@ -1008,6 +1010,20 @@ fn coalesce_child_live<P: ProtocolExtension>(
 }
 
 impl<P: ProtocolExtension> ObservationSender<P> {
+    /// Allocates the next presentation revision for this face. Every sender
+    /// wrapper over the channel shares the counter; exhaustion refuses rather
+    /// than reusing a revision in the same face lifetime.
+    #[must_use]
+    pub fn next_presentation_revision(&self) -> Option<u64> {
+        self.0
+            .presentation_revision
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |revision| {
+                revision.checked_add(1)
+            })
+            .ok()
+            .and_then(|revision| revision.checked_add(1))
+    }
+
     /// Whether a transcript-building observation was dropped since the latest
     /// successfully queued transcript replacement.
     #[must_use]

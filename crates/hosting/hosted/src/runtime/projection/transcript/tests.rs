@@ -119,3 +119,331 @@ fn scopes_share_the_publisher_but_never_each_others_baseline() {
         "only one agent view is retained"
     );
 }
+
+#[test]
+fn a_quiet_settlement_emits_an_empty_patch_not_a_snapshot() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let mut publisher = Presentations::default();
+    publisher.snapshot(snapshot(TranscriptScope::Root, &[(1, "unchanged")]), &sink);
+    let _ = receiver.try_recv().unwrap();
+    assert!(publisher.publish(snapshot(TranscriptScope::Root, &[(1, "unchanged")]), &sink));
+    let HostEvent::TranscriptPatch(patch) = receiver.try_recv().unwrap() else {
+        panic!("quiet settlement must patch");
+    };
+    assert_eq!(patch.upserts, Vec::new());
+    assert_eq!(patch.deletes, Vec::new());
+    assert!(patch.to_revision > patch.from_revision);
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn opening_notices_are_carried_once_into_the_first_baseline() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let mut publisher = Presentations::default();
+    for scope in [NoticeScope::Recovery, NoticeScope::Session] {
+        publisher.observe(
+            TranscriptScope::Root,
+            &HostEvent::<Core>::Row(TranscriptRow::info(scope, "opening note")),
+            &sink,
+        );
+    }
+    assert!(
+        receiver.try_recv().is_err(),
+        "no patch before the attachment baseline"
+    );
+    publisher.snapshot(snapshot(TranscriptScope::Root, &[(1, "history")]), &sink);
+    let HostEvent::PresentationSnapshot(view) = receiver.try_recv().unwrap() else {
+        panic!("attachment");
+    };
+    assert_eq!(view.items.iter().filter(|item| matches!(&item.row, TranscriptRow::Notice(notice) if notice.text == "opening note")).count(), 1);
+}
+#[test]
+fn busy_resync_preserves_live_text_and_continues_the_same_key_in_both_scopes() {
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        let (sink, receiver) = observation_channel::<Core>();
+        let mut publisher = Presentations::default();
+        assert!(publisher.snapshot(snapshot(scope.clone(), &[(1, "committed")]), &sink));
+        let HostEvent::PresentationSnapshot(initial) = receiver.try_recv().unwrap() else {
+            panic!("initial");
+        };
+        let mut folded = TranscriptState::default();
+        folded.replace(initial).unwrap();
+        assert!(publisher.observe(
+            scope.clone(),
+            &HostEvent::<Core>::AssistantDelta("in flight".into()),
+            &sink
+        ));
+        let HostEvent::TranscriptPatch(delta) = receiver.try_recv().unwrap() else {
+            panic!("live patch");
+        };
+        let key = delta.upserts[0].key;
+        folded.apply(delta).unwrap();
+        assert!(publisher.resync(&scope, &sink));
+        let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
+            panic!("busy resync");
+        };
+        assert_eq!(
+            resync.items.last().unwrap().row,
+            TranscriptRow::assistant("in flight")
+        );
+        folded.replace(resync).unwrap();
+        assert!(publisher.observe(
+            scope,
+            &HostEvent::<Core>::AssistantDelta(" continues".into()),
+            &sink
+        ));
+        let HostEvent::TranscriptPatch(delta) = receiver.try_recv().unwrap() else {
+            panic!("continued patch");
+        };
+        assert_eq!(delta.upserts[0].key, key);
+        folded.apply(delta).unwrap();
+        assert_eq!(
+            folded.items().get(&key),
+            Some(&TranscriptRow::assistant("in flight continues"))
+        );
+    }
+}
+
+#[test]
+fn busy_resync_preserves_running_tool_and_reasoning_identity() {
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c2".into())] {
+        let (sink, receiver) = observation_channel::<Core>();
+        let mut publisher = Presentations::default();
+        publisher.snapshot(snapshot(scope.clone(), &[]), &sink);
+        let _ = receiver.try_recv().unwrap();
+        let tool = HostEvent::<Core>::Row(TranscriptRow::Tool(crate::sessions::ToolItem {
+            call_id: "call".into(),
+            name: "read_file".into(),
+            exposed_name: None,
+            kind: plakous_host_protocol::views::ActivityKind::Tool,
+            state: "running".into(),
+            subject: Some("file.rs".into()),
+            detail: None,
+            parent_call_id: None,
+            cell_id: None,
+            wait: None,
+            started_at_ms: Some(10),
+            finished_at_ms: None,
+        }));
+        assert!(publisher.observe(scope.clone(), &tool, &sink));
+        assert!(publisher.observe(
+            scope.clone(),
+            &HostEvent::<Core>::ReasoningDelta {
+                location_key: "thought".into(),
+                text: "first".into()
+            },
+            &sink
+        ));
+        let _ = receiver.try_iter().count();
+        assert!(publisher.resync(&scope, &sink));
+        let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
+            panic!("resync");
+        };
+        let keys: Vec<_> = resync.items.iter().map(|item| item.key).collect();
+        assert_eq!(resync.items[0].row.as_tool().unwrap().state, "running");
+        assert!(publisher.observe(
+            scope.clone(),
+            &HostEvent::<Core>::ReasoningDelta {
+                location_key: "thought".into(),
+                text: " second".into()
+            },
+            &sink
+        ));
+        let HostEvent::TranscriptPatch(continued) = receiver.try_recv().unwrap() else {
+            panic!("thought patch");
+        };
+        assert_eq!(continued.upserts[0].key, keys[1]);
+        assert_eq!(
+            continued.upserts[0].row.as_thinking().unwrap().text,
+            "first second"
+        );
+        assert!(publisher.observe(
+            scope,
+            &HostEvent::<Core>::ReasoningSealed {
+                location_key: "thought".into()
+            },
+            &sink
+        ));
+        let HostEvent::TranscriptPatch(sealed) = receiver.try_recv().unwrap() else {
+            panic!("seal patch");
+        };
+        assert_eq!(sealed.upserts[0].key, keys[1]);
+        assert!(
+            sealed.upserts[0]
+                .row
+                .as_thinking()
+                .unwrap()
+                .elapsed_ms
+                .is_some()
+        );
+    }
+}
+
+#[test]
+fn retry_discards_only_the_uncommitted_response_tail() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let scope = TranscriptScope::Root;
+    let mut publisher = Presentations::default();
+    publisher.snapshot(snapshot(scope.clone(), &[(1, "committed")]), &sink);
+    publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::AssistantDelta("partial".into()),
+        &sink,
+    );
+    let _ = receiver.try_iter().count();
+    assert!(publisher.observe(
+        scope.clone(),
+        &HostEvent::<Core>::ModelRetry(plakous_host_protocol::ModelRetryNotice {
+            next_attempt: 2,
+            max_attempts: 3,
+            delay_ms: 0,
+            cause_kind: "stream_interrupted".into(),
+            cause: "fixture".into(),
+            output_discarded: true,
+        }),
+        &sink
+    ));
+    let HostEvent::TranscriptPatch(discard) = receiver.try_recv().unwrap() else {
+        panic!("discard patch");
+    };
+    assert_eq!(discard.upserts, Vec::new());
+    assert_eq!(discard.deletes.len(), 1);
+    publisher.resync(&scope, &sink);
+    let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
+        panic!("resync");
+    };
+    assert_eq!(resync.items.len(), 1);
+    assert_eq!(resync.items[0].row, TranscriptRow::assistant("committed"));
+}
+
+#[test]
+fn invalid_view_repair_restores_key_order_uniqueness_and_bounds() {
+    let mut invalid = snapshot(
+        TranscriptScope::Root,
+        &[(2, "second"), (1, "first"), (2, "last value")],
+    );
+    invalid.schema = u32::MAX;
+    for index in 3..=plakous_host_protocol::views::presentation::MAX_SNAPSHOT_ROWS as u64 + 10 {
+        invalid.items.push(TranscriptItem {
+            key: RowKey::new(index, Lane::Runtime, 0),
+            row: TranscriptRow::assistant("row"),
+        });
+    }
+    let repaired = repair::snapshot(invalid);
+    assert_eq!(repaired.validate(), Ok(()));
+    assert_eq!(repaired.items[0].row, TranscriptRow::Truncated);
+    assert!(
+        repaired
+            .items
+            .windows(2)
+            .all(|items| items[0].key < items[1].key)
+    );
+}
+
+#[test]
+fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
+    for seed in 1_u64..=32 {
+        let (sink, receiver) = observation_channel::<Core>();
+        let mut publisher = Presentations::default();
+        let mut consumer: BTreeMap<TranscriptScope, TranscriptState> = BTreeMap::new();
+        let mut random = seed;
+        for step in 0..160 {
+            random = random
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let scope = if random % 3 == 0 {
+                TranscriptScope::Root
+            } else {
+                TranscriptScope::Agent(format!("c{}", (random >> 32) % 3))
+            };
+            match random % 8 {
+                0 => {
+                    publisher.clear();
+                    let _ = sink.send(HostEvent::ClearView);
+                }
+                1 => {
+                    publisher.snapshot(snapshot(scope.clone(), &[(1, "attached")]), &sink);
+                }
+                2 => {
+                    publisher.publish(
+                        snapshot(scope.clone(), &[(1, "committed"), (2, "tail")]),
+                        &sink,
+                    );
+                }
+                3 => {
+                    publisher.resync(&scope, &sink);
+                }
+                4..=6 => {
+                    publisher.observe(
+                        scope.clone(),
+                        &HostEvent::<Core>::AssistantDelta(format!("{step}")),
+                        &sink,
+                    );
+                }
+                _ => {
+                    for index in 0..=OBSERVATION_QUEUE_CAPACITY {
+                        let _ = sink.send(HostEvent::JobStarted {
+                            job_id: format!("p{index}"),
+                            owner: "root".into(),
+                            command: "fixture".into(),
+                        });
+                    }
+                }
+            }
+            if step % 7 != 0 {
+                continue;
+            }
+            fold_delivery(&receiver, &mut consumer);
+            let scopes: Vec<_> = publisher.states.keys().cloned().collect();
+            for scope in scopes {
+                if sink.transcript_resnapshot_required_for(&scope)
+                    || consumer.get(&scope) != publisher.states.get(&scope)
+                {
+                    assert!(
+                        publisher.resync(&scope, &sink),
+                        "seed={seed} step={step} scope={scope:?}"
+                    );
+                }
+            }
+            fold_delivery(&receiver, &mut consumer);
+            for (scope, state) in &publisher.states {
+                assert_eq!(
+                    consumer.get(scope),
+                    Some(state),
+                    "seed={seed} step={step} scope={scope:?}"
+                );
+            }
+        }
+    }
+}
+
+fn fold_delivery(
+    receiver: &plakous_host_protocol::ObservationReceiver<Core>,
+    consumer: &mut BTreeMap<TranscriptScope, TranscriptState>,
+) {
+    for event in receiver.try_iter() {
+        match event {
+            HostEvent::ClearView => consumer.clear(),
+            HostEvent::PresentationSnapshot(snapshot) => {
+                if matches!(snapshot.scope, TranscriptScope::Agent(_)) {
+                    consumer.retain(|scope, _| {
+                        *scope == TranscriptScope::Root || *scope == snapshot.scope
+                    });
+                }
+                consumer
+                    .entry(snapshot.scope.clone())
+                    .or_default()
+                    .replace(snapshot)
+                    .unwrap();
+            }
+            HostEvent::TranscriptPatch(patch) => {
+                // A scope with a missing baseline/revision waits for resync.
+                let _ = consumer
+                    .entry(patch.scope.clone())
+                    .or_default()
+                    .apply(patch);
+            }
+            _ => {}
+        }
+    }
+}

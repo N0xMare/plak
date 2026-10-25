@@ -517,6 +517,14 @@ impl App {
                 {
                     return;
                 }
+                if self.busy
+                    && self.pane.presentation_ready
+                    && snapshot.revision <= self.pane.presentation.revision()
+                {
+                    // A repeated baseline is not settlement and cannot erase
+                    // the active turn's preview overlay.
+                    return;
+                }
                 if let Err(error) = self.pane.presentation.replace(snapshot) {
                     self.pane.blocks.push(ScrollBlock::Error(format!(
                         "invalid presentation snapshot refused: {error:?}"
@@ -535,6 +543,7 @@ impl App {
                     return;
                 }
                 if self.pane.resync.is_some() {
+                    self.rearm_transcript_resync();
                     return;
                 }
                 let scope = patch.scope.clone();

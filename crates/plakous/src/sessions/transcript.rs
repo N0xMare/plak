@@ -62,12 +62,30 @@ impl SessionTranscriptTail {
 /// One committed conversation item as presentation parts.
 #[derive(Clone, Eq, PartialEq)]
 pub struct SessionTranscriptItem {
+    position: u64,
+    part_offset: u32,
     actor: Actor,
     provenance: Provenance,
     parts: Vec<SessionTranscriptPart>,
 }
 
 impl SessionTranscriptItem {
+    /// Returns the item's zero-based position in the canonical history read,
+    /// not its index in this bounded tail. Reopening or sliding the tail over
+    /// unchanged history preserves this position; a history rewrite may rekey it.
+    #[must_use]
+    pub const fn position(&self) -> u64 {
+        self.position
+    }
+
+    /// Returns the first presentation-part ordinal of this fragment. Synthetic
+    /// effect-backed fragments share their owning canonical item's position
+    /// and have disjoint, increasing part ranges.
+    #[must_use]
+    pub const fn part_offset(&self) -> u32 {
+        self.part_offset
+    }
+
     /// Returns the responsible actor.
     #[must_use]
     pub const fn actor(&self) -> Actor {
@@ -122,6 +140,8 @@ impl fmt::Debug for SessionTranscriptItem {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SessionTranscriptItem")
+            .field("position", &self.position)
+            .field("part_offset", &self.part_offset)
             .field("actor", &self.actor)
             .field("provenance", &self.provenance)
             .field("parts", &self.parts)
@@ -223,6 +243,7 @@ impl fmt::Debug for SessionTranscriptPart {
 fn project_item(
     item: &ConversationItem,
     child_owners: &CompositionChildOwners,
+    position: u64,
 ) -> SessionTranscriptItem {
     let parts = item
         .blocks()
@@ -275,6 +296,8 @@ fn project_item(
         })
         .collect();
     SessionTranscriptItem {
+        position,
+        part_offset: 0,
         actor: item.actor(),
         provenance: item.provenance(),
         parts,
@@ -409,6 +432,8 @@ fn inject_nested_items(
     }
     let mut expanded = Vec::new();
     for item in items {
+        let position = item.position;
+        let first_fragment = expanded.len();
         let mut parts = Vec::new();
         for part in item.parts {
             let inserted = if let SessionTranscriptPart::ToolCall { call_id, .. } = &part {
@@ -419,12 +444,16 @@ fn inject_nested_items(
             parts.push(part);
             if let Some(calls) = inserted {
                 expanded.push(SessionTranscriptItem {
+                    position,
+                    part_offset: 0,
                     actor: item.actor,
                     provenance: item.provenance,
                     parts: std::mem::take(&mut parts),
                 });
                 for call in calls {
                     expanded.push(SessionTranscriptItem {
+                        position,
+                        part_offset: 0,
                         actor: Actor::Tool,
                         provenance: Provenance::ToolExecution,
                         parts: vec![
@@ -447,10 +476,19 @@ fn inject_nested_items(
         }
         if !parts.is_empty() {
             expanded.push(SessionTranscriptItem {
+                position,
+                part_offset: 0,
                 actor: item.actor,
                 provenance: item.provenance,
                 parts,
             });
+        }
+        let mut offset = 0_u32;
+        for fragment in &mut expanded[first_fragment..] {
+            fragment.part_offset = offset;
+            offset = offset
+                .saturating_add(u32::try_from(fragment.parts.len()).unwrap_or(u32::MAX))
+                .saturating_add(1);
         }
     }
     expanded
@@ -506,11 +544,19 @@ fn mark_composition(
 pub(super) fn project_items(
     items: &[ConversationItem],
     ledger: &RuntimeOperationLedger,
+    first_ordinal: u64,
 ) -> Vec<SessionTranscriptItem> {
     let child_owners = composition_child_owners(ledger);
     let projected = items
         .iter()
-        .map(|item| project_item(item, &child_owners))
+        .enumerate()
+        .map(|(index, item)| {
+            project_item(
+                item,
+                &child_owners,
+                first_ordinal.saturating_add(index as u64),
+            )
+        })
         .collect();
     let mut projected = inject_nested_items(projected, ledger);
     mark_composition(&mut projected, ledger);
@@ -531,7 +577,7 @@ fn project_transcript_tail(
     let mut retained = 0_usize;
     let mut index = all.len();
     while index > 0 && items.len() < max_items {
-        let item = project_item(&all[index - 1], &child_owners);
+        let item = project_item(&all[index - 1], &child_owners, (index - 1) as u64);
         let bytes = item.retained_bytes();
         if !items.is_empty() && retained.saturating_add(bytes) > max_bytes {
             break;

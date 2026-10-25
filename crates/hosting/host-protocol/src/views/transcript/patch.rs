@@ -2,16 +2,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
-
 use super::{RowKey, TranscriptRow};
 use crate::views::presentation::{
     MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, PresentationError, PresentationSnapshot, row_bytes,
 };
 
 /// The transcript an update belongs to; child content never mutates the root.
-#[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub enum TranscriptScope {
     /// The attached product session.
     #[default]
@@ -21,8 +18,7 @@ pub enum TranscriptScope {
 }
 
 /// A row and its immutable ordering identity within one transcript scope.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptItem {
     /// Ordering identity, not a display label or vector index.
     pub key: RowKey,
@@ -32,8 +28,7 @@ pub struct TranscriptItem {
 
 /// An atomic update to one exact presentation revision. Missing a revision
 /// requires a scope snapshot; a patch is never recovery or terminal authority.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TranscriptPatch {
     /// The transcript to update.
     pub scope: TranscriptScope,

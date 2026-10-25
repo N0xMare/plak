@@ -295,19 +295,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .snapshot(snapshot, &self.inner);
         }
-        if matches!(value, HostEvent::ClearView) {
+        if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clear();
         }
         let boundary = matches!(value, HostEvent::Status { .. } | HostEvent::SetBusy(false));
-        let sent = self.inner.send(value).is_ok();
+        let mut presentations = self
+            .presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let sent = self.inner.send(value.clone()).is_ok();
+        let _ = presentations.observe(
+            plakous_host_protocol::views::transcript::TranscriptScope::Root,
+            &value,
+            &self.inner,
+        );
         if boundary {
-            self.presentations
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .resync_gaps(&self.inner);
+            presentations.resync_gaps(&self.inner);
         }
         sent
     }
@@ -347,7 +353,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 row: row.clone(),
             });
         }
-        self.inner.send(HostEvent::Row(row)).is_ok()
+        self.send(HostEvent::Row(row))
     }
     /// Notice intents authored since the last call, oldest
     /// first.
@@ -359,7 +365,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     }
     fn resnapshot_transcript_if_required(&self, session: &SessionRecord) {
         if self.inner.transcript_resnapshot_required() {
-            let _ = self.send(logging::project_session_snapshot(session));
+            if !self
+                .resync_transcript(&plakous_host_protocol::views::transcript::TranscriptScope::Root)
+            {
+                let _ = self.send(logging::project_session_snapshot(session));
+            }
         }
     }
 }

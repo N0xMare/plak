@@ -1,6 +1,31 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::*;
+
+#[test]
+fn bounded_history_positions_and_fragment_offsets_do_not_shift_with_the_window() {
+    let source = source("exec", true);
+    let full = source.tail(512, usize::MAX);
+    let narrow = source.tail(3, usize::MAX);
+    assert!(full.items().len() >= narrow.items().len());
+    for retained in narrow.items() {
+        let same_position = full
+            .items()
+            .iter()
+            .find(|item| {
+                item.position() == retained.position()
+                    && item.part_offset() == retained.part_offset()
+            })
+            .unwrap();
+        assert_eq!(same_position, retained);
+    }
+    assert!(
+        full.items()
+            .windows(2)
+            .all(|items| (items[0].position(), items[0].part_offset())
+                < (items[1].position(), items[1].part_offset()))
+    );
+}
 use plakous_agent::internal::{
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
     DurableOperationTransition, ReconstructiveComponent, RuntimeComponentKind,

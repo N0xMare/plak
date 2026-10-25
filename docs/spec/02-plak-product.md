@@ -1709,8 +1709,8 @@ proceeds with projection debt, not a snapshot of stale rows. A task that stops
 while a settle waits fails that request at once rather than leaving it
 unanswered.
 Terminal publication takes the settled views and counters directly from
-the live task and still emits the full presentation snapshot; it does not reload
-the session record or transcript for that snapshot.
+the live task and emits the canonical settlement update (a patch, or a snapshot
+on a gap); it does not reload the session record or transcript for that update.
 It normalizes and bounds those rows exactly as a stored transcript load does.
 A narrow read restores the stored queue intents and recorded locator before
 applying the cached views' consumption and branch-head guards.
@@ -1798,6 +1798,11 @@ deriving identities from vector positions. The synthetic session header uses
 presented at `(0, runtime, 1)`, without changing the stored key. Live rows not
 yet replaced by their projector rows use an attachment-local, non-persisted
 key namespace (anchors starting at 2^63).
+An unsaved notice receives its provisional identity once; projector reloads
+carry that identity with the pending notice rather than allocating one from
+the rebuilt window length. Skipped headers and blank thinking rows claim no
+stored presentation key. A debug build asserts that the stored projection's
+retained keys are strictly increasing.
 
 `TranscriptPatch { scope, from_revision, to_revision, upserts, deletes }`
 describes an atomic keyed update. Upserts and deletes each have strictly
@@ -1814,14 +1819,25 @@ a full transcript snapshot. An empty patch still advances the presentation
 revision: it reconciles droppable live-only previews when the committed view
 did not change. Full snapshots establish attach/session-switch and clear
 baselines, or answer overflow and `ResyncTranscript { scope }`. Root live
-text/tool/reasoning observations remain droppable previews; the canonical
-settlement patch replaces them with committed rows.
+text/tool/reasoning observations still supply the closed JSONL v1 projection.
+The host also folds their content through one scoped keyed live-row reducer:
+assistant and reasoning deltas update their existing provisional key, tool
+updates use call identity, and retry discards delete the provisional response
+tail. This live state is the resync baseline, so busy resync preserves in-flight
+previews and subsequent deltas continue their same keys. Resync does not reset
+the reducer's stream boundary, call index or reasoning clocks. Canonical
+settlement replaces provisional rows with the committed projector rows.
 The TUI keeps a keyed baseline and applies only exact-revision patches. A gap
 keeps the last good presentation and requests one scope resync; later patches
 are ignored until a valid snapshot replaces it. An observation-channel gap is
 scoped: a root snapshot does not pay an agent's presentation debt. Replacing
 the one open agent view retires its previous scope's queued patches and gap
 bookkeeping. Presentation refreshes do not cancel a pending root continuation.
+Invalid keyed views fail a debug assertion at publication. A release build
+reports a host diagnostic and installs a sorted, deduplicated, bounded full
+snapshot, rather than silently leaving the face frozen on its prior revision.
+This repairs only disposable presentation state; it never repairs stored or
+canonical authority.
 A runtime-derived row's anchor is its record's sequence, lane 0, and its ordinal
 is its position among the rows that record derives. An operator notice's anchor
 is the cursor the authoring host had applied when it wrote the notice, lane 1,
@@ -4339,7 +4355,8 @@ holding the item before the admission and the mailbox keeps only the newest
 snapshot, at the back, so that next snapshot is at least as new, and a
 provisional row is never drawn beside its own `#N`. A `PromptCorrelationReset`
 (a receipt lost at saturation) retires every accepted prompt no admission has
-named. A busy edge, a presentation snapshot, `ClearView`, a draft restore or a
+named. A busy edge, a presentation snapshot, an applied transcript patch,
+`ClearView`, a draft restore or a
 host disconnect retires every acknowledged provisional row.
 
 Compaction is a transcript row, the same grammar as a tool call: `◌ Compact`

@@ -554,7 +554,8 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
     assert_eq!(
         seen.borrow()
             .iter()
-            .filter(|event| event.contains("NoticeRow")
+            .filter(|event| event.starts_with("Row(")
+                && event.contains("NoticeRow")
                 && event.contains("queue projection is catching up"))
             .count(),
         1
