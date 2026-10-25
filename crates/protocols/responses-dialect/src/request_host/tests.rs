@@ -680,6 +680,42 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
     Ok(())
 }
 
+fn sealed_native_summary_input(
+    prior: ConversationItem,
+) -> Result<ConversationView, Box<dyn std::error::Error>> {
+    use plakous_model::{
+        CanonicalHistory, ContextHistoryPlan, HistorySegment, HistorySegmentKind,
+        SemanticCompactionCut, WorkingProjection,
+    };
+
+    let prior = ConversationItem::new(
+        prior.id(),
+        prior.actor(),
+        vec![prior.blocks()[0].clone()],
+        prior.provenance(),
+    )?;
+    let source = ConversationView::from_shared(
+        CanonicalHistory::new(vec![
+            HistorySegment::new(
+                HistorySegmentKind::RecentIntent,
+                vec![user(21, "retained intent")?],
+            )?,
+            HistorySegment::new(HistorySegmentKind::Compaction, vec![prior])?,
+            HistorySegment::new(
+                HistorySegmentKind::RecentIntent,
+                vec![user(23, "selected work")?],
+            )?,
+            HistorySegment::new(
+                HistorySegmentKind::RecentIntent,
+                vec![user(24, "latest intent")?],
+            )?,
+        ])?,
+        WorkingProjection::default(),
+    );
+    let cut = SemanticCompactionCut::seal(&source, &ContextHistoryPlan::new(&source)?)?;
+    Ok(cut.summary_input().clone())
+}
+
 #[test]
 fn openai_codex_replays_bound_native_compaction_item() -> TestResult {
     let (protocol, family, model) = target_values()?;
@@ -688,7 +724,7 @@ fn openai_codex_replays_bound_native_compaction_item() -> TestResult {
         r#"{"id":"compact_1","type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
     )?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::from_items(vec![user(21, "continue")?, prior])?,
+        sealed_native_summary_input(prior)?,
         workflow_metadata()?,
     )
     .build()?;
@@ -725,7 +761,7 @@ fn openai_codex_rejects_compaction_ciphertext_mismatch() -> TestResult {
         r#"{"type":"compaction","encrypted_content":"opaque"}"#,
     )?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::from_items(vec![user(21, "continue")?, prior])?,
+        sealed_native_summary_input(prior)?,
         workflow_metadata()?,
     )
     .build()?;
@@ -750,6 +786,61 @@ fn openai_codex_rejects_compaction_ciphertext_mismatch() -> TestResult {
             ResponsesRequestContentError::CompactionWithoutReplay
         ))
     ));
+    Ok(())
+}
+
+#[test]
+fn sealed_native_summary_never_replays_on_a_different_target() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?;
+    let prior = bound_compaction_prior(
+        "opaque-ciphertext",
+        r#"{"type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
+    )?;
+    let request = crate::test_support::model_request_builder(
+        sealed_native_summary_input(prior)?,
+        workflow_metadata()?,
+    )
+    .build()?;
+    for (protocol, family, model, account) in [
+        (
+            ProtocolId::new("other.protocol")?,
+            Some(family.clone()),
+            model.clone(),
+            account,
+        ),
+        (protocol.clone(), None, model.clone(), account),
+        (
+            protocol.clone(),
+            Some(family.clone()),
+            ModelId::new("other-model")?,
+            account,
+        ),
+        (
+            protocol,
+            Some(family),
+            model,
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"other-account"])?,
+        ),
+    ] {
+        let lowered = lower_responses_request(
+            &request,
+            ResponsesRequestConfig::new(
+                &protocol,
+                family.as_ref(),
+                &model,
+                ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
+                None,
+            )
+            .with_account_binding(&account),
+        );
+        assert!(matches!(
+            lowered,
+            Err(ResponsesRequestError::Content(
+                ResponsesRequestContentError::CompactionWithoutReplay
+            ))
+        ));
+    }
     Ok(())
 }
 

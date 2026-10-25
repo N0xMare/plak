@@ -43,6 +43,7 @@ pub(super) mod jobs_carry_fixture;
 pub(super) mod landed_round_abandonment;
 mod long_turn_compaction;
 mod native_capacity_tests;
+mod native_prefix_compaction;
 mod native_tail_tests;
 mod note_receipt;
 mod observation_budget;

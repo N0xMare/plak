@@ -2162,8 +2162,9 @@ context could not be carried (the native summary is ciphertext, not portable
 prose) and which keeps that block's `summarized_turns` record. The segment
 stays a compaction segment and moves to position zero, ahead of the retained
 user, developer and system prefix: the marker stands in for context before
-those messages, and a semantic cut accepts a prior compaction only at position
-zero (§10.6). The count is a sum, so the move does not change `(prompts, turns)`.
+those messages. A plain summary occupies position zero; only a bound native
+successor may retain its instruction prefix ahead of its summary (§10.2).
+The count is a sum, so the move does not change `(prompts, turns)`.
 A reasoning-replay segment left with no reasoning becomes conversation. An item
 that remains keeps
 its host-only presentation subject; that label is not replay material and is
@@ -6928,6 +6929,20 @@ omits `tools` and `tool_choice` entirely, while OpenRouter Messages keeps
 reject `tool_use`/`tool_result` without a `tools` array. OpenRouter also sends
 `plugins: [{ "id": "context-compression", "enabled": false }]`, since
 middle-out truncation is not a compaction facet.
+
+A semantic cut carries forward the source's sole prior compaction, normally
+at position zero. A native successor may instead place it after its retained
+instruction prefix: only complete RecentIntent, Steering, or Conversation
+segments containing exclusively user, developer or system items may precede
+it, and the canonical compaction item must have both native replay and its
+producing binding. Every preceding instruction survives verbatim, in source
+order. The cut includes the whole prior item in summary input, excludes it
+from the retained complement, and publishes exactly one new leading summary.
+Native replay still requires the summarizer route's exact protocol, family,
+model and account binding; a cut does not grant replay authority or turn
+ciphertext into portable prose. Existing portable lowering/refusal rules
+remain authoritative on mismatch. Multiple prior compactions or a non-intent
+prefix are refused. Live completion and recovery derive the identical cut.
 
 **The summary input must admit before dispatch.** The full sealed input is
 preferred. If its measured disposition overflows, or preparation refuses it

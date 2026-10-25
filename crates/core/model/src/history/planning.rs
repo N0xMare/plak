@@ -522,7 +522,7 @@ pub struct SemanticCompactionCut {
 impl SemanticCompactionCut {
     /// Seals a closed plan against its exact quiescent committed source.
     ///
-    /// A sole leading prior compaction is included in [`Self::summary_input`]
+    /// The sole recognized prior compaction is included in [`Self::summary_input`]
     /// so the new summary must fold its semantics, but it is excluded from the
     /// retained successor handles. All other selected and retained content is
     /// shared at complete semantic-group boundaries.
@@ -561,13 +561,15 @@ impl SemanticCompactionCut {
         }
 
         let source_segments = source.history().segments();
-        let prior_compaction = source_segments
-            .get(0)
-            .filter(|segment| segment.kind() == HistorySegmentKind::Compaction)
+        let prior_position = prior_compaction_position(source);
+        let prior_compaction = prior_position
+            .and_then(|position| source_segments.get(position))
             .cloned();
-        if prior_compaction
-            .as_ref()
-            .is_some_and(|segment| !is_canonical_compaction_summary(segment))
+        if source_segments
+            .iter()
+            .filter(|segment| segment.kind() == HistorySegmentKind::Compaction)
+            .count()
+            != usize::from(prior_position.is_some())
         {
             return Err(SemanticCompactionCutError::InvalidSelectedSemantics);
         }
@@ -617,12 +619,12 @@ impl SemanticCompactionCut {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Retained is the exact complement: every committed segment the cut
-        // does not fold, minus the position-zero prior compaction whose
+        // does not fold, minus the prior compaction whose
         // semantics the new summary must carry forward.
         let mut selected_iter = evidence.iter().peekable();
         let mut retained = Vec::new();
         for (position, segment) in source_segments.iter().enumerate() {
-            if position == 0 && prior_compaction.is_some() {
+            if Some(position) == prior_position {
                 continue;
             }
             if selected_iter.peek().is_some_and(|next| {
@@ -778,7 +780,7 @@ impl SemanticCompactionCut {
 
     /// Returns the exact shared handles selected for replacement.
     ///
-    /// A prior position-zero compaction is not in this slice; it is exposed by
+    /// A prior compaction is not in this slice; it is exposed by
     /// [`Self::prior_compaction`] and included in [`Self::summary_input`].
     #[must_use]
     pub fn selected_segments(&self) -> &[HistorySegment] {
@@ -885,12 +887,46 @@ fn is_canonical_compaction_summary(segment: &HistorySegment) -> bool {
         && matches!(segment.items()[0].blocks(), [ContentBlock::Compaction(_)])
 }
 
+// Native successors place retained instructions before their sole bound item.
+// Nothing else authorizes moving a nonleading summary into a semantic cut.
+fn prior_compaction_position(source: &ConversationView) -> Option<usize> {
+    let segments = source.history().segments();
+    let mut positions = segments
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| segment.kind() == HistorySegmentKind::Compaction);
+    let (position, segment) = positions.next()?;
+    if positions.next().is_some() || !is_canonical_compaction_summary(segment) {
+        return None;
+    }
+    if position == 0 {
+        return Some(position);
+    }
+    let [ContentBlock::Compaction(block)] = segment.items()[0].blocks() else {
+        return None;
+    };
+    (block.native_item().is_some()
+        && block.native_binding().is_some()
+        && segments.iter().take(position).all(|segment| {
+            matches!(
+                segment.kind(),
+                HistorySegmentKind::RecentIntent
+                    | HistorySegmentKind::Steering
+                    | HistorySegmentKind::Conversation
+            ) && segment.model_visible_complete()
+                && segment.items().iter().all(|item| {
+                    matches!(item.actor(), Actor::User | Actor::Developer | Actor::System)
+                })
+        }))
+    .then_some(position)
+}
+
 /// Zero-copy retained groups awaiting a committed semantic-summary insertion.
 ///
 /// This value is neither a valid compaction successor nor an admission/fit
 /// witness. A driver must first insert and commit the summary which replaces
 /// the selected intent groups, then the descriptor context path must freshly
-/// prepare and measure the complete successor request. An existing position-zero
+/// prepare and measure the complete successor request. An existing
 /// compaction is retained here as required semantic input, but a canonical
 /// successor folds it into the sole newly committed compaction output.
 #[derive(Clone, Copy, Debug)]
@@ -1019,22 +1055,28 @@ fn analyze_context_history(
     })
 }
 
+fn context_summary_barrier(source: &ConversationView, analysis: &ContextHistoryAnalysis) -> u32 {
+    prior_compaction_position(source)
+        .and_then(|position| u32::try_from(position).ok())
+        .or_else(|| {
+            analysis.latest_user_intent.and_then(|latest| {
+                analysis
+                    .compaction_positions
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|position| *position < latest)
+            })
+        })
+        .map_or(0, |position| position.saturating_add(1))
+}
+
 fn select_context_summary_prefix(
     source: &ConversationView,
     analysis: &ContextHistoryAnalysis,
 ) -> Result<ContextSummarySelection, HistoryPlanningError> {
     let total = u32::try_from(analysis.total).map_err(|_| HistoryPlanningError::LimitExceeded)?;
-    let barrier = analysis
-        .latest_user_intent
-        .and_then(|latest| {
-            analysis
-                .compaction_positions
-                .iter()
-                .rev()
-                .copied()
-                .find(|position| *position < latest)
-        })
-        .map_or(0, |position| position.saturating_add(1));
+    let barrier = context_summary_barrier(source, analysis);
     let mut groups = Vec::new();
     if let Some(latest) = analysis.latest_user_intent {
         for (index, start) in analysis.intent_positions.iter().copied().enumerate() {
@@ -1095,7 +1137,12 @@ fn select_context_summary_prefix(
             .transpose()?;
         if let Some(tail_start) = tail_start {
             let mut run_start = None;
-            for position in latest.saturating_add(1)..tail_start {
+            let start = prior_compaction_position(source)
+                .and_then(|position| u32::try_from(position).ok())
+                .map_or(latest.saturating_add(1), |prior| {
+                    latest.max(prior).saturating_add(1)
+                });
+            for position in start..tail_start {
                 let segment = committed
                     .get(usize::try_from(position).unwrap_or(usize::MAX))
                     .ok_or(HistoryPlanningError::LimitExceeded)?;
@@ -1129,7 +1176,7 @@ fn select_context_summary_prefix(
 }
 
 /// The retained set is every segment the selection does not fold, minus a
-/// position-zero prior compaction (its semantics fold into the new summary
+/// recognized prior compaction (its semantics fold into the new summary
 /// rather than surviving as a second compaction). `start_position` is the
 /// first retained position; the identity formula is unchanged, so a wholly
 /// contiguous retained set produces the same digest as before.
@@ -1138,17 +1185,13 @@ fn context_retained_tail(
     selected: &[ContextSelectedSegment],
     total: usize,
 ) -> Result<ContextRetainedTail, HistoryPlanningError> {
-    let prior_compaction = source
-        .history()
-        .segments()
-        .get(0)
-        .is_some_and(|segment| segment.kind() == HistorySegmentKind::Compaction);
+    let prior_position = prior_compaction_position(source);
     let mut selected = selected.iter().peekable();
     let mut start = None;
     let mut retained = Vec::new();
     for (position, segment) in source.segments().enumerate() {
         let position = u32::try_from(position).map_err(|_| HistoryPlanningError::LimitExceeded)?;
-        if prior_compaction && position == 0 {
+        if Some(usize::try_from(position).unwrap_or(usize::MAX)) == prior_position {
             continue;
         }
         if selected

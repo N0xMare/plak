@@ -1014,6 +1014,148 @@ fn semantic_compaction_cut_rejects_working_protected_drift_and_invalid_summary()
     );
 }
 
+fn native_prior_summary() -> HistorySegment {
+    let binding = crate::CompactionReplayBinding::new(
+        crate::ProtocolId::new("test.responses").expect("protocol"),
+        None,
+        crate::ModelId::new("test-model").expect("model"),
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"]).expect("account"),
+    );
+    HistorySegment::new(
+        HistorySegmentKind::Compaction,
+        vec![entry(
+            90,
+            Actor::Assistant,
+            ContentBlock::Compaction(
+                CompactionBlock::new("native summary")
+                    .expect("summary")
+                    .with_native_item(
+                        r#"{"type":"compaction","encrypted_content":"fixture"}"#.to_owned(),
+                    )
+                    .with_native_binding(binding),
+            ),
+        )],
+    )
+    .expect("native prior")
+}
+
+#[test]
+fn semantic_cut_preserves_the_native_instruction_prefix_at_every_prior_position() {
+    for count in [1, 3, 86] {
+        let prefix = (0..count)
+            .map(|index| {
+                let kind = [
+                    HistorySegmentKind::RecentIntent,
+                    HistorySegmentKind::Steering,
+                    HistorySegmentKind::Conversation,
+                ][index % 3];
+                HistorySegment::new(
+                    kind,
+                    vec![text(
+                        u128::try_from(index).expect("bounded position") + 1,
+                        Actor::User,
+                        "retained instruction",
+                    )],
+                )
+                .expect("instruction")
+            })
+            .collect::<Vec<_>>();
+        let prior = native_prior_summary();
+        let mut segments = prefix.clone();
+        segments.extend([
+            prior.clone(),
+            complete_exchange(500),
+            complete_exchange(600),
+        ]);
+        let source = ConversationView::from_shared(
+            CanonicalHistory::new(segments).expect("history"),
+            WorkingProjection::default(),
+        );
+        let plan = ContextHistoryPlan::new(&source).expect("plan");
+        let cut = SemanticCompactionCut::seal(&source, &plan).expect("native cut");
+        assert_eq!(cut.prior_compaction(), Some(&prior));
+        assert_eq!(cut.selected_segments().len(), 1);
+        assert!(
+            cut.selected_segments()[0].shares_storage_with(&source.history().segments()[count + 1])
+        );
+        for (retained, original) in cut.retained_segments().iter().zip(&prefix) {
+            assert!(retained.shares_storage_with(original));
+        }
+        let successor = cut
+            .build_successor(&compaction_summary(1_001, "folded native summary and work"))
+            .expect("successor");
+        assert_eq!(
+            successor
+                .segments()
+                .iter()
+                .filter(|segment| segment.kind() == HistorySegmentKind::Compaction)
+                .count(),
+            1
+        );
+        assert_eq!(&successor.segments().to_vec()[1..=count], prefix);
+        assert_eq!(
+            SemanticCompactionCut::seal(
+                &source,
+                &ContextHistoryPlan::new(&source).expect("recovery plan")
+            )
+            .expect("recovery cut"),
+            cut
+        );
+    }
+}
+
+#[test]
+fn semantic_cut_rejects_non_native_non_intent_and_multiple_prior_compactions() {
+    let intent = HistorySegment::new(
+        HistorySegmentKind::RecentIntent,
+        vec![text(1, Actor::User, "intent")],
+    )
+    .expect("intent");
+    let assistant = HistorySegment::new(
+        HistorySegmentKind::Conversation,
+        vec![text(2, Actor::Assistant, "not retained intent")],
+    )
+    .expect("assistant");
+    for prefix in [
+        vec![intent.clone(), compaction_summary(91, "not native")],
+        vec![intent.clone(), assistant, native_prior_summary()],
+        vec![
+            intent.clone(),
+            complete_exchange(200),
+            native_prior_summary(),
+        ],
+        vec![
+            intent,
+            compaction_summary(91, "first"),
+            native_prior_summary(),
+        ],
+    ] {
+        let mut segments = prefix;
+        segments.extend([complete_exchange(500), complete_exchange(600)]);
+        let source = ConversationView::from_shared(
+            CanonicalHistory::new(segments).expect("history"),
+            WorkingProjection::default(),
+        );
+        match ContextHistoryPlan::new(&source) {
+            Err(HistoryPlanningError::NoncanonicalCompaction) => {
+                assert_eq!(
+                    source
+                        .history()
+                        .segments()
+                        .iter()
+                        .filter(|segment| segment.kind() == HistorySegmentKind::Compaction)
+                        .count(),
+                    2
+                );
+            }
+            other => assert_eq!(
+                SemanticCompactionCut::seal(&source, &other.expect("plan")),
+                Err(SemanticCompactionCutError::InvalidSelectedSemantics)
+            ),
+        }
+    }
+}
+
 #[test]
 fn semantic_compaction_cut_rejects_nonprefix_and_noncanonical_prior_summary() {
     let leading = HistorySegment::new(
