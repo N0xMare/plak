@@ -9,11 +9,14 @@ use plakous_cell::{LossClass, WorkerFrame, write_frame_blocking};
 mod cell;
 mod codec;
 mod prompts;
-#[cfg(feature = "test-hooks")]
+#[cfg(all(feature = "test-hooks", debug_assertions))]
 mod test_hooks;
-#[cfg(not(feature = "test-hooks"))]
+#[cfg(not(all(feature = "test-hooks", debug_assertions)))]
 mod test_hooks {
     pub(super) fn boundary(_name: &str) {}
+    pub(super) fn probe() -> bool {
+        false
+    }
 }
 
 #[global_allocator]
@@ -25,6 +28,9 @@ static ALLOC: monty_alloc::LimitedAllocator = monty_alloc::LimitedAllocator;
 const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
 
 fn main() -> ExitCode {
+    if test_hooks::probe() {
+        return ExitCode::SUCCESS;
+    }
     install_panic_hook();
     match thread::Builder::new()
         .name("plakous-py-host".to_owned())

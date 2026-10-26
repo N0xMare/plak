@@ -732,12 +732,13 @@ The private-driver scheduler additionally exercises failed read-only
 and partially effective mutating children, later successful mutation, rejected
 invalid arguments, finalized child records, and joined cancellation. Canonical
 projection tests distinguish ordinary tool failure from infrastructure failure.
-Every tier that runs Rust tests takes the `plakous-py-host` binary from the workspace test
-build (`cargo test --no-run --workspace --all-features`) and obtains its
-executable path from Cargo's artifact record, respecting Cargo target-directory
-and build-target configuration. An explicit `PLAK_PY_HOST` instead selects
-an existing worker; missing, empty, directory, or non-executable paths fail the
-gate. Both offline nextest lanes receive its absolute path, so real Monty tests
+Every tier that runs Rust tests takes the `plakous-py-host` and
+`plakous-js-host` binaries from the workspace test build (`cargo test --no-run
+--workspace --all-features`) and obtains their executable paths from Cargo's
+artifact records, respecting Cargo target-directory and build-target
+configuration. Explicit `PLAK_PY_HOST` and `PLAK_JS_HOST` overrides instead select
+existing workers; missing, empty, directory, or non-executable paths fail the
+gate. All nextest lanes receive their absolute paths, so real Monty tests
 cannot silently take their missing-worker early return. A worker that cannot
 run or speak the protocol fails those tests. Manually invoked Rust tests
 without a worker retain their existing limited, potentially skipped coverage.
@@ -754,12 +755,30 @@ failed-wait loss, and cleanup after a definite failed cell costs its generation.
 Worker unit tests preserve the
 undecodable-traceback definite-failure distinction and the type-checker stubs.
 The durability profile's `cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance`
-kills the real Python worker at test-only boundaries before result handoff and
-after its acceptance receipt but before terminal publication. The first leaves
+kills both real workers at test-only boundaries before result handoff and
+after their acceptance receipts but before terminal publication. The first leaves
 delivery unknown, the second retains acceptance, neither produces a cell terminal
 or permits source/nested-call replay, and cleanup cannot relabel loss as joined.
-These hooks require the worker's `test-hooks` feature; ordinary worker builds
-do not read the cut environment or create sentinels. The private-driver
+Both workers expose `PLAK_TEST_CELL_CUT=before_delivery|after_accepted` and
+`PLAK_TEST_CELL_CUT_READY=<sentinel>` only with `test-hooks` and debug
+assertions enabled; ordinary and release builds do not read those variables
+or create sentinels. The boundary parks after reading `NestedResult` but
+before interpreter handoff, or after flushing `Delivery{Accepted}` and before
+publishing `CellDone`. The durability test
+`real_cell_worker_crash_recovery_boundaries` kills each real interpreter at
+both boundaries, reopens its SQLite session, and requires no source or nested
+tool replay, exactly one root terminal, and the persisted honest
+`RecoveryRequired` diagnostic rather than a fabricated successful cell result.
+The reopened canonical history has no successful outer exec result; the exact
+nested effect remains completed without replay at both cuts. Canonical child
+completion precedes delivery and is not evidence of interpreter acceptance.
+The direct real-worker receipt tests separately prove unknown delivery before
+handoff and acceptance after the correlated receipt. Both worker paths come
+from the gate's Cargo artifact manifest or
+explicit overrides, and a debug-only `--test-cell-hooks` probe refuses workers
+without the required hooks before the crash test starts.
+These interpreter cuts are in the durability lane, not the indexed SQLite
+commit sweep. The private-driver
 scheduler also withholds its first delivery receipt until the second result
 arrives, while checking canonical child finalization and joined cancellation.
 Owner-transfer regressions cover a committed tool terminal followed by refused

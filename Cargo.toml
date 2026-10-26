@@ -513,6 +513,10 @@ reason = "Reviewed child-process/VCS environment construction reads; passed-in e
 env-sites = ["src/test_hooks.rs"]
 reason = "Only the test-hook module reads deterministic worker crash-cut controls."
 
+[workspace.metadata.plakous.cfg.plakous-js-runtime]
+env-sites = ["src/test_hooks.rs"]
+reason = "Only the test-hook module reads deterministic worker crash-cut controls."
+
 [workspace.metadata.plakous.cfg.plakous-xai]
 feature-ceiling = 84
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."

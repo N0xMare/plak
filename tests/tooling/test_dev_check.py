@@ -76,6 +76,7 @@ class DevCheckWorkerTests(unittest.TestCase):
                         CARGO_TARGET_DIR=str(self.root / 'custom target'),
                         CARGO_BUILD_TARGET='host-triple')
         self.env.pop('PLAK_PY_HOST', None)
+        self.env.pop('PLAK_JS_HOST', None)
         # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
@@ -93,6 +94,7 @@ if args == ['nextest', '--version']:
     print('cargo-nextest 0.9.100')
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(args=args, worker=os.environ.get('PLAK_PY_HOST'),
+                             js_worker=os.environ.get('PLAK_JS_HOST'),
                              target=os.environ.get('CARGO_BUILD_TARGET'),
                              target_dir=os.environ.get('CARGO_TARGET_DIR'),
                              plak_home=os.environ.get('PLAK_HOME'),
@@ -118,6 +120,11 @@ if args[0] == 'test':
                          target=dict(name='plakous-py-host', kind=['bin']), profile=dict(test=True))))
     print(json.dumps(dict(reason='compiler-artifact', executable=str(worker),
                          target=dict(name='plakous-py-host', kind=['bin']), profile=dict(test=False))))
+    js_worker = worker.with_name('plakous-js-host')
+    js_worker.write_text('#!/bin/sh\nexit 0\n')
+    js_worker.chmod(0o700)
+    print(json.dumps(dict(reason='compiler-artifact', executable=str(js_worker),
+                         target=dict(name='plakous-js-host', kind=['bin']), profile=dict(test=False))))
 ''')
         self.executable('python3', r'''import json, os, sys
 if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
@@ -248,6 +255,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         lanes = [c for c in calls if c['args'][:2] == ['nextest', 'run']]
         self.assertEqual(len(lanes), 2)
         self.assertTrue(all(c['worker'] == str(self.worker.resolve()) for c in lanes))
+        self.assertTrue(all(c['js_worker'] == str(self.worker.with_name('plakous-js-host').resolve())
+                            for c in lanes))
         self.assert_nextest_home_is_isolated(calls)
 
     def test_explicit_relative_worker_is_resolved_without_building(self):
@@ -255,25 +264,45 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.worker.write_text('#!/bin/sh\nexit 0\n')
         self.worker.chmod(0o700)
         self.env['PLAK_PY_HOST'] = str(self.worker.relative_to(self.root))
+        self.env['PLAK_JS_HOST'] = str(self.worker.relative_to(self.root))
         result, calls, _ = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(c['args'][0] == 'test' for c in calls))
         lanes = [c for c in calls if c['args'][:2] == ['nextest', 'run']]
         self.assertEqual([c['worker'] for c in lanes], [str(self.worker.resolve())] * 2)
+        self.assertEqual([c['js_worker'] for c in lanes], [str(self.worker.resolve())] * 2)
 
     def test_invalid_override_fails_before_any_test_lane(self):
         directory = self.root / 'directory'
         directory.mkdir()
         ordinary = self.root / 'non-executable'
         ordinary.write_text('not executable')
+        self.worker.parent.mkdir(parents=True)
+        self.worker.write_text('#!/bin/sh\nexit 0\n')
+        self.worker.chmod(0o700)
+        self.env['PLAK_JS_HOST'] = str(self.worker)
         for value in ('', 'missing', str(directory), str(ordinary)):
             with self.subTest(value=value):
                 self.env['PLAK_PY_HOST'] = value
                 self.log.unlink(missing_ok=True)
                 result, calls, _ = self.run_gate()
                 self.assertNotEqual(result.returncode, 0)
+                self.assertIn('PLAK_PY_HOST', result.stderr)
                 self.assertFalse(any(c['args'][0] == 'test' or
                                      c['args'][:2] == ['nextest', 'run'] for c in calls))
+
+    def test_invalid_js_override_fails_before_any_test_lane(self):
+        self.worker.parent.mkdir(parents=True)
+        self.worker.write_text('#!/bin/sh\nexit 0\n')
+        self.worker.chmod(0o700)
+        self.env['PLAK_PY_HOST'] = str(self.worker)
+        for value in ('', 'missing', str(self.root)):
+            with self.subTest(value=value):
+                self.env['PLAK_JS_HOST'] = value
+                self.log.unlink(missing_ok=True)
+                result, calls, _ = self.run_gate()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(c['args'][:2] == ['nextest', 'run'] for c in calls))
 
     def test_failed_build_cannot_run_worker_tests(self):
         self.env['GATE_BUILD_FAIL'] = '1'

@@ -80,6 +80,8 @@ use plakous_tools::{
 
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 mod capacity;
+#[cfg(all(unix, feature = "composition", feature = "sessions-sqlite"))]
+mod cell_crashes;
 mod debt;
 #[cfg(feature = "sessions-sqlite")]
 mod feed;

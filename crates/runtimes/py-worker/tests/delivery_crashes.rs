@@ -1,6 +1,6 @@
 //! Real-worker cuts around result consumption and its acceptance receipt.
 
-#![cfg(all(unix, feature = "test-hooks"))]
+#![cfg(all(unix, feature = "test-hooks", debug_assertions))]
 #![allow(clippy::expect_used, clippy::panic, reason = "crash-cut assertions")]
 
 use std::{os::unix::fs::PermissionsExt, sync::Arc, time::Duration};

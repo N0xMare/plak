@@ -2271,7 +2271,7 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plak"], 20)
         self.assertEqual(profile_counts["plakous-hosted"], 17)
         self.assertNotIn("plakous-cell", profile_counts)
-        self.assertNotIn("plakous-js-runtime", profile_counts)
+        self.assertEqual(profile_counts["plakous-js-runtime"], 3)
         for count in profile_counts.values():
             self.assertLessEqual(count, 2**feature_policy.MAX_OPTIONAL_FEATURES + 2)
 

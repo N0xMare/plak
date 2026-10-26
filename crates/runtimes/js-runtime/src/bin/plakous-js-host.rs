@@ -21,7 +21,21 @@ use plakous_js_runtime::{DEFAULT_YIELD_TIME_MS, EmbeddedHost, RuntimeEvent};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+#[cfg(all(feature = "test-hooks", debug_assertions))]
+#[path = "../test_hooks.rs"]
+mod test_hooks;
+#[cfg(not(all(feature = "test-hooks", debug_assertions)))]
+mod test_hooks {
+    pub(super) fn boundary(_name: &str) {}
+    pub(super) fn probe() -> bool {
+        false
+    }
+}
+
 fn main() {
+    if test_hooks::probe() {
+        return;
+    }
     if let Err(error) = run() {
         eprintln!("plakous-js-host: {error}");
         std::process::exit(2);
@@ -232,8 +246,18 @@ async fn command(
             call,
             outcome,
         } => {
+            test_hooks::boundary("before_delivery");
             let frame = delivery_frame(host, cell, call, outcome).await;
             write(stdout, &frame)?;
+            if matches!(
+                frame,
+                WorkerFrame::Delivery {
+                    verdict: DeliveryVerdict::Accepted,
+                    ..
+                }
+            ) {
+                test_hooks::boundary("after_accepted");
+            }
         }
         HostFrame::Resume { cell, window } => host.resume(cell, window)?,
         HostFrame::Cancel { .. } => host.interrupt(),

@@ -93,13 +93,14 @@ case "$target_dir" in
   *) target_dir="$PWD/$target_dir" ;;
 esac
 py_host=''
+js_host=''
 prepare_tests() {
   if [[ -n "$py_host" ]]; then return; fi
   worker_manifest="$(mktemp "$TMPDIR/plak-worker-build.XXXXXX")"
   trap 'rm -f "$worker_manifest"' EXIT
-  if [[ "${PLAK_PY_HOST+x}" == x ]]; then
+  if [[ "${PLAK_PY_HOST+x}" == x && "${PLAK_JS_HOST+x}" == x ]]; then
     worker_mode=explicit
-    worker_input="$PLAK_PY_HOST"
+    worker_input=''
   else
     worker_mode=built
     # The worker comes out of the test build itself. A `cargo build` would leave
@@ -108,31 +109,40 @@ prepare_tests() {
     cargo test --no-run --locked --workspace --all-features --message-format=json ${target_args[@]+"${target_args[@]}"} >"$worker_manifest"
     worker_input="$worker_manifest"
   fi
-  py_host="$(python3 - "$worker_mode" "$worker_input" <<'PY_WORKER'
+  worker_paths="$(python3 - "$worker_mode" "$worker_input" <<'PY_WORKER'
 import json
 import os
 from pathlib import Path
 import sys
 
-mode, value = sys.argv[1:]
-if mode == "built":
-    records = [json.loads(line) for line in Path(value).read_text().splitlines() if line.strip()]
-    paths = {row["executable"] for row in records
-             if row.get("reason") == "compiler-artifact"
-             and row.get("target", {}).get("name") == "plakous-py-host"
-             and "bin" in row.get("target", {}).get("kind", []) and row.get("executable")
-             and not row.get("profile", {}).get("test")}
-    if len(paths) != 1:
-        raise SystemExit("gate requires exactly one built plakous-py-host executable")
-    value = paths.pop()
-if not value:
-    raise SystemExit("PLAK_PY_HOST must name an executable file")
-path = Path(value).resolve(strict=True)
-if not path.is_file() or not os.access(path, os.X_OK):
-    raise SystemExit("gate requires an executable Python cell worker")
-print(path)
+mode, manifest = sys.argv[1:]
+records = ([json.loads(line) for line in Path(manifest).read_text().splitlines() if line.strip()]
+           if mode == "built" else [])
+for variable, binary in [("PLAK_PY_HOST", "plakous-py-host"), ("PLAK_JS_HOST", "plakous-js-host")]:
+    if variable in os.environ:
+        value = os.environ[variable]
+    else:
+        paths = {row["executable"] for row in records
+                 if row.get("reason") == "compiler-artifact"
+                 and row.get("target", {}).get("name") == binary
+                 and "bin" in row.get("target", {}).get("kind", []) and row.get("executable")
+                 and not row.get("profile", {}).get("test")}
+        if len(paths) != 1:
+            raise SystemExit(f"gate requires exactly one built {binary} executable")
+        value = paths.pop()
+    if not value:
+        raise SystemExit(f"{variable} must name an executable file")
+    try:
+        path = Path(value).resolve(strict=True)
+    except OSError as error:
+        raise SystemExit(f"{variable} must name an executable cell worker: {error}") from error
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise SystemExit(f"{variable} must name an executable cell worker")
+    print(path)
 PY_WORKER
   )"
+  py_host="$(printf '%s\n' "$worker_paths" | sed -n '1p')"
+  js_host="$(printf '%s\n' "$worker_paths" | sed -n '2p')"
   rm -f "$worker_manifest"
   trap - EXIT
 }
@@ -169,7 +179,7 @@ run_lane() {
   local profile=$1
   shift
   prepare_tests
-  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" cargo nextest run --locked --workspace --all-features \
+  PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" cargo nextest run --locked --workspace --all-features \
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
 
@@ -271,21 +281,23 @@ run_timed() {
   echo "== group: $group =="
   started=$SECONDS
   # A subshell keeps set -e fail-fast inside the group; the parent records the
-  # status and goes on to the next group. A prepared py_host survives a
+  # status and goes on to the next group. Prepared worker paths survive a
   # failed lane so later lanes reuse the same build.
   worker_state="$(mktemp)"
-  printf '%s\n' "$py_host" >"$worker_state"
+  printf '%s\n' "$py_host" "$js_host" >"$worker_state"
   set +e
   (
     set -Ee
-    py_host="$(head -n 1 "$worker_state")"
-    trap 'printf "%s\n" "$py_host" >"$worker_state"' ERR
+    py_host="$(sed -n '1p' "$worker_state")"
+    js_host="$(sed -n '2p' "$worker_state")"
+    trap 'printf "%s\n" "$py_host" "$js_host" >"$worker_state"' ERR
     run_group "$group"
-    printf '%s\n' "$py_host" >"$worker_state"
+    printf '%s\n' "$py_host" "$js_host" >"$worker_state"
   )
   status=$?
   set -e
-  py_host="$(head -n 1 "$worker_state")"
+  py_host="$(sed -n '1p' "$worker_state")"
+  js_host="$(sed -n '2p' "$worker_state")"
   rm -f "$worker_state"
   echo "== time: $group $((SECONDS - started)) s =="
   if [[ "$status" -ne 0 ]]; then
