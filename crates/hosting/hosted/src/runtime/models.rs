@@ -56,18 +56,6 @@ pub fn effort_from_record(value: Option<&str>) -> CliResult<Option<ReasoningEffo
     Ok(Some(effort))
 }
 
-/// Returns the exact Ready-catalog effort requirement for one OAuth row.
-pub fn oauth_model_needs_effort(account: &str, model_id: &str) -> bool {
-    if oauth_provider_for_account(account).is_none() {
-        return false;
-    }
-    let m = model_id.to_ascii_lowercase();
-    if m.contains("non-reasoning") || m == "grok-build-0.1" {
-        return false;
-    }
-    true
-}
-
 pub fn ready_catalog_model_needs_effort(
     ready_catalog: &[plakous_host_protocol::views::ProviderSection],
     account: &str,

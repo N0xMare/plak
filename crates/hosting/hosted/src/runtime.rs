@@ -174,7 +174,6 @@ pub use info::effort_label;
 pub use models::effort_from_config;
 pub use models::effort_from_record;
 pub use models::native_compact_facet;
-pub use models::oauth_model_needs_effort;
 pub use models::oauth_provider_for_account;
 pub use models::ready_catalog_model_needs_effort;
 pub use oneshot::{OneShot, OneShotOutcome, RunBounds};

@@ -2999,6 +2999,9 @@ come only from the provider crate's bundled reviewed table. A listed id with no
 family rule or no reviewed row is refused with its reason, never admitted on a
 pattern match alone.
 
+Hosted effort eligibility reads the selected Ready-catalog row. It does not
+guess whether effort is required from substrings in a model identifier.
+
 `Capability::ImageInput` is a per-model catalog fact for inline user images.
 It is set only where provider evidence says the model accepts images: every
 Anthropic Platform and Claude subscription row (Anthropic vision support
