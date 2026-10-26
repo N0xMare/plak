@@ -421,19 +421,21 @@ mod tests {
             OpenRouterChatModelEvidence::from_authenticated_discovery(
                 model.clone(),
                 route.identity(),
-                endpoints.clone(),
-                BTreeSet::from(["tools".to_owned()]),
-                None,
-                4096,
-                false,
-                Timestamp::new(
-                    now.seconds().saturating_sub(observed_offset),
-                    now.nanoseconds(),
-                )?,
-                Timestamp::new(
-                    now.seconds().saturating_add(expiry_offset),
-                    now.nanoseconds(),
-                )?,
+                crate::chat::OpenRouterChatDiscovery {
+                    endpoints: endpoints.clone(),
+                    model_supported_parameters: BTreeSet::from(["tools".to_owned()]),
+                    reasoning: None,
+                    context_length: 4096,
+                    image_input: false,
+                    observed_at: Timestamp::new(
+                        now.seconds().saturating_sub(observed_offset),
+                        now.nanoseconds(),
+                    )?,
+                    expires_at: Timestamp::new(
+                        now.seconds().saturating_add(expiry_offset),
+                        now.nanoseconds(),
+                    )?,
+                },
             )
         };
         let first = OpenRouterResponsesTarget::gateway_managed(

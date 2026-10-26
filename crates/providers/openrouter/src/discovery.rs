@@ -156,13 +156,15 @@ impl OpenRouterChatRoute {
         OpenRouterChatModelEvidence::from_authenticated_discovery(
             model,
             self.identity(),
-            candidates,
-            model_facts.supported_parameters,
-            model_facts.reasoning,
-            model_facts.context_length,
-            model_facts.image_input,
-            observed_at,
-            expires_at,
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: candidates,
+                model_supported_parameters: model_facts.supported_parameters,
+                reasoning: model_facts.reasoning,
+                context_length: model_facts.context_length,
+                image_input: model_facts.image_input,
+                observed_at,
+                expires_at,
+            },
         )
         .map_err(OpenRouterChatDiscoveryError::from)
     }
@@ -1782,60 +1784,122 @@ mod tests {
         Ok(())
     }
 
+    fn endpoint_document(rows: Vec<Value>) -> Value {
+        serde_json::json!({"data": {"id": "vendor/model", "endpoints": rows}})
+    }
+
+    fn endpoint_tags(candidates: &[OpenRouterChatEndpointCandidate]) -> Vec<String> {
+        candidates
+            .iter()
+            .map(|candidate| candidate.endpoint().to_owned())
+            .collect()
+    }
+
+    struct DuplicateEndpointFixture {
+        kept: Value,
+        kept_repeat: Value,
+        other: Value,
+        base_conflict: Value,
+        facts: ModelFacts,
+        clean_identity: Digest,
+    }
+
+    impl DuplicateEndpointFixture {
+        fn new() -> Result<Self, Box<dyn std::error::Error>> {
+            let kept = serde_json::json!({
+                "tag": "a/model", "provider_name": "Alpha",
+                "supported_parameters": ["tools", "max_tokens"],
+                "context_length": 8192,
+                "max_prompt_tokens": 6144,
+                "max_completion_tokens": 2048,
+                "supports_tool_choice": {"auto": true},
+                "supports_implicit_caching": false,
+                "uptime_last_30m": 98.0
+            });
+            let mut kept_repeat = kept.clone();
+            kept_repeat["uptime_last_30m"] = serde_json::json!(97.0);
+            kept_repeat["supported_parameters"] = serde_json::json!(["max_tokens", "tools"]);
+            let other = serde_json::json!({
+                "tag": "z/model", "provider_name": "Zed",
+                "supported_parameters": ["tools"]
+            });
+            let base_conflict = serde_json::json!({
+                "tag": "baseten/fp8", "provider_name": "Baseten",
+                "supported_parameters": ["tools", "response_format"],
+                "context_length": 4096,
+                "max_prompt_tokens": 3072,
+                "max_completion_tokens": 1024,
+                "supports_tool_choice": {"auto": true, "none": true},
+                "supports_implicit_caching": false
+            });
+            let facts = ModelFacts {
+                supported_parameters: BTreeSet::from(["tools".to_owned()]),
+                reasoning: None,
+                context_length: 8192,
+                image_input: false,
+            };
+            let admitted_without_conflict = validate_endpoints_document(
+                &endpoint_document(vec![other.clone(), kept.clone(), kept_repeat.clone()]),
+                "vendor/model",
+            )?;
+            assert_eq!(
+                endpoint_tags(&admitted_without_conflict),
+                ["a/model", "z/model"]
+            );
+            let clean_identity = snapshot_from_facts(
+                "stable-route",
+                "vendor/model",
+                &facts,
+                &admitted_without_conflict,
+            )?;
+
+            Ok(Self {
+                kept,
+                kept_repeat,
+                other,
+                base_conflict,
+                facts,
+                clean_identity,
+            })
+        }
+
+        fn orders(&self, changed: &Value) -> [Vec<Value>; 3] {
+            // A later matching row must not resurrect a conflicted tag.
+            let mut majority = self.base_conflict.clone();
+            majority["uptime_last_30m"] = serde_json::json!(50.0);
+            [
+                vec![
+                    self.base_conflict.clone(),
+                    changed.clone(),
+                    self.kept.clone(),
+                    self.other.clone(),
+                    self.kept_repeat.clone(),
+                    majority.clone(),
+                ],
+                vec![
+                    changed.clone(),
+                    self.other.clone(),
+                    majority.clone(),
+                    self.kept_repeat.clone(),
+                    self.base_conflict.clone(),
+                    self.kept.clone(),
+                ],
+                vec![
+                    self.kept_repeat.clone(),
+                    majority,
+                    self.other.clone(),
+                    changed.clone(),
+                    self.kept.clone(),
+                    self.base_conflict.clone(),
+                ],
+            ]
+        }
+    }
+
     #[test]
     fn ambiguous_duplicate_tags_drop_only_that_endpoint() -> Result<(), Box<dyn std::error::Error>>
     {
-        let kept = serde_json::json!({
-            "tag": "a/model", "provider_name": "Alpha",
-            "supported_parameters": ["tools", "max_tokens"],
-            "context_length": 8192,
-            "max_prompt_tokens": 6144,
-            "max_completion_tokens": 2048,
-            "supports_tool_choice": {"auto": true},
-            "supports_implicit_caching": false,
-            "uptime_last_30m": 98.0
-        });
-        let mut kept_repeat = kept.clone();
-        kept_repeat["uptime_last_30m"] = serde_json::json!(97.0);
-        kept_repeat["supported_parameters"] = serde_json::json!(["max_tokens", "tools"]);
-        let other = serde_json::json!({
-            "tag": "z/model", "provider_name": "Zed",
-            "supported_parameters": ["tools"]
-        });
-        let base_conflict = serde_json::json!({
-            "tag": "baseten/fp8", "provider_name": "Baseten",
-            "supported_parameters": ["tools", "response_format"],
-            "context_length": 4096,
-            "max_prompt_tokens": 3072,
-            "max_completion_tokens": 1024,
-            "supports_tool_choice": {"auto": true, "none": true},
-            "supports_implicit_caching": false
-        });
-        let document = |rows: Vec<Value>| serde_json::json!({"data": {"id": "vendor/model", "endpoints": rows}});
-        let tags = |candidates: &[OpenRouterChatEndpointCandidate]| {
-            candidates
-                .iter()
-                .map(|candidate| candidate.endpoint().to_owned())
-                .collect::<Vec<_>>()
-        };
-        let facts = ModelFacts {
-            supported_parameters: BTreeSet::from(["tools".to_owned()]),
-            reasoning: None,
-            context_length: 8192,
-            image_input: false,
-        };
-        let admitted_without_conflict = validate_endpoints_document(
-            &document(vec![other.clone(), kept.clone(), kept_repeat.clone()]),
-            "vendor/model",
-        )?;
-        assert_eq!(tags(&admitted_without_conflict), ["a/model", "z/model"]);
-        let clean_identity = snapshot_from_facts(
-            "stable-route",
-            "vendor/model",
-            &facts,
-            &admitted_without_conflict,
-        )?;
-
+        let fixture = DuplicateEndpointFixture::new()?;
         for (field, conflict) in [
             ("provider_name", serde_json::json!("Other")),
             ("supported_parameters", serde_json::json!(["tools"])),
@@ -1845,98 +1909,95 @@ mod tests {
             ("supports_tool_choice", serde_json::json!({"auto": false})),
             ("supports_implicit_caching", serde_json::json!(true)),
         ] {
-            let mut changed = base_conflict.clone();
+            let mut changed = fixture.base_conflict.clone();
             changed[field] = conflict;
-            // A later row that matches the first must not put the tag back.
-            let mut majority = base_conflict.clone();
-            majority["uptime_last_30m"] = serde_json::json!(50.0);
-            let orders = [
-                vec![
-                    base_conflict.clone(),
-                    changed.clone(),
-                    kept.clone(),
-                    other.clone(),
-                    kept_repeat.clone(),
-                    majority.clone(),
-                ],
-                vec![
-                    changed.clone(),
-                    other.clone(),
-                    majority.clone(),
-                    kept_repeat.clone(),
-                    base_conflict.clone(),
-                    kept.clone(),
-                ],
-                vec![
-                    kept_repeat.clone(),
-                    majority,
-                    other.clone(),
-                    changed.clone(),
-                    kept.clone(),
-                    base_conflict.clone(),
-                ],
-            ];
+            let orders = fixture.orders(&changed);
             for rows in orders {
-                let candidates = validate_endpoints_document(&document(rows), "vendor/model")?;
+                let candidates =
+                    validate_endpoints_document(&endpoint_document(rows), "vendor/model")?;
                 assert_eq!(
-                    tags(&candidates),
+                    endpoint_tags(&candidates),
                     ["a/model", "z/model"],
                     "conflicting {field}"
                 );
-                let identity =
-                    snapshot_from_facts("stable-route", "vendor/model", &facts, &candidates)?;
-                assert_eq!(identity, clean_identity, "conflicting {field}");
+                let identity = snapshot_from_facts(
+                    "stable-route",
+                    "vendor/model",
+                    &fixture.facts,
+                    &candidates,
+                )?;
+                assert_eq!(identity, fixture.clean_identity, "conflicting {field}");
             }
-            for winner in [base_conflict.clone(), changed] {
+            for winner in [fixture.base_conflict.clone(), changed] {
                 let picked = validate_endpoints_document(
-                    &document(vec![winner, kept.clone(), other.clone()]),
+                    &endpoint_document(vec![winner, fixture.kept.clone(), fixture.other.clone()]),
                     "vendor/model",
                 )?;
                 let picked_identity =
-                    snapshot_from_facts("stable-route", "vendor/model", &facts, &picked)?;
-                assert_ne!(picked_identity, clean_identity, "winner for {field}");
+                    snapshot_from_facts("stable-route", "vendor/model", &fixture.facts, &picked)?;
+                assert_ne!(
+                    picked_identity, fixture.clean_identity,
+                    "winner for {field}"
+                );
             }
         }
 
-        let mut only_changed = base_conflict.clone();
-        only_changed["supported_parameters"] = serde_json::json!(["tools"]);
-        for rows in [
-            vec![base_conflict.clone(), only_changed.clone()],
-            vec![only_changed.clone(), base_conflict.clone()],
-        ] {
-            assert!(
-                matches!(
-                    validate_endpoints_document(&document(rows), "vendor/model"),
-                    Err(OpenRouterChatDiscoveryError::InvalidCatalogValue(path))
-                        if path == "endpoints.data.endpoints[].tag"
-                ),
-                "all-conflicting"
-            );
-        }
+        Ok(())
+    }
 
-        let mut second = other.clone();
+    #[test]
+    fn duplicate_tag_boundary_rows_are_exact() -> Result<(), Box<dyn std::error::Error>> {
+        let fixture = DuplicateEndpointFixture::new()?;
+        let mut changed = fixture.base_conflict.clone();
+        changed["supported_parameters"] = serde_json::json!(["tools"]);
+        let mut second = fixture.other.clone();
         second["provider_name"] = serde_json::json!("OtherZed");
-        let candidates = validate_endpoints_document(
-            &document(vec![
-                base_conflict,
-                only_changed,
-                second,
-                other,
-                kept.clone(),
-            ]),
-            "vendor/model",
-        )?;
-        assert_eq!(tags(&candidates), ["a/model"]);
-
-        let mut unsafe_row = kept_repeat.clone();
+        let mut unsafe_row = fixture.kept_repeat.clone();
         unsafe_row["tag"] = serde_json::json!("bad tag");
-        assert!(matches!(
-            validate_endpoints_document(
-                &document(vec![kept, unsafe_row, kept_repeat]),
-                "vendor/model"
+        for (label, rows, expected) in [
+            (
+                "all conflicting",
+                vec![fixture.base_conflict.clone(), changed.clone()],
+                "tag",
             ),
-            Err(OpenRouterChatDiscoveryError::InvalidCatalogValue(_))
-        ));
+            (
+                "all conflicting reversed",
+                vec![changed.clone(), fixture.base_conflict.clone()],
+                "tag",
+            ),
+            (
+                "two conflicted tags",
+                vec![
+                    fixture.base_conflict,
+                    changed,
+                    second,
+                    fixture.other,
+                    fixture.kept.clone(),
+                ],
+                "a/model",
+            ),
+            (
+                "malformed duplicate row",
+                vec![fixture.kept, unsafe_row, fixture.kept_repeat],
+                "invalid",
+            ),
+        ] {
+            let result = validate_endpoints_document(&endpoint_document(rows), "vendor/model");
+            match expected {
+                "tag" => assert!(
+                    matches!(result, Err(OpenRouterChatDiscoveryError::InvalidCatalogValue(ref path)) if path == "endpoints.data.endpoints[].tag"),
+                    "{label}: {result:?}"
+                ),
+                "invalid" => assert!(
+                    matches!(
+                        result,
+                        Err(OpenRouterChatDiscoveryError::InvalidCatalogValue(_))
+                    ),
+                    "{label}: {result:?}"
+                ),
+                tag => assert_eq!(endpoint_tags(&result?), [tag], "{label}"),
+            }
+        }
         Ok(())
     }
 
@@ -2077,27 +2138,31 @@ mod tests {
         let evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
-            vec![OpenRouterChatEndpointCandidate {
-                endpoint: "provider/model".to_owned(),
-                provider_name: "Provider".to_owned(),
-                supported_parameters: BTreeSet::from(
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: vec![OpenRouterChatEndpointCandidate {
+                    endpoint: "provider/model".to_owned(),
+                    provider_name: "Provider".to_owned(),
+                    supported_parameters: BTreeSet::from(
+                        ["tools", "max_tokens", "tool_choice"].map(str::to_owned),
+                    ),
+                    context_length: Some(4096),
+                    max_prompt_tokens: Some(3072),
+                    max_completion_tokens: Some(1024),
+                    tool_choice: OpenRouterToolChoiceModes {
+                        required: true,
+                        ..OpenRouterToolChoiceModes::default()
+                    },
+                    supports_implicit_caching: false,
+                }],
+                model_supported_parameters: BTreeSet::from(
                     ["tools", "max_tokens", "tool_choice"].map(str::to_owned),
                 ),
-                context_length: Some(4096),
-                max_prompt_tokens: Some(3072),
-                max_completion_tokens: Some(1024),
-                tool_choice: OpenRouterToolChoiceModes {
-                    required: true,
-                    ..OpenRouterToolChoiceModes::default()
-                },
-                supports_implicit_caching: false,
-            }],
-            BTreeSet::from(["tools", "max_tokens", "tool_choice"].map(str::to_owned)),
-            None,
-            4096,
-            false,
-            now,
-            Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+                reasoning: None,
+                context_length: 4096,
+                image_input: false,
+                observed_at: now,
+                expires_at: Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+            },
         )?;
         let contract = custom_context(&route, 2048)?;
         let target = OpenRouterChatTarget::gateway_managed(
@@ -2150,24 +2215,28 @@ mod tests {
         let first_evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
             model.clone(),
             route.identity(),
-            candidates.clone(),
-            parameters.clone(),
-            None,
-            4096,
-            false,
-            first_observed,
-            first_expiry,
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: candidates.clone(),
+                model_supported_parameters: parameters.clone(),
+                reasoning: None,
+                context_length: 4096,
+                image_input: false,
+                observed_at: first_observed,
+                expires_at: first_expiry,
+            },
         )?;
         let second_evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
             model,
             route.identity(),
-            candidates,
-            parameters,
-            None,
-            4096,
-            false,
-            second_observed,
-            second_expiry,
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: candidates,
+                model_supported_parameters: parameters,
+                reasoning: None,
+                context_length: 4096,
+                image_input: false,
+                observed_at: second_observed,
+                expires_at: second_expiry,
+            },
         )?;
         let context = custom_context(&route, 2048)?;
         let first_target = OpenRouterChatTarget::gateway_managed(
@@ -2250,13 +2319,15 @@ mod tests {
             let evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
                 ModelId::new("vendor/model")?,
                 route.identity(),
-                candidates,
-                facts.supported_parameters.clone(),
-                None,
-                4096,
-                false,
-                now,
-                Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+                crate::chat::OpenRouterChatDiscovery {
+                    endpoints: candidates,
+                    model_supported_parameters: facts.supported_parameters.clone(),
+                    reasoning: None,
+                    context_length: 4096,
+                    image_input: false,
+                    observed_at: now,
+                    expires_at: Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+                },
             )?;
             let target = OpenRouterChatTarget::gateway_managed(
                 route.clone(),
@@ -2284,22 +2355,24 @@ mod tests {
         let evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
-            vec![OpenRouterChatEndpointCandidate {
-                endpoint: "provider/model".to_owned(),
-                provider_name: "Provider".to_owned(),
-                supported_parameters: BTreeSet::new(),
-                context_length: Some(4096),
-                max_prompt_tokens: Some(3072),
-                max_completion_tokens: Some(1024),
-                tool_choice: OpenRouterToolChoiceModes::default(),
-                supports_implicit_caching: false,
-            }],
-            BTreeSet::new(),
-            None,
-            4096,
-            false,
-            Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
-            Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: vec![OpenRouterChatEndpointCandidate {
+                    endpoint: "provider/model".to_owned(),
+                    provider_name: "Provider".to_owned(),
+                    supported_parameters: BTreeSet::new(),
+                    context_length: Some(4096),
+                    max_prompt_tokens: Some(3072),
+                    max_completion_tokens: Some(1024),
+                    tool_choice: OpenRouterToolChoiceModes::default(),
+                    supports_implicit_caching: false,
+                }],
+                model_supported_parameters: BTreeSet::new(),
+                reasoning: None,
+                context_length: 4096,
+                image_input: false,
+                observed_at: Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
+                expires_at: Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+            },
         )?;
         let conservative = custom_context(&route, 2048)?;
         let target = OpenRouterChatTarget::gateway_managed(
@@ -2339,13 +2412,15 @@ mod tests {
         let stale = OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
-            vec![candidate.clone()],
-            BTreeSet::new(),
-            None,
-            4096,
-            false,
-            Timestamp::new(now.seconds().saturating_sub(20), now.nanoseconds())?,
-            Timestamp::new(now.seconds().saturating_sub(10), now.nanoseconds())?,
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: vec![candidate.clone()],
+                model_supported_parameters: BTreeSet::new(),
+                reasoning: None,
+                context_length: 4096,
+                image_input: false,
+                observed_at: Timestamp::new(now.seconds().saturating_sub(20), now.nanoseconds())?,
+                expires_at: Timestamp::new(now.seconds().saturating_sub(10), now.nanoseconds())?,
+            },
         )?;
         assert!(matches!(
             OpenRouterChatTarget::gateway_managed(route.clone(), stale, context.clone()),
@@ -2356,13 +2431,15 @@ mod tests {
         let fresh = OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
-            vec![candidate],
-            BTreeSet::new(),
-            None,
-            4096,
-            false,
-            Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
-            expiry,
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: vec![candidate],
+                model_supported_parameters: BTreeSet::new(),
+                reasoning: None,
+                context_length: 4096,
+                image_input: false,
+                observed_at: Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
+                expires_at: expiry,
+            },
         )?;
         // The reviewed Chat facts never refuse on the calendar: a decade past
         // their review-due date the route builds, and its authority is
@@ -2377,13 +2454,15 @@ mod tests {
         let future_evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             future_route.identity(),
-            fresh.endpoints().to_vec(),
-            BTreeSet::new(),
-            None,
-            4096,
-            false,
-            past_review,
-            Timestamp::new(past_review.seconds() + 60, 0)?,
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: fresh.endpoints().to_vec(),
+                model_supported_parameters: BTreeSet::new(),
+                reasoning: None,
+                context_length: 4096,
+                image_input: false,
+                observed_at: past_review,
+                expires_at: Timestamp::new(past_review.seconds() + 60, 0)?,
+            },
         )?;
         let future_evidence_expiry = future_evidence.expires_at();
         let future_target =
@@ -2418,9 +2497,13 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn authenticated_loopback_discovery_binds_exact_literal_and_paths()
-    -> Result<(), Box<dyn std::error::Error>> {
+    struct DiscoveryWirePeer {
+        client: Client,
+        origin_text: String,
+        peer: tokio::task::JoinHandle<io::Result<Vec<String>>>,
+    }
+
+    async fn discovery_wire_peer() -> Result<DiscoveryWirePeer, Box<dyn std::error::Error>> {
         let CertifiedKey { cert, signing_key } =
             generate_simple_self_signed(vec!["127.0.0.1".to_owned()])?;
         let certificate = cert.der().clone();
@@ -2479,6 +2562,21 @@ mod tests {
             }
             Ok::<_, io::Error>(requests)
         });
+        Ok(DiscoveryWirePeer {
+            client,
+            origin_text,
+            peer,
+        })
+    }
+
+    #[tokio::test]
+    async fn authenticated_loopback_discovery_binds_exact_literal_and_paths()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let DiscoveryWirePeer {
+            client,
+            origin_text,
+            peer,
+        } = discovery_wire_peer().await?;
         let source = Arc::new(StaticOpenRouterApiKeySource::new(
             OpenRouterApiKey::new("test-catalog-key")?,
             "test-account",

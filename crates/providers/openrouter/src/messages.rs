@@ -334,45 +334,15 @@ impl fmt::Debug for OpenRouterMessagesLanguageModel {
     }
 }
 
-impl LanguageModel for OpenRouterMessagesLanguageModel {
-    fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
-        let origin = Origin::parse(self.target.route.identity().origin().as_str()).ok()?;
-        Some(plakous_responses_dialect::bind_reachability_probe(
-            self.client.clone(),
-            origin,
-            self.target.descriptor().route().clone(),
-        ))
-    }
-
-    fn revalidate_runtime_authority(
-        self: Arc<Self>,
-        checked_at: Timestamp,
-    ) -> RuntimeModelAuthorityOperation {
-        Box::pin(async move {
-            self.target
-                .runtime_authority(checked_at)
-                .map_err(|error| match error {
-                    OpenRouterMessagesBuildError::StaleEvidence => {
-                        RuntimeModelAuthorityError::Stale
-                    }
-                    OpenRouterMessagesBuildError::Authentication(_) => {
-                        RuntimeModelAuthorityError::Unavailable
-                    }
-                    _ => RuntimeModelAuthorityError::ForeignAuthority,
-                })
-        })
-    }
-
-    fn prepare_call(
-        self: Arc<Self>,
-        plan: ValidatedRequestPlan,
-        context: ModelPreparationContext,
-    ) -> Result<PreparedModelCall, ModelPreparationError> {
+impl OpenRouterMessagesLanguageModel {
+    fn request_policy(
+        &self,
+        plan: &ValidatedRequestPlan,
+        context: &ModelPreparationContext,
+        output_bound: std::num::NonZeroU32,
+    ) -> Result<MessagesRequestPolicy, ModelPreparationError> {
         let descriptor = self.target.descriptor();
-        OPENROUTER_MESSAGES_WIRE.admit_plan(descriptor, &self.configuration, &plan, &context)?;
         let identity = self.target.route.identity();
-        let output_bound =
-            OPENROUTER_MESSAGES_WIRE.admit_route(identity, &self.configuration, &context)?;
         let retention = identity.retention_policy();
         let router = MessagesRouterPolicy::gateway_managed(
             retention
@@ -417,26 +387,57 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
         } else {
             policy
         };
+        Ok(policy)
+    }
+}
+
+impl LanguageModel for OpenRouterMessagesLanguageModel {
+    fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
+        let origin = Origin::parse(self.target.route.identity().origin().as_str()).ok()?;
+        Some(plakous_responses_dialect::bind_reachability_probe(
+            self.client.clone(),
+            origin,
+            self.target.descriptor().route().clone(),
+        ))
+    }
+
+    fn revalidate_runtime_authority(
+        self: Arc<Self>,
+        checked_at: Timestamp,
+    ) -> RuntimeModelAuthorityOperation {
+        Box::pin(async move {
+            self.target
+                .runtime_authority(checked_at)
+                .map_err(|error| match error {
+                    OpenRouterMessagesBuildError::StaleEvidence => {
+                        RuntimeModelAuthorityError::Stale
+                    }
+                    OpenRouterMessagesBuildError::Authentication(_) => {
+                        RuntimeModelAuthorityError::Unavailable
+                    }
+                    _ => RuntimeModelAuthorityError::ForeignAuthority,
+                })
+        })
+    }
+
+    fn prepare_call(
+        self: Arc<Self>,
+        plan: ValidatedRequestPlan,
+        context: ModelPreparationContext,
+    ) -> Result<PreparedModelCall, ModelPreparationError> {
+        let descriptor = self.target.descriptor();
+        OPENROUTER_MESSAGES_WIRE.admit_plan(descriptor, &self.configuration, &plan, &context)?;
+        let identity = self.target.route.identity();
+        let output_bound =
+            OPENROUTER_MESSAGES_WIRE.admit_route(identity, &self.configuration, &context)?;
+        let policy = self.request_policy(&plan, &context, output_bound)?;
         let lowered = lower_request_with_active_artifact(
             &plan,
             &policy,
             ToolOwnership::default(),
             context.active_family_artifact(),
         )
-        .map_err(|error| {
-            let kind = match error.kind() {
-                MessagesRequestErrorKind::UnsupportedSemantic => {
-                    ModelPreparationErrorKind::UnsupportedCapability
-                }
-                MessagesRequestErrorKind::InvalidRequest => {
-                    ModelPreparationErrorKind::InvalidRequest
-                }
-                MessagesRequestErrorKind::ProtectedHistory => {
-                    ModelPreparationErrorKind::ProtectedHistory
-                }
-            };
-            rejection(kind, "OpenRouter Messages request lowering failed")
-        })?;
+        .map_err(messages_lowering_error)?;
         let replay_diagnostics = lowered
             .replay_diagnostics()
             .iter()
@@ -976,6 +977,17 @@ fn retry_delay(advice: Duration) -> Option<plakous_model::ModelRetryDelay> {
     plakous_model::ModelRetryDelay::from_millis(millis).ok()
 }
 
+fn messages_lowering_error(error: plakous_messages::MessagesRequestError) -> ModelPreparationError {
+    let kind = match error.kind() {
+        MessagesRequestErrorKind::UnsupportedSemantic => {
+            ModelPreparationErrorKind::UnsupportedCapability
+        }
+        MessagesRequestErrorKind::InvalidRequest => ModelPreparationErrorKind::InvalidRequest,
+        MessagesRequestErrorKind::ProtectedHistory => ModelPreparationErrorKind::ProtectedHistory,
+    };
+    rejection(kind, "OpenRouter Messages request lowering failed")
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1190,28 +1202,33 @@ mod tests {
         OpenRouterChatModelEvidence::from_authenticated_discovery(
             plakous_model::ModelId::new("vendor/dynamic-model")?,
             route.identity(),
-            vec![OpenRouterChatEndpointCandidate {
-                endpoint: "provider/dynamic-model".to_owned(),
-                provider_name: "Provider".to_owned(),
-                supported_parameters: BTreeSet::from([
+            crate::chat::OpenRouterChatDiscovery {
+                endpoints: vec![OpenRouterChatEndpointCandidate {
+                    endpoint: "provider/dynamic-model".to_owned(),
+                    provider_name: "Provider".to_owned(),
+                    supported_parameters: BTreeSet::from([
+                        "tools".to_owned(),
+                        "tool_choice".to_owned(),
+                    ]),
+                    context_length: Some(8_192),
+                    max_prompt_tokens: Some(4_096),
+                    max_completion_tokens: Some(4_096),
+                    tool_choice: OpenRouterToolChoiceModes::default(),
+                    supports_implicit_caching: false,
+                }],
+                model_supported_parameters: BTreeSet::from([
                     "tools".to_owned(),
                     "tool_choice".to_owned(),
                 ]),
-                context_length: Some(8_192),
-                max_prompt_tokens: Some(4_096),
-                max_completion_tokens: Some(4_096),
-                tool_choice: OpenRouterToolChoiceModes::default(),
-                supports_implicit_caching: false,
-            }],
-            BTreeSet::from(["tools".to_owned(), "tool_choice".to_owned()]),
-            None,
-            8_192,
-            false,
-            Timestamp::new(
-                now.seconds().saturating_sub(observed_offset),
-                now.nanoseconds(),
-            )?,
-            Timestamp::new(now.seconds() + expiry_offset, now.nanoseconds())?,
+                reasoning: None,
+                context_length: 8_192,
+                image_input: false,
+                observed_at: Timestamp::new(
+                    now.seconds().saturating_sub(observed_offset),
+                    now.nanoseconds(),
+                )?,
+                expires_at: Timestamp::new(now.seconds() + expiry_offset, now.nanoseconds())?,
+            },
         )
         .map_err(Into::into)
     }

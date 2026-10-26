@@ -277,18 +277,31 @@ pub struct OpenRouterChatModelEvidence {
     expires_at: Timestamp,
 }
 
+pub(crate) struct OpenRouterChatDiscovery {
+    pub(crate) endpoints: Vec<OpenRouterChatEndpointCandidate>,
+    pub(crate) model_supported_parameters: BTreeSet<String>,
+    pub(crate) reasoning: Option<OpenRouterReasoningFacts>,
+    pub(crate) context_length: u64,
+    pub(crate) image_input: bool,
+    pub(crate) observed_at: Timestamp,
+    pub(crate) expires_at: Timestamp,
+}
+
 impl OpenRouterChatModelEvidence {
     pub(crate) fn from_authenticated_discovery(
         model: ModelId,
         route: &crate::OpenRouterChatRouteIdentity,
-        endpoints: Vec<OpenRouterChatEndpointCandidate>,
-        model_supported_parameters: BTreeSet<String>,
-        reasoning: Option<OpenRouterReasoningFacts>,
-        context_length: u64,
-        image_input: bool,
-        observed_at: Timestamp,
-        expires_at: Timestamp,
+        discovery: OpenRouterChatDiscovery,
     ) -> Result<Self, OpenRouterChatBuildError> {
+        let OpenRouterChatDiscovery {
+            endpoints,
+            model_supported_parameters,
+            reasoning,
+            context_length,
+            image_input,
+            observed_at,
+            expires_at,
+        } = discovery;
         if !concrete_model_id(model.as_str())
             || endpoints.is_empty()
             || context_length == 0
@@ -818,49 +831,15 @@ impl fmt::Debug for OpenRouterChatLanguageModel {
     }
 }
 
-impl LanguageModel for OpenRouterChatLanguageModel {
-    fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
-        let origin = Origin::parse(self.target.route.identity().origin().as_str()).ok()?;
-        Some(plakous_responses_dialect::bind_reachability_probe(
-            self.client.clone(),
-            origin,
-            self.target.descriptor().route().clone(),
-        ))
-    }
-
-    fn revalidate_runtime_authority(
-        self: Arc<Self>,
-        checked_at: Timestamp,
-    ) -> RuntimeModelAuthorityOperation {
-        Box::pin(async move {
-            self.target
-                .runtime_authority(checked_at)
-                .map_err(|error| match error {
-                    OpenRouterChatBuildError::StaleEvidence => RuntimeModelAuthorityError::Stale,
-                    OpenRouterChatBuildError::Authentication(_) => {
-                        RuntimeModelAuthorityError::Unavailable
-                    }
-                    _ => RuntimeModelAuthorityError::ForeignAuthority,
-                })
-        })
-    }
-
-    fn prepare_call(
-        self: Arc<Self>,
-        plan: ValidatedRequestPlan,
-        context: ModelPreparationContext,
-    ) -> Result<PreparedModelCall, ModelPreparationError> {
+impl OpenRouterChatLanguageModel {
+    fn request_policy(
+        &self,
+        plan: &ValidatedRequestPlan,
+        context: &ModelPreparationContext,
+        output_bound: std::num::NonZeroU32,
+    ) -> Result<ChatRequestPolicy, ModelPreparationError> {
         let descriptor = self.target.descriptor();
-        OPENROUTER_CHAT_WIRE.admit_plan(descriptor, &self.configuration, &plan, &context)?;
-        if context.active_family_artifact().is_some() {
-            return Err(rejection(
-                ModelPreparationErrorKind::InvalidRequest,
-                "stateless Chat has no aggregate family artifact",
-            ));
-        }
         let identity = self.target.route.identity();
-        let output_bound =
-            OPENROUTER_CHAT_WIRE.admit_route(identity, &self.configuration, &context)?;
         let router = match self.target.routing() {
             OpenRouterChatRoutingPolicy::StrictPinned(_) => {
                 return Err(rejection(
@@ -921,30 +900,59 @@ impl LanguageModel for OpenRouterChatLanguageModel {
         } else {
             policy
         };
+        Ok(policy)
+    }
+}
+
+impl LanguageModel for OpenRouterChatLanguageModel {
+    fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
+        let origin = Origin::parse(self.target.route.identity().origin().as_str()).ok()?;
+        Some(plakous_responses_dialect::bind_reachability_probe(
+            self.client.clone(),
+            origin,
+            self.target.descriptor().route().clone(),
+        ))
+    }
+
+    fn revalidate_runtime_authority(
+        self: Arc<Self>,
+        checked_at: Timestamp,
+    ) -> RuntimeModelAuthorityOperation {
+        Box::pin(async move {
+            self.target
+                .runtime_authority(checked_at)
+                .map_err(|error| match error {
+                    OpenRouterChatBuildError::StaleEvidence => RuntimeModelAuthorityError::Stale,
+                    OpenRouterChatBuildError::Authentication(_) => {
+                        RuntimeModelAuthorityError::Unavailable
+                    }
+                    _ => RuntimeModelAuthorityError::ForeignAuthority,
+                })
+        })
+    }
+
+    fn prepare_call(
+        self: Arc<Self>,
+        plan: ValidatedRequestPlan,
+        context: ModelPreparationContext,
+    ) -> Result<PreparedModelCall, ModelPreparationError> {
+        let descriptor = self.target.descriptor();
+        OPENROUTER_CHAT_WIRE.admit_plan(descriptor, &self.configuration, &plan, &context)?;
+        if context.active_family_artifact().is_some() {
+            return Err(rejection(
+                ModelPreparationErrorKind::InvalidRequest,
+                "stateless Chat has no aggregate family artifact",
+            ));
+        }
+        let identity = self.target.route.identity();
+        let output_bound =
+            OPENROUTER_CHAT_WIRE.admit_route(identity, &self.configuration, &context)?;
+        let policy = self.request_policy(&plan, &context, output_bound)?;
         let replay_target = policy.replay_target();
         let stream_reasoning = policy.reasoning();
         let stream_reasoning_replay = policy.reasoning_replay();
         let stream_reasoning_alias = policy.reasoning_alias();
-        let lowered = lower_request(&plan, &policy).map_err(|error| {
-            let kind = match error.kind() {
-                plakous_chat_completions::ChatRequestErrorKind::UnsupportedSemantic => {
-                    ModelPreparationErrorKind::UnsupportedCapability
-                }
-                plakous_chat_completions::ChatRequestErrorKind::InvalidRequest => {
-                    ModelPreparationErrorKind::InvalidRequest
-                }
-                plakous_chat_completions::ChatRequestErrorKind::ProtectedHistory => {
-                    ModelPreparationErrorKind::ProtectedHistory
-                }
-            };
-            rejection(
-                kind,
-                format!(
-                    "OpenRouter Chat request lowering failed: {}",
-                    error.message()
-                ),
-            )
-        })?;
+        let lowered = lower_request(&plan, &policy).map_err(chat_lowering_error)?;
         let record = OPENROUTER_CHAT_WIRE.prepare_record(
             descriptor,
             &plan,
@@ -1576,6 +1584,27 @@ pub(crate) fn test_descriptor() -> ResolvedModelDescriptor {
     )
 }
 
+fn chat_lowering_error(error: plakous_chat_completions::ChatRequestError) -> ModelPreparationError {
+    let kind = match error.kind() {
+        plakous_chat_completions::ChatRequestErrorKind::UnsupportedSemantic => {
+            ModelPreparationErrorKind::UnsupportedCapability
+        }
+        plakous_chat_completions::ChatRequestErrorKind::InvalidRequest => {
+            ModelPreparationErrorKind::InvalidRequest
+        }
+        plakous_chat_completions::ChatRequestErrorKind::ProtectedHistory => {
+            ModelPreparationErrorKind::ProtectedHistory
+        }
+    };
+    rejection(
+        kind,
+        format!(
+            "OpenRouter Chat request lowering failed: {}",
+            error.message()
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1605,35 +1634,38 @@ mod tests {
         Ok(OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
-            vec![OpenRouterChatEndpointCandidate {
-                endpoint: "provider/first".to_owned(),
-                provider_name: "First".to_owned(),
-                supported_parameters: BTreeSet::from(
+            OpenRouterChatDiscovery {
+                endpoints: vec![OpenRouterChatEndpointCandidate {
+                    endpoint: "provider/first".to_owned(),
+                    provider_name: "First".to_owned(),
+                    supported_parameters: BTreeSet::from(
+                        ["tools", "max_tokens", "tool_choice", "reasoning", "stop"]
+                            .map(str::to_owned),
+                    ),
+                    context_length: Some(131_072),
+                    max_prompt_tokens: Some(100_000),
+                    max_completion_tokens: Some(65_536),
+                    tool_choice: OpenRouterToolChoiceModes {
+                        auto: true,
+                        ..OpenRouterToolChoiceModes::default()
+                    },
+                    supports_implicit_caching: false,
+                }],
+                model_supported_parameters: BTreeSet::from(
                     ["tools", "max_tokens", "tool_choice", "reasoning", "stop"].map(str::to_owned),
                 ),
-                context_length: Some(131_072),
-                max_prompt_tokens: Some(100_000),
-                max_completion_tokens: Some(65_536),
-                tool_choice: OpenRouterToolChoiceModes {
-                    auto: true,
-                    ..OpenRouterToolChoiceModes::default()
-                },
-                supports_implicit_caching: false,
-            }],
-            BTreeSet::from(
-                ["tools", "max_tokens", "tool_choice", "reasoning", "stop"].map(str::to_owned),
-            ),
-            Some(OpenRouterReasoningFacts {
-                supported_efforts: Some(vec!["medium".to_owned()]),
-                default_effort: Some("medium".to_owned()),
-                default_enabled: true,
-                supports_max_tokens: false,
-                mandatory: false,
-            }),
-            131_072,
-            false,
-            now,
-            Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+                reasoning: Some(OpenRouterReasoningFacts {
+                    supported_efforts: Some(vec!["medium".to_owned()]),
+                    default_effort: Some("medium".to_owned()),
+                    default_enabled: true,
+                    supports_max_tokens: false,
+                    mandatory: false,
+                }),
+                context_length: 131_072,
+                image_input: false,
+                observed_at: now,
+                expires_at: Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
+            },
         )?)
     }
 
@@ -1687,138 +1719,155 @@ mod tests {
         Ok(())
     }
 
+    struct AdmissionRow {
+        label: &'static str,
+        before: OpenRouterChatModelEvidence,
+        after: OpenRouterChatModelEvidence,
+        unchanged: Option<AdmissionWire>,
+    }
+
+    fn admission_fact_rows(
+        base: &OpenRouterChatModelEvidence,
+    ) -> Result<Vec<AdmissionRow>, Box<dyn std::error::Error>> {
+        let mut changed = Vec::new();
+        let mut value = base.clone();
+        value.context_length = 131_070;
+        changed.push(("model context", value));
+        let mut value = base.clone();
+        value.model = ModelId::new("vendor/other")?;
+        changed.push(("model id", value));
+        let mut value = base.clone();
+        value.model_supported_parameters.remove("max_tokens");
+        changed.push(("model required parameter", value));
+        let mut value = base.clone();
+        value.model_supported_parameters.remove("stop");
+        changed.push(("model wire parameter", value));
+        for fact in [
+            "efforts",
+            "default_effort",
+            "default_enabled",
+            "supports_max_tokens",
+            "mandatory",
+        ] {
+            let mut value = base.clone();
+            let reasoning = value.reasoning.as_mut().ok_or("reasoning")?;
+            match fact {
+                "efforts" => {
+                    reasoning.supported_efforts = Some(vec!["low".to_owned(), "medium".to_owned()]);
+                }
+                "default_effort" => reasoning.default_effort = None,
+                "default_enabled" => reasoning.default_enabled = false,
+                "supports_max_tokens" => reasoning.supports_max_tokens = true,
+                _ => reasoning.mandatory = true,
+            }
+            changed.push((fact, value));
+        }
+        for fact in [
+            "prompt",
+            "completion",
+            "context",
+            "tools",
+            "max_tokens",
+            "reasoning",
+            "stop",
+            "caching",
+            "output rung",
+            "safe input",
+        ] {
+            let mut value = base.clone();
+            let endpoint = &mut value.endpoints[0];
+            match fact {
+                "prompt" => endpoint.max_prompt_tokens = Some(99_000),
+                "completion" => endpoint.max_completion_tokens = Some(40_000),
+                "context" => endpoint.context_length = Some(120_000),
+                "caching" => endpoint.supports_implicit_caching = true,
+                "output rung" => endpoint.max_completion_tokens = Some(16_384),
+                "safe input" => endpoint.max_prompt_tokens = Some(32_768),
+                parameter => {
+                    endpoint.supported_parameters.remove(parameter);
+                }
+            }
+            changed.push((fact, value));
+        }
+        Ok(changed
+            .into_iter()
+            .map(|(label, after)| AdmissionRow {
+                label,
+                before: base.clone(),
+                after,
+                unchanged: matches!(label, "stop" | "model wire parameter")
+                    .then_some(AdmissionWire::Responses),
+            })
+            .collect())
+    }
+
+    fn admission_tool_choice_rows(base: &OpenRouterChatModelEvidence) -> Vec<AdmissionRow> {
+        let mut rows = Vec::new();
+        for fact in ["auto", "none", "required", "function", "tool_choice"] {
+            let mut value = base.clone();
+            let endpoint = &mut value.endpoints[0];
+            match fact {
+                "auto" => endpoint.tool_choice.auto = false,
+                "none" => endpoint.tool_choice.none = true,
+                "required" => endpoint.tool_choice.required = true,
+                "function" => endpoint.tool_choice.function = true,
+                _ => {
+                    endpoint.supported_parameters.remove("tool_choice");
+                }
+            }
+            rows.push(AdmissionRow {
+                label: fact,
+                before: base.clone(),
+                after: value,
+                unchanged: Some(AdmissionWire::Chat),
+            });
+        }
+        rows
+    }
+
+    fn admission_correlated_row(base: &OpenRouterChatModelEvidence) -> AdmissionRow {
+        let mut paired = base.clone();
+        let mut second = paired.endpoints[0].clone();
+        second.endpoint = "provider/second".to_owned();
+        second.supported_parameters.remove("stop");
+        second.supports_implicit_caching = true;
+        paired.endpoints.push(second);
+        let mut crossed = paired.clone();
+        crossed.endpoints[0].supports_implicit_caching = true;
+        crossed.endpoints[1].supports_implicit_caching = false;
+        AdmissionRow {
+            label: "per-endpoint parameter/behaviour correlation",
+            before: paired,
+            after: crossed,
+            unchanged: Some(AdmissionWire::Responses),
+        }
+    }
+
     #[test]
     fn admission_projection_rotates_on_each_model_and_endpoint_fact()
     -> Result<(), Box<dyn std::error::Error>> {
         let base = admission_fixture()?;
-        for wire in [
-            AdmissionWire::Chat,
-            AdmissionWire::Responses,
-            AdmissionWire::Messages,
-        ] {
-            let identity = base.admission_identity(wire)?;
-            let mut changed = Vec::new();
-            let mut value = base.clone();
-            value.context_length = 131_070;
-            changed.push(("model context", value));
-            let mut value = base.clone();
-            value.model = ModelId::new("vendor/other")?;
-            changed.push(("model id", value));
-            let mut value = base.clone();
-            value.model_supported_parameters.remove("max_tokens");
-            changed.push(("model required parameter", value));
-            let mut value = base.clone();
-            value.model_supported_parameters.remove("stop");
-            changed.push(("model wire parameter", value));
-            for fact in [
-                "efforts",
-                "default_effort",
-                "default_enabled",
-                "supports_max_tokens",
-                "mandatory",
+        let mut rows = admission_fact_rows(&base)?;
+        rows.extend(admission_tool_choice_rows(&base));
+        rows.push(admission_correlated_row(&base));
+        for row in rows {
+            for wire in [
+                AdmissionWire::Chat,
+                AdmissionWire::Responses,
+                AdmissionWire::Messages,
             ] {
-                let mut value = base.clone();
-                let reasoning = value.reasoning.as_mut().ok_or("reasoning")?;
-                match fact {
-                    "efforts" => {
-                        reasoning.supported_efforts =
-                            Some(vec!["low".to_owned(), "medium".to_owned()]);
-                    }
-                    "default_effort" => reasoning.default_effort = None,
-                    "default_enabled" => reasoning.default_enabled = false,
-                    "supports_max_tokens" => reasoning.supports_max_tokens = true,
-                    _ => reasoning.mandatory = true,
-                }
-                changed.push((fact, value));
-            }
-            for fact in [
-                "prompt",
-                "completion",
-                "context",
-                "tools",
-                "max_tokens",
-                "reasoning",
-                "stop",
-                "caching",
-                "output rung",
-                "safe input",
-            ] {
-                let mut value = base.clone();
-                let endpoint = &mut value.endpoints[0];
-                match fact {
-                    "prompt" => endpoint.max_prompt_tokens = Some(99_000),
-                    "completion" => endpoint.max_completion_tokens = Some(40_000),
-                    "context" => endpoint.context_length = Some(120_000),
-                    "caching" => endpoint.supports_implicit_caching = true,
-                    "output rung" => endpoint.max_completion_tokens = Some(16_384),
-                    "safe input" => endpoint.max_prompt_tokens = Some(32_768),
-                    parameter => {
-                        endpoint.supported_parameters.remove(parameter);
-                    }
-                }
-                changed.push((fact, value));
-            }
-            for (fact, value) in changed {
-                if matches!(wire, AdmissionWire::Responses)
-                    && matches!(fact, "stop" | "model wire parameter")
-                {
-                    assert_eq!(
-                        identity,
-                        value.admission_identity(wire)?,
-                        "Responses never sends stop"
-                    );
-                } else {
-                    assert_ne!(
-                        identity,
-                        value.admission_identity(wire)?,
-                        "{fact}: {wire:?}"
-                    );
-                }
-            }
-            for fact in ["auto", "none", "required", "function", "tool_choice"] {
-                let mut value = base.clone();
-                let endpoint = &mut value.endpoints[0];
-                match fact {
-                    "auto" => endpoint.tool_choice.auto = false,
-                    "none" => endpoint.tool_choice.none = true,
-                    "required" => endpoint.tool_choice.required = true,
-                    "function" => endpoint.tool_choice.function = true,
-                    _ => {
-                        endpoint.supported_parameters.remove("tool_choice");
-                    }
-                }
-                if matches!(wire, AdmissionWire::Chat) {
-                    assert_eq!(
-                        identity,
-                        value.admission_identity(wire)?,
-                        "Chat does not emit {fact}"
-                    );
-                } else {
-                    assert_ne!(identity, value.admission_identity(wire)?, "explicit {fact}");
-                }
-            }
-            let mut paired = base.clone();
-            let mut second = paired.endpoints[0].clone();
-            second.endpoint = "provider/second".to_owned();
-            second.supported_parameters.remove("stop");
-            second.supports_implicit_caching = true;
-            paired.endpoints.push(second);
-            let mut crossed = paired.clone();
-            crossed.endpoints[0].supports_implicit_caching = true;
-            crossed.endpoints[1].supports_implicit_caching = false;
-            if matches!(wire, AdmissionWire::Responses) {
-                assert_eq!(
-                    paired.admission_identity(wire)?,
-                    crossed.admission_identity(wire)?,
-                    "Responses never sends stop"
+                let equal = matches!(
+                    (wire, row.unchanged),
+                    (AdmissionWire::Chat, Some(AdmissionWire::Chat))
+                        | (AdmissionWire::Responses, Some(AdmissionWire::Responses))
                 );
-                continue;
+                assert_eq!(
+                    row.before.admission_identity(wire)? == row.after.admission_identity(wire)?,
+                    equal,
+                    "{}: {wire:?}",
+                    row.label
+                );
             }
-            assert_ne!(
-                paired.admission_identity(wire)?,
-                crossed.admission_identity(wire)?,
-                "per-endpoint parameter/behaviour correlation: {wire:?}"
-            );
         }
         Ok(())
     }

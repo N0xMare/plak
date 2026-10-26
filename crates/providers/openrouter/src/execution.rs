@@ -343,44 +343,7 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
-        self.target
-            .runtime_authority(context.prepared_at())
-            .map_err(|_| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "OpenRouter Responses discovery evidence is stale or foreign",
-                )
-            })?;
-        self.descriptor.validate_plan_binding(&plan)?;
-        if plan.request().selected_provider_configuration_id()
-            != self.configuration.selected_identity()
-            || plan.request().effective_provider_configuration_id()
-                != self.configuration.effective_identity()
-        {
-            return Err(rejection(
-                ModelPreparationErrorKind::InvalidConfiguration,
-                "OpenRouter request provider configuration is foreign",
-            ));
-        }
-        if !request_matches_configuration(plan.request(), self.configuration.selected().behavior())
-        {
-            return Err(rejection(
-                ModelPreparationErrorKind::InvalidConfiguration,
-                "OpenRouter request behavior differs from compiled configuration",
-            ));
-        }
-        self.descriptor
-            .validate_plan_admission(plan.request(), &plan)?;
-        context
-            .authority()
-            .validate(&self.descriptor, context.prepared_at())?;
-        let route = self.target.route();
-        if context.authority().account_binding() != route.identity().account_binding()
-            || context.authority().credential_authority_binding()
-                != route.identity().credential_authority_binding()
-        {
-            return Err(RuntimeModelAuthorityError::ForeignAuthority.into());
-        }
+        self.admit_preparation(&plan, &context)?;
         let request = plan.request();
         if request
             .tools()
@@ -403,36 +366,7 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
                 "OpenRouter canonical projection facts are invalid",
             )
         })?;
-        let authority = ResponsesRequestAuthority::from_admitted_operation(
-            &self.descriptor,
-            &plan,
-            request,
-            context.authority().account_binding(),
-            openrouter_semantic_revisions().map_err(|_| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "OpenRouter semantic revisions are invalid",
-                )
-            })?,
-            context
-                .cache_affinity()
-                .map(plakous_model::ModelCacheAffinity::identity),
-            ResponsesStoragePolicy::Stateless,
-        )
-        .map_err(|error| {
-            let kind = if matches!(
-                error,
-                plakous_responses_dialect::ResponsesReplayError::IncompleteAuthority
-            ) {
-                ModelPreparationErrorKind::InvalidConfiguration
-            } else {
-                ModelPreparationErrorKind::InvalidRequest
-            };
-            rejection(
-                kind,
-                "OpenRouter request authority does not match the operation",
-            )
-        })?;
+        let authority = self.request_authority(&plan, &context)?;
         let replay_bridge = context
             .active_family_artifact()
             .map(|active| {
@@ -479,6 +413,130 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
                 format!("OpenRouter shared request lowering failed: {error}"),
             )
         })?;
+        let record = self.prepare_record(&plan, &context, &prepared_attempt)?;
+        let execution = PreparedResponsesModelExecution::new(
+            prepared_attempt,
+            canonical,
+            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
+            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
+            replay_bridge
+                .as_ref()
+                .map(|bridge| bridge.hosted_programs().clone())
+                .unwrap_or_default(),
+            plan,
+            artifact_binding,
+            Arc::clone(&self.clock),
+            self.descriptor.clone(),
+            self.config.event_channel_capacity,
+            None,
+        )
+        .map_err(|_| {
+            rejection(
+                ModelPreparationErrorKind::InvalidConfiguration,
+                "OpenRouter prepared execution facts are inconsistent",
+            )
+        })?;
+        let service = Arc::clone(&self.service);
+        let clock = Arc::clone(&self.clock);
+        let timeout = self.config.operation_timeout;
+        Ok(PreparedModelCall::new(record, move |call_context| {
+            let deadline = operation_deadline(clock.as_ref(), timeout, None);
+            start_prepared_responses_model_call(execution, service, call_context, deadline)
+        }))
+    }
+}
+
+impl OpenRouterResponsesLanguageModel {
+    fn admit_preparation(
+        &self,
+        plan: &ValidatedRequestPlan,
+        context: &ModelPreparationContext,
+    ) -> Result<(), ModelPreparationError> {
+        self.target
+            .runtime_authority(context.prepared_at())
+            .map_err(|_| {
+                rejection(
+                    ModelPreparationErrorKind::InvalidConfiguration,
+                    "OpenRouter Responses discovery evidence is stale or foreign",
+                )
+            })?;
+        self.descriptor.validate_plan_binding(plan)?;
+        if plan.request().selected_provider_configuration_id()
+            != self.configuration.selected_identity()
+            || plan.request().effective_provider_configuration_id()
+                != self.configuration.effective_identity()
+        {
+            return Err(rejection(
+                ModelPreparationErrorKind::InvalidConfiguration,
+                "OpenRouter request provider configuration is foreign",
+            ));
+        }
+        if !request_matches_configuration(plan.request(), self.configuration.selected().behavior())
+        {
+            return Err(rejection(
+                ModelPreparationErrorKind::InvalidConfiguration,
+                "OpenRouter request behavior differs from compiled configuration",
+            ));
+        }
+        self.descriptor
+            .validate_plan_admission(plan.request(), plan)?;
+        context
+            .authority()
+            .validate(&self.descriptor, context.prepared_at())?;
+        let route = self.target.route();
+        if context.authority().account_binding() != route.identity().account_binding()
+            || context.authority().credential_authority_binding()
+                != route.identity().credential_authority_binding()
+        {
+            return Err(RuntimeModelAuthorityError::ForeignAuthority.into());
+        }
+        Ok(())
+    }
+
+    fn request_authority(
+        &self,
+        plan: &ValidatedRequestPlan,
+        context: &ModelPreparationContext,
+    ) -> Result<ResponsesRequestAuthority, ModelPreparationError> {
+        let request = plan.request();
+        ResponsesRequestAuthority::from_admitted_operation(
+            &self.descriptor,
+            plan,
+            request,
+            context.authority().account_binding(),
+            openrouter_semantic_revisions().map_err(|_| {
+                rejection(
+                    ModelPreparationErrorKind::InvalidConfiguration,
+                    "OpenRouter semantic revisions are invalid",
+                )
+            })?,
+            context
+                .cache_affinity()
+                .map(plakous_model::ModelCacheAffinity::identity),
+            ResponsesStoragePolicy::Stateless,
+        )
+        .map_err(|error| {
+            let kind = if matches!(
+                error,
+                plakous_responses_dialect::ResponsesReplayError::IncompleteAuthority
+            ) {
+                ModelPreparationErrorKind::InvalidConfiguration
+            } else {
+                ModelPreparationErrorKind::InvalidRequest
+            };
+            rejection(
+                kind,
+                "OpenRouter request authority does not match the operation",
+            )
+        })
+    }
+
+    fn prepare_record(
+        &self,
+        plan: &ValidatedRequestPlan,
+        context: &ModelPreparationContext,
+        prepared_attempt: &plakous_responses_dialect::PreparedResponsesAttempt,
+    ) -> Result<PreparedCallRecord, ModelPreparationError> {
         let wire_digest = prepared_attempt.wire_digest();
         let wire_size = u64::try_from(prepared_attempt.wire_size()).map_err(|_| {
             rejection(
@@ -512,7 +570,7 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
                 .with_wire_input(
                     prepared_attempt.body().as_ref(),
                     Some(plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS),
-                    &context,
+                    context,
                 )?;
         let output_limit = prepared_attempt
             .enforced_output_tokens()
@@ -545,8 +603,8 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
         };
         let projection = PreparedModelProjection::new(
             &self.descriptor,
-            &plan,
-            &context,
+            plan,
+            context,
             ProtocolId::new(RESPONSES_FAMILY).map_err(|_| {
                 rejection(
                     ModelPreparationErrorKind::InvalidConfiguration,
@@ -562,37 +620,7 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
             cache_use,
             output_limit,
         )?;
-        let record =
-            PreparedCallRecord::for_prepared(&self.descriptor, &plan, projection, &context)?;
-        let execution = PreparedResponsesModelExecution::new(
-            prepared_attempt,
-            canonical,
-            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
-            CanonicalIdSources::with_clock(Arc::clone(&self.clock)),
-            replay_bridge
-                .as_ref()
-                .map(|bridge| bridge.hosted_programs().clone())
-                .unwrap_or_default(),
-            plan,
-            artifact_binding,
-            Arc::clone(&self.clock),
-            self.descriptor.clone(),
-            self.config.event_channel_capacity,
-            None,
-        )
-        .map_err(|_| {
-            rejection(
-                ModelPreparationErrorKind::InvalidConfiguration,
-                "OpenRouter prepared execution facts are inconsistent",
-            )
-        })?;
-        let service = Arc::clone(&self.service);
-        let clock = Arc::clone(&self.clock);
-        let timeout = self.config.operation_timeout;
-        Ok(PreparedModelCall::new(record, move |call_context| {
-            let deadline = operation_deadline(clock.as_ref(), timeout, None);
-            start_prepared_responses_model_call(execution, service, call_context, deadline)
-        }))
+        PreparedCallRecord::for_prepared(&self.descriptor, plan, projection, context)
     }
 }
 

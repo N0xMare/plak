@@ -55,22 +55,24 @@ fn evidence(
     Ok(OpenRouterChatModelEvidence::from_authenticated_discovery(
         ModelId::new("vendor/model")?,
         route.identity(),
-        vec![OpenRouterChatEndpointCandidate {
-            endpoint: "provider/first".to_owned(),
-            provider_name: "First".to_owned(),
-            supported_parameters: parameters.clone(),
-            context_length: Some(131_072),
-            max_prompt_tokens: Some(100_000),
-            max_completion_tokens: Some(65_536),
-            tool_choice: OpenRouterToolChoiceModes::default(),
-            supports_implicit_caching: false,
-        }],
-        parameters,
-        reasoning,
-        131_072,
-        false,
-        now,
-        Timestamp::new(now.seconds() + 3_600, 0)?,
+        crate::chat::OpenRouterChatDiscovery {
+            endpoints: vec![OpenRouterChatEndpointCandidate {
+                endpoint: "provider/first".to_owned(),
+                provider_name: "First".to_owned(),
+                supported_parameters: parameters.clone(),
+                context_length: Some(131_072),
+                max_prompt_tokens: Some(100_000),
+                max_completion_tokens: Some(65_536),
+                tool_choice: OpenRouterToolChoiceModes::default(),
+                supports_implicit_caching: false,
+            }],
+            model_supported_parameters: parameters,
+            reasoning,
+            context_length: 131_072,
+            image_input: false,
+            observed_at: now,
+            expires_at: Timestamp::new(now.seconds() + 3_600, 0)?,
+        },
     )?)
 }
 
