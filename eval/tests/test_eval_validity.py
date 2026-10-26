@@ -197,7 +197,9 @@ class CredentialAndHarvestTests(unittest.TestCase):
                 "slot_id": "fixture", "account_binding": "fixture", "generation": 1,
                 "status": "active", "payload": base64.b64encode(json.dumps({
                     "access_expires_at": 9000, "access_token": "synthetic"}).encode()).decode()}))
+            (credential.parent / "login-host").write_text("fixture-host")
             with mock.patch("harbor_adapter.credentials.time.time", return_value=1000), \
+                 mock.patch("harbor_adapter.credentials.host_login_marker", return_value="fixture-host"), \
                  mock.patch("harbor_adapter.credentials.subprocess.run") as refresh:
                 with trial_oauth("codex", agent_timeout=1800, verifier_timeout=600, xdg_state_home=root):
                     self.assertFalse((credential.parent / ".harbor-refresh.lock").exists())
@@ -206,6 +208,22 @@ class CredentialAndHarvestTests(unittest.TestCase):
             with self.assertRaises(CredentialError) as found:
                 oauth_expiry(credential, "codex")
             self.assertNotIn("synthetic", str(found.exception))
+
+    def test_copied_oauth_is_refused_before_refresh_or_upload(self):
+        for marker in (None, "plak-login-host-v1\nother-machine\n"):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                credential = root / "plak/subscriptions/codex/credential.json"
+                credential.parent.mkdir(parents=True)
+                credential.write_text("synthetic credential must not be read")
+                if marker is not None:
+                    (credential.parent / "login-host").write_text(marker)
+                with mock.patch("harbor_adapter.credentials.host_login_marker", return_value="local-host"), \
+                     mock.patch("harbor_adapter.credentials.subprocess.run") as refresh:
+                    with self.assertRaisesRegex(CredentialError, "not created by login on this host"):
+                        with trial_oauth("codex", agent_timeout=1, verifier_timeout=1, xdg_state_home=root):
+                            self.fail("copied credential reached upload")
+                    refresh.assert_not_called()
 
     def test_codex_rotation_is_atomic_and_same_account(self):
         with tempfile.TemporaryDirectory() as directory:

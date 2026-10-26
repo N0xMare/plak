@@ -72,6 +72,7 @@ native-subscriptions = [
     "plakous-tool-web/fetch",
     "plakous-tool-web/image-gen",
     "dep:rustix",
+    "dep:uuid",
     "dep:plakous-openai",
     "plakous-openai/native-auth",
     "dep:plakous-xai",
@@ -109,6 +110,7 @@ rustix = { workspace = true, features = ["fs", "process"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
 sha2 = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 plakous-tools.workspace = true
 plakous-xai = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

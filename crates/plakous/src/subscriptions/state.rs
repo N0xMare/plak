@@ -24,6 +24,7 @@ use super::{
 };
 mod filesystem;
 mod locks;
+mod login_host;
 pub(super) use locks::PrivateFilesystemLock;
 use locks::acquire_private_filesystem_lock;
 #[cfg(test)]

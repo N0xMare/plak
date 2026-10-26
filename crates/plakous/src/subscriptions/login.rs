@@ -462,6 +462,7 @@ where
         .current_credential_generation(consent.notice.provider())?
         .ok_or(NativeSubscriptionError::CredentialUnavailable)?;
     consent.clear_recovery(&recovery, generation)?;
+    consent.state.record_login_host(consent.notice.provider())?;
     lock.verify()?;
     Ok(NativeAuthStatus::Ready)
 }

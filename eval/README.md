@@ -13,6 +13,14 @@ they are not in any gate tier either.
 
 ## Prerequisites
 
+Use **one login per machine; never copy credential dirs between hosts**.
+Rotating a copied refresh token can invalidate the original machine's login.
+Plak OAuth trial arms require the `login-host` provenance marker written by a
+successful `plak login <account>` on this host. Harbor refuses an unmarked or
+foreign-host directory before any host refresh or upload. Log in locally to
+create it; do not copy or manufacture the marker. Native comparator stores must
+likewise come from their own login, not a copy of Plak's credentials.
+
 - Python 3.12 or newer on `PATH`, a local Docker daemon with buildx, and [uv](https://docs.astral.sh/uv/).
   Harbor is pinned at 0.23.0 in `eval/pyproject.toml` and always runs through
   `uv run --project eval`, never a global `harbor`.

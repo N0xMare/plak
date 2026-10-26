@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import re
 import shlex
 import sys
 import fcntl
 import subprocess
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -149,7 +152,46 @@ def require_ready_oauth(account: str, *, xdg_state_home: Path | None = None) -> 
         raise CredentialError(
             f"missing {credential}; run `plak login {account}` on the host first"
         )
+    require_host_login(directory, account)
     return directory
+
+
+def host_login_marker() -> str:
+    """Match Plak's login-only host provenance; never read credentials."""
+    try:
+        if sys.platform == "linux":
+            machine = Path("/etc/machine-id").read_text().strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{32}", machine):
+                raise ValueError
+            identity = "linux:" + machine
+        elif sys.platform == "darwin":
+            output = subprocess.run(
+                ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                capture_output=True, check=True, timeout=10, text=True,
+            ).stdout
+            match = re.search(r'"IOPlatformUUID" = "([0-9a-fA-F-]{36})"', output)
+            if match is None:
+                raise ValueError
+            identity = "macos:" + str(uuid.UUID(match.group(1)))
+        else:
+            raise ValueError
+    except (OSError, ValueError, subprocess.SubprocessError):
+        raise CredentialError("cannot verify this host's login identity") from None
+    digest = hashlib.sha256(("plak-login-host-v1\0" + identity).encode()).hexdigest()
+    return f"plak-login-host-v1\n{digest}\n"
+
+
+def require_host_login(directory: Path, account: str) -> None:
+    try:
+        marker = directory / "login-host"
+        valid = not marker.is_symlink() and marker.read_text() == host_login_marker()
+    except (OSError, UnicodeError):
+        valid = False
+    if not valid:
+        raise CredentialError(
+            f"OAuth directory was not created by login on this host; run `plak login {account}` "
+            "here. One login per machine; never copy credential dirs between hosts"
+        )
 
 
 def oauth_expiry(path: Path, account: str) -> float:
@@ -248,6 +290,7 @@ def trial_oauth(account: str, *, agent_timeout: float, verifier_timeout: float,
     fd = os.open(directory.parent / ("." + directory.name + ".harbor-refresh.lock"), os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(fd, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        require_host_login(directory, account)
         required = agent_timeout + verifier_timeout + 300
         if oauth_expiry(directory / "credential.json", account) - time.time() < required:
             env = dict(os.environ)
