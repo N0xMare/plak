@@ -4,14 +4,6 @@ pub(crate) use plakous_hosted::capabilities::{
 };
 
 pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
-    if let Command::Run { prompt, .. }
-    | Command::RunOpenRouter { prompt, .. }
-    | Command::RunPlatform { prompt, .. }
-    | Command::ContinueSession { prompt, .. } = command
-        && !prompt.images.is_empty()
-    {
-        require_feature("images")?;
-    }
     match command {
         Command::Tui { .. } | Command::Resume { .. } => require_feature("tui")?,
         Command::Mcp(_) => require_feature("mcp")?,
@@ -29,11 +21,13 @@ pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
     Ok(())
 }
 
-// Refuse before parsing reads a file; parsed-command admission covers callers
-// that already hold a Draft instead of CLI paths.
-pub(crate) fn admit_image_arguments(images: &[std::path::PathBuf]) -> CliResult<()> {
+// Refuse before parsing reads a file.
+pub(crate) fn admit_image_arguments(
+    images: &[std::path::PathBuf],
+    images_available: Result<(), plakous_hosted::capabilities::CapabilityUnavailable>,
+) -> CliResult<()> {
     if !images.is_empty() {
-        require_feature("images")?;
+        images_available?;
     }
     Ok(())
 }
@@ -138,10 +132,7 @@ mod tests {
 
     #[test]
     fn image_argument_refusal_preserves_the_capability_source_before_file_io() {
-        if require_feature("images").is_ok() {
-            return;
-        }
-        let failure = crate::cli::parse(
+        let failure = crate::cli::parse_with_image_capability(
             [
                 "run",
                 "--account",
@@ -154,6 +145,11 @@ mod tests {
                 "describe",
             ]
             .map(std::ffi::OsString::from),
+            Err(plakous_hosted::capabilities::CapabilityUnavailable {
+                id: "images",
+                kind: plakous_hosted::capabilities::CapabilityKind::Surface,
+                feature: "images",
+            }),
         )
         .unwrap_err();
         assert_eq!(failure.exit_code(), 2);

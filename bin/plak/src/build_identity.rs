@@ -1,7 +1,5 @@
 //! Product build identity, independent of the working directory's Git state.
 
-#[cfg(any(test, feature = "tui"))]
-use std::ffi::OsString;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -36,7 +34,7 @@ struct Launch {
 
 #[cfg(any(test, feature = "tui"))]
 enum Invocation {
-    Name(OsString),
+    Name(std::ffi::OsString),
     Path(PathBuf),
 }
 
@@ -102,6 +100,7 @@ pub(crate) fn ready_binary_id() -> Option<&'static str> {
 
 /// Record the invocation and the running executable. Call once, first thing.
 pub(crate) fn record_launch(argv0: Option<&std::ffi::OsStr>) {
+    #[cfg(not(any(test, feature = "tui")))]
     let _ = argv0;
     LAUNCH.get_or_init(|| {
         #[cfg(any(test, feature = "tui"))]
@@ -447,6 +446,7 @@ pub(crate) fn version_label() -> String {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
 
     #[test]
     fn manifest_requires_installer_layout_and_safe_file_and_directory() {

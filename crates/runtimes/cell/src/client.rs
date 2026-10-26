@@ -884,7 +884,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_slow_worker_can_say_hello_inside_the_startup_bound() {
+    async fn a_delayed_hello_uses_the_supplied_startup_bound() {
         let directory = tempfile::tempdir().expect("directory");
         let opening = hello(
             CELL_PROTOCOL_REVISION,

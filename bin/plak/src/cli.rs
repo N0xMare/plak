@@ -11,6 +11,13 @@ use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
 
 /// Parse argv tokens (without binary name) into a product [`Command`].
 pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> crate::CliResult<Command> {
+    parse_with_image_capability(arguments, crate::build_features::require_feature("images"))
+}
+
+pub(super) fn parse_with_image_capability(
+    arguments: impl IntoIterator<Item = OsString>,
+    images_available: Result<(), plakous_hosted::capabilities::CapabilityUnavailable>,
+) -> crate::CliResult<Command> {
     let usage = |message| crate::CliFailure::classified(crate::CliFailureKind::Usage, message);
     let values = arguments
         .into_iter()
@@ -140,7 +147,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> crate::Cli
         ));
     }
     if let Some(TopCommand::Run { image, .. }) = &cli.command {
-        crate::build_features::admit_image_arguments(image)?;
+        crate::build_features::admit_image_arguments(image, images_available)?;
     }
     cli.into_command().map_err(usage)
 }

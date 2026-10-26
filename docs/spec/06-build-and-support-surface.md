@@ -682,6 +682,8 @@ Native dependencies still require a platform C/C++ toolchain and linker.
 Development lanes of concurrent worktrees must use distinct Cargo target
 directories: one shared target directory is safe only for one worktree at a
 time. Share dependency compilation through sccache, not workspace artifacts.
+The shared sccache server must start with a stable `TMPDIR`, never a gate's
+per-checkout test directory, which another gate can remove while compiles run.
 Cargo defaults to the host target; the supported Linux musl build requires
 `--target x86_64-unknown-linux-musl` and a musl C compiler/linker as described
 in the getting-started guide. A GNU host build is not musl qualification.
