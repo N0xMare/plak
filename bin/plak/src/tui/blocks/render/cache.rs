@@ -22,6 +22,8 @@ pub struct TranscriptRender {
     pub lines: Vec<Line<'static>>,
     /// Plain visual lines and their source blocks.
     pub layout: LineLayout,
+    #[cfg(test)]
+    measurements: usize,
 }
 
 /// Mutation known by the presentation owner since the preceding draw.
@@ -169,8 +171,10 @@ pub struct TranscriptRenderCache {
     /// Bounded by [`MAX_EXACT_BLOCKS`]; the trailing tail band and a short
     /// transcript are exact without being listed here.
     exact_blocks: std::collections::BTreeSet<usize>,
-    /// Every block is measured exactly because selection or copy asked.
+    /// Every block is measured exactly for a copy action.
     exact_all: bool,
+    /// Selection geometry stays exact even while the viewport is elsewhere.
+    required_blocks: Option<std::ops::RangeInclusive<usize>>,
     /// The streaming assistant tail's settled markdown prefix.
     tail_markdown: crate::tui::markdown::StreamingMarkdown,
     /// Where the tail's settled-prefix rows sit, while they are current.
@@ -187,6 +191,8 @@ pub struct TranscriptRenderCache {
     reprojections: usize,
     #[cfg(test)]
     promotions: usize,
+    #[cfg(test)]
+    measurements: usize,
 }
 
 /// The rows a streaming assistant tail's settled prefix occupies.
@@ -306,6 +312,7 @@ impl TranscriptRenderCache {
                 self.recount_projection();
                 #[cfg(test)]
                 {
+                    self.measurements += self.render.measurements;
                     self.rebuilds += 1;
                     self.full_rows += self.render.lines.len();
                 }
@@ -391,15 +398,30 @@ impl TranscriptRenderCache {
         self.visible_rows = None;
     }
 
-    /// Demand — or release — an exactly measured projection.
-    ///
-    /// Selection carries content rows from one frame to the next and copy
-    /// reads them all, so while either is live nothing may be an estimate.
-    /// Set this before asking for the projection, so the rebuild it may
-    /// trigger measures everything in the one pass. Releasing it leaves
-    /// the projection in hand alone; the next rebuild is windowed again.
-    pub const fn require_exact(&mut self, exact: bool) {
-        self.exact_all = exact;
+    pub(crate) fn require_blocks(&mut self, span: Option<std::ops::RangeInclusive<usize>>) {
+        self.exact_all = false;
+        self.required_blocks = span;
+    }
+
+    /// Measure only selected blocks; the rest keeps its windowed estimates.
+    /// Evicted text is projected temporarily without exempting it from the
+    /// ordinary cache byte ceiling. The selection retains its digest, not text.
+    pub(crate) fn materialize_required(&mut self, blocks: &[ScrollBlock]) {
+        let Some(span) = self.required_blocks.clone() else {
+            return;
+        };
+        if self
+            .render
+            .layout
+            .estimated
+            .range(span.clone())
+            .next()
+            .is_some()
+        {
+            self.rebuild(blocks);
+        }
+        let wanted: Vec<_> = self.evicted.range(span).copied().collect();
+        self.reproject(blocks, &wanted);
     }
 
     /// Row the anchor occupies in the projection as it now stands.
@@ -433,6 +455,9 @@ impl TranscriptRenderCache {
             return None;
         }
         let mut exact = self.exact_blocks.clone();
+        if let Some(span) = &self.required_blocks {
+            exact.extend(span.clone());
+        }
         exact.extend(len.saturating_sub(EXACT_TAIL_BLOCKS)..len);
         Some(exact)
     }
@@ -474,6 +499,7 @@ impl TranscriptRenderCache {
         self.recount_projection();
         #[cfg(test)]
         {
+            self.measurements += self.render.measurements;
             self.promotions += 1;
         }
     }
@@ -501,10 +527,9 @@ impl TranscriptRenderCache {
 
     /// Measure and project every block.
     ///
-    /// Transcript copy reads the complete plain projection and selection
-    /// carries row identities across frames, so neither may run against
-    /// estimated geometry or the blanks eviction leaves behind. Windowed
-    /// rebuilds resume at the next [`Self::relax_exact`]; the byte ceiling
+    /// Transcript copy reads the complete plain projection, without estimated
+    /// geometry or blanks eviction leaves behind. Windowed rebuilding resumes
+    /// when the face next configures its selected span; the byte ceiling
     /// is re-applied by the next paint.
     pub fn materialize_all(&mut self, blocks: &[ScrollBlock]) {
         self.exact_all = true;
@@ -559,6 +584,12 @@ impl TranscriptRenderCache {
     #[must_use]
     pub const fn promotions(&self) -> usize {
         self.promotions
+    }
+
+    /// Actual block formatter invocations, excluding estimated placeholders.
+    #[cfg(test)]
+    pub const fn measurements(&self) -> usize {
+        self.measurements
     }
 
     /// Rebuild the byte account and the oversized side-list from scratch.
@@ -702,6 +733,10 @@ impl TranscriptRenderCache {
                 continue;
             };
             let (styled, copy) = block_rows(source, plan, &theme, self.width, self.prefs, blocks);
+            #[cfg(test)]
+            {
+                self.measurements += 1;
+            }
             if styled.len() != end - start || copy.len() != styled.len() {
                 // Dropping the cached revision forces the next `get` to
                 // rebuild rather than paint rows that no longer line up.
@@ -745,6 +780,10 @@ impl TranscriptRenderCache {
             prefs,
             blocks,
         );
+        #[cfg(test)]
+        {
+            self.measurements += 1;
+        }
         // A row that folds away is a structural change, not a splice.
         if styled.is_empty() {
             return false;
@@ -999,10 +1038,16 @@ fn render_transcript_windowed(
     let mut copy = Vec::new();
     let mut estimated = std::collections::BTreeSet::new();
     let mut previous_drawn: Option<&ScrollBlock> = None;
+    #[cfg(test)]
+    let mut measurements = 0;
     for bi in row_order(plans) {
         let block = &blocks[bi];
         let separated = wants_separator(previous_drawn, block);
         if exact.is_none_or(|exact| exact.contains(&bi)) {
+            #[cfg(test)]
+            {
+                measurements += 1;
+            }
             let (styled, row_copy) =
                 block_rows(block, &plans[bi], theme, content_width, prefs, blocks);
             // Hidden system noise intentionally contributes no visual rows.
@@ -1045,6 +1090,8 @@ fn render_transcript_windowed(
     }
     TranscriptRender {
         lines,
+        #[cfg(test)]
+        measurements,
         layout: LineLayout {
             plain,
             block_index,

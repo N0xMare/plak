@@ -661,11 +661,8 @@ pub(crate) struct App {
     approval_chip_hits: Vec<ApprovalChipHit>,
     /// Call detail asked of the host for open items, and its cache.
     call_details: call_detail::CallDetails,
-    pending_tool_click: Option<(usize, blocks::RowTarget)>,
     /// What each [`Self::tool_hit_rows`] entry toggles, index for index.
     tool_hit_targets: Vec<blocks::RowTarget>,
-    /// Drag-select over transcript.
-    selection: TranscriptSelection,
     /// Last pointer position while transcript drag ownership is active.
     transcript_drag_pointer: Option<(u16, u16)>,
     /// The operator's last gesture was a transcript wheel, click or drag.
@@ -831,6 +828,8 @@ impl App {
         } else {
             "idle"
         };
+        let mut pane = pane::TranscriptPane::new(blocks);
+        pane.presentation_session.clone_from(&launch.session_id);
         Self {
             session_id: launch.session_id,
             workspace: display_workspace(&launch.workspace),
@@ -846,7 +845,7 @@ impl App {
             pending_prompt: None,
             attachments: attachments::Attachments::default(),
             hosted,
-            pane: pane::TranscriptPane::new(blocks),
+            pane,
             agent_view: None,
             host_agent_transcript: None,
             agent_pane_serial: 0,
@@ -971,9 +970,7 @@ impl App {
             tool_hit_rows: Vec::new(),
             approval_chip_hits: Vec::new(),
             call_details: call_detail::CallDetails::default(),
-            pending_tool_click: None,
             tool_hit_targets: Vec::new(),
-            selection: TranscriptSelection::default(),
             transcript_drag_pointer: None,
             transcript_gesture: false,
             transcript_gesture_is_wheel: false,
@@ -1262,6 +1259,8 @@ mod shell_tests;
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod test_support;
+#[cfg(test)]
+mod transcript_perf_tests;
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

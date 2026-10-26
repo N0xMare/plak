@@ -37,6 +37,11 @@ pub(in crate::tui::ui) struct BlockIndex {
 }
 
 impl BlockIndex {
+    pub(in crate::tui::ui) fn key_at(&self, at: usize) -> Option<RowKey> {
+        self.visit(1);
+        self.slots.get(&(self.head + at)).copied()
+    }
+
     pub(in crate::tui::ui) fn is_local(&self, at: usize) -> bool {
         let at = self.head + at;
         self.visit(1);

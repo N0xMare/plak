@@ -373,7 +373,7 @@ pub(super) fn handle_terminal_event(
             }
         }
         Event::Resize(_, _) => {
-            app.selection.clear();
+            app.pane.selection.clear();
             app.transcript_drag_pointer = None;
             app.reset_composer_drag();
             app.mark_dirty();

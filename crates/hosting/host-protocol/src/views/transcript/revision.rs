@@ -90,6 +90,13 @@ impl TranscriptRevision {
             });
         }
         patch.validate()?;
+        // Measuring a row serializes its payload. Reuse that measurement
+        // when committing rather than serializing each upsert twice here.
+        let upserts: Vec<_> = patch
+            .upserts
+            .iter()
+            .map(|item| (item.key, RowMetadata::new(&item.row)))
+            .collect();
         let mut count = self.entries.len();
         let mut bytes = self.bytes;
         for key in &patch.deletes {
@@ -98,13 +105,13 @@ impl TranscriptRevision {
                 bytes -= entry.bytes;
             }
         }
-        for item in &patch.upserts {
-            if let Some(entry) = self.entries.get(&item.key) {
+        for (key, added) in &upserts {
+            if let Some(entry) = self.entries.get(key) {
                 bytes -= entry.bytes;
             } else {
                 count += 1;
             }
-            bytes = bytes.saturating_add(row_bytes(&item.row));
+            bytes = bytes.saturating_add(added.bytes);
         }
         if count > MAX_SNAPSHOT_ROWS {
             return Err(PresentationError::ItemLimit);
@@ -115,8 +122,8 @@ impl TranscriptRevision {
         for key in &patch.deletes {
             self.entries.remove(key);
         }
-        for item in &patch.upserts {
-            self.entries.insert(item.key, RowMetadata::new(&item.row));
+        for (key, entry) in upserts {
+            self.entries.insert(key, entry);
         }
         self.bytes = bytes;
         self.revision = patch.to_revision;

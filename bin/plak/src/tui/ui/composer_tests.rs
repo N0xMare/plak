@@ -812,8 +812,8 @@ fn resize_history_sticky_and_tool_mouse_geometry_remain_coherent() {
         !crate::tui::blocks::plan_rows(&app.pane.blocks, app.render_prefs)[tool_index].group_folded,
         "a toggled row must open past its header"
     );
-    assert!(!app.selection.is_dragging());
-    assert!(!app.selection.has_range());
+    assert!(!app.pane.selection.is_dragging());
+    assert!(!app.pane.selection.has_range());
 
     if let ScrollBlock::Assistant(text) = &mut app.pane.blocks[1] {
         for line in 1..=18 {
@@ -883,9 +883,12 @@ fn long_tool_rows_share_buffer_hit_selection_and_copy_geometry() {
     let (tool_index, summary_row) = app.tool_hit_rows[0];
     assert!(app.handle_mouse(left_click(5, summary_row)).is_none());
     // A press on a clickable row arms its toggle; only a drag selects.
-    assert!(!app.selection.has_range(), "a press alone selects nothing");
+    assert!(
+        !app.pane.selection.has_range(),
+        "a press alone selects nothing"
+    );
     assert_eq!(
-        app.pending_tool_click,
+        app.pane.pending_tool_click,
         Some((tool_index, crate::tui::blocks::RowTarget::Item))
     );
     app.handle_mouse(left_mouse(
@@ -958,11 +961,7 @@ fn long_tool_rows_share_buffer_hit_selection_and_copy_geometry() {
 }
 
 #[test]
-fn a_transcript_selection_pins_the_projection_to_an_exact_measurement() {
-    // Off-window blocks carry an estimated row count until the viewport
-    // reaches them. Selection cannot live with that: it carries content
-    // rows from one frame to the next, and measuring a block renumbers
-    // every row below it. So a live selection measures the transcript.
+fn a_transcript_selection_measures_its_span_and_copy_measures_the_rest() {
     let mut app = App::new(launch_basic(), true);
     app.pane.blocks = (0..2_000)
         .map(|index| {
@@ -994,8 +993,8 @@ fn a_transcript_selection_pins_the_projection_to_an_exact_measurement() {
     ));
     terminal.draw(|frame| app.draw(frame)).unwrap();
     assert!(
-        app.pane.transcript_cache.estimated_blocks().is_empty(),
-        "a live selection was left reading estimated geometry"
+        !app.pane.transcript_cache.estimated_blocks().is_empty(),
+        "a live selection unnecessarily measured unselected history"
     );
 
     let copied = app
@@ -1012,7 +1011,7 @@ fn a_transcript_selection_pins_the_projection_to_an_exact_measurement() {
         body.right() - 1,
         body.bottom() - 1,
     ));
-    app.selection.clear();
+    app.pane.selection.clear();
     app.mark_transcript_structural();
     terminal.draw(|frame| app.draw(frame)).unwrap();
     assert!(
@@ -1040,7 +1039,7 @@ fn sticky_preview_is_navigation_only_and_width_reflow_clears_selection() {
     let (sticky, target) = app.sticky_prompt_jump.expect("sticky preview");
     app.handle_mouse(left_click(sticky.x, sticky.y));
     assert_eq!(app.pane.scroll_from_bottom, target);
-    assert!(!app.selection.is_dragging());
+    assert!(!app.pane.selection.is_dragging());
 
     let body = app.transcript_body_area.expect("body");
     app.handle_mouse(left_mouse(
@@ -1053,13 +1052,13 @@ fn sticky_preview_is_navigation_only_and_width_reflow_clears_selection() {
         body.x.saturating_add(3),
         body.y,
     ));
-    assert!(app.selection.is_dragging());
+    assert!(app.pane.selection.is_dragging());
 
     let backend = TestBackend::new(22, 10);
     let mut resized = Terminal::new(backend).unwrap();
     resized.draw(|frame| app.draw(frame)).unwrap();
     assert!(
-        !app.selection.is_dragging(),
+        !app.pane.selection.is_dragging(),
         "width reflow clears row coordinates"
     );
 }
@@ -1361,7 +1360,7 @@ fn selection_anchor_survives_estimated_to_exact_rebuild_over_512_blocks() {
         body.y + 2,
     ));
     terminal.draw(|frame| app.draw(frame)).unwrap();
-    let selected = app.selection.endpoints_for_test().unwrap().0;
+    let selected = app.pane.selection.endpoints_for_test().unwrap().0;
     assert_eq!(
         layout_anchor(app.pane.transcript_cache.layout(), selected.row),
         Some(anchor)
@@ -1387,13 +1386,13 @@ fn transcript_drag_slop_ignores_one_cell_jitter() {
         body.y,
     ));
     terminal.draw(|frame| app.draw(frame)).unwrap();
-    assert!(!app.selection.has_range());
+    assert!(!app.pane.selection.has_range());
     app.handle_mouse(left_mouse(
         MouseEventKind::Up(MouseButton::Left),
         body.x + 3,
         body.y,
     ));
-    assert!(!app.selection.has_range());
+    assert!(!app.pane.selection.has_range());
 }
 
 #[test]

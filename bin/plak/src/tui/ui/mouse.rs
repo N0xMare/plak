@@ -302,7 +302,7 @@ impl App {
             }
             // A click on a clickable row toggles it on release; a drag from
             // it still selects, so a collapsed row can be copied.
-            self.pending_tool_click = self
+            self.pane.pending_tool_click = self
                 .tool_hit_rows
                 .iter()
                 .position(|&(_, r)| r == mouse.row)
@@ -362,12 +362,13 @@ impl App {
                     && area.contains((mouse.column, mouse.row).into())
                     && let Some(position) = self.transcript_position_at(mouse.column, mouse.row)
                 {
-                    self.selection.begin(
+                    self.pane.selection.begin(
                         position,
                         usize::from(area.width),
                         self.pane.transcript_revision,
                     );
-                    self.selection
+                    self.pane
+                        .selection
                         .capture_blocks(self.pane.transcript_cache.layout());
                     self.transcript_down_cell = Some((mouse.column, mouse.row));
                     self.mark_dirty();
@@ -388,12 +389,13 @@ impl App {
                 }
                 self.transcript_gesture = true;
                 self.transcript_gesture_is_wheel = false;
-                self.pending_tool_click = None;
+                self.pane.pending_tool_click = None;
                 self.transcript_drag_pointer = Some((mouse.column, mouse.row));
                 if let Some(position) = self.transcript_position_at(mouse.column, mouse.row)
-                    && self.selection.drag(position)
+                    && self.pane.selection.drag(position)
                 {
-                    self.selection
+                    self.pane
+                        .selection
                         .capture_blocks(self.pane.transcript_cache.layout());
                     self.mark_dirty();
                 }
@@ -405,19 +407,20 @@ impl App {
                 let selected = was_dragging
                     && self
                         .transcript_position_at(mouse.column, mouse.row)
-                        .is_some_and(|position| self.selection.finish(position));
+                        .is_some_and(|position| self.pane.selection.finish(position));
                 if selected {
-                    self.selection
+                    self.pane
+                        .selection
                         .capture_blocks(self.pane.transcript_cache.layout());
                     self.mark_dirty();
                     // Copy runs after the next paint from the complete cache.
                     self.copy_selection_after_draw = true;
-                    self.pending_tool_click = None;
-                } else if let Some((block_index, target)) = self.pending_tool_click.take() {
-                    self.selection.clear();
+                    self.pane.pending_tool_click = None;
+                } else if let Some((block_index, target)) = self.pane.pending_tool_click.take() {
+                    self.pane.selection.clear();
                     self.toggle_row(block_index, target);
                 } else {
-                    self.selection.clear();
+                    self.pane.selection.clear();
                 }
             }
             _ => {}

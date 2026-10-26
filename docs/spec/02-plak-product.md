@@ -1872,6 +1872,26 @@ updating only the indexed blocks named by changed keys. Tool and thinking UI
 state stays on its existing block; local approval rows, refusal messages and
 product notices remain after the keyed block they followed. Inserts and deletes
 remap the remaining block indexes without rebuilding unchanged block content.
+Full same-session snapshots restore folds and item detail by row key, with
+call/location correlation for provisional settlement; duplicate settled text
+does not transfer another row's UI state. Busy-resync local blocks and pending
+opening diagnostics move into the replacement without cloning their payloads,
+preserving their relative order, including before the first canonical row.
+Camera, focus and selection follow surviving identities. Selection survives
+only an unchanged contiguous block span with unchanged rendered selected rows;
+changed or deleted selected content, an insertion inside its span, or a new
+session namespace invalidates it. Selection and pending tool clicks belong to
+their pane, so hidden-root updates cannot alter a visible child's gesture.
+An unchanged remapped selection adopts the current projection revision and
+remains copyable after a patch, resync or retention trim. Selection measures
+only its block span plus the ordinary viewport/anchor window; unselected
+history remains estimated. Only the copy action materializes the complete
+projection, resolving block-space endpoints again before extracting text.
+Starting another root session does not carry folds, details or fallback clocks
+across reused row keys.
+Root snapshots scope those keys by their typed session header, including when
+a successor snapshot precedes its binding observation. That presentation
+namespace never changes the effective binding itself.
 The key-to-block index uses ordered slot queries for local anchors and group
 boundaries. Splices visit only slots in the affected range; appending at the
 tail or moving a key within the tail does not scan older history. Surviving

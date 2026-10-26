@@ -93,6 +93,7 @@ impl App {
         rows: Vec<plakous_host_protocol::views::transcript::TranscriptItem>,
         resume_stream: bool,
         keep_local: bool,
+        namespace: Option<String>,
     ) {
         #[cfg(test)]
         {
@@ -104,11 +105,13 @@ impl App {
         }
         let streaming = resume_stream || self.pane.assistant_stream_active;
         self.pane.assistant_stream_active = false;
-        let locals = if keep_local {
-            self.local_keyed_blocks()
-        } else {
-            Vec::new()
-        };
+        let same_session = self.pane.presentation_session == namespace;
+        let mut restore = self.take_keyed_restore(keep_local && same_session, same_session, root);
+        self.pane.presentation_session = namespace;
+        if !same_session {
+            self.pane.tool_started.clear();
+            self.pane.thinking_started.clear();
+        }
         self.restore_tip_clocks(rows.iter().map(|item| &item.row));
         let full_window = rows.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
         let live_assistant = rows.last().is_some_and(|item| {
@@ -157,41 +160,26 @@ impl App {
         if root {
             self.restore_opening_note(&mut blocks, full_window);
         }
-        self.restore_local_keyed_blocks(&mut blocks, locals);
-        for note in if root {
-            self.take_open_notes()
-        } else {
-            Vec::new()
-        } {
-            let already = blocks.iter().any(|block| match (block, &note) {
-                (ScrollBlock::System(have), ScrollBlock::System(want))
-                | (ScrollBlock::Error(have), ScrollBlock::Error(want)) => have == want,
-                _ => false,
-            });
-            if !already {
-                blocks.push(note);
-            }
-        }
-        let old = std::mem::replace(&mut self.pane.blocks, blocks);
-        self.carry_item_state(&old);
-        self.refresh_keyed_item_details(&old);
+        self.restore_local_keyed_blocks(&mut blocks, &mut restore);
+        Self::restore_open_notes(&mut blocks, &mut restore);
+        self.pane.blocks = blocks;
+        let running = self.finish_keyed_restore(restore);
+        self.refresh_keyed_item_details(running);
         self.pane.assistant_stream_active = streaming && live_assistant;
         self.mark_transcript_replaced();
+        self.pane
+            .transcript_cache
+            .require_blocks(self.pane.selection.block_span());
         self.warm_transcript_projection();
+        self.pane
+            .transcript_cache
+            .materialize_required(&self.pane.blocks);
+        self.pane
+            .selection
+            .resolve_blocks(self.pane.transcript_cache.layout());
     }
 
-    fn refresh_keyed_item_details(&mut self, old: &[ScrollBlock]) {
-        let running: std::collections::BTreeSet<_> = old
-            .iter()
-            .filter_map(|block| match block {
-                ScrollBlock::Tool {
-                    call_id: Some(id),
-                    state,
-                    ..
-                } if tool_is_running(state) => Some(id.as_str()),
-                _ => None,
-            })
-            .collect();
+    fn refresh_keyed_item_details(&mut self, running: std::collections::BTreeSet<String>) {
         let ended: Vec<_> = self
             .pane
             .blocks
@@ -219,8 +207,25 @@ impl App {
     fn apply_presentation(&mut self, event: HostEvent) {
         match event {
             HostEvent::PresentationSnapshot(snapshot) => {
+                // Rebind publishes the successor snapshot before Binding.
+                // Its header scopes UI identity; it does not change the binding.
+                let namespace = snapshot
+                    .items
+                    .first()
+                    .and_then(|item| match &item.row {
+                        crate::store::sessions::TranscriptRow::SessionHeader {
+                            session_id, ..
+                        } if snapshot.scope
+                            == plakous_host_protocol::views::transcript::TranscriptScope::Root =>
+                        {
+                            Some(session_id.clone())
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| self.session_id.clone());
                 if self.busy
                     && self.pane.presentation_ready
+                    && self.pane.presentation_session == namespace
                     && snapshot.revision <= self.pane.presentation.revision()
                 {
                     return;
@@ -238,7 +243,7 @@ impl App {
                     return;
                 }
                 self.presentation_replaced();
-                self.install_keyed_transcript(snapshot.items, true, keep_local);
+                self.install_keyed_transcript(snapshot.items, true, keep_local, namespace);
             }
             HostEvent::TranscriptPatch(patch) => {
                 if self.pane.resync.is_some() {
@@ -247,7 +252,10 @@ impl App {
                 }
                 let scope = patch.scope.clone();
                 let from_revision = patch.from_revision;
-                if !self.pane.presentation_ready || self.pane.presentation.apply(&patch).is_err() {
+                if !self.pane.presentation_ready
+                    || self.pane.presentation_session != self.session_id
+                    || self.pane.presentation.apply(&patch).is_err()
+                {
                     self.pane.resync = Some(scope);
                     self.rearm_transcript_resync(from_revision);
                     return;

@@ -175,7 +175,8 @@ pub const DISCARDED_LABEL: &str = "discarded -- retrying";
 pub const DISCARDED_THINKING_LABEL: &str = "discarded thinking -- retrying";
 
 /// One visual unit in the transcript scrollback.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(Clone))]
+#[derive(Debug, Eq, PartialEq)]
 pub enum ScrollBlock {
     /// User-originated message.
     User {

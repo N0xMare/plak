@@ -31,6 +31,526 @@ fn paint(app: &mut App) -> String {
     serialize_frame(terminal.backend().buffer())
 }
 
+fn scoped_app(scope: &TranscriptScope) -> App {
+    let mut app = App::new(launch_basic(), true);
+    pin_clock(&mut app);
+    app.render_prefs.group_tool_calls = false;
+    app.render_prefs.reduced_motion = true;
+    if let TranscriptScope::Agent(id) = scope {
+        app.open_agent_view(id.clone(), "child".into());
+    }
+    app
+}
+
+fn scoped_snapshot(
+    scope: &TranscriptScope,
+    revision: u64,
+    rows: &BTreeMap<RowKey, TranscriptRow>,
+) -> HostEvent {
+    let mut snapshot = snapshot(revision, rows);
+    snapshot.scope = scope.clone();
+    HostEvent::PresentationSnapshot(snapshot)
+}
+
+fn select_blocks(app: &mut App, first: usize, last: usize) {
+    use super::ContentPosition;
+    let _ = paint(app);
+    let layout = app.pane.transcript_cache.layout();
+    let row = |block| {
+        layout
+            .block_index
+            .iter()
+            .position(|at| *at == Some(block))
+            .unwrap()
+    };
+    app.pane.selection.begin(
+        ContentPosition {
+            row: row(first),
+            column: 0,
+        },
+        app.last_transcript_width,
+        app.pane.transcript_revision,
+    );
+    app.pane.selection.drag(ContentPosition {
+        row: row(last),
+        column: 4,
+    });
+    app.pane.selection.capture_blocks(layout);
+}
+
+fn bind_session(app: &mut App, id: &str) {
+    app.apply_host_event(HostEvent::Binding {
+        session_id: Some(id.to_owned()),
+        account: app.account.clone(),
+        model: app.model.clone(),
+        effort: app.effort.clone(),
+        extra: app.model_extra.clone(),
+        composition: app.composition,
+        protocol: app.protocol,
+        effective_presentation: app.effective_presentation.clone(),
+    });
+}
+
+#[test]
+fn resync_matches_duplicate_mail_by_key_and_keeps_its_focus_camera_and_selection() {
+    use crate::tui::blocks::{RowTarget, ScrollBlock};
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        let mut app = scoped_app(&scope);
+        let first = RowKey::new(2, Lane::Runtime, 0);
+        let separator = RowKey::new(3, Lane::Runtime, 0);
+        let kept = RowKey::new(4, Lane::Runtime, 0);
+        let mail = TranscriptRow::info(NoticeScope::Tree, "result · #c1 · repeated\nfull body");
+        let before = BTreeMap::from([
+            (first, mail.clone()),
+            (separator, TranscriptRow::assistant("between notices")),
+            (kept, mail.clone()),
+        ]);
+        app.apply_host_event(scoped_snapshot(&scope, 1, &before));
+        app.apply_host_event(HostEvent::SetBusy(true));
+        let first_at = app.pane.keyed.get(first).unwrap();
+        let kept_at = app.pane.keyed.get(kept).unwrap();
+        app.toggle_row(first_at, RowTarget::Item);
+        select_blocks(&mut app, kept_at, kept_at);
+        app.pane.focused_block = Some(kept_at);
+        app.pane.transcript_view_anchor = Some((kept_at, 0));
+        app.apply_host_event(scoped_snapshot(&scope, 2, &BTreeMap::from([(kept, mail)])));
+        let kept_at = app.pane.keyed.get(kept).unwrap();
+        assert!(matches!(
+            app.pane.blocks[kept_at],
+            ScrollBlock::Mail { open: false, .. }
+        ));
+        assert_eq!(app.pane.focused_block, Some(kept_at));
+        assert_eq!(app.pane.transcript_view_anchor, Some((kept_at, 0)));
+        let _ = paint(&mut app);
+        assert!(app.pane.selection.has_range());
+        let row = app
+            .pane
+            .transcript_cache
+            .layout()
+            .block_index
+            .iter()
+            .position(|at| *at == Some(kept_at))
+            .unwrap();
+        let (anchor, head) = app.pane.selection.endpoints_for_test().unwrap();
+        assert_eq!((anchor.row, head.row), (row, row));
+        assert!(app.take_transcript_selection_text().is_some());
+    }
+}
+
+#[test]
+fn busy_resync_moves_leading_local_notices_without_cloning_or_reversing_them() {
+    use crate::tui::blocks::ScrollBlock;
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        let mut app = scoped_app(&scope);
+        app.apply_host_event(scoped_snapshot(&scope, 1, &BTreeMap::new()));
+        app.apply_host_event(HostEvent::SetBusy(true));
+        let first = "local A ".repeat(128);
+        let second = "local B ".repeat(128);
+        let allocations = [first.as_ptr(), second.as_ptr()];
+        app.push_block(ScrollBlock::System(first));
+        app.push_block(ScrollBlock::System(second));
+        let second_at = app.pane.blocks.len() - 1;
+        select_blocks(&mut app, second_at, second_at);
+        app.pane.focused_block = Some(second_at);
+        app.apply_host_event(scoped_snapshot(
+            &scope,
+            2,
+            &BTreeMap::from([(
+                RowKey::new(9, Lane::Runtime, 0),
+                TranscriptRow::assistant("canonical row"),
+            )]),
+        ));
+        let locals: Vec<_> = app
+            .pane
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(at, block)| match block {
+                ScrollBlock::System(text) if text.starts_with("local ") => Some((at, text)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(locals.len(), 2);
+        assert!(locals[0].1.starts_with("local A "));
+        assert!(locals[1].1.starts_with("local B "));
+        for ((_, text), original) in locals.iter().zip(allocations) {
+            assert!(
+                std::ptr::eq(text.as_ptr(), original),
+                "local payload cloned"
+            );
+        }
+        assert_eq!(app.pane.focused_block, Some(locals[1].0));
+        assert!(app.pane.selection.has_range());
+    }
+}
+
+#[test]
+fn opening_notes_move_into_the_attached_transcript_without_a_block_copy() {
+    use crate::tui::blocks::ScrollBlock;
+    let mut app = scoped_app(&TranscriptScope::Root);
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 1, &BTreeMap::new()));
+    app.apply_host_event(HostEvent::SessionOpening);
+    let text = "opening diagnostic ".repeat(128);
+    let original = text.as_ptr();
+    app.push_root_block(ScrollBlock::Error(text));
+    app.apply_host_event(scoped_snapshot(
+        &TranscriptScope::Root,
+        2,
+        &BTreeMap::from([(
+            RowKey::new(2, Lane::Runtime, 0),
+            TranscriptRow::assistant("attached"),
+        )]),
+    ));
+    let diagnostic = app.pane.blocks.iter().find_map(|block| match block {
+        ScrollBlock::Error(text) if text.starts_with("opening diagnostic ") => Some(text),
+        _ => None,
+    });
+    assert!(std::ptr::eq(diagnostic.unwrap().as_ptr(), original));
+}
+
+#[test]
+fn an_earlier_upsert_reflows_without_losing_a_later_unchanged_selection() {
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        let mut app = scoped_app(&scope);
+        let first = RowKey::new(2, Lane::Runtime, 0);
+        let kept = RowKey::new(4, Lane::Runtime, 0);
+        let before = BTreeMap::from([
+            (first, TranscriptRow::assistant("before")),
+            (kept, TranscriptRow::assistant("selected text")),
+        ]);
+        app.apply_host_event(scoped_snapshot(&scope, 1, &before));
+        let kept_at = app.pane.keyed.get(kept).unwrap();
+        select_blocks(&mut app, kept_at, kept_at);
+        app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+            scope,
+            from_revision: 1,
+            to_revision: 2,
+            upserts: vec![TranscriptItem {
+                key: first,
+                row: TranscriptRow::assistant("earlier expanded line\n".repeat(20)),
+            }],
+            deletes: Vec::new(),
+        }));
+        let _ = paint(&mut app);
+        assert!(app.pane.selection.has_range());
+        let row = app
+            .pane
+            .transcript_cache
+            .layout()
+            .block_index
+            .iter()
+            .position(|at| *at == Some(kept_at))
+            .unwrap();
+        let (anchor, head) = app.pane.selection.endpoints_for_test().unwrap();
+        assert_eq!((anchor.row, head.row), (row, row));
+        assert!(app.take_transcript_selection_text().is_some());
+    }
+}
+
+#[test]
+fn active_selection_patch_and_resync_measure_only_a_bounded_block_span() {
+    use super::ContentPosition;
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        for count in [0_u64, 8_000, 10_000] {
+            let mut app = scoped_app(&scope);
+            let selected = RowKey::new(count + 2, Lane::Runtime, 0);
+            let tool = RowKey::new(count + 3, Lane::Runtime, 0);
+            let mut rows: BTreeMap<_, _> = (0..count.saturating_sub(2))
+                .map(|n| {
+                    (
+                        RowKey::new(n + 1, Lane::Runtime, 0),
+                        TranscriptRow::assistant(format!("history {n}\n\nmore prose")),
+                    )
+                })
+                .collect();
+            rows.insert(selected, TranscriptRow::assistant("selected text"));
+            rows.insert(tool, TranscriptRow::Tool(tool_item("tail", "read_file")));
+            app.apply_host_event(scoped_snapshot(&scope, 1, &rows));
+            for resync in [false, true] {
+                let at = app.pane.keyed.get(selected).unwrap();
+                select_blocks(&mut app, at, at);
+                let (_, head) = app.pane.selection.endpoints_for_test().unwrap();
+                app.pane
+                    .selection
+                    .drag(ContentPosition { column: 99, ..head });
+                app.pane
+                    .selection
+                    .capture_blocks(app.pane.transcript_cache.layout());
+                let _ = paint(&mut app);
+                let before = app.pane.transcript_cache.measurements();
+                if resync {
+                    app.apply_host_event(scoped_snapshot(&scope, 3, &rows));
+                } else {
+                    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+                        scope: scope.clone(),
+                        from_revision: 1,
+                        to_revision: 2,
+                        upserts: vec![TranscriptItem {
+                            key: tool,
+                            row: rows[&tool].clone(),
+                        }],
+                        deletes: Vec::new(),
+                    }));
+                }
+                let _ = paint(&mut app);
+                let work = app.pane.transcript_cache.measurements() - before;
+                assert!(
+                    work <= 1_024,
+                    "scope={scope:?} count={count} resync={resync} work={work}"
+                );
+                if count >= 8_000 {
+                    assert!(
+                        app.pane.transcript_cache.estimated_blocks().len() > count as usize - 1_024
+                    );
+                }
+                let copied = app
+                    .take_transcript_selection_text()
+                    .expect("surviving selection copies");
+                assert!(copied.contains("selected text"), "{copied:?}");
+                assert!(!copied.contains("history"), "{copied:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn ceiling_trim_keeps_stable_key_camera_focus_and_copy_selection() {
+    use crate::tui::blocks::ScrollBlock;
+    let scope = TranscriptScope::Root;
+    let mut app = scoped_app(&scope);
+    let rows: BTreeMap<_, _> = (1..=10_000)
+        .map(|n| {
+            (
+                RowKey::new(n, Lane::Runtime, 0),
+                TranscriptRow::assistant(format!("row {n}")),
+            )
+        })
+        .collect();
+    let key = RowKey::new(9_990, Lane::Runtime, 0);
+    app.apply_host_event(scoped_snapshot(&scope, 1, &rows));
+    let at = app.pane.keyed.get(key).unwrap();
+    select_blocks(&mut app, at, at);
+    app.pane.focused_block = Some(at);
+    app.pane.transcript_view_anchor = Some((at, 0));
+    app.pane.scroll_from_bottom = 3;
+    app.push_block(ScrollBlock::System("new tail".into()));
+    let at = app.pane.keyed.get(key).unwrap();
+    assert_eq!(app.pane.focused_block, Some(at));
+    assert_eq!(app.pane.transcript_view_anchor, Some((at, 0)));
+    let _ = paint(&mut app);
+    assert!(app.pane.selection.has_range());
+    assert!(app.take_transcript_selection_text().is_some());
+}
+
+#[test]
+fn a_changed_or_removed_block_inside_a_selected_range_invalidates_it() {
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        for change in ["replace", "delete", "insert"] {
+            let mut app = scoped_app(&scope);
+            let first = RowKey::new(2, Lane::Runtime, 0);
+            let middle = RowKey::new(4, Lane::Runtime, 0);
+            let last = RowKey::new(6, Lane::Runtime, 0);
+            let before = BTreeMap::from([
+                (first, TranscriptRow::assistant("first")),
+                (middle, TranscriptRow::assistant("middle")),
+                (last, TranscriptRow::assistant("last")),
+            ]);
+            app.apply_host_event(scoped_snapshot(&scope, 1, &before));
+            let first_at = app.pane.keyed.get(first).unwrap();
+            let last_at = app.pane.keyed.get(last).unwrap();
+            select_blocks(&mut app, first_at, last_at);
+            let mut after = before.clone();
+            match change {
+                "replace" => {
+                    after.insert(middle, TranscriptRow::assistant("changed"));
+                }
+                "delete" => {
+                    after.remove(&middle);
+                }
+                _ => {
+                    after.insert(
+                        RowKey::new(3, Lane::Runtime, 0),
+                        TranscriptRow::assistant("inserted"),
+                    );
+                }
+            }
+            app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch::between(
+                scope.clone(),
+                1,
+                2,
+                &before,
+                &after,
+            )));
+            let _ = paint(&mut app);
+            assert!(
+                !app.pane.selection.has_range(),
+                "scope={scope:?} change={change}"
+            );
+        }
+    }
+}
+
+#[test]
+fn appending_mail_invalidates_a_selected_group_summary_inside_unchanged_endpoints() {
+    use crate::tui::blocks::RowTarget;
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        let mut app = scoped_app(&scope);
+        let first = RowKey::new(1, Lane::Runtime, 0);
+        let head = RowKey::new(2, Lane::Runtime, 0);
+        let last = RowKey::new(3, Lane::Runtime, 0);
+        let before = BTreeMap::from([
+            (first, TranscriptRow::assistant("selected text")),
+            (
+                head,
+                TranscriptRow::info(NoticeScope::Tree, "result · #c1 · first\nbody"),
+            ),
+            (
+                last,
+                TranscriptRow::info(NoticeScope::Tree, "result · #c2 · second\nbody"),
+            ),
+        ]);
+        app.apply_host_event(scoped_snapshot(&scope, 1, &before));
+        let head_at = app.pane.keyed.get(head).unwrap();
+        app.toggle_row(head_at, RowTarget::Group);
+        let first_at = app.pane.keyed.get(first).unwrap();
+        let last_at = app.pane.keyed.get(last).unwrap();
+        select_blocks(&mut app, first_at, last_at);
+        app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+            scope,
+            from_revision: 1,
+            to_revision: 2,
+            upserts: vec![TranscriptItem {
+                key: RowKey::new(4, Lane::Runtime, 0),
+                row: TranscriptRow::info(NoticeScope::Tree, "result · #c3 · third\nbody"),
+            }],
+            deletes: Vec::new(),
+        }));
+        let _ = paint(&mut app);
+        assert!(!app.pane.selection.has_range());
+    }
+}
+
+#[test]
+fn hidden_root_resync_does_not_touch_child_selection_or_pending_tool_click() {
+    use crate::tui::blocks::RowTarget;
+    let mut app = scoped_app(&TranscriptScope::Root);
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 1, &BTreeMap::new()));
+    app.open_agent_view("c1".into(), "child".into());
+    let child = TranscriptScope::Agent("c1".into());
+    let key = RowKey::new(2, Lane::Runtime, 0);
+    app.apply_host_event(scoped_snapshot(
+        &child,
+        1,
+        &BTreeMap::from([(
+            key,
+            TranscriptRow::Tool(tool_item("child-call", "read_file")),
+        )]),
+    ));
+    let at = app.pane.keyed.get(key).unwrap();
+    select_blocks(&mut app, at, at);
+    let selection = app.pane.selection.endpoints_for_test();
+    app.pane.pending_tool_click = Some((at, RowTarget::Item));
+    app.apply_host_event(scoped_snapshot(
+        &TranscriptScope::Root,
+        2,
+        &BTreeMap::from([(key, TranscriptRow::assistant("hidden root"))]),
+    ));
+    let _ = paint(&mut app);
+    assert_eq!(app.pane.selection.endpoints_for_test(), selection);
+    assert_eq!(app.pane.pending_tool_click, Some((at, RowTarget::Item)));
+}
+
+#[test]
+fn another_root_session_cannot_inherit_ui_state_for_reused_row_keys() {
+    use crate::tui::blocks::{RowTarget, ScrollBlock};
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let mut app = scoped_app(&TranscriptScope::Root);
+    let key = RowKey::new(2, Lane::Runtime, 0);
+    let rows = BTreeMap::from([(
+        key,
+        TranscriptRow::info(NoticeScope::Tree, "result · #c1 · repeat\nfull body"),
+    )]);
+    bind_session(&mut app, "first-session");
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 9, &rows));
+    let at = app.pane.keyed.get(key).unwrap();
+    app.toggle_row(at, RowTarget::Item);
+    select_blocks(&mut app, at, at);
+    bind_session(&mut app, "second-session");
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+        scope: TranscriptScope::Root,
+        from_revision: 9,
+        to_revision: 10,
+        upserts: Vec::new(),
+        deletes: vec![key],
+    }));
+    assert_eq!(app.pane.presentation.revision(), 9);
+    assert_eq!(app.pane.resync, Some(TranscriptScope::Root));
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 1, &rows));
+    assert_eq!(app.pane.presentation.revision(), 1);
+    assert!(app.pane.resync.is_none());
+    let at = app.pane.keyed.get(key).unwrap();
+    assert!(matches!(
+        app.pane.blocks[at],
+        ScrollBlock::Mail { open: false, .. }
+    ));
+    assert!(app.pane.focused_block.is_none());
+    assert!(!app.pane.selection.has_range());
+}
+
+#[test]
+fn successor_snapshot_before_binding_keeps_new_profile_notices_and_accepts_patches() {
+    use crate::surface_protocol::{ProfileOutcome, SurfaceObservation};
+    use crate::tui::blocks::{RowTarget, ScrollBlock};
+    use plakous_host_protocol::views::transcript::NoticeScope;
+    let mut app = scoped_app(&TranscriptScope::Root);
+    let header_key = RowKey::new(0, Lane::Runtime, 0);
+    let key = RowKey::new(2, Lane::Runtime, 0);
+    let header = |id: &str| TranscriptRow::SessionHeader {
+        session_id: id.to_owned(),
+        carried_from: None,
+    };
+    let mut rows = BTreeMap::from([
+        (header_key, header("s1")),
+        (
+            key,
+            TranscriptRow::info(NoticeScope::Tree, "result · #c1 · mail\nbody"),
+        ),
+    ]);
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 1, &rows));
+    let at = app.pane.keyed.get(key).unwrap();
+    app.toggle_row(at, RowTarget::Item);
+    rows.insert(header_key, header("successor"));
+    app.apply_host_event(scoped_snapshot(&TranscriptScope::Root, 2, &rows));
+    let at = app.pane.keyed.get(key).unwrap();
+    assert!(matches!(
+        app.pane.blocks[at],
+        ScrollBlock::Mail { open: false, .. }
+    ));
+    bind_session(&mut app, "successor");
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::ProfileApplied {
+        name: "target-profile".into(),
+        outcome: ProfileOutcome::Forked,
+    }));
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+        scope: TranscriptScope::Root,
+        from_revision: 2,
+        to_revision: 3,
+        upserts: vec![TranscriptItem {
+            key: RowKey::new(3, Lane::Runtime, 0),
+            row: TranscriptRow::info(NoticeScope::Settings, "Model switched"),
+        }],
+        deletes: Vec::new(),
+    }));
+    assert!(app.pane.resync.is_none());
+    assert_eq!(app.pane.presentation.revision(), 3);
+    assert!(app.pane.blocks.iter().any(|block| matches!(block,
+        ScrollBlock::System(text) if text.starts_with("forked this session onto profile target-profile")
+    )));
+}
+
 #[test]
 fn keyed_payloads_move_into_root_and_child_blocks_without_a_second_content_copy() {
     for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {

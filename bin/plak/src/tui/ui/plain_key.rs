@@ -541,7 +541,7 @@ impl App {
         let Some(area) = self.transcript_body_area else {
             return false;
         };
-        if !self.selection.has_range() {
+        if !self.pane.selection.has_range() {
             return false;
         }
         let max_from_bottom = self.pane.transcript_total_rows.saturating_sub(usize::from(
@@ -560,11 +560,24 @@ impl App {
     }
 
     pub(super) fn take_transcript_selection_text(&mut self) -> Option<String> {
+        self.pane
+            .transcript_cache
+            .require_blocks(self.pane.selection.block_span());
+        self.warm_transcript_projection();
         // Copy reads the complete plain projection, so any block the byte
         // ceiling evicted has to come back first.
         self.pane
             .transcript_cache
             .materialize_all(&self.pane.blocks);
+        self.pane
+            .selection
+            .resolve_blocks(self.pane.transcript_cache.layout());
+        self.pane.selection.reconcile_projection(
+            self.pane.transcript_revision,
+            self.last_transcript_width,
+            self.pane.transcript_cache.layout().plain.len(),
+            None,
+        );
         let layout = self.pane.transcript_cache.layout();
         let plans = self.pane.transcript_cache.row_plans();
         let (blocks, theme) = (&self.pane.blocks, &self.theme);
@@ -586,7 +599,7 @@ impl App {
             let lead = leads.get(row - head)?;
             Some(lead.full_text())
         };
-        self.selection.take_text(
+        self.pane.selection.take_text(
             self.pane.transcript_revision,
             &layout.plain,
             &layout.copy,

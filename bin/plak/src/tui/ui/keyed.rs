@@ -5,31 +5,10 @@ use plakous_host_protocol::views::transcript::{RowKey, TranscriptItem};
 use super::{App, ScrollBlock, tool_is_running};
 
 mod index;
+mod restore;
 pub(super) use index::BlockIndex;
 
 impl App {
-    pub(super) fn local_keyed_blocks(&self) -> Vec<(Option<RowKey>, ScrollBlock)> {
-        self.pane.blocks.iter().enumerate().filter_map(|(at, block)| {
-            if !self.pane.keyed.is_local(at)
-                || matches!(block, ScrollBlock::System(text) if Some(text) == self.opening_note.as_ref()) {
-                return None;
-            }
-            Some((self.pane.keyed.local_anchor(at), block.clone()))
-        }).collect()
-    }
-
-    pub(super) fn restore_local_keyed_blocks(
-        &mut self,
-        blocks: &mut Vec<ScrollBlock>,
-        locals: Vec<(Option<RowKey>, ScrollBlock)>,
-    ) {
-        for (key, block) in locals {
-            let at = self.pane.keyed.after(key, blocks.len());
-            self.pane.keyed.splice(at, 0, 1);
-            blocks.insert(at, block);
-        }
-    }
-
     pub(super) fn push_live_block(&mut self, block: ScrollBlock) {
         self.push_block(block);
         if !self.pane.blocks.is_empty() {
@@ -69,6 +48,9 @@ impl App {
         upserts: Vec<TranscriptItem>,
         deletes: Vec<RowKey>,
     ) {
+        self.pane
+            .selection
+            .prepare_keyed_restore(self.pane.transcript_cache.layout());
         // Bind replacements first: a settled call can change its key while
         // retaining its block, focus, selection, and following local notices.
         for TranscriptItem { key, row } in upserts {
@@ -107,6 +89,11 @@ impl App {
             };
             if let Some(old) = &old {
                 carry_ui(&mut block, old);
+                if old != &block
+                    && let Some(at) = at
+                {
+                    self.pane.selection.invalidate_block(at);
+                }
             }
             let inserted = at.is_none();
             let at = if let Some(at) = at {
@@ -144,6 +131,7 @@ impl App {
         for at in self.pane.keyed.pending().into_iter().rev() {
             self.remove_keyed_block(at);
         }
+        self.pane.selection.remap_blocks(Some);
         if self.pane.presentation.last_row_is_assistant() == Some(false) {
             self.pane.assistant_stream_active = false;
         }
@@ -192,7 +180,7 @@ impl App {
         start
     }
 
-    fn splice_keyed_indices(&mut self, at: usize, removed: usize, added: usize) {
+    pub(super) fn splice_keyed_indices(&mut self, at: usize, removed: usize, added: usize) {
         self.pane.keyed.splice(at, removed, added);
         let remap = |index: usize| {
             if index < at {
@@ -211,8 +199,8 @@ impl App {
         self.pane.transcript_view_anchor = self.pane.transcript_view_anchor.map(|(index, row)| {
             remap(index).map_or((index.saturating_sub(1), 0), |index| (index, row))
         });
-        self.selection.remap_blocks(remap);
-        self.pending_tool_click = None;
+        self.pane.selection.remap_blocks(remap);
+        self.pane.pending_tool_click = None;
     }
 
     fn refresh_changed_clock(&mut self, at: usize, old: Option<&ScrollBlock>) {

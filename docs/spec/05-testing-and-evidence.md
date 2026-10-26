@@ -361,6 +361,21 @@ distinguishes local abandonment/finalization debt from external effect evidence.
 
 ### Declarative TUI stories and the semantic pilot
 
+The ignored `tui::ui::transcript_perf_tests::transcript_selection_perf_probe`
+runs the debug TUI over the real hosted `Sender`: 0, 8,000 and 9,990 synthetic
+roughly 100-column history rows, 100 tool start/finish calls with a frame after
+each boundary, 20 calls with a two-row selection, and 20 busy resyncs with a
+pending tool, approval and local note. It reports per-call/per-resync timing,
+selection-survival frames, duplicate-free tail order and copying after five
+boundaries with the camera 300 rows above the tail. The hosted test-support kit
+exposes only observational replacement/resync wrappers for this fixture.
+Run it alone on the same lane and debug configuration for each compared tree:
+`cargo test --locked -p plak --lib --all-features transcript_selection_perf_probe -- --ignored --nocapture --test-threads=1`.
+Use the ordinary isolated test environment (§2); it performs no inference.
+Timings are informational, not gate thresholds. Non-ignored tests separately
+require copy after patches/resyncs/trims and bounded selected-span formatting
+at 0, 8,000 and 10,000 rows.
+
 Processes stories cover 48-, 80- and 120-column TestBackend frames in the
 default dark theme: idle HUD count, Processes list, live output, the busy
 `Esc` stop pop-up and the quit pop-up. `activity-processes.frame` pins these

@@ -118,7 +118,7 @@ fn long_keybinds_overlay_scrolls_without_a_track() {
     app.handle_key(key(KeyCode::End));
     let scroll = app.control_scroll[super::ControlTab::Keybinds.index()];
     assert_eq!(scroll.offset(), scroll.max_offset());
-    assert!(!app.selection.has_range());
+    assert!(!app.pane.selection.has_range());
 }
 
 /// Spec 02 §5.5: "an unscrollable pane is a defect regardless of content

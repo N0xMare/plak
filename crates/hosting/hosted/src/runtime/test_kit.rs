@@ -22,6 +22,22 @@ use super::{
     SessionHome, ShellFallbackFacts, ShellHostConfig, ShellHostRunner, Surface, SurfaceHandler,
 };
 
+/// Seed the real presentation reducer without constructing a runtime.
+pub fn replace_transcript<P: plakous_host_protocol::ProtocolExtension>(
+    sender: &Sender<P>,
+    snapshot: plakous_host_protocol::views::PresentationSnapshot,
+) -> bool {
+    sender.replace_transcript(snapshot)
+}
+
+/// Republish the real reducer's current canonical and live presentation.
+pub fn resync_transcript<P: plakous_host_protocol::ProtocolExtension>(
+    sender: &Sender<P>,
+    scope: &plakous_host_protocol::views::transcript::TranscriptScope,
+) -> bool {
+    sender.resync_transcript(scope)
+}
+
 /// A surface that answers every product intent by recording it.
 #[derive(Debug, Default)]
 pub struct RecordingSurface {

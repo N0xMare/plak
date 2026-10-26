@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use super::App;
+use super::{App, TranscriptSelection};
 use crate::tui::{UserAction, UserActionSender};
 use plakous_host_protocol::views::transcript::{TranscriptRevision, TranscriptScope};
 
@@ -20,6 +20,8 @@ pub(crate) struct TranscriptPane {
     pub(super) keyed: super::keyed::BlockIndex,
     pub(crate) blocks: Vec<ScrollBlock>,
     pub(super) presentation: TranscriptRevision,
+    /// Root session whose key namespace this pane's presentation belongs to.
+    pub(super) presentation_session: Option<String>,
     pub(super) presentation_ready: bool,
     pub(super) resync: Option<TranscriptScope>,
     resync_sent: Option<(u64, Instant)>,
@@ -61,6 +63,8 @@ pub(crate) struct TranscriptPane {
     pub(super) transcript_anchor_banner_rows: usize,
     /// Focused transcript row for the §5.3 fold keymap.
     pub(super) focused_block: Option<usize>,
+    pub(super) selection: TranscriptSelection,
+    pub(super) pending_tool_click: Option<(usize, blocks::RowTarget)>,
     /// Presentation-only start instants for correlated activity timing.
     ///
     /// Fallback only: the host stamps `duration_ms` on every line it can, and
@@ -76,6 +80,7 @@ impl TranscriptPane {
         Self {
             blocks,
             presentation: TranscriptRevision::default(),
+            presentation_session: None,
             presentation_ready: false,
             resync: None,
             #[cfg(test)]
@@ -97,6 +102,8 @@ impl TranscriptPane {
             transcript_view_anchor: None,
             transcript_anchor_banner_rows: 0,
             focused_block: None,
+            selection: TranscriptSelection::default(),
+            pending_tool_click: None,
             tool_started: HashMap::new(),
             thinking_started: HashMap::new(),
         }
@@ -214,6 +221,8 @@ impl App {
                 return;
             }
             Some(view) => {
+                self.pane.selection.clear();
+                self.pane.pending_tool_click = None;
                 self.agent_pane_serial += 1;
                 view.agent_id = agent_id;
                 view.label = label;
@@ -221,6 +230,8 @@ impl App {
                 self.pane = TranscriptPane::new(Vec::new());
             }
             None => {
+                self.pane.selection.clear();
+                self.pane.pending_tool_click = None;
                 self.agent_pane_serial += 1;
                 let root = std::mem::replace(&mut self.pane, TranscriptPane::new(Vec::new()));
                 self.agent_view = Some(AgentView {
@@ -232,6 +243,7 @@ impl App {
                 });
             }
         }
+        self.pane.presentation_session.clone_from(&self.session_id);
         self.reset_transcript_gestures();
         self.mark_transcript_structural();
     }
@@ -250,95 +262,6 @@ impl App {
         // Render preferences may have changed while the root pane was hidden.
         self.mark_transcript_structural();
         true
-    }
-
-    /// Carries what the operator did to the agent's rows across a re-sent
-    /// transcript (every turn end): open items and their fetched detail,
-    /// folded thoughts, the focused row and the camera's anchor, each found
-    /// again by its identity (a tool's call id, a thought's location, or a
-    /// typed content key and occurrence for rows without a durable id). A
-    /// selection addresses old rows and is dropped.
-    pub(super) fn carry_item_state(&mut self, old: &[ScrollBlock]) {
-        carry_mail_state(&mut self.pane.blocks, old);
-        let by_identity: HashMap<(bool, String), &ScrollBlock> = old
-            .iter()
-            .filter_map(|block| {
-                item_identity(block).map(|(tool, id)| ((tool, id.to_owned()), block))
-            })
-            .collect();
-        let by_content: HashMap<_, _> = old
-            .iter()
-            .filter(|block| matches!(block, ScrollBlock::Thinking { .. }))
-            .map(|block| ((std::mem::discriminant(block), block.body()), block))
-            .collect();
-        for block in &mut self.pane.blocks {
-            let Some(id) = item_identity(block).map(|(tool, id)| (tool, id.to_owned())) else {
-                continue;
-            };
-            let Some(was) = by_identity.get(&id).copied().or_else(|| {
-                by_content
-                    .get(&(std::mem::discriminant(block), block.body()))
-                    .copied()
-            }) else {
-                continue;
-            };
-            match (block, was) {
-                (
-                    ScrollBlock::Tool {
-                        mode,
-                        manual,
-                        group_open,
-                        view,
-                        ..
-                    },
-                    ScrollBlock::Tool {
-                        mode: old_mode,
-                        manual: old_manual,
-                        group_open: old_group_open,
-                        view: old_view,
-                        ..
-                    },
-                ) => {
-                    *mode = *old_mode;
-                    *manual = *old_manual;
-                    *group_open = *old_group_open;
-                    view.clone_from(old_view);
-                }
-                (
-                    ScrollBlock::Thinking { mode, manual, .. },
-                    ScrollBlock::Thinking {
-                        mode: old_mode,
-                        manual: old_manual,
-                        ..
-                    },
-                ) if *old_manual => {
-                    *mode = *old_mode;
-                    *manual = true;
-                }
-                _ => {}
-            }
-        }
-        let new = &self.pane.blocks;
-        let remap = |idx| remap_block(old, new, idx);
-        self.pane.focused_block = self.pane.focused_block.and_then(remap);
-        self.pane.transcript_view_anchor =
-            self.pane.transcript_view_anchor.and_then(|(idx, row)| {
-                remap(idx)
-                    .map(|at| (at, row))
-                    .or_else(|| {
-                        // If the row was removed, hold the nearest surviving
-                        // content, never reinterpret the old bottom offset.
-                        (1..old.len()).find_map(|distance| {
-                            idx.checked_add(distance)
-                                .and_then(remap)
-                                .or_else(|| idx.checked_sub(distance).and_then(remap))
-                                .map(|at| (at, 0))
-                        })
-                    })
-                    .or_else(|| (!new.is_empty()).then_some((0, 0)))
-            });
-        self.selection.clear();
-        self.pending_tool_click = None;
     }
 
     /// Asks the host to serve the agent transcript on screen, or to close the
@@ -429,6 +352,7 @@ impl App {
     pub(super) fn clear_presentation(&mut self) {
         self.pane.keyed = super::keyed::BlockIndex::default();
         self.pane.presentation = TranscriptRevision::default();
+        self.pane.presentation_session = None;
         self.pane.presentation_ready = false;
         self.pane.resync = None;
         self.pane.resync_sent = None;
@@ -439,8 +363,8 @@ impl App {
     /// screen; none of it carries over to another pane.
     fn reset_transcript_gestures(&mut self) {
         self.reset_composer_drag();
-        self.selection.clear();
-        self.pending_tool_click = None;
+        self.pane.selection.clear();
+        self.pane.pending_tool_click = None;
         self.transcript_drag_pointer = None;
         self.transcript_down_cell = None;
         self.copy_selection_after_draw = false;
@@ -448,88 +372,5 @@ impl App {
         self.tool_hit_targets.clear();
         self.mouse_scroll_queue = 0;
         self.scrollbar_drag = None;
-    }
-}
-
-fn carry_mail_state(blocks: &mut [ScrollBlock], old: &[ScrollBlock]) {
-    // Notices have no wire identity; retain folds by content and occurrence.
-    let mut mail_states: HashMap<&str, std::collections::VecDeque<(bool, bool)>> = HashMap::new();
-    for block in old {
-        if let ScrollBlock::Mail {
-            text,
-            open,
-            group_open,
-        } = block
-        {
-            mail_states
-                .entry(text)
-                .or_default()
-                .push_back((*open, *group_open));
-        }
-    }
-    for block in blocks {
-        if let ScrollBlock::Mail {
-            text,
-            open,
-            group_open,
-        } = block
-            && let Some((was_open, was_group)) = mail_states
-                .get_mut(text.as_str())
-                .and_then(std::collections::VecDeque::pop_front)
-        {
-            *open = was_open;
-            *group_open = was_group;
-        }
-    }
-}
-
-fn remap_block(old: &[ScrollBlock], new: &[ScrollBlock], idx: usize) -> Option<usize> {
-    let block = old.get(idx)?;
-    if let Some(id) = item_identity(block)
-        && let Some(at) = new
-            .iter()
-            .position(|block| item_identity(block) == Some(id))
-    {
-        return Some(at);
-    }
-    // Snapshots can replace live location keys. Prose and notices
-    // have no wire id at all. Their typed content plus occurrence is
-    // a stable presentation key, independent of distance to the tail.
-    let same = |other: &&ScrollBlock| {
-        std::mem::discriminant(*other) == std::mem::discriminant(block)
-            && other.body() == block.body()
-            && match (block, *other) {
-                (
-                    ScrollBlock::Tool {
-                        subject,
-                        parent_call_id,
-                        ..
-                    },
-                    ScrollBlock::Tool {
-                        subject: other_subject,
-                        parent_call_id: other_parent,
-                        ..
-                    },
-                ) => subject == other_subject && parent_call_id == other_parent,
-                _ => true,
-            }
-    };
-    let occurrence = old[..idx].iter().filter(same).count();
-    new.iter()
-        .enumerate()
-        .filter(|(_, other)| same(other))
-        .nth(occurrence)
-        .map(|(at, _)| at)
-}
-
-/// The identity a row keeps across re-sent transcripts: a tool's call id or
-/// a thought's location key.
-fn item_identity(block: &ScrollBlock) -> Option<(bool, &str)> {
-    match block {
-        ScrollBlock::Tool {
-            call_id: Some(id), ..
-        } => Some((true, id.as_str())),
-        ScrollBlock::Thinking { location_key, .. } => Some((false, location_key.as_str())),
-        _ => None,
     }
 }

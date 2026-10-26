@@ -1116,7 +1116,10 @@ fn agent_body_scrollbar_track_click_pages_and_thumb_drags() {
             "{width}x{height}: a track click above the thumb did not page ({before} -> {})",
             app.pane.scroll_from_bottom
         );
-        assert!(!app.selection.has_range(), "{width}x{height}: it selected");
+        assert!(
+            !app.pane.selection.has_range(),
+            "{width}x{height}: it selected"
+        );
         assert_eq!(app.viewed_agent_id(), Some(AGENT));
 
         // A fresh tail: the thumb sits on the last row, so the press grabs it.
@@ -1136,7 +1139,7 @@ fn agent_body_scrollbar_track_click_pages_and_thumb_drags() {
             "{width}x{height}: dragging the thumb up did not move ({})",
             app.pane.scroll_from_bottom
         );
-        assert!(!app.selection.has_range());
+        assert!(!app.pane.selection.has_range());
         let bottom = app
             .transcript_scrollbar
             .expect("track")

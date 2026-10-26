@@ -309,22 +309,6 @@ impl App {
         self.mark_dirty();
     }
 
-    /// The system and error notes the host published during the open that
-    /// is now publishing its presentation snapshot, in order. The snapshot
-    /// replaces the transcript; these postdate it and must survive it.
-    pub(super) fn take_open_notes(&mut self) -> Vec<ScrollBlock> {
-        let Some(from) = self.open_notes_from.take() else {
-            return Vec::new();
-        };
-        self.pane
-            .blocks
-            .iter()
-            .skip(from)
-            .filter(|block| matches!(block, ScrollBlock::System(_) | ScrollBlock::Error(_)))
-            .cloned()
-            .collect()
-    }
-
     pub(super) fn push_block(&mut self, block: ScrollBlock) {
         self.flush_assistant_stream();
         self.pane.transcript_bytes = self
@@ -467,8 +451,9 @@ impl App {
         if remove == 0 {
             return;
         }
+        let held_anchor = self.pane.transcript_view_anchor;
         self.pane.blocks.drain(..remove);
-        self.pane.keyed.splice(0, remove, 0);
+        self.splice_keyed_indices(0, remove, 0);
         // Every block-space index the operator's place and the render cache
         // hold names a block that just moved. `dropped_below` is the lowest old
         // index that survives; `shift` is how far the survivors moved down.
@@ -479,7 +464,7 @@ impl App {
                 0,
                 ScrollBlock::System(TRANSCRIPT_TRUNCATION_MARKER.to_owned()),
             );
-            self.pane.keyed.splice(0, 0, 1);
+            self.splice_keyed_indices(0, 0, 1);
             self.pane.transcript_bytes = self.pane.transcript_bytes.saturating_add(marker_bytes);
             shift = shift.saturating_sub(1);
         }
@@ -489,23 +474,22 @@ impl App {
                 .transcript_bytes
                 .saturating_sub(self.pane.blocks[1].retained_bytes());
             self.pane.blocks.remove(1);
-            self.pane.keyed.splice(1, 1, 0);
+            self.splice_keyed_indices(1, 1, 0);
             dropped_below = dropped_below.saturating_add(1);
             shift = shift.saturating_add(1);
         }
         // Anchoring must not drift. A pinned viewport at the
         // retention cap drifted one block per host event because the anchor was
         // a raw block index that retention never rebased.
-        self.pane.transcript_view_anchor =
-            self.pane.transcript_view_anchor.map(|(block, sub_row)| {
-                if block >= dropped_below {
-                    (block.saturating_sub(shift), sub_row)
-                } else {
-                    // The anchored block itself was evicted: hold the oldest
-                    // content still retained rather than jumping to live.
-                    (dropped_below.saturating_sub(shift), 0)
-                }
-            });
+        self.pane.transcript_view_anchor = held_anchor.map(|(block, sub_row)| {
+            if block >= dropped_below {
+                (block.saturating_sub(shift), sub_row)
+            } else {
+                // The anchored block itself was evicted: hold the oldest
+                // content still retained rather than jumping to live.
+                (dropped_below.saturating_sub(shift), 0)
+            }
+        });
         self.pane
             .transcript_cache
             .shift_blocks(dropped_below, shift);

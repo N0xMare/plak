@@ -7,6 +7,7 @@
 use crate::tui::blocks::{LineLayout, layout_anchor, resolve_layout_anchor};
 use crate::tui::markdown::RowCopy;
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
+use sha2::{Digest as _, Sha256};
 use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;
 
@@ -26,10 +27,76 @@ pub(crate) struct TranscriptSelection {
     block_head: Option<(usize, usize)>,
     projection_width: Option<usize>,
     projection_revision: Option<u64>,
+    restore_projection: Option<[u8; 32]>,
 }
 
 impl TranscriptSelection {
+    /// A key match alone does not prove the same rendered text: grouping can
+    /// change a row's label even when its own content did not change.
+    pub(crate) fn prepare_keyed_restore(&mut self, layout: &LineLayout) {
+        if self.anchor.is_none() || self.restore_projection.is_some() {
+            return;
+        }
+        if self.block_anchor.is_none() || self.head.is_some() && self.block_head.is_none() {
+            self.capture_blocks(layout);
+        }
+        if self.block_anchor.is_none() || self.head.is_some() && self.block_head.is_none() {
+            self.clear();
+            return;
+        }
+        self.restore_projection = self.projection_digest(layout);
+        if self.restore_projection.is_none() {
+            self.clear();
+        }
+    }
+
+    fn projection_digest(&self, layout: &LineLayout) -> Option<[u8; 32]> {
+        let anchor = self.anchor?;
+        let head = self.head.unwrap_or(anchor);
+        let rows = layout
+            .plain
+            .get(anchor.row.min(head.row)..=anchor.row.max(head.row))?;
+        let mut digest = Sha256::new();
+        for row in rows {
+            digest.update((row.len() as u64).to_le_bytes());
+            digest.update(row.as_bytes());
+        }
+        Some(digest.finalize().into())
+    }
+
+    pub(crate) fn invalidate_block(&mut self, block: usize) {
+        if self.block_span().is_some_and(|span| span.contains(&block)) {
+            self.clear();
+        }
+    }
+
+    pub(crate) fn block_span(&self) -> Option<std::ops::RangeInclusive<usize>> {
+        let (anchor, _) = self.block_anchor?;
+        let (head, _) = self.block_head.unwrap_or((anchor, 0));
+        Some(anchor.min(head)..=anchor.max(head))
+    }
+
     pub(crate) fn remap_blocks(&mut self, remap: impl Fn(usize) -> Option<usize>) {
+        if self.anchor.is_some() && self.block_anchor.is_none()
+            || self.head.is_some() && self.block_head.is_none()
+        {
+            self.clear();
+            return;
+        }
+        if let Some(span) = self.block_span() {
+            let Some(first) = remap(*span.start()) else {
+                self.clear();
+                return;
+            };
+            if span.enumerate().any(|(offset, block)| {
+                first
+                    .checked_add(offset)
+                    .is_none_or(|expected| remap(block) != Some(expected))
+            }) {
+                self.clear();
+                return;
+            }
+        }
         let map = |anchor: Option<(usize, usize)>| {
             anchor.and_then(|(block, row)| remap(block).map(|block| (block, row)))
         };
@@ -66,6 +133,15 @@ impl TranscriptSelection {
         {
             position.row = resolve_layout_anchor(layout, anchor);
         }
+        let digest = self.projection_digest(layout);
+        if self
+            .restore_projection
+            .is_some_and(|guard| digest != Some(guard))
+        {
+            self.clear();
+        } else {
+            self.restore_projection = digest;
+        }
     }
 
     /// Begin a potential drag in absolute rendered-content coordinates.
@@ -76,12 +152,16 @@ impl TranscriptSelection {
         self.block_head = None;
         self.projection_width = Some(width);
         self.projection_revision = Some(revision);
+        self.restore_projection = None;
     }
 
     /// Update the drag head; returns true while a gesture is owned.
     pub(crate) fn drag(&mut self, position: ContentPosition) -> bool {
         if self.anchor.is_none() {
             return false;
+        }
+        if self.head != Some(position) {
+            self.restore_projection = None;
         }
         self.head = Some(position);
         true
@@ -95,6 +175,9 @@ impl TranscriptSelection {
         if self.head.is_none() && position == anchor {
             self.clear();
             return false;
+        }
+        if self.head != Some(position) {
+            self.restore_projection = None;
         }
         self.head = Some(position);
         true
@@ -111,7 +194,8 @@ impl TranscriptSelection {
 
     /// Preserve only a selection proven to address the same projection. A tail
     /// splice may retain positions wholly inside its unchanged prefix; every
-    /// structural replacement or reflow invalidates absolute row coordinates.
+    /// replacement without a proven key remap, or a reflow, invalidates
+    /// absolute row coordinates.
     pub(crate) fn reconcile_projection(
         &mut self,
         revision: u64,
@@ -143,6 +227,9 @@ impl TranscriptSelection {
         };
         self.anchor = self.anchor.map(clamp);
         self.head = self.head.map(clamp);
+        if self.anchor.is_some() {
+            self.projection_revision = Some(revision);
+        }
     }
 
     pub(crate) fn clear(&mut self) {
@@ -152,6 +239,7 @@ impl TranscriptSelection {
         self.block_head = None;
         self.projection_width = None;
         self.projection_revision = None;
+        self.restore_projection = None;
     }
 
     /// Highlight the selected part of the currently visible real transcript

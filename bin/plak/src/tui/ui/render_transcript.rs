@@ -101,12 +101,9 @@ impl App {
             .then_some(self.pane.transcript_view_anchor)
             .flatten();
         let stable_prefix_rows = self.pane.transcript_cache.stable_prefix_rows(change);
-        // Selection carries content rows from one frame to the next and copy
-        // reads the whole plain projection, so both need every block measured;
-        // nothing else does. Declared before the projection is asked for, so a
-        // rebuild this frame measures everything in the one pass.
-        let selecting = self.selection.has_range();
-        self.pane.transcript_cache.require_exact(selecting);
+        self.pane
+            .transcript_cache
+            .require_blocks(self.pane.selection.block_span());
         let prefs = self.pane_prefs();
         let _ = self.pane.transcript_cache.get(
             self.pane.transcript_revision,
@@ -116,11 +113,9 @@ impl App {
             change,
             prefs,
         );
-        if selecting {
-            self.pane
-                .transcript_cache
-                .materialize_all(&self.pane.blocks);
-        }
+        self.pane
+            .transcript_cache
+            .materialize_required(&self.pane.blocks);
 
         // The session banner is a prefix of the document, not a sticky
         // header: follow-live and scroll offsets count it in the total, so it
@@ -194,9 +189,10 @@ impl App {
         self.transcript_body_area = Some(body_area);
         self.pane.transcript_visible_start = start;
         self.pane.transcript_total_rows = vtotal;
-        self.selection
+        self.pane
+            .selection
             .resolve_blocks(self.pane.transcript_cache.layout());
-        self.selection.reconcile_projection(
+        self.pane.selection.reconcile_projection(
             self.pane.transcript_revision,
             content_w,
             total_messages,
@@ -214,8 +210,9 @@ impl App {
                     .min(total_messages.saturating_sub(1)),
                 column: usize::from(screen_column.saturating_sub(body_area.x)),
             };
-            self.selection.drag(position);
-            self.selection
+            self.pane.selection.drag(position);
+            self.pane
+                .selection
                 .capture_blocks(self.pane.transcript_cache.layout());
         }
         if banner_visible > 0 {
@@ -437,7 +434,7 @@ impl App {
         }
         // Highlight only the real body. Copy uses the complete cached plain
         // projection.
-        self.selection.render(
+        self.pane.selection.render(
             frame.buffer_mut(),
             body_area,
             start,

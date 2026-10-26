@@ -145,7 +145,7 @@ impl App {
             if self.copy_current_selection() {
                 self.composer_selection
                     .set_caret(&self.input, self.input_cursor);
-                self.selection.clear();
+                self.pane.selection.clear();
                 self.mark_dirty();
                 return None;
             }
@@ -283,7 +283,7 @@ impl App {
             copy_text_osc52(&selected);
             return true;
         }
-        if self.selection.has_range()
+        if self.pane.selection.has_range()
             && let Some(selected) = self.take_transcript_selection_text()
         {
             copy_text_osc52(&selected);

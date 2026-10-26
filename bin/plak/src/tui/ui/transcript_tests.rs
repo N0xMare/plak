@@ -336,7 +336,7 @@ fn transcript_scrollbar_reserves_column_and_track_click_pages() {
     let before = app.pane.scroll_from_bottom;
     app.handle_mouse(left_click(area.right() - 1, area.y));
     assert!(app.pane.scroll_from_bottom > before);
-    assert!(!app.selection.has_range());
+    assert!(!app.pane.selection.has_range());
 }
 
 #[test]
@@ -358,7 +358,7 @@ fn transcript_scrollbar_drag_reaches_both_ends_without_selecting() {
     ));
     terminal.draw(|frame| app.draw(frame)).unwrap();
     assert!(app.pane.scroll_from_bottom > 70);
-    assert!(!app.selection.has_range());
+    assert!(!app.pane.selection.has_range());
     app.handle_mouse(left_mouse(
         MouseEventKind::Drag(MouseButton::Left),
         x,
@@ -1569,13 +1569,30 @@ fn live_transcript_updates_do_not_snap_a_scrolled_viewport_to_tail() {
 
 #[test]
 fn detached_camera_survives_snapshots_and_resumes_only_at_tip() {
+    use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem};
+    let item = |anchor, row| TranscriptItem {
+        key: RowKey::new(anchor, Lane::Runtime, 0),
+        row,
+    };
+    let snapshot = |revision, items| {
+        HostEvent::PresentationSnapshot(crate::tui::presentation::PresentationSnapshot {
+            revision,
+            items,
+            ..Default::default()
+        })
+    };
     for (rekey, return_to_tip) in [(false, 0), (true, 1), (true, 2)] {
         let mut app = App::new(launch_basic(), true);
         let mut rows: Vec<_> = (0..40)
-            .map(|i| TranscriptRow::assistant(format!("row-{i:02}\n\nsecond line\n\nthird line")))
+            .map(|i| {
+                item(
+                    i + 3,
+                    TranscriptRow::assistant(format!("row-{i:02}\n\nsecond line\n\nthird line")),
+                )
+            })
             .collect();
         // Attach/resume starts at the tail.
-        app.apply_host_event(restore_snapshot(1, rows.clone()));
+        app.apply_host_event(snapshot(1, rows.clone()));
         let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert_eq!(app.pane.scroll_from_bottom, 0);
@@ -1591,7 +1608,7 @@ fn detached_camera_survives_snapshots_and_resumes_only_at_tip() {
             assert!(app.jump_to_live_hit.is_some());
         };
         // An identical turn-end replacement must not reset follow mode.
-        app.apply_host_event(restore_snapshot(2, rows.clone()));
+        app.apply_host_event(snapshot(2, rows.clone()));
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert_held(&app);
         // A host wake has no user row; it starts streaming directly.
@@ -1599,15 +1616,23 @@ fn detached_camera_survives_snapshots_and_resumes_only_at_tip() {
         app.apply_host_event(HostEvent::AssistantDelta("wake output\n".repeat(20)));
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert_held(&app);
-        rows.push(TranscriptRow::assistant("wake output\n".repeat(20)));
+        rows.push(item(
+            1000,
+            TranscriptRow::assistant("wake output\n".repeat(20)),
+        ));
         if rekey {
-            // Rebuild the row vector with shifted ordering keys: content
-            // before the camera can be inserted or evicted by projection.
+            // Projection shifts positions, not surviving rows' identities.
             rows.remove(0);
-            rows.insert(0, TranscriptRow::info(NoticeScope::Host, "new prefix"));
-            rows.insert(0, TranscriptRow::info(NoticeScope::Host, "another prefix"));
+            rows.insert(
+                0,
+                item(2, TranscriptRow::info(NoticeScope::Host, "new prefix")),
+            );
+            rows.insert(
+                0,
+                item(1, TranscriptRow::info(NoticeScope::Host, "another prefix")),
+            );
         }
-        app.apply_host_event(restore_snapshot(3, rows.clone()));
+        app.apply_host_event(snapshot(3, rows.clone()));
         app.apply_host_event(HostEvent::SetBusy(false));
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert_held(&app);
@@ -1638,8 +1663,11 @@ fn detached_camera_survives_snapshots_and_resumes_only_at_tip() {
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert_eq!(app.pane.scroll_from_bottom, 0);
         assert!(app.pane.transcript_visible_start > before);
-        rows.push(TranscriptRow::assistant("new tail\n".repeat(20)));
-        app.apply_host_event(restore_snapshot(4, rows));
+        rows.push(item(
+            1001,
+            TranscriptRow::assistant("new tail\n".repeat(20)),
+        ));
+        app.apply_host_event(snapshot(4, rows));
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert_eq!(app.pane.scroll_from_bottom, 0);
     }
@@ -3609,7 +3637,7 @@ fn delivered_child_mail_is_compact_grouped_and_expandable() {
         activity_frame(&mut app, "dark", width, "mail-rows");
         app.toggle_row(head + 1, RowTarget::Item);
         activity_frame(&mut app, "dark", width, "mail-detail");
-        // Same notices re-sent by a snapshot preserve local folds, by occurrence.
+        // Same notices re-sent by a snapshot preserve local folds by row key.
         app.apply_host_event(restore_snapshot(2, rows));
         assert!(matches!(
             app.pane.blocks[head],
