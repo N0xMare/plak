@@ -899,6 +899,20 @@ class LiveOracleTests(unittest.TestCase):
         # A typed non-provider status outranks provider prose.
         self.assertIsNone(live.provider_reason_from(None, 400, "too many requests"))
 
+    def test_typed_terminals_do_not_classify_quoted_product_prose(self):
+        misleading = ("model lookup failed after 3 attempts: HTTP 503 "
+                      "returned an in-band error after accepting the request: HTTP 504 (timeout) "
+                      "response reached its output bound before completion "
+                      "[2 requests; last: rate limited]")
+        self.assertIsNone(live.provider_reason_from("Protocol", None, misleading))
+        self.assertFalse(live.output_limit_failure("Protocol", misleading))
+        self.assertEqual(live.provider_reason_from("Unavailable", 503, "renamed diagnostic"),
+                         "Unavailable 503")
+        turn = live.Turn(phase="failed", model_error_kind="Transport", errors=["renamed diagnostic"])
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_incomplete(turn, "turn")
+        self.assertEqual(raised.exception.model_error_kind, "Transport")
+
     def test_a_typed_in_band_provider_error_without_a_rendered_status_is_provider(self):
         # Text cut before its status still carries the typed kind.
         text = ("agent turn failed: OpenRouter Chat operation failed: OpenRouter returned an "

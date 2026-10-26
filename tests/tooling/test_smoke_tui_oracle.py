@@ -42,7 +42,8 @@ class SmokeTuiOracleTests(unittest.TestCase):
         for kind, status, text in (
                 ("Unavailable", None, "server_is_overloaded"),
                 (None, 429, ""),
-                ("Protocol", None, "OpenRouter Chat HTTP 429 (rejected-before-acceptance)"),
+                ("RateLimited", 429, "OpenRouter Chat HTTP 429 (rejected-before-acceptance)"),
+                (None, None, "OpenRouter Chat HTTP 429 (rejected-before-acceptance)"),
         ):
             turn = live.Turn(phase="failed", model_error_kind=kind, http_status=status,
                              errors=[text])

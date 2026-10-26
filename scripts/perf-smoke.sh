@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Offline performance smoke over the scripted model (`plak/test-hooks`).
 #
-# Six product measurements and four worker timings, each emitted as a JSON line carrying a
+# Six product measurements, four worker timings and long-lineage samples,
+# each emitted as a JSON line carrying a
 # machine id, so a number from one machine is never compared with a number from
 # another. `tests/performance/baselines/offline-perf-smoke.json` holds the seed
 # values. `--check` compares four of them against the recorded tolerance:
@@ -10,7 +11,7 @@
 # host. Cold start and the tool round trip print as informational, because
 # their measured spread (12.6% and 38.9%) leaves no tolerance worth defending.
 # The round trip is the median of five repeats. Wall time on a shared machine
-# is evidence, not a gate: `just check` runs this informationally. See spec 05
+# is evidence, not a gate: no gate tier runs this recipe. See spec 05
 # §2.7.
 #
 # Usage: scripts/perf-smoke.sh [--check] [--out <file>]
@@ -71,16 +72,15 @@ TOML
 chmod 700 "$root/home" "$root/home/agents"
 chmod 600 "$root/home/config.toml" "$root/home/agents/lead.toml"
 
-echo "== building the scripted binary ==" >&2
-# The binary comes out of the gate's test build, so this reuses it. `-p plak`
-# would resolve features for plak alone, and any `cargo build` leaves
-# dev-dependency features off; either compiles a second variant of much of the
-# dependency graph.
-cargo test --no-run --locked --workspace --all-features >&2
-# Copy the executable aside. The configured Cargo target's `debug/plak` is
-# shared, and a concurrent build without `test-hooks` would replace it.
+echo "== building the release scripted binary and sidecars ==" >&2
+cargo build --release --locked --workspace --all-features >&2
+# Keep the measured executable and its matching workers together, away from
+# later builds that could replace a configured target's artifacts.
 cargo_target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
-cp "$cargo_target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug/plak" "$root/plak"
+release_dir="$cargo_target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release"
+for binary in plak plakous-js-host plakous-py-host; do
+  cp "$release_dir/$binary" "$root/$binary"
+done
 plak_bin="$root/plak"
 
 machine="$("$PY" - <<'PY'
@@ -347,7 +347,11 @@ fi
 
 # Worker spawn plus one nested call, and warm per-cell cost on that same worker.
 "$PY" tools/perf/cell_round_trip.py \
-  "$cargo_target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" "$machine" >>"$measurements"
+  "$root" "$machine" >>"$measurements"
+
+# Informational long histories: sequential prompts retain the entire lineage;
+# the final request reports it back so truncation cannot look like a speedup.
+"$PY" tools/perf/long_lineage.py "$plak_bin" "$root/lineage" "$machine" >>"$measurements"
 
 if [[ -n "$out" ]]; then
   cp "$measurements" "$out"

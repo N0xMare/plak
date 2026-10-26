@@ -2216,12 +2216,10 @@ fn pi_edit_and_write_in_one_turn_commit_canonical_apply_patch_and_lower_by_expos
 // ---------------------------------------------------------------------------
 //
 // These cells drive `plak agent` through the scripted offline model (the
-// `test-hooks` feature). They are ignored by default because this package's
-// gate does not build the binary; run them after
-// `cargo build --locked -p plak --features test-hooks -p plakous-js-runtime
-// -p plakous-py-worker` (or point `PLAK_TEST_BINARY` at a matching build with
-// both sidecars beside it) with `cargo test -p plakous-offline-crash-harness --test
-// crash_matrix_routes -- --ignored jsonl`. Cut points on this face are reached
+// `test-hooks` feature). The durability gate's workspace/all-features test
+// build prepares that binary and both sidecars. Standalone invocations must
+// build the same artifacts or point `PLAK_TEST_BINARY` at a matching build
+// with both sidecars beside it. Cut points on this face are reached
 // through fsynced evidence rows, stream records and script stalls; the fold
 // and the effect-outcome interval have no deterministic hook on this face and
 // are covered in-process only.
@@ -2365,6 +2363,13 @@ struct FaceAgent {
     stdin: Option<std::process::ChildStdin>,
     lines: Arc<std::sync::Mutex<Vec<String>>>,
     stderr: Arc<std::sync::Mutex<String>>,
+}
+
+impl Drop for FaceAgent {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl FaceAgent {
@@ -2596,7 +2601,6 @@ fn face_reopen_and_continue(fixture: &FaceFixture, session: &str) -> TestResult<
 
 /// Before the turn: a kill while idle leaves an exact head and nothing to say.
 #[test]
-#[ignore = "needs the plak binary with test hooks; see the module note"]
 fn jsonl_face_cut_before_the_turn_reopens_exactly() -> TestResult {
     let fixture = FaceFixture::new(&face_answer(false))?;
     let mut agent = FaceAgent::start(&fixture, &[])?;
@@ -2617,7 +2621,6 @@ fn jsonl_face_cut_before_the_turn_reopens_exactly() -> TestResult {
 
 /// Inside the first model request: abandoned, with the billing warning.
 #[test]
-#[ignore = "needs the plak binary with test hooks; see the module note"]
 fn jsonl_face_cut_inside_the_model_request_is_abandoned_with_the_billing_note() -> TestResult {
     let fixture = FaceFixture::new(&face_stalled_answer())?;
     let mut agent = FaceAgent::start(&fixture, &[])?;
@@ -2645,7 +2648,6 @@ fn jsonl_face_cut_inside_the_model_request_is_abandoned_with_the_billing_note() 
 
 /// Inside a running child process: abandoned, sent to look at the workspace.
 #[test]
-#[ignore = "needs the plak binary with test hooks; see the module note"]
 fn jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note() -> TestResult {
     let fixture = FaceFixture::new(&json!({
         "version": 1,
@@ -2688,7 +2690,7 @@ fn jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note() -
     let note = outcome
         .note
         .ok_or("the reopen said nothing about the cut turn")?;
-    if !note.contains("a tool may have run")
+    if !note.contains("a tool may have changed this workspace")
         || !note.contains("workspace")
         || !note.contains("not retried")
         || note.contains("billed")
@@ -2703,7 +2705,6 @@ fn jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note() -
 
 /// After the terminal result was published: exact, nothing to say.
 #[test]
-#[ignore = "needs the plak binary with test hooks; see the module note"]
 fn jsonl_face_cut_after_the_answer_reopens_exactly() -> TestResult {
     let fixture = FaceFixture::new(&face_answer(false))?;
     let mut agent = FaceAgent::start(&fixture, &[])?;
@@ -2733,43 +2734,42 @@ fn jsonl_face_cut_after_the_answer_reopens_exactly() -> TestResult {
 /// Inside an effect-decision frame: the face asked for an approval and the
 /// process died waiting.
 ///
-/// PENDING (product defect, reported): the library restores this head
-/// (`OpenSessionOutcome::RestoredWorking` with the decision pending, see the
-/// in-process cell), but the product's reopen refuses it: the session record's
-/// locator lags the `DecisionRequired` checkpoint, and adoption of a lagging
-/// locator is gated on the head being abandonable, which a restorable head is
-/// not. Until that lands this cell pins the refusal text so the day it changes
-/// is visible. Expected once fixed: the reopen says nothing about recovery,
-/// asks for the same approval again, and writes no `turn.abandoned` record.
+/// The restored turn must ask for the same call again, without another provider
+/// dispatch, a recovery warning or an abandonment. Approval UI ids may be
+/// renewed; the canonical call id and tool identify the retained decision.
 #[test]
-#[ignore = "needs the plak binary with test hooks; see the module note"]
+#[ignore = "JSONL-APPROVAL-RESUME: blocked by production fix"]
 fn jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen() -> TestResult {
     let fixture = FaceFixture::new(&decision_script())?;
     let mut agent = FaceAgent::start(&fixture, &[])?;
     let hello = agent.wait_for("hello", |record| record["kind"] == "hello")?;
     let session = hello["session_id"].as_str().ok_or("session id")?.to_owned();
     agent.send(&prompt_frame("perform the loopback effect"))?;
-    agent.wait_for("the approval request", |record| {
+    let approval = agent.wait_for("the approval request", |record| {
         record["kind"] == "approval"
     })?;
+    let call = approval["call_id"].as_str().ok_or("approval call id")?;
+    let dispatches = read_evidence(&fixture.evidence)?
+        .iter()
+        .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
+        .count();
     agent.sigkill()?;
-    let agent = FaceAgent::start(&fixture, &["--session", &session])?;
-    let answer = agent.wait_for("the reopen's answer", |record| {
-        record["kind"] == "ready" || record["kind"] == "error"
+    let mut agent = FaceAgent::start(&fixture, &["--session", &session])?;
+    let restored = agent.wait_for("the restored approval", |record| {
+        record["kind"] == "approval"
     })?;
-    let (_, _, stderr) = agent.finish()?;
-    if answer["kind"] == "ready" {
-        return Err(
-            "the product now reopens a decision frame; flip this cell to the \
-                    expected contract in its doc comment"
-                .into(),
-        );
+    agent.wait_for("the reopened hello", |record| record["kind"] == "hello")?;
+    if restored["call_id"] != call || restored["name"] != approval["name"] {
+        return Err(format!("reopen changed the pending call: {approval} -> {restored}").into());
     }
-    let message = answer["message"].as_str().unwrap_or_default();
-    if !message.contains("session locator is not the current exact branch head")
-        || !message.contains("a retry will not change that")
+    if face_recovery_note(&agent).is_some()
+        || read_evidence(&fixture.evidence)?
+            .iter()
+            .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
+            .count()
+            != dispatches
     {
-        return Err(format!("unexpected refusal: {message}; stderr:\n{stderr}").into());
+        return Err("restoring a decision warned about abandonment or redispatched".into());
     }
     if fixture
         .session_log_kinds()?
@@ -2777,6 +2777,11 @@ fn jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen() -> TestResult {
         .any(|kind| kind == "turn.abandoned")
     {
         return Err("a decision frame was logged as an abandoned turn".into());
+    }
+    agent.send(&quit_frame())?;
+    let (success, _, stderr) = agent.finish()?;
+    if !success {
+        return Err(format!("quit after restored approval failed: {stderr}").into());
     }
     Ok(())
 }

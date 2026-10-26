@@ -1897,6 +1897,7 @@ def main(argv: list[str]) -> int:
         started = time.monotonic()
         usage_before = live.session_usage(env.home)
         segment_start = len(env.capture_segments)
+        model_error_kind = None
         try:
             # A bad dial fails this scenario, not the report writer.
             reported_pages = growth_pages(route)
@@ -1904,11 +1905,13 @@ def main(argv: list[str]) -> int:
             detail, outcome = play(route, env, name), PASS
         except ScenarioFailure as failure:
             outcome, detail = failure.outcome, str(failure)
+            model_error_kind = failure.model_error_kind
         except Exception as error:
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
         segments = env.capture_segments[segment_start:]
-        outcome, detail = live.score_runaway(outcome, detail, segments)
+        outcome, detail = live.score_runaway(outcome, detail, segments,
+                                           model_error_kind=model_error_kind)
         import smoke
         pending = live.provider_pending(env, segments, outcome)
         complete = smoke.capture_complete(segments, pending)

@@ -1291,6 +1291,51 @@ lists the tests whose subject is a wall-clock measurement rather than a schedule
 outcome. The tables below group the members by kind; `.config/nextest.toml` is
 the exact list.
 
+Short real-clock checks run in this lane too: executor shutdown and application
+result/observation ordering, worker stdin/cancel and SIGTERM escalation, callback
+writer and private-store lock deadlines, unfinished-upload closure, empty and
+steered job waits, child completion/start-failure waits, subscription refresh
+timeout/drop, transition-stage timeout, host-worker join and detached-writer
+cleanup. Their existing bounds are unchanged. The whole cleanup-contention
+module is serial because its shared helper asserts a two-second mutex-admission
+bound. The 64/128-process capacity probes and pre-spawn refusal cleanup also run
+serially; parallel process pressure must not masquerade as a cleanup regression.
+The post-acceptance OpenRouter deadline fixture and real-PTY resize fixture use
+the same lane. A 240-second runner allowance is a hang watchdog, not a replacement
+for any local assertion.
+
+The steered job-await fixture uses a process that survives stdin EOF until
+explicit stop. Closing stdin during termination must not race a `read` command's
+natural exit and obscure the stop attribution being asserted; natural-exit
+preservation remains covered separately.
+
+The bounded product-revision CAS probes each use six independent homes in the
+serial lane (twelve process launches each). Idle quit/reopen alternates the
+home-owned tree gate on and off, retaining three samples of each. The obsolete
+ignored navigator placeholder-label test is removed: its actor-label helper and
+textual placeholder UI no longer exist. The active
+`a_mid_session_compaction_renders_its_note_and_the_session_carries_on` PTY test
+instead requires a Compact row, ordered before the answer, no placeholder essay
+or forged user prompt, and a successful subsequent turn.
+
+Four real-JSONL-face SIGKILL cells run in the durability lane: idle before a
+turn, inside the model request, inside a running tool and after the answer.
+The approval-cut cell specifies the restored-decision contract (same call/tool,
+no redispatch or abandonment), but remains explicitly ignored under
+`JSONL-APPROVAL-RESUME` until the production reopen hang is fixed. Its durability
+predicate is retained so unignoring it enrolls it without changing lanes.
+The workspace/all-features prerequisite builds the
+test-hooks product and matching sidecars; the fixture locates `plak` beside the
+test executable's `deps` directory, or uses an explicit `PLAK_TEST_BINARY`.
+All five are excluded from the parallel lane. The four active cells no longer
+require an ignored-test invocation; fixture-owned hosts are reaped on failure.
+
+Paused-Tokio elapsed checks stay parallel, including the quiet-poll repeat-hold
+tests and protocol-terminal close. CPU-time redaction checks also stay parallel:
+they measure process CPU, not scheduler delay. Real-clock lower-bound-only
+assertions (wake consumption, retry delay and progressing streams) do not fail
+because the runner was descheduled and stay parallel. Pure duration-value
+assertions do not measure elapsed time and need no budget lane.
 
 
 | Kind | Predicates |
@@ -2472,10 +2517,17 @@ Seeding a new machine waits for one run in which all six metrics measure
 successfully on an idle host, so a seed never records a contended number as the
 thing to beat.
 
-The recipe takes `plak` from `cargo test --no-run --workspace --all-features`,
-the gate's test build, so it reuses that build, and copies the executable aside before measuring, because
-the configured Cargo target's `debug/plak` is shared and a concurrent build
-without `test-hooks` would otherwise replace the binary under measurement.
+The recipe builds the release-profile workspace with all features, then copies
+`plak` and its matching JavaScript/Python workers aside before measuring. Both
+product and worker timings therefore measure optimized binaries, not the gate's
+debug/test artifacts. Historical debug seeds are not release comparisons and
+must be remeasured before being used as release baselines.
+
+Additional informational cases retain 400 and 1000 sequential prompts in one
+session. They report total turn time and first/last twenty-turn medians. The
+final scripted request returns its actual input history and must contain every
+earlier prompt, so dropping history cannot appear as a performance improvement.
+These measurements have no threshold and are outside every gate.
 
 A metric the machine cannot measure is reported as **no measurement**, never as
 a regression. The resident-set figure is the case that forced the distinction:
@@ -2868,6 +2920,26 @@ tuple refuses with an exact message is evidence of the same weight as one
 asserting a success.
 
 ### 3.2 Live scenarios
+
+JSONL terminal classification uses `turn_lifecycle.model_error_kind` and
+`http_status` before rendered prose or bracketed physical-attempt summaries.
+The typed model-error kind follows a scenario failure into runaway scoring;
+a typed Transport failure needs no matching English sentence, and a different
+typed kind cannot be relabelled by transport words in its diagnostic.
+
+Some surfaces still have no equivalent structured class. CLI startup lookup
+exhaustion exposes only rendered attempt count/cause; compatibility-notice
+refusal exposes only account-bearing prose; session-log failed terminals and
+child fault strings can lack a model-error kind/status. The capture `.info`
+terminal is a Rust Debug value, not structured phase/kind/reset fields. Its
+network-failure and capture-cap classifiers must still read that encoding.
+JSONL also lacks a distinct accepted-in-band-error bit, so distinguishing that
+case from an injected pre-acceptance status still needs its diagnostic marker.
+Telemetry has retry cause/transport-phase and credential-refresh failure-class
+columns, but turn/model-attempt status rows do not expose the missing terminal
+transport facts or startup refusal classes. These are typed-evidence gaps, not
+permission to infer a replacement class or change production wire formats in
+the live driver. Untyped surfaces retain their existing guarded text oracles.
 
 A startup model lookup that exhausts the bounded GET retry policy (chapter 01
 §6.2) scores `provider` only for a real-provider cause: a timeout requires at

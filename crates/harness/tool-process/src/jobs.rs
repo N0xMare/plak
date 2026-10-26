@@ -1037,7 +1037,25 @@ async fn grok_await_steer_returns_without_stopping_or_consuming_running_jobs() -
     let directory = tempfile::tempdir()?;
     let environment = environment(directory.path())?;
     let tools = ProcessSessionTools::posix_sh()?;
-    let handle = start(&tools, &environment).await?;
+    // Termination closes stdin before signalling. A `read` fixture can exit
+    // naturally on that EOF, racing the explicit-stop attribution below.
+    let started = tools
+        .start_canonical(
+            &environment,
+            CanonicalProcessStartRequest {
+                command: "exec sleep 30".to_owned(),
+                workdir: PathBuf::from("."),
+                login: false,
+                tty: false,
+                keep_stdin_open: true,
+                _model_description: None,
+                yield_time_ms: 0,
+                max_output_bytes: 4096,
+            },
+            ExecutionOperationControl::new(CancellationToken::new()),
+        )
+        .await?;
+    let handle = started.projection.session_id.ok_or("promoted handle")?;
     let (_sender, receiver) = tokio::sync::watch::channel(plakous_tools::ToolPreempt::Steer);
     let before = Instant::now();
     let outcome = ProcessSessionTools::await_canonical(

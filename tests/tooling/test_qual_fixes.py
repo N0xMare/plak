@@ -1062,6 +1062,12 @@ class RunawayOutputTests(unittest.TestCase):
                        "failed: response stream interrupted [1 requests; last: unclassified]")
             self.assertEqual(live.score_runaway(live.HARNESS, aborted, [segment]),
                              (live.MODEL, reasons[0]))
+            self.assertEqual(live.score_runaway(live.HARNESS, "renamed diagnostic", [segment],
+                                               model_error_kind="Transport"),
+                             (live.MODEL, reasons[0]))
+            self.assertEqual(live.score_runaway(live.HARNESS, aborted, [segment],
+                                               model_error_kind="Protocol"),
+                             (live.HARNESS, aborted))
             self.assertEqual(live.score_runaway(live.PROVIDER, "429", [segment]),
                              (live.PROVIDER, "429"))
             # A cancelled bodiless request after it (the continuation stopped

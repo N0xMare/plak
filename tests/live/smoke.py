@@ -685,17 +685,20 @@ def main(argv: list[str]) -> int:
         started = time.monotonic()
         usage_before = live.session_usage(env.home)
         segment_start = len(env.capture_segments)
+        model_error_kind = None
         try:
             detail, outcome = run_named(smoke, name), PASS
         except ScenarioFailure as failure:
             outcome, detail = failure.outcome, str(failure)
+            model_error_kind = failure.model_error_kind
         except Exception as error:  # a bug in this driver is a harness failure too
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
         if outcome not in (PASS, features.REFUSED) and name in EXPECTED_PENDING:
             outcome, detail = PENDING, f"{detail} [{EXPECTED_PENDING[name]}]"
         segments = env.capture_segments[segment_start:]
-        outcome, detail = live.score_runaway(outcome, detail, segments)
+        outcome, detail = live.score_runaway(outcome, detail, segments,
+                                           model_error_kind=model_error_kind)
         pending = live.provider_pending(env, segments, outcome)
         complete = capture_complete(segments, pending)
         evidence[name] = {"segments": [str(segment) for segment in segments],

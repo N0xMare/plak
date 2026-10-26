@@ -242,9 +242,10 @@ class Result:
 class ScenarioFailure(Exception):
     """Raised inside a scenario with the class the failure belongs to."""
 
-    def __init__(self, outcome: str, detail: str):
+    def __init__(self, outcome: str, detail: str, *, model_error_kind: str | None = None):
         super().__init__(detail)
         self.outcome = outcome
+        self.model_error_kind = model_error_kind
 
 
 class EventTimeout(ScenarioFailure):
@@ -552,16 +553,16 @@ def provider_reason_from(kind: str | None, http_status: int | None, text: str, *
     manual `/compact` refusals, and child job output. A kernel
     stream-validation failure is not decided here.
     """
-    lookup = lookup_failure(text, lookup_faults)
-    if lookup:
-        return lookup[0] if lookup[1] == PROVIDER else None
     if kind in PROVIDER_ERROR_KINDS or http_status in PROVIDER_HTTP_STATUSES:
         status = f"{kind or ''} {http_status or ''}".strip()
         return status or text[:160]
-    if http_status is not None:
-        # The product typed the status, and not as a provider refusal; its
-        # prose cannot overrule that.
+    if kind is not None or http_status is not None:
+        # Typed terminal evidence outranks prose, including an earlier
+        # physical attempt's summary or a quoted provider diagnostic.
         return None
+    lookup = lookup_failure(text, lookup_faults)
+    if lookup:
+        return lookup[0] if lookup[1] == PROVIDER else None
     in_band = in_band_provider_status(text)
     if in_band is not None:
         return f"provider in-band error {in_band}"
@@ -790,7 +791,9 @@ def truncated_answer(code: int, stderr: str) -> bool:
 
 def output_limit_failure(kind: str | None, text: str) -> bool:
     """A failed turn of typed kind OutputLimit, from its kind or its diagnostic."""
-    return kind == OUTPUT_LIMIT_KIND or any(needle in text for needle in OUTPUT_LIMIT_DIAGNOSTICS)
+    if kind is not None:
+        return kind == OUTPUT_LIMIT_KIND
+    return any(needle in text for needle in OUTPUT_LIMIT_DIAGNOSTICS)
 
 
 def compatibility_notice_refusal(text: str) -> str | None:
@@ -860,7 +863,8 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
     if turn.completed:
         return
     text = " ".join(turn.errors)
-    lookup = lookup_failure(text, lookup_faults or turn.lookup_faults)
+    typed = turn.model_error_kind is not None or turn.http_status is not None
+    lookup = None if typed else lookup_failure(text, lookup_faults or turn.lookup_faults)
     if lookup:
         raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
     if output_limit_failure(turn.model_error_kind, text):
@@ -888,7 +892,8 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
         raise ScenarioFailure(PROVIDER, f"{what}: provider refused the request "
                                         f"({turn.refusals[-1]})")
     errors = " | ".join(" ".join(error.split()) for error in turn.errors)[:200]
-    raise ScenarioFailure(HARNESS, f"{what}: {status} {errors}".strip())
+    raise ScenarioFailure(HARNESS, f"{what}: {status} {errors}".strip(),
+                          model_error_kind=turn.model_error_kind)
 
 
 def classify_command_error(message: str, what: str, *,
@@ -1625,7 +1630,8 @@ def _last_answered(segment: Path, info: Path) -> bool:
                    for body in segment.glob("exchange-*.body"))
 
 
-def score_runaway(outcome: str, detail: str, segments: list[Path]) -> tuple[str, str]:
+def score_runaway(outcome: str, detail: str, segments: list[Path], *,
+                  model_error_kind: str | None = None) -> tuple[str, str]:
     """A failure a runaway model output explains is `model`; any other keeps its class.
 
     The runaway explains a `harness` or `model` failure when that failure is
@@ -1634,8 +1640,10 @@ def score_runaway(outcome: str, detail: str, segments: list[Path]) -> tuple[str,
     scenario's last process segment (the one whose turn failed), and it is
     the last exchange there that received a response byte.
     """
+    stream_aborted = (model_error_kind == "Transport" if model_error_kind is not None
+                      else bool(_STREAM_ABORT.search(detail)))
     runaways = _runaways(segments)
-    if not runaways or outcome not in (HARNESS, MODEL) or not _STREAM_ABORT.search(detail):
+    if not runaways or outcome not in (HARNESS, MODEL) or not stream_aborted:
         return outcome, detail
     explained = [found for found in runaways
                  if found[0] == segments[-1] and _last_answered(found[0], found[1])]

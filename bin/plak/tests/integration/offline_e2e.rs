@@ -1506,12 +1506,11 @@ fn corrupt_tree_store_never_counts_as_an_absent_tree() {
 /// Bounded reproduction probe for the CAS diagnostic that had
 /// no counted provider exchange. Each home is new, each completed first turn
 /// commits its product session, and the next process reopens that exact row.
-/// Run explicitly during qualification; sixty spawned hosts are too costly
-/// for the daily offline gate.
+/// Six independent homes keep the serial gate bounded while repeating the
+/// first-turn commit and exact-reopen boundary rather than sampling it once.
 #[test]
-#[ignore = "bounded 30-home startup/reopen CAS qualification probe"]
-fn thirty_isolated_jsonl_startups_and_reopens_preserve_product_revision() {
-    const SAMPLES: usize = 30;
+fn isolated_jsonl_startups_and_reopens_preserve_product_revision() {
+    const SAMPLES: usize = 6;
     for sample in 0..SAMPLES {
         let fixture = Fixture::new(&json!({
             "version": 1,
@@ -1561,9 +1560,8 @@ fn thirty_isolated_jsonl_startups_and_reopens_preserve_product_revision() {
 /// The `quit` command also saves the product row when no turn has run. This
 /// exercises that narrower boundary with and without the home-owned tree gate.
 #[test]
-#[ignore = "bounded 30-home idle quit/reopen CAS qualification probe"]
-fn thirty_isolated_idle_jsonl_quits_and_reopens_preserve_product_revision() {
-    const SAMPLES: usize = 30;
+fn isolated_idle_jsonl_quits_and_reopens_preserve_product_revision() {
+    const SAMPLES: usize = 6;
     for sample in 0..SAMPLES {
         let fixture = Fixture::new(&recovery_answer_script());
         if sample % 2 == 1 {

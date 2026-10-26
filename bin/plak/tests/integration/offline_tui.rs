@@ -959,40 +959,6 @@ fn a_mid_session_compaction_renders_its_note_and_the_session_carries_on() {
     terminal.quit();
 }
 
-/// The history navigator labels the placeholder pass note `harness`, never `user`.
-///
-/// HELD: the scripted model attaches no topology hub, so Ctrl+T answers
-/// `agent tree navigator unavailable` and the node transcript overlay that
-/// pages canonical history cannot open. The assertion is the product's own
-/// (`topology_navigator.rs`, `transcript_actor_label_for`); this runs it end
-/// to end once the harness binds a hub.
-#[test]
-#[ignore = "held: the scripted model attaches no topology hub, so the navigator cannot open"]
-fn the_history_navigator_labels_the_placeholder_note_harness_not_user() {
-    let fixture = Fixture::new(&growth_script("refuse"));
-    let mut terminal = Terminal::spawn_ready(&fixture);
-    terminal.send(b"grow the context\r");
-    terminal.wait_screen("the compacted answer");
-    terminal.send(b"\x14");
-    terminal.wait_where("the agent canvas", |frame| {
-        !frame.contains("requesting tree snapshot") && frame.contains("root")
-    });
-    terminal.send(b"\x1b[H");
-    terminal.send(b"\r");
-    let page = terminal.wait_screen("transcript · ");
-    assert!(
-        page.contains("[harness]"),
-        "the paged transcript must label the placeholder pass note harness:\n{page}"
-    );
-    assert!(
-        !page.contains("[user] [plak:") && !page.contains("[user] replaced 1 oldest"),
-        "the placeholder pass note must not read as something the operator typed:\n{page}"
-    );
-    terminal.send(b"\x1b");
-    terminal.send(b"q");
-    terminal.quit();
-}
-
 // ---------------------------------------------------------------------------
 // Case 4: a tree with a child
 // ---------------------------------------------------------------------------
@@ -1002,8 +968,8 @@ fn the_history_navigator_labels_the_placeholder_note_harness_not_user() {
 ///
 /// The `tree` script dial is the only child route from a spawned process; it
 /// is not the composition (Code Mode) route, which the scripted binding does
-/// not combine with a child binder. The canvas half is held with the
-/// navigator test above: no hub, no canvas.
+/// not combine with a child binder. This fixture covers activity rows, not
+/// the topology canvas: the scripted binding has no hub.
 #[test]
 fn a_tree_turn_renders_its_spawn_wait_and_adopt_rows_and_answers() {
     let fixture = Fixture::new(&tree_turn_script());
