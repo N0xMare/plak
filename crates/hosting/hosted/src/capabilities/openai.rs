@@ -1,8 +1,18 @@
+#[cfg(feature = "openai")]
+#[path = "openai_available.rs"]
+mod compiled;
+#[cfg(not(feature = "openai"))]
+#[path = "openai_unavailable.rs"]
+mod compiled;
+
 use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
 pub static OPENAI: RouteCapability = RouteCapability {
+    compiled: compiled::COMPILED,
+    feature: "openai",
+    review_deadline: compiled::review_deadline,
     account: "openai",
     aliases: &["openai"],
     kind: RouteKind::Platform(PlatformProvider::OpenAi),

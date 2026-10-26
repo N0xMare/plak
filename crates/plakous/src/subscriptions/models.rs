@@ -237,16 +237,6 @@ pub enum NativeModelVisibility {
     None,
 }
 
-pub(super) fn facade_codex_visibility(
-    visibility: plakous_openai::CodexCatalogVisibility,
-) -> NativeModelVisibility {
-    match visibility {
-        plakous_openai::CodexCatalogVisibility::List => NativeModelVisibility::List,
-        plakous_openai::CodexCatalogVisibility::Hide => NativeModelVisibility::Hide,
-        plakous_openai::CodexCatalogVisibility::None => NativeModelVisibility::None,
-    }
-}
-
 /// Failure to satisfy an exact native tool-mode requirement.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeToolModeRequirementError {
@@ -280,22 +270,6 @@ impl fmt::Display for NativeToolModeRequirementError {
 
 impl Error for NativeToolModeRequirementError {}
 
-pub(super) fn codex_native_tool_mode(
-    evidence: &plakous_openai::CodexModelResolutionEvidence,
-) -> Option<NativeToolMode> {
-    facade_native_tool_mode(evidence.tool_mode())
-}
-
-pub(super) fn facade_native_tool_mode(
-    mode: Option<plakous_openai::CodexCatalogToolMode>,
-) -> Option<NativeToolMode> {
-    mode.map(|mode| match mode {
-        plakous_openai::CodexCatalogToolMode::Direct => NativeToolMode::Direct,
-        plakous_openai::CodexCatalogToolMode::CodeMode => NativeToolMode::CodeMode,
-        plakous_openai::CodexCatalogToolMode::CodeModeOnly => NativeToolMode::CodeModeOnly,
-    })
-}
-
 pub(super) const fn require_exact_native_tool_mode(
     available: Option<NativeToolMode>,
     required: NativeToolMode,
@@ -316,18 +290,6 @@ pub(super) const fn require_exact_native_tool_mode(
             available,
         })
     }
-}
-
-pub(super) fn first_codex_compatible_model<'a>(
-    entries: impl IntoIterator<Item = (&'a str, bool, bool, bool)>,
-) -> Option<&'a str> {
-    entries
-        .into_iter()
-        .find_map(|(model, text, tools, reasoning)| (text && tools && reasoning).then_some(model))
-}
-
-pub(super) fn facade_xai_model_is_selectable(model_id: &str) -> bool {
-    plakous_xai::is_subscription_coding_model_id(model_id)
 }
 
 impl NativeModelCatalog {

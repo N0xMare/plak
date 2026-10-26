@@ -433,7 +433,7 @@ fn read_exact_compatibility_response(
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<String> {
-    let notice = backend.notice(provider);
+    let notice = backend.notice(provider)?;
     let account = cli_provider_name(provider);
     writeln!(
         stderr,
@@ -550,7 +550,14 @@ pub fn print_compatibility_notice(
     provider: NativeProvider,
     output: &mut dyn io::Write,
 ) -> CliResult<()> {
-    let notice = NativeSubscriptions::notice(provider);
+    let notice = NativeSubscriptions::notice(provider).map_err(|_| {
+        let account = cli_provider_name(provider);
+        plakous_hosted::capabilities::CapabilityUnavailable {
+            id: account,
+            kind: plakous_hosted::capabilities::CapabilityKind::Route,
+            feature: account,
+        }
+    })?;
     writeln!(output, "provider={}", notice.provider().as_str())
         .and_then(|()| writeln!(output, "profile_id={}", notice.profile_id()))
         .and_then(|()| writeln!(output, "source_revision={}", notice.source_revision()))

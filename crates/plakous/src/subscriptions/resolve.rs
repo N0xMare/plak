@@ -1,16 +1,13 @@
 //! Gated native model and provider resolution.
 
 use super::{
-    Arc, ConfiguredLanguageModel, MODEL_CATALOG_DEADLINE, ModelId, NativeModelResolutionError,
+    Arc, ConfiguredLanguageModel, MODEL_CATALOG_DEADLINE, NativeModelResolutionError,
     NativeModelSelector, NativeProvider, NativeSubscriptionError, NativeSubscriptions,
-    NativeToolMode, ResolvedNativeModel, ResolvedProvider, ResolvedProviderAuthorityBinding,
-    RuntimeModelAuthority, SelectedProviderConfiguration, SessionLineage, SubscriptionRequestClass,
-    SubscriptionRequestGate, SubscriptionRequestLimits, SubscriptionResolutionEvidence,
+    ResolvedNativeModel, ResolvedProvider, RuntimeModelAuthority, SelectedProviderConfiguration,
+    SessionLineage, SubscriptionRequestGate, SubscriptionRequestLimits,
     SystemSubscriptionGateClock, TurnScopedSubscriptionRequestGate,
-    apply_turn_scoped_provider_gate, catalog_operation_deadline, codex_native_http_config,
-    codex_native_tool_mode, first_codex_compatible_model, guidance, map_claude_error,
-    map_codex_error, map_xai_error, native_provider_route_selection, timestamp_now,
-    xai_inference_client, xai_native_http_config,
+    apply_turn_scoped_provider_gate, catalog_operation_deadline, native_provider_route_selection,
+    timestamp_now,
 };
 
 /// The pinned native provider whose exact route `selected` names, with the
@@ -57,42 +54,10 @@ fn configure_gated_provider(
             NativeSubscriptionError::ProviderConfigurationPolicyMismatch("processing_tier"),
         ));
     }
-    let native_tool_mode = resolved
-        .evidence
-        .codex_exact
-        .as_ref()
-        .and_then(codex_native_tool_mode);
-    let configuration = match provider {
-        NativeProvider::Codex => {
-            let evidence = resolved.evidence.codex_exact.as_ref().ok_or_else(|| {
-                NativeModelResolutionError::after_selection(
-                    requested_model.clone(),
-                    NativeSubscriptionError::Internal,
-                )
-            })?;
-            plakous_openai::compile_codex_subscription_configuration(selected, &authority, evidence)
-        }
-        NativeProvider::Xai => {
-            let evidence = resolved.evidence.xai_exact.as_ref().ok_or_else(|| {
-                NativeModelResolutionError::after_selection(
-                    requested_model.clone(),
-                    NativeSubscriptionError::Internal,
-                )
-            })?;
-            plakous_xai::compile_supergrok_subscription_configuration(
-                selected, &authority, evidence,
-            )
-        }
-        NativeProvider::Claude => {
-            return configure_claude_provider(selected, resolved, authority, native_tool_mode);
-        }
-    }
-    .map_err(|error| {
-        NativeModelResolutionError::after_selection(
-            requested_model,
-            responses_configuration_error(error),
-        )
-    })?;
+    let vertical = super::vertical::require_vertical(provider)
+        .map_err(NativeModelResolutionError::before_selection)?;
+    let native_tool_mode = vertical.tool_mode(&resolved);
+    let configuration = vertical.configure(selected, &resolved, &authority)?;
     let configured = ConfiguredLanguageModel::new(
         &plakous_model::StandardIntegrationAuthority::release_owned(),
         resolved.model(),
@@ -113,101 +78,6 @@ fn configure_gated_provider(
     })
 }
 
-/// The Claude OAuth branch of [`configure_gated_provider`]: Messages policy
-/// compilation bound to the resolved descriptor and authority.
-fn configure_claude_provider(
-    selected: &SelectedProviderConfiguration,
-    resolved: ResolvedNativeModel,
-    authority: RuntimeModelAuthority,
-    native_tool_mode: Option<NativeToolMode>,
-) -> Result<ResolvedProvider, NativeModelResolutionError> {
-    let requested_model = selected.route().requested_model().clone();
-    let beta = plakous_anthropic::claude_oauth_beta_header(requested_model.as_str());
-    let evidence = plakous_model::ProviderSemanticEvidence::new(
-        1,
-        b"plakous-anthropic/claude-oauth-semantic-evidence-v1".to_vec(),
-    )
-    .map_err(|_| {
-        NativeModelResolutionError::after_selection(
-            requested_model.clone(),
-            NativeSubscriptionError::ProviderConfigurationIdentityRejected,
-        )
-    })?;
-    let binding = ResolvedProviderAuthorityBinding::new(&resolved.descriptor, &authority, evidence)
-        .map_err(|_| {
-            NativeModelResolutionError::after_selection(
-                requested_model.clone(),
-                NativeSubscriptionError::ProviderConfigurationIdentityRejected,
-            )
-        })?;
-    let configuration = plakous_anthropic::compile_messages_oauth_configuration(
-        selected,
-        resolved.descriptor.clone(),
-        binding,
-        plakous_anthropic::ANTHROPIC_API_VERSION,
-        beta,
-    )
-    .map_err(|error| {
-        NativeModelResolutionError::after_selection(
-            requested_model.clone(),
-            messages_configuration_error(error),
-        )
-    })?;
-    let configured = ConfiguredLanguageModel::new(
-        &plakous_model::StandardIntegrationAuthority::release_owned(),
-        resolved.model(),
-        configuration,
-        authority,
-    )
-    .map_err(|_| {
-        NativeModelResolutionError::after_selection(
-            requested_model.clone(),
-            NativeSubscriptionError::ConfiguredAggregateRejected,
-        )
-    })?;
-    Ok(ResolvedProvider {
-        model: resolved,
-        configured,
-        native_tool_mode,
-        reresolution: None,
-    })
-}
-
-/// The resolution failure a Responses (Codex, SuperGrok) policy compilation
-/// error reports.
-fn responses_configuration_error(
-    error: plakous_openai::ResponsesProviderConfigurationError,
-) -> NativeSubscriptionError {
-    match error {
-        plakous_openai::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
-            NativeSubscriptionError::ProviderConfigurationPolicyMismatch(field)
-        }
-        plakous_openai::ResponsesProviderConfigurationError::Identity => {
-            NativeSubscriptionError::ProviderConfigurationIdentityRejected
-        }
-        plakous_openai::ResponsesProviderConfigurationError::ProviderConfiguration(error) => {
-            NativeSubscriptionError::ProviderConfigurationCompileRejected(error)
-        }
-        _ => NativeSubscriptionError::ProviderConfigurationRejected,
-    }
-}
-
-/// The resolution failure a Claude OAuth Messages policy compilation error
-/// reports.
-fn messages_configuration_error(
-    error: plakous_anthropic::MessagesProviderConfigurationError,
-) -> NativeSubscriptionError {
-    match error {
-        plakous_anthropic::MessagesProviderConfigurationError::Identity => {
-            NativeSubscriptionError::ProviderConfigurationIdentityRejected
-        }
-        plakous_anthropic::MessagesProviderConfigurationError::PolicyMismatch
-        | plakous_anthropic::MessagesProviderConfigurationError::Provider(_) => {
-            NativeSubscriptionError::ProviderConfigurationRejected
-        }
-    }
-}
-
 impl NativeSubscriptions {
     /// Resolves one exact native model under a classified physical-request gate.
     ///
@@ -221,10 +91,6 @@ impl NativeSubscriptions {
     /// Returns [`NativeModelResolutionError`] when compatibility locks, online
     /// admission, catalog selection, or evidence binding fail. `selected_model`
     /// is set only after a concrete id was chosen.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the provider branches keep exact selection and pre/post-selection evidence explicit"
-    )]
     pub(crate) async fn resolve_gated_native_model(
         &self,
         provider: NativeProvider,
@@ -261,10 +127,6 @@ impl NativeSubscriptions {
         Ok((model, compile_authority))
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the provider branches keep exact selection and pre/post-selection evidence explicit"
-    )]
     async fn resolve_gated_native_model_phased(
         &self,
         provider: NativeProvider,
@@ -285,369 +147,10 @@ impl NativeSubscriptions {
             .acquire_compatibility_lock(provider)
             .await
             .map_err(NativeModelResolutionError::before_selection)?;
-        match provider {
-            NativeProvider::Claude => {
-                let NativeModelSelector::Exact(selected_model) = model_selector else {
-                    return Err(NativeModelResolutionError::before_selection(
-                        NativeSubscriptionError::ModelUnavailable,
-                    ));
-                };
-                let selected_model = selected_model.clone();
-                let online = self
-                    .claude_online_with_gate(Some(Arc::clone(&gate)), true)
-                    .await
-                    .map_err(|error| {
-                        NativeModelResolutionError::after_selection(selected_model.clone(), error)
-                    })?;
-                let client = plakous_http::Client::new_http1(
-                    plakous_http::Limits::for_streaming_inference(),
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        selected_model.clone(),
-                        NativeSubscriptionError::Internal,
-                    )
-                })?;
-                let client = client
-                    .pooled()
-                    .with_observer(self.exchange_observer.clone());
-                if !attach {
-                    online.manager.refresh_if_needed().await.map_err(|error| {
-                        NativeModelResolutionError::after_selection(
-                            selected_model.clone(),
-                            map_claude_error(error),
-                        )
-                    })?;
-                }
-                let mut permit = gate
-                    .acquire(SubscriptionRequestClass::Catalog)
-                    .map_err(|_| {
-                        NativeModelResolutionError::after_selection(
-                            selected_model.clone(),
-                            NativeSubscriptionError::Internal,
-                        )
-                    })?;
-                permit.authorize_dispatch().map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        selected_model.clone(),
-                        NativeSubscriptionError::Internal,
-                    )
-                })?;
-                let session_id = plakous_model::SessionId::generate(
-                    &plakous_model::SystemClock,
-                    &plakous_model::SystemIdGenerator,
-                )
-                .map_err(|_| {
-                    NativeModelResolutionError::after_selection(
-                        selected_model.clone(),
-                        NativeSubscriptionError::Internal,
-                    )
-                })?;
-                let (model, authority, descriptor, retrieval) = online
-                    .manager
-                    .resolve_model_with_retrieval(
-                        selected_model.as_str(),
-                        client,
-                        lineage,
-                        session_id,
-                    )
-                    .await
-                    .map_err(|error| {
-                        NativeModelResolutionError::after_selection(
-                            selected_model.clone(),
-                            map_claude_error(error),
-                        )
-                    })?;
-                drop(permit);
-                let catalog_expires_at = authority.valid_until().ok_or_else(|| {
-                    NativeModelResolutionError::after_selection(
-                        selected_model.clone(),
-                        NativeSubscriptionError::ResolutionEvidenceRejected,
-                    )
-                })?;
-                if authority.observed_at() >= catalog_expires_at {
-                    return Err(NativeModelResolutionError::after_selection(
-                        selected_model.clone(),
-                        NativeSubscriptionError::ResolutionEvidenceRejected,
-                    ));
-                }
-                let evidence = SubscriptionResolutionEvidence {
-                    account_fingerprint: authority.account_binding().to_string(),
-                    credential_authority_binding: authority
-                        .credential_authority_binding()
-                        .to_string(),
-                    credential_generation: authority.credential_generation(),
-                    credential_selection_epoch: "primary".to_owned(),
-                    route_fingerprint: plakous_anthropic::CLAUDE_OAUTH_ROUTE_ID.to_owned(),
-                    descriptor_digest: descriptor.binding_digest().map_or_else(
-                        |_| "claude-oauth-descriptor".to_owned(),
-                        |digest| digest.to_string(),
-                    ),
-                    dialect: descriptor.protocol().as_str().to_owned(),
-                    adapter_revision: plakous_anthropic::CLAUDE_OAUTH_ADAPTER_REVISION.to_owned(),
-                    catalog_observed_at: authority.observed_at(),
-                    catalog_expires_at,
-                    runtime_admission_witness: None,
-                    profile_revision: plakous_anthropic::CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID
-                        .to_owned(),
-                    codex_exact: None,
-                    xai_exact: None,
-                };
-                let resolved = ResolvedNativeModel {
-                    service_tiers: Vec::new(),
-                    selected_model,
-                    descriptor,
-                    model,
-                    evidence,
-                    retrieval: Some(Arc::new(
-                        crate::anthropic_retrieval::AnthropicRetrievalPort::new(retrieval),
-                    )),
-                    image_gen: None,
-                };
-                let compile_authority = attach.then_some(authority);
-                Ok((resolved, compile_authority))
-            }
-            NativeProvider::Codex => {
-                let exact_selection = model_selector.exact_model().cloned();
-                let online = self
-                    .codex_online_with_gate(Some(gate), true)
-                    .await
-                    .map_err(|error| match exact_selection.clone() {
-                        Some(selected) => {
-                            NativeModelResolutionError::after_selection(selected, error)
-                        }
-                        None => NativeModelResolutionError::before_selection(error),
-                    })?;
-                let resolver = plakous_openai::CodexModelResolver::new(
-                    Arc::clone(&online.manager),
-                    online.client.with_observer(self.exchange_observer.clone()),
-                    codex_native_http_config().map_err(|error| {
-                        exact_selection.clone().map_or_else(
-                            || NativeModelResolutionError::before_selection(error),
-                            |selected| NativeModelResolutionError::after_selection(selected, error),
-                        )
-                    })?,
-                )
-                .map_err(|error| {
-                    let error = match error {
-                        plakous_openai::NativeCodexAuthError::Validation => {
-                            NativeSubscriptionError::ProviderClientConstructionRejected
-                        }
-                        other => map_codex_error(other),
-                    };
-                    exact_selection.clone().map_or_else(
-                        || NativeModelResolutionError::before_selection(error),
-                        |selected| NativeModelResolutionError::after_selection(selected, error),
-                    )
-                })?
-                .with_inference_observer(self.exchange_observer.clone());
-                let resolver = if self.catalog_retries {
-                    resolver
-                } else {
-                    resolver.without_catalog_retries()
-                };
-                let catalog = resolver.refresh_catalog().await.map_err(|error| {
-                    let error = match error {
-                        plakous_openai::NativeCodexAuthError::Validation => {
-                            NativeSubscriptionError::CatalogValidationRejected
-                        }
-                        other => map_codex_error(other),
-                    };
-                    exact_selection.clone().map_or_else(
-                        || NativeModelResolutionError::before_selection(error),
-                        |selected| NativeModelResolutionError::after_selection(selected, error),
-                    )
-                })?;
-                let selected_model = match model_selector {
-                    NativeModelSelector::Exact(model) => model.clone(),
-                    NativeModelSelector::CodexFirstCompatible => {
-                        let selected =
-                            first_codex_compatible_model(catalog.entries().iter().map(|entry| {
-                                (
-                                    entry.model_id(),
-                                    entry.supports_text(),
-                                    entry.supports_tools(),
-                                    entry.supports_reasoning(),
-                                )
-                            }))
-                            .ok_or_else(|| {
-                                NativeModelResolutionError::before_selection(
-                                    NativeSubscriptionError::ModelUnavailable,
-                                )
-                            })?;
-                        ModelId::new(selected.to_owned()).map_err(|_| {
-                            NativeModelResolutionError::before_selection(
-                                NativeSubscriptionError::ModelUnavailable,
-                            )
-                        })?
-                    }
-                };
-                let (model, resolution, retrieval, images) = resolver
-                    .resolve_with_retrieval(selected_model.as_str())
-                    .map_err(|error| {
-                        let error = match error {
-                            plakous_openai::NativeCodexAuthError::Validation => {
-                                NativeSubscriptionError::ResolutionEvidenceRejected
-                            }
-                            other => map_codex_error(other),
-                        };
-                        NativeModelResolutionError::after_selection(selected_model.clone(), error)
-                    })?;
-                let model = guidance::with_content_filter_guidance(
-                    model,
-                    resolution.content_filter_guidance(),
-                );
-                let descriptor = resolution
-                    .validated_descriptor()
-                    .map_err(|_| {
-                        NativeModelResolutionError::after_selection(
-                            selected_model.clone(),
-                            NativeSubscriptionError::ResolutionEvidenceRejected,
-                        )
-                    })?
-                    .clone();
-                let compile_authority = if attach {
-                    Some(Self::attach_compile_authority_from_codex(
-                        &selected_model,
-                        &descriptor,
-                        &resolution,
-                    )?)
-                } else {
-                    None
-                };
-                let evidence = SubscriptionResolutionEvidence {
-                    account_fingerprint: resolution.account_fingerprint().to_string(),
-                    credential_authority_binding: resolution
-                        .credential_authority_binding()
-                        .to_string(),
-                    credential_generation: resolution.selected_credential_generation(),
-                    credential_selection_epoch: resolution.credential_selection_epoch().to_string(),
-                    route_fingerprint: resolution.route_fingerprint().to_string(),
-                    descriptor_digest: resolution.descriptor_digest().to_string(),
-                    dialect: descriptor.protocol().as_str().to_owned(),
-                    adapter_revision: resolution.adapter_revision().to_owned(),
-                    catalog_observed_at: resolution.catalog_observed_at(),
-                    catalog_expires_at: resolution.catalog_expires_at(),
-                    runtime_admission_witness: None,
-                    profile_revision: resolution.profile_revision().to_owned(),
-                    codex_exact: Some(resolution),
-                    xai_exact: None,
-                };
-                Ok((
-                    ResolvedNativeModel {
-                        service_tiers: catalog
-                            .entries()
-                            .iter()
-                            .find(|entry| entry.model_id() == selected_model.as_str())
-                            .map(|entry| {
-                                entry
-                                    .service_tiers()
-                                    .iter()
-                                    .map(|tier| tier.id().to_owned())
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        selected_model,
-                        descriptor,
-                        model,
-                        evidence,
-                        retrieval: Some(Arc::new(
-                            crate::responses_retrieval::CodexRetrievalPort::new(retrieval),
-                        )),
-                        image_gen: Some(Arc::new(crate::responses_images::CodexImagePort::new(
-                            images,
-                        ))),
-                    },
-                    compile_authority,
-                ))
-            }
-            NativeProvider::Xai => {
-                let NativeModelSelector::Exact(selected_model) = model_selector else {
-                    return Err(NativeModelResolutionError::before_selection(
-                        NativeSubscriptionError::ModelUnavailable,
-                    ));
-                };
-                let selected_model = selected_model.clone();
-                let online =
-                    self.xai_online_with_gate(Some(gate), true)
-                        .await
-                        .map_err(|error| {
-                            NativeModelResolutionError::after_selection(
-                                selected_model.clone(),
-                                error,
-                            )
-                        })?;
-                let config = xai_native_http_config().map_err(|error| {
-                    NativeModelResolutionError::after_selection(selected_model.clone(), error)
-                })?;
-                let inference_client = xai_inference_client(self.exchange_observer.clone())
-                    .map_err(|error| {
-                        NativeModelResolutionError::after_selection(selected_model.clone(), error)
-                    })?;
-                let (model, resolution, retrieval, images) = online
-                    .manager
-                    .resolve_model_with_retrieval(selected_model.as_str(), inference_client, config)
-                    .await
-                    .map_err(|error| {
-                        NativeModelResolutionError::after_selection(
-                            selected_model.clone(),
-                            map_xai_error(error),
-                        )
-                    })?;
-                let descriptor = resolution
-                    .validated_descriptor()
-                    .map_err(|_| {
-                        NativeModelResolutionError::after_selection(
-                            selected_model.clone(),
-                            NativeSubscriptionError::ResolutionEvidenceRejected,
-                        )
-                    })?
-                    .clone();
-                let compile_authority = if attach {
-                    Some(Self::attach_compile_authority_from_xai(
-                        &selected_model,
-                        &descriptor,
-                        &resolution,
-                    )?)
-                } else {
-                    None
-                };
-                let evidence = SubscriptionResolutionEvidence {
-                    account_fingerprint: resolution.account_fingerprint().to_string(),
-                    credential_authority_binding: resolution
-                        .credential_authority_binding()
-                        .to_string(),
-                    credential_generation: resolution.selected_credential_generation(),
-                    credential_selection_epoch: resolution.credential_selection_epoch().to_owned(),
-                    route_fingerprint: resolution.route_fingerprint().to_owned(),
-                    descriptor_digest: resolution.descriptor_digest().to_string(),
-                    dialect: descriptor.protocol().as_str().to_owned(),
-                    adapter_revision: resolution.adapter_revision().to_owned(),
-                    catalog_observed_at: resolution.catalog_observed_at(),
-                    catalog_expires_at: resolution.catalog_expires_at(),
-                    runtime_admission_witness: Some(resolution.runtime_admission_witness().clone()),
-                    profile_revision: resolution.profile_revision().to_owned(),
-                    codex_exact: None,
-                    xai_exact: Some(resolution),
-                };
-                Ok((
-                    ResolvedNativeModel {
-                        service_tiers: Vec::new(),
-                        selected_model,
-                        descriptor,
-                        model,
-                        evidence,
-                        retrieval: Some(Arc::new(
-                            crate::responses_retrieval::XaiRetrievalPort::new(retrieval),
-                        )),
-                        image_gen: Some(Arc::new(crate::responses_images::XaiImagePort::new(
-                            images,
-                        ))),
-                    },
-                    compile_authority,
-                ))
-            }
-        }
+        super::vertical::require_vertical(provider)
+            .map_err(NativeModelResolutionError::before_selection)?
+            .resolve(self, model_selector, gate, attach, lineage)
+            .await
     }
 
     /// Resolves one complete explicit native provider configuration under the
@@ -831,7 +334,7 @@ impl NativeSubscriptions {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "codex", feature = "grok", feature = "claude"))]
 mod tests {
     use super::super::NativeProvider;
     use super::super::reresolve::tests::{BASE, resolved};
@@ -910,41 +413,5 @@ mod tests {
         );
         assert_eq!(error.selected_model, Some(requested));
         Ok(())
-    }
-
-    #[test]
-    fn policy_compilation_errors_map_to_their_resolution_failures() {
-        use plakous_anthropic::MessagesProviderConfigurationError as Messages;
-        use plakous_model::ProviderConfigurationError;
-        use plakous_openai::ResponsesProviderConfigurationError as Responses;
-        assert_eq!(
-            responses_configuration_error(Responses::PolicyMismatch("cache")),
-            NativeSubscriptionError::ProviderConfigurationPolicyMismatch("cache")
-        );
-        assert_eq!(
-            responses_configuration_error(Responses::Identity),
-            NativeSubscriptionError::ProviderConfigurationIdentityRejected
-        );
-        assert_eq!(
-            responses_configuration_error(Responses::ProviderConfiguration(
-                ProviderConfigurationError::ForeignTarget
-            )),
-            NativeSubscriptionError::ProviderConfigurationCompileRejected(
-                ProviderConfigurationError::ForeignTarget
-            )
-        );
-        assert_eq!(
-            messages_configuration_error(Messages::Identity),
-            NativeSubscriptionError::ProviderConfigurationIdentityRejected
-        );
-        for error in [
-            Messages::PolicyMismatch,
-            Messages::Provider(ProviderConfigurationError::ForeignTarget),
-        ] {
-            assert_eq!(
-                messages_configuration_error(error),
-                NativeSubscriptionError::ProviderConfigurationRejected
-            );
-        }
     }
 }

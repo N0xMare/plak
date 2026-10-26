@@ -140,7 +140,7 @@ SUPPORTED_COMPILE_FIXTURES = {
             "anthropic",
             "auth",
             "composition-python",
-            "native-subscriptions",
+            "codex", "grok", "claude",
             "openai",
             "openrouter",
             "sessions-sqlite",
@@ -4214,7 +4214,7 @@ def main() -> int:
             hosted = app.manifest.get(section, {}).get("plakous-hosted", {})
             if not isinstance(hosted, dict) or hosted.get("default-features") is not False:
                 errors.append(f"plak {section}: hosted defaults must be disabled for product selection")
-        for feature in ("tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"):
+        for feature in ("tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"):
             if f"plakous-hosted/{feature}" not in app_features.get(feature, []):
                 errors.append(f"plak/{feature} must forward the matching hosted capability")
         if not {"tui", "images"} <= set(app_features.get("clipboard", [])):
@@ -4231,13 +4231,13 @@ def main() -> int:
             "test-support",
             "git-cli",
             "jj",
-            "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch",
+            "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter",
         }:
             errors.append(
                 "plak may expose only default, maintainer, otel, test-hooks, test-support "
                 "workspace backend features and product build capabilities"
             )
-        elif set(app_features.get("default", [])) != {"git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"}:
+        elif set(app_features.get("default", [])) != {"git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"}:
             errors.append("plak default must enable git-cli and all product capabilities")
         elif app_features.get("maintainer") != ["jj"]:
             errors.append(
@@ -4269,9 +4269,9 @@ def main() -> int:
         if len(libraries) != 1 or libraries[0]["name"] != "plakous_hosted":
             errors.append("plakous-hosted must expose exactly one library named plakous_hosted")
         host_features = host.metadata.get("features", {})
-        if set(host_features) != {"default", "test-support", "git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"}:
+        if set(host_features) != {"default", "test-support", "git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"}:
             errors.append("plakous-hosted must expose exactly the workspace backends, test-support and product capabilities")
-        elif set(host_features.get("default", [])) != {"git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"}:
+        elif set(host_features.get("default", [])) != {"git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"}:
             errors.append("plakous-hosted default must enable both workspace backends and all product capabilities")
         elif host_features.get("test-support") != [
             "dep:tempfile",
@@ -4294,7 +4294,7 @@ def main() -> int:
             "full",
             "test-clock",
             "mcp",
-            "native-subscriptions",
+            "codex", "grok", "claude",
             "openai",
             "openrouter",
             "sessions-sqlite",

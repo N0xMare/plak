@@ -1,6 +1,16 @@
+#[cfg(feature = "openrouter")]
+#[path = "openrouter_available.rs"]
+mod compiled;
+#[cfg(not(feature = "openrouter"))]
+#[path = "openrouter_unavailable.rs"]
+mod compiled;
+
 use super::{RouteCapability, RouteKind};
 
 pub static OPENROUTER: RouteCapability = RouteCapability {
+    compiled: compiled::COMPILED,
+    feature: "openrouter",
+    review_deadline: compiled::review_deadline,
     account: "openrouter",
     aliases: &["openrouter"],
     kind: RouteKind::OpenRouter,

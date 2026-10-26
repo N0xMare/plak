@@ -59,7 +59,7 @@ async fn consent_change_during_usage_discards_the_observation()
         subscriptions
             .acknowledge_exact(
                 provider,
-                NativeSubscriptions::notice(provider).notice_revision(),
+                NativeSubscriptions::notice(provider)?.notice_revision(),
             )
             .await?;
         Ok::<_, NativeSubscriptionError>(

@@ -190,8 +190,10 @@ vendor = []
 [workspace.metadata.plakous.edge-exceptions]
 # The composition compiler owns the pinned Codex description/grammar renderer.
 plakous-compose = ["plakous-codex-code-mode-protocol"]
-# The facade shares lookup backoff policy, never a second catalog retry copy.
-plakous = ["plakous-exchange"]
+# Shared lookup backoff and the Responses configuration error vocabulary.
+plakous = ["plakous-exchange", "plakous-responses-dialect"]
+# Credential dispatch uses the neutral classified gate without owning its vocabulary.
+plakous-auth = ["plakous-model"]
 plak = [
     "plakous-host-protocol",
     "plakous-hosted",
@@ -320,9 +322,9 @@ plakous-hosted = [
 ]
 
 [workspace.metadata.plakous.facade-features]
-plak = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+plak = ["codex", "grok", "claude", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
 plakous-recursive-subagents = []
-plakous-hosted = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+plakous-hosted = ["codex", "grok", "claude", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
 
 [workspace.metadata.plakous.modules.plak.tui]
 forbid-crates = ["plakous", "plakous-*"]
@@ -429,7 +431,7 @@ env-ceiling = 29
 reason = "Capability registry, grouped interactive identity/carry helpers, remaining lookup and re-export predicates, and the capacity-probe test hook; existing placement debt must fall as module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous]
-feature-ceiling = 66
+feature-ceiling = 61
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]

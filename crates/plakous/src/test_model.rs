@@ -78,7 +78,7 @@ pub(crate) fn with_context_contract(
     Ok(descriptor.with_context_contract(context_contract(protocol_family, observed_at)?))
 }
 
-#[cfg(feature = "native-subscriptions")]
+#[cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
 pub(crate) fn with_shared_window_context_contract(
     descriptor: ResolvedModelDescriptor,
     observed_at: Timestamp,

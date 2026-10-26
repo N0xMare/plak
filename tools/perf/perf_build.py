@@ -32,7 +32,7 @@ SCHEMA = "plakous.perf-build.v9"
 FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 9}
 SUPPORTED_PUBLIC_BUILD_PROFILES = {
     "minimal": ("plakous", ("--lib",), ()),
-    "subscriptions": ("plakous", ("--lib",), ("native-subscriptions",)),
+    "subscriptions": ("plakous", ("--lib",), ("codex", "grok", "claude",)),
     "sessions-sqlite": ("plakous", ("--lib",), ("sessions-sqlite",)),
     "plak": ("plak", ("--bin", "plak"), ()),
     "agent": ("plakous-agent", ("--lib",), ()),
@@ -48,13 +48,12 @@ TRANSITIONAL_FACADE_BUILD_PROFILES = {
     "all-providers": (
         "plakous",
         ("--lib",),
-        ("anthropic", "native-subscriptions", "openai", "openrouter", "xai"),
+        ("anthropic", "codex", "grok", "claude", "openai", "openrouter", "xai"),
     ),
     "full": ("plakous", ("--lib",), ("full",)),
 }
-# The public facade has one combined native-subscriptions feature. These two
-# benchmark-only component closures measure one provider integration at a time;
-# neither claims a supported facade configuration.
+# These benchmark-only closures measure provider implementation components,
+# distinct from the facade's standalone native-route features.
 COMPONENT_BUILD_PROFILES = {
     "codex-components": (
         "plakous",

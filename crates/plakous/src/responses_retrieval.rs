@@ -9,11 +9,11 @@ use plakous_tools::{
     RetrievalOutcome, RetrievalPort, RetrievalRequest, RetrievalSource, RetrievalUsage,
 };
 
-#[cfg(any(feature = "openai", feature = "native-subscriptions"))]
+#[cfg(any(feature = "openai", feature = "codex"))]
 use plakous_openai as responses;
 #[cfg(all(
-    feature = "xai",
-    not(any(feature = "openai", feature = "native-subscriptions"))
+    any(feature = "xai", feature = "grok"),
+    not(any(feature = "openai", feature = "codex"))
 ))]
 use plakous_xai as responses;
 use responses::{
@@ -21,99 +21,20 @@ use responses::{
     ResponsesRetrievalQuery,
 };
 
-/// One session's OpenAI API hosted web search as a [`RetrievalPort`].
 #[cfg(feature = "openai")]
-pub struct OpenAiRetrievalPort(Arc<plakous_openai::OpenAiRetrieval>);
-
+mod openai;
 #[cfg(feature = "openai")]
-impl OpenAiRetrievalPort {
-    /// Wraps the session's side-request executor.
-    #[must_use]
-    pub fn new(retrieval: plakous_openai::OpenAiRetrieval) -> Self {
-        Self(Arc::new(retrieval))
-    }
-}
+pub use openai::OpenAiRetrievalPort;
 
-#[cfg(feature = "openai")]
-impl RetrievalPort for OpenAiRetrievalPort {
-    fn kinds(&self) -> &[RetrievalKind] {
-        &[RetrievalKind::WebSearch]
-    }
+#[cfg(feature = "codex")]
+mod codex;
+#[cfg(feature = "codex")]
+pub use codex::CodexRetrievalPort;
 
-    fn retrieve(
-        &self,
-        request: RetrievalRequest,
-        control: ExecutionOperationControl,
-    ) -> RetrievalFuture {
-        let retrieval = Arc::clone(&self.0);
-        run(self.kinds(), request, move |query| async move {
-            retrieval.retrieve(query, control.cancellation()).await
-        })
-    }
-}
-
-/// One session's Codex subscription hosted web search as a [`RetrievalPort`].
-#[cfg(feature = "native-subscriptions")]
-pub struct CodexRetrievalPort(Arc<plakous_openai::CodexRetrieval>);
-
-#[cfg(feature = "native-subscriptions")]
-impl CodexRetrievalPort {
-    /// Wraps the session's side-request executor.
-    #[must_use]
-    pub fn new(retrieval: plakous_openai::CodexRetrieval) -> Self {
-        Self(Arc::new(retrieval))
-    }
-}
-
-#[cfg(feature = "native-subscriptions")]
-impl RetrievalPort for CodexRetrievalPort {
-    fn kinds(&self) -> &[RetrievalKind] {
-        &[RetrievalKind::WebSearch]
-    }
-
-    fn retrieve(
-        &self,
-        request: RetrievalRequest,
-        control: ExecutionOperationControl,
-    ) -> RetrievalFuture {
-        let retrieval = Arc::clone(&self.0);
-        run(self.kinds(), request, move |query| async move {
-            retrieval.retrieve(query, control.cancellation()).await
-        })
-    }
-}
-
-/// One session's xAI API or SuperGrok hosted web and X search as a
-/// [`RetrievalPort`].
-#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
-pub struct XaiRetrievalPort(Arc<plakous_xai::XaiRetrieval>);
-
-#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
-impl XaiRetrievalPort {
-    /// Wraps the session's side-request executor.
-    #[must_use]
-    pub fn new(retrieval: plakous_xai::XaiRetrieval) -> Self {
-        Self(Arc::new(retrieval))
-    }
-}
-
-#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
-impl RetrievalPort for XaiRetrievalPort {
-    fn kinds(&self) -> &[RetrievalKind] {
-        &[RetrievalKind::WebSearch, RetrievalKind::PostSearch]
-    }
-
-    fn retrieve(
-        &self,
-        request: RetrievalRequest,
-        control: ExecutionOperationControl,
-    ) -> RetrievalFuture {
-        let retrieval = Arc::clone(&self.0);
-        run(self.kinds(), request, move |query| async move {
-            retrieval.retrieve(query, control.cancellation()).await
-        })
-    }
-}
+#[cfg(any(feature = "xai", feature = "grok"))]
+mod xai;
+#[cfg(any(feature = "xai", feature = "grok"))]
+pub use xai::XaiRetrievalPort;
 
 fn run<F, Fut>(kinds: &[RetrievalKind], request: RetrievalRequest, retrieve: F) -> RetrievalFuture
 where

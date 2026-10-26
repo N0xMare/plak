@@ -24,6 +24,7 @@ mod fetch;
 mod fetch_limits;
 #[cfg(feature = "image-gen")]
 mod image_gen;
+mod image_gen_port;
 mod render;
 mod search;
 mod text;
@@ -37,9 +38,10 @@ pub use fetch_limits::{
     MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS, MAX_INLINE_FETCH_TEXT_BYTES,
 };
 #[cfg(feature = "image-gen")]
-pub use image_gen::{
-    ImageGenFuture, ImageGenPack, ImageGenPort, ImageGenRequest, ImageGenSource,
-    MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
+pub use image_gen::ImageGenPack;
+pub use image_gen_port::{
+    ImageGenFuture, ImageGenPort, ImageGenRequest, ImageGenSource, MAX_IMAGE_EDIT_INPUT_BYTES,
+    MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
 };
 pub use render::render_outcome;
 pub use text::{

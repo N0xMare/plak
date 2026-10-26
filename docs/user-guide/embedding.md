@@ -30,9 +30,9 @@ prompts and session workflows (including the feed) are always available.
 | `composition` | Code Mode, JavaScript and Python PTC over the cell client; no credentials, HTTP or interpreter dependencies |
 | `sessions-sqlite` | `SessionBackend::sqlite` |
 | `anthropic`, `openrouter` | Provider integrations and explicit credential/model inputs |
-| `openai`, `xai` | Provider integration exports; `OpenAiLanguageModel`/`XaiLanguageModel` also require `native-subscriptions` |
+| `openai`, `xai` | Provider integration exports; the native `OpenAiLanguageModel`/`XaiLanguageModel` additionally require `codex`/`grok`, respectively |
 | `auth` | Credential store, OAuth, pins and account binding; implies `openai` and `xai` |
-| `native-subscriptions` | Subscription admission/authentication; implies `composition` |
+| `codex`, `grok`, `claude` | Independent native subscription admission/authentication; evaluator and API re-export selection remain explicit |
 | `full` | All of these features, including Python and subscription dependencies |
 
 The always-on `application::run_once_until_signal` takes your cancellation

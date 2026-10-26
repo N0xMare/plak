@@ -1,8 +1,18 @@
+#[cfg(feature = "codex")]
+#[path = "codex_available.rs"]
+mod compiled;
+#[cfg(not(feature = "codex"))]
+#[path = "codex_unavailable.rs"]
+mod compiled;
+
 use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
 use plakous::subscriptions::NativeProvider;
 
 pub static CODEX: RouteCapability = RouteCapability {
+    compiled: compiled::COMPILED,
+    feature: "codex",
+    review_deadline: compiled::review_deadline,
     account: "codex",
     aliases: &["codex", "chatgpt"],
     kind: RouteKind::Native(NativeProvider::Codex),

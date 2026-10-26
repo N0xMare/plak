@@ -1,10 +1,9 @@
 //! Compatibility acceptance and local credential status.
 
 use super::{
-    CompatibilityNotice, CompatibilityStatus, NativeAuthStatus, NativeProvider,
-    NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions, PRIMARY_SLOT,
-    PrivateFilesystemLock, SubscriptionState, map_claude_error, map_claude_offline_status,
-    map_codex_error, map_codex_status, map_xai_error, map_xai_offline_status, run_blocking,
+    CompatibilityStatus, NativeAuthStatus, NativeProvider, NativeSubscriptionError,
+    NativeSubscriptionStatus, NativeSubscriptions, PrivateFilesystemLock, SubscriptionState,
+    run_blocking,
 };
 
 impl NativeSubscriptions {
@@ -12,6 +11,7 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<PrivateFilesystemLock, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
         self.state.acquire_compatibility_lock(provider).await
     }
 
@@ -19,13 +19,8 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<Option<PrivateFilesystemLock>, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
         self.state.try_acquire_compatibility_lock(provider).await
-    }
-
-    /// Returns every immutable fact requiring explicit operator consent.
-    #[must_use]
-    pub fn notice(provider: NativeProvider) -> CompatibilityNotice {
-        SubscriptionState::notice(provider)
     }
 
     /// Persists explicit consent only when the operator supplied the exact
@@ -40,7 +35,7 @@ impl NativeSubscriptions {
         provider: NativeProvider,
         operator_response: &str,
     ) -> Result<(), NativeSubscriptionError> {
-        let notice = Self::notice(provider);
+        let notice = Self::notice(provider)?;
         if operator_response != notice.notice_revision() {
             return Err(NativeSubscriptionError::AcceptanceRequired);
         }
@@ -74,11 +69,12 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
         let paths = self.state.clone();
         if !run_blocking(move || paths.layout_exists()).await?? {
             return Ok(NativeSubscriptionStatus {
                 compatibility: SubscriptionState::absent_compatibility(
-                    Self::notice(provider),
+                    Self::notice(provider)?,
                     self.state.now()?,
                 ),
                 credential: NativeAuthStatus::SignedOut,
@@ -101,10 +97,11 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<CompatibilityStatus, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?;
         let paths = self.state.clone();
         if !run_blocking(move || paths.layout_exists()).await?? {
             return Ok(SubscriptionState::absent_compatibility(
-                Self::notice(provider),
+                Self::notice(provider)?,
                 self.state.now()?,
             ));
         }
@@ -140,7 +137,7 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<bool, NativeSubscriptionError> {
         let paths = self.state.clone();
-        let notice = Self::notice(provider);
+        let notice = Self::notice(provider)?;
         run_blocking(move || paths.compatibility_written_by_newer_build(notice)).await?
     }
 
@@ -161,46 +158,9 @@ impl NativeSubscriptions {
     ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
         let paths = self.state.clone();
         run_blocking(move || paths.prepare()).await??;
-        Ok(match provider {
-            NativeProvider::Codex => plakous_openai::CodexSubscriptionLocalAdmin::open(
-                self.state.provider_record(provider),
-            )
+        super::vertical::require_vertical(provider)?
+            .offline_status(self)
             .await
-            .map_err(map_codex_error)?
-            .status()
-            .await
-            .map(map_codex_status)
-            .map_err(map_codex_error)?,
-            NativeProvider::Xai => {
-                let path = self.state.provider_record(provider);
-                run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
-                    let admin = plakous_xai::XaiOfflineSelectedSlot::open_explicit(path, slot)
-                        .map_err(map_xai_error)?;
-                    admin
-                        .status()
-                        .map(map_xai_offline_status)
-                        .map_err(map_xai_error)
-                })
-                .await??
-            }
-            NativeProvider::Claude => {
-                let path = self.state.provider_record(provider);
-                run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
-                    let admin =
-                        plakous_anthropic::ClaudeOfflineSelectedSlot::open_explicit(path, slot)
-                            .map_err(map_claude_error)?;
-                    admin
-                        .status()
-                        .map(map_claude_offline_status)
-                        .map_err(map_claude_error)
-                })
-                .await??
-            }
-        })
     }
 
     async fn status_after_credential(
@@ -208,7 +168,7 @@ impl NativeSubscriptions {
         provider: NativeProvider,
         credential: NativeAuthStatus,
     ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
-        let notice = Self::notice(provider);
+        let notice = Self::notice(provider)?;
         let paths = self.state.clone();
         let consent_generation = run_blocking(move || {
             let now = paths.now()?;
@@ -249,7 +209,7 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<CompatibilityStatus, NativeSubscriptionError> {
         let paths = self.state.clone();
-        let notice = Self::notice(provider);
+        let notice = Self::notice(provider)?;
         match run_blocking(move || {
             let now = paths.now()?;
             paths.load_acceptance(notice, now)

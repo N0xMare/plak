@@ -80,7 +80,7 @@ fn seed(paths: &SubscriptionPaths, now: u64) -> TestResult {
     paths.prepare()?;
     store_acceptance(
         paths,
-        NativeSubscriptions::notice(NativeProvider::Codex),
+        NativeSubscriptions::notice(NativeProvider::Codex).unwrap(),
         now,
     )?;
     let profile = plakous_auth::SubscriptionIntegrationProfileId::new(
@@ -107,7 +107,7 @@ fn seed(paths: &SubscriptionPaths, now: u64) -> TestResult {
     )?)?;
     let consent = load_acceptance_exact(
         paths,
-        NativeSubscriptions::notice(NativeProvider::Codex),
+        NativeSubscriptions::notice(NativeProvider::Codex).unwrap(),
         now,
     )?;
     let operation = arm_login_recovery(paths, NativeProvider::Codex, &consent.generation)?;

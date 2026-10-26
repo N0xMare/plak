@@ -1,33 +1,15 @@
 //! Dispatch admission, refresh, revoke and local logout.
+use super::dispatch_credential_admitted;
 
 use super::{
-    Arc, Duration, ForcedRefresh, Instant, NativeAuthStatus, NativeProvider,
-    NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions, PRIMARY_SLOT, detached,
-    map_claude_error, map_claude_offline_status, map_codex_error, map_codex_status,
-    map_credential_status, map_xai_error, map_xai_offline_status, run_blocking,
+    Duration, ForcedRefresh, Instant, NativeAuthStatus, NativeProvider, NativeSubscriptionError,
+    NativeSubscriptionStatus, NativeSubscriptions, run_blocking,
 };
 
 /// Bound on how long dispatch admission waits for another owner's claimed
 /// refresh to settle; a refresh exchange is bounded well inside it.
 const REFRESH_IN_FLIGHT_WAIT: Duration = Duration::from_secs(30);
 const REFRESH_IN_FLIGHT_POLL: Duration = Duration::from_millis(200);
-
-/// The single credential admission rule for every dispatch-shaped path: model
-/// catalog, inference, and child spawn.
-///
-/// Ready is admitted for every provider. xAI Quarantined is admitted because
-/// its durable Unknown is retryable on the stored refresh token;
-/// the next refresh reclaims it. Codex and Claude stay Ready-only.
-#[must_use]
-pub const fn dispatch_credential_admitted(
-    provider: NativeProvider,
-    credential: NativeAuthStatus,
-) -> bool {
-    matches!(
-        (provider, credential),
-        (_, NativeAuthStatus::Ready) | (NativeProvider::Xai, NativeAuthStatus::Quarantined)
-    )
-}
 
 impl NativeSubscriptions {
     /// Admits one provider for a dispatch-shaped use (child spawn) exactly as
@@ -136,26 +118,9 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<u64, NativeSubscriptionError> {
-        match provider {
-            NativeProvider::Codex => self
-                .codex_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_codex_error),
-            NativeProvider::Claude => self
-                .claude_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_claude_error),
-            NativeProvider::Xai => self
-                .xai_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_xai_error),
-        }
+        super::vertical::require_vertical(provider)?
+            .access_expires_at(self)
+            .await
     }
 
     /// Runs one refresh under the held compatibility lock; `force` claims a
@@ -165,76 +130,9 @@ impl NativeSubscriptions {
         provider: NativeProvider,
         force: bool,
     ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
-        let status = match provider {
-            NativeProvider::Codex => {
-                let online = self.codex_online().await?;
-                let manager = Arc::clone(&online.manager);
-                if force {
-                    detached(async move { manager.refresh_after_rejection().await })
-                        .await?
-                        .map_err(map_codex_error)?;
-                } else {
-                    online
-                        .manager
-                        .refresh_if_needed()
-                        .await
-                        .map_err(map_codex_error)?;
-                }
-                online
-                    .manager
-                    .status()
-                    .map(map_codex_status)
-                    .map_err(map_codex_error)
-            }
-            NativeProvider::Claude => {
-                let online = self.claude_online().await?;
-                let manager = Arc::clone(&online.manager);
-                if force {
-                    detached(async move { manager.refresh_after_rejection().await })
-                        .await?
-                        .map_err(map_claude_error)?;
-                } else {
-                    online
-                        .manager
-                        .refresh_if_needed()
-                        .await
-                        .map_err(map_claude_error)?;
-                }
-                online
-                    .manager
-                    .status()
-                    .map(|status| {
-                        status.map_or(NativeAuthStatus::SignedOut, |value| {
-                            map_credential_status(value.status())
-                        })
-                    })
-                    .map_err(map_claude_error)
-            }
-            NativeProvider::Xai => {
-                let online = self.xai_online().await?;
-                let manager = Arc::clone(&online.manager);
-                if force {
-                    detached(async move { manager.refresh_now().await })
-                        .await?
-                        .map_err(map_xai_error)?;
-                } else {
-                    online
-                        .manager
-                        .refresh_if_needed()
-                        .await
-                        .map_err(map_xai_error)?;
-                }
-                online
-                    .manager
-                    .status()
-                    .map(|status| {
-                        status.map_or(NativeAuthStatus::SignedOut, |value| {
-                            map_credential_status(value.status())
-                        })
-                    })
-                    .map_err(map_xai_error)
-            }
-        }?;
+        let status = super::vertical::require_vertical(provider)?
+            .refresh(self, force)
+            .await?;
         // Refresh legitimately advances durable credential generations. Re-pin
         // the cleared login-recovery marker so the recovery gate does not treat
         // the owner-managed rotation as a foreign slot takeover.
@@ -245,7 +143,7 @@ impl NativeSubscriptions {
             let paths = self.state.clone();
             let consent = {
                 let paths = self.state.clone();
-                let notice = Self::notice(provider);
+                let notice = Self::notice(provider)?;
                 let now = self.state.now()?;
                 run_blocking(move || paths.load_acceptance_exact(notice, now)).await??
             };
@@ -268,33 +166,9 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
         let lock = self.acquire_compatibility_lock(provider).await?;
-        let status = match provider {
-            NativeProvider::Codex => self
-                .codex_online()
-                .await?
-                .manager
-                .revoke()
-                .await
-                .map(map_codex_status)
-                .map_err(map_codex_error),
-            NativeProvider::Xai => {
-                self.xai_online()
-                    .await?
-                    .manager
-                    .revoke()
-                    .await
-                    .map_err(map_xai_error)?;
-                Ok(NativeAuthStatus::Revoked)
-            }
-            NativeProvider::Claude => {
-                self.claude_online()
-                    .await?
-                    .manager
-                    .revoke()
-                    .map_err(map_claude_error)?;
-                Ok(NativeAuthStatus::Revoked)
-            }
-        }?;
+        let status = super::vertical::require_vertical(provider)?
+            .revoke(self)
+            .await?;
         lock.verify()?;
         Ok(status)
     }
@@ -354,7 +228,7 @@ impl NativeSubscriptions {
         };
         lock.verify()?;
         let paths = self.state.clone();
-        let notice = Self::notice(provider);
+        let notice = Self::notice(provider)?;
         run_blocking(move || {
             paths.retire_login_recovery(provider)?;
             paths.retire_newer_receipt(notice)
@@ -370,42 +244,8 @@ impl NativeSubscriptions {
     ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
         let paths = self.state.clone();
         run_blocking(move || paths.prepare()).await??;
-        match provider {
-            NativeProvider::Codex => plakous_openai::CodexSubscriptionLocalAdmin::open(
-                self.state.provider_record(provider),
-            )
+        super::vertical::require_vertical(provider)?
+            .logout(self)
             .await
-            .map_err(map_codex_error)?
-            .logout_local()
-            .await
-            .map(map_codex_status)
-            .map_err(map_codex_error),
-            NativeProvider::Xai => {
-                let path = self.state.provider_record(provider);
-                run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
-                    plakous_xai::XaiOfflineSelectedSlot::open_explicit(path, slot)
-                        .map_err(map_xai_error)?
-                        .logout_local()
-                        .map(map_xai_offline_status)
-                        .map_err(map_xai_error)
-                })
-                .await?
-            }
-            NativeProvider::Claude => {
-                let path = self.state.provider_record(provider);
-                run_blocking(move || {
-                    let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
-                    plakous_anthropic::ClaudeOfflineSelectedSlot::open_explicit(path, slot)
-                        .map_err(map_claude_error)?
-                        .logout_local()
-                        .map(map_claude_offline_status)
-                        .map_err(map_claude_error)
-                })
-                .await?
-            }
-        }
     }
 }

@@ -6,145 +6,31 @@ use std::sync::Arc;
 use plakous_tool_web::{ImageGenFuture, ImageGenPort, ImageGenRequest};
 use plakous_tools::ExecutionOperationControl;
 
-#[cfg(any(feature = "openai", feature = "native-subscriptions"))]
+#[cfg(any(feature = "openai", feature = "codex"))]
 use plakous_openai as responses;
 #[cfg(all(
-    feature = "xai",
-    not(any(feature = "openai", feature = "native-subscriptions"))
+    any(feature = "xai", feature = "grok"),
+    not(any(feature = "openai", feature = "codex"))
 ))]
 use plakous_xai as responses;
 use responses::{ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource};
 
 use crate::responses_retrieval::error_of;
 
-/// One session's OpenAI API image generation as an [`ImageGenPort`].
 #[cfg(feature = "openai")]
-pub struct OpenAiImagePort(Arc<plakous_openai::OpenAiImages>);
-
+mod openai;
 #[cfg(feature = "openai")]
-impl OpenAiImagePort {
-    /// Wraps the session's images executor.
-    #[must_use]
-    pub fn new(images: plakous_openai::OpenAiImages) -> Self {
-        Self(Arc::new(images))
-    }
-}
+pub use openai::OpenAiImagePort;
 
-#[cfg(feature = "openai")]
-impl ImageGenPort for OpenAiImagePort {
-    fn max_edit_images(&self) -> usize {
-        ResponsesImageFlavor::OpenAi.max_edit_images()
-    }
+#[cfg(feature = "codex")]
+mod codex;
+#[cfg(feature = "codex")]
+pub use codex::CodexImagePort;
 
-    fn takes_size(&self) -> bool {
-        ResponsesImageFlavor::OpenAi.takes_size()
-    }
-
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        control: ExecutionOperationControl,
-    ) -> ImageGenFuture {
-        let images = Arc::clone(&self.0);
-        Box::pin(async move {
-            let request = lowered(
-                plakous_openai::OPENAI_IMAGE_MODEL,
-                ResponsesImageFlavor::OpenAi,
-                request,
-            );
-            images
-                .generate(&request, control.cancellation())
-                .await
-                .map_err(|error| error_of(&error))
-        })
-    }
-}
-
-/// One session's Codex subscription image generation as an [`ImageGenPort`].
-#[cfg(feature = "native-subscriptions")]
-pub struct CodexImagePort(Arc<plakous_openai::CodexImages>);
-
-#[cfg(feature = "native-subscriptions")]
-impl CodexImagePort {
-    /// Wraps the session's images executor.
-    #[must_use]
-    pub fn new(images: plakous_openai::CodexImages) -> Self {
-        Self(Arc::new(images))
-    }
-}
-
-#[cfg(feature = "native-subscriptions")]
-impl ImageGenPort for CodexImagePort {
-    fn max_edit_images(&self) -> usize {
-        ResponsesImageFlavor::Codex.max_edit_images()
-    }
-
-    fn takes_size(&self) -> bool {
-        ResponsesImageFlavor::Codex.takes_size()
-    }
-
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        control: ExecutionOperationControl,
-    ) -> ImageGenFuture {
-        let images = Arc::clone(&self.0);
-        Box::pin(async move {
-            let request = lowered(
-                plakous_openai::CODEX_IMAGE_MODEL,
-                ResponsesImageFlavor::Codex,
-                request,
-            );
-            images
-                .generate(&request, control.cancellation())
-                .await
-                .map_err(|error| error_of(&error))
-        })
-    }
-}
-
-/// One session's xAI API image generation as an [`ImageGenPort`].
-#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
-pub struct XaiImagePort(Arc<plakous_xai::XaiImages>);
-
-#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
-impl XaiImagePort {
-    /// Wraps the session's images executor.
-    #[must_use]
-    pub fn new(images: plakous_xai::XaiImages) -> Self {
-        Self(Arc::new(images))
-    }
-}
-
-#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
-impl ImageGenPort for XaiImagePort {
-    fn max_edit_images(&self) -> usize {
-        ResponsesImageFlavor::Xai.max_edit_images()
-    }
-
-    fn takes_size(&self) -> bool {
-        ResponsesImageFlavor::Xai.takes_size()
-    }
-
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        control: ExecutionOperationControl,
-    ) -> ImageGenFuture {
-        let images = Arc::clone(&self.0);
-        Box::pin(async move {
-            let request = lowered(
-                plakous_xai::XAI_IMAGE_MODEL,
-                ResponsesImageFlavor::Xai,
-                request,
-            );
-            images
-                .generate(&request, control.cancellation())
-                .await
-                .map_err(|error| error_of(&error))
-        })
-    }
-}
+#[cfg(any(feature = "xai", feature = "grok"))]
+mod xai;
+#[cfg(any(feature = "xai", feature = "grok"))]
+pub use xai::XaiImagePort;
 
 fn lowered(
     model: &str,

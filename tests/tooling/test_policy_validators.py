@@ -1012,7 +1012,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 self.assertEqual(validator(workspace), [])
 
     def test_product_explicit_api_features_cannot_be_borrowed_from_hosted(self) -> None:
-        expected = {"native-subscriptions", "openai", "anthropic", "xai",
+        expected = {"codex", "grok", "claude", "openai", "anthropic", "xai",
                     "openrouter", "sessions-sqlite"}
         self.assertEqual(set(self.workspace.policy.facade_features["plak"]), expected)
         self.assertEqual(workspace_policy.validate_facade_features(self.workspace), [])
@@ -1230,7 +1230,8 @@ class RepositoryPolicyTests(unittest.TestCase):
             self.workspace.policy.edge_exceptions,
             {
                 "plakous-compose": ("plakous-codex-code-mode-protocol",),
-                "plakous": ("plakous-exchange",),
+                "plakous": ("plakous-exchange", "plakous-responses-dialect"),
+                "plakous-auth": ("plakous-model",),
                 "plak": (
                     "plakous-host-protocol",
                     "plakous-hosted",
@@ -2293,11 +2294,11 @@ class FeaturePolicyTests(unittest.TestCase):
             )
             for package in packages
         }
-        self.assertEqual(profile_counts["plakous"], 2 * 11 + 3)
+        self.assertEqual(profile_counts["plakous"], 2 * 13 + 3)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2 * 3 + 3)
-        self.assertEqual(profile_counts["plak"], 2 * 13 + 3)
-        self.assertEqual(profile_counts["plakous-hosted"], 2 * 10 + 3)
+        self.assertEqual(profile_counts["plak"], 2 * 20 + 3)
+        self.assertEqual(profile_counts["plakous-hosted"], 2 * 17 + 3)
         self.assertNotIn("plakous-cell", profile_counts)
         self.assertEqual(profile_counts["plakous-js-runtime"], 3)
         for count in profile_counts.values():
@@ -2327,10 +2328,10 @@ class FeaturePolicyTests(unittest.TestCase):
         )
         self.assertNotIn("plakous-cell", minimal)
         native = feature_policy.expected_closure(
-            "plakous", ("native-subscriptions",), False, manifests
+            "plakous", ("codex", "grok", "claude",), False, manifests
         )
         self.assertIn("plakous-codex-code-mode-protocol", native)
-        self.assertIn("plakous-cell", native)
+        self.assertNotIn("plakous-cell", native)
         self.assertIn("plakous-auth", native)
         self.assertNotIn("plakous-openrouter", native)
         store = feature_policy.expected_closure("plakous-store", ("sqlite",), False, manifests)

@@ -954,3 +954,20 @@ fn openrouter_persisted_effort_is_closed_and_never_defaulted() {
     session.effort = Some("high".into());
     assert!(session.validate_for_store().is_ok());
 }
+
+#[test]
+fn stored_api_binding_is_readable_without_current_model_enrollment() {
+    let mut session = bound_session("/work/historical-api");
+    session.account = Some("openai".into());
+    session.model = Some("historical-model-not-in-this-build".into());
+    session.effort = Some("high".into());
+    session.composition = ProductCompositionSelection::NativePtc;
+    session.target_selection = ProductTargetSelection::Platform {
+        provider: crate::binding::PlatformProvider::OpenAi,
+    };
+    session.validate_for_store().unwrap();
+    assert_eq!(
+        session.model.as_deref(),
+        Some("historical-model-not-in-this-build")
+    );
+}

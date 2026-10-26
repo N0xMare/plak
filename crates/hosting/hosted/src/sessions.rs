@@ -447,8 +447,8 @@ impl SessionRecord {
                     && self.model.as_deref().is_some_and(|model| {
                         !model.is_empty()
                             && self.composition != ProductCompositionSelection::FollowCatalog
-                            && crate::platform::api_composition(*provider, model, self.composition)
-                                .is_ok()
+                            && (self.composition != ProductCompositionSelection::NativePtc
+                                || *provider == crate::binding::PlatformProvider::OpenAi)
                     })
                     && self
                         .effort

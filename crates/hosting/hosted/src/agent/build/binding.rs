@@ -76,6 +76,7 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     composition: CompositionSelection,
     processing_tier: ProcessingTierDisposition,
 ) -> CliResult<SelectedProviderConfiguration> {
+    crate::capabilities::require_native(provider)?;
     crate::capabilities::require_composition(composition)?;
     if provider == NativeProvider::Codex && effort == Some(ReasoningEffort::Ultra) {
         return Err(CliFailure::new(

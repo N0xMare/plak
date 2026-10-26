@@ -54,6 +54,9 @@ one cross-build carrier (a build imports its own and the previous version).
   terminal paths. Waiting releases shared request capacity and does not spend
   the operation deadline. The HUD and child activity show the login wait. This
   is in-memory state only; persisted and export encodings are unchanged.
+- Native subscription builds select `codex`, `grok` and `claude` independently,
+  without pulling in other providers or evaluators. Frozen subscription
+  vocabulary remains readable; omitted operations refuse before state writes.
 - JS and Python evaluator choices forward independently from the product;
   Python profiles require explicit `composition-python`. MCP client omission
   unlinks its transports while preserving frozen MCP records for read/export.

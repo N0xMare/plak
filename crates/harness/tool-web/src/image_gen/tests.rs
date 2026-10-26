@@ -3,6 +3,8 @@
     reason = "fixture builders take owned values for readability"
 )]
 
+use crate::ImageGenFuture;
+use plakous_tools::{ExecutionOperationControl, RetrievalError};
 use std::error::Error;
 use std::str::FromStr as _;
 use std::sync::Mutex;

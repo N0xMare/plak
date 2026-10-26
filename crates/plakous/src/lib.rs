@@ -32,7 +32,9 @@
 
 /// Optional observational exchange hooks. These carry no dispatch authority.
 #[cfg(any(
-    feature = "native-subscriptions",
+    feature = "codex",
+    feature = "grok",
+    feature = "claude",
     feature = "web-fetch",
     feature = "openrouter",
     feature = "openai",
@@ -355,19 +357,28 @@ pub mod construction;
 /// leases, compare-and-swap operations, object graphs, and SQL remain private.
 pub mod sessions;
 
-#[cfg(any(feature = "anthropic", feature = "native-subscriptions"))]
+#[cfg(any(feature = "anthropic", feature = "claude"))]
 mod anthropic_retrieval;
 #[cfg(feature = "openrouter")]
 mod openrouter_retrieval;
-#[cfg(any(feature = "openai", feature = "xai", feature = "native-subscriptions"))]
+#[cfg(any(
+    feature = "openai",
+    feature = "xai",
+    feature = "codex",
+    feature = "grok"
+))]
 mod responses_images;
-#[cfg(any(feature = "openai", feature = "xai", feature = "native-subscriptions"))]
+#[cfg(any(
+    feature = "openai",
+    feature = "xai",
+    feature = "codex",
+    feature = "grok"
+))]
 mod responses_retrieval;
 #[cfg(test)]
 mod test_model;
 
 pub mod application;
-#[cfg(feature = "native-subscriptions")]
 pub mod subscriptions;
 
 /// Curated Anthropic integration configuration.
@@ -395,7 +406,7 @@ pub mod anthropic {
 /// Provider-neutral auth foundations (secrets, private store, OAuth helpers).
 ///
 /// Externally owned login-store readers and brokers were removed from the
-/// product path. Plak-owned OAuth (`native-subscriptions` / provider
+/// product path. Plak-owned OAuth (`codex` / `grok` / `claude` / provider
 /// `native-auth`) is the only supported login surface. This module re-exports
 /// neutral credential, OAuth and account-binding foundations for embedders.
 ///
@@ -562,7 +573,7 @@ pub mod mcp;
 #[cfg(feature = "openai")]
 pub mod openai {
     pub use crate::responses_images::OpenAiImagePort;
-    #[cfg(feature = "native-subscriptions")]
+    #[cfg(feature = "codex")]
     pub use crate::responses_retrieval::CodexRetrievalPort;
     pub use crate::responses_retrieval::OpenAiRetrievalPort;
     pub use plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS;
@@ -585,7 +596,7 @@ pub mod openai {
     };
     pub use plakous_openai::{OpenAiRetrieval, lowest_responses_effort};
 
-    #[cfg(feature = "native-subscriptions")]
+    #[cfg(feature = "codex")]
     pub use plakous_openai::OpenAiLanguageModel;
 }
 /// Curated OpenRouter Chat connection and Custom model construction.
@@ -1161,23 +1172,27 @@ pub mod tools {
         /// The Plak-run `fetch_url` tool, selected independently of providers.
         #[cfg(feature = "web-fetch")]
         pub use plakous_tool_web::FetchUrlPack;
+        /// The `image_gen` execution pack, selected by provider routes, not MCP
+        /// or the independent local page fetcher.
+        #[cfg(any(
+            feature = "anthropic",
+            feature = "codex",
+            feature = "grok",
+            feature = "claude",
+            feature = "openai",
+            feature = "openrouter",
+            feature = "xai"
+        ))]
+        pub use plakous_tool_web::ImageGenPack;
         pub use plakous_tool_web::{
             DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits,
             MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,
             MAX_INLINE_FETCH_TEXT_BYTES,
         };
-        /// The `image_gen` tool and the port a route implements for it,
-        /// built whenever the facade links an HTTP stack.
-        #[cfg(any(
-            feature = "anthropic",
-            feature = "mcp",
-            feature = "native-subscriptions",
-            feature = "openai",
-            feature = "openrouter",
-            feature = "xai"
-        ))]
+        /// Transport-free image generation vocabulary remains available without
+        /// an execution pack or a compiled provider.
         pub use plakous_tool_web::{
-            ImageGenFuture, ImageGenPack, ImageGenPort, ImageGenRequest, ImageGenSource,
+            ImageGenFuture, ImageGenPort, ImageGenRequest, ImageGenSource,
             MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
         };
         pub use plakous_tool_web::{
@@ -1261,7 +1276,7 @@ pub mod xai {
     pub use plakous_xai::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
     pub use plakous_xai::{XAI_IMAGE_MODEL, XaiImages};
 
-    #[cfg(feature = "native-subscriptions")]
+    #[cfg(feature = "grok")]
     pub use plakous_xai::{
         StandardXaiHttpConfig, XaiLanguageModel, XaiLanguageModelConfigError,
         compile_supergrok_subscription_configuration, grok_max_output_tokens,

@@ -28,6 +28,7 @@ getrandom.workspace = true
 jsonwebtoken = { workspace = true, optional = true }
 ring = { workspace = true, optional = true }
 plakous-http = { workspace = true, optional = true }
+plakous-model.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

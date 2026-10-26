@@ -474,8 +474,9 @@ fn status_prints_every_provider_when_one_credential_cannot_be_read() {
     ] {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let codex_profile =
-        plakous::subscriptions::NativeSubscriptions::notice(NativeProvider::Codex).profile_id();
+    let codex_profile = plakous::subscriptions::NativeSubscriptions::notice(NativeProvider::Codex)
+        .unwrap()
+        .profile_id();
     let codex_record = format!(
         r#"{{"format_version":2,"profile_id":"{codex_profile}","slot_id":"primary","account_binding":"legacy-account","generation":1,"status":"ready","payload":"e30="}}"#
     );
@@ -563,7 +564,8 @@ fn status_prints_every_provider_when_one_credential_cannot_be_read() {
 fn seed_cleared_codex_login_recovery(app: &mut PlakousApplication, subscriptions: &Path) {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let notice = plakous::subscriptions::NativeSubscriptions::notice(NativeProvider::Codex);
+    let notice =
+        plakous::subscriptions::NativeSubscriptions::notice(NativeProvider::Codex).unwrap();
     app.acknowledge_exact(NativeProvider::Codex, notice.notice_revision())
         .expect("codex acceptance");
     let receipt = std::fs::read_to_string(subscriptions.join("compatibility/codex.json")).unwrap();
@@ -647,8 +649,9 @@ fn status_quarantines_a_ready_capable_codex_login_with_no_recovery_marker() {
     let root = tempfile::tempdir().unwrap();
     let state = std::fs::canonicalize(root.path()).unwrap().join("state");
     let subscriptions = mode_700_subscription_tree(&state);
-    let profile =
-        plakous::subscriptions::NativeSubscriptions::notice(NativeProvider::Codex).profile_id();
+    let profile = plakous::subscriptions::NativeSubscriptions::notice(NativeProvider::Codex)
+        .unwrap()
+        .profile_id();
     let record = format!(
         r#"{{"format_version":2,"profile_id":"{profile}","slot_id":"primary","account_binding":"legacy-account","generation":1,"status":"ready","payload":"e30="}}"#
     );
@@ -785,13 +788,13 @@ impl FakeBackend {
 }
 
 impl AccountOps for FakeBackend {
-    fn notice(&self, _provider: NativeProvider) -> CliNotice {
-        CliNotice {
+    fn notice(&self, _provider: NativeProvider) -> CliResult<CliNotice> {
+        Ok(CliNotice {
             profile_id: "fixture-profile",
             notice_revision: "exact-review",
             reviewed_at: 1_785_456_000,
             expires_at: 1_793_232_000,
-        }
+        })
     }
 
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
@@ -2810,7 +2813,7 @@ fn local_compatibility_notice_exposes_exact_compiled_facts_for_each_provider() {
         ),
     ];
     for (provider, expected) in cases {
-        let notice = plakous::subscriptions::NativeSubscriptions::notice(provider);
+        let notice = plakous::subscriptions::NativeSubscriptions::notice(provider).unwrap();
         let expected = expected
             .replace("{reviewed_at}", &notice.reviewed_at().to_string())
             .replace("{expires_at}", &notice.expires_at().to_string());

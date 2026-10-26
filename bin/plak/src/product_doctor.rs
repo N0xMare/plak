@@ -891,10 +891,11 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         ));
     }
     if crate::capabilities::ROUTES.iter().any(|capability| {
-        matches!(
-            capability.doctor,
-            Some(crate::capabilities::RouteDoctor::OpenRouterCatalog)
-        )
+        capability.route.compiled
+            && matches!(
+                capability.doctor,
+                Some(crate::capabilities::RouteDoctor::OpenRouterCatalog)
+            )
     }) {
         checks.push(openrouter_catalog_check(input.openrouter_catalog));
     }
@@ -902,6 +903,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     checks.push(spawn_templates_check(input.spawn_templates));
     for doctor in crate::capabilities::ROUTES
         .iter()
+        .filter(|capability| capability.route.compiled)
         .filter_map(|capability| capability.doctor.as_ref())
     {
         if let crate::capabilities::RouteDoctor::Oauth { kind, probe } = doctor {

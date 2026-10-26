@@ -159,6 +159,7 @@ pub(crate) async fn construct_platform_runtime_with(
     admission: &PlatformAdmission,
     clock: Arc<dyn plakous::model::Clock>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
+    crate::capabilities::require(provider.account())?;
     if provider.account() != spec.account || provider.protocol() != spec.wire {
         return Err(CliFailure::new(
             "API target/account/protocol binding is inconsistent",

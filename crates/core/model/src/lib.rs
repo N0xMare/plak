@@ -40,3 +40,7 @@ pub use portable_schema_v2::*;
 pub use request::*;
 pub use semantic_json::*;
 pub use subscription_usage::*;
+
+/// Provider-neutral classified request accounting.
+#[doc(hidden)]
+pub mod subscription_limit;

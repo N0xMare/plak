@@ -1,224 +1,195 @@
-//! Curated, Plak-owned subscription authentication and model admission.
-//!
-//! This application-facing module deliberately hides provider transports,
-//! credentials, account identifiers, generations, endpoints, and native route
-//! objects. Its public values are credential-free capabilities and status.
-//!
-//! ## Admit surface
-//!
-//! Library-owned admission is the typed gate for catalog resolution and
-//! revalidation before an ordinary run.
+//! Native subscription vocabulary and exact per-route capability dispatch.
+//! An omitted route never falls back to a different provider.
 
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod catalog;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod child;
+#[cfg(feature = "claude")]
 mod claude;
+#[cfg(feature = "codex")]
 mod codex;
+#[cfg(any(feature = "grok", feature = "claude"))]
+mod common_error;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod compatibility;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod credential;
+mod error;
+#[cfg(feature = "grok")]
+mod grok;
+#[cfg(feature = "codex")]
 mod guidance;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod login;
+mod login_types;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod model_catalog;
 mod models;
+mod paths;
 mod provider;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod reresolve;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod resolution;
+#[cfg(not(any(feature = "codex", feature = "grok", feature = "claude")))]
+#[path = "subscriptions/resolution_unavailable.rs"]
+mod resolution;
+mod resolution_error;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod resolve;
+#[cfg(any(feature = "codex", feature = "grok"))]
+mod responses_budget;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod runtime;
+#[cfg(not(any(feature = "codex", feature = "grok", feature = "claude")))]
+#[path = "subscriptions/unavailable.rs"]
+mod runtime;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod scope;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod state;
 mod status;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod telemetry;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod usage;
-mod xai;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod vertical;
+#[cfg(not(any(feature = "codex", feature = "grok", feature = "claude")))]
+#[path = "subscriptions/vertical_unavailable.rs"]
+mod vertical;
 
-use codex::codex_native_http_config;
-pub use credential::dispatch_credential_admitted;
-pub use login::{
+pub use error::NativeSubscriptionError;
+pub use login_types::{
     CompatibilityNotice, NativeDeviceCode, NativeLoginCompletion, NativeLoginInstructions,
-    NativeLoginMode, PendingNativeLogin,
+    NativeLoginMode,
 };
-#[cfg(test)]
-use login::{
-    PendingCompatibilityConsent, complete_approved_with_consent, complete_pending_with_consent,
-};
-use model_catalog::catalog_operation_deadline;
-#[cfg(test)]
-use model_catalog::run_classified_model_catalog;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+use models::require_exact_native_tool_mode;
 pub use models::{
     NativeModelCatalog, NativeModelSelector, NativeModelSelectorError, NativeModelSummary,
     NativeModelVisibility, NativeServiceTierSummary, NativeToolMode,
     NativeToolModeRequirementError,
 };
-use models::{
-    codex_native_tool_mode, facade_codex_visibility, facade_native_tool_mode,
-    facade_xai_model_is_selectable, first_codex_compatible_model, require_exact_native_tool_mode,
-};
-pub use provider::{NativeProvider, native_provider_route_selection};
-pub(crate) use resolution::SubscriptionResolutionEvidence;
-pub use resolution::{NativeModelResolutionError, ResolvedNativeModel, ResolvedProvider};
-pub use status::{CompatibilityStatus, ForcedRefresh, NativeAuthStatus, NativeSubscriptionStatus};
-use xai::{xai_inference_client, xai_native_http_config};
-
-pub use state::SubscriptionPaths;
-use state::{LoadedAcceptance, LoginRecoveryOperation, PrivateFilesystemLock, SubscriptionState};
-mod error;
-mod reresolve;
-mod scope;
-mod telemetry;
-use scope::apply_turn_scoped_provider_gate;
-#[cfg(test)]
-pub(crate) use scope::wrap_turn_scoped_native_model;
-
-pub use error::NativeSubscriptionError;
-use error::{
-    map_claude_error, map_claude_offline_status, map_codex_error, map_codex_status,
-    map_credential_status, map_xai_error, map_xai_offline_status,
-};
-use telemetry::credential_refresh_observer;
-pub use telemetry::install_credential_telemetry;
-
-use std::error::Error;
-use std::fmt;
-use std::future::Future;
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-// The product's per-model operation budget is 300 seconds. Native inference
-// must not silently inherit the shorter provider-library API default.
-const NATIVE_INFERENCE_OPERATION_TIMEOUT: Duration = Duration::from_secs(300);
-
-use plakous_auth::subscription_limit::{
-    InMemorySubscriptionRequestGate, SubscriptionInferenceScopeHandle,
-    SubscriptionInferenceScopeLease, SubscriptionLimitSnapshot,
-};
-pub use plakous_auth::subscription_limit::{
+pub use paths::SubscriptionPaths;
+pub use plakous_model::subscription_limit::{
     SubscriptionInferenceScope, SubscriptionRequestClass, SubscriptionRequestGate,
     SubscriptionRequestLimits, SystemSubscriptionGateClock, TurnScopedSubscriptionRequestGate,
 };
 use plakous_model::{
-    CompiledProviderConfiguration, ConfiguredLanguageModel, CredentialSelectionId, Digest,
-    DigestDomain, DigestError, LanguageModel, ModelAdapterProfileId, ModelCallRecoveryOperation,
-    ModelCallRecoveryRequest, ModelError, ModelErrorKind, ModelId, ModelOperationRoot,
-    ModelOperationScope, ModelPreparationContext, ModelPreparationError, ModelPreparationErrorKind,
-    PreparedModelCall, ProtocolId, ProviderAuthorityClassId, ProviderProfileRevisionId,
-    ProviderRouteSelection, ReasoningEffort, ResolvedModelDescriptor,
-    ResolvedProviderAuthorityBinding, RouteId, RuntimeAdmissionWitness, RuntimeModelAuthority,
-    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, SessionLineage,
-    SubscriptionUsageCredentialState, SubscriptionUsageRead, SubscriptionUsageUnavailable,
-    Timestamp, ValidatedRequestPlan,
+    CredentialSelectionId, ModelAdapterProfileId, ModelId, ProtocolId, ProviderAuthorityClassId,
+    ProviderProfileRevisionId, ProviderRouteSelection, ReasoningEffort, RouteId,
+    SelectedProviderConfiguration, SessionLineage, SubscriptionUsageRead,
+};
+pub use provider::{NativeProvider, native_provider_route_selection};
+pub use resolution::{ResolvedNativeModel, ResolvedProvider};
+pub use resolution_error::NativeModelResolutionError;
+pub use runtime::{NativeSubscriptions, PendingNativeLogin, install_credential_telemetry};
+pub use status::{CompatibilityStatus, ForcedRefresh, NativeAuthStatus, NativeSubscriptionStatus};
+use std::{
+    error::Error,
+    fmt,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+const PRIMARY_SLOT: &str = "primary";
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+use resolution::SubscriptionResolutionEvidence;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+use runtime::support::{
+    CompiledProviderConfiguration, ConfiguredLanguageModel, Digest, DigestDomain, DigestError,
+    Future, InMemorySubscriptionRequestGate, LanguageModel, LoadedAcceptance,
+    LoginRecoveryOperation, MODEL_CATALOG_DEADLINE, ModelCallRecoveryOperation,
+    ModelCallRecoveryRequest, ModelError, ModelErrorKind, ModelOperationRoot, ModelOperationScope,
+    ModelPreparationContext, ModelPreparationError, ModelPreparationErrorKind, PreparedModelCall,
+    PrivateFilesystemLock, ResolvedModelDescriptor, RuntimeAdmissionWitness, RuntimeModelAuthority,
+    RuntimeModelAuthorityOperation, SubscriptionInferenceScopeHandle,
+    SubscriptionInferenceScopeLease, SubscriptionLimitSnapshot, SubscriptionState,
+    SubscriptionUsageCredentialState, SubscriptionUsageUnavailable, Timestamp,
+    ValidatedRequestPlan, apply_turn_scoped_provider_gate, catalog_operation_deadline,
+    credential_refresh_observer, detached, run_blocking, timestamp_now, unix_now,
 };
 
-const PRIMARY_SLOT: &str = "primary";
-// Refresh/setup (up to 30 s) plus the shared 60 s lookup cap and cleanup margin.
-const MODEL_CATALOG_DEADLINE: Duration = Duration::from_secs(120);
-
-/// Curated owner of Plak's native subscription operations.
-///
-/// Construction is offline and accepts only fixed Plak-owned paths. Every
-/// online operation validates exact persisted compatibility consent, creates a
-/// provider-blind bounded client internally, and exposes no credential or
-/// provider-native route object.
-#[derive(Clone)]
-pub struct NativeSubscriptions {
-    #[cfg(test)]
-    child_backoff: Option<child::BackoffHook>,
-    #[cfg(test)]
-    codex_test_transport: Option<(plakous_http::Client, plakous_openai::EndpointOrigin)>,
-    catalog_retries: bool,
-    state: SubscriptionState,
-    exchange_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
-}
+#[cfg(all(test, any(feature = "codex", feature = "grok", feature = "claude")))]
+pub(crate) use scope::wrap_turn_scoped_native_model;
 
 impl NativeSubscriptions {
-    fn from_state(state: SubscriptionState) -> Self {
-        Self {
-            #[cfg(test)]
-            child_backoff: None,
-            #[cfg(test)]
-            codex_test_transport: None,
-            state,
-            exchange_observer: None,
-            catalog_retries: true,
+    /// Returns the exact compatibility notice, or refuses an omitted route.
+    ///
+    /// # Errors
+    /// Returns [`NativeSubscriptionError::NotCompiled`] before any I/O.
+    pub fn notice(
+        provider: NativeProvider,
+    ) -> Result<CompatibilityNotice, NativeSubscriptionError> {
+        Ok(vertical::require_vertical(provider)?.notice())
+    }
+}
+/// The single credential admission rule for every dispatch-shaped path: model
+/// catalog, inference, and child spawn.
+///
+/// Ready is admitted for every provider. xAI Quarantined is admitted because
+/// its durable Unknown is retryable on the stored refresh token;
+/// the next refresh reclaims it. Codex and Claude stay Ready-only.
+#[must_use]
+pub const fn dispatch_credential_admitted(
+    provider: NativeProvider,
+    credential: NativeAuthStatus,
+) -> bool {
+    matches!(
+        (provider, credential),
+        (_, NativeAuthStatus::Ready) | (NativeProvider::Xai, NativeAuthStatus::Quarantined)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plakous_model::SubscriptionUsageUnavailable;
+
+    #[tokio::test]
+    async fn omitted_native_routes_refuse_without_creating_state() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("uncreated");
+        let subscriptions =
+            NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(&root)?);
+        for provider in [
+            NativeProvider::Codex,
+            NativeProvider::Xai,
+            NativeProvider::Claude,
+        ] {
+            if provider.is_compiled() {
+                assert!(NativeSubscriptions::notice(provider).is_ok());
+                continue;
+            }
+            let expected = Some(NativeSubscriptionError::NotCompiled(provider));
+            assert_eq!(NativeSubscriptions::notice(provider).err(), expected);
+            assert_eq!(
+                native_provider_route_selection(provider, ModelId::new("unavailable-model")?).err(),
+                expected
+            );
+            assert_eq!(subscriptions.status(provider).await.err(), expected);
+            assert_eq!(
+                subscriptions
+                    .begin_login(provider, NativeLoginMode::Browser)
+                    .await
+                    .err(),
+                expected
+            );
+            assert_eq!(subscriptions.model_catalog(provider).await.err(), expected);
+            assert_eq!(subscriptions.refresh(provider).await.err(), expected);
+            assert!(matches!(
+                subscriptions.subscription_usage(provider).await,
+                SubscriptionUsageRead::Unavailable {
+                    reason: SubscriptionUsageUnavailable::NotConnected,
+                    ..
+                }
+            ));
+            assert!(
+                !root.exists(),
+                "an omitted route must never create its state root"
+            );
         }
+        Ok(())
     }
-    /// Creates the curated facade without filesystem or network I/O.
-    #[must_use]
-    pub const fn new(paths: SubscriptionPaths) -> Self {
-        Self {
-            #[cfg(test)]
-            child_backoff: None,
-            #[cfg(test)]
-            codex_test_transport: None,
-            state: SubscriptionState::new(paths),
-            exchange_observer: None,
-            catalog_retries: true,
-        }
-    }
-
-    /// Test-only replacement for compatibility and credential time.
-    #[cfg(any(test, feature = "test-clock"))]
-    #[doc(hidden)]
-    #[must_use]
-    pub fn with_clock(mut self, clock: Arc<dyn plakous_model::Clock>) -> Self {
-        self.state = self.state.with_clock(clock);
-        self
-    }
-
-    /// Uses one physical attempt per model lookup, including background refresh.
-    /// Child binding may retry the whole operation after releasing its authority;
-    /// receipt renewals are always single-attempt.
-    #[must_use]
-    pub fn without_model_lookup_retries(mut self) -> Self {
-        self.catalog_retries = false;
-        self
-    }
-
-    /// Attaches passive observation to Claude and Grok inference, never auth exchanges.
-    #[must_use]
-    pub fn with_exchange_observer(
-        mut self,
-        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
-    ) -> Self {
-        self.exchange_observer = observer;
-        self
-    }
-}
-
-impl fmt::Debug for NativeSubscriptions {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("NativeSubscriptions(<redacted fixed Plak paths>)")
-    }
-}
-
-fn unix_now() -> Result<u64, NativeSubscriptionError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .map_err(|_| NativeSubscriptionError::Internal)
-}
-
-fn timestamp_now() -> Result<Timestamp, NativeSubscriptionError> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| NativeSubscriptionError::Internal)?;
-    Timestamp::new(duration.as_secs(), duration.subsec_nanos())
-        .map_err(|_| NativeSubscriptionError::Internal)
-}
-
-/// Runs a claimed refresh as its own task: a dropped caller (a usage-read
-/// timeout, a closed menu) never strands a started claim mid-exchange.
-async fn detached<F>(refresh: F) -> Result<F::Output, NativeSubscriptionError>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    tokio::spawn(refresh)
-        .await
-        .map_err(|_| NativeSubscriptionError::Internal)
-}
-
-async fn run_blocking<F, T>(operation: F) -> Result<T, NativeSubscriptionError>
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|_| NativeSubscriptionError::Internal)
 }

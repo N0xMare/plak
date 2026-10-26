@@ -2,8 +2,6 @@
 
 use std::io::{self, Write};
 
-use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
-
 const DAY: u64 = 86_400;
 const WARNING_WINDOW: u64 = 14 * DAY;
 
@@ -16,44 +14,35 @@ enum ReviewClass {
     ReviewDue,
 }
 
-fn compiled_reviews() -> [(&'static str, ReviewClass, u64); 7] {
+fn compiled_reviews() -> Vec<(&'static str, ReviewClass, u64)> {
     [
         (
+            "codex",
             "Codex OAuth",
             ReviewClass::HardExpiry { route: "Codex" },
-            NativeSubscriptions::notice(NativeProvider::Codex).expires_at(),
         ),
+        ("openrouter", "OpenRouter Chat", ReviewClass::ReviewDue),
+        ("xai-api", "xAI Platform API", ReviewClass::ReviewDue),
+        ("openai", "OpenAI Platform API", ReviewClass::ReviewDue),
         (
-            "OpenRouter Chat",
-            ReviewClass::ReviewDue,
-            plakous::openrouter::OPENROUTER_CHAT_REVIEW_DUE_AT,
-        ),
-        (
-            "xAI Platform API",
-            ReviewClass::ReviewDue,
-            plakous::xai::XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS,
-        ),
-        (
-            "OpenAI Platform API",
-            ReviewClass::ReviewDue,
-            plakous::openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS,
-        ),
-        (
+            "grok",
             "Grok OAuth",
             ReviewClass::HardExpiry { route: "Grok" },
-            NativeSubscriptions::notice(NativeProvider::Xai).expires_at(),
         ),
         (
+            "claude",
             "Claude OAuth",
             ReviewClass::HardExpiry { route: "Claude" },
-            NativeSubscriptions::notice(NativeProvider::Claude).expires_at(),
         ),
-        (
-            "Anthropic API",
-            ReviewClass::ReviewDue,
-            plakous::anthropic::ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_UNIX_SECONDS,
-        ),
+        ("anthropic", "Anthropic API", ReviewClass::ReviewDue),
     ]
+    .into_iter()
+    .filter_map(|(account, label, class)| {
+        plakous_hosted::capabilities::for_account(account)?
+            .review_deadline()
+            .map(|deadline| (label, class, deadline))
+    })
+    .collect()
 }
 
 /// Writes one line per review within 14 days of its deadline or past it and
@@ -170,8 +159,8 @@ mod tests {
     #[test]
     fn warnings_are_credential_independent_and_counted() -> io::Result<()> {
         let after_all_deadlines = compiled_reviews()
-            .map(|(_, _, deadline)| deadline)
             .into_iter()
+            .map(|(_, _, deadline)| deadline)
             .max()
             .unwrap_or(0);
         assert_eq!(warnings_at(after_all_deadlines)?.0, 7);

@@ -1,3 +1,5 @@
+#![cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
+
 use std::os::unix::fs::MetadataExt as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +58,7 @@ async fn capture_codex_authenticated_catalog() -> Result<(), Box<dyn Error>> {
         "vertical": "codex-oauth",
         "client_version": plakous_openai::OPENAI_CODEX_REFERENCE_CLIENT_VERSION,
         "account_material_removed": true,
-        "capture_procedure": "PLAK_CAPTURE_STATE_HOME=<Plak XDG state home> PLAK_CAPTURE_OUTPUT=<fixture path> cargo test --locked -p plakous --features native-subscriptions capture_codex_authenticated_catalog -- --ignored",
+        "capture_procedure": "PLAK_CAPTURE_STATE_HOME=<Plak XDG state home> PLAK_CAPTURE_OUTPUT=<fixture path> cargo test --locked -p plakous --features codex capture_codex_authenticated_catalog -- --ignored",
         "models": captured.ok_or("catalog capture did not complete")?,
     });
     let mut bytes = serde_json::to_vec_pretty(&document)?;
@@ -162,6 +164,16 @@ fn native_inference_configs_match_product_budget_without_changing_api_defaults()
 
 use super::super::*;
 use super::*;
+use crate::subscriptions::codex::{
+    codex_native_http_config, complete_approved_with_consent, facade_native_tool_mode,
+    first_codex_compatible_model, map_codex_error,
+};
+use crate::subscriptions::grok::{
+    facade_xai_model_is_selectable, map_xai_error, xai_inference_client, xai_native_http_config,
+};
+use crate::subscriptions::login::{PendingCompatibilityConsent, complete_pending_with_consent};
+use crate::subscriptions::model_catalog::run_classified_model_catalog;
+use crate::subscriptions::responses_budget::NATIVE_INFERENCE_OPERATION_TIMEOUT;
 
 mod child_catalog;
 #[cfg(unix)]
@@ -525,7 +537,7 @@ async fn claude_foreign_profile_is_retired_by_logout_or_replaced_by_login()
         plakous_auth::CredentialStatus::Ready,
         plakous_auth::SecretBytes::new(b"old-opaque-credential".to_vec()),
     )?)?;
-    let notice = NativeSubscriptions::notice(NativeProvider::Claude);
+    let notice = NativeSubscriptions::notice(NativeProvider::Claude).unwrap();
     let now = test_now();
     store_acceptance(&paths, notice, now)?;
     let acceptance = load_acceptance_exact(&paths, notice, now)?;
@@ -574,7 +586,7 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
     let root = unique_test_root("xai-retired-payload-local-retirement")?;
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
     paths.prepare()?;
-    let notice = NativeSubscriptions::notice(provider);
+    let notice = NativeSubscriptions::notice(provider).unwrap();
     let now = test_now();
     store_acceptance(&paths, notice, now)?;
     let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
@@ -670,7 +682,7 @@ fn seed_newer_state(
     shape: NewerState,
 ) -> Result<SeededFiles, Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt as _;
-    let notice = NativeSubscriptions::notice(provider);
+    let notice = NativeSubscriptions::notice(provider).unwrap();
     let now = test_now();
     store_acceptance(paths, notice, now)?;
     let current = notice.profile_id();
@@ -844,7 +856,7 @@ async fn newer_build_state_is_refused_untouched_until_a_confirmed_replacement()
                 "{label}"
             );
             untouched()?;
-            let notice = NativeSubscriptions::notice(provider);
+            let notice = NativeSubscriptions::notice(provider).unwrap();
             if matches!(shape, NewerState::Receipt) {
                 assert_eq!(
                     subscriptions
@@ -958,7 +970,7 @@ async fn explicit_login_retires_armed_recovery_before_starting_a_fresh_attempt()
     ] {
         let root = unique_test_root(&format!("logout-empty-recovery-{provider:?}"))?;
         let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
-        let notice = NativeSubscriptions::notice(provider);
+        let notice = NativeSubscriptions::notice(provider).unwrap();
         let now = test_now();
         store_acceptance(&paths, notice, now)?;
         let acceptance = load_acceptance_exact(&paths, notice, now)?;
@@ -1005,7 +1017,7 @@ async fn explicit_login_retires_armed_recovery_before_starting_a_fresh_attempt()
 
         fs::remove_dir_all(root)?;
     }
-    let claude = NativeSubscriptions::notice(NativeProvider::Claude);
+    let claude = NativeSubscriptions::notice(NativeProvider::Claude).unwrap();
     assert!(!claude.is_killed());
     assert_eq!(
         claude.kill_switch_revision(),
@@ -1936,7 +1948,7 @@ fn install_ready_login_fixture(
     generation: u64,
 ) -> Result<String, Box<dyn Error>> {
     paths.prepare()?;
-    let notice = NativeSubscriptions::notice(provider);
+    let notice = NativeSubscriptions::notice(provider).unwrap();
     let now = test_now();
     store_acceptance(paths, notice, now)?;
     let acceptance = load_acceptance_exact(paths, notice, now)?;
@@ -1979,7 +1991,7 @@ fn durable_unknown_after_cleared_recovery_gate_is_xai_only() -> Result<(), Box<d
             install_ready_login_fixture(&paths, provider, credential_generation)?;
         let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
         clear_login_recovery(&paths, provider, &operation, credential_generation)?;
-        let notice = NativeSubscriptions::notice(provider);
+        let notice = NativeSubscriptions::notice(provider).unwrap();
         let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
         let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?;
         let store = plakous_auth::PrivateCredentialStore::open_slot(
@@ -2015,7 +2027,7 @@ async fn in_flight_refresh_reads_refreshing_and_leaves_no_sticky_quarantine()
         let consent_generation = install_ready_login_fixture(&paths, provider, 7)?;
         let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
         clear_login_recovery(&paths, provider, &operation, 7)?;
-        let notice = NativeSubscriptions::notice(provider);
+        let notice = NativeSubscriptions::notice(provider).unwrap();
         let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
         let store = plakous_auth::PrivateCredentialStore::open_slot(
             paths.provider_record(provider),
@@ -2099,7 +2111,7 @@ fn repin_tolerates_a_concurrent_generation_advance() -> Result<(), Box<dyn Error
     clear_login_recovery(&paths, provider, &operation, 7)?;
     let (marker, _) = read_login_recovery_marker(&paths, provider)?.ok_or("missing marker")?;
     assert_eq!(marker.credential_generation, Some(7));
-    let notice = NativeSubscriptions::notice(provider);
+    let notice = NativeSubscriptions::notice(provider).unwrap();
     let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
     let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?;
     let store = plakous_auth::PrivateCredentialStore::open_slot(
@@ -2238,8 +2250,8 @@ async fn turn_scoped_prepare_without_root_does_not_start_inference() -> Result<(
                 catalog_expires_at: observed,
                 runtime_admission_witness: None,
                 profile_revision: "fixture-profile".to_owned(),
-                codex_exact: None,
-                xai_exact: None,
+                exact: None,
+                exact_provider: None,
             },
             retrieval: None,
             image_gen: None,
@@ -2344,7 +2356,7 @@ fn login_required_after_an_unpinned_refresh_is_not_sticky_quarantined() -> Resul
     let consent_generation = install_ready_login_fixture(&paths, provider, 7)?;
     let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
     clear_login_recovery(&paths, provider, &operation, 7)?;
-    let notice = NativeSubscriptions::notice(provider);
+    let notice = NativeSubscriptions::notice(provider).unwrap();
     let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
     let slot = plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?;
     let store = plakous_auth::PrivateCredentialStore::open_slot(
@@ -2450,7 +2462,7 @@ async fn a_re_review_with_an_unchanged_contract_keeps_consent_and_the_login()
         let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
         clear_login_recovery(&paths, provider, &operation, 3)?;
 
-        let notice = NativeSubscriptions::notice(provider);
+        let notice = NativeSubscriptions::notice(provider).unwrap();
         let previous_review = notice.reviewed_at() - 30 * 86_400;
         let receipt_path = paths.receipt_path(provider);
         let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
@@ -2523,7 +2535,7 @@ async fn a_changed_notice_revision_requires_acceptance_and_keeps_the_ready_login
         let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
         clear_login_recovery(&paths, provider, &operation, 3)?;
 
-        let notice = NativeSubscriptions::notice(provider);
+        let notice = NativeSubscriptions::notice(provider).unwrap();
         let receipt_path = paths.receipt_path(provider);
         let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
         receipt["notice_revision"] = serde_json::Value::from("previous.notice.revision");
@@ -2611,7 +2623,7 @@ async fn a_profile_id_change_requires_acceptance_and_a_new_login() -> Result<(),
         let root = unique_test_root(&format!("profile-change-{}", provider.as_str()))?;
         let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
         paths.prepare()?;
-        let notice = NativeSubscriptions::notice(provider);
+        let notice = NativeSubscriptions::notice(provider).unwrap();
         let (prefix, _) = notice
             .profile_id()
             .rsplit_once(".compat.")
@@ -2687,7 +2699,7 @@ async fn accepting_a_notice_does_not_rebind_a_login_from_another_consent()
     let consent_generation = install_ready_login_fixture(&paths, provider, 5)?;
     let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
     clear_login_recovery(&paths, provider, &operation, 5)?;
-    let notice = NativeSubscriptions::notice(provider);
+    let notice = NativeSubscriptions::notice(provider).unwrap();
     store_acceptance(&paths, notice, test_now())?;
 
     let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
@@ -2774,7 +2786,7 @@ fn test_now() -> u64 {
         NativeProvider::Claude,
     ]
     .into_iter()
-    .map(|provider| NativeSubscriptions::notice(provider).reviewed_at())
+    .map(|provider| NativeSubscriptions::notice(provider).unwrap().reviewed_at())
     .max()
     .expect("compiled profiles")
         + 60

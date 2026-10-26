@@ -128,7 +128,11 @@ published-internal (30), repository-only (3). Publication and nameability
 confer accessibility, not support.
 
 Packages declare the dependency features their Rust targets use rather than
-relying on another workspace member's feature unification. The feature checker
+relying on another workspace member's feature unification. Native routes
+(`codex`, `grok`, `claude`), API exports, evaluators,
+MCP and local page fetch independent at the facade boundary. Persisted route
+and tool vocabulary stays readable even when its runtime is omitted.
+The feature checker
 requires locally declared UUID generation features, including for test code.
 It validates 2n+3 feature closures per package (none, each singleton, full
 minus each feature, default and full), with a reviewed cap of 24 public

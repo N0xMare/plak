@@ -1,3 +1,4 @@
+#![cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -5,9 +6,8 @@
 )]
 
 use super::*;
-use crate::subscriptions::{
-    NativeProvider, NativeSubscriptions, SubscriptionPaths, map_codex_error,
-};
+use crate::subscriptions::codex::map_codex_error;
+use crate::subscriptions::{NativeProvider, NativeSubscriptions, SubscriptionPaths};
 use plakous_exchange::lookup::{LookupBudget, get_json};
 use plakous_http::{Bytes, Client, HeaderMap, Limits, Method, Origin, Request};
 use std::sync::{

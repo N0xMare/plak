@@ -625,10 +625,10 @@ class FeatureGateTests(unittest.TestCase):
     def test_expected_native_closure_includes_non_plakous_internal_packages(self) -> None:
         manifests = feature_gate.load_workspace_manifests()
         closure = feature_gate.expected_closure(
-            "plakous", ("native-subscriptions",), False, manifests
+            "plakous", ("codex", "grok", "claude",), False, manifests
         )
         self.assertIn("plakous-codex-code-mode-protocol", closure)
-        self.assertIn("plakous-cell", closure)
+        self.assertNotIn("plakous-cell", closure)
         self.assertNotIn("plak-compose-protocol", closure)
 
     def test_feature_profiles_are_per_package_and_capped(self) -> None:

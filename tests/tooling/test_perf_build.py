@@ -55,7 +55,7 @@ class PerfBuildProfileTests(unittest.TestCase):
                 "subscriptions": (
                     "plakous",
                     ("--lib",),
-                    ("native-subscriptions",),
+                    ("codex", "grok", "claude",),
                 ),
                 "sessions-sqlite": (
                     "plakous",
@@ -79,7 +79,7 @@ class PerfBuildProfileTests(unittest.TestCase):
                     ("--lib",),
                     (
                         "anthropic",
-                        "native-subscriptions",
+                        "codex", "grok", "claude",
                         "openai",
                         "openrouter",
                         "xai",
@@ -313,7 +313,8 @@ class PerfBuildProfileTests(unittest.TestCase):
         supergrok = perf_build.BUILD_PROFILES["supergrok-components"][2]
         self.assertEqual(codex, ("openai", "plakous-openai/native-auth"))
         self.assertEqual(supergrok, ("plakous-xai/native-auth", "xai"))
-        self.assertNotIn("native-subscriptions", codex + supergrok)
+        for feature in ["codex", "grok", "claude"]:
+            self.assertNotIn(feature, codex + supergrok)
 
     def test_producer_and_validator_profile_contracts_are_identical(self) -> None:
         produced = {

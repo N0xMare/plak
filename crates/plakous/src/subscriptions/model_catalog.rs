@@ -2,11 +2,11 @@
 
 use super::{
     Arc, CompatibilityStatus, Future, InMemorySubscriptionRequestGate, MODEL_CATALOG_DEADLINE,
-    ModelId, NativeAuthStatus, NativeModelCatalog, NativeModelResolutionError, NativeModelSummary,
-    NativeProvider, NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions,
-    ResolvedModelDescriptor, RuntimeModelAuthority, SubscriptionLimitSnapshot,
-    SubscriptionRequestClass, SubscriptionRequestGate, SubscriptionRequestLimits,
-    SystemSubscriptionGateClock, dispatch_credential_admitted, run_blocking,
+    NativeAuthStatus, NativeModelCatalog, NativeModelSummary, NativeProvider,
+    NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions,
+    SubscriptionLimitSnapshot, SubscriptionRequestClass, SubscriptionRequestGate,
+    SubscriptionRequestLimits, SystemSubscriptionGateClock, dispatch_credential_admitted,
+    run_blocking,
 };
 
 #[cfg(test)]
@@ -154,11 +154,9 @@ impl NativeSubscriptions {
         let status = self.status_unlocked(provider).await?;
         let models =
             run_classified_model_catalog_with_gate(provider, status, gate, |gate| async move {
-                match provider {
-                    NativeProvider::Codex => self.codex_catalog_models(gate).await,
-                    NativeProvider::Xai => self.xai_catalog_models(gate).await,
-                    NativeProvider::Claude => self.claude_catalog_models(gate).await,
-                }
+                super::vertical::require_vertical(provider)?
+                    .catalog(self, gate)
+                    .await
             })
             .await?;
         if models.is_empty() {
@@ -201,50 +199,5 @@ impl NativeSubscriptions {
         let catalog = run_blocking(move || paths.load_persisted_catalog(provider)).await??;
         lock.verify()?;
         Ok(catalog)
-    }
-
-    pub(super) fn attach_compile_authority_from_codex(
-        requested_model: &ModelId,
-        descriptor: &ResolvedModelDescriptor,
-        evidence: &plakous_openai::CodexModelResolutionEvidence,
-    ) -> Result<RuntimeModelAuthority, NativeModelResolutionError> {
-        RuntimeModelAuthority::new(
-            descriptor,
-            evidence.account_fingerprint(),
-            evidence.credential_authority_binding(),
-            evidence.selected_credential_generation(),
-            evidence.catalog_observed_at(),
-            Some(evidence.catalog_expires_at()),
-        )
-        .map_err(|_| {
-            NativeModelResolutionError::after_selection(
-                requested_model.clone(),
-                NativeSubscriptionError::ProviderAuthorityRevalidationRejected,
-            )
-        })
-    }
-
-    pub(super) fn attach_compile_authority_from_xai(
-        requested_model: &ModelId,
-        descriptor: &ResolvedModelDescriptor,
-        evidence: &plakous_xai::XaiModelResolutionEvidence,
-    ) -> Result<RuntimeModelAuthority, NativeModelResolutionError> {
-        RuntimeModelAuthority::new(
-            descriptor,
-            evidence.account_fingerprint(),
-            evidence.credential_authority_binding(),
-            evidence.selected_credential_generation(),
-            evidence.catalog_observed_at(),
-            Some(evidence.catalog_expires_at()),
-        )
-        .map_err(|_| {
-            NativeModelResolutionError::after_selection(
-                requested_model.clone(),
-                NativeSubscriptionError::ProviderAuthorityRevalidationRejected,
-            )
-        })
-        .map(|authority| {
-            authority.with_admission_witness(evidence.runtime_admission_witness().clone())
-        })
     }
 }

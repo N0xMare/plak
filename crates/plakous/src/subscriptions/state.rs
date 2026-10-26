@@ -1,3 +1,5 @@
+#[cfg(feature = "claude")]
+mod claude;
 #[cfg(unix)]
 use rustix::fs::{FlockOperation, Mode, OFlags};
 use serde::{Deserialize, Serialize};
@@ -15,12 +17,12 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use super::SubscriptionPaths;
 use plakous_auth::RecordAge;
 
 use super::{
     CompatibilityNotice, CompatibilityStatus, NativeAuthStatus, NativeModelCatalog,
-    NativeModelSummary, NativeProvider, NativeSubscriptionError, catalog, fmt, run_blocking,
-    unix_now,
+    NativeModelSummary, NativeProvider, NativeSubscriptionError, catalog, run_blocking, unix_now,
 };
 mod filesystem;
 mod locks;
@@ -39,7 +41,7 @@ use filesystem::{
     open_private_parent, private_file_identity, read_private_bounded,
     read_private_bounded_with_hook_and_limit, remove_private_file_durable,
     validate_private_directory, validate_private_file, validate_private_file_metadata,
-    validate_state_root, write_private_atomic, write_private_atomic_with_hook,
+    write_private_atomic, write_private_atomic_with_hook,
 };
 use recovery::{
     arm_login_recovery, clear_login_recovery, current_credential_generation,
@@ -92,53 +94,7 @@ struct LoginRecoveryEpoch {
     credential_generation: Option<u64>,
 }
 
-/// Fixed Plak-owned storage derived from one explicit XDG state root.
-///
-/// No environment, home directory, external login store, or provider CLI path
-/// is consulted by this type.
-#[derive(Clone)]
-pub struct SubscriptionPaths {
-    state_root: PathBuf,
-}
-
 impl SubscriptionPaths {
-    /// Binds the fixed Plak layout to one explicit absolute XDG state root.
-    ///
-    /// # Errors
-    ///
-    /// Rejects relative, empty, parent-traversing, or root-only paths.
-    pub fn from_xdg_state_home(
-        state_root: impl Into<PathBuf>,
-    ) -> Result<Self, NativeSubscriptionError> {
-        let state_root = state_root.into();
-        validate_state_root(&state_root)?;
-        Ok(Self { state_root })
-    }
-
-    fn claude_client_device_id(
-        &self,
-    ) -> Result<plakous_anthropic::ClaudeClientDeviceId, NativeSubscriptionError> {
-        self.prepare()?;
-        let path = self.layout_root().join("client-device-id");
-        let lock =
-            acquire_private_filesystem_lock(&self.layout_root().join(".client-device-id.lock"))?;
-        lock.verify()?;
-        let value = match read_private_bounded(&path) {
-            Ok(bytes) => {
-                String::from_utf8(bytes).map_err(|_| NativeSubscriptionError::UnsafeStorage)?
-            }
-            Err(NativeSubscriptionError::AcceptanceRequired) => {
-                let value = new_random_identity()?;
-                write_private_atomic(&path, value.as_bytes())?;
-                value
-            }
-            Err(error) => return Err(error),
-        };
-        lock.verify()?;
-        plakous_anthropic::ClaudeClientDeviceId::new(value)
-            .map_err(|_| NativeSubscriptionError::UnsafeStorage)
-    }
-
     fn provider_record(&self, provider: NativeProvider) -> PathBuf {
         self.layout_root()
             .join(provider.as_str())
@@ -187,12 +143,6 @@ impl SubscriptionPaths {
             let _ = open_or_create_private_child(&subscriptions, OsStr::new(name))?;
         }
         Ok(())
-    }
-}
-
-impl fmt::Debug for SubscriptionPaths {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("SubscriptionPaths(<redacted explicit state root>)")
     }
 }
 
@@ -663,11 +613,6 @@ impl SubscriptionState {
     pub(super) fn provider_record(&self, provider: NativeProvider) -> PathBuf {
         self.paths.provider_record(provider)
     }
-    pub(super) fn claude_client_device_id(
-        &self,
-    ) -> Result<plakous_anthropic::ClaudeClientDeviceId, NativeSubscriptionError> {
-        self.paths.claude_client_device_id()
-    }
 }
 
 impl SubscriptionState {
@@ -731,58 +676,6 @@ impl SubscriptionState {
         let bytes = catalog::encode_catalog_snapshot(provider, models)?;
         self.paths.prepare()?;
         write_private_atomic(&self.paths.catalog_snapshot_path(provider), &bytes)
-    }
-}
-
-impl SubscriptionState {
-    pub(super) fn notice(provider: NativeProvider) -> CompatibilityNotice {
-        match provider {
-            NativeProvider::Codex => {
-                let profile = plakous_openai::CodexSubscriptionIntegrationProfile;
-                CompatibilityNotice {
-                    provider,
-                    profile_id: profile.id(),
-                    source_revision: profile.source_revision(),
-                    secondary_source_revision: None,
-                    notice_revision: profile.notice_revision(),
-                    provenance: "pinned_compatibility",
-                    reviewed_at: profile.reviewed_at(),
-                    expires_at: profile.expires_at(),
-                    kill_switch_revision: profile.kill_switch_revision(),
-                    killed: profile.is_killed(),
-                }
-            }
-            NativeProvider::Xai => {
-                let profile = plakous_xai::XaiSubscriptionIntegrationProfile;
-                CompatibilityNotice {
-                    provider,
-                    profile_id: profile.id(),
-                    source_revision: profile.source_revision(),
-                    secondary_source_revision: Some(profile.official_model_source_revision()),
-                    notice_revision: profile.notice_revision(),
-                    provenance: "pinned_compatibility",
-                    reviewed_at: profile.reviewed_at(),
-                    expires_at: profile.expires_at(),
-                    kill_switch_revision: profile.kill_switch_revision(),
-                    killed: profile.is_killed(),
-                }
-            }
-            NativeProvider::Claude => {
-                let profile = plakous_anthropic::ClaudeSubscriptionIntegrationProfile;
-                CompatibilityNotice {
-                    provider,
-                    profile_id: profile.id(),
-                    source_revision: profile.source_revision(),
-                    secondary_source_revision: None,
-                    notice_revision: profile.notice_revision(),
-                    provenance: "pinned_compatibility",
-                    reviewed_at: profile.reviewed_at(),
-                    expires_at: profile.expires_at(),
-                    kill_switch_revision: profile.kill_switch_revision(),
-                    killed: profile.is_killed(),
-                }
-            }
-        }
     }
 }
 

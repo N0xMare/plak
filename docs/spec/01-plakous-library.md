@@ -8901,8 +8901,21 @@ All presentations select profiles through `LocalCompositionProfile::cell`
 using the compiled `plakous::tools::CellDescriptor`; language-specific profile
 constructors and Python-only component identity accessors are absent.
 
-`native-subscriptions` adds the subscription tier —
-`subscriptions`, and the provider crates' native-auth facets — and implies `composition`.
+`codex`, `grok` and `claude` independently select their native subscription
+implementation and its provider crate's `native-auth` facet. None implies
+an API-provider re-export, `composition`, Python, MCP or page fetch. A native
+CodeModeOnly selection still requires an explicitly compiled evaluator and
+fails closed without one. The `subscriptions` provider, model, status, login
+instruction and error vocabulary remains available without any native route.
+The private vertical registry dispatches only to linked implementations;
+an omitted provider returns `NativeSubscriptionError::NotCompiled(provider)`
+before acquiring storage authority or starting a transport. `notice` is
+fallible for the same reason. There is no replacement provider or route.
+
+Classified subscription request accounting is provider-neutral vocabulary in
+`plakous-model::subscription_limit`, re-exported by the curated facade. The auth
+crate consumes that one gate and owns only its HTTP-dispatch adapter. Gate
+permits, root identity, refund proof and request budgets retain their semantics.
 The frozen `plakous::mcp::McpToolRecord` vocabulary is always available so
 smaller products can decode and export existing bindings. That data-only
 closure links neither rmcp, auth nor HTTP. `mcp` selects the internal crate's
@@ -8910,8 +8923,8 @@ closure links neither rmcp, auth nor HTTP. `mcp` selects the internal crate's
 `McpToolPack`, the frozen listing and record types, the resource and prompt
 types, the OAuth settings, login and status types, `McpError`, and
 `ServiceSecretValue` for secret resolvers); it links `plakous-auth` with its
-`http-refresh` orchestrators, for MCP OAuth, and does not expose `plakous::auth`. `native-subscriptions` does
-not imply it; Plak's product closure is `native-subscriptions` plus `mcp`.
+`http-refresh` orchestrators, for MCP OAuth, and does not expose `plakous::auth`.
+No native route implies MCP; the product selects it explicitly.
 Configuration parsing, named-secret storage, the credential store's location
 and operator views stay with the product.
 `sessions-sqlite` enables `SessionBackend::sqlite`. `full` is all of the above.

@@ -67,33 +67,40 @@ pub(crate) const ROUTES: &[&ProductCapability] = &[
 pub(crate) fn oauth_accounts() -> impl Iterator<Item = &'static str> {
     ROUTES
         .iter()
-        .filter(|capability| capability.auth_kind() == AuthKind::Oauth)
+        .filter(|capability| capability.route.compiled && capability.auth_kind() == AuthKind::Oauth)
         .map(|capability| capability.route.account)
 }
 
 #[cfg(feature = "tui")]
 pub(crate) fn usage_verticals() -> impl Iterator<Item = (&'static str, &'static str)> {
-    ROUTES.iter().filter_map(|capability| {
-        capability
-            .route
-            .usage_label
-            .map(|label| (capability.route.account, label))
-    })
+    ROUTES
+        .iter()
+        .filter(|capability| capability.route.compiled)
+        .filter_map(|capability| {
+            capability
+                .route
+                .usage_label
+                .map(|label| (capability.route.account, label))
+        })
 }
 
 pub(crate) fn recommended_model(account: &str) -> Option<&'static str> {
-    ROUTES.iter().find_map(|capability| {
-        let recommendation = capability.recommendation.as_ref()?;
-        recommendation
-            .accounts
-            .contains(&account)
-            .then_some(recommendation.model)
-    })
+    ROUTES
+        .iter()
+        .filter(|capability| capability.route.compiled)
+        .find_map(|capability| {
+            let recommendation = capability.recommendation.as_ref()?;
+            recommendation
+                .accounts
+                .contains(&account)
+                .then_some(recommendation.model)
+        })
 }
 
 pub(crate) fn presets() -> impl Iterator<Item = &'static Builtin> {
     let mut presets: Vec<_> = ROUTES
         .iter()
+        .filter(|capability| capability.route.compiled)
         .filter_map(|capability| capability.preset)
         .collect();
     presets.sort_by_key(|(order, _)| *order);

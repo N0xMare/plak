@@ -1,26 +1,12 @@
 //! Subscription usage reads.
 
+use super::vertical::NativeFuture;
+
 use super::{
     Future, NativeAuthStatus, NativeProvider, NativeSubscriptionError, NativeSubscriptionStatus,
     NativeSubscriptions, PrivateFilesystemLock, SubscriptionUsageCredentialState,
     SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp, run_blocking,
 };
-
-enum UsageReader {
-    Codex(std::sync::Arc<plakous_openai::CodexSubscriptionCredentialManager>),
-    Xai(std::sync::Arc<plakous_xai::XaiNativeAuthManager>),
-    Claude(std::sync::Arc<plakous_anthropic::ClaudeNativeAuthManager>),
-}
-
-impl UsageReader {
-    async fn read(self) -> SubscriptionUsageRead {
-        match self {
-            Self::Codex(manager) => Box::pin(manager.subscription_usage()).await,
-            Self::Xai(manager) => Box::pin(manager.subscription_usage()).await,
-            Self::Claude(manager) => Box::pin(manager.subscription_usage()).await,
-        }
-    }
-}
 
 impl NativeSubscriptions {
     async fn usage_lock(
@@ -45,6 +31,9 @@ impl NativeSubscriptions {
     /// credential leases protect the network read; the compatibility guard is
     /// held only while preparing and checking its local consent snapshot.
     pub async fn subscription_usage(&self, provider: NativeProvider) -> SubscriptionUsageRead {
+        if super::vertical::vertical(provider).is_none() {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::NotConnected);
+        }
         let observation = Box::pin(self.read_usage_once(provider, false)).await;
         if matches!(
             observation,
@@ -103,23 +92,24 @@ impl NativeSubscriptions {
                             SubscriptionUsageCredentialState::WrittenByNewerBuild,
                         )
                     }
+                    NativeSubscriptionError::NotCompiled(_) => {
+                        SubscriptionUsageUnavailable::NotConnected
+                    }
                     _ => SubscriptionUsageUnavailable::LocalState,
                 };
                 return self.usage_unavailable(reason);
             }
         };
-        Box::pin(self.observe_usage_unlocked(provider, lock, reader.read())).await
+        Box::pin(self.observe_usage_unlocked(provider, lock, reader)).await
     }
 
     async fn usage_reader(
         &self,
         provider: NativeProvider,
-    ) -> Result<UsageReader, NativeSubscriptionError> {
-        Ok(match provider {
-            NativeProvider::Codex => UsageReader::Codex(self.codex_online().await?.manager),
-            NativeProvider::Xai => UsageReader::Xai(self.xai_online().await?.manager),
-            NativeProvider::Claude => UsageReader::Claude(self.claude_online().await?.manager),
-        })
+    ) -> Result<NativeFuture<'static, SubscriptionUsageRead>, NativeSubscriptionError> {
+        super::vertical::require_vertical(provider)?
+            .usage_reader(self)
+            .await
     }
 
     async fn usage_snapshot(

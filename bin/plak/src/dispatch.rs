@@ -2,8 +2,6 @@
 
 use std::io;
 
-use plakous::subscriptions::NativeProvider;
-
 use crate::commands;
 use crate::commands::application::AccountOps;
 use crate::commands::session::{load_admitted_product_session, run_attached_action};
@@ -116,11 +114,7 @@ pub(super) fn execute_status_all(
     review_expiry::write_warnings(stdout, services.now_unix_seconds())
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let mut rows = Vec::with_capacity(7);
-    for provider in [
-        NativeProvider::Codex,
-        NativeProvider::Xai,
-        NativeProvider::Claude,
-    ] {
+    for provider in plakous_hosted::capabilities::native_providers() {
         // One account's unreadable credential is a Setup needed row.
         // The other verticals, including API keys, still print.
         match backend.offline_status_row(provider) {
@@ -149,7 +143,10 @@ pub(super) fn execute_status_all(
     let api_accounts = ["openai", "xai-api", "anthropic", "openrouter"];
     match services.paths() {
         Ok(paths) => {
-            for a in api_accounts {
+            for a in api_accounts.into_iter().filter(|account| {
+                plakous_hosted::capabilities::for_account(account)
+                    .is_some_and(|route| route.compiled)
+            }) {
                 match product_secrets::key_status(paths, a) {
                     Ok(status) => {
                         let credential = match status.source {
@@ -210,14 +207,8 @@ pub(super) fn execute_status_all(
     writeln!(stdout, "Subscription compatibility profiles")
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let mut deadlines = cli_output::Table::new(["PROVIDER", "REVIEW VALID UNTIL (UTC)"]);
-    for provider in [
-        NativeProvider::Codex,
-        NativeProvider::Xai,
-        NativeProvider::Claude,
-    ] {
-        let deadline = format_unix_seconds(
-            plakous::subscriptions::NativeSubscriptions::notice(provider).expires_at(),
-        );
+    for provider in plakous_hosted::capabilities::native_providers() {
+        let deadline = format_unix_seconds(backend.notice(provider)?.expires_at);
         deadlines
             .push([subscription_provider_label(provider), deadline.as_str()])
             .map_err(CliFailure::new)?;

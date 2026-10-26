@@ -3,6 +3,11 @@ pub(crate) use plakous_hosted::capabilities::{
     compiled_features, omitted_features, require_composition, require_feature,
 };
 
+pub(crate) fn require_account(account: &str) -> CliResult<()> {
+    plakous_hosted::capabilities::require(account)?;
+    Ok(())
+}
+
 pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
     match command {
         Command::Tui { .. } | Command::Resume { .. } => require_feature("tui")?,
@@ -15,6 +20,22 @@ pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
         }
         Command::RunOpenRouter { composition, .. } | Command::RunPlatform { composition, .. } => {
             require_composition(*composition)?;
+        }
+        _ => {}
+    }
+    match command {
+        Command::CompatibilityNotice(provider)
+        | Command::AuthStatus(provider)
+        | Command::AuthRefresh(provider)
+        | Command::Models(provider)
+        | Command::AuthLogin { provider, .. }
+        | Command::AuthLogout { provider, .. }
+        | Command::Run { provider, .. } => plakous_hosted::capabilities::require_native(*provider)?,
+        Command::ModelsOpenRouter | Command::RunOpenRouter { .. } => {
+            plakous_hosted::capabilities::require("openrouter")?;
+        }
+        Command::ModelsPlatform(provider) | Command::RunPlatform { provider, .. } => {
+            plakous_hosted::capabilities::require(provider.account())?;
         }
         _ => {}
     }
@@ -44,6 +65,7 @@ pub(crate) fn description() -> String {
 pub(crate) fn admit_config(config: &crate::product_config::ProductConfig) -> CliResult<()> {
     require_composition(config.default_composition())?;
     for template in config.templates.values() {
+        require_account(&template.account)?;
         if let Some(composition) = template.composition {
             require_composition(composition)?;
         }
@@ -58,6 +80,9 @@ pub(crate) fn admit_selected(
     model: Option<&str>,
     composition: crate::product_config::ProductCompositionSelection,
 ) -> CliResult<()> {
+    if let Some(account) = account {
+        require_account(account)?;
+    }
     require_composition(composition)?;
     if let Some(template) = config.root_template()
         && Some(template.account.as_str()) == account
@@ -69,6 +94,9 @@ pub(crate) fn admit_selected(
 }
 
 pub(crate) fn admit_session(record: &crate::store::sessions::SessionRecord) -> CliResult<()> {
+    if let Some(account) = record.account.as_deref() {
+        require_account(account)?;
+    }
     require_composition(record.composition)?;
     if let Some(tools) = record.frozen_tools.as_ref() {
         plakous_hosted::capabilities::require_tools(&tools.selection().selection)?;
@@ -201,6 +229,11 @@ mod tests {
             "xai-api",
         ]
         .into_iter()
+        .filter(|account| {
+            plakous_hosted::capabilities::for_account(account)
+                .unwrap()
+                .compiled
+        })
         .chain(
             plakous_hosted::capabilities::BUILD_CAPABILITIES
                 .iter()

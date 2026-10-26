@@ -455,7 +455,9 @@ pub(crate) fn profile_date(seconds: u64) -> String {
 /// was reviewed and that only a newer build repairs it.
 pub(crate) fn profile_inactive_failure(account: Option<NativeProvider>) -> CliFailure {
     let detail = account.map_or_else(String::new, |provider| {
-        let notice = plakous::subscriptions::NativeSubscriptions::notice(provider);
+        let Ok(notice) = plakous::subscriptions::NativeSubscriptions::notice(provider) else {
+            return String::new();
+        };
         if notice.is_killed() {
             format!(" ({} profile withdrawn)", cli_provider_name(provider))
         } else {
@@ -578,6 +580,14 @@ pub fn native_subscription_failure(
     let login = format!("run `plak login {name}`");
     let auth = |message: String| CliFailure::classified(CliFailureKind::Auth, message);
     match error {
+        E::NotCompiled(provider) => {
+            let account = cli_provider_name(provider);
+            plakous_hosted::capabilities::CapabilityUnavailable {
+                id: account,
+                kind: plakous_hosted::capabilities::CapabilityKind::Route,
+                feature: account,
+            }.into()
+        }
         E::UnsafeStorage => auth(
             super::subscription_storage::find_violation(state_home, account).map_or_else(
                 || format!(

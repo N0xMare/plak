@@ -50,7 +50,9 @@ full = [
     "composition",
     "composition-python",
     "mcp",
-    "native-subscriptions",
+    "codex",
+    "grok",
+    "claude",
     "openai",
     "openrouter",
     "sessions-sqlite",
@@ -60,22 +62,9 @@ full = [
 # Model Context Protocol client: the server pool, frozen listings and the MCP
 # tool pack. Configuration, secrets and views stay with the embedding product.
 mcp = ["plakous-mcp/client", "plakous-tool-web/image-gen"]
-# Plak's product closure: both evaluators plus subscription authentication.
-native-subscriptions = [
-    "dep:plakous-exchange",
-    "composition",
-    "dep:plakous-auth",
-    "plakous-auth/http-refresh",
-    "dep:plakous-http",
-    "plakous-tool-web/image-gen",
-    "dep:rustix",
-    "dep:plakous-openai",
-    "plakous-openai/native-auth",
-    "dep:plakous-xai",
-    "plakous-xai/native-auth",
-    "dep:plakous-anthropic",
-    "plakous-anthropic/native-auth",
-]
+codex = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-openai", "plakous-openai/native-auth"]
+grok = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-xai", "plakous-xai/native-auth", "dep:plakous-responses-dialect"]
+claude = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-anthropic", "plakous-anthropic/native-auth"]
 openai = ["dep:plakous-openai", "dep:plakous-http", "plakous-tool-web/image-gen"]
 openrouter = ["dep:plakous-http", "dep:plakous-openrouter", "plakous-tool-web/image-gen"]
 sessions-sqlite = ["plakous-store/sqlite"]
@@ -85,6 +74,7 @@ xai = ["dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/image-gen"]
 thiserror = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v4"], optional = true }
 plakous-exchange = { workspace = true, optional = true }
+plakous-responses-dialect = { workspace = true, optional = true }
 plakous-agent.workspace = true
 plakous-anthropic = { workspace = true, optional = true }
 plakous-auth = { workspace = true, optional = true }

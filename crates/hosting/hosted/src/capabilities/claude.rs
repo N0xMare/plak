@@ -1,8 +1,18 @@
+#[cfg(feature = "claude")]
+#[path = "claude_available.rs"]
+mod compiled;
+#[cfg(not(feature = "claude"))]
+#[path = "claude_unavailable.rs"]
+mod compiled;
+
 use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
 use plakous::subscriptions::NativeProvider;
 
 pub static CLAUDE: RouteCapability = RouteCapability {
+    compiled: compiled::COMPILED,
+    feature: "claude",
+    review_deadline: compiled::review_deadline,
     account: "claude",
     aliases: &["claude"],
     kind: RouteKind::Native(NativeProvider::Claude),

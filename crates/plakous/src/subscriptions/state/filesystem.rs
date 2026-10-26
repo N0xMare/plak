@@ -16,17 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(unix)]
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
-pub(super) fn validate_state_root(path: &Path) -> Result<(), NativeSubscriptionError> {
-    if !path.is_absolute() || path.parent().is_none() || path == Path::new("/") {
-        return Err(NativeSubscriptionError::UnsafeStorage);
-    }
-    for component in path.components() {
-        if matches!(component, Component::CurDir | Component::ParentDir) {
-            return Err(NativeSubscriptionError::UnsafeStorage);
-        }
-    }
-    Ok(())
-}
+use super::super::paths::validate_state_root;
 
 #[cfg(unix)]
 pub(super) fn ensure_state_root(path: &Path) -> Result<File, NativeSubscriptionError> {

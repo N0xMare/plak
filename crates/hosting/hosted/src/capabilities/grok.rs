@@ -1,8 +1,18 @@
+#[cfg(feature = "grok")]
+#[path = "grok_available.rs"]
+mod compiled;
+#[cfg(not(feature = "grok"))]
+#[path = "grok_unavailable.rs"]
+mod compiled;
+
 use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
 use plakous::subscriptions::NativeProvider;
 
 pub static GROK: RouteCapability = RouteCapability {
+    compiled: compiled::COMPILED,
+    feature: "grok",
+    review_deadline: compiled::review_deadline,
     account: "grok",
     aliases: &["grok", "supergrok", "xai-oauth"],
     kind: RouteKind::Native(NativeProvider::Xai),

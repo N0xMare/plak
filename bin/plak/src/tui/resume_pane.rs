@@ -135,6 +135,9 @@ impl ResumeRow for ResumeSessionEntry {
     /// A row's right-aligned value: the account and model this session resumes
     /// under.
     fn display_binding(&self) -> String {
+        if unavailable_route(self) {
+            return "not in this build".to_owned();
+        }
         match (self.display_account(), self.display_model()) {
             (Some(account), Some(model)) => format!("{account} · {model}"),
             (Some(only), None) | (None, Some(only)) => only,
@@ -148,7 +151,7 @@ impl ResumeRow for ResumeSessionEntry {
     /// stands alone: the summary is the only column that says what a session
     /// was, and a full `account · model` erases it on a narrow terminal.
     fn display_binding_for_width(&self, row_width: u16) -> String {
-        if row_width >= WIDE_BINDING_ROW_WIDTH {
+        if unavailable_route(self) || row_width >= WIDE_BINDING_ROW_WIDTH {
             return self.display_binding();
         }
         self.display_model()
@@ -161,6 +164,13 @@ impl ResumeRow for ResumeSessionEntry {
     fn display_age(&self, now_unix: u64, zone: &jiff::tz::TimeZone) -> String {
         relative_age(self.updated_at_unix, now_unix, zone)
     }
+}
+
+fn unavailable_route(entry: &ResumeSessionEntry) -> bool {
+    entry
+        .account
+        .as_deref()
+        .is_some_and(|account| crate::build_features::require_account(account).is_err())
 }
 
 /// How long ago `then_unix` was, as the picker says it.

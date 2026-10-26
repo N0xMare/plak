@@ -292,6 +292,13 @@ capability. A build without it refuses config/session admission with the typed
 `CapabilityUnavailable` (exit 2), before attach or writes; it never drops the
 selected tool silently. Frozen fetch bounds remain readable for show/log/export.
 
+The same capability verdict applies to a template, card or default selecting
+an uncompiled account or evaluator. Execution admission returns the typed
+`CapabilityUnavailable` (exit 2), without selecting another account. Existing
+session show/log/export does not require its route to be compiled. Stored
+binding validation checks the frozen vocabulary, not today's model enrollment;
+attach, resume and rebind separately require the compiled route before writes.
+
 A set `allowed_domains`, `blocked_domains` or `allowed_x_handles` replaces
 the list the model passes on a call. Each option travels in the route
 provider's own parameter, and a bind on a route whose provider has none

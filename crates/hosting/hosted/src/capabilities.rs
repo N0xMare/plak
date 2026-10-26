@@ -7,6 +7,17 @@ use plakous::subscriptions::NativeProvider;
 
 use crate::binding::{PlatformProvider, ResolvedProtocol};
 
+#[cfg(not(all(
+    feature = "codex",
+    feature = "grok",
+    feature = "claude",
+    feature = "openai",
+    feature = "xai-api",
+    feature = "anthropic",
+    feature = "openrouter"
+)))]
+mod route_unavailable;
+
 mod build;
 pub use build::{
     BUILD_CAPABILITIES, BuildCapability, CapabilityKind, CapabilityUnavailable, compiled_features,
@@ -38,6 +49,9 @@ pub enum RouteKind {
 
 #[derive(Debug)]
 pub struct RouteCapability {
+    pub compiled: bool,
+    pub feature: &'static str,
+    pub(crate) review_deadline: fn() -> Option<u64>,
     pub account: &'static str,
     pub(crate) aliases: &'static [&'static str],
     pub kind: RouteKind,
@@ -53,6 +67,10 @@ pub struct RouteCapability {
 }
 
 impl RouteCapability {
+    pub fn review_deadline(&self) -> Option<u64> {
+        (self.review_deadline)()
+    }
+
     pub const fn native_provider(&self) -> Option<NativeProvider> {
         match self.kind {
             RouteKind::Native(provider) => Some(provider),
@@ -142,7 +160,10 @@ pub const fn for_platform(provider: PlatformProvider) -> &'static RouteCapabilit
 }
 
 pub fn native_providers() -> impl Iterator<Item = NativeProvider> {
-    ROUTES.iter().filter_map(|route| route.native_provider())
+    ROUTES
+        .iter()
+        .filter(|route| route.compiled)
+        .filter_map(|route| route.native_provider())
 }
 
 /// Complete, ungated account vocabulary used by frozen template bind hints.
@@ -179,6 +200,32 @@ pub fn require_tools(
         require_feature("mcp")?;
     }
     Ok(())
+}
+
+/// Refuses an omitted known account without choosing another route.
+pub fn require(account: &str) -> Result<(), CapabilityUnavailable> {
+    let Some(route) = for_account(account) else {
+        return Ok(());
+    };
+    if route.compiled {
+        return Ok(());
+    }
+    Err(CapabilityUnavailable {
+        id: route.account,
+        kind: CapabilityKind::Route,
+        feature: route.feature,
+    })
+}
+
+pub fn require_native(provider: NativeProvider) -> Result<(), CapabilityUnavailable> {
+    if let Some(route) = for_native(provider) {
+        return require(route.account);
+    }
+    Err(CapabilityUnavailable {
+        id: provider.as_str(),
+        kind: CapabilityKind::Route,
+        feature: provider.as_str(),
+    })
 }
 
 #[cfg(test)]

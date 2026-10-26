@@ -26,7 +26,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 
 [dependencies]
 plakous-host-protocol.workspace = true
-plakous = { workspace = true, features = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
+plakous = { workspace = true, features = ["codex", "grok", "claude", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
 plakous-recursive-subagents.workspace = true
 plakous-workspace.workspace = true
 nix.workspace = true
@@ -68,7 +68,14 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-th
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [features]
-default = ["git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"]
+codex = ["plakous/codex", "js"]
+grok = ["plakous/grok"]
+claude = ["plakous/claude"]
+openai = ["plakous/openai", "js"]
+xai-api = ["plakous/xai"]
+anthropic = ["plakous/anthropic"]
+openrouter = ["plakous/openrouter"]
+default = ["git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"]
 js = ["plakous/composition"]
 web-fetch = ["plakous/web-fetch"]
 tui = []

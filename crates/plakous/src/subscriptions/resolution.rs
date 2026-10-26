@@ -2,24 +2,24 @@
 
 use super::{
     Arc, CompiledProviderConfiguration, ConfiguredLanguageModel, Digest, DigestDomain, DigestError,
-    Error, LanguageModel, ModelId, NativeSubscriptionError, NativeToolMode,
-    NativeToolModeRequirementError, ResolvedModelDescriptor, RuntimeAdmissionWitness,
-    RuntimeModelAuthority, Timestamp, fmt, require_exact_native_tool_mode, reresolve,
+    LanguageModel, ModelId, NativeToolMode, NativeToolModeRequirementError,
+    ResolvedModelDescriptor, RuntimeAdmissionWitness, RuntimeModelAuthority, Timestamp,
+    require_exact_native_tool_mode, reresolve,
 };
 
 /// One gated native model resolution with fresh account-scoped evidence.
 ///
 /// Credential material stays inside the returned [`LanguageModel`].
 pub struct ResolvedNativeModel {
-    pub(crate) service_tiers: Vec<String>,
-    pub(crate) selected_model: ModelId,
-    pub(crate) descriptor: ResolvedModelDescriptor,
-    pub(crate) model: Arc<dyn LanguageModel>,
-    pub(crate) evidence: SubscriptionResolutionEvidence,
+    pub(super) service_tiers: Vec<String>,
+    pub(super) selected_model: ModelId,
+    pub(super) descriptor: ResolvedModelDescriptor,
+    pub(super) model: Arc<dyn LanguageModel>,
+    pub(super) evidence: SubscriptionResolutionEvidence,
     /// The route's hosted-retrieval port on the same model and grant.
-    pub(crate) retrieval: Option<Arc<dyn plakous_tools::RetrievalPort>>,
+    pub(super) retrieval: Option<Arc<dyn plakous_tools::RetrievalPort>>,
     /// The route's image generation port on the same model and grant.
-    pub(crate) image_gen: Option<Arc<dyn plakous_tool_web::ImageGenPort>>,
+    pub(super) image_gen: Option<Arc<dyn plakous_tool_web::ImageGenPort>>,
 }
 
 /// One exact native provider resolution carrying both the executable model and
@@ -137,58 +137,42 @@ impl ResolvedNativeModel {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SubscriptionResolutionEvidence {
-    pub(crate) account_fingerprint: String,
-    pub(crate) credential_authority_binding: String,
-    pub(crate) credential_generation: u64,
-    pub(crate) credential_selection_epoch: String,
-    pub(crate) route_fingerprint: String,
-    pub(crate) descriptor_digest: String,
-    pub(crate) dialect: String,
-    pub(crate) adapter_revision: String,
-    pub(crate) catalog_observed_at: Timestamp,
-    pub(crate) catalog_expires_at: Timestamp,
-    pub(crate) runtime_admission_witness: Option<RuntimeAdmissionWitness>,
-    pub(crate) profile_revision: String,
-    pub(crate) codex_exact: Option<plakous_openai::CodexModelResolutionEvidence>,
-    pub(crate) xai_exact: Option<plakous_xai::XaiModelResolutionEvidence>,
+pub(super) struct SubscriptionResolutionEvidence {
+    pub(super) account_fingerprint: String,
+    pub(super) credential_authority_binding: String,
+    pub(super) credential_generation: u64,
+    pub(super) credential_selection_epoch: String,
+    pub(super) route_fingerprint: String,
+    pub(super) descriptor_digest: String,
+    pub(super) dialect: String,
+    pub(super) adapter_revision: String,
+    pub(super) catalog_observed_at: Timestamp,
+    pub(super) catalog_expires_at: Timestamp,
+    pub(super) runtime_admission_witness: Option<RuntimeAdmissionWitness>,
+    pub(super) profile_revision: String,
+    pub(super) exact: Option<Arc<dyn ExactNativeEvidence>>,
+    pub(super) exact_provider: Option<super::NativeProvider>,
 }
 
-/// Credential-free failure from gated native model resolution.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NativeModelResolutionError {
-    /// Set when failure happened after a concrete model id was chosen.
-    pub selected_model: Option<ModelId>,
-    /// Underlying credential-free subscription failure (transport, model, etc.).
-    pub kind: NativeSubscriptionError,
+pub(super) trait ExactNativeEvidence: std::any::Any + std::fmt::Debug + Send + Sync {
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn equivalent(&self, other: &dyn ExactNativeEvidence) -> bool;
 }
 
-impl fmt::Display for NativeModelResolutionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.kind.fmt(f)
+impl<T: std::any::Any + std::fmt::Debug + Eq + Send + Sync> ExactNativeEvidence for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn equivalent(&self, other: &dyn ExactNativeEvidence) -> bool {
+        other.as_any().downcast_ref::<Self>() == Some(self)
     }
 }
 
-impl Error for NativeModelResolutionError {}
-
-impl NativeModelResolutionError {
-    pub(super) fn before_selection(error: NativeSubscriptionError) -> Self {
-        Self {
-            selected_model: None,
-            kind: error,
-        }
-    }
-
-    pub(super) fn after_selection(selected_model: ModelId, error: NativeSubscriptionError) -> Self {
-        Self {
-            selected_model: Some(selected_model),
-            kind: error,
-        }
-    }
-
-    /// Returns the underlying subscription failure kind.
-    #[must_use]
-    pub const fn kind(&self) -> NativeSubscriptionError {
-        self.kind
+impl PartialEq for dyn ExactNativeEvidence {
+    fn eq(&self, other: &Self) -> bool {
+        self.equivalent(other)
     }
 }
+
+impl Eq for dyn ExactNativeEvidence {}

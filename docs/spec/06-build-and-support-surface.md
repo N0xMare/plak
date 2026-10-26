@@ -151,10 +151,14 @@ than the workspace's.
 in the same policy table, and `[workspace.metadata.plakous.modules.plak.tui]`
 constrains what the binary's `tui` module may name.
 
-The facade's optional `native-subscriptions` edge to `plakous-exchange` is an
-explicit exception for shared model-lookup backoff policy. It does not move
-catalog transport, parsing or provider admission into the facade or authorize
-direct dependencies on other protocol crates.
+The facade's optional native-route edge to `plakous-exchange` is an explicit
+exception for shared model-lookup backoff policy. Its Grok route also names
+the shared `plakous-responses-dialect` configuration error type, without linking
+another provider for that vocabulary. Neither exception moves catalog
+transport, parsing or provider admission into the facade. A separate narrow
+`plakous-auth` to `plakous-model` exception lets the credential HTTP adapter
+consume the one provider-neutral classified request gate. It does not put
+provider names, credentials or HTTP into the model crate.
 
 ### 3.1 What each supported package promises
 
@@ -378,7 +382,7 @@ not supported embedder authority. Plak's maintainer feature enables its `jj` fea
 `plakous-host-protocol` in production, and on no other package in the tree —
 `plakous-workspace` in particular is reached only through the tree crate. The
 product declares its required facade features explicitly in `bin/plak`:
-default features off, `native-subscriptions`, `openai`, `anthropic`, `xai`,
+default features off, `codex`, `grok`, `claude`, `openai`, `anthropic`, `xai`,
 `openrouter`, and `sessions-sqlite` on. Hosted libraries also declare the facade
 features their own implementations require; Cargo unifies these requirements.
 Every package must declare the dependency features its own Rust targets use;
@@ -401,8 +405,8 @@ The facade's portable-history named-state JSON API is always available.
 enabled by `composition`. The reviewed dependency-surface pin records that
 change; default-feature consumers still link no worker, provider or HTTP
 implementation through this neutral carrier.
-`native-subscriptions` implies `composition`, so the
-product closure is unchanged by the split.
+Native facade routes do not imply composition. The product selects its
+evaluators explicitly; its default execution behavior is unchanged.
 
 The reviewed public-feature sanity cap in `tools/checks/check_features.py`
 is **24 per package**; growth requires an amendment here. `mcp` is independent:

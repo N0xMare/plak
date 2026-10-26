@@ -122,6 +122,7 @@ pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
 ];
 
 pub fn require_feature(feature: &str) -> Result<(), CapabilityUnavailable> {
+    super::require(feature)?;
     if let Some(capability) = BUILD_CAPABILITIES
         .iter()
         .find(|entry| entry.feature == feature && !entry.compiled)
@@ -153,17 +154,26 @@ pub fn require_composition(
 }
 
 pub fn omitted_features() -> Vec<&'static str> {
-    BUILD_CAPABILITIES
+    let mut features: Vec<_> = BUILD_CAPABILITIES
         .iter()
         .filter(|entry| !entry.compiled)
         .map(|entry| entry.feature)
-        .collect()
+        .chain(
+            super::ROUTES
+                .iter()
+                .filter(|route| !route.compiled)
+                .map(|route| route.feature),
+        )
+        .collect();
+    features.sort_unstable();
+    features
 }
 
 pub fn compiled_features() -> Vec<&'static str> {
     let mut features: Vec<_> = super::ROUTES
         .iter()
-        .map(|route| route.account)
+        .filter(|route| route.compiled)
+        .map(|route| route.feature)
         .chain(
             BUILD_CAPABILITIES
                 .iter()

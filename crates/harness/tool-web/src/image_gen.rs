@@ -11,9 +11,7 @@
 //! generation is never paid for twice by recovery.
 
 use std::fmt::Write as _;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::sync::Arc;
 
 use plakous_model::{
@@ -21,9 +19,8 @@ use plakous_model::{
     ToolInputContract, ToolName, ToolOutputContract, ToolResultPart,
 };
 use plakous_tools::{
-    CodingPresentation, ExecutionBackendErrorKind, ExecutionOperationControl,
-    MAX_STANDARD_IMAGE_BYTES, MAX_WORKSPACE_READ_SLICE_BYTES, MenuEntry, PassthroughPack,
-    PromptPin, RegisteredToolId, RetrievalError, RetrievalErrorKind, ToolContext, ToolExecutor,
+    CodingPresentation, ExecutionBackendErrorKind, MAX_STANDARD_IMAGE_BYTES, MenuEntry,
+    PassthroughPack, PromptPin, RegisteredToolId, RetrievalErrorKind, ToolContext, ToolExecutor,
     ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack,
     ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, WorkspaceExpectedFileState,
     WorkspaceMutation, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
@@ -35,61 +32,12 @@ use serde_json::{Value, json};
 use crate::text::PLAKOUS_WEB_IMAGE_GEN_DESCRIPTION;
 use crate::{ISSUER, SEMANTIC_VERSION, WEB_PROMPT_PINS, invalid, registration_error, require_text};
 
-/// Longest accepted prompt, in bytes.
-pub const MAX_IMAGE_PROMPT_BYTES: usize = 4000;
-/// Most edit inputs any route accepts.
-pub const MAX_IMAGE_EDIT_INPUTS: usize = 16;
-/// Largest edit input, in bytes.
-pub const MAX_IMAGE_EDIT_INPUT_BYTES: u64 = MAX_WORKSPACE_READ_SLICE_BYTES;
+use crate::{MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES};
 
 const TOOL_NAME: &str = "image_gen";
 const MAX_PATH_BYTES: usize = 1024;
 
-/// One generation, or an edit when it names input images.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ImageGenRequest {
-    /// What to draw, or how to change the inputs.
-    pub prompt: String,
-    /// `WIDTHxHEIGHT` or `auto`; `None` leaves the provider's default.
-    pub size: Option<String>,
-    /// Input images of an edit, in the order named.
-    pub edit_from: Vec<ImageGenSource>,
-}
-
-/// One edit input read from the workspace.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ImageGenSource {
-    /// `image/png`, `image/jpeg` or `image/webp`.
-    pub media_type: &'static str,
-    /// The file's bytes.
-    pub bytes: Vec<u8>,
-}
-
-/// The future one generation returns: the image bytes, or the request's
-/// failure.
-pub type ImageGenFuture =
-    Pin<Box<dyn Future<Output = Result<Vec<u8>, RetrievalError>> + Send + 'static>>;
-
-/// One route's image generation, bound to the session's exact route,
-/// account and credential.
-///
-/// An implementation revalidates admission immediately before each request,
-/// as before a model round, and never falls back to another route or
-/// account.
-pub trait ImageGenPort: Send + Sync {
-    /// Most input images one edit may name.
-    fn max_edit_images(&self) -> usize;
-
-    /// Whether the route takes a requested size.
-    fn takes_size(&self) -> bool;
-
-    /// Runs one generation or edit as one request.
-    fn generate(
-        &self,
-        request: ImageGenRequest,
-        control: ExecutionOperationControl,
-    ) -> ImageGenFuture;
-}
+use crate::{ImageGenPort, ImageGenRequest, ImageGenSource};
 
 /// The `image_gen` tool: one registration, appended after the core menu in
 /// every vocabulary under the same name.

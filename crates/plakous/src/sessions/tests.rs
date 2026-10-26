@@ -1,4 +1,4 @@
-#[cfg(feature = "native-subscriptions")]
+#[cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
 mod carry_replay;
 
 #[path = "tests/command_ancestry.rs"]
@@ -424,7 +424,7 @@ fn runtime_binding_with_model_and_durability(
     Ok((SessionRuntimeBinding::new(builder), Arc::clone(&model)))
 }
 
-#[cfg(feature = "native-subscriptions")]
+#[cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
 fn runtime_binding_with_turn_scoped_model(
     workspace: Arc<WorkspacePolicy>,
     descriptor: ResolvedModelDescriptor,
@@ -4259,7 +4259,7 @@ async fn context_status_current_and_pending_are_exact_and_read_only() -> TestRes
     Ok(())
 }
 
-#[cfg(feature = "native-subscriptions")]
+#[cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
 #[tokio::test]
 async fn context_status_turn_scoped_inspect_is_available_without_operation_root() -> TestResult {
     let directory = tempfile::tempdir()?;
@@ -4322,7 +4322,7 @@ async fn context_status_turn_scoped_inspect_is_available_without_operation_root(
     Ok(())
 }
 
-#[cfg(feature = "native-subscriptions")]
+#[cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
 #[tokio::test]
 async fn context_status_turn_scoped_inspect_reports_overflow_without_operation_root() -> TestResult
 {
@@ -8005,7 +8005,7 @@ async fn attached_context_status_uses_driver_authority_without_store_reads() -> 
     Ok(())
 }
 
-#[cfg(feature = "native-subscriptions")]
+#[cfg(all(feature = "codex", feature = "grok", feature = "claude"))]
 #[tokio::test]
 async fn attached_context_status_revives_expired_but_refuses_taken_over_and_archived_owners()
 -> TestResult {

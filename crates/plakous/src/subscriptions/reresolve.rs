@@ -34,7 +34,7 @@ impl NativeSubscriptions {
         gate: Arc<TurnScopedSubscriptionRequestGate>,
     ) -> ResolvedProvider {
         let evidence = &resolved.model.evidence;
-        if evidence.codex_exact.is_some() || evidence.xai_exact.is_some() {
+        if evidence.exact_provider.is_some() {
             resolved.reresolution = Some(Arc::new(Reresolution {
                 subscriptions: self.clone(),
                 selected,
@@ -113,15 +113,14 @@ impl ResolvedProvider {
                 == fresh_authority.credential_authority_binding()
             && previous_authority.credential_generation() <= fresh_authority.credential_generation()
             && previous_evidence.route_fingerprint == fresh_evidence.route_fingerprint
-            && previous_evidence.codex_exact.is_some() == fresh_evidence.codex_exact.is_some()
-            && previous_evidence.xai_exact.is_some() == fresh_evidence.xai_exact.is_some()
+            && previous_evidence.exact_provider == fresh_evidence.exact_provider
             && self.native_tool_mode == fresh.native_tool_mode
             && self.model().content_filter_retry_instruction()
                 == fresh.model().content_filter_retry_instruction()
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "codex", feature = "grok", feature = "claude"))]
 pub(super) mod tests {
     use std::collections::BTreeMap;
     use std::error::Error;
@@ -223,8 +222,8 @@ pub(super) mod tests {
                     catalog_expires_at: expires,
                     runtime_admission_witness: None,
                     profile_revision: "fixture-profile".to_owned(),
-                    codex_exact: None,
-                    xai_exact: None,
+                    exact: None,
+                    exact_provider: None,
                 },
                 retrieval: None,
                 image_gen: None,

@@ -228,7 +228,7 @@ pub enum LoginOutcome {
 /// Synchronous account operations. Commands own terminal input and output;
 /// the facade owns login admission, the opaque pending authority, and completion.
 pub trait AccountOps {
-    fn notice(&self, provider: NativeProvider) -> CliNotice;
+    fn notice(&self, provider: NativeProvider) -> CliResult<CliNotice>;
 
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus>;
 
@@ -516,14 +516,15 @@ impl PlakousApplication {
 }
 
 impl AccountOps for PlakousApplication {
-    fn notice(&self, provider: NativeProvider) -> CliNotice {
-        let notice = NativeSubscriptions::notice(provider);
-        CliNotice {
+    fn notice(&self, provider: NativeProvider) -> CliResult<CliNotice> {
+        let notice = NativeSubscriptions::notice(provider)
+            .map_err(|error| self.subscription_failure(error, Some(provider)))?;
+        Ok(CliNotice {
             profile_id: notice.profile_id(),
             notice_revision: notice.notice_revision(),
             reviewed_at: notice.reviewed_at(),
             expires_at: notice.expires_at(),
-        }
+        })
     }
 
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
@@ -785,7 +786,11 @@ pub(crate) fn test_clock() -> Arc<dyn plakous::model::Clock> {
         NativeProvider::Claude,
     ]
     .into_iter()
-    .map(|provider| NativeSubscriptions::notice(provider).reviewed_at())
+    .filter_map(|provider| {
+        NativeSubscriptions::notice(provider)
+            .ok()
+            .map(plakous::subscriptions::CompatibilityNotice::reviewed_at)
+    })
     .max()
     .expect("compiled notices");
     Arc::new(plakous::model::FixedClock::new(

@@ -20,7 +20,7 @@ CODEX_LOCAL_LOGIN_ARGS = re.compile(r'\[\s*"login"\s*,\s*"codex"\s*(?P<rest>[^\]
 BROWSER_LOGIN_CALLERS = (
     "crates/providers/openai/src/native_auth/",
     "crates/providers/xai/src/native_auth",
-    "crates/plakous/src/subscriptions/login.rs",
+    "crates/plakous/src/subscriptions/codex.rs",
 )
 SCANNED_ROOTS = ("bin", "crates", "tests")
 

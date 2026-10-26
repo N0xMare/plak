@@ -787,8 +787,16 @@ fn enabled_features() -> Vec<&'static str> {
         ("auth", cfg!(feature = "auth")),
         ("full", cfg!(feature = "full")),
         (
-            "native-subscriptions",
-            cfg!(feature = "native-subscriptions"),
+            "codex",
+            plakous::subscriptions::NativeProvider::Codex.is_compiled(),
+        ),
+        (
+            "grok",
+            plakous::subscriptions::NativeProvider::Xai.is_compiled(),
+        ),
+        (
+            "claude",
+            plakous::subscriptions::NativeProvider::Claude.is_compiled(),
         ),
         ("openai", cfg!(feature = "openai")),
         ("openrouter", cfg!(feature = "openrouter")),
