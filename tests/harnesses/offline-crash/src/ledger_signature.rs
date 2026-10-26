@@ -11,6 +11,33 @@ use std::path::Path;
 mod root_terminal_answers;
 pub use root_terminal_answers::{inspect_completed_root_answers, inspect_root_lifecycles};
 
+/// The committed compaction strategy and number of protected trailing segments.
+///
+/// # Errors
+/// Returns read-only store lookup and integrity failures.
+pub fn inspect_compaction_strategy(
+    database: &Path,
+    head: SessionLocator,
+) -> Result<Option<(String, u32)>, plakous_agent::internal::SessionStoreError> {
+    let loaded = SqliteSessionStore::inspect_branch(
+        database,
+        SessionRef::new(head.session_id(), head.branch_id()),
+    )?;
+    Ok(loaded
+        .checkpoint()
+        .checkpoint()
+        .manifest()
+        .canonical()
+        .context()
+        .compaction_provenance()
+        .map(|provenance| {
+            (
+                format!("{:?}", provenance.strategy()),
+                provenance.trailing_segment_count(),
+            )
+        }))
+}
+
 /// Reads only `UserInput` steering text from the canonical history of a fixture.
 ///
 /// # Errors

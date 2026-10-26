@@ -1133,7 +1133,7 @@ async fn codex_offline_successor_case(protected: bool, overflow: bool) -> TestRe
             .count();
         assert_eq!(
             compacts, 2,
-            "one capacity pass and one provider-overflow recovery"
+            "one capacity pass and one bounded provider-overflow recovery"
         );
     } else {
         assert!(

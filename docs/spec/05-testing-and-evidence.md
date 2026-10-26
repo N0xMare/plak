@@ -1679,6 +1679,12 @@ the legal face schedules without adding an interrupt to the scripted inputs.
 The lifecycle's stalled-step deadline advances only for new face records or
 indexed commits, not lease-renewal trace writes. A failed worker startup cannot
 keep a pilot waiting for `assistant_done` forever by renewing its idle lease.
+`scheduled_native_compaction_in_turn` enrolls the scripted direct model's
+`native_compaction` facet, runs two tool groups and one native fold, then
+continues to the original answer. Its pilot requires native provenance with
+a protected current-round tool tail and exactly one compaction operation;
+it is not a harness-summary substitute. The fixture-only dial requires
+scheduled direct composition and an admitted context contract.
 Every lifecycle also has an absolute cap of ten step budgets (450 s), even
 when it continues producing progress. Pilots that expect success fail as soon
 as an `error` terminal or failed `turn_lifecycle` record appears. Cut runs and
@@ -1898,7 +1904,8 @@ Artifacts are `target/crash-sweep/<run>/sweep.jsonl` and `table.md`.
   instead.
   `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` compares
   the complete serialized SQL-cell snapshot before deletion and after a
-  lease-free rebuild for all 14 strict-sweep shapes. Its live-schema inventory
+  lease-free rebuild for 17 of the 19 registry shapes (all but
+  `leftover_background_job` and `tree_child_submit_adopt`). Its live-schema inventory
   prevents a new view table from silently escaping the comparison.
 - *Delete-and-reopen*: deleting the product views (and, separately, the tree
   views) of a sweep row's final home and reopening it yields a decoded summary
@@ -1910,7 +1917,7 @@ Artifacts are `target/crash-sweep/<run>/sweep.jsonl` and `table.md`.
   `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` compares all SQL
   cells after exactly one ordinary JSONL-host reopen in each of two identical
   homes, one with intact views and one with every view table deleted, for all
-  14 strict-sweep shapes. Each open must reach the feed tail at Ready, before
+  the same 17 registry shapes. Each open must reach the feed tail at Ready, before
   any harness projector pass or subsequent Quit. Cursor equality compares
   the same logical point, including any facts the open itself commits.
   The Working busy-quit pilot first recovers once through an ordinary host,
@@ -2086,13 +2093,14 @@ requires the reopen alone to converge before the harness checks idempotence.
 
 The opt-in live-fact pilots cover `non_stop_finish_length`,
 `empty_length_retry`, `non_stop_finish_refusal`, `steer_accepted_mid_turn`,
-`scheduled_compaction_in_turn`, `scheduled_compaction_workflow`,
+`scheduled_compaction_in_turn`, `scheduled_native_compaction_in_turn`, `scheduled_compaction_workflow`,
 `code_mode_cell_nested_then_final` and `code_mode_cell_final`. They assert
 the committed provider finish, durable accepted/applied steering, finalized
 in-turn compaction, a committed product compaction workflow, and real
 JavaScript cell/nested-call parentage respectively. The workflow pilot seeds
 foldable prior turns and explicitly requests the product compact workflow;
-the in-turn pilot crosses the scheduled fence. Cell-final uses a text-only
+the in-turn pilots cross the scheduled fence, with the native pilot proving a
+native successor and its retained current-round tail. Cell-final uses a text-only
 cell, while nested-then-final joins a real nested process call. These shapes
 do not widen the durability subset. `non_stop_finish_length` commits a visible
 Length answer and emits its truncation warning; `empty_length_retry` makes two

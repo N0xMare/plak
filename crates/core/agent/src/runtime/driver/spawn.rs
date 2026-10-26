@@ -210,6 +210,7 @@ impl PreparedAgent {
             active_root: None,
             retention_due: None,
             last_compaction_diagnostic: None,
+            last_compaction_successor: None,
             active_model_root_scope: None,
             restored,
             compaction_in_flight: false,

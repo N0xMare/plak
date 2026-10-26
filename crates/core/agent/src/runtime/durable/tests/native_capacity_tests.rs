@@ -436,15 +436,20 @@ fn native_scheduling_holds_descriptor_room_without_changing_admission() -> TestR
 
 #[tokio::test]
 async fn native_request_room_schedules_before_the_next_prompt() -> TestResult {
-    Box::pin(native_request_room_case(false)).await
+    Box::pin(native_request_room_case(false, false)).await
 }
 
 #[tokio::test]
 async fn native_request_room_schedules_after_a_tool_group() -> TestResult {
-    Box::pin(native_request_room_case(true)).await
+    Box::pin(native_request_room_case(true, false)).await
 }
 
-async fn native_request_room_case(tool_group: bool) -> TestResult {
+#[tokio::test]
+async fn native_mid_turn_overflow_on_the_unchanged_successor_recovers_once() -> TestResult {
+    Box::pin(native_request_room_case(true, true)).await
+}
+
+async fn native_request_room_case(tool_group: bool, overflow_successor: bool) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let descriptor = reference_input_descriptor(
@@ -489,6 +494,11 @@ async fn native_request_room_case(tool_group: bool) -> TestResult {
         &model.ordinary_context_overhead
     };
     overhead.store(241_000, Ordering::Release);
+    if overflow_successor {
+        // Two seed rounds, the tool round and the native fold have run. The
+        // first provider overflow on that exact successor retains one recovery fold.
+        model.overflow_once_at_call.store(4, Ordering::Release);
+    }
     let result = agent
         .prompt("continue with room to compact")
         .await?
@@ -499,7 +509,10 @@ async fn native_request_room_case(tool_group: bool) -> TestResult {
         "{:?}",
         result.outcome()
     );
-    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 1);
+    assert_eq!(
+        model.paid_compaction_calls.load(Ordering::Acquire),
+        if overflow_successor { 2 } else { 1 }
+    );
     assert_eq!(model.ordinary_capacity_refusals.load(Ordering::Acquire), 0);
     let checkpoint = agent.checkpoint();
     assert_eq!(

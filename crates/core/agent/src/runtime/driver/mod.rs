@@ -115,6 +115,7 @@ struct Driver {
     active_root: Option<PromptCommand>,
     retention_due: Option<TurnId>,
     last_compaction_diagnostic: Option<String>,
+    last_compaction_successor: Option<Digest>,
     active_model_root_scope: Option<Box<dyn ModelOperationScope>>,
     restored: Option<DriverRestoredStartup>,
     compaction_in_flight: bool,

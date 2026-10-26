@@ -4,6 +4,61 @@ pub(super) struct ArtifactOperationScope;
 impl plakous_model::ModelOperationScope for ArtifactOperationScope {}
 
 #[tokio::test]
+async fn exhausted_threshold_does_not_suppress_one_provider_overflow_ladder() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let (builder, model) = placeholder_fixture(
+        workspace,
+        901_000,
+        40_000,
+        &[100],
+        &[2],
+        false,
+        LocalDurabilityDisposition::Ephemeral,
+    )?;
+    let agent = builder.build()?;
+    for prompt in ["older requirement", "latest requirement"] {
+        assert!(matches!(
+            agent.prompt(prompt).await?.result().await?.outcome(),
+            TurnResultOutcome::Completed(_)
+        ));
+    }
+    model
+        .summary_context_overhead
+        .store(1_000_000, Ordering::Release);
+    model
+        .tool_successor_capacity_loss
+        .store(36_000, Ordering::Release);
+    // The unchanged next round reports overflow after the first free ladder
+    // found no smaller legal successor. Provider overflow still gets its one
+    // distinct recovery ladder, even on that unchanged source.
+    model.overflow_once_at_call.store(3, Ordering::Release);
+    let mut turn = agent.prompt("read one small tool result").await?;
+    let mut events = turn.take_events()?;
+    let result = turn.result().await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Failed(error) if error.model_kind() == Some(ModelErrorKind::ContextLimit)),
+        "{:?}",
+        result.outcome()
+    );
+    let mut starts = 0;
+    while let Ok(event) = events.recv().await {
+        match event.kind() {
+            AgentEventKind::CompactionStarted { .. } => starts += 1,
+            AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        starts, 2,
+        "one threshold ladder and one provider-overflow recovery"
+    );
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 0);
+    agent.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn optional_compaction_measurement_refusals_are_typed_and_nonfatal() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);

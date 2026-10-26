@@ -88,6 +88,16 @@ impl Driver {
         )
         .await
         .map_err(CompactionCompletionError::recovery)?;
+        // Capture the actual published successor, including continuation and
+        // post-compaction notes rather than just the semantic fold's target.
+        self.last_compaction_successor = Some(
+            self.authority
+                .checkpoint()
+                .manifest()
+                .canonical()
+                .history()
+                .identity(),
+        );
         Ok((identity.success_checkpoint, fold.occupancy_tokens_after))
     }
 }

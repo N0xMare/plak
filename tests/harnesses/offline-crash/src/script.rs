@@ -115,6 +115,9 @@ pub struct ScriptPlan {
     /// turn takes the ordinary direct path.
     #[serde(default)]
     pub code_mode: bool,
+    /// Enroll the real native-compaction rung in the scripted direct model.
+    #[serde(default)]
+    pub native_compaction: bool,
     /// Declare image input support on the scripted model, so an image prompt
     /// is admitted; without it the runtime refuses one naming the route.
     #[serde(default)]
@@ -512,6 +515,11 @@ impl ScriptPlan {
             return Err(ScriptError(
                 "offline script js_ptc requires code_mode".to_owned(),
             ));
+        }
+        if self.native_compaction
+            && (!self.scheduled_compaction || self.code_mode || self.omit_context_contract)
+        {
+            return Err(ScriptError("offline native_compaction requires scheduled direct composition and a context contract".into()));
         }
         if self.child_process_quiescent && !self.child_process {
             return Err(ScriptError(

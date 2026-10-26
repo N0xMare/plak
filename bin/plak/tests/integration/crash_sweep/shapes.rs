@@ -29,6 +29,13 @@ fn capacity_overflow_pilot_proves_live_shape() {
 }
 
 #[test]
+fn native_mid_turn_pilot_proves_native_strategy_and_protected_tail() {
+    let shape = "scheduled_native_compaction_in_turn";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
+}
+
+#[test]
 fn final_only_pilot_waits_for_face_idle() {
     let shape = "final_only";
     let (seed, session) = super::driver::setup(shape);
@@ -280,6 +287,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         setup: setup_workflow,
         lifecycle: workflow_lifecycle,
         assert_live: assert_workflow_compaction,
+    },
+    Shape {
+        name: "scheduled_native_compaction_in_turn",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: native_in_turn_compaction,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: assert_native_in_turn_compaction,
     },
     Shape {
         name: "code_mode_cell_nested_then_final",
@@ -736,6 +753,42 @@ fn assert_in_turn_compaction(fixture: &Fixture, outcome: &AgentOutcome, state: &
         "pilot finalized in-turn compaction"
     );
     assert_compact_row(outcome);
+}
+
+fn native_in_turn_compaction() -> Value {
+    let mut plan = in_turn_compaction();
+    plan["native_compaction"] = json!(true);
+    plan
+}
+
+fn assert_native_in_turn_compaction(
+    fixture: &Fixture,
+    outcome: &AgentOutcome,
+    state: &summary::Summary,
+) {
+    assert_in_turn_compaction(fixture, outcome, state);
+    let provenance = plakous_offline_crash_harness::ledger_signature::inspect_compaction_strategy(
+        &summary::paths(fixture).runtime_database(),
+        state.head.parse().unwrap(),
+    )
+    .unwrap()
+    .expect("native compaction provenance");
+    assert_eq!(provenance.0, "NativeResponsesTriggerV1");
+    assert!(
+        provenance.1 > 0,
+        "the in-turn native successor retains its current-round tool tail"
+    );
+    assert_eq!(
+        state
+            .ledger
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["kind"] == "compaction")
+            .count(),
+        1,
+        "one paid compaction in the pilot"
+    );
 }
 
 fn assert_compact_row(outcome: &AgentOutcome) {

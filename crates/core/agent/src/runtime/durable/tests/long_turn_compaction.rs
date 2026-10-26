@@ -1,16 +1,49 @@
 use super::*;
 
+struct NearFullAfterFold(Arc<ArtifactModel>);
+
+impl TelemetrySink for NearFullAfterFold {
+    fn try_emit(&self, observation: TelemetryObservation) -> Result<(), TelemetrySinkError> {
+        if matches!(
+            observation.kind(),
+            TelemetryObservationKind::CompactionFinished { .. }
+        ) {
+            self.0
+                .item_provider_input_tokens
+                .store(39_000, Ordering::Release);
+        }
+        Ok(())
+    }
+}
+
 #[tokio::test]
 async fn provider_overflow_refreshes_expired_paid_fold_backoff() -> TestResult {
+    overflow_after_backoff_case(false).await
+}
+
+#[tokio::test]
+async fn exhausted_fence_under_backoff_does_not_block_later_provider_overflow() -> TestResult {
+    overflow_after_backoff_case(true).await
+}
+
+async fn overflow_after_backoff_case(exhausted_fence: bool) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
-    let bodies = [20_000, 60_000];
+    let bodies: &[usize] = if exhausted_fence {
+        &[20_000, 60_000, 35, 35, 35]
+    } else {
+        &[20_000, 60_000]
+    };
     let (builder, model) = placeholder_fixture(
         workspace,
         335_000,
         40_000,
-        &bodies,
-        &[0, 1],
+        bodies,
+        if exhausted_fence {
+            &[0, 1, 2, 3, 4]
+        } else {
+            &[0, 1]
+        },
         true,
         LocalDurabilityDisposition::Ephemeral,
     )?;
@@ -18,10 +51,24 @@ async fn provider_overflow_refreshes_expired_paid_fold_backoff() -> TestResult {
     model
         .fail_first_compaction_call
         .store(true, Ordering::Release);
-    *lock_mutex(&model.assistant_continuation_calls) = BTreeSet::from([3, 4]);
-    // Two assistant continuations finalize rounds without a tool fence to refresh the
-    // guard. The next provider refusal must refresh it before the paid ladder.
-    model.overflow_once_at_call.store(5, Ordering::Release);
+    *lock_mutex(&model.assistant_continuation_calls) = if exhausted_fence {
+        BTreeSet::from([7, 8, 9])
+    } else {
+        BTreeSet::from([3, 4])
+    };
+    // After the optional exhausted tool fence, assistant continuations finish
+    // rounds without another tool fence. Provider overflow must re-arm paid folding.
+    model
+        .overflow_once_at_call
+        .store(if exhausted_fence { 10 } else { 5 }, Ordering::Release);
+    let builder = if exhausted_fence {
+        *lock_mutex(&model.fail_compaction_calls) = BTreeSet::from([2]);
+        builder.telemetry(Arc::new(TelemetryEmitter::enabled(Arc::new(
+            NearFullAfterFold(model.clone()),
+        ))))
+    } else {
+        builder
+    };
     let agent = builder.build()?;
     let mut turn = agent
         .prompt("continue after a failed fold and later overflow")
@@ -29,11 +76,15 @@ async fn provider_overflow_refreshes_expired_paid_fold_backoff() -> TestResult {
     let mut events = turn.take_events()?;
     let result = turn.result().await?;
     let mut compactions = Vec::new();
+    let mut exhausted = false;
     loop {
         match events.recv().await?.kind() {
             AgentEventKind::CompactionFinished {
                 outcome, detail, ..
-            } => compactions.push(format!("{outcome:?}: {detail:?}")),
+            } => {
+                exhausted |= *outcome == CompactionEventOutcome::NoEligibleRange;
+                compactions.push(format!("{outcome:?}: {detail:?}"));
+            }
             AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. } => break,
             _ => {}
         }
@@ -47,7 +98,20 @@ async fn provider_overflow_refreshes_expired_paid_fold_backoff() -> TestResult {
         model.ordinary_calls.load(Ordering::Acquire),
         *lock_mutex(&model.paid_compaction_rounds)
     );
-    assert_eq!(*lock_mutex(&model.paid_compaction_rounds), [2, 4]);
+    assert_eq!(
+        *lock_mutex(&model.paid_compaction_rounds),
+        if exhausted_fence {
+            vec![2, 4, 8]
+        } else {
+            vec![2, 4]
+        }
+    );
+    if exhausted_fence {
+        assert!(
+            exhausted,
+            "the backoff fence must exhaust the free rung: {compactions:?}"
+        );
+    }
     agent.shutdown().await?;
     Ok(())
 }

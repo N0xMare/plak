@@ -1004,7 +1004,8 @@ async fn recurring_oversized_tool_results_schedule_distinct_pressure_paid_folds(
 }
 
 #[tokio::test]
-async fn a_pressure_fold_does_not_block_occupancy_or_provider_overflow_folds() -> TestResult {
+async fn a_pressure_fold_allows_new_tool_history_and_one_provider_overflow_recovery() -> TestResult
+{
     for provider_overflow in [true, false] {
         let directory = tempfile::tempdir()?;
         let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -1069,14 +1070,14 @@ async fn a_pressure_fold_does_not_block_occupancy_or_provider_overflow_folds() -
         assert_eq!(
             model.calls.load(Ordering::Acquire),
             if provider_overflow { 5 } else { 6 },
-            "the later provider refusal or occupancy fence must get its own paid fold: {:?}; contexts {}",
+            "new tool history or one provider refusal gets another fold: {:?}; contexts {}",
             result.outcome(),
             model.observed_compaction_contexts().len()
         );
         assert_eq!(
             model.observed_compaction_contexts().len(),
             2,
-            "occupancy and provider-overflow folds must still dispatch after the pressure fold"
+            "occupancy and bounded provider-overflow recovery remain available"
         );
         if !provider_overflow {
             assert!(

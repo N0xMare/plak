@@ -750,6 +750,14 @@ impl Driver {
             None,
         )
         .await?;
+        self.last_compaction_successor = Some(
+            self.authority
+                .checkpoint()
+                .manifest()
+                .canonical()
+                .history()
+                .identity(),
+        );
         let observation = AgentEventKind::ToolResultsReplaced {
             results: successor.replaced_results,
             bytes: successor.replaced_bytes,

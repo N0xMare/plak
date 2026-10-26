@@ -160,8 +160,10 @@ pub(in crate::runtime) enum CompactOrigin {
 /// Why a turn fence compacts (spec 01 §10.3).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::runtime) enum FenceTrigger {
-    /// The occupancy trigger or an overflow.
+    /// The occupancy or local admission-headroom threshold.
     Occupancy,
+    /// A local or provider context-limit refusal of a round (the one overflow recovery).
+    ProviderOverflow,
     /// Exhausted observation capacity.
     CapacityPressure,
     /// The committed segment count alone. Placeholder and replay-omission
@@ -173,7 +175,7 @@ pub(in crate::runtime) enum FenceTrigger {
 impl FenceTrigger {
     /// Whether the pass spends the per-turn pressure guard.
     pub(in crate::runtime) const fn pressure_forced(self) -> bool {
-        !matches!(self, Self::Occupancy)
+        matches!(self, Self::CapacityPressure | Self::SegmentPressure)
     }
 }
 

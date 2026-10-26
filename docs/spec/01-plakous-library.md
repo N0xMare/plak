@@ -7696,12 +7696,23 @@ at or over the trigger, or when it fits and its remaining admitted input is at
 or under the 4,096-token observation reserve. An unanchored measure supplies no
 occupancy, so it never reaches the occupancy ground, except a nonempty root
 genesis seed's first fold at fence (a), above. Fence (b) reads the
-reserve from its status headroom; fence (a) reads no reserve, since the prompt
-is not yet appended; a host's idle fence reads it from the admission bound
+reserve from its status headroom; fence (a) reads it from the admission
+headroom of the committed source before appending the pending prompt. Both
+subtract any descriptor-derived native request room before applying the
+4,096-token observation reserve, as above. A host's idle fence reads it from the admission bound
 under the admitted ceiling, never from occupancy, and only for a measure
 admitted on a bound rather than the unanchored estimate. The fences add their
 own guards (the pressure guard, backoff, a failed fold before another round);
 the verdict decides only what the measure asks.
+The turn driver skips a threshold fence (occupancy, capacity pressure or
+segment pressure) whose source is the last committed compaction successor:
+unchanged history is not new work for another threshold-triggered paid fold.
+A provider overflow is a distinct trigger and retains its one bounded recovery
+even on that freshly committed successor.
+A new committed tool group or user intent makes a new source;
+capacity-forced and occupancy policies are distinct, so an occupancy landing
+refusal does not suppress a newly forced free-rung attempt. These guards do not
+authorize paid redispatch or change the backoff and single-dispatch rules.
 
 - **Fence (a), idle pre-dispatch.** The host schedules a compact before
   dispatching new user intent. The driver also checks the committed history
@@ -7811,7 +7822,8 @@ raw message. The prose is read only to classify and is never retained. The
 driver verifies any explicit error attribution matches the current route/model,
 confirms the ladder has an eligible cut or placeholder range, finalizes any
 refused operation, and runs fence (b) without the occupancy
-threshold, and on a committed compaction sends the round again as a **new
+threshold or the unchanged-successor threshold skip, and on a committed
+compaction sends the round again as a **new
 logical operation** on the smaller successor, without appending the prompt a
 second time and without spending a model round. The refused request produced
 nothing and the new one differs, so this is not a retry and single dispatch

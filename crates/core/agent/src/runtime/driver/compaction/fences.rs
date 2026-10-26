@@ -331,7 +331,7 @@ impl Driver {
         }
         self.reresolve_expired_model(command).await?;
         self.refresh_paid_fold_backoff(command.turn_id);
-        self.run_turn_fence_compaction(command, FenceTrigger::Occupancy)
+        self.run_turn_fence_compaction(command, FenceTrigger::ProviderOverflow)
             .await
             .map(|outcome| outcome.committed())
     }
@@ -424,6 +424,16 @@ impl Driver {
     ) -> Result<TurnCompactionOutcome, AgentError> {
         let checkpoint = self.authority.checkpoint();
         let canonical = checkpoint.manifest().canonical();
+        let source = canonical.history().identity();
+        if matches!(
+            trigger,
+            FenceTrigger::Occupancy
+                | FenceTrigger::CapacityPressure
+                | FenceTrigger::SegmentPressure
+        ) && self.last_compaction_successor == Some(source)
+        {
+            return Ok(TurnCompactionOutcome::Deferred);
+        }
         let plan = ContextHistoryPlan::new(&canonical.projection()).map_err(|_| {
             AgentError::new(AgentErrorKind::Internal, "compaction cut planning failed")
         })?;

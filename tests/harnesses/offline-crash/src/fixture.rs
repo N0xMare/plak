@@ -378,15 +378,29 @@ impl LanguageModel for LoopbackModel {
         // should make the crash precondition fail visibly. The driver emits it
         // as the trailing user item of the fold's input — never as a prefix
         // instruction — so the input items are where it has to be found.
-        let is_summary_request = plan.request().input().items().iter().any(|item| {
-            item.blocks().iter().any(|block| {
-                matches!(
-                    block,
-                    ContentBlock::Text(text)
-                        if text.text() == plakous::model::SEMANTIC_COMPACTION_INSTRUCTION
-                )
-            })
-        });
+        let native_namespace = NamespaceId::new("plakous.compaction").map_err(|error| {
+            ModelPreparationError::rejected(
+                ModelPreparationErrorKind::InvalidConfiguration,
+                error.to_string(),
+            )
+        })?;
+        let is_native_compaction = plan
+            .request()
+            .stable_prefix()
+            .native()
+            .entries()
+            .get(&native_namespace)
+            .is_some_and(|value| value == "native_responses_trigger_v1");
+        let is_summary_request = is_native_compaction
+            || plan.request().input().items().iter().any(|item| {
+                item.blocks().iter().any(|block| {
+                    matches!(
+                        block,
+                        ContentBlock::Text(text)
+                            if text.text() == plakous::model::SEMANTIC_COMPACTION_INSTRUCTION
+                    )
+                })
+            });
         let default_output_tokens = NonZeroU32::new(1_024).ok_or_else(|| {
             ModelPreparationError::rejected(
                 ModelPreparationErrorKind::InvalidConfiguration,
@@ -664,13 +678,23 @@ impl LanguageModel for LoopbackModel {
                         ScriptFaultPhase::InBand => {}
                     }
                 }
-                let response = loopback_response(
-                    round,
-                    &plan,
-                    &self.scenario,
-                    self.identity_namespace,
-                    prepared_input_tokens,
-                )?;
+                let response = if is_native_compaction {
+                    native_summary_response(
+                        round,
+                        &plan,
+                        self.identity_namespace,
+                        &self.descriptor,
+                        self.authority.account_binding(),
+                    )?
+                } else {
+                    loopback_response(
+                        round,
+                        &plan,
+                        &self.scenario,
+                        self.identity_namespace,
+                        prepared_input_tokens,
+                    )?
+                };
                 let response = if self.seal_final_artifact {
                     seal_fixture_artifact(&plan, &response, cache_affinity)?
                 } else {
@@ -1546,6 +1570,45 @@ fn scripted_summary_response(
     ))
 }
 
+fn native_summary_response(
+    round: u64,
+    plan: &ValidatedRequestPlan,
+    identity_namespace: u128,
+    descriptor: &ResolvedModelDescriptor,
+    account: Digest,
+) -> Result<ModelResponse, ModelError> {
+    let native = plakous::model::CompactionBlock::new("native older context compacted")
+        .map_err(invalid_model_fixture)?
+        .with_native_item(
+            r#"{"type":"compaction","encrypted_content":"offline-native-summary"}"#.into(),
+        )
+        .with_native_binding(plakous::model::CompactionReplayBinding::new(
+            descriptor.protocol().clone(),
+            descriptor.model_family().cloned(),
+            descriptor.requested_model().clone(),
+            account,
+        ));
+    let item = ConversationItem::new(
+        EntryId::try_from(Uuid::from_u128(
+            (identity_namespace << 64)
+                .saturating_add(90_000)
+                .saturating_add(u128::from(round)),
+        ))
+        .map_err(invalid_model_fixture)?,
+        Actor::Assistant,
+        vec![ContentBlock::Compaction(native)],
+        Provenance::ModelOutput,
+    )
+    .map_err(invalid_model_fixture)?;
+    Ok(ModelResponse::new(
+        vec![item],
+        FinishDetails::new(FinishReason::Stop, None),
+        None,
+        None,
+        plan.digest(),
+    ))
+}
+
 /// The tree call for one round of [`LoopbackScenario::Topology`].
 ///
 /// Round 1 spawns; rounds 2 and 3 read the previous round's tool result, so
@@ -1747,12 +1810,35 @@ fn script_descriptor(
     account: &[u8],
     script: &ScriptPlan,
 ) -> HarnessResult<ResolvedModelDescriptor> {
-    let descriptor = descriptor_over_protocol(
+    let mut descriptor = descriptor_over_protocol(
         account,
         script.maximum_projected_input,
         LOOPBACK_PROTOCOL,
         script.image_input,
     )?;
+    if script.native_compaction {
+        let capability = FeatureSupport::new(
+            Support::Native,
+            CapabilityConstraints::default(),
+            FactProvenance::new(FactSource::TestFixture, fixture_time()?, None),
+        );
+        let native = BTreeMap::from([(NamespaceId::new("plakous.compaction")?, capability)]);
+        descriptor = ResolvedModelDescriptor::new_custom(
+            descriptor.protocol().clone(),
+            descriptor.route().clone(),
+            descriptor.requested_model().clone(),
+            None,
+            descriptor.model_family().cloned(),
+            descriptor.profile().clone(),
+            CapabilitySet::new(descriptor.capabilities().features().clone(), native),
+        )
+        .with_context_contract(
+            descriptor
+                .context_contract()
+                .cloned()
+                .ok_or("native fixture context contract")?,
+        );
+    }
     if script.omit_context_contract {
         return Ok(ResolvedModelDescriptor::new_custom(
             descriptor.protocol().clone(),

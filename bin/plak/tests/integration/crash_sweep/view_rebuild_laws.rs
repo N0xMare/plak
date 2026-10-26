@@ -14,6 +14,7 @@ const SHAPES: &[&str] = &[
     "non_stop_finish_refusal",
     "steer_accepted_mid_turn",
     "scheduled_compaction_in_turn",
+    "scheduled_native_compaction_in_turn",
     "scheduled_compaction_workflow",
     "code_mode_cell_nested_then_final",
     "code_mode_cell_final",
