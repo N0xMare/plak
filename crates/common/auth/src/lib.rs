@@ -20,6 +20,8 @@
 
 mod binding;
 mod credential;
+#[cfg(feature = "jwt")]
+mod jwt_crypto;
 mod private_store;
 mod secret;
 /// In-process account/profile single-flight coordination.

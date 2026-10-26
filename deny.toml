@@ -13,6 +13,11 @@ multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
+deny = [
+    { name = "aws-lc-rs" },
+    { name = "aws-lc-sys" },
+    { name = "rsa" },
+]
 
 [licenses]
 confidence-threshold = 0.8
@@ -71,7 +76,7 @@ allow = ["Apache-2.0 WITH LLVM-exception"]
 # no supported platform builds it.
 [[licenses.exceptions]]
 name = "clipboard-win"
-version = "=5.4.1"
+version = "=5.4.3"
 allow = ["BSL-1.0"]
 
 [[licenses.exceptions]]

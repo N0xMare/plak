@@ -10,7 +10,7 @@ use std::task::{Context, Poll};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use futures_util::StreamExt as _;
-use jsonwebtoken::{EncodingKey, Header, encode};
+use jsonwebtoken::{EncodingKey, Header};
 use plakous_auth::subscription_limit::{
     InMemorySubscriptionRequestGate, SubscriptionLimitError, SubscriptionLimitSnapshot,
     SubscriptionRequestLimits, SubscriptionRequestPermit, SystemSubscriptionGateClock,
@@ -447,6 +447,30 @@ struct TestClaims<'a> {
     nonce: Option<&'a str>,
 }
 
+fn encode(
+    header: &Header,
+    claims: &impl Serialize,
+    key: &EncodingKey,
+) -> TestResult<String> {
+    let base64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let message = format!(
+        "{}.{}",
+        base64.encode(serde_json::to_vec(header)?),
+        base64.encode(serde_json::to_vec(claims)?)
+    );
+    let rng = ring::rand::SystemRandom::new();
+    let pair = ring::signature::EcdsaKeyPair::from_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+        key.as_bytes(),
+        &rng,
+    )
+    .map_err(|_| "invalid test EC key")?;
+    let signature = pair
+        .sign(&rng, message.as_bytes())
+        .map_err(|_| "test EC signing failed")?;
+    Ok(format!("{message}.{}", base64.encode(signature.as_ref())))
+}
+
 fn id_token(subject: &str, nonce: Option<&str>) -> TestResult<String> {
     id_token_with_exp(subject, nonce, system_unix_seconds()? + 3600)
 }
@@ -469,7 +493,7 @@ fn id_token_with_azp_exp(
     let private = STANDARD.decode(PRIVATE_DER_B64.replace('-', "+").replace('_', "/"))?;
     let mut header = Header::new(Algorithm::ES256);
     header.kid = Some(TEST_KID.to_owned());
-    Ok(encode(
+    encode(
         &header,
         &TestClaims {
             iss: XAI_ISSUER,
@@ -481,7 +505,7 @@ fn id_token_with_azp_exp(
             nonce,
         },
         &EncodingKey::from_ec_der(&private),
-    )?)
+    )
 }
 
 fn jwks(kid: &str) -> serde_json::Value {

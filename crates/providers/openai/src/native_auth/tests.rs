@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use jsonwebtoken::{EncodingKey, Header, encode};
+use jsonwebtoken::{EncodingKey, Header};
 use plakous_auth::subscription_limit::{
     InMemorySubscriptionRequestGate, SubscriptionRequestLimits, SystemSubscriptionGateClock,
 };
@@ -664,6 +664,30 @@ fn acceptance() -> Result<CodexCompatibilityAcceptance, NativeCodexAuthError> {
     )
 }
 
+fn encode(
+    header: &Header,
+    claims: &impl Serialize,
+    key: &EncodingKey,
+) -> TestResult<String> {
+    let base64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let message = format!(
+        "{}.{}",
+        base64.encode(serde_json::to_vec(header)?),
+        base64.encode(serde_json::to_vec(claims)?)
+    );
+    let pair = ring::signature::RsaKeyPair::from_der(key.as_bytes())
+        .map_err(|_| "invalid test RSA key")?;
+    let mut signature = vec![0; pair.public().modulus_len()];
+    pair.sign(
+        &ring::signature::RSA_PKCS1_SHA256,
+        &ring::rand::SystemRandom::new(),
+        message.as_bytes(),
+        &mut signature,
+    )
+    .map_err(|_| "test RSA signing failed")?;
+    Ok(format!("{message}.{}", base64.encode(signature)))
+}
+
 fn id_token(kid: &str, subject: &str, account: &str) -> TestResult<String> {
     let now = now_unix_secs();
     let mut header = Header::new(Algorithm::RS256);
@@ -684,7 +708,7 @@ fn id_token(kid: &str, subject: &str, account: &str) -> TestResult<String> {
         .collect::<String>();
     let der = base64::engine::general_purpose::STANDARD.decode(encoded)?;
     let pkcs1 = pkcs8_rsa_inner(&der).ok_or("invalid test PKCS#8 key")?;
-    Ok(encode(&header, &claims, &EncodingKey::from_rsa_der(pkcs1))?)
+    encode(&header, &claims, &EncodingKey::from_rsa_der(pkcs1))
 }
 
 fn pkcs8_rsa_inner(der: &[u8]) -> Option<&[u8]> {

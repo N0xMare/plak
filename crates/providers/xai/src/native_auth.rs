@@ -60,7 +60,8 @@ use futures_util::lock::Mutex as AsyncMutex;
 use jsonwebtoken::jwk::{
     AlgorithmParameters, EllipticCurve, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
 };
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode_header};
+use plakous_auth::oauth_orchestrator::jwt::decode;
 use plakous_auth::oauth_orchestrator::{
     BrowserLoopbackHooks, BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks,
     CredentialRefreshDetail, CredentialRefreshEvent, CredentialRefreshFailureClass,

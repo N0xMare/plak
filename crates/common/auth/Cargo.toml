@@ -25,7 +25,8 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 [dependencies]
 base64.workspace = true
 getrandom.workspace = true
-jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }
+jsonwebtoken = { workspace = true, optional = true }
+ring = { workspace = true, optional = true }
 plakous-http = { workspace = true, optional = true }
 rustix = { workspace = true, features = ["fs", "process"] }
 serde = { workspace = true, features = ["derive"] }
@@ -50,7 +51,7 @@ default = []
 # Claimed refresh/revoke + browser loopback + JWKS cache orchestrators.
 http-refresh = ["dep:plakous-http", "dep:tokio"]
 # Content-free JWT rejection classification for signed-identity dialects.
-jwt = ["http-refresh", "dep:jsonwebtoken"]
+jwt = ["http-refresh", "dep:jsonwebtoken", "dep:ring"]
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

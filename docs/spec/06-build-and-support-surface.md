@@ -1090,8 +1090,10 @@ attributable; `just build profiling` produces `target/profiling/plak`, and
 
 Linux x86_64 GNU measurements qualify the release profile's size/build-time
 tradeoff; these are non-publication rehearsals, not musl or macOS evidence.
-Both columns use Git-only defaults, unchanged AWS-LC-backed JWT verification,
-and separate parent/worker Cargo resolutions. Sizes are bytes; raw means the
+Both columns are historical measurements made with Git-only defaults,
+AWS-LC-backed JWT verification (before the ring change), and separate
+parent/worker Cargo resolutions. They are not current ring-build size evidence.
+Sizes are bytes; raw means the
 symbol-bearing Cargo output used for strict linkage proof. Staged copies have
 all symbols stripped. The tarball includes all three executables and licenses.
 
@@ -1378,6 +1380,18 @@ earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
 macOS.
 
 ## 7. Dependency and supply-chain policy
+
+JWT identity verification uses `jsonwebtoken =11.1.0` without either built-in
+backend. `plakous-auth/jwt` supplies a verification-only ring provider for
+RS256 and ES256, sharing the TLS crypto stack; signing and other algorithms
+refuse. An embedder needing another provider must explicitly call
+`CryptoProvider::install_default` before the first Plakous identity verification
+(chapter 01 §7.2). Otherwise the first decode installs the ring process provider;
+later installation and `jsonwebtoken` crate-feature defaults cannot replace it.
+No aws-lc or `rsa` crate
+is linked and no RUSTSEC-2023-0071 exception is needed. Closure exclusions pin
+aws-lc absent from default Plak and every subscription singleton; dependency
+bans additionally reject aws-lc-rs, aws-lc-sys and rsa anywhere in the graph.
 
 A dependency is taken only when it provides a clear correctness,
 interoperability, or maintenance benefit over a small local implementation. Each

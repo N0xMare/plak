@@ -423,7 +423,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-agent": "a19134205d444cf4b88520e8da37268e19e9527aae92ac337ffb68691c7bdba7",
     "plakous-anthropic": "2f501ee54d5ac3cf1867512c91ba2bfe82c70f74de7767a735b1f977f0c35b90",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
-    "plakous-auth": "621ce8b075d3e56e9c250ce9c68da87c1aba95de0cb34750683574cda7995202",
+    "plakous-auth": "612ab33d919a782e57f95a1afd61b30079a94faf100d1cb92e4013fbc047f9b8",
     "plakous-chat-completions": "251fd50384154edbb997b1b0394df1cda3b1795f081a383db30835cca6a0295e",
     "plakous-exchange": "209703e22ea03737ebab1904ef0e5286f431a71ec59fe962342c976457902fc4",
     "plakous-http": "4ba11a284120802378d429ec77ea58c8a3f25663d1808a795974c297f934ede9",
@@ -431,7 +431,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "567ec57875dcd1f0b3b28325330bd3cd0e071a994088fb90b7445ae8f69ac166",
     "plakous-messages": "eae7f4a067455ca31bab364c39a597256a19c84e636a17af6b6012bba40284b1",
     "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
-    "plakous-openai": "68cd7c2921152b0089085d63ed812b076c643f9485b7b5496f3b167435639347",
+    "plakous-openai": "245c035951bf08445c2c7d617f876ee870908aa4a9587ae7d262b897ec2a7ee6",
     "plakous-tool-files": "f91b59c3d65dff91d2fe462da36376abf3d82c44a5a86abf209d435cd046f759",
     "plakous-tool-plan": "7e57f5a8c4b1b39a7967fe97dbb83d7d78822878b40638d823e49c5a7d0b021c",
     "plakous-tool-process": "f70f0cd80a32e357f1b8381a78eeb0aa69861bb7f5fad614f0c52831a029c5cb",
@@ -444,7 +444,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-responses-dialect": "87c82cbbd98ded7dceeb4d2bbec480905da27084ee6ea8dba00e5c92f8212d8e",
     "plakous-store": "64f90ad9ab7d4143c47844d30dfcc4ce41fe06a980d80d6bfba681a3ae378015",
     "plakous-tools": "1140b910a06b7b83f425d6e0ed50a9466d7adc8e2da6a07b4885d4a3c0a737a0",
-    "plakous-xai": "b1e753efb16cda3956a21aaa836d5c7da2fbd375216035d30f1f657ac729823f",
+    "plakous-xai": "bfdc8ccb6f48d35fbfd32ebeaeb973f4be1b369368166276ecb4163c1b395cad",
 }
 
 
@@ -456,7 +456,11 @@ EXCLUDED_CLOSURE_PACKAGES = {
         "ratatui", "crossterm", "syntect", "arboard", "pulldown-cmark",
     ),
     ("plak", ("git-cli", "tui", "python", "mcp")): ("image",),
-    ("plak", ("default",)): ("jj-lib", "gix", "pollster"),
+    ("plak", ("default",)): ("jj-lib", "gix", "pollster", "aws-lc-rs", "aws-lc-sys", "rsa"),
+    ("plakous", ("full",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
+    ("plakous", ("native-subscriptions",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
+    ("plakous-openai", ("native-auth",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
+    ("plakous-xai", ("native-auth",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
     ("plak", ("git-cli",)): ("jj-lib", "gix", "pollster"),
     ("plakous", ("composition",)): (
         "htmd",

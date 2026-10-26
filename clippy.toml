@@ -2,3 +2,9 @@ msrv = "1.99.0"
 cognitive-complexity-threshold = 25
 too-many-arguments-threshold = 7
 type-complexity-threshold = 250
+disallowed-methods = [
+    { path = "jsonwebtoken::decode", reason = "Use the auth JWT decode boundary so the reviewed provider is installed before identity verification." },
+    { path = "jsonwebtoken::jws::decode", reason = "Use the auth JWT decode boundary rather than bypassing provider installation." },
+    { path = "jsonwebtoken::crypto::verify", reason = "Use the auth JWT decode boundary rather than bypassing provider installation and claim checks." },
+    { path = "jsonwebtoken::encode", reason = "The shared JWT provider is verification-only; Plakous does not sign JWTs." },
+]

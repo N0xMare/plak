@@ -3818,6 +3818,15 @@ signed-claim validation, account binding, token payload encodings, compatibility
 review checks and consent pins. Sharing scaffolding does not change their wire
 bytes, stored credentials or compiled identities.
 
+JWT identity verification uses a process-wide `jsonwebtoken` provider. An
+embedder needing its own algorithms or signing MUST call that provider's
+`CryptoProvider::install_default` before the first Plakous identity verification.
+Otherwise Plakous lazily installs its verification-only ring provider (RS256
+and ES256); later installation cannot replace it, and `jsonwebtoken` crate-feature
+defaults are not honored once it is installed. Selecting crate features alone
+is not an explicit provider installation. A provider installed before the first
+verification remains authoritative for the process.
+
 The facade's private `SubscriptionState` owns compatibility consent, login
 recovery markers, their locks and quarantine, and offline catalog persistence. Login and model
 workflows call named state operations; the catalog codec performs no I/O.

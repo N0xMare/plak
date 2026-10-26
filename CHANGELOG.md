@@ -54,7 +54,11 @@ one cross-build carrier (a build imports its own and the previous version).
   terminal paths. Waiting releases shared request capacity and does not spend
   the operation deadline. The HUD and child activity show the login wait. This
   is in-memory state only; persisted and export encodings are unchanged.
-
+- JWT identity verification shares ring with TLS instead of linking aws-lc.
+  Only RS256 and ES256 verification is enabled; signing refuses. Embedders
+  needing another JWT provider must explicitly install it before the first
+  Plakous identity verification; later installation and crate-feature defaults
+  cannot replace the lazily installed process provider.
 - All local cell profiles use `LocalCompositionProfile::cell(&CellDescriptor)`.
   The four per-engine profile constructors and Python-only component identity
   accessors are removed. `CellDescriptor` is available at the compose crate

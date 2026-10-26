@@ -42,7 +42,7 @@ native-auth = [
 test-support = ["native-auth"]
 [dependencies]
 base64 = { workspace = true, optional = true }
-jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }
+jsonwebtoken = { workspace = true, optional = true }
 plakous-auth = { workspace = true, optional = true }
 plakous-exchange.workspace = true
 plakous-http.workspace = true
@@ -60,6 +60,7 @@ url.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+ring.workspace = true
 plakous-agent.workspace = true
 plakous-tools.workspace = true
 plakous-http = { workspace = true, features = ["fault-injection"] }

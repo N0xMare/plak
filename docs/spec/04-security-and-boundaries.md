@@ -1433,6 +1433,15 @@ normal shutdown stops and joins it before reading the lease to release.
 
 ## 7. Unsafe code and supply chain
 
+JWT signature verification and TLS share ring. The JWT backend accepts only
+RS256 and ES256 verification and refuses signing; provider header, key-family
+and claim checks remain in force. An embedder's JWT provider is authoritative
+only when explicitly installed with `CryptoProvider::install_default` before
+the first Plakous identity verification (chapter 01 §7.2). Otherwise the auth
+decode boundary lazily installs the reviewed verification-only process provider;
+later installation and crate-feature defaults cannot replace it. Neither aws-lc nor the `rsa` crate
+is part of this closure, and there is no Marvin advisory exception.
+
 The workspace JJ backend runs `jj-lib` in process. Host JJ operations do not
 spawn the JJ CLI, read its user configuration, or invoke an editor. Native
 repository and working-copy mutation stays outside the tree mutex; working-copy

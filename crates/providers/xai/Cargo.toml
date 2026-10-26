@@ -46,7 +46,7 @@ native-auth = [
 base64 = { workspace = true, optional = true }
 futures-util = { workspace = true, features = ["async-await", "std"], optional = true }
 getrandom = { workspace = true, optional = true }
-jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }
+jsonwebtoken = { workspace = true, optional = true }
 plakous-auth = { workspace = true, optional = true }
 plakous-exchange.workspace = true
 plakous-http.workspace = true
@@ -65,6 +65,7 @@ url = { workspace = true, optional = true }
 zeroize.workspace = true
 
 [dev-dependencies]
+ring.workspace = true
 plakous-http = { workspace = true, features = ["fault-injection"] }
 plakous-test-support = { path = "../../../tests/support/plakous-test-support" }
 base64.workspace = true

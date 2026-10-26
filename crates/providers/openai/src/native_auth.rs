@@ -81,7 +81,8 @@ use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use base64::Engine as _;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode_header};
+use plakous_auth::oauth_orchestrator::jwt::decode;
 #[cfg(test)]
 #[cfg(test)]
 use plakous_auth::oauth_orchestrator::write_all_before_deadline;
