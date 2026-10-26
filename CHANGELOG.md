@@ -12,6 +12,8 @@ one cross-build carrier (a build imports its own and the previous version).
 - Fast children retain their start and finished transcript milestones even
   when they complete before the host's first tree observation. Durable notice
   identities prevent duplicates after reattachment or transcript truncation.
+  Reversals use an ordinary tree notice rather than a second adopted milestone;
+  conflicts deduplicate by topology operation, even without a display call id.
 
 - Source builds can omit the TUI, clipboard paste, image decoding, Python
   composition, or MCP with Cargo features. Defaults retain the shipped shape.

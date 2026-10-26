@@ -1757,6 +1757,14 @@ indexed sequences; cross-store interleaving remains informational.
 The same hosted laws cover an early question, named notices pending in an
 unsaved session, and distinct adoptions with reused or absent presentation
 call ids. Their identities come from durable message and merge operations.
+An adopt-then-revert law requires exactly one adopted milestone and one
+ordinary tree-info reversal notice, including on a repeated first-read push.
+Conflict laws run the real topology tool with distinct operation ids, then
+present its terminals with reused, absent and empty display ids. Every
+operation retains one keyed conflict notice and its own whole path; conflict
+facts still cross the existing process-local tool boundary, not a new store
+encoding. Product schema 34, tree schema 9 and export v9 importing v8 stay
+unchanged by these notice corrections.
 The bounded result-mail observation law requires start and finished milestones
 before its result row even on the first read. The spawn/wait/adopt parity
 fixture uses a standalone tool driver, not a hub-visible tree: its three faces

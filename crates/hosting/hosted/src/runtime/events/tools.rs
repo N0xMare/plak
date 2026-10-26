@@ -338,14 +338,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             crate::runtime::tools::process_observation_label(&name, label_exposed, args)
         });
         let wait = wait_started(&name, process_label, process_args.as_ref());
-        if let Some(call_id) = call_id_str.as_ref()
-            && let Some(candidate) =
-                crate::runtime::tool_facts::adopt_candidate_arg(&name, process_args.as_ref())
-        {
-            projection
-                .adopt_candidates
-                .insert(call_id.clone(), candidate);
-        }
         let kind = crate::activity::tool_activity_kind(&name);
         let processes = process_label
             .map(|_| roots.job_registry().snapshot())
@@ -691,7 +683,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         // A topology call's whole result, as its tool left it: the
         // observation preview is bounded and stops being JSON on a
         // fan-out wait or a long conflict list.
-        let call_facts = call_id_str
+        // The topology executor keys its operation and whole-result facts by
+        // the invocation's canonical call id, not the row's display id.
+        let operation_id = event.call_id().map(|id| id.to_string());
+        let call_facts = operation_id
             .as_deref()
             .filter(|_| matches!(name.as_str(), "wait_agent" | "adopt_candidate"))
             .and_then(plakous_recursive_subagents::call_facts::take);
@@ -867,39 +862,53 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         } else {
             let _ = events.send(line);
         }
-        if let Some(call_id) = call_id_str.as_ref().filter(|id| !id.is_empty())
-            && let Some(candidate) = projection.adopt_candidates.remove(call_id)
+        if let Some(operation_id) = operation_id
             && let Some(
                 facts @ plakous_recursive_subagents::call_facts::TopologyCallFacts::AdoptConflict {
                     ..
                 },
             ) = call_facts
-            && let Some(milestone) =
-                crate::runtime::tool_facts::adopt_milestone(&candidate, facts, |candidate| {
-                    last_tree_revision
-                        .runtime(rows, session)?
-                        .read(|tree| {
-                            let agent = tree
-                                .candidates()
-                                .values()
-                                .find(|record| record.candidate_id.as_str() == candidate)?
-                                .producing_agent_id
-                                .clone();
-                            let template = tree
-                                .nodes()
-                                .get(&agent)
-                                .and_then(|node| node.template.as_ref())
-                                .map(ToString::to_string);
-                            Some((agent, template))
-                        })
-                        .ok()
-                        .flatten()
-                })
+            && let Some(runtime) = last_tree_revision.runtime(rows, session)
+            && let Ok(Some((id, milestone))) = runtime.read(|tree| {
+                let operation = tree.operations().get(&operation_id)?;
+                if operation.caller_agent_id != tree.root_agent_id
+                    || operation.tool_name != "adopt_candidate"
+                    || operation.terminal_code
+                        != Some(crate::agent_tree_protocol::TopologyErrorCode::MergeConflict)
+                {
+                    return None;
+                }
+                let request: crate::agent_tree_protocol::AdoptCandidateRequest =
+                    serde_json::from_str(&operation.canonical_request).ok()?;
+                let candidate = request.candidate_id;
+                let milestone =
+                    crate::runtime::tool_facts::adopt_milestone(candidate.as_str(), facts, |_| {
+                        let source = tree.candidates().get(&candidate)?;
+                        let template = tree
+                            .nodes()
+                            .get(&source.producing_agent_id)
+                            .and_then(|node| node.template.as_ref())
+                            .map(ToString::to_string);
+                        Some((source.producing_agent_id.clone(), template))
+                    })?;
+                Some((
+                    format!(
+                        "tree:{}:adopt-conflict:{candidate}:{operation_id}",
+                        tree.tree_id
+                    ),
+                    milestone,
+                ))
+            })
         {
             if let Ok(mut ids) = crate::runtime::tree::known_notice_ids(store, session) {
-                let id = format!("adopt-conflict:{candidate}:{call_id}");
-                let _ = crate::runtime::tree::publish_milestone_once(
-                    store, home, session, events, &mut ids, &id, milestone,
+                let _ = crate::runtime::tree::publish_notice_once(
+                    store,
+                    home,
+                    session,
+                    events,
+                    &mut ids,
+                    &id,
+                    sessions::TranscriptRow::Milestone(milestone),
                 );
             }
         }

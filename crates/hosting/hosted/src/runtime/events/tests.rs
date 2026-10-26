@@ -93,6 +93,132 @@ fn live_tool_subject_redaction_is_idempotent() {
     assert_eq!(live_tool_subject(&subject), subject);
 }
 
+fn completed_adopt_event(operation: uuid::Uuid) -> AgentEvent {
+    use plakous::model::{Digest, DigestDomain};
+    let digest = Digest::sha256(DigestDomain::ToolDefinition, 1, &[b"test"]).unwrap();
+    serde_json::from_value(serde_json::json!({
+        "branch_sequence": 1, "event_id": operation, "session_id": operation,
+        "branch_id": operation, "agent_id": operation, "run_id": operation,
+        "turn_id": null, "attempt_id": null, "call_id": operation,
+        "timestamp": {"seconds": 1, "nanoseconds": 0}, "causal_parent": null,
+        "origin": "Tool", "classification": "Public", "event_schema": 3,
+        "projection_revision": 6, "visibility": "Content", "scope": "Agent", "event_kind_version": 11,
+        "kind": {"ToolCompleted": {
+            "identity": {"canonical_name":"adopt_candidate", "exposed_name":"adopt_candidate",
+                "exposure_map_digest":null, "registered_tool_id":"plak.topology.adopt_candidate.v1",
+                "executor_id":"plak.topology.adopt_candidate.executor.v1", "definition_digest":digest,
+                "schema_digest":digest, "effect_metadata_digest":digest, "argument_limits_digest":digest},
+            "lineage":plakous::agent::ToolCallerLineageView::direct(),
+            "observation":{"succeeded":false,"preview":"merge conflict"}
+        }}, "retained_bytes":512,"metadata_retained_bytes":512,"content_retained_bytes":0
+    })).unwrap()
+}
+
+#[tokio::test]
+async fn conflict_notices_use_operation_ids_with_reused_absent_and_empty_display_ids() {
+    use crate::agent_tree_protocol::{AdoptCandidateRequest, TopologyErrorCode};
+    use crate::occupancy_vcs::{AdoptFailure, ConflictPath};
+    let dir = tempfile::tempdir().unwrap();
+    let roots = crate::agent::ProductStateRoots::with_doubles(
+        dir.path().to_owned(),
+        dir.path().join("state"),
+    );
+    let rows = test_kit::MemoryRows::new();
+    let home = SessionHome::new(dir.path().join("sessions"));
+    let mut session = SessionRecord::new(dir.path().to_owned());
+    let tree_id = session.id.clone();
+    let (tree, vcs, candidate) =
+        crate::runtime::test_support::finished_fork_tree(dir.path(), &tree_id);
+    let runtime = crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    let (events, received) = host_event_sink();
+    let mut projection = TurnProjection::default();
+    let mut push = TreeSnapshotPush::default();
+    let request = serde_json::to_value(AdoptCandidateRequest {
+        candidate_id: candidate.clone(),
+        revert: false,
+        accept_conflicts: false,
+        expected_target: None,
+        evidence: None,
+    })
+    .unwrap();
+    let mut expected = Vec::new();
+    for (index, display) in [Some("reused"), Some("reused"), None, Some("")]
+        .into_iter()
+        .enumerate()
+    {
+        let operation = uuid::Uuid::new_v4();
+        let path = format!("src/conflict-{index}, draft.rs");
+        vcs.adopt_next_with(Err(AdoptFailure::Conflict {
+            paths: vec![ConflictPath {
+                path: path.clone(),
+                kind: "contents".into(),
+            }],
+            candidate: None,
+        }));
+        let _outcome = crate::agent_tree_tools::invoke_granted_topology_tool_on(
+            runtime.driver().clone(),
+            "root".into(),
+            "adopt_candidate",
+            &request,
+            operation.to_string(),
+            crate::agent_tree_tools::TopologyHostPorts::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            runtime
+                .read(|tree| tree.operations()[&operation.to_string()].terminal_code)
+                .unwrap(),
+            Some(TopologyErrorCode::MergeConflict)
+        );
+        let event = completed_adopt_event(operation);
+        super::EventApplier {
+            event: &event,
+            roots: &roots,
+            rows: &rows,
+            store: rows.records(),
+            home: &home,
+            session: &mut session,
+            events: &events,
+            assistant: &mut String::new(),
+            delta_buf: &mut String::new(),
+            last_flush: &mut Instant::now(),
+            tool_subjects: &mut ToolSubjectStash::new(),
+            projection: &mut projection,
+            log: None,
+            observed_session_id: "test",
+            last_tree_revision: &mut push,
+            compacted_mid_turn: &mut false,
+            peak_prepared_input_tokens: &mut 0,
+            call_id_str: display.map(str::to_owned),
+        }
+        .tool_completed();
+        expected.push((
+            format!("tree:{tree_id}:adopt-conflict:{candidate}:{operation}"),
+            path,
+        ));
+    }
+    let notices = rows.records().load_intents(&session.id).unwrap().notices;
+    for (id, path) in expected {
+        let matching: Vec<_> = notices
+            .iter()
+            .filter(|notice| notice.notice_id == id)
+            .collect();
+        assert_eq!(matching.len(), 1);
+        let TranscriptRow::Milestone(row) = &matching[0].row else {
+            panic!("conflict milestone")
+        };
+        assert_eq!(
+            row.event,
+            plakous_host_protocol::views::transcript::MilestoneEvent::AdoptConflict
+        );
+        assert_eq!(row.paths, [path]);
+    }
+    assert_eq!(received.try_iter().filter(|event| matches!(event,
+        HostEvent::Row(TranscriptRow::Milestone(row)) if row.event == plakous_host_protocol::views::transcript::MilestoneEvent::AdoptConflict)).count(), 4);
+    crate::topology_runtime::force_release(&tree_id).await;
+}
+
 #[test]
 fn live_and_restored_subjects_match_at_the_byte_bound() {
     for (raw, expected) in [

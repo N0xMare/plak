@@ -183,13 +183,6 @@ fn settled_word(row: &Value) -> Option<&'static str> {
     }
 }
 
-/// The candidate an `adopt_candidate` call names, from its arguments.
-pub(super) fn adopt_candidate_arg(name: &str, args: Option<&Value>) -> Option<String> {
-    (name == "adopt_candidate")
-        .then(|| args?.get("candidate_id")?.as_str().map(str::to_owned))
-        .flatten()
-}
-
 /// The milestone an `adopt_candidate` call earns from the facts its tool
 /// left: `adopted` with the landed file count, or `adopt_conflict` with the
 /// conflicting paths (at most [`MAX_CONFLICT_PATHS`], each a whole path as

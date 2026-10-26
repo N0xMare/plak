@@ -1285,8 +1285,6 @@ struct TurnProjection<P: plakous_host_protocol::ProtocolExtension> {
     cells: HashMap<String, ComposeProjection>,
     /// Call-local process handles for result-derived wait subjects.
     process_waits: HashMap<String, Vec<String>>,
-    /// Call-local candidate an `adopt_candidate` names, for its milestone.
-    adopt_candidates: HashMap<String, String>,
     /// Call-local row name a start gave a Grok await or interrupt over a
     /// child (`wait_agent`, `interrupt_agent`), kept for its later lines.
     presented_names: HashMap<String, String>,
@@ -1330,7 +1328,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> Default for TurnProjection<P> 
             settled_assistant_len: 0,
             cells: HashMap::new(),
             process_waits: HashMap::new(),
-            adopt_candidates: HashMap::new(),
             presented_names: HashMap::new(),
             process_commands: HashMap::new(),
             marker_by_cell: HashMap::new(),

@@ -355,6 +355,52 @@ pub(super) fn no_unsettled_rebind_requests(config: &HostConfig) -> bool {
     })
 }
 
+pub(super) fn finished_fork_tree(
+    workspace: &std::path::Path,
+    tree_id: &str,
+) -> (
+    crate::agent_tree::ProductAgentTree,
+    Arc<crate::agent_tree::FakeVcs>,
+    crate::agent_tree_protocol::CandidateId,
+) {
+    use crate::agent_tree_protocol::{
+        SpawnAgentRequest, SpawnWorkspace, SubmitResultRequest, Tier, WriterMode,
+    };
+    let vcs = Arc::new(crate::agent_tree::FakeVcs::new());
+    let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test_with(
+        vcs.clone(),
+        tree_id,
+        "root",
+        "owner",
+        workspace.to_owned(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut request =
+        SpawnAgentRequest::test_named("implement", Tier::Mutate, "worker", "finish now");
+    request.workspace = SpawnWorkspace::Fork;
+    let child = tree.spawn_agent("root", &request, None).unwrap();
+    tree.submit_result(
+        &child.agent_id,
+        &SubmitResultRequest {
+            turn_token: tree.attempt(&child.agent_id).unwrap().turn_token,
+            output_json: "{\"ok\":true}".into(),
+        },
+        None,
+    )
+    .unwrap();
+    tree.record_turn_completed(&child.agent_id).unwrap();
+    tree.settle_for_test();
+    let candidate = tree
+        .attempt(&child.agent_id)
+        .unwrap()
+        .candidate_id
+        .clone()
+        .unwrap();
+    (tree, vcs, candidate)
+}
+
 pub(super) fn install_live_descendant_on_hub(tree_id: &str, workspace: &std::path::Path) {
     use crate::agent_tree::ProductAgentTree;
     use crate::agent_tree_protocol::{SpawnAgentRequest, WriterMode};

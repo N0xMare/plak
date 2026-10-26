@@ -178,14 +178,14 @@ fn a_pending_named_notice_in_an_unsaved_session_is_not_published_twice() {
     for _ in 0..2 {
         let mut ids = known_notice_ids(paths.records(), &session).unwrap();
         assert!(
-            !publish_milestone_once(
+            !publish_notice_once(
                 paths.records(),
                 &home,
                 &mut session,
                 &events,
                 &mut ids,
                 "pending-start",
-                milestone.clone()
+                TranscriptRow::Milestone(milestone.clone())
             )
             .unwrap()
         );
@@ -419,6 +419,78 @@ fn closing_an_agent_without_a_hub_retires_its_cached_notice_scope() {
     );
     assert!(!events.resync_transcript(&TranscriptScope::Agent("c1".into())));
     assert!(events.resync_transcript(&TranscriptScope::Root));
+}
+
+#[tokio::test]
+async fn reverting_announces_one_adoption_and_one_existing_tree_notice() {
+    use crate::agent_tree_protocol::AdoptCandidateRequest;
+    use crate::session_store::SessionRecordStore;
+    let root = tempfile::tempdir().unwrap();
+    let rows = MemoryRows::new();
+    let mut session = SessionRecord::new(root.path().to_owned());
+    let tree_id = durable_tree_id(&rows, &session);
+    let (mut tree, _, candidate) = finished_fork_tree(root.path(), &tree_id);
+    let mut request = AdoptCandidateRequest {
+        candidate_id: candidate.clone(),
+        revert: false,
+        accept_conflicts: false,
+        expected_target: None,
+        evidence: None,
+    };
+    tree.adopt_candidate("root", &request, Some("op-adopt"))
+        .unwrap();
+    request.revert = true;
+    tree.adopt_candidate("root", &request, Some("op-revert"))
+        .unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(sender);
+    let home = SessionHome::new(root.path().join("sessions"));
+    for _ in 0..2 {
+        emit_tree_snapshot_if_revision_advanced(
+            &rows,
+            rows.records(),
+            &home,
+            &mut session,
+            &mut TreeSnapshotPush::default(),
+            &events,
+            true,
+        );
+    }
+    let notices = rows.records().load_intents(&session.id).unwrap().notices;
+    assert_eq!(
+        notices
+            .iter()
+            .filter(|notice| matches!(&notice.row,
+        TranscriptRow::Milestone(row) if row.event == MilestoneEvent::Adopted))
+            .count(),
+        1
+    );
+    let revert = notices
+        .iter()
+        .find(|notice| notice.notice_id == format!("tree:{tree_id}:revert:{candidate}:op-revert"))
+        .unwrap();
+    let TranscriptRow::Notice(row) = &revert.row else {
+        panic!("existing notice vocabulary")
+    };
+    assert_eq!(row.scope, NoticeScope::Tree);
+    assert_eq!(row.text, format!("reverted {candidate} · 1 file"));
+    let live: Vec<_> = received.try_iter().collect();
+    assert_eq!(
+        live.iter()
+            .filter(|event| matches!(event,
+        HostEvent::Row(TranscriptRow::Milestone(row)) if row.event == MilestoneEvent::Adopted))
+            .count(),
+        1
+    );
+    assert_eq!(
+        live.iter()
+            .filter(|event| matches!(event,
+        HostEvent::Row(TranscriptRow::Notice(row)) if row.text.starts_with("reverted ")))
+            .count(),
+        1
+    );
+    crate::topology_runtime::force_release(&tree_id).await;
 }
 
 /// A finished child's result keeps 16 KiB and a cut says so and from how

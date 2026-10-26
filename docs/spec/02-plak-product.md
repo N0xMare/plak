@@ -3863,10 +3863,21 @@ notice identities once, also recognizes named pending notices, and adds ids
 only after successful commits. The root's own `adopt_candidate` operation
 earns an `adopted` milestone keyed by tree, candidate and durable operation id,
 with the landed file count from its receipt; reused or absent presentation
-call ids do not merge distinct adoptions. A call may instead earn an `adopt conflict`
+call ids do not merge distinct adoptions. A receipt with `reverted:true` does
+not earn an `adopted` milestone. It publishes an existing tree-info notice,
+`reverted <candidate> · N files` (`1 file` in the singular), keyed
+`tree:<tree>:revert:<candidate>:<operation>`; the revert's tool row remains.
+A call may instead earn an `adopt conflict`
 milestone with the conflicting paths (at most 16, each whole as the VCS named
 it), which the committed result does not carry and the host takes from the
-call's tool-boundary facts; the producing child is the candidate's sealer, and
+call's tool-boundary facts. Conflict notice identity is
+`tree:<tree>:adopt-conflict:<candidate>:<operation>`: the operation id is the
+canonical invocation id used by the topology executor, never the display
+call id. The retained root `merge_conflict` operation supplies the requested
+candidate. Reused, absent or empty display ids neither merge nor suppress
+notices. Conflict details remain process-local until their notice is committed;
+this does not add a durable refusal payload or a tree-store format.
+The producing child is the candidate's sealer, and
 the milestone's template is that child's template when the tree names one. The
 VCS landing reports a file count, not the landed paths, so an `adopted`
 milestone carries no text. Wait

@@ -2154,6 +2154,11 @@ and dropped would lose what stood behind a landing. Because each review node's
 
 ### 7.6 Reverting an adoption
 
+The root host does not turn a successful `reverted:true` receipt into a second
+`adopted` milestone. It uses the existing tree-info notice vocabulary to name
+the reversal, keyed by tree, candidate and revert operation; the tool row
+still records the reversal itself. No new persisted row kind is introduced.
+
 `adopt_candidate {candidate_id, revert:true}` removes exactly one adoption's
 delta from the caller's current checkout, preserving later unrelated edits.
 Only the original adopter may revert it. The accepting candidate and its

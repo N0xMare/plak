@@ -281,9 +281,9 @@ fn child_milestones(
     rows
 }
 
-fn adoption_milestones(
+fn adoption_notices(
     tree: &plakous_recursive_subagents::tree::ProductAgentTree,
-) -> Vec<(String, AgentMilestone)> {
+) -> Vec<(String, TranscriptRow)> {
     tree.operations()
         .values()
         .filter(|operation| {
@@ -294,6 +294,27 @@ fn adoption_milestones(
         .filter_map(|operation| {
             let receipt: plakous_host_protocol::topology::AdoptOutcome =
                 serde_json::from_str(operation.terminal_response.as_deref()?).ok()?;
+            if receipt.reverted {
+                return Some((
+                    format!(
+                        "tree:{}:revert:{}:{}",
+                        tree.tree_id, receipt.candidate_id, operation.operation_id
+                    ),
+                    TranscriptRow::info(
+                        NoticeScope::Tree,
+                        format!(
+                            "reverted {} · {} {}",
+                            receipt.candidate_id,
+                            receipt.files_changed,
+                            if receipt.files_changed == 1 {
+                                "file"
+                            } else {
+                                "files"
+                            }
+                        ),
+                    ),
+                ));
+            }
             let source = tree.candidates().get(&receipt.candidate_id)?;
             let milestone = super::tool_facts::adopt_milestone(
                 receipt.candidate_id.as_str(),
@@ -315,7 +336,7 @@ fn adoption_milestones(
                     "tree:{}:adopt:{}:{}",
                     tree.tree_id, receipt.candidate_id, operation.operation_id
                 ),
-                milestone,
+                TranscriptRow::Milestone(milestone),
             ))
         })
         .collect()
@@ -385,29 +406,25 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
             if node.agent_id == tree.root_agent_id {
                 continue;
             }
-            rows.extend(child_milestones(tree, node));
+            rows.extend(
+                child_milestones(tree, node)
+                    .into_iter()
+                    .map(|(id, milestone)| (id, TranscriptRow::Milestone(milestone))),
+            );
         }
         for question in root_questions(tree) {
             rows.push((
                 format!("tree:{}:question:{}", tree.tree_id, question.message_id),
-                ask_milestone(tree, question),
+                TranscriptRow::Milestone(ask_milestone(tree, question)),
             ));
         }
-        rows.extend(adoption_milestones(tree));
+        rows.extend(adoption_notices(tree));
         rows
     });
     // No session feed fact implies a tree milestone, so each is an operator
     // notice intent (spec 02 §2.6) and a restore shows what the live face did.
-    for (id, milestone) in milestones.unwrap_or_default() {
-        let _ = publish_milestone_once(
-            store,
-            home,
-            session,
-            events,
-            &mut notice_ids,
-            &id,
-            milestone,
-        );
+    for (id, row) in milestones.unwrap_or_default() {
+        let _ = publish_notice_once(store, home, session, events, &mut notice_ids, &id, row);
     }
     let _ = runtime.read(|tree| {
         let revision = tree.revision;
@@ -521,14 +538,14 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     });
 }
 
-pub(super) fn publish_milestone_once<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) fn publish_notice_once<P: plakous_host_protocol::ProtocolExtension>(
     store: &dyn crate::session_store::SessionRecordStore,
     home: &crate::session_home::SessionHome,
     session: &mut SessionRecord,
     events: &Sender<P>,
     notice_ids: &mut std::collections::HashSet<String>,
     id: &str,
-    milestone: AgentMilestone,
+    row: TranscriptRow,
 ) -> Result<bool, String> {
     if notice_ids.contains(id)
         || session
@@ -539,7 +556,6 @@ pub(super) fn publish_milestone_once<P: plakous_host_protocol::ProtocolExtension
         notice_ids.insert(id.into());
         return Ok(false);
     }
-    let row = TranscriptRow::Milestone(milestone);
     let committed = super::admission::commit_session_update(store, home, session, |candidate| {
         candidate
             .transcript
