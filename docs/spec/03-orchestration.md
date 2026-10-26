@@ -4071,7 +4071,13 @@ the same history), a compaction is the `compact` tool row, and delivered mail is
 one `tree` notice, whose text is `<purpose> · #<agent> · <body>`.
 Root feed reads and child atomic-history reads use one hosted
 `SessionTranscriptPart` reader, preserving result subjects and composition
-lineage before their row projection. Canonical-history read positions and
+lineage before their row projection.
+The prose, image, mail and visible-reasoning rows also use the root's canonical
+row-order mapper; omitted reasoning does not split a prose run or emit a row.
+Canonical call and result rows use that mapper's shared tool constructor and
+settlement. Child process/wait context and explicit composition owners remain
+inputs, not facts guessed from another scope or from row order.
+Canonical-history read positions and
 fragment offsets are defined in chapter 01 §12; they are not bounded-window
 indices and remain identical for retained items across reopen and window slides.
 Child keys use that canonical position as `anchor`, the runtime lane, and the

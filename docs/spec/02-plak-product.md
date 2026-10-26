@@ -1568,6 +1568,13 @@ bounded read at the record's checkpoint (`feed_items`, `feed_call`,
 `feed_terminal`, chapter 01 §5.11); (c) a join with a product intent; (d) a
 host-authored notice intent in lane 1; or (e) live only, shown live and absent
 from the persisted row and from every rebuild.
+Root and child canonical reads share one row-order mapper for prose, image
+chips, visible reasoning and mail. Hidden reasoning contributes neither text
+nor an artificial prose boundary. The same canonical mapper constructs tool
+rows and settles their result state, detail and wait facts. Root feed and
+child history adapters retain their own authoritative call ordering, lineage,
+process subjects, compaction identities and timestamps; those facts are not
+inferred by the shared row assembly.
 
 Every compaction's live tool row (manual, scheduled, capacity recovery and
 automatic in-turn folds) uses the projector's `compaction-<hex16>`

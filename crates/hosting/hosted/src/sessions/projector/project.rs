@@ -11,7 +11,7 @@ use plakous::sessions::feed::{
     FeedSeq, FeedTurnOutcome, FeedWorkflowKind, FeedWorkflowOutcome,
 };
 use plakous_host_protocol::views::presentation::{ActivityKind, ActivityState, row_bytes};
-use plakous_host_protocol::views::transcript::{ProcessNotice, ProcessOutcome, WaitFacts};
+use plakous_host_protocol::views::transcript::{ProcessNotice, ProcessOutcome};
 
 use super::intents::ProductIntents;
 use super::reads::{
@@ -23,13 +23,13 @@ use super::views::{
     SessionViews, WorkflowCompletion, WorkflowSettlement,
 };
 use crate::runtime::events::{
-    abandoned_turn_operator_detail, compact_terminal_subject, completed_tool_detail,
-    completed_tool_state, compose_counts_subject, host_owns_subject, projected_tool_subject,
-    wait_settled, wait_started,
+    abandoned_turn_operator_detail, compact_terminal_subject, completed_tool_state,
+    compose_counts_subject, host_owns_subject, projected_tool_subject,
 };
+use crate::runtime::{Derived, item_rows, projected_tool_row as tool_row, settle_tool_row};
 use crate::sessions::{
-    MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES, NoticeScope, ProductCompactReason, ThinkingRow,
-    ToolItem, TranscriptRow, bound_row,
+    MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES, NoticeScope, ProductCompactReason, ToolItem,
+    TranscriptRow, bound_row,
 };
 
 /// The first ordinal of a model round's prose, keyed at the record of the
@@ -1461,122 +1461,8 @@ impl Applier<'_> {
     }
 }
 
-/// What one history item derives, in part order.
-enum Derived<'a> {
-    /// A prose, mail or reasoning row.
-    Row(Box<TranscriptRow>),
-    /// A tool call or result block: its row is keyed by call id.
-    Call(&'a ReadPart),
-}
-
-/// What one history item derives: user and assistant prose, inbound mail as
-/// one tree notice (a prompt's child-mail batch as one per child), visible reasoning, and its call blocks in order.
-fn item_rows(item: &ReadItem, ordinal: u64, sent_at_ms: Option<u64>) -> Vec<Derived<'_>> {
-    let mut rows = Vec::new();
-    let mut text = String::new();
-    let flush = |rows: &mut Vec<Derived<'_>>, text: &mut String| {
-        if text.trim().is_empty() {
-            text.clear();
-            return;
-        }
-        let value = std::mem::take(text);
-        if let Some(mail) = crate::topology_navigator::mail_row(&value) {
-            rows.push(Derived::Row(Box::new(TranscriptRow::info(
-                NoticeScope::Tree,
-                mail,
-            ))));
-            return;
-        }
-        if item.harness_authored {
-            return;
-        }
-        match item.actor {
-            ReadActor::User => {
-                let (own, mail) = crate::topology_navigator::split_child_mail(&value)
-                    .unwrap_or_else(|| (value, Vec::new()));
-                if !own.trim().is_empty() {
-                    rows.push(Derived::Row(Box::new(TranscriptRow::User {
-                        text: own,
-                        sent_at_ms,
-                    })));
-                }
-                rows.extend(mail.into_iter().map(|mail| {
-                    Derived::Row(Box::new(TranscriptRow::info(NoticeScope::Tree, mail)))
-                }));
-            }
-            ReadActor::Assistant => {
-                rows.push(Derived::Row(Box::new(TranscriptRow::assistant(value))));
-            }
-            ReadActor::Other => {}
-        }
-    };
-    for (block, part) in item.parts.iter().enumerate() {
-        match part {
-            ReadPart::Text(value) | ReadPart::Image(value) => {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str(value);
-            }
-            ReadPart::Reasoning(value) => {
-                flush(&mut rows, &mut text);
-                if !value.trim().is_empty() {
-                    rows.push(Derived::Row(Box::new(TranscriptRow::Thinking(
-                        ThinkingRow {
-                            location_key: format!("{ordinal}:{block}"),
-                            text: value.clone(),
-                            elapsed_ms: None,
-                        },
-                    ))));
-                }
-            }
-            ReadPart::Call { .. } | ReadPart::Result { .. } => {
-                flush(&mut rows, &mut text);
-                rows.push(Derived::Call(part));
-            }
-            ReadPart::Compaction => flush(&mut rows, &mut text),
-        }
-    }
-    flush(&mut rows, &mut text);
-    rows
-}
-
-fn tool_row(call_id: &str, canonical: &str, exposed: &str, arguments: Option<&str>) -> ToolItem {
-    let args =
-        arguments.and_then(|arguments| serde_json::from_str::<serde_json::Value>(arguments).ok());
-    ToolItem {
-        call_id: call_id.to_owned(),
-        name: canonical.to_owned(),
-        exposed_name: (exposed != canonical).then(|| exposed.to_owned()),
-        kind: crate::activity::tool_activity_kind(canonical),
-        state: "running".to_owned(),
-        subject: projected_tool_subject(canonical, arguments),
-        detail: arguments
-            .and_then(|arguments| crate::activity::tool_detail_text(Some(arguments), None)),
-        started_at_ms: None,
-        finished_at_ms: None,
-        parent_call_id: None,
-        cell_id: None,
-        wait: wait_started(canonical, None, args.as_ref()),
-    }
-}
-
 fn settle(tool: &mut ToolItem, result: &ResultRead) {
-    tool.state = completed_tool_state(&tool.name, Some((result.succeeded, &result.text)));
-    if let Some(detail) = completed_tool_detail(tool.detail.as_deref(), Some(&result.text)) {
-        tool.detail = Some(detail);
-    }
-    let value = serde_json::from_str::<serde_json::Value>(&result.text).ok();
-    let waited_ms = tool.duration_ms();
-    tool.wait = wait_settled(
-        &tool.name,
-        tool.wait.take(),
-        value.as_ref(),
-        result.succeeded,
-        waited_ms,
-        None,
-    )
-    .map(|facts| WaitFacts { waited_ms, ..facts });
+    settle_tool_row(tool, result.succeeded, &result.text, None);
 }
 
 fn put_row(views: &mut SessionViews, key: RowKey, row: TranscriptRow) {

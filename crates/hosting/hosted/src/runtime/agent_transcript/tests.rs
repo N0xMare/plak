@@ -402,6 +402,41 @@ fn item(actor: Actor, parts: Vec<TranscriptPart<'_>>) -> TranscriptRead<'_> {
 }
 
 #[test]
+fn hidden_reasoning_keeps_the_same_prose_run_as_the_root_mapper() {
+    let chip = crate::sessions::image_chip("image/png", 1234, Some((80, 60)));
+    let mut read = item(
+        Actor::Assistant,
+        vec![
+            TranscriptPart::Text("before"),
+            TranscriptPart::Reasoning {
+                visibility: ReasoningVisibility::Omitted,
+                text: "not displayable",
+            },
+            TranscriptPart::Image(chip.clone()),
+            TranscriptPart::Text("after"),
+            TranscriptPart::Reasoning {
+                visibility: ReasoningVisibility::Summary,
+                text: "considering",
+            },
+            TranscriptPart::Text("answer"),
+        ],
+    );
+    read.position = 9;
+    read.part_offset = 4;
+    let rows = rows_from_items(&[read], locator(), &[], false);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0],
+        TranscriptRow::assistant(format!("before\n{chip}\nafter"))
+    );
+    let thinking = rows[1].as_thinking().unwrap();
+    assert_eq!(thinking.text, "considering");
+    assert_eq!(thinking.location_key, "9:8");
+    assert_eq!(rows[2], TranscriptRow::assistant("answer"));
+    assert!(!format!("{rows:?}").contains("not displayable"));
+}
+
+#[test]
 fn mail_is_a_tree_notice_and_harness_notes_and_hidden_reasoning_have_no_row() {
     let mail = serde_json::json!({
         "purpose": "result", "from": "root-c39", "attempt_id": "c39-a2",

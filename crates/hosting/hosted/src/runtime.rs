@@ -151,6 +151,8 @@ mod thinking_settle_tests;
 mod tool_facts;
 mod tools;
 mod topology_state;
+mod transcript_rows;
+pub(crate) use transcript_rows::{Derived, item_rows, projected_tool_row, settle_tool_row};
 mod tree;
 pub(crate) use tree::bounded_text as bounded_notice_text;
 mod turn;
