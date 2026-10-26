@@ -141,6 +141,11 @@ fn the_responses_row_of_the_provider_failure_matrix_is_definite()
         );
     }
 
+    Ok(())
+}
+
+#[test]
+fn hosted_effect_escalates_retry_risk() {
     // The one lever that escalates any column, and the only fact it reads.
     let snapshot = |hosted: bool| ObservationSnapshot {
         physical_attempts: 1,
@@ -176,7 +181,6 @@ fn the_responses_row_of_the_provider_failure_matrix_is_definite()
         ),
         "a hosted effect in flight is the one thing that escalates"
     );
-    Ok(())
 }
 
 #[test]

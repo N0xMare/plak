@@ -452,56 +452,45 @@ fn bound_compaction_prior(
     )?)
 }
 
-#[test]
-fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> TestResult {
-    let (protocol, family, model) = target_values()?;
-    let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?;
-    let make_replay = |native: Value| -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
-        Ok(ReplayEnvelope::new(
-            protocol.clone(),
-            Some(family.clone()),
-            ReplayScope::ExactAccountModel {
-                model: model.clone(),
-                account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
-            },
-            ReplayKindId::new("responses.output_item")?,
-            1,
-            DataClassification::Sensitive,
-            RawValue::from_string(native.to_string())?,
-        )?)
-    };
-    let blank_native = json!({"id":"blank", "type":"message", "role":"assistant", "status":"completed", "content":[{"type":"output_text","text":"","annotations":[]}]});
-    let blank_replay = make_replay(blank_native.clone())?;
-    let compact = bound_compaction_prior(
-        "opaque-ciphertext",
-        r#"{"type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
-    )?;
-    let compact_replay = compact
-        .blocks()
-        .iter()
-        .find_map(|block| match block {
-            ContentBlock::Opaque(opaque) => Some(opaque.replay().clone()),
-            _ => None,
-        })
-        .ok_or("compact replay")?;
-    let call_native = json!({"id":"call-item","type":"function_call","status":"completed","call_id":"call-1","name":"lookup","arguments":"{}"});
-    let call_replay = make_replay(call_native.clone())?;
-    let call = ToolCallBlock::new(
-        id::<CallId>(28)?,
-        ToolName::new("lookup")?,
-        ToolExecutionOwner::Local,
-        ToolCallState::Requested,
-        ToolCorrelation::new(Some("call-1".to_owned()), None, ToolCallerLineage::Direct)?,
-        "{}",
-    )?;
-    let producing = crate::test_support::model_request_builder(
-        ConversationView::from_items(vec![user(20, "first")?])?,
-        metadata()?,
-    )
-    .tools(vec![tool("lookup", false)?])
-    .resolved_harness_plan_identity(harness_plan_identity()?)
-    .build()?;
-    let items = vec![
+struct ProjectorHistoryFixture {
+    protocol: ProtocolId,
+    family: ModelFamilyId,
+    model: ModelId,
+    account: Digest,
+    blank_native: Value,
+    call_native: Value,
+    request: ModelRequest,
+    artifact: ResponsesArtifact,
+    now: Timestamp,
+}
+
+fn projector_history_replay(
+    protocol: &ProtocolId,
+    family: &ModelFamilyId,
+    model: &ModelId,
+    native: Value,
+) -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+    Ok(ReplayEnvelope::new(
+        protocol.clone(),
+        Some(family.clone()),
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        },
+        ReplayKindId::new("responses.output_item")?,
+        1,
+        DataClassification::Sensitive,
+        RawValue::from_string(native.to_string())?,
+    )?)
+}
+
+fn projector_history_items(
+    blank_replay: &ReplayEnvelope,
+    compact: ConversationItem,
+    call: &ToolCallBlock,
+    call_replay: &ReplayEnvelope,
+) -> Result<Vec<ConversationItem>, Box<dyn std::error::Error>> {
+    Ok(vec![
         user(20, "first")?,
         ConversationItem::new(
             id::<EntryId>(21)?,
@@ -538,7 +527,44 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
             Provenance::ToolExecution,
         )?,
         user(25, "follow up")?,
-    ];
+    ])
+}
+
+fn projector_history_fixture() -> Result<ProjectorHistoryFixture, Box<dyn std::error::Error>> {
+    let (protocol, family, model) = target_values()?;
+    let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?;
+    let blank_native = json!({"id":"blank", "type":"message", "role":"assistant", "status":"completed", "content":[{"type":"output_text","text":"","annotations":[]}]});
+    let blank_replay = projector_history_replay(&protocol, &family, &model, blank_native.clone())?;
+    let compact = bound_compaction_prior(
+        "opaque-ciphertext",
+        r#"{"type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
+    )?;
+    let compact_replay = compact
+        .blocks()
+        .iter()
+        .find_map(|block| match block {
+            ContentBlock::Opaque(opaque) => Some(opaque.replay().clone()),
+            _ => None,
+        })
+        .ok_or("compact replay")?;
+    let call_native = json!({"id":"call-item","type":"function_call","status":"completed","call_id":"call-1","name":"lookup","arguments":"{}"});
+    let call_replay = projector_history_replay(&protocol, &family, &model, call_native.clone())?;
+    let call = ToolCallBlock::new(
+        id::<CallId>(28)?,
+        ToolName::new("lookup")?,
+        ToolExecutionOwner::Local,
+        ToolCallState::Requested,
+        ToolCorrelation::new(Some("call-1".to_owned()), None, ToolCallerLineage::Direct)?,
+        "{}",
+    )?;
+    let producing = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![user(20, "first")?])?,
+        metadata()?,
+    )
+    .tools(vec![tool("lookup", false)?])
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .build()?;
+    let items = projector_history_items(&blank_replay, compact, &call, &call_replay)?;
     let request = crate::test_support::model_request_builder(
         ConversationView::from_items(items)?,
         metadata()?,
@@ -558,24 +584,44 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
         now,
         b"history-reopen",
     )?;
-    let reopened_items: Vec<ConversationItem> =
-        serde_json::from_slice(&serde_json::to_vec(&request.input().items().to_vec())?)?;
-    assert_eq!(reopened_items.as_slice(), request.input().items().to_vec());
+    Ok(ProjectorHistoryFixture {
+        protocol,
+        family,
+        model,
+        account,
+        blank_native,
+        call_native,
+        request,
+        artifact,
+        now,
+    })
+}
+
+#[test]
+fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> TestResult {
+    let fixture = projector_history_fixture()?;
+    let reopened_items: Vec<ConversationItem> = serde_json::from_slice(&serde_json::to_vec(
+        &fixture.request.input().items().to_vec(),
+    )?)?;
+    assert_eq!(
+        reopened_items.as_slice(),
+        fixture.request.input().items().to_vec()
+    );
     let artifact =
-        ResponsesArtifactCodec::decode_inert(&ResponsesArtifactCodec::encode(&artifact)?)?;
+        ResponsesArtifactCodec::decode_inert(&ResponsesArtifactCodec::encode(&fixture.artifact)?)?;
     let active = active_artifact(&artifact)?;
     let bridge = ResponsesArtifactReplayBridge::from_active_artifact(
         &active,
-        &request,
+        &fixture.request,
         operation_authority(
-            &request,
+            &fixture.request,
             "responses-test-route",
             ResponsesStoragePolicy::Stateless,
         )?,
         ResponsesReplayKind::new("responses.output_item", 1),
         None,
         None,
-        now,
+        fixture.now,
     )?;
     for policy in [
         ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
@@ -583,27 +629,33 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
         ResponsesRequestPolicy::openrouter_stateless(),
     ] {
         let lowered = lower_responses_request(
-            &request,
+            &fixture.request,
             ResponsesRequestConfig::new(
-                &protocol,
-                Some(&family),
-                &model,
+                &fixture.protocol,
+                Some(&fixture.family),
+                &fixture.model,
                 policy,
                 Some(bridge.context()),
             ),
         )?;
-        assert_eq!(lowered.body()["input"][1], blank_native);
+        assert_eq!(lowered.body()["input"][1], fixture.blank_native);
         assert_eq!(
             lowered.body()["input"][2]["encrypted_content"],
             "opaque-ciphertext"
         );
-        let mut expected_call = call_native.clone();
+        let mut expected_call = fixture.call_native.clone();
         omit_output_only_input_fields(policy, &mut expected_call);
         assert_eq!(lowered.body()["input"][3], expected_call);
         let fresh = lower_responses_request(
-            &request,
-            ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None)
-                .with_account_binding(&account),
+            &fixture.request,
+            ResponsesRequestConfig::new(
+                &fixture.protocol,
+                Some(&fixture.family),
+                &fixture.model,
+                policy,
+                None,
+            )
+            .with_account_binding(&fixture.account),
         );
         if policy.authorizes_native_compaction_item_replay() {
             let fresh = fresh?;
@@ -619,18 +671,24 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
             ));
         }
     }
+    Ok(())
+}
+
+#[test]
+fn projector_history_refuses_foreign_accounts_and_targets() -> TestResult {
+    let fixture = projector_history_fixture()?;
     for config in [
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
             None,
         ),
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
             None,
         )
@@ -640,8 +698,8 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
             &[b"other-account"],
         )?),
     ] {
-        let error =
-            lower_responses_request(&request, config).expect_err("no foreign ciphertext replay");
+        let error = lower_responses_request(&fixture.request, config)
+            .expect_err("no foreign ciphertext replay");
         let classified = crate::ResponsesAttemptBuildError::Request(error).preparation_error_kind();
         assert_eq!(
             classified,
@@ -652,13 +710,13 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
     let other_family = ModelFamilyId::new("foreign-family")?;
     let other_model = ModelId::new("foreign-model")?;
     for (dialect, target_family, target_model) in [
-        (&other_protocol, &family, &model),
-        (&protocol, &other_family, &model),
-        (&protocol, &family, &other_model),
+        (&other_protocol, &fixture.family, &fixture.model),
+        (&fixture.protocol, &other_family, &fixture.model),
+        (&fixture.protocol, &fixture.family, &other_model),
     ] {
         assert!(matches!(
             lower_responses_request(
-                &request,
+                &fixture.request,
                 ResponsesRequestConfig::new(
                     dialect,
                     Some(target_family),
@@ -670,7 +728,7 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
                     ),
                     None,
                 )
-                .with_account_binding(&account)
+                .with_account_binding(&fixture.account)
             ),
             Err(ResponsesRequestError::Content(
                 ResponsesRequestContentError::CompactionWithoutReplay
@@ -1193,6 +1251,10 @@ fn target_values() -> Result<(ProtocolId, ModelFamilyId, ModelId), Box<dyn std::
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the exact mixed-presentation fixture keeps each canonical tool contract beside its expected wire form"
+)]
 fn mixed_v2_projection_lowers_explicit_function_and_custom_presentations() -> TestResult {
     let base = crate::test_support::model_request_builder(
         ConversationView::from_items(vec![user(90, "run it")?])?,
@@ -2673,167 +2735,223 @@ fn target_compatible_native_output_without_artifact_uses_portable_semantics() ->
     Ok(())
 }
 
+struct OpaqueFallbackTarget {
+    protocol: ProtocolId,
+    family: ModelFamilyId,
+    model: ModelId,
+}
+
+impl OpaqueFallbackTarget {
+    fn new(protocol: &str, family: &str, model: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            protocol: ProtocolId::new(protocol)?,
+            family: ModelFamilyId::new(family)?,
+            model: ModelId::new(model)?,
+        })
+    }
+}
+
+struct OpaqueFallbackDirection {
+    label: &'static str,
+    source: OpaqueFallbackTarget,
+    target: OpaqueFallbackTarget,
+    policy: ResponsesRequestPolicy,
+}
+
+impl OpaqueFallbackDirection {
+    fn config(&self) -> ResponsesRequestConfig<'_> {
+        ResponsesRequestConfig::new(
+            &self.target.protocol,
+            Some(&self.target.family),
+            &self.target.model,
+            self.policy,
+            None,
+        )
+    }
+
+    fn request(
+        &self,
+        entry: u128,
+        actor: Actor,
+        sibling: bool,
+        fallback: OpaqueFallback,
+        marker: &str,
+    ) -> Result<ModelRequest, Box<dyn std::error::Error>> {
+        let mut blocks = Vec::new();
+        if sibling {
+            blocks.push(ContentBlock::Text(TextBlock::new(
+                "portable sibling",
+                Some(TextPhase::Final),
+            )?));
+        }
+        blocks.push(native_output_with_fallback(
+            &self.source.protocol,
+            &self.source.family,
+            &self.source.model,
+            marker,
+            fallback,
+        )?);
+        Ok(crate::test_support::model_request_builder(
+            ConversationView::from_items(vec![ConversationItem::new(
+                id::<EntryId>(entry)?,
+                actor,
+                blocks,
+                if actor == Actor::User {
+                    Provenance::UserInput
+                } else {
+                    Provenance::ModelOutput
+                },
+            )?])?,
+            metadata()?,
+        )
+        .build()?)
+    }
+}
+
+fn assert_opaque_fallback_row(
+    direction: &OpaqueFallbackDirection,
+    fallback: OpaqueFallback,
+    base: u128,
+    label: &str,
+) -> TestResult {
+    let opaque_only = direction.request(
+        base,
+        Actor::Assistant,
+        false,
+        fallback.clone(),
+        "private-fallback-marker",
+    )?;
+    let lowered = lower_responses_request(&opaque_only, direction.config());
+    match &fallback {
+        OpaqueFallback::CompatibleReplay => assert!(
+            matches!(
+                lowered,
+                Err(ResponsesRequestError::Content(
+                    ResponsesRequestContentError::OpaqueOnlyWithoutCompatibleReplay
+                ))
+            ),
+            "{} / {label}",
+            direction.label
+        ),
+        OpaqueFallback::Omit => assert_eq!(
+            lowered?.body()["input"],
+            json!([]),
+            "{} / {label}",
+            direction.label
+        ),
+        OpaqueFallback::SemanticSummary(summary) => {
+            let lowered = lowered?;
+            assert_eq!(
+                lowered.body()["input"][0]["role"],
+                "assistant",
+                "{} / {label}",
+                direction.label
+            );
+            assert_eq!(
+                lowered.body()["input"][0]["content"][0],
+                json!({"type":"output_text","text":summary}),
+                "{} / {label}",
+                direction.label
+            );
+        }
+        _ => unreachable!("closed test fallback"),
+    }
+    let mixed = direction.request(
+        base + 100,
+        Actor::Assistant,
+        true,
+        fallback.clone(),
+        "private-mixed-marker",
+    )?;
+    let mixed = lower_responses_request(&mixed, direction.config())?;
+    assert_eq!(
+        mixed.body()["input"][0]["role"],
+        "assistant",
+        "{} / {label}",
+        direction.label
+    );
+    assert_eq!(
+        mixed.body()["input"][0]["content"][0]["text"],
+        "portable sibling",
+        "{} / {label}",
+        direction.label
+    );
+    let expected_parts = usize::from(matches!(fallback, OpaqueFallback::SemanticSummary(_))) + 1;
+    assert_eq!(
+        mixed.body()["input"][0]["content"]
+            .as_array()
+            .expect("message parts")
+            .len(),
+        expected_parts,
+        "{} / {label}",
+        direction.label
+    );
+    assert!(
+        !mixed.body().to_string().contains("private-"),
+        "{} / {label}",
+        direction.label
+    );
+    Ok(())
+}
+
 #[test]
 fn incompatible_opaque_fallback_matrix_is_exact_in_both_directions() -> TestResult {
     let directions = [
-        (
-            ProtocolId::new("openai.codex.responses")?,
-            ModelFamilyId::new("gpt")?,
-            ModelId::new("gpt-5.6")?,
-            ProtocolId::new("xai.supergrok.responses")?,
-            ModelFamilyId::new("grok")?,
-            ModelId::new("grok-4.5")?,
-            ResponsesRequestPolicy::supergrok_stateless(),
-        ),
-        (
-            ProtocolId::new("xai.supergrok.responses")?,
-            ModelFamilyId::new("grok")?,
-            ModelId::new("grok-4.5")?,
-            ProtocolId::new("openai.codex.responses")?,
-            ModelFamilyId::new("gpt")?,
-            ModelId::new("gpt-5.6")?,
-            ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
-        ),
+        OpaqueFallbackDirection {
+            label: "Codex to Grok",
+            source: OpaqueFallbackTarget::new("openai.codex.responses", "gpt", "gpt-5.6")?,
+            target: OpaqueFallbackTarget::new("xai.supergrok.responses", "grok", "grok-4.5")?,
+            policy: ResponsesRequestPolicy::supergrok_stateless(),
+        },
+        OpaqueFallbackDirection {
+            label: "Grok to Codex",
+            source: OpaqueFallbackTarget::new("xai.supergrok.responses", "grok", "grok-4.5")?,
+            target: OpaqueFallbackTarget::new("openai.codex.responses", "gpt", "gpt-5.6")?,
+            policy: ResponsesRequestPolicy::openai_codex(
+                false,
+                false,
+                "reasoning.encrypted_content",
+            ),
+        },
     ];
-    for (
-        direction,
-        (
-            source_protocol,
-            source_family,
-            source_model,
-            target_protocol,
-            target_family,
-            target_model,
-            policy,
-        ),
-    ) in directions.into_iter().enumerate()
-    {
-        for (fallback_index, fallback) in [
-            OpaqueFallback::Omit,
-            OpaqueFallback::SemanticSummary("portable opaque summary".to_owned()),
-            OpaqueFallback::CompatibleReplay,
+    for (index, direction) in directions.into_iter().enumerate() {
+        for (fallback_index, (label, fallback)) in [
+            ("omit", OpaqueFallback::Omit),
+            (
+                "summary",
+                OpaqueFallback::SemanticSummary("portable opaque summary".to_owned()),
+            ),
+            ("compatible replay", OpaqueFallback::CompatibleReplay),
         ]
         .into_iter()
         .enumerate()
         {
-            let base = 900 + u128::try_from(direction * 10 + fallback_index)?;
-            let opaque_only = crate::test_support::model_request_builder(
-                ConversationView::from_items(vec![ConversationItem::new(
-                    id::<EntryId>(base)?,
-                    Actor::Assistant,
-                    vec![native_output_with_fallback(
-                        &source_protocol,
-                        &source_family,
-                        &source_model,
-                        "private-fallback-marker",
-                        fallback.clone(),
-                    )?],
-                    Provenance::ModelOutput,
-                )?])?,
-                metadata()?,
-            )
-            .build()?;
-            let config = || {
-                ResponsesRequestConfig::new(
-                    &target_protocol,
-                    Some(&target_family),
-                    &target_model,
-                    policy,
-                    None,
-                )
-            };
-            match &fallback {
-                OpaqueFallback::CompatibleReplay => assert!(matches!(
-                    lower_responses_request(&opaque_only, config()),
-                    Err(ResponsesRequestError::Content(
-                        ResponsesRequestContentError::OpaqueOnlyWithoutCompatibleReplay
-                    ))
-                )),
-                OpaqueFallback::Omit => assert_eq!(
-                    lower_responses_request(&opaque_only, config())?.body()["input"],
-                    json!([])
-                ),
-                OpaqueFallback::SemanticSummary(summary) => {
-                    let lowered = lower_responses_request(&opaque_only, config())?;
-                    assert_eq!(lowered.body()["input"][0]["role"], "assistant");
-                    assert_eq!(
-                        lowered.body()["input"][0]["content"][0],
-                        json!({"type":"output_text","text":summary})
-                    );
-                }
-                _ => unreachable!("closed test fallback"),
-            }
-
-            let mixed = crate::test_support::model_request_builder(
-                ConversationView::from_items(vec![ConversationItem::new(
-                    id::<EntryId>(base + 100)?,
-                    Actor::Assistant,
-                    vec![
-                        ContentBlock::Text(TextBlock::new(
-                            "portable sibling",
-                            Some(TextPhase::Final),
-                        )?),
-                        native_output_with_fallback(
-                            &source_protocol,
-                            &source_family,
-                            &source_model,
-                            "private-mixed-marker",
-                            fallback.clone(),
-                        )?,
-                    ],
-                    Provenance::ModelOutput,
-                )?])?,
-                metadata()?,
-            )
-            .build()?;
-            let mixed = lower_responses_request(&mixed, config())?;
-            assert_eq!(mixed.body()["input"][0]["role"], "assistant");
-            assert_eq!(
-                mixed.body()["input"][0]["content"][0]["text"],
-                "portable sibling"
-            );
-            let expected_parts =
-                usize::from(matches!(fallback, OpaqueFallback::SemanticSummary(_))) + 1;
-            assert_eq!(
-                mixed.body()["input"][0]["content"]
-                    .as_array()
-                    .expect("message parts")
-                    .len(),
-                expected_parts
-            );
-            assert!(!mixed.body().to_string().contains("private-"));
+            assert_opaque_fallback_row(
+                &direction,
+                fallback,
+                900 + u128::try_from(index * 10 + fallback_index)?,
+                label,
+            )?;
         }
-
-        let user_summary = crate::test_support::model_request_builder(
-            ConversationView::from_items(vec![ConversationItem::new(
-                id::<EntryId>(990 + u128::try_from(direction)?)?,
-                Actor::User,
-                vec![native_output_with_fallback(
-                    &source_protocol,
-                    &source_family,
-                    &source_model,
-                    "private-user-marker",
-                    OpaqueFallback::SemanticSummary("portable user summary".to_owned()),
-                )?],
-                Provenance::UserInput,
-            )?])?,
-            metadata()?,
-        )
-        .build()?;
-        let lowered = lower_responses_request(
-            &user_summary,
-            ResponsesRequestConfig::new(
-                &target_protocol,
-                Some(&target_family),
-                &target_model,
-                policy,
-                None,
-            ),
+        let user = direction.request(
+            990 + u128::try_from(index)?,
+            Actor::User,
+            false,
+            OpaqueFallback::SemanticSummary("portable user summary".to_owned()),
+            "private-user-marker",
         )?;
-        assert_eq!(lowered.body()["input"][0]["role"], "user");
+        let lowered = lower_responses_request(&user, direction.config())?;
+        assert_eq!(
+            lowered.body()["input"][0]["role"],
+            "user",
+            "{} / user summary",
+            direction.label
+        );
         assert_eq!(
             lowered.body()["input"][0]["content"][0],
-            json!({"type":"input_text","text":"portable user summary"})
+            json!({"type":"input_text","text":"portable user summary"}),
+            "{} / user summary",
+            direction.label
         );
     }
     Ok(())
@@ -3456,9 +3574,12 @@ fn multimodal_tool_result_lowers_exact_data_urls_and_detail() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
-    let (protocol, family, model) = target_values()?;
+struct OrderedToolGroupFixture {
+    request: ModelRequest,
+    long_result: String,
+}
+
+fn ordered_tool_group_fixture() -> Result<OrderedToolGroupFixture, Box<dyn std::error::Error>> {
     let long_result = "x".repeat(4_096);
     let function_call = ToolCallBlock::new(
         id::<CallId>(20)?,
@@ -3529,6 +3650,19 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
     )
     .tools(vec![tool("lookup", false)?, tool("write_code", true)?])
     .build()?;
+    Ok(OrderedToolGroupFixture {
+        request,
+        long_result,
+    })
+}
+
+#[test]
+fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let OrderedToolGroupFixture {
+        request,
+        long_result,
+    } = ordered_tool_group_fixture()?;
     let lowered = lower_responses_request(
         &request,
         ResponsesRequestConfig::new(
@@ -3550,6 +3684,12 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
     assert_eq!(input[3]["output"], "halfway");
     assert_eq!(input[4]["type"], "custom_tool_call_output");
 
+    Ok(())
+}
+
+#[test]
+fn invalid_custom_tool_arguments_are_refused() -> TestResult {
+    let (protocol, family, model) = target_values()?;
     let invalid_custom = ToolCallBlock::new(
         id::<CallId>(27)?,
         ToolName::new("write_code")?,
@@ -3610,9 +3750,12 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
 /// Responses target that exposes no custom tool — Codex Direct, Grok —
 /// lowers as a `function_call` carrying the original program text, and its
 /// yields fold into the one `function_call_output` in source order.
-#[test]
-fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestResult {
-    let (protocol, family, model) = target_values()?;
+struct CodeModeReplayFixture {
+    request: ModelRequest,
+    program: &'static str,
+}
+
+fn code_mode_replay_fixture() -> Result<CodeModeReplayFixture, Box<dyn std::error::Error>> {
     let program = "const out = await tools.exec_command({cmd: 'pwd'});\nyield_(out);";
     let exec_call = ToolCallBlock::new(
         id::<CallId>(40)?,
@@ -3686,6 +3829,13 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
         requirement: CapabilityRequirement::Required,
     })
     .build()?;
+    Ok(CodeModeReplayFixture { request, program })
+}
+
+#[test]
+fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let CodeModeReplayFixture { request, program } = code_mode_replay_fixture()?;
     let lowered = lower_responses_request(
         &request,
         ResponsesRequestConfig::new(
@@ -3725,6 +3875,13 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
             .all(|item| item["type"] != "custom_tool_call_output"),
         "a function call never owns a custom_tool_call_output: {input:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn code_mode_exec_cell_replays_on_a_lite_target() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let CodeModeReplayFixture { request, .. } = code_mode_replay_fixture()?;
     let affinity = Digest::sha256(DigestDomain::CacheAffinity, 1, &[b"codex-lite-round"])?;
     let lite = lower_responses_request(
         &request,
@@ -3760,6 +3917,10 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the complete canonical reasoning fixture and exact portable wire assertion are one projection contract"
+)]
 fn fresh_codex_body_matches_portable_reasoning_projection() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let affinity = Digest::sha256(DigestDomain::CacheAffinity, 1, &[b"offline-pass"])?;
@@ -3964,54 +4125,78 @@ fn provider_stored_without_active_artifact_replays_full_canonical_request() -> T
     Ok(())
 }
 
-#[test]
-fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_modes() -> TestResult {
-    let (protocol, family, _) = target_values()?;
-    let model = ModelId::new("gpt-5.6-sol")?;
-    let base_tool = tool_with_concurrency("lookup", false, ToolConcurrency::Serial)?;
-    let programmatic_tool = ConfiguredTool::new(
-        base_tool.definition().clone(),
-        base_tool.execution(),
-        ToolCallerDisposition::ProviderProgrammaticOnly,
-    );
-    let producing_request = crate::test_support::model_request_builder(
-        ConversationView::from_items(vec![user(145, "look up one value")?])?,
-        metadata()?,
-    )
-    .tools(vec![programmatic_tool.clone()])
-    .hosted_tools(vec![HostedTool::ProgrammaticComposition])
-    .resolved_harness_plan_identity(harness_plan_identity()?)
-    .build()?;
-    let initial = lower_responses_request(
-        &producing_request,
-        ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
-            ResponsesRequestPolicy::openai_platform(
-                ResponsesStoragePolicy::Stateless,
-                false,
-                false,
-            ),
-            None,
-        ),
-    )?;
-    assert_eq!(
-        initial.body()["tools"],
-        json!([
-            {
-                "type":"function", "name":"lookup", "description":"lookup description",
-                // No `$schema`: the wire projection strips the dialect URI.
-                "parameters":{
-                    "type":"object", "properties":{"q":{"type":"string"}},
-                    "required":["q"], "additionalProperties":false
-                },
-                "strict":false, "allowed_callers":["programmatic"]
-            },
-            {"type":"programmatic_tool_calling"}
-        ])
-    );
+struct ProgrammaticFirstExchange {
+    program_native: Value,
+    call_native: Value,
+    program_replay: ReplayEnvelope,
+    call_replay: ReplayEnvelope,
+    call: ToolCallBlock,
+    program_item: ConversationItem,
+    call_item: ConversationItem,
+    result_item: ConversationItem,
+}
 
+struct ProgrammaticSecondExchange {
+    call_native: Value,
+    call_replay: ReplayEnvelope,
+    call_item: ConversationItem,
+    result_item: ConversationItem,
+}
+
+struct ProgrammaticReplayFixture {
+    protocol: ProtocolId,
+    family: ModelFamilyId,
+    model: ModelId,
+    base_tool: ConfiguredTool,
+    producing_request: ModelRequest,
+    next_request: ModelRequest,
+    final_request: ModelRequest,
+    now: Timestamp,
+    first: ProgrammaticFirstExchange,
+    second: ProgrammaticSecondExchange,
+}
+
+struct ProgrammaticPause {
+    artifact: ResponsesArtifact,
+    active: ActiveFamilyArtifact,
+    bridge: ResponsesArtifactReplayBridge,
+    lowered: LoweredResponsesRequest,
+}
+
+struct ProgrammaticMutation {
+    view: ConversationView,
+    replay: Vec<ReplayEnvelope>,
+}
+
+fn programmatic_replay(
+    protocol: &ProtocolId,
+    family: &ModelFamilyId,
+    model: &ModelId,
+    native: &Value,
+) -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+    Ok(ReplayEnvelope::new(
+        protocol.clone(),
+        Some(family.clone()),
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: Digest::sha256(
+                DigestDomain::ModelBinding,
+                1,
+                &[b"responses-ptc-test-route"],
+            )?,
+        },
+        ReplayKindId::new("openai.output_item")?,
+        2,
+        DataClassification::Sensitive,
+        RawValue::from_string(native.to_string())?,
+    )?)
+}
+
+fn first_programmatic_exchange(
+    protocol: &ProtocolId,
+    family: &ModelFamilyId,
+    model: &ModelId,
+) -> Result<ProgrammaticFirstExchange, Box<dyn std::error::Error>> {
     let program_native = json!({
         "type":"program", "id":"prog_1", "call_id":"pcall_1",
         "code":"await lookup({q:'x'})", "fingerprint":"opaque-fingerprint-1"
@@ -4021,26 +4206,8 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
         "arguments":"{\"q\":\"x\"}",
         "caller":{"type":"program","caller_id":"pcall_1"}
     });
-    let replay = |native: &Value| {
-        Ok::<_, Box<dyn std::error::Error>>(ReplayEnvelope::new(
-            protocol.clone(),
-            Some(family.clone()),
-            ReplayScope::ExactAccountModel {
-                model: model.clone(),
-                account: Digest::sha256(
-                    DigestDomain::ModelBinding,
-                    1,
-                    &[b"responses-ptc-test-route"],
-                )?,
-            },
-            ReplayKindId::new("openai.output_item")?,
-            2,
-            DataClassification::Sensitive,
-            RawValue::from_string(native.to_string())?,
-        )?)
-    };
-    let program_replay = replay(&program_native)?;
-    let call_replay = replay(&call_native)?;
+    let program_replay = programmatic_replay(protocol, family, model, &program_native)?;
+    let call_replay = programmatic_replay(protocol, family, model, &call_native)?;
     let lineage = ToolCallerLineage::provider_programmatic(
         NamespaceId::new("openai.responses.program")?,
         "pcall_1",
@@ -4086,37 +4253,29 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
         )?)],
         Provenance::ToolExecution,
     )?;
-    let next_request = crate::test_support::model_request_builder(
-        ConversationView::from_shared(
-            CanonicalHistory::new(vec![
-                HistorySegment::new(
-                    HistorySegmentKind::RecentIntent,
-                    vec![user(145, "look up one value")?],
-                )?,
-                HistorySegment::new(
-                    HistorySegmentKind::ReasoningReplay,
-                    vec![program_item.clone()],
-                )?,
-                HistorySegment::new(
-                    HistorySegmentKind::ToolExchange,
-                    vec![call_item.clone(), result_item.clone()],
-                )?,
-            ])?,
-            WorkingProjection::default(),
-        ),
-        metadata()?,
-    )
-    .tools(vec![programmatic_tool.clone()])
-    .hosted_tools(vec![HostedTool::ProgrammaticComposition])
-    .resolved_harness_plan_identity(harness_plan_identity()?)
-    .build()?;
+    Ok(ProgrammaticFirstExchange {
+        program_native,
+        call_native,
+        program_replay,
+        call_replay,
+        call,
+        program_item,
+        call_item,
+        result_item,
+    })
+}
 
+fn second_programmatic_exchange(
+    protocol: &ProtocolId,
+    family: &ModelFamilyId,
+    model: &ModelId,
+) -> Result<ProgrammaticSecondExchange, Box<dyn std::error::Error>> {
     let second_call_native = json!({
         "type":"function_call", "id":"fc_2", "call_id":"call_2", "name":"lookup",
         "arguments":"{\"q\":\"y\"}",
         "caller":{"type":"program","caller_id":"pcall_1"}
     });
-    let second_call_replay = replay(&second_call_native)?;
+    let second_call_replay = programmatic_replay(protocol, family, model, &second_call_native)?;
     let second_lineage = ToolCallerLineage::provider_programmatic(
         NamespaceId::new("openai.responses.program")?,
         "pcall_1",
@@ -4153,10 +4312,62 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
         )?)],
         Provenance::ToolExecution,
     )?;
+    Ok(ProgrammaticSecondExchange {
+        call_native: second_call_native,
+        call_replay: second_call_replay,
+        call_item: second_call_item,
+        result_item: second_result_item,
+    })
+}
+
+fn programmatic_replay_fixture() -> Result<ProgrammaticReplayFixture, Box<dyn std::error::Error>> {
+    let (protocol, family, _) = target_values()?;
+    let model = ModelId::new("gpt-5.6-sol")?;
+    let base_tool = tool_with_concurrency("lookup", false, ToolConcurrency::Serial)?;
+    let programmatic_tool = ConfiguredTool::new(
+        base_tool.definition().clone(),
+        base_tool.execution(),
+        ToolCallerDisposition::ProviderProgrammaticOnly,
+    );
+    let producing_request = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![user(145, "look up one value")?])?,
+        metadata()?,
+    )
+    .tools(vec![programmatic_tool.clone()])
+    .hosted_tools(vec![HostedTool::ProgrammaticComposition])
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .build()?;
+    let first = first_programmatic_exchange(&protocol, &family, &model)?;
+    let next_request = crate::test_support::model_request_builder(
+        ConversationView::from_shared(
+            CanonicalHistory::new(vec![
+                HistorySegment::new(
+                    HistorySegmentKind::RecentIntent,
+                    vec![user(145, "look up one value")?],
+                )?,
+                HistorySegment::new(
+                    HistorySegmentKind::ReasoningReplay,
+                    vec![first.program_item.clone()],
+                )?,
+                HistorySegment::new(
+                    HistorySegmentKind::ToolExchange,
+                    vec![first.call_item.clone(), first.result_item.clone()],
+                )?,
+            ])?,
+            WorkingProjection::default(),
+        ),
+        metadata()?,
+    )
+    .tools(vec![programmatic_tool.clone()])
+    .hosted_tools(vec![HostedTool::ProgrammaticComposition])
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .build()?;
+
+    let second = second_programmatic_exchange(&protocol, &family, &model)?;
     let mut final_segments = next_request.input().history().segments().to_vec();
     final_segments.push(HistorySegment::new(
         HistorySegmentKind::ToolExchange,
-        vec![second_call_item, second_result_item],
+        vec![second.call_item.clone(), second.result_item.clone()],
     )?);
     let final_request = crate::test_support::model_request_builder(
         ConversationView::from_shared(
@@ -4170,236 +4381,135 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
     .resolved_harness_plan_identity(harness_plan_identity()?)
     .build()?;
     let now = Timestamp::new(1_700_000_000, 0)?;
-    for storage in [
-        ResponsesStorageMode::ProviderStored,
-        ResponsesStorageMode::Stateless,
-    ] {
-        let policy = if storage == ResponsesStorageMode::ProviderStored {
-            ResponsesStoragePolicy::ProviderStored
-        } else {
-            ResponsesStoragePolicy::Stateless
-        };
+    Ok(ProgrammaticReplayFixture {
+        protocol,
+        family,
+        model,
+        base_tool,
+        producing_request,
+        next_request,
+        final_request,
+        now,
+        first,
+        second,
+    })
+}
+
+fn programmatic_storage_policy(storage: ResponsesStorageMode) -> ResponsesStoragePolicy {
+    if storage == ResponsesStorageMode::ProviderStored {
+        ResponsesStoragePolicy::ProviderStored
+    } else {
+        ResponsesStoragePolicy::Stateless
+    }
+}
+
+impl ProgrammaticReplayFixture {
+    fn replay(&self, native: &Value) -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+        programmatic_replay(&self.protocol, &self.family, &self.model, native)
+    }
+
+    fn first_pause(
+        &self,
+        storage: ResponsesStorageMode,
+    ) -> Result<ProgrammaticPause, Box<dyn std::error::Error>> {
+        let fixture = self;
+        let policy = programmatic_storage_policy(storage);
         let artifact = output_artifact(
-            &producing_request,
-            &next_request,
+            &fixture.producing_request,
+            &fixture.next_request,
             "responses-ptc-test-route",
-            vec![program_replay.clone(), call_replay.clone()],
+            vec![
+                fixture.first.program_replay.clone(),
+                fixture.first.call_replay.clone(),
+            ],
             storage,
             "response-ptc-first-pause",
             None,
-            now,
+            fixture.now,
             b"openai-platform-ptc-replay",
         )?;
         let active = active_artifact(&artifact)?;
         let bridge = ResponsesArtifactReplayBridge::from_active_artifact(
             &active,
-            &next_request,
-            operation_authority(&next_request, "responses-ptc-test-route", policy)?,
+            &fixture.next_request,
+            operation_authority(&fixture.next_request, "responses-ptc-test-route", policy)?,
             ResponsesReplayKind::new("openai.output_item", 2),
             None,
             (storage == ResponsesStorageMode::ProviderStored)
                 .then(|| ResponsesReplayKind::new("openai.previous_response_id", 1)),
-            now,
+            fixture.now,
         )?;
-        assert_eq!(
-            bridge.hosted_programs().live_program("pcall_1"),
-            Some(("prog_1", "opaque-fingerprint-1"))
-        );
         let continued = lower_responses_request(
-            &next_request,
+            &fixture.next_request,
             ResponsesRequestConfig::new(
-                &protocol,
-                Some(&family),
-                &model,
+                &fixture.protocol,
+                Some(&fixture.family),
+                &fixture.model,
                 ResponsesRequestPolicy::openai_platform(policy, false, false),
                 Some(bridge.context()),
             ),
         )?;
-        if storage == ResponsesStorageMode::ProviderStored {
-            assert!(matches!(
-                continued.replay_mode(),
-                ResponsesReplayMode::PreviousResponse {
-                    prefix_items: 3,
-                    ..
-                }
-            ));
-            assert_eq!(
-                continued.body()["previous_response_id"],
-                "response-ptc-first-pause"
-            );
-            assert_eq!(
-                continued.body()["input"],
-                json!([{"type":"function_call_output","call_id":"call_1","output":"found","caller":{"type":"program","caller_id":"pcall_1"}}])
-            );
-        } else {
-            assert_eq!(continued.replay_mode(), &ResponsesReplayMode::Full);
-            assert_eq!(
-                continued.body()["input"],
-                json!([
-                    {"type":"message","role":"user","content":[{"type":"input_text","text":"look up one value"}]},
-                    program_native,
-                    call_native,
-                    {"type":"function_call_output","call_id":"call_1","output":"found","caller":{"type":"program","caller_id":"pcall_1"}}
-                ])
-            );
-            assert_eq!(
-                continued.body()["input"][1]["fingerprint"],
-                "opaque-fingerprint-1"
-            );
-        }
+        Ok(ProgrammaticPause {
+            artifact,
+            active,
+            bridge,
+            lowered: continued,
+        })
+    }
 
-        // The operation-budget wrap-up over this same programmatic history
-        // withdraws tool selection only, so it keeps the bound replay and
-        // continues the live program. Fresh lowering has no form for
-        // hosted program items or provider-programmatic calls.
-        let wrap_up =
-            crate::test_support::model_request_builder(next_request.input().clone(), metadata()?)
-                .tools(next_request.tools().to_vec())
-                .hosted_tools(next_request.hosted_tools().to_vec())
-                .resolved_harness_plan_identity(harness_plan_identity()?)
-                .tool_choice(ToolChoice::None)
-                .build()?;
-        let wrap_up_bridge = ResponsesArtifactReplayBridge::from_active_artifact(
-            &active,
-            &wrap_up,
-            operation_authority(&wrap_up, "responses-ptc-test-route", policy)?,
-            ResponsesReplayKind::new("openai.output_item", 2),
-            None,
-            (storage == ResponsesStorageMode::ProviderStored)
-                .then(|| ResponsesReplayKind::new("openai.previous_response_id", 1)),
-            now,
-        )?;
-        assert_eq!(
-            wrap_up_bridge.hosted_programs().live_program("pcall_1"),
-            Some(("prog_1", "opaque-fingerprint-1"))
-        );
-        let wrapped = lower_responses_request(
-            &wrap_up,
-            ResponsesRequestConfig::new(
-                &protocol,
-                Some(&family),
-                &model,
-                ResponsesRequestPolicy::openai_platform(policy, false, false),
-                Some(wrap_up_bridge.context()),
-            ),
-        )?;
-        assert_eq!(wrapped.body()["tool_choice"], "none");
-        assert_eq!(wrapped.body()["tools"], continued.body()["tools"]);
-        assert_eq!(wrapped.body()["input"], continued.body()["input"]);
-        assert_eq!(wrapped.replay_mode(), continued.replay_mode());
-        let fresh = lower_responses_request(
-            &wrap_up,
-            ResponsesRequestConfig::new(
-                &protocol,
-                Some(&family),
-                &model,
-                ResponsesRequestPolicy::openai_platform(policy, false, false),
-                None,
-            ),
-        );
-        assert!(matches!(
-            fresh.map_err(|error| {
-                crate::ResponsesAttemptBuildError::Request(error).preparation_error_kind()
-            }),
-            Err(plakous_model::ModelPreparationErrorKind::ProtectedHistory)
-        ));
-
+    fn second_pause(
+        &self,
+        storage: ResponsesStorageMode,
+    ) -> Result<ProgrammaticPause, Box<dyn std::error::Error>> {
+        let fixture = self;
+        let policy = programmatic_storage_policy(storage);
         let second_artifact = output_artifact(
-            &next_request,
-            &final_request,
+            &fixture.next_request,
+            &fixture.final_request,
             "responses-ptc-test-route",
-            vec![second_call_replay.clone()],
+            vec![fixture.second.call_replay.clone()],
             storage,
             "response-ptc-second-pause",
             None,
-            now,
+            fixture.now,
             b"openai-platform-ptc-second-replay",
         )?;
-        assert_ne!(
-            artifact.production().covered_projection(),
-            second_artifact.production().covered_projection(),
-            "the second pause must advance artifact coverage"
-        );
-        assert_eq!(artifact.production().covered_projection_items(), 3);
-        assert_eq!(second_artifact.production().covered_projection_items(), 5);
         let second_active = active_artifact(&second_artifact)?;
         let second_bridge = ResponsesArtifactReplayBridge::from_active_artifact(
             &second_active,
-            &final_request,
-            operation_authority(&final_request, "responses-ptc-test-route", policy)?,
+            &fixture.final_request,
+            operation_authority(&fixture.final_request, "responses-ptc-test-route", policy)?,
             ResponsesReplayKind::new("openai.output_item", 2),
             None,
             (storage == ResponsesStorageMode::ProviderStored)
                 .then(|| ResponsesReplayKind::new("openai.previous_response_id", 1)),
-            now,
+            fixture.now,
         )?;
-        assert_eq!(second_bridge.hosted_programs().live_program_count(), 1);
-        assert_eq!(
-            second_bridge.hosted_programs().live_program("pcall_1"),
-            Some(("prog_1", "opaque-fingerprint-1"))
-        );
-        let final_program_output = json!({
-            "type":"program_output", "id":"program_output_1", "call_id":"pcall_1",
-            "result":"found + found again", "status":"completed"
-        });
-        let mut completed_programs = second_bridge.hosted_programs().clone();
-        completed_programs.admit_replayed_output(
-            &parse_output_item::<ResponsesHostDecodeError>(&final_program_output)?,
-            crate::ResponsesCanonicalPolicy::openai_platform(),
-        )?;
-        assert_eq!(completed_programs.live_program_count(), 0);
         let final_continuation = lower_responses_request(
-            &final_request,
+            &fixture.final_request,
             ResponsesRequestConfig::new(
-                &protocol,
-                Some(&family),
-                &model,
+                &fixture.protocol,
+                Some(&fixture.family),
+                &fixture.model,
                 ResponsesRequestPolicy::openai_platform(policy, false, false),
                 Some(second_bridge.context()),
             ),
         )?;
-        if storage == ResponsesStorageMode::ProviderStored {
-            assert!(matches!(
-                final_continuation.replay_mode(),
-                ResponsesReplayMode::PreviousResponse {
-                    prefix_items: 5,
-                    ..
-                }
-            ));
-            assert_eq!(
-                final_continuation.body()["previous_response_id"],
-                "response-ptc-second-pause"
-            );
-            assert_eq!(
-                final_continuation.body()["input"],
-                json!([{"type":"function_call_output","call_id":"call_2","output":"found again","caller":{"type":"program","caller_id":"pcall_1"}}])
-            );
-        } else {
-            assert_eq!(final_continuation.replay_mode(), &ResponsesReplayMode::Full);
-            assert!(
-                final_continuation
-                    .body()
-                    .get("previous_response_id")
-                    .is_none()
-            );
-            assert_eq!(
-                final_continuation.body()["input"],
-                json!([
-                    {"type":"message","role":"user","content":[{"type":"input_text","text":"look up one value"}]},
-                    program_native,
-                    call_native,
-                    {"type":"function_call_output","call_id":"call_1","output":"found","caller":{"type":"program","caller_id":"pcall_1"}},
-                    second_call_native,
-                    {"type":"function_call_output","call_id":"call_2","output":"found again","caller":{"type":"program","caller_id":"pcall_1"}}
-                ])
-            );
-        }
+        Ok(ProgrammaticPause {
+            artifact: second_artifact,
+            active: second_active,
+            bridge: second_bridge,
+            lowered: final_continuation,
+        })
+    }
 
-        let wrong_program = replay(&json!({
+    fn mutations(&self) -> Result<Vec<ProgrammaticMutation>, Box<dyn std::error::Error>> {
+        let fixture = self;
+        let wrong_program = fixture.replay(&json!({
             "type":"program", "id":"prog_1", "call_id":"pcall_1",
             "code":"await lookup({q:'x'})", "fingerprint":"wrong-fingerprint"
         }))?;
-        let wrong_caller = replay(&json!({
+        let wrong_caller = fixture.replay(&json!({
             "type":"function_call", "id":"fc_1", "call_id":"call_1",
             "name":"lookup", "arguments":"{\"q\":\"x\"}",
             "caller":{"type":"program","caller_id":"wrong-program"}
@@ -4416,17 +4526,17 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
                     )?)],
                     Provenance::ModelOutput,
                 )?,
-                call_item.clone(),
-                result_item.clone(),
+                fixture.first.call_item.clone(),
+                fixture.first.result_item.clone(),
             ])?,
             ConversationView::from_items(vec![
                 user(145, "look up one value")?,
-                program_item.clone(),
+                fixture.first.program_item.clone(),
                 ConversationItem::new(
                     id::<EntryId>(148)?,
                     Actor::Assistant,
                     vec![
-                        ContentBlock::ToolCall(call.clone()),
+                        ContentBlock::ToolCall(fixture.first.call.clone()),
                         ContentBlock::Opaque(OpaqueBlock::new(
                             wrong_caller.clone(),
                             OpaqueFallback::CompatibleReplay,
@@ -4434,73 +4544,348 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
                     ],
                     Provenance::ModelOutput,
                 )?,
-                result_item.clone(),
+                fixture.first.result_item.clone(),
             ])?,
             ConversationView::from_items(vec![
                 user(145, "look up one value")?,
-                call_item.clone(),
-                program_item.clone(),
-                result_item.clone(),
+                fixture.first.call_item.clone(),
+                fixture.first.program_item.clone(),
+                fixture.first.result_item.clone(),
             ])?,
         ];
         let mutated_replays = [
-            vec![wrong_program, call_replay.clone()],
-            vec![program_replay.clone(), wrong_caller],
-            vec![call_replay.clone(), program_replay.clone()],
+            vec![wrong_program, fixture.first.call_replay.clone()],
+            vec![fixture.first.program_replay.clone(), wrong_caller],
+            vec![
+                fixture.first.call_replay.clone(),
+                fixture.first.program_replay.clone(),
+            ],
         ];
-        for (mutation_index, (mutated_view, mutated_replay)) in
-            mutated_views.into_iter().zip(mutated_replays).enumerate()
-        {
-            let mutated_request =
-                crate::test_support::model_request_builder(mutated_view, metadata()?)
-                    .tools(vec![ConfiguredTool::new(
-                        base_tool.definition().clone(),
-                        base_tool.execution(),
-                        ToolCallerDisposition::ProviderProgrammaticOnly,
-                    )])
-                    .hosted_tools(vec![HostedTool::ProgrammaticComposition])
-                    .resolved_harness_plan_identity(harness_plan_identity()?)
-                    .build()?;
-            let mutated = output_artifact(
-                &producing_request,
-                &mutated_request,
-                "responses-ptc-test-route",
-                mutated_replay,
-                storage,
-                "response-ptc-first-pause",
-                None,
-                now,
-                format!("openai-platform-ptc-mutation-{mutation_index}").as_bytes(),
-            )?;
-            assert!(
-                ResponsesArtifactReplayBridge::from_active_artifact(
-                    &active_artifact(&mutated)?,
+        Ok(mutated_views
+            .into_iter()
+            .zip(mutated_replays)
+            .map(|(view, replay)| ProgrammaticMutation { view, replay })
+            .collect())
+    }
+}
+
+#[test]
+fn programmatic_initial_request_has_exact_tool_contract() -> TestResult {
+    let fixture = programmatic_replay_fixture()?;
+    let initial = lower_responses_request(
+        &fixture.producing_request,
+        ResponsesRequestConfig::new(
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
+            ResponsesRequestPolicy::openai_platform(
+                ResponsesStoragePolicy::Stateless,
+                false,
+                false,
+            ),
+            None,
+        ),
+    )?;
+    assert_eq!(
+        initial.body()["tools"],
+        json!([
+            {
+                "type":"function", "name":"lookup", "description":"lookup description",
+                // No `$schema`: the wire projection strips the dialect URI.
+                "parameters":{
+                    "type":"object", "properties":{"q":{"type":"string"}},
+                    "required":["q"], "additionalProperties":false
+                },
+                "strict":false, "allowed_callers":["programmatic"]
+            },
+            {"type":"programmatic_tool_calling"}
+        ])
+    );
+
+    Ok(())
+}
+
+fn check_programmatic_first_pause(storage: ResponsesStorageMode) -> TestResult {
+    let fixture = programmatic_replay_fixture()?;
+    let ProgrammaticPause {
+        bridge,
+        lowered: continued,
+        ..
+    } = fixture.first_pause(storage)?;
+    assert_eq!(
+        bridge.hosted_programs().live_program("pcall_1"),
+        Some(("prog_1", "opaque-fingerprint-1"))
+    );
+    if storage == ResponsesStorageMode::ProviderStored {
+        assert!(matches!(
+            continued.replay_mode(),
+            ResponsesReplayMode::PreviousResponse {
+                prefix_items: 3,
+                ..
+            }
+        ));
+        assert_eq!(
+            continued.body()["previous_response_id"],
+            "response-ptc-first-pause"
+        );
+        assert_eq!(
+            continued.body()["input"],
+            json!([{"type":"function_call_output","call_id":"call_1","output":"found","caller":{"type":"program","caller_id":"pcall_1"}}])
+        );
+    } else {
+        assert_eq!(continued.replay_mode(), &ResponsesReplayMode::Full);
+        assert_eq!(
+            continued.body()["input"],
+            json!([
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"look up one value"}]},
+                fixture.first.program_native,
+                fixture.first.call_native,
+                {"type":"function_call_output","call_id":"call_1","output":"found","caller":{"type":"program","caller_id":"pcall_1"}}
+            ])
+        );
+        assert_eq!(
+            continued.body()["input"][1]["fingerprint"],
+            "opaque-fingerprint-1"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn programmatic_first_pause_stored() -> TestResult {
+    check_programmatic_first_pause(ResponsesStorageMode::ProviderStored)
+}
+
+#[test]
+fn programmatic_first_pause_stateless() -> TestResult {
+    check_programmatic_first_pause(ResponsesStorageMode::Stateless)
+}
+
+fn check_programmatic_wrap_up(storage: ResponsesStorageMode) -> TestResult {
+    let fixture = programmatic_replay_fixture()?;
+    let policy = programmatic_storage_policy(storage);
+    let ProgrammaticPause {
+        active,
+        lowered: continued,
+        ..
+    } = fixture.first_pause(storage)?;
+    // The operation-budget wrap-up over this same programmatic history
+    // withdraws tool selection only, so it keeps the bound replay and
+    // continues the live program. Fresh lowering has no form for
+    // hosted program items or provider-programmatic calls.
+    let wrap_up = crate::test_support::model_request_builder(
+        fixture.next_request.input().clone(),
+        metadata()?,
+    )
+    .tools(fixture.next_request.tools().to_vec())
+    .hosted_tools(fixture.next_request.hosted_tools().to_vec())
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .tool_choice(ToolChoice::None)
+    .build()?;
+    let wrap_up_bridge = ResponsesArtifactReplayBridge::from_active_artifact(
+        &active,
+        &wrap_up,
+        operation_authority(&wrap_up, "responses-ptc-test-route", policy)?,
+        ResponsesReplayKind::new("openai.output_item", 2),
+        None,
+        (storage == ResponsesStorageMode::ProviderStored)
+            .then(|| ResponsesReplayKind::new("openai.previous_response_id", 1)),
+        fixture.now,
+    )?;
+    assert_eq!(
+        wrap_up_bridge.hosted_programs().live_program("pcall_1"),
+        Some(("prog_1", "opaque-fingerprint-1"))
+    );
+    let wrapped = lower_responses_request(
+        &wrap_up,
+        ResponsesRequestConfig::new(
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
+            ResponsesRequestPolicy::openai_platform(policy, false, false),
+            Some(wrap_up_bridge.context()),
+        ),
+    )?;
+    assert_eq!(wrapped.body()["tool_choice"], "none");
+    assert_eq!(wrapped.body()["tools"], continued.body()["tools"]);
+    assert_eq!(wrapped.body()["input"], continued.body()["input"]);
+    assert_eq!(wrapped.replay_mode(), continued.replay_mode());
+    let fresh = lower_responses_request(
+        &wrap_up,
+        ResponsesRequestConfig::new(
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
+            ResponsesRequestPolicy::openai_platform(policy, false, false),
+            None,
+        ),
+    );
+    assert!(matches!(
+        fresh.map_err(|error| {
+            crate::ResponsesAttemptBuildError::Request(error).preparation_error_kind()
+        }),
+        Err(plakous_model::ModelPreparationErrorKind::ProtectedHistory)
+    ));
+
+    Ok(())
+}
+
+#[test]
+fn programmatic_wrap_up_stored() -> TestResult {
+    check_programmatic_wrap_up(ResponsesStorageMode::ProviderStored)
+}
+
+#[test]
+fn programmatic_wrap_up_stateless() -> TestResult {
+    check_programmatic_wrap_up(ResponsesStorageMode::Stateless)
+}
+
+fn check_programmatic_second_pause(storage: ResponsesStorageMode) -> TestResult {
+    let fixture = programmatic_replay_fixture()?;
+    let ProgrammaticPause { artifact, .. } = fixture.first_pause(storage)?;
+    let ProgrammaticPause {
+        artifact: second_artifact,
+        bridge: second_bridge,
+        lowered: final_continuation,
+        ..
+    } = fixture.second_pause(storage)?;
+    assert_ne!(
+        artifact.production().covered_projection(),
+        second_artifact.production().covered_projection(),
+        "the second pause must advance artifact coverage"
+    );
+    assert_eq!(artifact.production().covered_projection_items(), 3);
+    assert_eq!(second_artifact.production().covered_projection_items(), 5);
+    assert_eq!(second_bridge.hosted_programs().live_program_count(), 1);
+    assert_eq!(
+        second_bridge.hosted_programs().live_program("pcall_1"),
+        Some(("prog_1", "opaque-fingerprint-1"))
+    );
+    let final_program_output = json!({
+        "type":"program_output", "id":"program_output_1", "call_id":"pcall_1",
+        "result":"found + found again", "status":"completed"
+    });
+    let mut completed_programs = second_bridge.hosted_programs().clone();
+    completed_programs.admit_replayed_output(
+        &parse_output_item::<ResponsesHostDecodeError>(&final_program_output)?,
+        crate::ResponsesCanonicalPolicy::openai_platform(),
+    )?;
+    assert_eq!(completed_programs.live_program_count(), 0);
+    if storage == ResponsesStorageMode::ProviderStored {
+        assert!(matches!(
+            final_continuation.replay_mode(),
+            ResponsesReplayMode::PreviousResponse {
+                prefix_items: 5,
+                ..
+            }
+        ));
+        assert_eq!(
+            final_continuation.body()["previous_response_id"],
+            "response-ptc-second-pause"
+        );
+        assert_eq!(
+            final_continuation.body()["input"],
+            json!([{"type":"function_call_output","call_id":"call_2","output":"found again","caller":{"type":"program","caller_id":"pcall_1"}}])
+        );
+    } else {
+        assert_eq!(final_continuation.replay_mode(), &ResponsesReplayMode::Full);
+        assert!(
+            final_continuation
+                .body()
+                .get("previous_response_id")
+                .is_none()
+        );
+        assert_eq!(
+            final_continuation.body()["input"],
+            json!([
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"look up one value"}]},
+                fixture.first.program_native,
+                fixture.first.call_native,
+                {"type":"function_call_output","call_id":"call_1","output":"found","caller":{"type":"program","caller_id":"pcall_1"}},
+                fixture.second.call_native,
+                {"type":"function_call_output","call_id":"call_2","output":"found again","caller":{"type":"program","caller_id":"pcall_1"}}
+            ])
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn programmatic_second_pause_stored() -> TestResult {
+    check_programmatic_second_pause(ResponsesStorageMode::ProviderStored)
+}
+
+#[test]
+fn programmatic_second_pause_stateless() -> TestResult {
+    check_programmatic_second_pause(ResponsesStorageMode::Stateless)
+}
+
+fn check_programmatic_mutations(storage: ResponsesStorageMode) -> TestResult {
+    let fixture = programmatic_replay_fixture()?;
+    let policy = programmatic_storage_policy(storage);
+    for (mutation_index, row) in fixture.mutations()?.into_iter().enumerate() {
+        let mutated_view = row.view;
+        let mutated_replay = row.replay;
+        let mutated_request = crate::test_support::model_request_builder(mutated_view, metadata()?)
+            .tools(vec![ConfiguredTool::new(
+                fixture.base_tool.definition().clone(),
+                fixture.base_tool.execution(),
+                ToolCallerDisposition::ProviderProgrammaticOnly,
+            )])
+            .hosted_tools(vec![HostedTool::ProgrammaticComposition])
+            .resolved_harness_plan_identity(harness_plan_identity()?)
+            .build()?;
+        let mutated = output_artifact(
+            &fixture.producing_request,
+            &mutated_request,
+            "responses-ptc-test-route",
+            mutated_replay,
+            storage,
+            "response-ptc-first-pause",
+            None,
+            fixture.now,
+            format!("openai-platform-ptc-mutation-{mutation_index}").as_bytes(),
+        )?;
+        assert!(
+            ResponsesArtifactReplayBridge::from_active_artifact(
+                &active_artifact(&mutated)?,
+                if mutation_index == 0 {
+                    &fixture.next_request
+                } else {
+                    &mutated_request
+                },
+                operation_authority(
                     if mutation_index == 0 {
-                        &next_request
+                        &fixture.next_request
                     } else {
                         &mutated_request
                     },
-                    operation_authority(
-                        if mutation_index == 0 {
-                            &next_request
-                        } else {
-                            &mutated_request
-                        },
-                        "responses-ptc-test-route",
-                        policy,
-                    )?,
-                    ResponsesReplayKind::new("openai.output_item", 2),
-                    None,
-                    (storage == ResponsesStorageMode::ProviderStored)
-                        .then(|| ResponsesReplayKind::new("openai.previous_response_id", 1)),
-                    now,
-                )
-                .is_err(),
-                "storage {storage:?} replay mutation {mutation_index} was admitted"
-            );
-        }
+                    "responses-ptc-test-route",
+                    policy,
+                )?,
+                ResponsesReplayKind::new("openai.output_item", 2),
+                None,
+                (storage == ResponsesStorageMode::ProviderStored)
+                    .then(|| ResponsesReplayKind::new("openai.previous_response_id", 1)),
+                fixture.now,
+            )
+            .is_err(),
+            "storage {storage:?} replay mutation {mutation_index} was admitted"
+        );
     }
     Ok(())
+}
+
+#[test]
+fn programmatic_mutations_stored() -> TestResult {
+    check_programmatic_mutations(ResponsesStorageMode::ProviderStored)
+}
+
+#[test]
+fn programmatic_mutations_stateless() -> TestResult {
+    check_programmatic_mutations(ResponsesStorageMode::Stateless)
 }
 
 #[test]
@@ -4524,77 +4909,60 @@ fn active_artifact_wrapper_binding_revision_family_and_bytes_fail_closed() -> Te
         .last_mut()
         .ok_or_else(|| std::io::Error::other("empty active bytes"))?;
     *last ^= 0x01;
-    let wrappers = [
-        (
-            "family",
-            ActiveFamilyArtifact::new(
-                "messages",
-                RESPONSES_ARTIFACT_SCHEMA_REVISION,
-                RESPONSES_ARTIFACT_CODEC_REVISION,
-                binding,
-                bytes.clone(),
-            )?,
-        ),
+    let schema = RESPONSES_ARTIFACT_SCHEMA_REVISION;
+    let codec = RESPONSES_ARTIFACT_CODEC_REVISION;
+    for (axis, family, schema, codec, wrapper_binding, bytes) in [
+        ("family", "messages", schema, codec, binding, bytes.clone()),
         (
             "schema revision",
-            ActiveFamilyArtifact::new(
-                "responses",
-                RESPONSES_ARTIFACT_SCHEMA_REVISION.saturating_add(1),
-                RESPONSES_ARTIFACT_CODEC_REVISION,
-                binding,
-                bytes.clone(),
-            )?,
+            "responses",
+            schema.saturating_add(1),
+            codec,
+            binding,
+            bytes.clone(),
         ),
         (
             "codec revision",
-            ActiveFamilyArtifact::new(
-                "responses",
-                RESPONSES_ARTIFACT_SCHEMA_REVISION,
-                RESPONSES_ARTIFACT_CODEC_REVISION.saturating_add(1),
-                binding,
-                bytes.clone(),
-            )?,
+            "responses",
+            schema,
+            codec.saturating_add(1),
+            binding,
+            bytes.clone(),
         ),
         (
             "generic binding",
-            ActiveFamilyArtifact::new(
-                "responses",
-                RESPONSES_ARTIFACT_SCHEMA_REVISION,
-                RESPONSES_ARTIFACT_CODEC_REVISION,
-                Digest::sha256(DigestDomain::ModelBinding, 1, &[b"foreign-neutral-binding"])?,
-                bytes,
-            )?,
+            "responses",
+            schema,
+            codec,
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"foreign-neutral-binding"])?,
+            bytes.clone(),
         ),
         (
             "rebound current-operation wrapper",
-            ActiveFamilyArtifact::new(
-                "responses",
-                RESPONSES_ARTIFACT_SCHEMA_REVISION,
-                RESPONSES_ARTIFACT_CODEC_REVISION,
-                current_binding,
-                active.bytes().to_vec(),
-            )?,
+            "responses",
+            schema,
+            codec,
+            current_binding,
+            bytes,
         ),
         (
             "family bytes",
-            ActiveFamilyArtifact::new(
-                "responses",
-                RESPONSES_ARTIFACT_SCHEMA_REVISION,
-                RESPONSES_ARTIFACT_CODEC_REVISION,
-                binding,
-                tampered_bytes,
-            )?,
+            "responses",
+            schema,
+            codec,
+            binding,
+            tampered_bytes,
         ),
-    ];
-    for (axis, wrapper) in &wrappers {
+    ] {
+        let wrapper = ActiveFamilyArtifact::new(family, schema, codec, wrapper_binding, bytes)?;
         assert!(
             ResponsesArtifactReplayBridge::from_active_artifact(
-                wrapper,
+                &wrapper,
                 &request,
                 operation_authority(
                     &request,
                     "responses-test-route",
-                    ResponsesStoragePolicy::ProviderStored,
+                    ResponsesStoragePolicy::ProviderStored
                 )?,
                 ResponsesReplayKind::new("openai.output_item", 2),
                 None,
@@ -4687,10 +5055,37 @@ fn active_artifact_expiry_storage_and_replay_kinds_fail_closed() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -> TestResult {
-    let (protocol, family, model) = target_values()?;
-    let replay = ReplayEnvelope::new(
+struct StoredReplayFixture {
+    protocol: ProtocolId,
+    family: ModelFamilyId,
+    model: ModelId,
+    replay: ReplayEnvelope,
+    producing_request: ModelRequest,
+    next_request: ModelRequest,
+    now: Timestamp,
+    expires: Timestamp,
+    stored: ActiveFamilyArtifact,
+    output_kind: ResponsesReplayKind<'static>,
+    previous_kind: ResponsesReplayKind<'static>,
+}
+
+struct StoredReplayRequests {
+    producing_request: ModelRequest,
+    next_request: ModelRequest,
+}
+
+struct StoredThirdTurn {
+    request: ModelRequest,
+    replay: ReplayEnvelope,
+}
+
+fn stored_replay_envelope(
+    protocol: &ProtocolId,
+    family: &ModelFamilyId,
+    model: &ModelId,
+    number: u8,
+) -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+    Ok(ReplayEnvelope::new(
         protocol.clone(),
         Some(family.clone()),
         ReplayScope::ExactAccountModel {
@@ -4702,15 +5097,20 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
         DataClassification::Sensitive,
         RawValue::from_string(
             json!({
-                "id": "reasoning-1",
+                "id": format!("reasoning-{number}"),
                 "type": "reasoning",
                 "status": "completed",
                 "summary": [],
-                "encrypted_content": "encrypted-1"
+                "encrypted_content": format!("encrypted-{number}")
             })
             .to_string(),
         )?,
-    )?;
+    )?)
+}
+
+fn stored_replay_requests(
+    replay: &ReplayEnvelope,
+) -> Result<StoredReplayRequests, Box<dyn std::error::Error>> {
     let producing_prefix =
         HistorySegment::new(HistorySegmentKind::RecentIntent, vec![user(49, "start")?])?;
     let producing_request = crate::test_support::model_request_builder(
@@ -4750,6 +5150,19 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     )
     .resolved_harness_plan_identity(harness_plan_identity()?)
     .build()?;
+    Ok(StoredReplayRequests {
+        producing_request,
+        next_request,
+    })
+}
+
+fn stored_replay_fixture() -> Result<StoredReplayFixture, Box<dyn std::error::Error>> {
+    let (protocol, family, model) = target_values()?;
+    let replay = stored_replay_envelope(&protocol, &family, &model, 1)?;
+    let StoredReplayRequests {
+        producing_request,
+        next_request,
+    } = stored_replay_requests(&replay)?;
     let now = Timestamp::new(1_700_000_000, 0)?;
     let expires = Timestamp::new(1_800_000_000, 0)?;
     let stored = output_artifact(
@@ -4766,25 +5179,110 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     let output_kind = ResponsesReplayKind::new("openai.output_item", 2);
     let previous_kind = ResponsesReplayKind::new("openai.previous_response_id", 1);
     let stored = active_artifact(&stored)?;
+    Ok(StoredReplayFixture {
+        protocol,
+        family,
+        model,
+        replay,
+        producing_request,
+        next_request,
+        now,
+        expires,
+        stored,
+        output_kind,
+        previous_kind,
+    })
+}
+
+impl StoredReplayFixture {
+    fn third_request(&self) -> Result<StoredThirdTurn, Box<dyn std::error::Error>> {
+        let fixture = self;
+        let replay_two =
+            stored_replay_envelope(&fixture.protocol, &fixture.family, &fixture.model, 2)?;
+        let mut third_segments = fixture.next_request.input().history().segments().to_vec();
+        third_segments.push(HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![ConversationItem::new(
+                id::<EntryId>(52)?,
+                Actor::Assistant,
+                vec![ContentBlock::Opaque(OpaqueBlock::new(
+                    replay_two.clone(),
+                    OpaqueFallback::CompatibleReplay,
+                )?)],
+                Provenance::ModelOutput,
+            )?],
+        )?);
+        third_segments.push(HistorySegment::new(
+            HistorySegmentKind::RecentIntent,
+            vec![user(53, "third turn")?],
+        )?);
+        let third_request = crate::test_support::model_request_builder(
+            ConversationView::from_shared(
+                CanonicalHistory::new(third_segments)?,
+                WorkingProjection::default(),
+            ),
+            metadata()?,
+        )
+        .resolved_harness_plan_identity(harness_plan_identity()?)
+        .build()?;
+        Ok(StoredThirdTurn {
+            request: third_request,
+            replay: replay_two,
+        })
+    }
+
+    fn stateless_artifact(&self) -> Result<ActiveFamilyArtifact, Box<dyn std::error::Error>> {
+        let fixture = self;
+        let stateless = output_artifact(
+            &fixture.producing_request,
+            &fixture.next_request,
+            "responses-test-route",
+            vec![fixture.replay.clone()],
+            ResponsesStorageMode::Stateless,
+            "unused-stateless-response",
+            Some(fixture.expires),
+            fixture.now,
+            b"stateless-round-trip",
+        )?;
+        let stateless = active_artifact(&stateless)?;
+        Ok(stateless)
+    }
+
+    fn wrap_up_request(&self) -> Result<ModelRequest, Box<dyn std::error::Error>> {
+        let fixture = self;
+        let wrap_up_request = crate::test_support::model_request_builder(
+            fixture.next_request.input().clone(),
+            metadata()?,
+        )
+        .resolved_harness_plan_identity(harness_plan_identity()?)
+        .tool_choice(ToolChoice::None)
+        .build()?;
+        Ok(wrap_up_request)
+    }
+}
+
+#[test]
+fn stored_replay_continues_first_response() -> TestResult {
+    let fixture = stored_replay_fixture()?;
     let bridge = ResponsesArtifactReplayBridge::from_active_artifact(
-        &stored,
-        &next_request,
+        &fixture.stored,
+        &fixture.next_request,
         operation_authority(
-            &next_request,
+            &fixture.next_request,
             "responses-test-route",
             ResponsesStoragePolicy::ProviderStored,
         )?,
-        output_kind,
+        fixture.output_kind,
         None,
-        Some(previous_kind),
-        now,
+        Some(fixture.previous_kind),
+        fixture.now,
     )?;
     let lowered = lower_responses_request(
-        &next_request,
+        &fixture.next_request,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_platform(
                 ResponsesStoragePolicy::ProviderStored,
                 false,
@@ -4797,62 +5295,25 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     assert_eq!(lowered.body()["input"].as_array().expect("input").len(), 1);
     assert_eq!(lowered.body()["input"][0]["content"][0]["text"], "continue");
 
-    let replay_two = ReplayEnvelope::new(
-        protocol.clone(),
-        Some(family.clone()),
-        ReplayScope::ExactAccountModel {
-            model: model.clone(),
-            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
-        },
-        ReplayKindId::new("openai.output_item")?,
-        2,
-        DataClassification::Sensitive,
-        RawValue::from_string(
-            json!({
-                "id": "reasoning-2",
-                "type": "reasoning",
-                "status": "completed",
-                "summary": [],
-                "encrypted_content": "encrypted-2"
-            })
-            .to_string(),
-        )?,
-    )?;
-    let mut third_segments = next_request.input().history().segments().to_vec();
-    third_segments.push(HistorySegment::new(
-        HistorySegmentKind::ReasoningReplay,
-        vec![ConversationItem::new(
-            id::<EntryId>(52)?,
-            Actor::Assistant,
-            vec![ContentBlock::Opaque(OpaqueBlock::new(
-                replay_two.clone(),
-                OpaqueFallback::CompatibleReplay,
-            )?)],
-            Provenance::ModelOutput,
-        )?],
-    )?);
-    third_segments.push(HistorySegment::new(
-        HistorySegmentKind::RecentIntent,
-        vec![user(53, "third turn")?],
-    )?);
-    let third_request = crate::test_support::model_request_builder(
-        ConversationView::from_shared(
-            CanonicalHistory::new(third_segments)?,
-            WorkingProjection::default(),
-        ),
-        metadata()?,
-    )
-    .resolved_harness_plan_identity(harness_plan_identity()?)
-    .build()?;
+    Ok(())
+}
+
+#[test]
+fn stored_replay_reopen_uses_latest_third_turn_response() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let StoredThirdTurn {
+        request: third_request,
+        replay: replay_two,
+    } = fixture.third_request()?;
     let latest = output_artifact(
-        &next_request,
+        &fixture.next_request,
         &third_request,
         "responses-test-route",
         vec![replay_two],
         ResponsesStorageMode::ProviderStored,
         "response-2",
-        Some(expires),
-        now,
+        Some(fixture.expires),
+        fixture.now,
         b"stored-third-turn",
     )?;
     let reopened: ActiveFamilyArtifact =
@@ -4865,17 +5326,17 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
             "responses-test-route",
             ResponsesStoragePolicy::ProviderStored,
         )?,
-        output_kind,
+        fixture.output_kind,
         None,
-        Some(previous_kind),
-        now,
+        Some(fixture.previous_kind),
+        fixture.now,
     )?;
     let third = lower_responses_request(
         &third_request,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_platform(
                 ResponsesStoragePolicy::ProviderStored,
                 false,
@@ -4888,56 +5349,57 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     assert_eq!(third.body()["input"].as_array().expect("input").len(), 1);
     assert_eq!(third.body()["input"][0]["content"][0]["text"], "third turn");
 
+    Ok(())
+}
+
+#[test]
+fn stored_replay_expiry_is_exact() -> TestResult {
+    let fixture = stored_replay_fixture()?;
     assert!(matches!(
         ResponsesArtifactReplayBridge::from_active_artifact(
-            &stored,
-            &next_request,
+            &fixture.stored,
+            &fixture.next_request,
             operation_authority(
-                &next_request,
+                &fixture.next_request,
                 "responses-test-route",
                 ResponsesStoragePolicy::ProviderStored,
             )?,
-            output_kind,
+            fixture.output_kind,
             None,
-            Some(previous_kind),
-            expires,
+            Some(fixture.previous_kind),
+            fixture.expires,
         ),
         Err(ResponsesRequestError::Replay(
             ResponsesReplayError::ArtifactExpired
         ))
     ));
 
-    let stateless = output_artifact(
-        &producing_request,
-        &next_request,
-        "responses-test-route",
-        vec![replay],
-        ResponsesStorageMode::Stateless,
-        "unused-stateless-response",
-        Some(expires),
-        now,
-        b"stateless-round-trip",
-    )?;
-    let stateless = active_artifact(&stateless)?;
+    Ok(())
+}
+
+#[test]
+fn stateless_replay_uses_original_native_items() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let stateless = fixture.stateless_artifact()?;
     let stateless_bridge = ResponsesArtifactReplayBridge::from_active_artifact(
         &stateless,
-        &next_request,
+        &fixture.next_request,
         operation_authority(
-            &next_request,
+            &fixture.next_request,
             "responses-test-route",
             ResponsesStoragePolicy::Stateless,
         )?,
-        output_kind,
+        fixture.output_kind,
         None,
         None,
-        now,
+        fixture.now,
     )?;
     let replayed = lower_responses_request(
-        &next_request,
+        &fixture.next_request,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
             Some(stateless_bridge.context()),
         ),
@@ -4945,34 +5407,41 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     assert_eq!(replayed.body()["input"][1]["id"], "reasoning-1");
     assert_eq!(replayed.body()["input"][1]["type"], "reasoning");
 
+    Ok(())
+}
+
+#[test]
+fn stateless_replay_refuses_foreign_route() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let stateless = fixture.stateless_artifact()?;
     let foreign = operation_authority(
-        &next_request,
+        &fixture.next_request,
         "foreign-route",
         ResponsesStoragePolicy::Stateless,
     )?;
     assert!(matches!(
         ResponsesArtifactReplayBridge::from_active_artifact(
             &stateless,
-            &next_request,
+            &fixture.next_request,
             foreign,
-            output_kind,
+            fixture.output_kind,
             None,
             None,
-            now,
+            fixture.now,
         ),
         Err(ResponsesRequestError::Replay(
             ResponsesReplayError::ArtifactTargetMismatch { axis: "route" }
         ))
     ));
 
-    // The operation-budget wrap-up withdraws tool selection over the same
-    // history. The binding leaves tool selection out of its prefix
-    // identity, so the wrap-up still continues this artifact.
-    let wrap_up_request =
-        crate::test_support::model_request_builder(next_request.input().clone(), metadata()?)
-            .resolved_harness_plan_identity(harness_plan_identity()?)
-            .tool_choice(ToolChoice::None)
-            .build()?;
+    Ok(())
+}
+
+#[test]
+fn stateless_wrap_up_retains_native_replay() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let stateless = fixture.stateless_artifact()?;
+    let wrap_up_request = fixture.wrap_up_request()?;
     let wrap_up = ResponsesArtifactReplayBridge::from_active_artifact(
         &stateless,
         &wrap_up_request,
@@ -4981,35 +5450,41 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
             "responses-test-route",
             ResponsesStoragePolicy::Stateless,
         )?,
-        output_kind,
+        fixture.output_kind,
         None,
         None,
-        now,
+        fixture.now,
     )?;
     let replayed_wrap_up = lower_responses_request(
         &wrap_up_request,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
             Some(wrap_up.context()),
         ),
     )?;
     assert_eq!(replayed_wrap_up.body()["input"][1]["id"], "reasoning-1");
     assert!(replayed_wrap_up.body().to_string().contains("encrypted-1"));
-    // Any other stable-prefix difference is not this artifact's
-    // continuation: the route prepares fresh and still lowers the complete
-    // history.
-    let drifted_request =
-        crate::test_support::model_request_builder(next_request.input().clone(), metadata()?)
-            .resolved_harness_plan_identity(harness_plan_identity()?)
-            .instructions(vec![InstructionBlock::new(
-                InstructionSource::System,
-                "answer briefly",
-            )?])
-            .tool_choice(ToolChoice::None)
-            .build()?;
+    Ok(())
+}
+
+#[test]
+fn stateless_wrap_up_prefix_drift_prepares_fresh() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let stateless = fixture.stateless_artifact()?;
+    let drifted_request = crate::test_support::model_request_builder(
+        fixture.next_request.input().clone(),
+        metadata()?,
+    )
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .instructions(vec![InstructionBlock::new(
+        InstructionSource::System,
+        "answer briefly",
+    )?])
+    .tool_choice(ToolChoice::None)
+    .build()?;
     let drifted = ResponsesArtifactReplayBridge::from_active_artifact(
         &stateless,
         &drifted_request,
@@ -5018,10 +5493,10 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
             "responses-test-route",
             ResponsesStoragePolicy::Stateless,
         )?,
-        output_kind,
+        fixture.output_kind,
         None,
         None,
-        now,
+        fixture.now,
     );
     assert!(matches!(
         drifted,
@@ -5030,9 +5505,13 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
         ))
     ));
     assert!(drifted.is_err_and(|error| error.artifact_is_not_for_this_request()));
-    // Fresh lowering of that history as the canonicalizer stores it
-    // (native reasoning is `Omit`) sends every portable item and no
-    // native reasoning.
+    Ok(())
+}
+
+#[test]
+fn stateless_wrap_up_fresh_projection_omits_native_reasoning() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let wrap_up_request = fixture.wrap_up_request()?;
     let segments = wrap_up_request.input().history().segments();
     let ContentBlock::Opaque(reasoning) = &segments[1].items()[0].blocks()[0] else {
         return Err("fixture reasoning is not opaque".into());
@@ -5066,9 +5545,9 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     let fresh = lower_responses_request(
         &stored_wrap_up,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
             None,
         ),
@@ -5076,85 +5555,14 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     let fresh = fresh.body().to_string();
     assert!(fresh.contains("start") && fresh.contains("continue"));
     assert!(!fresh.contains("encrypted-1"));
-    // A hard target axis still wins over the soft prefix miss.
-    assert!(matches!(
-        ResponsesArtifactReplayBridge::from_active_artifact(
-            &stateless,
-            &wrap_up_request,
-            operation_authority(
-                &wrap_up_request,
-                "foreign-route",
-                ResponsesStoragePolicy::Stateless,
-            )?,
-            output_kind,
-            None,
-            None,
-            now,
-        ),
-        Err(ResponsesRequestError::Replay(
-            ResponsesReplayError::ArtifactTargetMismatch { axis: "route" }
-        ))
-    ));
-    // Every other hard axis also wins over a tool-free prefix: a foreign
-    // tool plan and a different storage mode.
-    let foreign_plan = Digest::sha256(
-        DigestDomain::ResolvedHarnessPlan,
-        1,
-        &[b"responses-foreign-tool-plan"],
-    )?;
-    let foreign_plan_wrap_up =
-        crate::test_support::model_request_builder(next_request.input().clone(), metadata()?)
-            .resolved_harness_plan_identity(foreign_plan)
-            .tool_choice(ToolChoice::None)
-            .build()?;
-    let foreign_tool_plan = ResponsesArtifactReplayBridge::from_active_artifact(
-        &stateless,
-        &foreign_plan_wrap_up,
-        operation_authority(
-            &foreign_plan_wrap_up,
-            "responses-test-route",
-            ResponsesStoragePolicy::Stateless,
-        )?,
-        output_kind,
-        None,
-        None,
-        now,
-    );
-    assert!(
-        matches!(
-            foreign_tool_plan,
-            Err(ResponsesRequestError::Replay(
-                ResponsesReplayError::ArtifactTargetMismatch { axis: "tool-plan" }
-            ))
-        ),
-        "tool-plan must stay hard under a tool-free prefix: {foreign_tool_plan:?}"
-    );
-    let foreign_storage = ResponsesArtifactReplayBridge::from_active_artifact(
-        &stateless,
-        &wrap_up_request,
-        operation_authority(
-            &wrap_up_request,
-            "responses-test-route",
-            ResponsesStoragePolicy::ProviderStored,
-        )?,
-        output_kind,
-        None,
-        None,
-        now,
-    );
-    assert!(
-        matches!(
-            foreign_storage,
-            Err(ResponsesRequestError::Replay(
-                ResponsesReplayError::ArtifactTargetMismatch {
-                    axis: "storage-mode"
-                }
-            ))
-        ),
-        "storage-mode must stay hard under a tool-free prefix: {foreign_storage:?}"
-    );
+    Ok(())
+}
 
-    let original = next_request.input().history().segments();
+#[test]
+fn stateless_replay_refuses_gaps_reordering_and_truncation() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let stateless = fixture.stateless_artifact()?;
+    let original = fixture.next_request.input().history().segments();
     let malformed_histories = [
         vec![original[0].clone()],
         vec![
@@ -5188,13 +5596,67 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
                 &stateless,
                 &malformed,
                 authority,
-                output_kind,
+                fixture.output_kind,
                 None,
                 None,
-                now,
+                fixture.now,
             )
             .is_err(),
             "gap/reorder/truncation mutation {index} was accepted"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn stateless_wrap_up_keeps_hard_binding_axes() -> TestResult {
+    let fixture = stored_replay_fixture()?;
+    let stateless = fixture.stateless_artifact()?;
+    let wrap_up_request = fixture.wrap_up_request()?;
+    let foreign_plan = Digest::sha256(
+        DigestDomain::ResolvedHarnessPlan,
+        1,
+        &[b"responses-foreign-tool-plan"],
+    )?;
+    let foreign_plan_wrap_up = crate::test_support::model_request_builder(
+        fixture.next_request.input().clone(),
+        metadata()?,
+    )
+    .resolved_harness_plan_identity(foreign_plan)
+    .tool_choice(ToolChoice::None)
+    .build()?;
+    for (axis, request, route, storage) in [
+        (
+            "route",
+            &wrap_up_request,
+            "foreign-route",
+            ResponsesStoragePolicy::Stateless,
+        ),
+        (
+            "tool-plan",
+            &foreign_plan_wrap_up,
+            "responses-test-route",
+            ResponsesStoragePolicy::Stateless,
+        ),
+        (
+            "storage-mode",
+            &wrap_up_request,
+            "responses-test-route",
+            ResponsesStoragePolicy::ProviderStored,
+        ),
+    ] {
+        let result = ResponsesArtifactReplayBridge::from_active_artifact(
+            &stateless,
+            request,
+            operation_authority(request, route, storage)?,
+            fixture.output_kind,
+            None,
+            None,
+            fixture.now,
+        );
+        assert!(
+            matches!(result, Err(ResponsesRequestError::Replay(ResponsesReplayError::ArtifactTargetMismatch { axis: actual })) if actual == axis),
+            "{axis}: {result:?}"
         );
     }
     Ok(())
@@ -5369,35 +5831,50 @@ fn project_codec_append_and_next_request_are_exact_in_both_storage_modes() -> Te
     Ok(())
 }
 
-#[test]
-fn latest_artifact_authorizes_full_prefix_and_disambiguates_same_digest_groups() -> TestResult {
+struct SameDigestFixture {
+    protocol: ProtocolId,
+    family: ModelFamilyId,
+    model: ModelId,
+    now: Timestamp,
+    output_kind: ResponsesReplayKind<'static>,
+    next_request: ModelRequest,
+    artifact_two: ResponsesArtifact,
+}
+
+fn same_digest_replay(
+    protocol: &ProtocolId,
+    family: &ModelFamilyId,
+    model: &ModelId,
+    id: &str,
+) -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+    Ok(ReplayEnvelope::new(
+        protocol.clone(),
+        Some(family.clone()),
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        },
+        ReplayKindId::new("openai.output_item")?,
+        2,
+        DataClassification::Sensitive,
+        RawValue::from_string(
+            json!({
+                "id": id,
+                "type": "reasoning",
+                "status":"completed",
+                "summary": [],
+                "encrypted_content": format!("encrypted-{id}")
+            })
+            .to_string(),
+        )?,
+    )?)
+}
+
+fn same_digest_fixture() -> Result<SameDigestFixture, Box<dyn std::error::Error>> {
     let (protocol, family, model) = target_values()?;
     let now = Timestamp::new(1_700_000_000, 0)?;
     let output_kind = ResponsesReplayKind::new("openai.output_item", 2);
-    let raw = |id: &str| -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
-        Ok(ReplayEnvelope::new(
-            protocol.clone(),
-            Some(family.clone()),
-            ReplayScope::ExactAccountModel {
-                model: model.clone(),
-                account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
-            },
-            ReplayKindId::new("openai.output_item")?,
-            2,
-            DataClassification::Sensitive,
-            RawValue::from_string(
-                json!({
-                    "id": id,
-                    "type": "reasoning",
-                    "status":"completed",
-                    "summary": [],
-                    "encrypted_content": format!("encrypted-{id}")
-                })
-                .to_string(),
-            )?,
-        )?)
-    };
-    let replay_one = raw("reasoning-1")?;
+    let replay_one = same_digest_replay(&protocol, &family, &model, "reasoning-1")?;
     let replay_two = replay_one.clone();
     let prefix = HistorySegment::new(HistorySegmentKind::RecentIntent, vec![user(80, "first")?])?;
     let output_one = HistorySegment::new(
@@ -5455,28 +5932,42 @@ fn latest_artifact_authorizes_full_prefix_and_disambiguates_same_digest_groups()
         now,
         b"same-digest-group-two",
     )?;
-    let encoded_two = ResponsesArtifactCodec::encode(&artifact_two)?;
-    let active_two = active_artifact(&artifact_two)?;
+    Ok(SameDigestFixture {
+        protocol,
+        family,
+        model,
+        now,
+        output_kind,
+        next_request,
+        artifact_two,
+    })
+}
+
+#[test]
+fn latest_artifact_authorizes_full_prefix_and_disambiguates_same_digest_groups() -> TestResult {
+    let fixture = same_digest_fixture()?;
+    let encoded_two = ResponsesArtifactCodec::encode(&fixture.artifact_two)?;
+    let active_two = active_artifact(&fixture.artifact_two)?;
     assert!(!String::from_utf8_lossy(&encoded_two).contains("reasoning-1"));
     let bridge = ResponsesArtifactReplayBridge::from_active_artifact(
         &active_two,
-        &next_request,
+        &fixture.next_request,
         operation_authority(
-            &next_request,
+            &fixture.next_request,
             "responses-test-route",
             ResponsesStoragePolicy::Stateless,
         )?,
-        output_kind,
+        fixture.output_kind,
         None,
         None,
-        now,
+        fixture.now,
     )?;
     let lowered = lower_responses_request(
-        &next_request,
+        &fixture.next_request,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
             Some(bridge.context()),
         ),
@@ -5487,11 +5978,11 @@ fn latest_artifact_authorizes_full_prefix_and_disambiguates_same_digest_groups()
     assert_eq!(input[3]["id"], "reasoning-1");
 
     let grok = lower_responses_request(
-        &next_request,
+        &fixture.next_request,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::supergrok_stateless(),
             Some(bridge.context()),
         ),
@@ -6212,32 +6703,20 @@ fn hosted_programs_ignore_lineage_from_an_earlier_account() -> TestResult {
 /// replay fall back to portable semantics, Code Mode `exec` stays a paired
 /// custom call with its cell yield, and program-caller lineage is lowered on
 /// both call and output.
-#[test]
-fn native_successor_tail_lowers_after_the_compaction_item_without_replay() -> TestResult {
-    let (protocol, family, model) = target_values()?;
-    let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?;
-    let replay = |native: Value| -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
-        Ok(ReplayEnvelope::new(
-            protocol.clone(),
-            Some(family.clone()),
-            ReplayScope::ExactAccountModel {
-                model: model.clone(),
-                account,
-            },
-            ReplayKindId::new("responses.output_item")?,
-            1,
-            DataClassification::Sensitive,
-            RawValue::from_string(native.to_string())?,
-        )?)
-    };
-    let reasoning = ContentBlock::Reasoning(ReasoningBlock::new(
-        ReasoningVisibility::OpaqueReplay,
-        None,
-        Some(replay(json!({
-            "type": "reasoning", "id": "tail-reasoning",
-            "encrypted_content": "tail-encrypted", "summary": []
-        }))?),
-    )?);
+struct NativeSuccessorCalls {
+    exec: ToolCallBlock,
+    lookup: ToolCallBlock,
+    lineage: ToolCallerLineage,
+}
+struct NativeSuccessorFixture {
+    protocol: ProtocolId,
+    family: ModelFamilyId,
+    model: ModelId,
+    account: Digest,
+    request: ModelRequest,
+}
+
+fn native_successor_calls() -> Result<NativeSuccessorCalls, Box<dyn std::error::Error>> {
     let exec = ToolCallBlock::new(
         id::<CallId>(960)?,
         ToolName::new("exec")?,
@@ -6262,7 +6741,24 @@ fn native_successor_tail_lowers_after_the_compaction_item_without_replay() -> Te
         ToolCorrelation::new(Some("call_lookup".to_owned()), None, lineage.clone())?,
         r#"{"q":"check word"}"#,
     )?;
-    let items = vec![
+    Ok(NativeSuccessorCalls {
+        exec,
+        lookup,
+        lineage,
+    })
+}
+
+fn native_successor_items(
+    reasoning: ContentBlock,
+    calls: NativeSuccessorCalls,
+    exec_replay: ReplayEnvelope,
+) -> Result<Vec<ConversationItem>, Box<dyn std::error::Error>> {
+    let NativeSuccessorCalls {
+        exec,
+        lookup,
+        lineage,
+    } = calls;
+    Ok(vec![
         user(962, "read every page")?,
         bound_compaction_prior(
             "opaque-ciphertext",
@@ -6275,10 +6771,7 @@ fn native_successor_tail_lowers_after_the_compaction_item_without_replay() -> Te
                 reasoning,
                 ContentBlock::ToolCall(exec.clone()),
                 ContentBlock::Opaque(OpaqueBlock::new(
-                    replay(json!({
-                        "type": "custom_tool_call", "id": "ctc_1", "call_id": "call_exec",
-                        "name": "exec", "input": "const page = await read(2); yield_(page);"
-                    }))?,
+                    exec_replay,
                     OpaqueFallback::CompatibleReplay,
                 )?),
                 ContentBlock::ToolCall(lookup.clone()),
@@ -6313,23 +6806,67 @@ fn native_successor_tail_lowers_after_the_compaction_item_without_replay() -> Te
             Provenance::ToolExecution,
         )?,
         user(965, "also read page three")?,
-    ];
+    ])
+}
+
+fn native_successor_fixture() -> Result<NativeSuccessorFixture, Box<dyn std::error::Error>> {
+    let (protocol, family, model) = target_values()?;
+    let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?;
+    let replay = |native: Value| -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+        Ok(ReplayEnvelope::new(
+            protocol.clone(),
+            Some(family.clone()),
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account,
+            },
+            ReplayKindId::new("responses.output_item")?,
+            1,
+            DataClassification::Sensitive,
+            RawValue::from_string(native.to_string())?,
+        )?)
+    };
+    let reasoning = ContentBlock::Reasoning(ReasoningBlock::new(
+        ReasoningVisibility::OpaqueReplay,
+        None,
+        Some(replay(json!({
+            "type": "reasoning", "id": "tail-reasoning",
+            "encrypted_content": "tail-encrypted", "summary": []
+        }))?),
+    )?);
+    let exec_replay = replay(json!({
+        "type": "custom_tool_call", "id": "ctc_1", "call_id": "call_exec",
+        "name": "exec", "input": "const page = await read(2); yield_(page);"
+    }))?;
+    let items = native_successor_items(reasoning, native_successor_calls()?, exec_replay)?;
     let request = crate::test_support::model_request_builder(
         ConversationView::from_items(items)?,
         metadata()?,
     )
     .tools(vec![tool("exec", true)?, tool("lookup", false)?])
     .build()?;
+    Ok(NativeSuccessorFixture {
+        protocol,
+        family,
+        model,
+        account,
+        request,
+    })
+}
+
+#[test]
+fn native_successor_tail_lowers_after_the_compaction_item_without_replay() -> TestResult {
+    let fixture = native_successor_fixture()?;
     let lowered = lower_responses_request(
-        &request,
+        &fixture.request,
         ResponsesRequestConfig::new(
-            &protocol,
-            Some(&family),
-            &model,
+            &fixture.protocol,
+            Some(&fixture.family),
+            &fixture.model,
             ResponsesRequestPolicy::openai_codex(false, true, "reasoning.encrypted_content"),
             None,
         )
-        .with_account_binding(&account),
+        .with_account_binding(&fixture.account),
     )?;
     let input = lowered.body()["input"].as_array().ok_or("input")?;
     let types = input

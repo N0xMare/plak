@@ -24,7 +24,6 @@
 #![cfg_attr(
     test,
     allow(
-        clippy::too_many_lines,
         clippy::needless_pass_by_value,
         reason = "scenario tests spell out whole wire exchanges and own their fixtures"
     )
@@ -74,29 +73,7 @@ mod test_support {
             .expect("integration profile fixture");
         let integration_revision =
             ProviderProfileRevisionId::new("responses-test-v1").expect("integration revision");
-        let behavior = ProviderBehaviorConfiguration {
-            processing_tier: plakous_model::ProcessingTierDisposition::Standard,
-            tool_mode: plakous_model::ToolPresentationMode::Direct,
-            reasoning_effort: ReasoningEffortDisposition::Disabled,
-            reasoning_summary: ReasoningSummaryDisposition::Omit,
-            reasoning_include: ReasoningIncludeDisposition::EncryptedContent,
-            replay: ReplayDisposition::StrictEncrypted,
-            cache: CachePolicy::Disabled,
-            tools: Vec::new(),
-            hosted_tools: Vec::new(),
-            tool_choice: ToolChoice::Auto,
-            parallel_tools: ParallelToolDisposition::Disabled,
-            output: OutputPolicy::default(),
-            output_bound: OutputBoundDisposition::Enforced(NonZeroU32::MIN),
-            storage: ProviderStorageDisposition::DisabledOnWire,
-            retention: RetentionDisposition::RouteContract {
-                profile: integration_profile.clone(),
-                revision: integration_revision.clone(),
-            },
-            response_state: ResponseStateDisposition::Stateless,
-            context_evidence_requirement: ContextAdmissionRequirement::AnyBounded,
-            local_durability: LocalDurabilityDisposition::Ephemeral,
-        };
+        let behavior = request_behavior(integration_profile.clone(), integration_revision.clone());
         let selected = SelectedProviderConfiguration::new(
             ProviderRouteSelection::new(
                 plakous_model::ProtocolId::new("openai.responses").expect("protocol fixture"),
@@ -182,6 +159,35 @@ mod test_support {
             input,
             metadata,
         )
+    }
+
+    fn request_behavior(
+        integration_profile: ModelAdapterProfileId,
+        integration_revision: ProviderProfileRevisionId,
+    ) -> ProviderBehaviorConfiguration {
+        ProviderBehaviorConfiguration {
+            processing_tier: plakous_model::ProcessingTierDisposition::Standard,
+            tool_mode: plakous_model::ToolPresentationMode::Direct,
+            reasoning_effort: ReasoningEffortDisposition::Disabled,
+            reasoning_summary: ReasoningSummaryDisposition::Omit,
+            reasoning_include: ReasoningIncludeDisposition::EncryptedContent,
+            replay: ReplayDisposition::StrictEncrypted,
+            cache: CachePolicy::Disabled,
+            tools: Vec::new(),
+            hosted_tools: Vec::new(),
+            tool_choice: ToolChoice::Auto,
+            parallel_tools: ParallelToolDisposition::Disabled,
+            output: OutputPolicy::default(),
+            output_bound: OutputBoundDisposition::Enforced(NonZeroU32::MIN),
+            storage: ProviderStorageDisposition::DisabledOnWire,
+            retention: RetentionDisposition::RouteContract {
+                profile: integration_profile,
+                revision: integration_revision,
+            },
+            response_state: ResponseStateDisposition::Stateless,
+            context_evidence_requirement: ContextAdmissionRequirement::AnyBounded,
+            local_durability: LocalDurabilityDisposition::Ephemeral,
+        }
     }
 }
 

@@ -1655,6 +1655,12 @@ async fn redirect_and_status_are_returned_once_without_fallback_or_retry() -> Re
     );
     assert_eq!(peer.await??.1, 1);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn statuses_are_returned_once_without_fallback_or_retry() -> Result<(), TestError> {
+    let generation = openai_generation_fingerprint(b"redirect-generation");
     let body = br#"{"error":{"message":"conflict"}}"#;
     let (client_config, tls_identity, origin, peer) = responding_wire_peer(http_response(
         "409 Conflict",
@@ -2935,176 +2941,96 @@ async fn stalled_stream_fails_at_the_idle_bound() -> Result<(), TestError> {
     Ok(())
 }
 
-#[test]
-fn physical_binding_covers_attempt_generation_headers_path_and_body() -> Result<(), TestError> {
-    let physical = attempt_binding(1, 1)?;
-    let generation = openai_generation_fingerprint(b"credential generation one");
-    let rotated = openai_generation_fingerprint(b"credential generation two");
-    let headers = header_bindings();
-    let authority = ResponsesCredentialAuthority::secondary(generation);
-    let rotated_authority = ResponsesCredentialAuthority::secondary(rotated);
-    let base = physical_request_digest(
-        &physical,
-        &authority,
-        &request(b"{}", "Bearer first")?,
-        &headers,
-    )?;
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &attempt_binding(2, 1)?,
-            &authority,
-            &request(b"{}", "Bearer first")?,
-            &headers
-        )?
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &attempt_binding(1, 2)?,
-            &authority,
-            &request(b"{}", "Bearer first")?,
-            &headers
-        )?
-    );
-    assert_eq!(
-        base,
-        physical_request_digest(
-            &physical,
-            &authority,
-            &request(b"{}", "Bearer rotated")?,
-            &headers
-        )?,
-        "credential bytes must not become a digest oracle"
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
-            &rotated_authority,
-            &request(b"{}", "Bearer first")?,
-            &headers
-        )?,
-        "the non-secret credential generation remains exact"
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
-            &authority,
-            &request(b"{\"x\":1}", "Bearer first")?,
-            &headers
-        )?
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
-            &authority,
-            &request_at(
-                "https://other.test",
-                Method::POST,
-                "/responses",
-                b"{}",
-                "Bearer first",
-                "application/json"
-            )?,
-            &headers
-        )?,
-        "normalized origin is part of the host-derived route binding"
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
-            &authority,
-            &request_at(
-                "https://example.test",
-                Method::POST,
-                "/backend-api/codex/responses",
-                b"{}",
-                "Bearer first",
-                "application/json"
-            )?,
-            &headers
-        )?,
-        "path is part of the host-derived route binding"
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
-            &authority,
-            &request_at(
-                "https://example.test",
-                Method::PUT,
-                "/responses",
-                b"{}",
-                "Bearer first",
-                "application/json"
-            )?,
-            &headers
-        )?,
-        "method is part of the exact request binding"
-    );
-    let alternate_public = header_bindings_for(b"application/responses+json");
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
-            &authority,
-            &request_at(
-                "https://example.test",
-                Method::POST,
-                "/responses",
-                b"{}",
-                "Bearer first",
-                "application/responses+json"
-            )?,
-            &alternate_public
-        )?,
-        "pinned public header bytes are bound exactly"
-    );
-    assert!(matches!(
-        physical_request_digest(
-            &physical,
-            &authority,
-            &request_at(
-                "https://example.test",
-                Method::POST,
-                "/responses",
-                b"{}",
-                "Bearer first",
-                "application/responses+json"
-            )?,
-            &headers
-        ),
-        Err(ResponsesAttemptBuildError::Binding)
-    ));
-    Ok(())
+#[derive(Clone, Copy, Debug)]
+enum PhysicalBindingAxis {
+    Base,
+    Attempt,
+    Generation,
+    Secret,
+    Authority,
+    Body,
+    Origin,
+    Path,
+    Method,
+    Header,
+    HeaderMismatch,
+}
+
+fn physical_binding_variant(
+    axis: PhysicalBindingAxis,
+) -> Result<Result<(Digest, Digest), ResponsesAttemptBuildError>, TestError> {
+    use PhysicalBindingAxis as Axis;
+    let physical = match axis {
+        Axis::Attempt => attempt_binding(2, 1)?,
+        Axis::Generation => attempt_binding(1, 2)?,
+        _ => attempt_binding(1, 1)?,
+    };
+    let generation = if matches!(axis, Axis::Authority) {
+        b"credential generation two"
+    } else {
+        b"credential generation one"
+    };
+    let authority =
+        ResponsesCredentialAuthority::secondary(openai_generation_fingerprint(generation));
+    let mut origin = "https://example.test";
+    let mut method = Method::POST;
+    let mut path = "/responses";
+    let mut body: &[u8] = b"{}";
+    let mut secret = "Bearer first";
+    let mut content_type = "application/json";
+    match axis {
+        Axis::Secret => secret = "Bearer rotated",
+        Axis::Body => body = b"{\"x\":1}",
+        Axis::Origin => origin = "https://other.test",
+        Axis::Path => path = "/backend-api/codex/responses",
+        Axis::Method => method = Method::PUT,
+        Axis::Header | Axis::HeaderMismatch => content_type = "application/responses+json",
+        _ => {}
+    }
+    let headers = if matches!(axis, Axis::Header) {
+        header_bindings_for(b"application/responses+json")
+    } else {
+        header_bindings()
+    };
+    let wire = request_at(origin, method, path, body, secret, content_type)?;
+    Ok(physical_request_digest(
+        &physical, &authority, &wire, &headers,
+    ))
 }
 
 #[test]
-fn dual_slot_binding_is_order_independent_and_rotates_independently() -> Result<(), TestError> {
-    let physical = attempt_binding_for_slots(7, 1, ResponsesAuthSlots::PrimaryAndSecondary)?;
-    let primary = openai_generation_fingerprint(b"primary-1");
-    let primary_rotated = openai_generation_fingerprint(b"primary-2");
-    let secondary = openai_generation_fingerprint(b"secondary-1");
-    let secondary_rotated = openai_generation_fingerprint(b"secondary-2");
-    let primary_account = model_binding(b"primary account")?;
-    let secondary_account = model_binding(b"secondary account")?;
-    let authority = ResponsesCredentialAuthority::primary_and_secondary(primary, secondary)
-        .with_account(ResponsesAccountSlot::Primary, primary_account)?
-        .with_account(ResponsesAccountSlot::Secondary, secondary_account)?;
-    let rotated_authority =
-        ResponsesCredentialAuthority::primary_and_secondary(primary_rotated, secondary)
-            .with_account(ResponsesAccountSlot::Primary, primary_account)?
-            .with_account(ResponsesAccountSlot::Secondary, secondary_account)?;
-    let secondary_rotated_authority =
-        ResponsesCredentialAuthority::primary_and_secondary(primary, secondary_rotated)
-            .with_account(ResponsesAccountSlot::Primary, primary_account)?
-            .with_account(ResponsesAccountSlot::Secondary, secondary_account)?;
-    let mut bindings = vec![
+fn physical_binding_covers_attempt_generation_headers_path_and_body() -> Result<(), TestError> {
+    use PhysicalBindingAxis as Axis;
+    let base = physical_binding_variant(Axis::Base)??;
+    for (axis, equal) in [
+        (Axis::Attempt, Some(false)),
+        (Axis::Generation, Some(false)),
+        (Axis::Secret, Some(true)),
+        (Axis::Authority, Some(false)),
+        (Axis::Body, Some(false)),
+        (Axis::Origin, Some(false)),
+        (Axis::Path, Some(false)),
+        (Axis::Method, Some(false)),
+        (Axis::Header, Some(false)),
+        (Axis::HeaderMismatch, None),
+    ] {
+        let actual = physical_binding_variant(axis)?;
+        match equal {
+            Some(equal) => assert_eq!(actual? == base, equal, "{axis:?}"),
+            None => assert!(
+                matches!(actual, Err(ResponsesAttemptBuildError::Binding)),
+                "{axis:?}: {actual:?}"
+            ),
+        }
+    }
+    Ok(())
+}
+
+fn dual_slot_headers(
+    primary_account: Digest,
+    secondary_account: Digest,
+) -> Vec<ResponsesHeaderBinding> {
+    vec![
         ResponsesHeaderBinding::CredentialSecret {
             name: HeaderName::from_static("x-primary-authorization"),
             slot: ResponsesAuthSlot::Primary,
@@ -3127,7 +3053,30 @@ fn dual_slot_binding_is_order_independent_and_rotates_independently() -> Result<
             name: HeaderName::from_static("content-type"),
             value: b"application/json".to_vec(),
         },
-    ];
+    ]
+}
+
+#[test]
+fn dual_slot_binding_is_order_independent_and_rotates_independently() -> Result<(), TestError> {
+    let physical = attempt_binding_for_slots(7, 1, ResponsesAuthSlots::PrimaryAndSecondary)?;
+    let primary = openai_generation_fingerprint(b"primary-1");
+    let primary_rotated = openai_generation_fingerprint(b"primary-2");
+    let secondary = openai_generation_fingerprint(b"secondary-1");
+    let secondary_rotated = openai_generation_fingerprint(b"secondary-2");
+    let primary_account = model_binding(b"primary account")?;
+    let secondary_account = model_binding(b"secondary account")?;
+    let authority = ResponsesCredentialAuthority::primary_and_secondary(primary, secondary)
+        .with_account(ResponsesAccountSlot::Primary, primary_account)?
+        .with_account(ResponsesAccountSlot::Secondary, secondary_account)?;
+    let rotated_authority =
+        ResponsesCredentialAuthority::primary_and_secondary(primary_rotated, secondary)
+            .with_account(ResponsesAccountSlot::Primary, primary_account)?
+            .with_account(ResponsesAccountSlot::Secondary, secondary_account)?;
+    let secondary_rotated_authority =
+        ResponsesCredentialAuthority::primary_and_secondary(primary, secondary_rotated)
+            .with_account(ResponsesAccountSlot::Primary, primary_account)?
+            .with_account(ResponsesAccountSlot::Secondary, secondary_account)?;
+    let mut bindings = dual_slot_headers(primary_account, secondary_account);
     let base = physical_request_digest(
         &physical,
         &authority,
@@ -3141,59 +3090,68 @@ fn dual_slot_binding_is_order_independent_and_rotates_independently() -> Result<
         &bindings,
     )?;
     bindings.reverse();
-    assert_eq!(
-        base,
-        physical_request_digest(
-            &physical,
+    for (label, candidate, wire, equal) in [
+        (
+            "secret bytes and header order",
             &authority,
-            &dual_request(
+            dual_request(
                 "Bearer primary-b",
                 "Bearer secondary-b",
                 "account-c",
                 "account-d",
                 true,
             )?,
-            &bindings,
-        )?,
-        "header order and all secret bytes remain outside the digest"
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
+            true,
+        ),
+        (
+            "primary generation",
             &rotated_authority,
-            &dual_request(
+            dual_request(
                 "Bearer primary-a",
                 "Bearer secondary-a",
                 "account-a",
                 "account-b",
                 false,
             )?,
-            &bindings,
-        )?,
-        "each slot generation is bound independently"
-    );
-    assert_ne!(
-        base,
-        physical_request_digest(
-            &physical,
+            false,
+        ),
+        (
+            "secondary generation",
             &secondary_rotated_authority,
-            &dual_request(
+            dual_request(
                 "Bearer primary-a",
                 "Bearer secondary-a",
                 "account-a",
                 "account-b",
                 false,
             )?,
-            &bindings,
-        )?,
-        "secondary generation rotation is independently identity-affecting"
-    );
+            false,
+        ),
+    ] {
+        let actual = physical_request_digest(&physical, candidate, &wire, &bindings)?;
+        assert_eq!(base == actual, equal, "{label}");
+    }
     Ok(())
 }
 
-#[test]
-fn credential_and_account_slots_are_complete_exact_and_nonduplicated() -> Result<(), TestError> {
+#[derive(Clone, Copy)]
+enum HeaderFixtureSlot {
+    Primary,
+    Secondary,
+    PrimaryAccount,
+    SecondaryAccount,
+    Content,
+    DuplicateSecondaryAccount,
+    WrongSecondaryAccount,
+}
+
+struct HeaderAuthorityFixture {
+    bindings: [ResponsesHeaderBinding; 7],
+    single: ResponsesCredentialAuthority,
+    dual: ResponsesCredentialAuthority,
+}
+
+fn header_authority_fixture() -> Result<HeaderAuthorityFixture, TestError> {
     let primary_generation = openai_generation_fingerprint(b"primary generation");
     let secondary_generation = openai_generation_fingerprint(b"secondary generation");
     let primary_account = model_binding(b"primary account")?;
@@ -3202,105 +3160,158 @@ fn credential_and_account_slots_are_complete_exact_and_nonduplicated() -> Result
         name: HeaderName::from_static("content-type"),
         value: b"application/json".to_vec(),
     };
-    let secondary_authority = ResponsesCredentialAuthority::secondary(secondary_generation);
-    assert!(matches!(
-        validate_header_authority(std::slice::from_ref(&content), &secondary_authority),
-        Err(ResponsesAttemptBuildError::AuthSlots)
-    ));
+    let single = ResponsesCredentialAuthority::secondary(secondary_generation);
     let secondary = ResponsesHeaderBinding::CredentialSecret {
         name: HeaderName::from_static("authorization"),
         slot: ResponsesAuthSlot::Secondary,
     };
-    assert!(matches!(
-        validate_header_authority(
-            &[secondary.clone(), secondary.clone(), content.clone()],
-            &secondary_authority
-        ),
-        Err(ResponsesAttemptBuildError::AuthSlots)
-    ));
     let primary = ResponsesHeaderBinding::CredentialSecret {
         name: HeaderName::from_static("x-primary-authorization"),
         slot: ResponsesAuthSlot::Primary,
     };
-    let dual_authority = ResponsesCredentialAuthority::primary_and_secondary(
+    let dual = ResponsesCredentialAuthority::primary_and_secondary(
         primary_generation,
         secondary_generation,
     )
     .with_account(ResponsesAccountSlot::Primary, primary_account)?
     .with_account(ResponsesAccountSlot::Secondary, secondary_account)?;
-    assert!(matches!(
-        validate_header_authority(&[primary.clone(), content.clone()], &dual_authority),
-        Err(ResponsesAttemptBuildError::AuthSlots)
-    ));
-    let primary_account_binding = ResponsesHeaderBinding::AccountSecret {
+    let primary_binding = ResponsesHeaderBinding::AccountSecret {
         name: HeaderName::from_static("x-primary-account"),
         slot: ResponsesAccountSlot::Primary,
         authority: primary_account,
     };
-    let secondary_account_binding = ResponsesHeaderBinding::AccountSecret {
+    let secondary_binding = ResponsesHeaderBinding::AccountSecret {
         name: HeaderName::from_static("x-secondary-account"),
         slot: ResponsesAccountSlot::Secondary,
         authority: secondary_account,
     };
-    let exact = vec![
-        secondary_account_binding.clone(),
-        primary.clone(),
-        content.clone(),
-        secondary.clone(),
-        primary_account_binding.clone(),
-    ];
-    validate_header_authority(&exact, &dual_authority)?;
-    let mut reversed = exact.clone();
-    reversed.reverse();
-    validate_header_authority(&reversed, &dual_authority)?;
+    let duplicate_binding = ResponsesHeaderBinding::AccountSecret {
+        name: HeaderName::from_static("x-secondary-account-copy"),
+        slot: ResponsesAccountSlot::Secondary,
+        authority: secondary_account,
+    };
+    let wrong_binding = ResponsesHeaderBinding::AccountSecret {
+        name: HeaderName::from_static("x-secondary-account"),
+        slot: ResponsesAccountSlot::Secondary,
+        authority: model_binding(b"wrong secondary account")?,
+    };
+    Ok(HeaderAuthorityFixture {
+        bindings: [
+            primary,
+            secondary,
+            primary_binding,
+            secondary_binding,
+            content,
+            duplicate_binding,
+            wrong_binding,
+        ],
+        single,
+        dual,
+    })
+}
 
-    assert!(matches!(
-        validate_header_authority(
-            &[
-                primary.clone(),
-                secondary.clone(),
-                primary_account_binding.clone(),
-                content.clone(),
-            ],
-            &dual_authority,
+type HeaderAuthorityRow = (
+    &'static str,
+    &'static [HeaderFixtureSlot],
+    bool,
+    Option<&'static str>,
+);
+
+#[test]
+fn credential_and_account_slots_are_complete_exact_and_nonduplicated() -> Result<(), TestError> {
+    use HeaderFixtureSlot::{
+        Content, DuplicateSecondaryAccount, Primary, PrimaryAccount, Secondary, SecondaryAccount,
+        WrongSecondaryAccount,
+    };
+    let fixture = header_authority_fixture()?;
+    let rows: &[HeaderAuthorityRow] = &[
+        ("missing secondary", &[Content], false, Some("slots")),
+        (
+            "duplicate secondary",
+            &[Secondary, Secondary, Content],
+            false,
+            Some("slots"),
         ),
-        Err(ResponsesAttemptBuildError::AuthSlots)
-    ));
-    assert!(matches!(
-        validate_header_authority(
-            &[
-                primary.clone(),
-                secondary.clone(),
-                primary_account_binding.clone(),
-                secondary_account_binding.clone(),
-                ResponsesHeaderBinding::AccountSecret {
-                    name: HeaderName::from_static("x-secondary-account-copy"),
-                    slot: ResponsesAccountSlot::Secondary,
-                    authority: secondary_account,
-                },
-                content.clone(),
-            ],
-            &dual_authority,
+        (
+            "missing secondary and accounts",
+            &[Primary, Content],
+            true,
+            Some("slots"),
         ),
-        Err(ResponsesAttemptBuildError::AuthSlots)
-    ));
-    assert!(matches!(
-        validate_header_authority(
+        (
+            "exact",
             &[
-                primary,
-                secondary,
-                primary_account_binding,
-                ResponsesHeaderBinding::AccountSecret {
-                    name: HeaderName::from_static("x-secondary-account"),
-                    slot: ResponsesAccountSlot::Secondary,
-                    authority: model_binding(b"wrong secondary account")?,
-                },
-                content,
+                SecondaryAccount,
+                Primary,
+                Content,
+                Secondary,
+                PrimaryAccount,
             ],
-            &dual_authority,
+            true,
+            None,
         ),
-        Err(ResponsesAttemptBuildError::Binding)
-    ));
+        (
+            "reversed",
+            &[
+                PrimaryAccount,
+                Secondary,
+                Content,
+                Primary,
+                SecondaryAccount,
+            ],
+            true,
+            None,
+        ),
+        (
+            "missing secondary account",
+            &[Primary, Secondary, PrimaryAccount, Content],
+            true,
+            Some("slots"),
+        ),
+        (
+            "duplicate secondary account",
+            &[
+                Primary,
+                Secondary,
+                PrimaryAccount,
+                SecondaryAccount,
+                DuplicateSecondaryAccount,
+                Content,
+            ],
+            true,
+            Some("slots"),
+        ),
+        (
+            "wrong secondary account",
+            &[
+                Primary,
+                Secondary,
+                PrimaryAccount,
+                WrongSecondaryAccount,
+                Content,
+            ],
+            true,
+            Some("binding"),
+        ),
+    ];
+    for (label, slots, dual, expected) in rows {
+        let bindings = slots
+            .iter()
+            .map(|slot| fixture.bindings[*slot as usize].clone())
+            .collect::<Vec<_>>();
+        let authority = if *dual {
+            &fixture.dual
+        } else {
+            &fixture.single
+        };
+        let actual = match validate_header_authority(&bindings, authority) {
+            Ok(()) => None,
+            Err(ResponsesAttemptBuildError::AuthSlots) => Some("slots"),
+            Err(ResponsesAttemptBuildError::Binding) => Some("binding"),
+            Err(error) => panic!("{label}: unexpected error {error:?}"),
+        };
+        assert_eq!(&actual, expected, "{label}");
+    }
     Ok(())
 }
 
@@ -3633,15 +3644,6 @@ fn long_function_arguments_cross_the_old_budget_and_count_the_terminal() {
     const DELTAS: usize = 16_385;
     const EVENTS: usize = DELTAS + 7; // prefix/suffix deltas and five lifecycle events
 
-    fn feed(
-        collector: &mut StreamCollector,
-        event: serde_json::Value,
-    ) -> Result<(), CollectorFailure> {
-        // One small SSE frame per push keeps the fixture's transport chunks bounded.
-        let frame = format!("data: {event}\n\n");
-        collector.push(frame.as_bytes()).map(|_| ())
-    }
-
     let defaults = ResponsesStreamLimits::default();
     assert_eq!(defaults.max_events(), 100_000);
     assert!(defaults.max_events() >= EVENTS);
@@ -3663,78 +3665,14 @@ fn long_function_arguments_cross_the_old_budget_and_count_the_terminal() {
         });
         let mut collector =
             StreamCollector::new(ResponsesStreamDialectData::codex("gpt-test"), limits);
-        feed(&mut collector, serde_json::json!({
-            "type":"response.created", "sequence_number":0,
-            "response":{"id":"resp_long","object":"response","status":"in_progress","model":"gpt-test"}
-        }))
-        .unwrap_or_else(|error| panic!("created: {error:?}"));
-        feed(&mut collector, serde_json::json!({
-            "type":"response.output_item.added", "sequence_number":1, "output_index":0,
-            "item":{"id":"fc_long","type":"function_call","call_id":"call_long","name":"lookup","arguments":""}
-        }))
-        .unwrap_or_else(|error| panic!("item added: {error:?}"));
-
-        let mut arguments = String::from("{\"values\":[");
-        feed(
-            &mut collector,
-            serde_json::json!({
-                "type":"response.function_call_arguments.delta", "sequence_number":2,
-                "output_index":0, "item_id":"fc_long", "delta":arguments
-            }),
-        )
-        .unwrap_or_else(|error| panic!("argument prefix: {error:?}"));
-        for index in 0..DELTAS {
-            let delta = if index + 1 == DELTAS {
-                index.to_string()
-            } else {
-                format!("{index},")
-            };
-            arguments.push_str(&delta);
-            feed(
-                &mut collector,
-                serde_json::json!({
-                    "type":"response.function_call_arguments.delta", "sequence_number":index + 3,
-                    "output_index":0, "item_id":"fc_long", "delta":delta
-                }),
-            )
-            .unwrap_or_else(|error| panic!("argument delta {index}: {error:?}"));
-        }
-        arguments.push_str("]}");
-        feed(
-            &mut collector,
-            serde_json::json!({
-                "type":"response.function_call_arguments.delta", "sequence_number":DELTAS + 3,
-                "output_index":0, "item_id":"fc_long", "delta":"]}"
-            }),
-        )
-        .unwrap_or_else(|error| panic!("argument suffix: {error:?}"));
-        feed(
-            &mut collector,
-            serde_json::json!({
-                "type":"response.function_call_arguments.done", "sequence_number":DELTAS + 4,
-                "output_index":0, "item_id":"fc_long", "arguments":arguments
-            }),
-        )
-        .unwrap_or_else(|error| panic!("arguments done: {error:?}"));
-        let item = serde_json::json!({
-            "id":"fc_long","type":"function_call","call_id":"call_long",
-            "name":"lookup","arguments":arguments,"status":"completed"
-        });
-        feed(
-            &mut collector,
-            serde_json::json!({
-                "type":"response.output_item.done", "sequence_number":DELTAS + 5,
-                "output_index":0, "item":item
-            }),
-        )
-        .unwrap_or_else(|error| panic!("item done: {error:?}"));
+        let (arguments, item) = long_function_arguments(&mut collector, DELTAS);
         let terminal = serde_json::json!({
             "type":"response.completed", "sequence_number":DELTAS + 6,
             "response":{"id":"resp_long","object":"response","status":"completed",
                 "model":"gpt-test","output":[item],
                 "usage":{"input_tokens":12,"output_tokens":8,"total_tokens":20}}
         });
-        let result = feed(&mut collector, terminal);
+        let result = feed_long_function_event(&mut collector, terminal);
         if allowed_events == Some(EVENTS - 1) {
             assert!(matches!(
                 result,
@@ -3766,6 +3704,87 @@ fn long_function_arguments_cross_the_old_budget_and_count_the_terminal() {
             assert_eq!(assembled["values"][DELTAS - 1].as_u64(), Some(16_384));
         }
     }
+}
+
+fn feed_long_function_event(
+    collector: &mut StreamCollector,
+    event: serde_json::Value,
+) -> Result<(), CollectorFailure> {
+    // One small SSE frame per push keeps the fixture's transport chunks bounded.
+    let frame = format!("data: {event}\n\n");
+    collector.push(frame.as_bytes()).map(|_| ())
+}
+
+fn long_function_arguments(
+    collector: &mut StreamCollector,
+    deltas: usize,
+) -> (String, serde_json::Value) {
+    feed_long_function_event(collector, serde_json::json!({
+            "type":"response.created", "sequence_number":0,
+            "response":{"id":"resp_long","object":"response","status":"in_progress","model":"gpt-test"}
+        }))
+        .unwrap_or_else(|error| panic!("created: {error:?}"));
+    feed_long_function_event(collector, serde_json::json!({
+            "type":"response.output_item.added", "sequence_number":1, "output_index":0,
+            "item":{"id":"fc_long","type":"function_call","call_id":"call_long","name":"lookup","arguments":""}
+        }))
+        .unwrap_or_else(|error| panic!("item added: {error:?}"));
+
+    let mut arguments = String::from("{\"values\":[");
+    feed_long_function_event(
+        collector,
+        serde_json::json!({
+            "type":"response.function_call_arguments.delta", "sequence_number":2,
+            "output_index":0, "item_id":"fc_long", "delta":arguments
+        }),
+    )
+    .unwrap_or_else(|error| panic!("argument prefix: {error:?}"));
+    for index in 0..deltas {
+        let delta = if index + 1 == deltas {
+            index.to_string()
+        } else {
+            format!("{index},")
+        };
+        arguments.push_str(&delta);
+        feed_long_function_event(
+            collector,
+            serde_json::json!({
+                "type":"response.function_call_arguments.delta", "sequence_number":index + 3,
+                "output_index":0, "item_id":"fc_long", "delta":delta
+            }),
+        )
+        .unwrap_or_else(|error| panic!("argument delta {index}: {error:?}"));
+    }
+    arguments.push_str("]}");
+    feed_long_function_event(
+        collector,
+        serde_json::json!({
+            "type":"response.function_call_arguments.delta", "sequence_number":deltas + 3,
+            "output_index":0, "item_id":"fc_long", "delta":"]}"
+        }),
+    )
+    .unwrap_or_else(|error| panic!("argument suffix: {error:?}"));
+    feed_long_function_event(
+        collector,
+        serde_json::json!({
+            "type":"response.function_call_arguments.done", "sequence_number":deltas + 4,
+            "output_index":0, "item_id":"fc_long", "arguments":arguments
+        }),
+    )
+    .unwrap_or_else(|error| panic!("arguments done: {error:?}"));
+    let item = serde_json::json!({
+        "id":"fc_long","type":"function_call","call_id":"call_long",
+        "name":"lookup","arguments":arguments,"status":"completed"
+    });
+    feed_long_function_event(
+        collector,
+        serde_json::json!({
+            "type":"response.output_item.done", "sequence_number":deltas + 5,
+            "output_index":0, "item":item
+        }),
+    )
+    .unwrap_or_else(|error| panic!("item done: {error:?}"));
+    (arguments, item)
 }
 
 fn mixed_model_sse() -> Vec<u8> {
@@ -4331,7 +4350,7 @@ fn rate_limit_error_hook(
 }
 
 #[tokio::test]
-async fn shared_model_host_maps_missing_duplicate_cancel_and_provider_hook() -> TestResult {
+async fn shared_model_host_maps_missing_and_duplicate_terminals() -> TestResult {
     let generation = openai_generation_fingerprint(b"shared-model-host-error-generation");
     let missing = concat!(
         "event: response.created\n",
@@ -4401,6 +4420,12 @@ async fn shared_model_host_maps_missing_duplicate_cancel_and_provider_hook() -> 
     assert!(!events.iter().any(Result::is_err));
     assert_eq!(peer.await??.1, 1);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn shared_model_host_maps_rate_limit_through_provider_hook() -> TestResult {
+    let generation = openai_generation_fingerprint(b"shared-model-host-error-generation");
     // Advice to wait past the caller hard deadline ends the attempt at once.
     let body = br#"{"error":{"message":"slow down","code":"rate_limit","request_id":"req_hook"}}"#;
     let (client_config, tls_identity, origin, peer) = responding_wire_peer(http_response_with(
@@ -4439,6 +4464,12 @@ async fn shared_model_host_maps_missing_duplicate_cancel_and_provider_hook() -> 
     }));
     assert_eq!(peer.await??.1, 1);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn shared_model_host_maps_cancellation_without_dispatch() -> TestResult {
+    let generation = openai_generation_fingerprint(b"shared-model-host-error-generation");
     let client = Client::new(Limits::default())?;
     let dialect = wire_dialect(Origin::parse("https://example.test")?, generation);
     let (execution, service, context, cancellation, _) = prepared_model_host(
