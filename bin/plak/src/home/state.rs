@@ -284,6 +284,44 @@ struct LockedPruneInventory {
     references: Vec<PathBuf>,
 }
 
+fn old_telemetry_files(paths: &PlakPaths) -> Result<Vec<PathBuf>, String> {
+    use std::os::unix::fs::MetadataExt as _;
+    let directory = paths.telemetry_dir();
+    let metadata = match fs::symlink_metadata(&directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o022 != 0
+    {
+        return Err("refusing unsafe telemetry directory".to_owned());
+    }
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let old = crate::telemetry_store::files::version(name)
+            .is_some_and(|version| version < crate::telemetry_store::TELEMETRY_SCHEMA_VERSION);
+        if old {
+            if !entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_file()
+            {
+                return Err(format!(
+                    "refusing unsafe telemetry file {}",
+                    entry.path().display()
+                ));
+            }
+            files.push(entry.path());
+        }
+    }
+    Ok(files)
+}
+
 fn build_prune_inventory(
     paths: &PlakPaths,
     options: PruneOptions,
@@ -307,6 +345,7 @@ fn build_prune_inventory(
         Err(error) => return Err(error.to_string()),
     };
     entries.retain(|path| *path != paths.state_dir());
+    entries.extend(old_telemetry_files(paths)?);
     entries.sort();
     let mut removals = Vec::new();
     let mut sidecars = Vec::new();
@@ -970,6 +1009,94 @@ mod tests {
             }
             Ok(())
         })
+    }
+
+    #[test]
+    fn explicit_prune_selects_only_old_telemetry_and_its_sidecars() {
+        let (_home, paths, _old) = fixture();
+        paths.ensure_layout().unwrap();
+        let old = paths.telemetry_dir().join("telemetry-v1.sqlite3");
+        let legacy = paths.telemetry_dir().join("telemetry.sqlite3");
+        for path in [&old, &legacy] {
+            rusqlite::Connection::open(path)
+                .unwrap()
+                .execute_batch("CREATE TABLE fixture(value);")
+                .unwrap();
+        }
+        let orphan = paths.telemetry_dir().join("telemetry-v2.sqlite3-wal");
+        fs::write(&orphan, b"orphaned sidecar").unwrap();
+        let current = paths.telemetry_database();
+        let newer = paths.telemetry_dir().join("telemetry-v999.sqlite3");
+        let unrelated = paths.telemetry_dir().join("notes.txt");
+        for path in [&current, &newer, &unrelated] {
+            fs::write(path, b"retained").unwrap();
+        }
+        let mut report = Vec::new();
+        let inventory =
+            confirm_prune_legacy(&paths, true, false, &mut &b""[..], &mut report).unwrap();
+        assert!(old.exists(), "confirmation must not remove telemetry");
+        assert!(
+            String::from_utf8(report)
+                .unwrap()
+                .contains("telemetry-v1.sqlite3")
+        );
+        prune_confirmed(&paths, &inventory).unwrap();
+        for path in [&old, &legacy, &orphan] {
+            assert!(!path.exists(), "{}", path.display());
+        }
+        for path in [&current, &newer, &unrelated] {
+            assert_eq!(fs::read(path).unwrap(), b"retained");
+        }
+    }
+
+    #[test]
+    fn explicit_prune_retains_noncanonical_telemetry_names() {
+        let (_home, paths, _old) = fixture();
+        paths.ensure_layout().unwrap();
+        let malformed = [
+            "telemetry-v+5.sqlite3",
+            "telemetry-v05.sqlite3",
+            "telemetry-vbad.sqlite3",
+            "telemetry-v+5.sqlite3-wal",
+        ];
+        for name in malformed {
+            fs::write(paths.telemetry_dir().join(name), b"retained").unwrap();
+        }
+        let old = paths.telemetry_dir().join("telemetry-v5.sqlite3");
+        drop(rusqlite::Connection::open(&old).unwrap());
+        prune_legacy(&paths).unwrap();
+        assert!(!old.exists());
+        for name in malformed {
+            assert_eq!(
+                fs::read(paths.telemetry_dir().join(name)).unwrap(),
+                b"retained"
+            );
+        }
+    }
+
+    #[test]
+    fn old_telemetry_prune_refuses_busy_database_and_symlinks() {
+        let (_home, paths, old_state) = fixture();
+        paths.ensure_layout().unwrap();
+        let old = paths.telemetry_dir().join("telemetry-v1.sqlite3");
+        let database = rusqlite::Connection::open(&old).unwrap();
+        database
+            .execute_batch("CREATE TABLE fixture(value); BEGIN IMMEDIATE;")
+            .unwrap();
+        assert!(prune_legacy(&paths).unwrap_err().contains("in use"));
+        assert!(old_state.exists());
+        drop(database);
+        fs::remove_file(&old).unwrap();
+        let retained = paths.telemetry_dir().join("retained");
+        fs::write(&retained, b"retained").unwrap();
+        std::os::unix::fs::symlink(&retained, &old).unwrap();
+        assert!(
+            prune_legacy(&paths)
+                .unwrap_err()
+                .contains("unsafe telemetry")
+        );
+        assert!(old_state.exists());
+        assert_eq!(fs::read(retained).unwrap(), b"retained");
     }
 
     #[test]

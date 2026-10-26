@@ -32,6 +32,7 @@ pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 20;
 /// Default disposable telemetry retention.
 pub const DEFAULT_TELEMETRY_MAX_BYTES: u64 = 512 * 1024 * 1024;
 pub const DEFAULT_TELEMETRY_MAX_AGE_DAYS: u64 = 90;
+pub(crate) mod files;
 mod observation;
 #[cfg(all(test, feature = "otel"))]
 mod projection_tests;

@@ -697,13 +697,6 @@ impl StorePressure {
     }
 }
 
-fn telemetry_file_version(name: &str) -> Option<u64> {
-    name.strip_prefix("telemetry-v")?
-        .strip_suffix(".sqlite3")?
-        .parse()
-        .ok()
-}
-
 fn telemetry_check(kind: CheckKind, path: &Path, health: TelemetryHealth) -> DoctorCheck {
     let mut check = match health {
         TelemetryHealth::Missing => DoctorCheck::new(
@@ -746,6 +739,13 @@ fn telemetry_check(kind: CheckKind, path: &Path, health: TelemetryHealth) -> Doc
             )
         }
     };
+    let Some(current_version) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(crate::telemetry_store::files::version)
+    else {
+        return check;
+    };
     let mut other_files: Vec<_> = path
         .parent()
         .and_then(|directory| fs::read_dir(directory).ok())
@@ -755,37 +755,38 @@ fn telemetry_check(kind: CheckKind, path: &Path, health: TelemetryHealth) -> Doc
         .filter(|entry| entry.path() != path && entry.file_type().is_ok_and(|kind| kind.is_file()))
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            (name == "telemetry.sqlite3"
-                || (name.starts_with("telemetry-v") && name.ends_with(".sqlite3")))
-            .then_some(name)
+            let version = crate::telemetry_store::files::version(&name)?;
+            (version != current_version).then_some((name, version))
         })
         .collect();
     other_files.sort();
-    let current_version = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(telemetry_file_version);
-    let (newer_files, old_files): (Vec<_>, Vec<_>) = other_files.into_iter().partition(|name| {
-        telemetry_file_version(name)
-            .zip(current_version)
-            .is_some_and(|(version, current)| version > current)
-    });
+    let (newer_files, old_files): (Vec<_>, Vec<_>) = other_files
+        .into_iter()
+        .partition(|(_, version)| *version > current_version);
     if !old_files.is_empty() {
         check.detail.push_str(&format!(
             "; older-schema/legacy files left untouched: {}",
-            old_files.join(", ")
+            old_files
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
         check.severity = check.severity.max(Severity::Warning);
         if check.remediation.is_none() {
             check.remediation = Some(
-                "old telemetry files are not migrated or pruned; removal is explicit".to_owned(),
+                "remove older telemetry explicitly with `plak state prune-legacy`; no automatic removal or migration".to_owned(),
             );
         }
     }
     if !newer_files.is_empty() {
         check.detail.push_str(&format!(
             "; newer-schema files left untouched: {}",
-            newer_files.join(", ")
+            newer_files
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     check
@@ -1528,6 +1529,40 @@ mod tests {
             b"retained"
         );
         Ok(())
+    }
+
+    #[test]
+    fn doctor_never_recommends_pruning_noncanonical_telemetry_names() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("telemetry-v20.sqlite3");
+        for name in [
+            "telemetry-v+5.sqlite3",
+            "telemetry-v05.sqlite3",
+            "telemetry-vbad.sqlite3",
+            "telemetry-v20.sqlite3-wal",
+        ] {
+            fs::write(directory.path().join(name), b"retained").unwrap();
+        }
+        let check = telemetry_check(
+            CheckKind::TelemetryDatabase,
+            &current,
+            TelemetryHealth::Ok {
+                rows: 0,
+                write_errors: 0,
+                dropped: 0,
+            },
+        );
+        assert_eq!(check.severity, Severity::Ok);
+        assert_eq!(check.remediation, None);
+        assert!(!check.detail.contains("telemetry-v"));
+        fs::write(directory.path().join("telemetry-v5.sqlite3-wal"), b"orphan").unwrap();
+        let check = telemetry_check(
+            CheckKind::TelemetryDatabase,
+            &current,
+            TelemetryHealth::Missing,
+        );
+        assert_eq!(check.severity, Severity::Warning);
+        assert!(check.detail.contains("telemetry-v5.sqlite3-wal"));
     }
 
     #[test]

@@ -670,6 +670,10 @@ retires it without the prompt.
 warning. Remove unused non-current directories and regular flat files explicitly
 with `plak state prune-legacy` (or `--yes` without a terminal). It refuses in-use locks, unsafe links and unreadable databases, and
 never selects the current key. Startup never deletes legacy state.
+The same explicit command lists and removes older-schema telemetry databases
+and their SQLite sidecars in `telemetry/`, including `telemetry.sqlite3`.
+Current and newer telemetry schemas remain untouched; nothing is pruned
+automatically.
 
 Each plak build keeps its state in `~/.plak/state/<format key>/`, where the
 key names the database schemas and runtime format it reads, for example

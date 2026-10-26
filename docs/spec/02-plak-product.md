@@ -2044,7 +2044,7 @@ version. There is no top-level prompt positional.
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags |
 | `usage [--account <id>] [--session <uuid>]` | the two options conflict |
 | `session list`, `session show <id>[.cN]`, `session log <id>[.cN] [--kind <k>] [--tail <n>] [--json]`, `session recover <id>`, `session export <id> [--out <path>]`, `session import <path>`, `session delete <id> [--yes] [--abandon-children]`, `session gc <id> \| --all` | log `--tail` defaults to 100; it must be at least 1; `recover` opens the session, abandons an unfinished turn once, and releases it; `export` and `import` implement the cross-build session reference (§2.5.1); `delete` removes a session and its retained history (§2.5.2); `gc` reclaims superseded history (§2.5.3) |
-| `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state; retain session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
+| `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state and older-schema telemetry (including its SQLite sidecars); retain current/newer telemetry and session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
 | `telemetry status [--views]`, `telemetry sql [<query>] [--json]`, `telemetry prune [--max-age-days <n>] [--max-bytes <n>] [--yes]` | the local analytics store |
 | `models [<account>]` | read-only catalog discovery, in every build |
 | `version`, `help [<command>]` | |
@@ -6419,7 +6419,15 @@ that cannot yet shrink.
 Two asymmetries are worth stating. `telemetry sql` is strictly read-only, while
 `telemetry status` opens the current per-schema file for writing, creating
 schema 20 from scratch when absent. Existing older telemetry files are left
-untouched and are not imported; telemetry is disposable. A mismatched schema
+untouched and are not imported; telemetry is disposable. Only explicit
+`state prune-legacy` inventories and removes older-schema and unversioned
+telemetry files and their SQLite sidecars, under the same lock, path-safety and
+confirmation checks as legacy state. Current and newer schemas remain untouched.
+Doctor and pruning share the canonical filename classifier: unversioned
+`telemetry.sqlite3`, or `telemetry-vN.sqlite3` with nonnegative decimal `N`
+without a sign or leading zeroes, optionally followed by `-wal`, `-shm` or
+`-journal`. Malformed names are neither recommended for pruning nor selected.
+A mismatched schema
 inside the current file is refused without migration or deletion. And a stale schema on a *read* path fails closed
 with the found and expected versions rather than silently wiping analytics the
 operator may still want.

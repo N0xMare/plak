@@ -3,7 +3,8 @@ plak state — legacy state maintenance
 USAGE:
   plak state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]
 
-Delete non-current state directories and regular files after confirmation.
+Delete non-current state directories, regular files and older-schema telemetry
+(including SQLite sidecars) after confirmation. Current/newer telemetry stays.
 Refuses in-use locks, unreadable databases and unsafe paths. Never deletes this
 build's state. Non-terminal stdin requires --yes. Inspect paths and sizes with
 plak doctor.
