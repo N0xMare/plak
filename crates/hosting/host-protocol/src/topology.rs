@@ -1092,6 +1092,9 @@ impl SpawnAgentRequest {
 #[serde(deny_unknown_fields)]
 /// `send_agent_message` arguments.
 pub struct SendAgentMessageRequest {
+    /// Follow-up only: merge the parent's live state when clean; false opts out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<bool>,
     /// The recipient.
     pub agent_id: String,
     /// The body, bounded by [`MAX_MESSAGE_BYTES`].
@@ -1137,7 +1140,9 @@ impl SendAgentMessageRequest {
         if purpose != MessagePurpose::Reply && in_reply_to.is_some() {
             return Err(TopologyErrorCode::ReplyInvalid);
         }
-        if purpose != MessagePurpose::Followup && self.output_schema_json.is_some() {
+        if purpose != MessagePurpose::Followup
+            && (self.output_schema_json.is_some() || self.refresh.is_some())
+        {
             return Err(TopologyErrorCode::SchemaMismatch);
         }
         Ok(())
@@ -1655,6 +1660,7 @@ mod tests {
         assert_eq!(followup.purpose, Some(MessagePurpose::Followup));
         assert_eq!(followup.validate("root"), Ok(()));
         let result = SendAgentMessageRequest {
+            refresh: None,
             agent_id: "root".into(),
             message: "done".into(),
             purpose: Some(MessagePurpose::Result),
@@ -1667,6 +1673,7 @@ mod tests {
             Err(TopologyErrorCode::SchemaMismatch)
         );
         let schema_on_coordinate = SendAgentMessageRequest {
+            refresh: None,
             agent_id: "c1".into(),
             message: "hi".into(),
             purpose: None,
@@ -1683,6 +1690,7 @@ mod tests {
     #[test]
     fn reply_requires_in_reply_to() {
         let req = SendAgentMessageRequest {
+            refresh: None,
             agent_id: "p".into(),
             message: "q".into(),
             purpose: Some(MessagePurpose::Reply),
@@ -1692,6 +1700,7 @@ mod tests {
         };
         assert_eq!(req.validate("c1"), Err(TopologyErrorCode::ReplyInvalid));
         let empty_ref = SendAgentMessageRequest {
+            refresh: None,
             agent_id: "c1".into(),
             message: "hi".into(),
             purpose: None,

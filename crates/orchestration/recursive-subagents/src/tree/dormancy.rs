@@ -356,6 +356,7 @@ impl ProductAgentTree {
             .values()
             .filter(|row| {
                 row.mode != WorkspaceMode::Inherit
+                    && !self.refresh_pending(&row.workspace_id)
                     && matches!(
                         row.status,
                         WorkspaceStatus::Active
@@ -1038,6 +1039,7 @@ pub(super) mod tests {
             assert!(!path.exists(), "cut {cut}");
             reopened.state = super::super::TreeAdmissionState::Live;
             let request = SendAgentMessageRequest {
+                refresh: None,
                 agent_id: child.clone(),
                 message: "continue".into(),
                 purpose: Some(super::super::MessagePurpose::Followup),

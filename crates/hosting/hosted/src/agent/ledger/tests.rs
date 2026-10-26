@@ -690,6 +690,7 @@ fn parent_mail(
     message: &str,
 ) -> crate::agent_tree_protocol::SendAgentMessageRequest {
     crate::agent_tree_protocol::SendAgentMessageRequest {
+        refresh: None,
         agent_id: agent_id.to_owned(),
         message: message.to_owned(),
         purpose: None,

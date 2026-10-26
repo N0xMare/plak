@@ -73,6 +73,26 @@ pub struct RevertRange {
 /// mutex released; the tree itself never holds one of these across a seal,
 /// an adopt, a hook, or an unmint.
 pub trait VcsOps: Send + Sync {
+    /// Computes a clean live-fork catch-up using object writes only.
+    fn prepare_refresh(
+        &self,
+        _request: &super::RefreshRequest,
+    ) -> Result<super::RefreshPreparation, VcsError> {
+        Ok(super::RefreshPreparation::Skipped(
+            "refresh is unavailable for this backend".into(),
+        ))
+    }
+
+    /// Applies or reconciles the exact previously published refresh plan.
+    fn apply_refresh(
+        &self,
+        _plan: &super::RefreshPlan,
+        _recover: bool,
+    ) -> Result<super::RefreshApplied, VcsError> {
+        Err(VcsError::mint_unavailable(
+            "refresh recovery is unavailable for this backend",
+        ))
+    }
     /// Proves normal sealing covers every non-disposable byte before reclaim.
     /// An optional seal additionally fences changes since preparation.
     fn check_reclaimable(&self, path: &Path, sealed: Option<&VcsSnapshot>) -> Result<(), VcsError> {
@@ -165,6 +185,20 @@ pub trait VcsOps: Send + Sync {
 pub struct SystemVcs;
 
 impl VcsOps for SystemVcs {
+    fn prepare_refresh(
+        &self,
+        request: &super::RefreshRequest,
+    ) -> Result<super::RefreshPreparation, VcsError> {
+        super::refresh::prepare(request)
+    }
+
+    fn apply_refresh(
+        &self,
+        plan: &super::RefreshPlan,
+        recover: bool,
+    ) -> Result<super::RefreshApplied, VcsError> {
+        super::refresh::apply(plan, recover)
+    }
     fn restore_copy_base(
         &self,
         path: &Path,

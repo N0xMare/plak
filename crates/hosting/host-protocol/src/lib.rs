@@ -159,6 +159,7 @@ mod round_trip_tests {
         );
         round_trip(
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "a1".into(),
                 message: "status?".into(),
                 purpose: Some(MessagePurpose::Followup),

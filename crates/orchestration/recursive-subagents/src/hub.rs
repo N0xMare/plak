@@ -2902,6 +2902,7 @@ mod tests {
                     .send_agent_message(
                         "root",
                         &SendAgentMessageRequest {
+                            refresh: None,
                             agent_id: id.clone(),
                             message: "again".into(),
                             purpose: Some(MessagePurpose::Followup),

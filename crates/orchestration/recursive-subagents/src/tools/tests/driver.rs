@@ -1075,6 +1075,7 @@ fn followup_withdrawal_cas_refusal_restores_the_complete_opening() {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    refresh: None,
                     agent_id: spawned.agent_id.clone(),
                     message: "again".to_owned(),
                     purpose: Some(MessagePurpose::Followup),

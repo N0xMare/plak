@@ -645,6 +645,16 @@ impl ProductAgentTree {
         active_turn: bool,
         output_schema_json: Option<&str>,
     ) -> Result<(String, String), TopologyError> {
+        if self
+            .nodes
+            .get(agent_id)
+            .is_some_and(|node| self.refresh_pending(&node.workspace_id))
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::WorkspaceRecoveryRequired,
+                "workspace refresh is pending; settle it before following up",
+            ));
+        }
         if self.seal_pending(agent_id) {
             return Err(TopologyError::new(
                 TopologyErrorCode::FollowupNotIdle,

@@ -13,7 +13,7 @@ use super::{
 pub(super) const GIT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Ceiling on a `git` step that mints, seals, adopts, or unmints a copy.
-const GIT_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+pub(super) const GIT_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Runs `command` to completion or to `timeout`, whichever comes first. A
 /// `git` that stalls (a lock, a credential prompt, a hung filesystem) fails
@@ -697,7 +697,7 @@ fn utf8_path(bytes: &[u8]) -> String {
 /// Applies the merged-tree patch to the target's working copy. The patch goes
 /// through a scratch file rather than a pipe so this module keeps one process
 /// constructor per VCS. `Err` carries git's stderr excerpt.
-fn git_apply(target_path: &Path, patch: &[u8]) -> Result<(), String> {
+pub(super) fn git_apply(target_path: &Path, patch: &[u8]) -> Result<(), String> {
     use std::io::Write as _;
     let Ok(scratch) = private_scratch() else {
         return Err("the patch scratch directory could not be created".to_owned());

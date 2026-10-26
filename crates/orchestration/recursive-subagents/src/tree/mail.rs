@@ -449,13 +449,24 @@ impl ProductAgentTree {
                 "recipient mailbox record budget is exhausted",
             ));
         }
+        let refresh = (purpose == MessagePurpose::Followup)
+            .then(|| {
+                self.nodes
+                    .get(&request.agent_id)
+                    .and_then(|node| self.refresh_report(&node.workspace_id, operation_id))
+            })
+            .flatten();
+        let body = refresh.as_ref().map_or_else(
+            || request.message.clone(),
+            |report| format!("{}\n\n{}", request.message, report.start_line()),
+        );
         let queued_bytes: usize = self
             .messages
             .values()
             .filter(|mail| mail.durable == MailDurableState::Accepted)
             .map(|mail| mail.body.len())
             .sum();
-        if queued_bytes.saturating_add(request.message.len()) > MAX_QUEUED_MAIL_BYTES {
+        if queued_bytes.saturating_add(body.len()) > MAX_QUEUED_MAIL_BYTES {
             return Err(TopologyError::new(
                 TopologyErrorCode::MailboxFull,
                 "tree queued-mail byte budget is exhausted",
@@ -499,7 +510,7 @@ impl ProductAgentTree {
             message_id: message_id.clone(),
             from: caller_id.to_owned(),
             to: request.agent_id.clone(),
-            body: request.message.clone(),
+            body,
             purpose,
             priority,
             in_reply_to: request.in_reply_to.clone(),
@@ -513,6 +524,7 @@ impl ProductAgentTree {
         self.messages.insert(message_id.clone(), mail);
         self.bump();
         let output = SendMessageOutput {
+            refresh,
             message_id,
             disposition,
         };

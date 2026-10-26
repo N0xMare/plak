@@ -93,6 +93,12 @@ impl ProductAgentTree {
     }
 
     pub(super) fn check_adopt_available(&self, workspace: &str) -> Result<(), TopologyError> {
+        if self.refresh_pending(workspace) {
+            return Err(TopologyError::new(
+                TopologyErrorCode::WorkspaceRecoveryRequired,
+                "workspace refresh is pending; settle it before adopting",
+            ));
+        }
         if self.inflight_adopts.contains(workspace)
             || (self
                 .workspaces
@@ -294,9 +300,11 @@ impl ProductAgentTree {
         }
         let reclaimed = self.reclaimed(&source.workspace_id);
         if let Some(row) = self.workspaces.get_mut(&source.workspace_id) {
-            row.base_commit = Some(source.commit.clone());
-            row.base_content = Some(source.content.clone());
-            row.base_change_id.clone_from(&source.change_id);
+            if row.base_commit.as_deref() == Some(source.base_commit.as_str()) {
+                row.base_commit = Some(source.commit.clone());
+                row.base_content = Some(source.content.clone());
+                row.base_change_id.clone_from(&source.change_id);
+            }
             row.status = if reclaimed {
                 WorkspaceStatus::CleanRemoved
             } else {

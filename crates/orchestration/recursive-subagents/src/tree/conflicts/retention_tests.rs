@@ -292,6 +292,7 @@ fn accepted_resolver_rehydrates_after_its_source_and_conflict_are_collected_then
     assert!(!f.tree.candidates.contains_key(&f.source));
     assert!(!f.tree.candidates.contains_key(&f.conflict));
     let request = SendAgentMessageRequest {
+        refresh: None,
         agent_id: resolver.clone(),
         message: "follow up".into(),
         purpose: Some(MessagePurpose::Followup),

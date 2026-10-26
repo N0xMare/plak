@@ -132,6 +132,10 @@ const TOPOLOGY_PAYLOAD_PINS: &[(&str, &str)] = &[
         r#"{"agent_id":"a2","message":"follow up","purpose":"reply","priority":"urgent","in_reply_to":"m1","output_schema_json":"{}"}"#,
     ),
     (
+        "send_agent_message/refresh",
+        r#"{"refresh":false,"agent_id":"a2","message":"follow up","purpose":"followup","priority":null,"in_reply_to":null}"#,
+    ),
+    (
         "list_agents/full",
         r#"{"include_self":true,"include_completed":true}"#,
     ),
@@ -406,12 +410,28 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "send_agent_message/full",
         &encoded(&SendAgentMessageRequest {
+            refresh: None,
             agent_id: "a2".into(),
             message: "follow up".into(),
             purpose: Some(MessagePurpose::Reply),
             priority: Some(MessagePriority::Urgent),
             in_reply_to: Some("m1".into()),
             output_schema_json: Some("{}".into()),
+        }),
+    );
+    check(
+        &mut failures,
+        &mut rows,
+        TOPOLOGY_PAYLOAD_PINS,
+        "send_agent_message/refresh",
+        &encoded(&SendAgentMessageRequest {
+            refresh: Some(false),
+            agent_id: "a2".into(),
+            message: "follow up".into(),
+            purpose: Some(MessagePurpose::Followup),
+            priority: None,
+            in_reply_to: None,
+            output_schema_json: None,
         }),
     );
     check(

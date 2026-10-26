@@ -337,6 +337,7 @@ fn resolver_followup_after_acceptance_seals_an_ordinary_delta() {
         .send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: agent.clone(),
                 message: "a later ordinary edit".to_owned(),
                 purpose: Some(MessagePurpose::Followup),
@@ -415,6 +416,7 @@ fn accepting_a_later_conflict_preserves_the_resolvers_original_input_lineage() {
         .send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: agent.clone(),
                 message: "later change".into(),
                 purpose: Some(MessagePurpose::Followup),

@@ -212,7 +212,8 @@ impl ProductAgentTree {
         let Some(node) = self.nodes.get(agent) else {
             return false;
         };
-        if node.parent_agent_id.is_none()
+        if self.refresh_pending(&node.workspace_id)
+            || node.parent_agent_id.is_none()
             || node.active_turn
             || self.has_turn_owner(agent)
             || self.has_turn_waiter(agent)

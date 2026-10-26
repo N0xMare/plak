@@ -1734,6 +1734,12 @@ adopting hold and its interrupted recovery.
 The opt-in `tree_revert` shape adopts and then reverses one candidate. Its pilot
 verifies cleared acceptance, retained original provenance and durable reversal
 stamps; indexed cuts cover the reversal's adopting hold and publication.
+Real-Git followup laws cover live-fork catch-up, pinned candidate bases, explicit
+opt-out, conflict reports on both sides, detached/staged/job skips and adoption
+of an older candidate without moving a refreshed base. The durability-lane
+`live_fork_refresh_crash_cuts_reconcile_only_exact_git_states` law cuts after
+intent publication, worktree application, branch CAS and base-pin CAS, then
+reopens the persisted tree against those real Git artifacts.
 The process pilots prove a real shell job was promoted and quit settled it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.

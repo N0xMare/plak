@@ -758,6 +758,7 @@ fn pi_hub_tree(
     tree.send_agent_message(
         &child,
         &SendAgentMessageRequest {
+            refresh: None,
             agent_id: "root".into(),
             message: "halfway there".into(),
             purpose: None,

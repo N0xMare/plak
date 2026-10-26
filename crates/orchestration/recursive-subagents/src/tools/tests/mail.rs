@@ -714,6 +714,7 @@ async fn a_followup_start_on_a_retiring_slot_is_retried() {
         Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let request = serde_json::to_value(SendAgentMessageRequest {
+        refresh: None,
         agent_id: "c1".into(),
         message: "now do the v3 schema".into(),
         purpose: Some(MessagePurpose::Followup),
@@ -932,6 +933,7 @@ async fn a_followup_start_that_never_finds_the_slot_vacant_withdraws_its_attempt
         Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     );
     let request = serde_json::to_value(SendAgentMessageRequest {
+        refresh: None,
         agent_id: "c1".into(),
         message: "now do the v3 schema".into(),
         purpose: Some(MessagePurpose::Followup),
@@ -994,6 +996,7 @@ async fn pf5_a_left_follow_up_answers_its_durable_receipt() {
         Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let request = serde_json::to_value(SendAgentMessageRequest {
+        refresh: None,
         agent_id: "c1".into(),
         message: "now do the v3 schema".into(),
         purpose: Some(MessagePurpose::Followup),
@@ -1062,6 +1065,7 @@ async fn a_cancelled_followup_withdraws_its_unstarted_attempt() {
         Some(Arc::clone(&deliverer) as Arc<dyn ChildController>),
     ));
     let request = serde_json::to_value(SendAgentMessageRequest {
+        refresh: None,
         agent_id: "c1".into(),
         message: "now do the v3 schema".into(),
         purpose: Some(MessagePurpose::Followup),
@@ -1365,6 +1369,7 @@ async fn followup_cancel_during_unknown_submission_holds_recovery_and_rebuild() 
         let tool = Arc::new(send_tool(driver.clone(), Some(deliverer.clone())));
         let cancellation = plakous::model::CancellationToken::new();
         let request = serde_json::to_value(SendAgentMessageRequest {
+            refresh: None,
             agent_id: "c1".to_owned(),
             message: "again".to_owned(),
             purpose: Some(MessagePurpose::Followup),
@@ -1449,6 +1454,7 @@ async fn a_refused_coordinate_start_never_rolls_back_another_sends_followup() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "c1".into(),
                 message: "now do the v3 schema".into(),
                 purpose: Some(MessagePurpose::Followup),
@@ -1954,6 +1960,7 @@ async fn followup_after_completion_opens_attempt_two_and_completes() {
     let deliverer = Arc::new(StubDeliverer::ok().binding(&tree));
     let body = "🦀".repeat(crate::protocol::MAX_MESSAGE_BYTES / 4);
     let followup = serde_json::to_value(SendAgentMessageRequest {
+        refresh: None,
         agent_id: "c1".into(),
         message: body.clone(),
         purpose: Some(MessagePurpose::Followup),
@@ -2042,6 +2049,7 @@ async fn owner_fenced_followup_refusal_fails_closed_without_erasing_evidence() {
         .send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: id.clone(),
                 message: "again".into(),
                 purpose: Some(MessagePurpose::Followup),
@@ -2138,6 +2146,7 @@ async fn refused_followup_start_rolls_the_attempt_back() {
     };
     let deliverer = Arc::new(StubDeliverer::refuse());
     let followup = serde_json::to_value(SendAgentMessageRequest {
+        refresh: None,
         agent_id: "c1".into(),
         message: "re-task the finished child".into(),
         purpose: Some(MessagePurpose::Followup),

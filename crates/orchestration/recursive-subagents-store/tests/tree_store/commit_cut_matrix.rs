@@ -294,6 +294,7 @@ fn scenario(root: &Path) -> (Vec<Frame>, Arc<FakeVcs>) {
         tree.send_agent_message(
             "c1",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "root".into(),
                 message: "question before parking".into(),
                 purpose: None,

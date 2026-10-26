@@ -4722,6 +4722,7 @@ proptest! {
         project(&mut base, &child, &feed);
         feed.terminal("start-1", turn(1), End::Completed);
         let undelivered = base.send_agent_message("root", &SendAgentMessageRequest {
+            refresh: None,
             agent_id: child.clone(), message: "waiting for a wake".to_owned(), purpose: None,
             priority: None, in_reply_to: None, output_schema_json: None,
         }, None).unwrap().message_id;
@@ -4734,6 +4735,7 @@ proptest! {
                 prop_assert_eq!(durable(&live, &undelivered), MailDurableState::Accepted);
             }
             let later = live.send_agent_message("root", &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: child.clone(), message: "later mail".to_owned(), purpose: None,
                 priority: None, in_reply_to: None, output_schema_json: None,
             }, None).unwrap().message_id;

@@ -1506,6 +1506,7 @@ mod suite {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    refresh: None,
                     agent_id: child.clone(),
                     message: "follow-up on the review".into(),
                     purpose: None,
@@ -1539,6 +1540,7 @@ mod suite {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    refresh: None,
                     agent_id: live.agent_id.clone(),
                     message: "start brief already applied; this is extra mail".into(),
                     purpose: None,
@@ -1655,6 +1657,7 @@ mod suite {
         let mail_self = topology_mail_request_invalid_message(
             TopologyErrorCode::SelfSend,
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "root".into(),
                 message: "hi".into(),
                 purpose: None,
@@ -1673,6 +1676,7 @@ mod suite {
         let mail_bound = topology_mail_request_invalid_message(
             TopologyErrorCode::BoundExceeded,
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "c1".into(),
                 message: String::new(),
                 purpose: None,
@@ -1691,6 +1695,7 @@ mod suite {
         let mail_reply = topology_mail_request_invalid_message(
             TopologyErrorCode::ReplyInvalid,
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "c1".into(),
                 message: "hi".into(),
                 purpose: Some(MessagePurpose::Reply),
@@ -1709,6 +1714,7 @@ mod suite {
         let mail_in_reply = topology_mail_request_invalid_message(
             TopologyErrorCode::ReplyInvalid,
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "c1".into(),
                 message: "hi".into(),
                 purpose: None,

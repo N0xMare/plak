@@ -59,6 +59,7 @@ pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Valu
         ),
         TopologyKind::Send => object_schema(
             json!({
+                "refresh": { "type": "boolean", "description": "Followup only; merge the parent's current state into a live-fork copy when clean. False keeps its base." },
                 "agent_id": { "type": "string" },
                 "message": { "type": "string" },
                 "purpose": {

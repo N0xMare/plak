@@ -189,6 +189,12 @@ impl FakeVcs {
 }
 
 impl VcsOps for FakeVcs {
+    fn prepare_refresh(
+        &self,
+        _request: &super::RefreshRequest,
+    ) -> Result<super::RefreshPreparation, VcsError> {
+        Ok(super::RefreshPreparation::Unchanged)
+    }
     fn restore_copy_base(
         &self,
         path: &Path,

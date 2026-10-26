@@ -659,11 +659,18 @@ Required `agent_id` and `message`.
 | `priority` | `deferred` or `urgent`; omitted means `urgent` from a parent to its running, active direct child, `deferred` otherwise |
 | `in_reply_to` | required with `purpose=reply`, refused otherwise (`reply_invalid`) |
 | `output_schema_json` | admitted only with `purpose=followup`, else `schema_mismatch` |
+| `refresh` | followup only; default catches up live-fork copies when clean, `false` keeps their base; explicit `true` on a snapshot or candidate-minted copy is `schema_mismatch` |
 
 `purpose=result` is host-authored and MUST be refused from a model. There is no
 `delegate` purpose: it would also replace a running task.
 
-Receipt: `{ message_id, disposition }`, disposition one of `started`, `queued`,
+Receipt: `{ message_id, disposition, refresh? }`. `refresh` reports
+`status: refreshed | skipped | conflict`, the new `base` on success, or bounded
+`reason` / conflict `paths` and `paths_total` (at most 16 entries, with
+`paths_truncated` when cut). Unchanged and design-ineligible copies omit it.
+The same result contributes one bounded host-authored line to the child's Start
+mail; the line counts toward the queued-mail budget, not the caller's 16 KiB
+request-body limit. `disposition` is one of `started`, `queued`,
 `steered`. Mail that reaches an interrupted child while its cancelled turn
 unwinds starts the resume turn instead, and its receipt reads `started` once
 that resume Start is admitted (§9). A `started` mail never joins a turn some
@@ -1352,6 +1359,15 @@ names its candidate beside the failed attempt status, which identifies it as
 partial rather than a successful result. Adoption is explicit. Followup
 continues in the same child copy without adopting it first.
 
+Before opening the new attempt, a Git fork minted from its parent's live state
+merges the parent's current state into the copy when both its committed and
+whole-worktree merges are clean (§6.8). `refresh:false` opts out. Copies minted
+over a candidate, including reviewers and resolvers, keep their pinned base;
+snapshot and inherit copies are not refreshed. A conflicting catch-up is refused
+without applying anything: followup proceeds at the old base and both parent and
+child receive the paths. Running jobs, detached/wrong HEAD, independent staged
+content and backend errors skip catch-up with a bounded reason.
+
 An interrupted attempt is *superseded*: it ends `cancelled` with no result, so
 exactly one attempt of a node is ever live.
 
@@ -1420,8 +1436,11 @@ An **adopted** copy is admitted. The workspace row returns to `active` for the
 new attempt, so that attempt's terminal seal runs — a seal only ever runs on an
 `active` copy.
 
-On a successful landing the copy's base has already advanced to the **adopted
-state**: the adopted candidate's own snapshot on both backends. The next candidate is
+On a successful landing the copy's base advances to the **adopted
+state** only when still equal to that candidate's recorded base. An older
+candidate sealed before catch-up remains adoptable over its own base without
+moving the refreshed copy base or its pin. Otherwise the adopted candidate's
+own snapshot is the new base on both backends. The next candidate is
 therefore the **delta** over what was adopted, and a second adopt lands only
 that delta instead of re-applying the first.
 
@@ -1836,6 +1855,53 @@ cleanup intent. Maintenance and deleted-session inventory include both live
 rescue ownership and pending cleanup, so removing a tree also releases its
 rescue refs. A refused snapshot can leave an owner with no refs, which cleans
 up through the same idempotent rule.
+
+### 6.8 Live-fork catch-up
+
+Catch-up runs only before a followup into an idle Git fork with no candidate
+input. The child must have no running background jobs, an attached tree-owned
+branch, no unmerged index entries and no independently staged version of a file.
+Rehydration, when needed, finishes first. Candidate-minted, snapshot and inherit
+copies are not refreshed; explicit `refresh:true` on them is `schema_mismatch`.
+JJ copies report a skipped catch-up until backend parity.
+
+The unlocked preparation snapshots parent `P` and child `C` over the recorded
+base `B`. No new parent tree means no refresh. Both `merge-tree --merge-base=B P
+HEAD` (committed content) and `merge-tree --merge-base=B P C` (whole working tree)
+must be clean. Either conflict retains the exact old copy, branch, index and
+base; both parent receipt and child Start name the paths. Other preparation
+failures skip catch-up with a bounded reason and followup continues.
+
+A clean preparation creates a fixed-identity merge commit `Mc` whose tree is
+the committed result and whose parents are old HEAD and `P`. Before any copy
+write, the tree publishes a `workspace_refresh:<workspace>` operation containing
+the exact original base, parent and child snapshots, whole result, merge commit,
+old HEAD and branch. The operation also binds the original followup request
+digest, so a retry cannot change its brief or refresh policy. The unlocked apply
+uses an atomic worktree-only patch from `C` to the whole result, CAS-updates the
+owned branch to `Mc`, resets only the index with `read-tree Mc`, and CAS-updates
+the copy base pin from `B` to `P`. Only then does the row advance its base and
+generation, settle the intent and open the new attempt. Existing uncommitted
+child work stays uncommitted. Pending refresh ownership blocks adoption, explicit
+discard, reclamation, retirement and another followup of that copy.
+
+Attachment or the next followup reconciles a published apply intent before
+admitting further work. An effect still owned by this process cannot be retried
+concurrently:
+old HEAD plus original child content abandons it at the old base; old HEAD plus
+the exact merged content finishes the branch/index/pin updates; `Mc` plus the
+merged content finishes index and base pin. If original and merged content are
+identical, completing the branch/base update is safe. Any divergent branch or
+content is `workspace_recovery_required`, retaining the copy and intent for
+inspection. A refresh fault records the prior idle node status; once exact-state
+recovery settles that fault and no other VCS fault remains, projection restores
+that same status without changing the sealed attempt or its result.
+A preparation interrupted before a plan is published simply skips
+catch-up at the old base. A completed `workspace_refresh_result:<send operation>`
+retains the bound request digest and report even if another followup replaces
+the workspace's current intent before the original send is admitted.
+A completed outcome is part of the original send
+receipt; replay never refreshes a copy twice or appends its Start line twice.
 
 ## 7. Adoption
 

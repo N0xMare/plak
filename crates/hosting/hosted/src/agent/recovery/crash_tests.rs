@@ -223,6 +223,7 @@ impl Fixture {
                         tree.send_agent_message(
                             "root",
                             &SendAgentMessageRequest {
+                                refresh: None,
                                 agent_id: id.clone(),
                                 message: "wake now".into(),
                                 purpose: None,
@@ -660,6 +661,7 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
                     .send_agent_message(
                         "root",
                         &SendAgentMessageRequest {
+                            refresh: None,
                             agent_id: id.clone(),
                             message: "retained receipt".into(),
                             purpose: None,

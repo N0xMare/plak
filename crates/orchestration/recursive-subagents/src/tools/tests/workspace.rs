@@ -3,6 +3,144 @@
 use super::*;
 
 #[tokio::test]
+async fn followup_tool_refreshes_a_real_git_copy_before_opening_the_next_attempt() {
+    let (root, store, mut tree) = git_persist_fixture();
+    let child = tree
+        .spawn_agent("root", &mint_spawn_request(), None)
+        .unwrap();
+    let path = tree.node(&child.agent_id).unwrap().path.clone();
+    std::fs::write(path.join("CHILD.txt"), "child work\n").unwrap();
+    tree.record_turn_completed(&child.agent_id).unwrap();
+    tree.settle_for_test();
+    std::fs::write(root.path().join("PARENT.txt"), "parent work\n").unwrap();
+    let driver = driver_on(tree, Arc::clone(&store));
+    let tool = send_tool(driver.clone(), None);
+    let request =
+        json!({"agent_id": child.agent_id, "message": "next task", "purpose": "followup"});
+    let outcome = tool
+        .send_with("refresh-followup".into(), &request)
+        .await
+        .unwrap();
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    let receipt = outcome_json(&outcome);
+    assert_eq!(receipt["refresh"]["status"], "refreshed");
+    assert_eq!(
+        std::fs::read_to_string(path.join("PARENT.txt")).unwrap(),
+        "parent work\n"
+    );
+    let loaded = reload(&store, "tree1");
+    assert_eq!(
+        loaded.attempt(&child.agent_id).unwrap().attempt_id.as_str(),
+        "c1-a2"
+    );
+    let mail = loaded
+        .mail(receipt["message_id"].as_str().unwrap())
+        .unwrap();
+    assert!(mail.body.contains("Your workspace was refreshed"));
+    std::fs::write(
+        root.path().join("SECOND.txt"),
+        "not part of this followup\n",
+    )
+    .unwrap();
+    let replay = tool
+        .send_with("refresh-followup".into(), &request)
+        .await
+        .unwrap();
+    assert_eq!(outcome_json(&replay), receipt);
+    assert!(!path.join("SECOND.txt").exists());
+}
+
+struct RefuseRefreshPlanStore {
+    inner: Arc<dyn TreeStore>,
+    refused: AtomicBool,
+}
+
+impl TreeStore for RefuseRefreshPlanStore {
+    fn exists(&self, id: &str) -> Result<bool, crate::tree::TreeStoreError> {
+        self.inner.exists(id)
+    }
+    fn ids(&self) -> Result<Vec<String>, crate::tree::TreeStoreError> {
+        self.inner.ids()
+    }
+    fn load(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::tree::PersistedTree>, crate::tree::TreeStoreError> {
+        self.inner.load(id)
+    }
+    fn save(
+        &self,
+        tree: &ProductAgentTree,
+    ) -> Result<crate::tree::Revision, crate::tree::TreeStoreError> {
+        let publishes_plan = tree.operations().values().any(|op| {
+            op.tool_name == "workspace_refresh"
+                && serde_json::from_str::<Value>(&op.canonical_request)
+                    .is_ok_and(|value| value["phase"] == "applying")
+        });
+        if publishes_plan && !self.refused.swap(true, Ordering::SeqCst) {
+            return Err(crate::tree::TreeStoreError::unavailable(
+                "refresh plan publication refused",
+            ));
+        }
+        self.inner.save(tree)
+    }
+}
+
+#[tokio::test]
+async fn refused_refresh_plan_publication_never_writes_the_copy_or_strands_its_hold() {
+    let (root, inner, mut tree) = git_persist_fixture();
+    let child = tree
+        .spawn_agent("root", &mint_spawn_request(), None)
+        .unwrap();
+    let path = tree.node(&child.agent_id).unwrap().path.clone();
+    std::fs::write(path.join("CHILD.txt"), "child work\n").unwrap();
+    tree.record_turn_completed(&child.agent_id).unwrap();
+    tree.settle_for_test();
+    std::fs::write(root.path().join("PARENT.txt"), "parent work\n").unwrap();
+    let store: Arc<dyn TreeStore> = Arc::new(RefuseRefreshPlanStore {
+        inner,
+        refused: AtomicBool::new(false),
+    });
+    let driver = driver_on(tree, store);
+    let tool = send_tool(driver.clone(), None);
+    let request =
+        json!({"agent_id": child.agent_id, "message": "next task", "purpose": "followup"});
+    let first = tool
+        .send_with("refresh-refusal".into(), &request)
+        .await
+        .unwrap();
+    assert_eq!(first.kind(), ToolOutcomeKind::Failure);
+    assert!(!path.join("PARENT.txt").exists());
+    assert_eq!(
+        driver
+            .read(|tree| tree
+                .attempt(&child.agent_id)
+                .unwrap()
+                .attempt_id
+                .to_string())
+            .unwrap(),
+        "c1-a1"
+    );
+    let retry = tool
+        .send_with("refresh-refusal".into(), &request)
+        .await
+        .unwrap();
+    assert_eq!(retry.kind(), ToolOutcomeKind::Success);
+    assert_eq!(outcome_json(&retry)["refresh"]["status"], "skipped");
+    assert!(!path.join("PARENT.txt").exists());
+    assert_eq!(
+        driver
+            .read(|tree| tree
+                .attempt(&child.agent_id)
+                .unwrap()
+                .attempt_id
+                .to_string())
+            .unwrap(),
+        "c1-a2"
+    );
+}
+
+#[tokio::test]
 async fn hub_working_copy_is_shared_across_compiles_and_persists() {
     let root = tempfile::tempdir().unwrap();
     let tree_id = format!("hub-{}", uuid::Uuid::new_v4().simple());

@@ -382,6 +382,10 @@ Home-scoped `orchestration.workspace_idle_seconds` and
 - **Follow-up** — `send_agent_message` with `purpose = "followup"` re-tasks a
   finished child on a new attempt, optionally with a new output schema. This is
   how a parent iterates on a child's result instead of spawning a fresh one.
+  A live-fork copy first catches up with its parent's current state when the
+  merge is clean; `refresh:false` keeps its old base. Copies minted over a
+  candidate, including reviewers and resolvers, never catch up automatically.
+  Conflicts keep the old copy and base, and report paths to both agents.
 - **Interrupt** — `interrupt_agent` cancels that child's current turn only. Any
   open `wait_agent` returns `interrupted`, the node stays listable, and it can
   still take follow-up mail. There is no separate resume tool.

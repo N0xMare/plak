@@ -895,6 +895,7 @@ mod tests {
                 .send_agent_message(
                     &sender.agent_id,
                     &SendAgentMessageRequest {
+                        refresh: None,
                         agent_id: "root".into(),
                         message: "later".into(),
                         purpose: None,
@@ -931,6 +932,7 @@ mod tests {
 
     fn followup(agent_id: &str) -> SendAgentMessageRequest {
         SendAgentMessageRequest {
+            refresh: None,
             agent_id: agent_id.to_owned(),
             message: "again".into(),
             purpose: Some(MessagePurpose::Followup),

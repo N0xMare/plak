@@ -999,7 +999,12 @@ impl ProductAgentTree {
             child.path.clone()
         };
         let target_path = self.node(caller_id)?.path.clone();
-        let advance_copy_base = !self.reclaimed(&candidate.workspace_id);
+        let base = source
+            .as_ref()
+            .filter(|_| candidate.kind == super::CandidateKind::Conflict)
+            .unwrap_or(&candidate);
+        let advance_copy_base = !self.reclaimed(&candidate.workspace_id)
+            && child.base_commit.as_deref() == Some(base.base_commit.as_str());
         let interrupted_adopt = self.workspace_has_vcs_fault(&candidate.workspace_id)
             || source
                 .as_ref()
@@ -1007,7 +1012,15 @@ impl ProductAgentTree {
         let conflict_pin = self.reserve_conflict_pin(&candidate, caller_id);
         let source_copy_agent = source
             .as_ref()
-            .filter(|source| !self.reclaimed(&source.workspace_id))
+            .filter(|source| {
+                !self.reclaimed(&source.workspace_id)
+                    && self
+                        .workspaces
+                        .get(&source.workspace_id)
+                        .is_some_and(|row| {
+                            row.base_commit.as_deref() == Some(source.base_commit.as_str())
+                        })
+            })
             .map(|source| source.producing_agent_id.clone());
         if let Some(row) = source
             .as_ref()
@@ -1102,12 +1115,14 @@ impl ProductAgentTree {
                             accepted_base.change_id.clone(),
                         ),
                     };
-                    row.base_commit = Some(commit);
-                    row.base_content = Some(content);
-                    // The jj squash abandoned the change the copy was minted
-                    // on; the next seal must ask its divergence question
-                    // against the change the copy sits on *now*.
-                    row.base_change_id = change_id;
+                    if ticket.advance_copy_base {
+                        row.base_commit = Some(commit);
+                        row.base_content = Some(content);
+                        // The jj squash abandoned the change the copy was minted
+                        // on; the next seal must ask its divergence question
+                        // against the change the copy sits on *now*.
+                        row.base_change_id = change_id;
+                    }
                 }
                 if let Some(record) = self.candidates.get_mut(&ticket.candidate.candidate_id) {
                     record.adopted_by = Some(ticket.caller_id.clone());
@@ -1539,6 +1554,7 @@ mod tests {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: child.agent_id.clone(),
                 message: "follow up".into(),
                 purpose: Some(MessagePurpose::Followup),

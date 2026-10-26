@@ -53,6 +53,7 @@ mod controller;
 mod driver;
 mod jobs;
 mod mail;
+mod refresh;
 mod registrations;
 mod spawn;
 mod storage;
@@ -598,7 +599,13 @@ impl TopologyTool {
     /// `on_mint` hook can run for minutes, so it goes to a blocking thread;
     /// seals, adopts, and unmints are short and run inline.
     async fn settle(&self, effects: Effects) -> Result<Settled, ToolRuntimeError> {
-        let settled = if effects.hooks.is_empty() && effects.dormancy.is_empty() {
+        self.settle_typed(effects)
+            .await
+            .map_err(|error| ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message))
+    }
+
+    async fn settle_typed(&self, effects: Effects) -> Result<Settled, TopologyError> {
+        if effects.hooks.is_empty() && effects.dormancy.is_empty() && effects.refreshes.is_empty() {
             self.driver.settle(effects)
         } else {
             let driver = self.driver.clone();
@@ -610,9 +617,7 @@ impl TopologyTool {
                         format!("effects task failed: {error}"),
                     ))
                 })
-        };
-        settled
-            .map_err(|error| ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message))
+        }
     }
 
     fn dispatch_mutating<Req, Out>(

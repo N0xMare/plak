@@ -549,6 +549,7 @@ impl TreeDriver {
                 let tree = self.lock()?;
                 if tree.revision != tree.stored_revision
                     && (!effects.base_pins.is_empty()
+                        || !effects.refreshes.is_empty()
                         || !effects.seals.is_empty()
                         || !effects.adopts.is_empty()
                         || !effects.dormancy.is_empty())
@@ -591,6 +592,9 @@ impl TreeDriver {
             tree.lift_restored_pause_if_quiescent();
             if let Err(error) = self.save_guarded(&mut tree) {
                 first_save_error = Some(error);
+                // No follow-on refresh write was dispatched. Keep its intent
+                // for exact-state recovery rather than a stranded local hold.
+                tree.abandon_queued_refresh_dispatches();
                 // Completed effects remain recorded. Follow-on reservations
                 // stay queued until a later successful publication.
                 break;

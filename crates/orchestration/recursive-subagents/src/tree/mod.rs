@@ -720,6 +720,9 @@ pub struct WorkspaceReceipt {
 /// message did to the recipient's turn.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SendMessageOutput {
+    /// Automatic catch-up before a follow-up; omitted for unchanged/ineligible copies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<RefreshReport>,
     /// The accepted message's durable id; a reply cites it as `in_reply_to`.
     pub message_id: String,
     /// Whether it started, steered, or queued behind the recipient's turn.
@@ -1171,6 +1174,7 @@ pub(crate) struct BasePinTicket {
 #[derive(Clone, Debug, Default)]
 #[must_use = "effects the caller drops are stranded: the node stays Sealing or the row Adopting/Discarding, which reopens RecoveryRequired"]
 pub struct Effects {
+    pub(crate) refreshes: Vec<refresh::RefreshTicket>,
     // Reopen-owned; ordinary mutation drains leave these for driver attachment.
     pub(crate) base_pins: Vec<BasePinTicket>,
     /// Copies to seal into candidates.
@@ -1192,6 +1196,7 @@ impl Effects {
     /// settles once.
     pub fn absorb(&mut self, other: Self) {
         let Self {
+            refreshes,
             base_pins,
             seals,
             dormancy,
@@ -1200,6 +1205,7 @@ impl Effects {
             unmints,
             launch_checkout,
         } = other;
+        self.refreshes.extend(refreshes);
         self.base_pins.extend(base_pins);
         self.seals.extend(seals);
         self.dormancy.extend(dormancy);
@@ -1215,7 +1221,8 @@ impl Effects {
     /// unlocked phase entirely.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.base_pins.is_empty()
+        self.refreshes.is_empty()
+            && self.base_pins.is_empty()
             && self.dormancy.is_empty()
             && self.seals.is_empty()
             && self.adopts.is_empty()
@@ -1225,6 +1232,19 @@ impl Effects {
 
     pub(crate) fn refuse_attach(self, reason: String) -> Completed {
         Completed {
+            refreshes: self
+                .refreshes
+                .into_iter()
+                .map(|ticket| {
+                    (
+                        ticket,
+                        Err(VcsError::new(
+                            VcsErrorKind::RecoveryRequired,
+                            reason.clone(),
+                        )),
+                    )
+                })
+                .collect(),
             base_pins: self
                 .base_pins
                 .into_iter()
@@ -1258,6 +1278,14 @@ impl Effects {
                     &ticket.base,
                 );
                 (ticket, result)
+            })
+            .collect();
+        let refreshes = self
+            .refreshes
+            .into_iter()
+            .map(|ticket| {
+                let answer = ticket.run(vcs);
+                (ticket, answer)
             })
             .collect();
         let seals = self
@@ -1308,6 +1336,7 @@ impl Effects {
             })
             .collect();
         Completed {
+            refreshes,
             base_pins,
             dormancy,
             seals,
@@ -1322,6 +1351,10 @@ impl Effects {
 /// [`ProductAgentTree::complete`].
 #[derive(Debug, Default)]
 pub struct Completed {
+    refreshes: Vec<(
+        refresh::RefreshTicket,
+        Result<refresh::RefreshAnswer, VcsError>,
+    )>,
     base_pins: Vec<(BasePinTicket, Result<(), VcsError>)>,
     dormancy: Vec<(
         dormancy::DormancyTicket,
@@ -1520,6 +1553,8 @@ pub struct ProductAgentTree {
     outstanding_seals: BTreeMap<String, Arc<()>>,
     /// Unlocked adopts currently owned by this host, including interrupted retries.
     inflight_adopts: BTreeSet<String>,
+    /// Refresh effects currently owned by this process, including recovery.
+    inflight_refreshes: BTreeSet<String>,
     /// In-process detach telemetry guard; never persisted.
     detach_emitted: HashSet<String>,
     /// Copies whose automatic prune failed in this process; they are not
@@ -1616,8 +1651,10 @@ mod park;
 mod projection;
 mod projector;
 mod recovery;
+mod refresh;
 mod retention;
 mod revert;
+pub use refresh::{RefreshReport, RefreshStatus};
 mod runtime_error;
 pub mod text;
 mod tree_store;
@@ -1803,6 +1840,7 @@ impl ProductAgentTree {
             compaction_cursors: BTreeMap::new(),
             outstanding_seals: BTreeMap::new(),
             inflight_adopts: BTreeSet::new(),
+            inflight_refreshes: BTreeSet::new(),
             detach_emitted: HashSet::new(),
             delivered: BTreeMap::new(),
             admission_marks: BTreeSet::new(),
@@ -1856,14 +1894,21 @@ impl ProductAgentTree {
     /// to [`Self::complete`].
     pub fn take_effects(&mut self) -> Effects {
         let base_pins = std::mem::take(&mut self.effects.base_pins);
+        let (attach_refreshes, refreshes): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.effects.refreshes)
+                .into_iter()
+                .partition(|ticket| ticket.attach);
+        self.effects.refreshes = refreshes;
         let mut effects = std::mem::take(&mut self.effects);
         self.effects.base_pins = base_pins;
+        self.effects.refreshes = attach_refreshes;
         effects.launch_checkout.clone_from(&self.launch_checkout);
         effects
     }
 
     pub(crate) fn take_attach_effects(&mut self) -> Effects {
         Effects {
+            refreshes: std::mem::take(&mut self.effects.refreshes),
             base_pins: std::mem::take(&mut self.effects.base_pins),
             ..Effects::default()
         }
@@ -1880,6 +1925,7 @@ impl ProductAgentTree {
     /// follows is a real change to the store's compare-and-swap.
     pub fn complete(&mut self, completed: Completed) -> Settled {
         let Completed {
+            refreshes,
             base_pins,
             dormancy,
             seals,
@@ -1887,7 +1933,8 @@ impl ProductAgentTree {
             hooks,
             unmints,
         } = completed;
-        let recorded_anything = !base_pins.is_empty()
+        let recorded_anything = !refreshes.is_empty()
+            || !base_pins.is_empty()
             || !dormancy.is_empty()
             || !seals.is_empty()
             || !adopts.is_empty()
@@ -1897,6 +1944,11 @@ impl ProductAgentTree {
         let mut settled = Settled::default();
         for (ticket, result) in base_pins {
             self.finish_base_pin_recovery(ticket, result);
+        }
+        for (ticket, answer) in refreshes {
+            if let Err(error) = self.complete_refresh(ticket, answer) {
+                settled.cleanup_failures.push(error);
+            }
         }
         for (ticket, answer) in dormancy {
             if let Err(error) = self.complete_dormancy(ticket, answer) {
@@ -2295,6 +2347,7 @@ impl ProductAgentTree {
             compaction_cursors: BTreeMap::new(),
             outstanding_seals: BTreeMap::new(),
             inflight_adopts: BTreeSet::new(),
+            inflight_refreshes: BTreeSet::new(),
             detach_emitted: HashSet::new(),
             delivered: BTreeMap::new(),
             admission_marks: BTreeSet::new(),

@@ -885,6 +885,7 @@ async fn parent_mail_wakes_a_parked_child_and_an_interrupt_keeps_its_job() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: "also check the docs".into(),
                 purpose: None,
@@ -994,6 +995,7 @@ async fn wake_turns_count_toward_max_turns() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: "status?".into(),
                 purpose: None,
@@ -1142,6 +1144,7 @@ fn parent_mail(fixture: &Fixture, text: &str) {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: text.into(),
                 purpose: None,
@@ -1790,6 +1793,7 @@ async fn a_retried_mail_start_acknowledges_its_mail() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: "use the v2 schema".into(),
                 purpose: None,
@@ -1889,6 +1893,7 @@ async fn an_interrupt_racing_the_park_decision_releases_the_bound_turn() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: "resume".into(),
                 purpose: None,
@@ -1996,6 +2001,7 @@ async fn an_interrupt_racing_the_wake_admission_keeps_the_attempt() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: "resume".into(),
                 purpose: None,
@@ -2050,6 +2056,7 @@ async fn mail_during_a_failed_wake_end_is_refused_not_started() {
                             tree.send_agent_message(
                                 "root",
                                 &SendAgentMessageRequest {
+                                    refresh: None,
                                     agent_id: child.clone(),
                                     message: "one more thing".into(),
                                     purpose: None,
@@ -2440,6 +2447,7 @@ async fn an_admitted_mail_start_rejoins_after_the_reopen_reconcile() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: "use the v2 schema".into(),
                 purpose: None,
@@ -2522,6 +2530,7 @@ async fn a_mail_start_never_claims_a_recovered_turn_another_command_admitted() {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    refresh: None,
                     agent_id: fixture.child.clone(),
                     message: text.into(),
                     purpose: None,
@@ -2618,6 +2627,7 @@ async fn a_recovered_turn_that_ends_before_the_rejoin_returns_stays_ended() {
             tree.send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    refresh: None,
                     agent_id: fixture.child.clone(),
                     message: text.into(),
                     purpose: None,
@@ -2735,6 +2745,7 @@ async fn a_recovered_turn_on_an_attempt_bound_to_another_turn_is_refused() {
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: fixture.child.clone(),
                 message: "use the v2 schema".into(),
                 purpose: None,

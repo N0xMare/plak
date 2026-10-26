@@ -26,6 +26,7 @@ reason = "Three fixture-local exhaustive refusal and retention scenarios keep th
 [dependencies]
 plakous-host-protocol.workspace = true
 rustix = { workspace = true, features = ["process"] }
+serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
 jj-lib = { version = "=0.46.0", default-features = false, features = ["git"], optional = true }
 futures = { workspace = true, optional = true }

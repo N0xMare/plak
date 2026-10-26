@@ -1541,6 +1541,7 @@ impl Fixture {
                 tree.send_agent_message(
                     "root",
                     &SendAgentMessageRequest {
+                        refresh: None,
                         agent_id: id.to_owned(),
                         message: "again".into(),
                         purpose: Some(MessagePurpose::Followup),
@@ -3502,6 +3503,7 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: id.clone(),
                 message: "followup that never reached Start".into(),
                 purpose: Some(MessagePurpose::Followup),
@@ -3586,6 +3588,7 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
         tree.send_agent_message(
             "root",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: id.clone(),
                 message: "new followup only".into(),
                 purpose: Some(MessagePurpose::Followup),

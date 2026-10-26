@@ -497,6 +497,7 @@ async fn grok_output_over_a_child_is_the_await_with_its_receipt_and_replay() {
         tree.send_agent_message(
             "c1",
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "root".into(),
                 message: "halfway there".into(),
                 purpose: None,
@@ -928,6 +929,7 @@ fn child_reports(driver: &TreeDriver) {
     tree.send_agent_message(
         "c1",
         &SendAgentMessageRequest {
+            refresh: None,
             agent_id: "root".into(),
             message: "halfway there".into(),
             purpose: None,

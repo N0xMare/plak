@@ -877,6 +877,7 @@ mod tests {
         assert_eq!(grok_child.agent_id, "c1");
         assert_eq!(claude_child.agent_id, "c1");
         let mail = SendAgentMessageRequest {
+            refresh: None,
             agent_id: "c1".into(),
             message: "coordinate once".into(),
             purpose: None,

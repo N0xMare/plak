@@ -4534,6 +4534,7 @@ dependencies = [
  "plakous-host-protocol",
  "pollster",
  "rustix",
+ "serde",
  "sha2",
  "tempfile",
 ]

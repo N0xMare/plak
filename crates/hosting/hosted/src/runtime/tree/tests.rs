@@ -239,6 +239,7 @@ async fn tree_snapshot_pushes_on_any_node_revision_and_drops_non_advancing() {
         tree.send_agent_message(
             &child,
             &crate::agent_tree_protocol::SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "root".into(),
                 message: "which branch?\nmain or a2".into(),
                 purpose: Some(crate::agent_tree_protocol::MessagePurpose::Question),

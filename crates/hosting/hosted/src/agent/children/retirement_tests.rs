@@ -1315,6 +1315,7 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
                     tree.send_agent_message(
                         "root",
                         &crate::agent_tree_protocol::SendAgentMessageRequest {
+                            refresh: None,
                             agent_id: parent.agent_id.clone(),
                             message: "followup assignment".into(),
                             purpose: Some(crate::agent_tree_protocol::MessagePurpose::Followup),

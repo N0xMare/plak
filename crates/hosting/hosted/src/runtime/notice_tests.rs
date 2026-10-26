@@ -41,6 +41,7 @@ fn child_mail_preempts_a_waiting_process_in_a_root_turn() {
             tree.send_agent_message(
                 &child,
                 &SendAgentMessageRequest {
+                    refresh: None,
                     agent_id: tree.root_agent_id.clone(),
                     purpose: Some(MessagePurpose::Question),
                     message: "new information while the process is quiet".into(),
@@ -148,6 +149,7 @@ fn send_question(hub: &crate::topology_runtime::ProductTopologyRuntime) {
         tree.send_agent_message(
             &child,
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: tree.root_agent_id.clone(),
                 purpose: Some(MessagePurpose::Question),
                 message: "still unread until the root consumes it".into(),

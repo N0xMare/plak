@@ -558,6 +558,7 @@ async fn spawn_starts_the_assignment_turn_and_later_mail_follows_up() {
             .send_agent_message(
                 "root",
                 &SendAgentMessageRequest {
+                    refresh: None,
                     agent_id: "c1".into(),
                     message: "also check the tests".into(),
                     purpose: None,

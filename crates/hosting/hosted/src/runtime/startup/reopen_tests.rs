@@ -163,6 +163,7 @@ fn root_startup_rejoins_certified_decision_once_and_settles_waits() {
         .send_agent_message(
             &leaf,
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "root".into(),
                 message: "retained reply".into(),
                 purpose: None,

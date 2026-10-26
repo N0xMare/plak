@@ -283,6 +283,12 @@ impl TopologyTool {
                     json!({ "code": error.code, "message": error.message }).to_string(),
                 );
             }
+            if let Some(refusal) = self
+                .refresh_followup(&caller, &request, &operation_id)
+                .await?
+            {
+                return Ok(refusal);
+            }
         }
         let (output, effects) = self
             .driver

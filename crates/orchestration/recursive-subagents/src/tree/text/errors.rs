@@ -122,6 +122,7 @@ mod tests {
         let mail = topology_mail_request_invalid_message(
             TopologyErrorCode::ReplyInvalid,
             &SendAgentMessageRequest {
+                refresh: None,
                 agent_id: "c1".into(),
                 message: "hi".into(),
                 purpose: Some(MessagePurpose::Reply),

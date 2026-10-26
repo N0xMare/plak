@@ -17,6 +17,8 @@ pub(super) const VCS_FAULT_SETTLED_KIND: &str = "vcs_fault_settled";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct VcsFault {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_prior_status: Option<NodeStatus>,
     source_id: String,
     workspace_id: Option<String>,
     attempt_id: Option<super::AttemptId>,
@@ -122,6 +124,7 @@ impl ProductAgentTree {
                 self.fault_reasons
                     .insert(ticket.agent_id.clone(), reason.clone());
                 let fault = VcsFault {
+                    refresh_prior_status: None,
                     source_id: format!(
                         "base-pin-recovery:{}:{}",
                         ticket.workspace_id, self.host_generation
@@ -181,6 +184,7 @@ impl ProductAgentTree {
         }
         self.fault_in_flight_vcs();
         self.queue_recovery_base_pins();
+        self.queue_refresh_recovery();
         let agents: std::collections::BTreeSet<_> = self
             .operations
             .values()
@@ -250,6 +254,7 @@ impl ProductAgentTree {
             self.record_vcs_fault(
                 &agent_id,
                 VcsFault {
+                    refresh_prior_status: None,
                     source_id,
                     workspace_id: None,
                     attempt_id: reservation.attempt_id,
@@ -289,6 +294,7 @@ impl ProductAgentTree {
                 self.record_vcs_fault(
                     &agent_id,
                     VcsFault {
+                        refresh_prior_status: None,
                         source_id: format!("workspace:{}", row.workspace_id),
                         workspace_id: Some(row.workspace_id.clone()),
                         attempt_id,
@@ -383,13 +389,33 @@ impl ProductAgentTree {
     }
 
     pub(super) fn join_vcs_fault_settled(&mut self, id: &str) -> Result<(), TopologyError> {
-        let _: VcsFaultSettled = serde_json::from_str(&self.operations[id].canonical_request)
+        let settled: VcsFaultSettled = serde_json::from_str(&self.operations[id].canonical_request)
             .map_err(|_| {
                 TopologyError::new(
                     TopologyErrorCode::OperationRecoveryRequired,
                     "VCS settlement intent is invalid",
                 )
             })?;
+        let Some(record) = self.operations.get(&settled.fault_id) else {
+            return Ok(());
+        };
+        let fault: VcsFault = serde_json::from_str(&record.canonical_request).map_err(|_| {
+            TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "settled VCS fault is invalid",
+            )
+        })?;
+        let agent = record.caller_agent_id.clone();
+        if let Some(status) = fault.refresh_prior_status
+            && !self.has_faulted_vcs_obligation(&agent)
+            && let Some(node) = self.nodes.get_mut(&agent)
+            && node.attempt_id == settled.attempt_id
+            && node.status == NodeStatus::RecoveryRequired
+        {
+            node.status = status;
+            self.fault_reasons.remove(&agent);
+            self.bump();
+        }
         Ok(())
     }
 
@@ -430,6 +456,26 @@ impl ProductAgentTree {
                         && (!seal_only || fault.workspace_id.is_none())
                 })
         })
+    }
+
+    pub(super) fn record_refresh_fault(&mut self, workspace_id: &str, reason: &str) {
+        let Ok(agent_id) = self.workspace_producer(workspace_id) else {
+            return;
+        };
+        let fault = VcsFault {
+            refresh_prior_status: self.nodes.get(&agent_id).map(|node| node.status),
+            source_id: format!("workspace-refresh:{workspace_id}"),
+            workspace_id: Some(workspace_id.to_owned()),
+            attempt_id: self
+                .nodes
+                .get(&agent_id)
+                .and_then(|node| node.attempt_id.clone()),
+            reason: reason.to_owned(),
+        };
+        self.record_vcs_fault(&agent_id, fault, self.vcs_fault_anchor(&agent_id));
+        if let Err(error) = self.fold_due(&agent_id) {
+            self.record_fault(&agent_id, error.message);
+        }
     }
 
     pub(super) fn settle_workspace_faults(&mut self, workspace_id: &str) {
@@ -689,6 +735,12 @@ impl ProductAgentTree {
             return Ok(prior);
         }
         self.require_live_or_terminal_cleanup()?;
+        if self.refresh_pending(&request.workspace_id) {
+            return Err(TopologyError::new(
+                TopologyErrorCode::WorkspaceRecoveryRequired,
+                "workspace refresh is pending; the copy was retained",
+            ));
+        }
         let workspace = self.workspaces.get(&request.workspace_id).ok_or_else(|| {
             TopologyError::new(
                 TopologyErrorCode::WorkspaceNotOwned,
@@ -972,6 +1024,7 @@ impl ProductAgentTree {
                         _ => false,
                     }
                     && !self.reclamation_pending(&row.workspace_id)
+                    && !self.refresh_pending(&row.workspace_id)
                     && !self.prune_failed.contains(&row.workspace_id)
                     && self.copy_is_disposable(&row.workspace_id)
             })

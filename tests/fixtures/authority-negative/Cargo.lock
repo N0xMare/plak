@@ -1531,6 +1531,7 @@ version = "0.0.2"
 dependencies = [
  "plakous-host-protocol",
  "rustix",
+ "serde",
  "sha2",
  "tempfile",
 ]
