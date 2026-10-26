@@ -33,6 +33,30 @@ impl App {
     }
 
     fn apply_host_event_state(&mut self, event: HostEvent) {
+        if let HostEvent::TranscriptStream { scope, delta } = event {
+            use plakous_host_protocol::views::transcript::{
+                TranscriptScope, TranscriptStreamDelta,
+            };
+            let event = match delta {
+                TranscriptStreamDelta::Assistant(text) => HostEvent::AssistantDelta(text),
+                TranscriptStreamDelta::AssistantDone => HostEvent::AssistantDone,
+                TranscriptStreamDelta::Reasoning { location_key, text } => {
+                    HostEvent::ReasoningDelta { location_key, text }
+                }
+                TranscriptStreamDelta::Tool(tool) => HostEvent::Row(
+                    plakous_host_protocol::views::transcript::TranscriptRow::Tool(*tool),
+                ),
+            };
+            match scope {
+                TranscriptScope::Root => self.with_root_pane(|app| app.apply_live_op(event)),
+                TranscriptScope::Agent(id) if self.viewed_agent_id() == Some(id.as_str()) => {
+                    self.semantic_revision = self.semantic_revision.saturating_add(1);
+                    self.apply_live_op(event);
+                }
+                TranscriptScope::Agent(_) => {}
+            }
+            return;
+        }
         if self.ends_agent_view(&event) {
             self.close_agent_view();
             // Its target belonged to the session that was attached.
@@ -64,11 +88,16 @@ impl App {
         self.with_root_pane(|app| app.apply_root_host_event(event));
     }
 
-    fn install_keyed_transcript(&mut self) {
+    fn install_keyed_transcript(&mut self, resume_stream: bool) {
+        #[cfg(test)]
+        {
+            self.pane.keyed_rebuilds += 1;
+        }
         let root = self.viewed_agent_id().is_none();
         if root {
             self.accepted_drafts.clear();
         }
+        let streaming = resume_stream || self.pane.assistant_stream_active;
         self.pane.assistant_stream_active = false;
         let rows = self
             .pane
@@ -153,15 +182,16 @@ impl App {
         let old = std::mem::replace(&mut self.pane.blocks, blocks);
         self.carry_item_state(&old);
         self.refresh_keyed_item_details(&old);
-        self.pane.assistant_stream_active = self
-            .pane
-            .presentation
-            .items()
-            .last_key_value()
-            .is_some_and(|(key, row)| {
-                key.anchor >= 1_u64 << 63
-                    && matches!(row, crate::store::sessions::TranscriptRow::Assistant { .. })
-            });
+        self.pane.assistant_stream_active = streaming
+            && self
+                .pane
+                .presentation
+                .items()
+                .last_key_value()
+                .is_some_and(|(key, row)| {
+                    key.anchor >= 1_u64 << 63
+                        && matches!(row, crate::store::sessions::TranscriptRow::Assistant { .. })
+                });
         self.mark_transcript_replaced();
         self.warm_transcript_projection();
     }
@@ -221,19 +251,21 @@ impl App {
                     return;
                 }
                 self.presentation_replaced();
-                self.install_keyed_transcript();
+                self.install_keyed_transcript(true);
             }
             HostEvent::TranscriptPatch(patch) => {
                 if self.pane.resync.is_some() {
-                    self.rearm_transcript_resync();
+                    self.rearm_transcript_resync(patch.from_revision);
                     return;
                 }
                 let scope = patch.scope.clone();
+                let from_revision = patch.from_revision;
                 if !self.pane.presentation_ready || self.pane.presentation.apply(patch).is_err() {
                     self.pane.resync = Some(scope);
+                    self.rearm_transcript_resync(from_revision);
                     return;
                 }
-                self.install_keyed_transcript();
+                self.install_keyed_transcript(false);
             }
             _ => {}
         }
@@ -626,6 +658,9 @@ impl App {
             self.pending_retry = None;
         }
         match event {
+            HostEvent::TranscriptStream { .. } => {
+                unreachable!("scoped stream routed before root events")
+            }
             HostEvent::ModelRetry(retry) => {
                 if retry.output_discarded {
                     self.discard_streamed_assistant();

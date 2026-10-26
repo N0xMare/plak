@@ -145,6 +145,7 @@ async fn real_finished_cells_restore_nested_rows_and_failure_tally_from_the_ledg
         }
         turn.result().await.unwrap();
         let source = sessions.transcript_source(session.locator()).await.unwrap();
+        crate::runtime::agent_transcript::assert_full_and_narrow_source_keys(&source);
         let rows = crate::runtime::agent_transcript::rows_from_source(&source, &[], false);
         let tools = rows
             .iter()
@@ -802,6 +803,15 @@ async fn next_agent_transcript(
 fn carries_text(op: &HostEvent, text: &str) -> bool {
     match op {
         HostEvent::AssistantDelta(delta) => delta.contains(text),
+        HostEvent::TranscriptStream {
+            delta:
+                plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(delta)
+                | plakous_host_protocol::views::transcript::TranscriptStreamDelta::Reasoning {
+                    text: delta,
+                    ..
+                },
+            ..
+        } => delta.contains(text),
         HostEvent::Row(row) => row.text().is_some_and(|value| value.contains(text)),
         HostEvent::TranscriptPatch(patch) => patch
             .upserts
@@ -883,10 +893,12 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     );
     assert_ne!(ops, [] as [plakous_host_protocol::SessionObservation; 0]);
     for op in &ops {
-        let HostEvent::TranscriptPatch(patch) = op else {
-            panic!("agent patch: {op:?}");
+        let scope = match op {
+            HostEvent::TranscriptPatch(patch) => &patch.scope,
+            HostEvent::TranscriptStream { scope, .. } => scope,
+            _ => panic!("scoped agent content: {op:?}"),
         };
-        assert_eq!(patch.scope, TranscriptScope::Agent("c1".to_owned()));
+        assert_eq!(*scope, TranscriptScope::Agent("c1".to_owned()));
         assert!(!carries_text(op, "committed prefix"), "{op:?}");
     }
     assert!(received.try_recv().is_err(), "the turn's end re-sends once");
@@ -918,7 +930,9 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     assert!(
         received.try_iter().all(|event| !matches!(
             event,
-            HostEvent::TranscriptPatch(_) | HostEvent::PresentationSnapshot(_)
+            HostEvent::TranscriptPatch(_)
+                | HostEvent::PresentationSnapshot(_)
+                | HostEvent::TranscriptStream { .. }
         )),
         "nothing arrives for a closed view"
     );

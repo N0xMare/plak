@@ -20,6 +20,38 @@ fn truncation_key(scope: &TranscriptScope) -> RowKey {
     }
 }
 
+fn apply_bounded(state: &mut TranscriptState, patch: &mut TranscriptPatch) -> bool {
+    // Retention removes the oldest body rows, never the session header.
+    while state.apply(patch.clone()).is_err() {
+        let marker = truncation_key(&patch.scope);
+        if !patch.upserts.iter().any(|item| item.key == marker) {
+            patch.upserts.push(TranscriptItem {
+                key: marker,
+                row: TranscriptRow::Truncated,
+            });
+            patch.upserts.sort_by_key(|item| item.key);
+        }
+        let Some(key) = state
+            .items()
+            .keys()
+            .find(|key| {
+                !patch.deletes.contains(key)
+                    && !patch.upserts.iter().any(|item| item.key == **key)
+                    && !matches!(
+                        state.items().get(key),
+                        Some(TranscriptRow::SessionHeader { .. })
+                    )
+            })
+            .copied()
+        else {
+            return false;
+        };
+        patch.deletes.push(key);
+        patch.deletes.sort_unstable();
+    }
+    true
+}
+
 #[derive(Default)]
 pub(in crate::runtime) struct Presentations {
     // One root and at most the one agent this face serves. Revisions remain
@@ -159,21 +191,32 @@ impl Presentations {
         let Some(state) = self.states.get(scope) else {
             return false;
         };
-        let snapshot = PresentationSnapshot {
+        let mut live = self.live.remove(scope);
+        let mut rows = state.items().clone();
+        if let Some(live) = &mut live {
+            rows.extend(
+                live.drain_pending()
+                    .into_iter()
+                    .map(|item| (item.key, item.row)),
+            );
+        }
+        let mut snapshot = PresentationSnapshot {
             scope: scope.clone(),
-            items: state
-                .items()
-                .iter()
-                .map(|(key, row)| TranscriptItem {
-                    key: *key,
-                    row: row.clone(),
-                })
+            items: rows
+                .into_iter()
+                .map(|(key, row)| TranscriptItem { key, row })
                 .collect(),
             ..PresentationSnapshot::default()
         };
-        let live = self.live.remove(scope);
+        if snapshot.validate().is_err() {
+            snapshot = repair::snapshot(snapshot);
+        }
         let sent = self.snapshot(snapshot, sink);
         if let Some(live) = live {
+            let mut live = live;
+            if let Some(state) = self.states.get(scope) {
+                live.retain(state.items());
+            }
             self.live.insert(scope.clone(), live);
         }
         sent
@@ -182,6 +225,12 @@ impl Presentations {
     pub(in crate::runtime) fn clear(&mut self) {
         self.states.clear();
         self.live.clear();
+    }
+
+    pub(in crate::runtime) fn close_agent(&mut self) {
+        self.states
+            .retain(|scope, _| *scope == TranscriptScope::Root);
+        self.live.retain(|scope, _| *scope == TranscriptScope::Root);
     }
 
     pub(in crate::runtime) fn observe<P: ProtocolExtension, E: ProtocolExtension>(
@@ -215,6 +264,26 @@ impl Presentations {
             .or_default()
             .observe(event, state.items())
         else {
+            if let HostEvent::ToolLine { call_id, name, .. } = event
+                && matches!(scope, TranscriptScope::Agent(_))
+                && let Some(tool) = self
+                    .live
+                    .get(&scope)
+                    .and_then(|live| live.pending_tool(call_id.as_deref().unwrap_or(name)))
+            {
+                if sink
+                    .send(HostEvent::TranscriptStream {
+                        scope: scope.clone(),
+                        delta:
+                            plakous_host_protocol::views::transcript::TranscriptStreamDelta::Tool(
+                                Box::new(tool.clone()),
+                            ),
+                    })
+                    .is_err()
+                {
+                    return self.resync(&scope, sink);
+                }
+            }
             return true;
         };
         if changes.deletes.is_empty()
@@ -240,33 +309,8 @@ impl Presentations {
             upserts: changes.upserts,
             deletes: changes.deletes,
         };
-        // Retention removes the oldest body rows, never the session header.
-        while state.apply(patch.clone()).is_err() {
-            let marker = truncation_key(&scope);
-            if !patch.upserts.iter().any(|item| item.key == marker) {
-                patch.upserts.push(TranscriptItem {
-                    key: marker,
-                    row: TranscriptRow::Truncated,
-                });
-                patch.upserts.sort_by_key(|item| item.key);
-            }
-            let Some(key) = state
-                .items()
-                .keys()
-                .find(|key| {
-                    !patch.deletes.contains(key)
-                        && !patch.upserts.iter().any(|item| item.key == **key)
-                        && !matches!(
-                            state.items().get(key),
-                            Some(TranscriptRow::SessionHeader { .. })
-                        )
-                })
-                .copied()
-            else {
-                return false;
-            };
-            patch.deletes.push(key);
-            patch.deletes.sort_unstable();
+        if !apply_bounded(state, &mut patch) {
+            return false;
         }
         if !patch.deletes.is_empty() {
             self.live

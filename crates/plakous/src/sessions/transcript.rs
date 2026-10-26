@@ -386,7 +386,8 @@ impl SessionTranscriptSource {
 
     /// Projects the newest items as typed presentation parts, oldest first.
     /// Items are projected newest first and projection stops at `max_items`
-    /// or `max_bytes` (the newest item is always kept), so older history is
+    /// or `max_bytes` (the newest canonical position group is always kept,
+    /// including all injected fragments), so older history is
     /// never projected. Tool calls and results carry the observations the
     /// live tool events carry, read over a bounded redaction window.
     #[must_use]
@@ -594,11 +595,24 @@ fn project_transcript_tail(
         bytes.saturating_add(item.retained_bytes())
     });
     let mut dropped = 0;
-    while items.len().saturating_sub(dropped) > 1
+    while dropped < items.len()
         && (retained > max_bytes || items.len().saturating_sub(dropped) > max_items)
     {
-        retained = retained.saturating_sub(items[dropped].retained_bytes());
-        dropped += 1;
+        let position = items[dropped].position();
+        let end = dropped
+            + items[dropped..]
+                .iter()
+                .take_while(|item| item.position() == position)
+                .count();
+        // The newest position is indivisible even when its injected fragments
+        // alone exceed the requested window, like one oversized canonical item.
+        if end == items.len() {
+            break;
+        }
+        for item in &items[dropped..end] {
+            retained = retained.saturating_sub(item.retained_bytes());
+        }
+        dropped = end;
     }
     items.drain(..dropped);
     let composition_owners = items

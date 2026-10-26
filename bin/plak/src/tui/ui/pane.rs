@@ -13,11 +13,14 @@ use plakous_host_protocol::views::transcript::{TranscriptScope, TranscriptState}
 use crate::tui::blocks::{self, ScrollBlock, TranscriptChange, TranscriptRenderCache};
 
 pub(crate) struct TranscriptPane {
+    #[cfg(test)]
+    pub(super) keyed_rebuilds: usize,
     pub(crate) blocks: Vec<ScrollBlock>,
     pub(super) presentation: TranscriptState,
     pub(super) presentation_ready: bool,
     pub(super) resync: Option<TranscriptScope>,
-    resync_sent: bool,
+    resync_sent: Option<(u64, Instant)>,
+    resync_after_revision: u64,
     /// Monotonic identity for every transcript content/layout mutation.
     pub(super) transcript_revision: u64,
     /// Coalesced mutation consumed by the next transcript presentation.
@@ -72,7 +75,10 @@ impl TranscriptPane {
             presentation: TranscriptState::default(),
             presentation_ready: false,
             resync: None,
-            resync_sent: false,
+            #[cfg(test)]
+            keyed_rebuilds: 0,
+            resync_sent: None,
+            resync_after_revision: 0,
             transcript_revision: 0,
             pending_transcript_change: TranscriptChange::Structural,
             transcript_bytes,
@@ -368,15 +374,22 @@ impl App {
     }
 
     fn sync_transcript_resync(&mut self, actions: &UserActionSender) {
-        if !self.pane.resync_sent
-            && let Some(scope) = &self.pane.resync
+        if self.pane.resync_sent.is_none_or(|(_, sent)| {
+            self.now().saturating_duration_since(sent) >= std::time::Duration::from_secs(1)
+        }) && let Some(scope) = &self.pane.resync
             && actions
                 .send(UserAction::ResyncTranscript {
                     scope: scope.clone(),
                 })
                 .is_ok()
         {
-            self.pane.resync_sent = true;
+            self.pane.resync_sent = Some((
+                self.pane
+                    .presentation
+                    .revision()
+                    .max(self.pane.resync_after_revision),
+                self.now(),
+            ));
         }
     }
 
@@ -397,18 +410,27 @@ impl App {
     pub(super) fn presentation_replaced(&mut self) {
         self.pane.presentation_ready = true;
         self.pane.resync = None;
-        self.pane.resync_sent = false;
+        self.pane.resync_sent = None;
+        self.pane.resync_after_revision = 0;
     }
 
-    pub(super) fn rearm_transcript_resync(&mut self) {
-        self.pane.resync_sent = false;
+    pub(super) fn rearm_transcript_resync(&mut self, from_revision: u64) {
+        if self
+            .pane
+            .resync_sent
+            .is_some_and(|(revision, _)| from_revision > revision)
+        {
+            self.pane.resync_sent = None;
+        }
+        self.pane.resync_after_revision = self.pane.resync_after_revision.max(from_revision);
     }
 
     pub(super) fn clear_presentation(&mut self) {
         self.pane.presentation = TranscriptState::default();
         self.pane.presentation_ready = false;
         self.pane.resync = None;
-        self.pane.resync_sent = false;
+        self.pane.resync_sent = None;
+        self.pane.resync_after_revision = 0;
     }
 
     /// Pointer, selection and click state address the pane that was on

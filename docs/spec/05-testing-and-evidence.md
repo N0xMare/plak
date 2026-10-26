@@ -2675,6 +2675,8 @@ scrub, rather than the schema/key/revision encoding of a snapshot or delta.
 Patch contract tests separately pin schema, ordering, exact revision, scope and
 atomic bounds refusals. A row-content change still fails observation parity;
 the JSONL kind table remains checked against the production closed projection.
+An assistant-completion or status boundary alone does not identify a live twin:
+patches carrying canonical settlement rows at those boundaries remain compared.
 Usage parity omits the live request's Coding/Agent tool-inventory
 informational rows and the timestamp-dependent `Live turn growth (est.)`
 category: prepared-request and terminal refreshes supersede one

@@ -20,6 +20,129 @@ fn snapshot(scope: TranscriptScope, rows: &[(u64, &str)]) -> PresentationSnapsho
 }
 
 #[test]
+fn streaming_cost_is_constant_in_history_rows_and_does_not_copy_accumulated_text() {
+    for scope in [
+        TranscriptScope::Root,
+        TranscriptScope::Agent("child".into()),
+    ] {
+        for count in [0, 2_000, 8_000] {
+            let (sink, receiver) = observation_channel::<Core>();
+            let sender = crate::runtime::Sender::over(sink);
+            let mut initial = snapshot(scope.clone(), &[]);
+            initial.items = (1..=count)
+                .map(|anchor| TranscriptItem {
+                    key: RowKey::new(anchor, Lane::Runtime, 0),
+                    row: TranscriptRow::assistant("historical row"),
+                })
+                .collect();
+            assert!(sender.replace_transcript(initial));
+            let _ = receiver.try_iter().count();
+            let revision = sender.presentations.lock().unwrap().states[&scope].revision();
+            for _ in 0..2_000 {
+                let event = HostEvent::<Core>::AssistantDelta("x".repeat(40));
+                assert!(match &scope {
+                    TranscriptScope::Root => sender.send(event),
+                    TranscriptScope::Agent(id) => sender.observe_agent(id, &event),
+                });
+            }
+            let publisher = sender.presentations.lock().unwrap();
+            assert_eq!(publisher.states[&scope].revision(), revision);
+            assert_eq!(
+                publisher.live[&scope].copied_rows, 0,
+                "no old row or accumulated prose was cloned"
+            );
+            drop(publisher);
+            let mut bytes = 0;
+            let mut slots = 0;
+            for event in receiver.try_iter() {
+                slots += 1;
+                bytes += match event {
+                    HostEvent::AssistantDelta(text) => text.len(),
+                    HostEvent::TranscriptStream {
+                        delta:
+                            plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(
+                                text,
+                            ),
+                        ..
+                    } => text.len(),
+                    _ => panic!("deltas must not publish keyed rows or rebuild the TUI"),
+                };
+            }
+            assert_eq!(bytes, 80_000, "only incoming bytes cross the mailbox");
+            assert_eq!(
+                slots, 1,
+                "raw deltas coalesce exactly as before keyed publication"
+            );
+        }
+    }
+}
+
+#[test]
+fn live_tool_duration_uses_the_retained_start_stamp_and_explicit_finish_wins() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let scope = TranscriptScope::Root;
+    let mut publisher = Presentations::default();
+    publisher.snapshot(snapshot(scope.clone(), &[]), &sink);
+    let _ = receiver.try_recv().unwrap();
+    for (started_at_ms, duration_ms, finished_at_ms, expected) in [
+        (Some(100), None, None, None),
+        (None, Some(35), None, Some(135)),
+        (None, Some(50), Some(170), Some(170)),
+    ] {
+        assert!(
+            publisher.observe(
+                scope.clone(),
+                &HostEvent::<Core>::ToolLine {
+                    call_id: Some("call".into()),
+                    parent_call_id: None,
+                    cell_id: None,
+                    kind: plakous_host_protocol::views::ActivityKind::Tool,
+                    name: "read_file".into(),
+                    state: if duration_ms.is_some() {
+                        "done"
+                    } else {
+                        "running"
+                    }
+                    .into(),
+                    subject: None,
+                    detail: None,
+                    duration_ms,
+                    started_at_ms,
+                    finished_at_ms,
+                    wait: None,
+                },
+                &sink
+            )
+        );
+        let HostEvent::TranscriptPatch(patch) = receiver.try_recv().unwrap() else {
+            panic!("tool boundary");
+        };
+        let tool = patch.upserts[0].row.as_tool().unwrap();
+        assert_eq!(tool.started_at_ms, Some(100));
+        assert_eq!(tool.finished_at_ms, expected);
+    }
+}
+
+#[test]
+fn closing_an_agent_retires_its_live_resync_source_but_not_root() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let mut publisher = Presentations::default();
+    publisher.snapshot(snapshot(TranscriptScope::Root, &[(1, "root")]), &sink);
+    let child = TranscriptScope::Agent("child".into());
+    publisher.snapshot(snapshot(child.clone(), &[(1, "child")]), &sink);
+    publisher.close_agent();
+    let _ = receiver.try_iter().count();
+    assert!(!publisher.resync(&child, &sink));
+    assert!(publisher.resync(&TranscriptScope::Root, &sink));
+    assert!(
+        publisher
+            .live
+            .keys()
+            .all(|scope| *scope == TranscriptScope::Root)
+    );
+}
+
+#[test]
 fn attach_is_full_and_ordinary_publication_is_only_the_changed_keys() {
     let (sink, receiver) = observation_channel::<Core>();
     let mut publisher = Presentations::default();
@@ -158,6 +281,8 @@ fn overflowing_an_already_truncated_scope_keeps_one_marker_and_the_root_header()
             &HostEvent::<Core>::AssistantDelta("new tip".into()),
             &sink
         ));
+        assert!(receiver.try_recv().is_err());
+        assert!(publisher.observe(scope.clone(), &HostEvent::<Core>::AssistantDone, &sink));
         let HostEvent::TranscriptPatch(patch) = receiver.try_recv().unwrap() else {
             panic!("bounded live patch");
         };
@@ -253,11 +378,7 @@ fn busy_resync_preserves_live_text_and_continues_the_same_key_in_both_scopes() {
             &HostEvent::<Core>::AssistantDelta("in flight".into()),
             &sink
         ));
-        let HostEvent::TranscriptPatch(delta) = receiver.try_recv().unwrap() else {
-            panic!("live patch");
-        };
-        let key = delta.upserts[0].key;
-        folded.apply(delta).unwrap();
+        assert!(receiver.try_recv().is_err(), "no per-delta patch");
         assert!(publisher.resync(&scope, &sink));
         let HostEvent::PresentationSnapshot(resync) = receiver.try_recv().unwrap() else {
             panic!("busy resync");
@@ -266,12 +387,14 @@ fn busy_resync_preserves_live_text_and_continues_the_same_key_in_both_scopes() {
             resync.items.last().unwrap().row,
             TranscriptRow::assistant("in flight")
         );
+        let key = resync.items.last().unwrap().key;
         folded.replace(resync).unwrap();
         assert!(publisher.observe(
-            scope,
+            scope.clone(),
             &HostEvent::<Core>::AssistantDelta(" continues".into()),
             &sink
         ));
+        assert!(publisher.observe(scope, &HostEvent::<Core>::SetBusy(false), &sink));
         let HostEvent::TranscriptPatch(delta) = receiver.try_recv().unwrap() else {
             panic!("continued patch");
         };
@@ -329,6 +452,7 @@ fn busy_resync_preserves_running_tool_and_reasoning_identity() {
             },
             &sink
         ));
+        assert!(publisher.observe(scope.clone(), &HostEvent::<Core>::SetBusy(false), &sink));
         let HostEvent::TranscriptPatch(continued) = receiver.try_recv().unwrap() else {
             panic!("thought patch");
         };

@@ -37,6 +37,7 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::JobTerminal { .. } => "job_terminal",
         SessionObservation::PresentationSnapshot(_) => "presentation",
         SessionObservation::TranscriptPatch(_) => "transcript_patch",
+        SessionObservation::TranscriptStream { .. } => "transcript_stream",
         SessionObservation::ProviderSnapshot { .. } => "provider_snapshot",
         SessionObservation::Activity { .. } => "activity",
         SessionObservation::AgentAttached(_) => "attached",
@@ -537,6 +538,7 @@ pub fn project_host_event<P: ProtocolExtension>(
         // variant is a decision here, not a silent drop.
         SessionObservation::PresentationSnapshot(_)
         | SessionObservation::TranscriptPatch(_)
+        | SessionObservation::TranscriptStream { .. }
         | SessionObservation::ProviderSnapshot { .. }
         | SessionObservation::Activity { .. }
         | SessionObservation::AgentAttached(_)

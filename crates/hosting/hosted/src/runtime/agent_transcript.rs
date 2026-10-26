@@ -591,3 +591,6 @@ pub(super) async fn read_rows_within(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(super) use tests::assert_full_and_narrow_source_keys;

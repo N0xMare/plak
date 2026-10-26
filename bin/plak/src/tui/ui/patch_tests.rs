@@ -32,6 +32,47 @@ fn paint(app: &mut App) -> String {
 }
 
 #[test]
+fn raw_streaming_never_rebuilds_keyed_history_in_root_or_child_panes() {
+    use plakous_host_protocol::views::transcript::TranscriptStreamDelta;
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        for count in [0, 2_000, 8_000] {
+            let mut app = App::new(launch_basic(), true);
+            pin_clock(&mut app);
+            if matches!(scope, TranscriptScope::Agent(_)) {
+                app.open_agent_view("c1".into(), "child".into());
+            }
+            let mut initial = restore_snapshot(
+                1,
+                (0..count)
+                    .map(|_| TranscriptRow::assistant("history"))
+                    .collect(),
+            );
+            if let HostEvent::PresentationSnapshot(snapshot) = &mut initial {
+                snapshot.scope = scope.clone();
+            }
+            app.apply_host_event(initial);
+            let rebuilds = app.pane.keyed_rebuilds;
+            for _ in 0..100 {
+                app.apply_host_event(match &scope {
+                    TranscriptScope::Root => HostEvent::AssistantDelta("delta".into()),
+                    TranscriptScope::Agent(_) => HostEvent::TranscriptStream {
+                        scope: scope.clone(),
+                        delta: TranscriptStreamDelta::Assistant("delta".into()),
+                    },
+                });
+            }
+            assert_eq!(
+                app.pane.keyed_rebuilds, rebuilds,
+                "per-delta history rebuilds must remain zero at {count} rows"
+            );
+            assert!(
+                matches!(app.pane.blocks.last(), Some(super::ScrollBlock::Assistant(text)) if text == &"delta".repeat(100))
+            );
+        }
+    }
+}
+
+#[test]
 fn keyed_patch_frames_match_full_restore_without_resetting_tool_expansion() {
     let mut patched = App::new(launch_basic(), true);
     let mut restored = App::new(launch_basic(), true);
@@ -107,19 +148,28 @@ fn a_revision_gap_keeps_the_frame_and_requests_one_resync_until_replaced() {
             scope: TranscriptScope::Root
         }
     ));
-    assert!(matches!(
-        rx.try_recv().unwrap().into_parts().0,
-        UserAction::ResyncTranscript {
-            scope: TranscriptScope::Root
-        }
-    ));
-    assert!(matches!(
-        rx.try_recv().unwrap().into_parts().0,
-        UserAction::ResyncTranscript {
-            scope: TranscriptScope::Root
-        }
-    ));
     assert!(rx.try_recv().is_err());
+    let mut newer = patch.clone();
+    newer.from_revision = 10;
+    newer.to_revision = 11;
+    app.apply_host_event(HostEvent::TranscriptPatch(newer.clone()));
+    app.sync_agent_transcript(Some(&tx));
+    assert!(matches!(
+        rx.try_recv().unwrap().into_parts().0,
+        UserAction::ResyncTranscript { .. }
+    ));
+    app.apply_host_event(HostEvent::TranscriptPatch(newer));
+    app.sync_agent_transcript(Some(&tx));
+    assert!(
+        rx.try_recv().is_err(),
+        "same evidence cannot repeatedly re-arm"
+    );
+    super::test_support::pass_time(&mut app, 1_000);
+    app.sync_agent_transcript(Some(&tx));
+    assert!(matches!(
+        rx.try_recv().unwrap().into_parts().0,
+        UserAction::ResyncTranscript { .. }
+    ));
     app.apply_host_event(restore_snapshot(
         12,
         vec![TranscriptRow::assistant("resynced")],

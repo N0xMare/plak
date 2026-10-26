@@ -600,11 +600,12 @@ fn pilot_story_open_an_agent_watch_it_live_and_go_back() {
         }]
     );
     app.apply_host_event(transcript(AGENT, agent_rows(), Some("t1")));
-    app.apply_host_event(super::test_support::agent_patch(
-        AGENT,
-        1,
-        vec![(20, TranscriptRow::assistant("Checking lints."))],
-    ));
+    app.apply_host_event(HostEvent::TranscriptStream {
+        scope: plakous_host_protocol::views::transcript::TranscriptScope::Agent(AGENT.into()),
+        delta: plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(
+            "Checking lints.".into(),
+        ),
+    });
     let watching = app.semantic_snapshot().transcript;
     assert!(watching.streaming);
     assert!(

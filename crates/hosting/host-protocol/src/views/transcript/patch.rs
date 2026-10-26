@@ -2,7 +2,26 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{RowKey, TranscriptRow};
+use super::{RowKey, ToolItem, TranscriptRow};
+
+/// Uncommitted appends between keyed publication boundaries. These are not
+/// revisions: a snapshot contains their accumulated resync baseline.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TranscriptStreamDelta {
+    /// Assistant prose appended to the current output.
+    Assistant(String),
+    /// The current assistant output ended; the next append starts a new row.
+    AssistantDone,
+    /// Admitted reasoning appended at one output location.
+    Reasoning {
+        /// Opaque output location.
+        location_key: String,
+        /// Already-redacted text.
+        text: String,
+    },
+    /// The latest live tool presentation.
+    Tool(Box<ToolItem>),
+}
 use crate::views::presentation::{
     MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, PresentationError, PresentationSnapshot, row_bytes,
 };
@@ -43,6 +62,43 @@ pub struct TranscriptPatch {
 }
 
 impl TranscriptPatch {
+    /// Composes consecutive updates without retaining overwritten row copies.
+    /// Refuses a gap, different scope, malformed input or an oversized result.
+    #[must_use]
+    pub fn merged(&self, next: &Self) -> Option<Self> {
+        if self.scope != next.scope || self.to_revision != next.from_revision {
+            return None;
+        }
+        self.validate().ok()?;
+        next.validate().ok()?;
+        let mut upserts: BTreeMap<_, _> = self
+            .upserts
+            .iter()
+            .map(|item| (item.key, item.row.clone()))
+            .collect();
+        let mut deletes: BTreeSet<_> = self.deletes.iter().copied().collect();
+        for key in &next.deletes {
+            upserts.remove(key);
+            deletes.insert(*key);
+        }
+        for item in &next.upserts {
+            deletes.remove(&item.key);
+            upserts.insert(item.key, item.row.clone());
+        }
+        let merged = Self {
+            scope: self.scope.clone(),
+            from_revision: self.from_revision,
+            to_revision: next.to_revision,
+            upserts: upserts
+                .into_iter()
+                .map(|(key, row)| TranscriptItem { key, row })
+                .collect(),
+            deletes: deletes.into_iter().collect(),
+        };
+        merged.validate().ok()?;
+        Some(merged)
+    }
+
     /// Computes the keyed difference between two bounded presentations.
     #[must_use]
     pub fn between(

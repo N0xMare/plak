@@ -3979,12 +3979,19 @@ explicit. Closing drops this subscription; a lagged tail reattaches, at most onc
 a second, with an explicit gap. Live content uses the same keyed row reducer
 and bounded scoped publication channel as the root. A refused patch marks that
 scope for a full resync baseline, including its current previews.
+Agent-scoped content occupies at most 128 of the observation mailbox's 512
+slots, leaving room for root content and terminal observations. Consecutive
+same-scope patches merge into one slot; raw assistant/reasoning appends coalesce
+within their scope and output location. Saturating the agent share marks only
+that scope's resync debt. Closing the agent view drops its publisher baseline
+and live-row indexes as well as the subscription.
 Dropping the host drops all of its child observers. Unread presentation debt
 never backpressures the child or its terminal result.
 
 Child text, reasoning (under the root's visibility gate), tool start/completion,
 usage and terminal observations feed the shared row projector; content is sent
-as `TranscriptPatch { scope: Agent(id), .. }`. They never enter the root's
+as `TranscriptPatch { scope: Agent(id), .. }` at stream boundaries, with scoped
+`TranscriptStream` appends between them. They never enter the root's
 `apply_event` or mutate its transcript, usage, queue, or turn control. Progress
 and usage remain tree observations rather than transcript authority.
 
@@ -4018,8 +4025,8 @@ fragment offsets are defined in chapter 01 §12; they are not bounded-window
 indices and remain identical for retained items across reopen and window slides.
 Child keys use that canonical position as `anchor`, the runtime lane, and the
 one-based derived-row ordinal within that canonical item, including its
-synthetic fragments in order. Tail reads retain whole canonical items before
-expanding their fragments, so sliding the window cannot restart that ordinal
+synthetic fragments in order. Tail reads retain whole canonical position groups,
+including after fragment injection and byte accounting, so sliding the window cannot restart that ordinal
 inside an item. The zero key is reserved for truncation; neither row indices in
 a bounded window nor process-local sequence numbers participate. A compaction marker's call
 identity and a reasoning location also use the canonical position and fragment

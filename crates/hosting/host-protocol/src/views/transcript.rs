@@ -19,7 +19,9 @@ mod key;
 mod patch;
 pub use key::{Lane, RowKey};
 pub(super) use patch::validate_items;
-pub use patch::{TranscriptItem, TranscriptPatch, TranscriptScope, TranscriptState};
+pub use patch::{
+    TranscriptItem, TranscriptPatch, TranscriptScope, TranscriptState, TranscriptStreamDelta,
+};
 
 /// One transcript row.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

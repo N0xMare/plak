@@ -1338,7 +1338,7 @@ fn normalize(events: &[HostEvent], root: &Path, _script: Script) -> Vec<Record> 
             let mut record = folded_presentation_record(event, root, &mut presentations);
             if matches!(event, HostEvent::TranscriptPatch(patch) if !patch.upserts.is_empty() || !patch.deletes.is_empty())
                 && index > 0
-                && live_transcript_event(&events[index - 1])
+                && live_presentation_twin(event, &events[index - 1])
             {
                 // The legacy observation already pins this exact live change
                 // (and JSONL still projects it). Validate/fold its keyed twin,
@@ -1358,9 +1358,27 @@ fn normalize(events: &[HostEvent], root: &Path, _script: Script) -> Vec<Record> 
     coalesce(records)
 }
 
-fn live_transcript_event(event: &HostEvent) -> bool {
+fn live_presentation_twin(event: &HostEvent, previous: &HostEvent) -> bool {
+    if matches!(
+        previous,
+        HostEvent::AssistantDone | HostEvent::Status { .. } | HostEvent::SetBusy(false)
+    ) {
+        let HostEvent::TranscriptPatch(patch) = event else {
+            return false;
+        };
+        // A boundary may precede either staged live prose or a canonical
+        // settlement. Never hide canonical rows just because both follow Done.
+        return patch
+            .upserts
+            .iter()
+            .any(|item| item.key.anchor >= 1_u64 << 63)
+            && patch.upserts.iter().all(|item| {
+                item.key.anchor >= 1_u64 << 63
+                    || matches!(item.row, crate::store::sessions::TranscriptRow::Truncated)
+            });
+    }
     matches!(
-        event,
+        previous,
         HostEvent::Row(_)
             | HostEvent::AssistantDelta(_)
             | HostEvent::UserMessage { .. }
@@ -1436,34 +1454,45 @@ fn presentation_parity_compares_folded_rows_not_snapshot_or_patch_encoding() {
         .iter()
         .map(|item| (item.key, item.row.clone()))
         .collect();
-    let mut patch = TranscriptPatch::between(TranscriptScope::Root, 7, 11, &before, &after);
-    let full = normalize(
-        &[
-            HostEvent::PresentationSnapshot(initial.clone()),
-            HostEvent::AssistantDone,
-            HostEvent::PresentationSnapshot(final_view),
-        ],
-        Path::new("/fixture"),
-        Script::Effect,
-    );
-    let incremental = |patch| {
-        normalize(
+    let patch = TranscriptPatch::between(TranscriptScope::Root, 7, 11, &before, &after);
+    for boundary in [
+        HostEvent::AssistantDone,
+        HostEvent::SetBusy(false),
+        HostEvent::Status {
+            phase: "idle".into(),
+            queue_len: 0,
+            detail: None,
+        },
+    ] {
+        let full = normalize(
             &[
                 HostEvent::PresentationSnapshot(initial.clone()),
-                HostEvent::AssistantDone,
-                HostEvent::TranscriptPatch(patch),
+                boundary.clone(),
+                HostEvent::PresentationSnapshot(final_view.clone()),
             ],
             Path::new("/fixture"),
             Script::Effect,
-        )
-    };
-    assert_eq!(incremental(patch.clone()), full);
-    patch.upserts[0].row = TranscriptRow::assistant("different answer");
-    assert_ne!(
-        incremental(patch),
-        full,
-        "changed row content must still fail parity"
-    );
+        );
+        let incremental = |patch| {
+            normalize(
+                &[
+                    HostEvent::PresentationSnapshot(initial.clone()),
+                    boundary.clone(),
+                    HostEvent::TranscriptPatch(patch),
+                ],
+                Path::new("/fixture"),
+                Script::Effect,
+            )
+        };
+        assert_eq!(incremental(patch.clone()), full);
+        let mut changed = patch.clone();
+        changed.upserts[0].row = TranscriptRow::assistant("different answer");
+        assert_ne!(
+            incremental(changed),
+            full,
+            "changed row content must still fail parity"
+        );
+    }
 }
 
 /// Whether this is one of the host's intra-workflow progress statuses.

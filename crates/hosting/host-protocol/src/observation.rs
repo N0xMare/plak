@@ -56,6 +56,13 @@ pub enum SessionObservation<P: ProtocolExtension = Core> {
     },
     /// Replace the typed, observational conversation/activity presentation.
     PresentationSnapshot(PresentationSnapshot),
+    /// Scoped uncommitted appends; keyed patches reconcile only at boundaries.
+    TranscriptStream {
+        /// Transcript receiving the append.
+        scope: crate::views::transcript::TranscriptScope,
+        /// One bounded live update, never a nested host observation.
+        delta: crate::views::transcript::TranscriptStreamDelta,
+    },
     /// Atomic keyed content update for one exact transcript scope/revision.
     /// In-process only; JSONL v1 retains its existing root event projection.
     TranscriptPatch(crate::views::transcript::TranscriptPatch),

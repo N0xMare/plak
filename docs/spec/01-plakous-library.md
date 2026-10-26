@@ -8510,7 +8510,8 @@ item in that history was presented at or before the cursor and every later
 commit lies after it. `SessionTranscriptSource::tail(max_items, max_bytes)` is
 synchronous CPU work that projects the newest items as typed presentation
 parts, oldest first: it projects from the newest backwards and stops at the
-first item past either bound (the newest item is always kept), reporting
+first canonical position group past either bound (the newest group is always
+kept, including its injected fragments), reporting
 whether older items were left out.
 `SessionTranscriptItem::position()` is its zero-based canonical-history
 position, not its index in the requested window. Reopening or sliding a window

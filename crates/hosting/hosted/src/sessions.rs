@@ -126,7 +126,7 @@ pub(crate) fn bound_subject_to(value: &str, limit: usize) -> String {
     format!("{}…", value[..end].trim_end_matches('…'))
 }
 
-const TRUNCATED_ACTIVITY_MARKER: &str = "\n[preview truncated]";
+pub(crate) const TRUNCATED_ACTIVITY_MARKER: &str = "\n[preview truncated]";
 
 fn bound_activity(value: String, maximum: usize) -> String {
     if value.len() <= maximum {

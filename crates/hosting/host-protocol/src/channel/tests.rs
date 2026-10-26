@@ -909,3 +909,147 @@ fn intent_readiness_wakes_on_every_arrival_and_on_nothing_else() {
     );
     leaving.join().unwrap();
 }
+#[test]
+fn child_flood_leaves_room_for_root_and_consecutive_patches_share_one_slot() {
+    use super::{AGENT_OBSERVATION_SHARE, agent_observation};
+    use crate::views::transcript::{
+        Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptScope, TranscriptStreamDelta,
+    };
+    let (sender, receiver) = observation_channel::<Core>();
+    let scope = TranscriptScope::Agent("child".into());
+    for revision in 1..=1_000 {
+        sender
+            .send(SessionObservation::TranscriptPatch(TranscriptPatch {
+                scope: scope.clone(),
+                from_revision: revision,
+                to_revision: revision + 1,
+                upserts: vec![TranscriptItem {
+                    key: RowKey::new(1, Lane::Runtime, 0),
+                    row: TranscriptRow::assistant(revision.to_string()),
+                }],
+                deletes: Vec::new(),
+            }))
+            .unwrap();
+    }
+    let SessionObservation::TranscriptPatch(merged) = receiver.try_recv().unwrap() else {
+        panic!("merged patch");
+    };
+    assert_eq!((merged.from_revision, merged.to_revision), (1, 1_001));
+    assert_eq!(merged.upserts[0].row, TranscriptRow::assistant("1000"));
+    assert!(receiver.try_recv().is_err());
+    for index in 0..AGENT_OBSERVATION_SHARE {
+        sender
+            .send(SessionObservation::TranscriptStream {
+                scope: scope.clone(),
+                delta: TranscriptStreamDelta::Reasoning {
+                    location_key: index.to_string(),
+                    text: "child".into(),
+                },
+            })
+            .unwrap();
+    }
+    assert!(
+        sender
+            .send(SessionObservation::TranscriptPatch(TranscriptPatch {
+                scope: scope.clone(),
+                from_revision: 1_001,
+                to_revision: 1_002,
+                upserts: Vec::new(),
+                deletes: Vec::new(),
+            }))
+            .is_err()
+    );
+    for index in AGENT_OBSERVATION_SHARE..OBSERVATION_QUEUE_CAPACITY {
+        sender
+            .send(SessionObservation::ReasoningDelta {
+                location_key: index.to_string(),
+                text: "root".into(),
+            })
+            .unwrap();
+    }
+    sender.send(SessionObservation::AssistantDone).unwrap();
+    sender.send(SessionObservation::SetBusy(false)).unwrap();
+    let events: Vec<_> = receiver.try_iter().collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, SessionObservation::AssistantDone))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, SessionObservation::SetBusy(false)))
+    );
+    assert!(
+        events
+            .iter()
+            .filter(|event| agent_observation(event))
+            .count()
+            <= AGENT_OBSERVATION_SHARE
+    );
+    assert!(sender.transcript_resnapshot_required_for(&scope));
+}
+
+#[test]
+fn merged_patches_fold_deletes_reinsertion_and_key_moves_across_another_scope() {
+    use crate::views::transcript::{
+        Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptScope, TranscriptState,
+    };
+    let rows = |values: &[(u64, &str)]| {
+        values
+            .iter()
+            .map(|(key, text)| {
+                (
+                    RowKey::new(*key, Lane::Runtime, 0),
+                    TranscriptRow::assistant(*text),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let before = rows(&[(1, "old"), (2, "delete"), (3, "keep")]);
+    let middle = rows(&[(3, "keep"), (4, "moved"), (5, "transient")]);
+    let after = rows(&[(1, "reinserted"), (3, "keep"), (4, "moved"), (6, "new")]);
+    let (sender, receiver) = observation_channel::<Core>();
+    sender
+        .send(SessionObservation::TranscriptPatch(
+            TranscriptPatch::between(TranscriptScope::Root, 10, 20, &before, &middle),
+        ))
+        .unwrap();
+    sender
+        .send(SessionObservation::TranscriptPatch(TranscriptPatch {
+            scope: TranscriptScope::Agent("child".into()),
+            from_revision: 12,
+            to_revision: 25,
+            upserts: Vec::new(),
+            deletes: Vec::new(),
+        }))
+        .unwrap();
+    sender
+        .send(SessionObservation::TranscriptPatch(
+            TranscriptPatch::between(TranscriptScope::Root, 20, 30, &middle, &after),
+        ))
+        .unwrap();
+    let events: Vec<_> = receiver.try_iter().collect();
+    assert_eq!(events.len(), 2);
+    let mut folded = TranscriptState::default();
+    folded
+        .replace(crate::views::PresentationSnapshot {
+            revision: 10,
+            items: before
+                .into_iter()
+                .map(|(key, row)| TranscriptItem { key, row })
+                .collect(),
+            ..crate::views::PresentationSnapshot::default()
+        })
+        .unwrap();
+    for event in events {
+        let SessionObservation::TranscriptPatch(patch) = event else {
+            panic!("patch");
+        };
+        if patch.scope == TranscriptScope::Root {
+            folded.apply(patch).unwrap();
+        }
+    }
+    assert_eq!(folded.revision(), 30);
+    assert_eq!(folded.items(), &after);
+}

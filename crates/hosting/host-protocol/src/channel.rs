@@ -28,7 +28,76 @@ use std::time::{Duration, Instant};
 use crate::intent::{Core, ObservationExtension, ProtocolExtension, SessionIntent};
 use crate::limits::{COALESCED_DELTA_BYTES, INTENT_QUEUE_CAPACITY, OBSERVATION_QUEUE_CAPACITY};
 use crate::observation::SessionObservation;
-use crate::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope};
+use crate::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope, TranscriptStreamDelta};
+
+const AGENT_OBSERVATION_SHARE: usize = OBSERVATION_QUEUE_CAPACITY / 4;
+
+fn agent_observation<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
+    let scope = match event {
+        SessionObservation::TranscriptPatch(patch) => &patch.scope,
+        SessionObservation::PresentationSnapshot(snapshot) => &snapshot.scope,
+        SessionObservation::TranscriptStream { scope, .. } => scope,
+        _ => return false,
+    };
+    matches!(scope, TranscriptScope::Agent(_))
+}
+
+fn append_delta(pending: &mut String, text: &str) -> bool {
+    if pending.len().saturating_add(text.len()) > COALESCED_DELTA_BYTES {
+        return false;
+    }
+    pending.push_str(text);
+    true
+}
+
+fn coalesce_stream(pending: &mut TranscriptStreamDelta, delta: &TranscriptStreamDelta) -> bool {
+    match (pending, delta) {
+        (TranscriptStreamDelta::Assistant(pending), TranscriptStreamDelta::Assistant(text)) => {
+            append_delta(pending, text)
+        }
+        (
+            TranscriptStreamDelta::Reasoning {
+                location_key: pending_key,
+                text: pending,
+            },
+            TranscriptStreamDelta::Reasoning { location_key, text },
+        ) if pending_key == location_key => append_delta(pending, text),
+        (TranscriptStreamDelta::Tool(pending), TranscriptStreamDelta::Tool(tool))
+            if pending.call_id == tool.call_id =>
+        {
+            pending.clone_from(tool);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn coalesce_delta<P: ProtocolExtension>(
+    pending: Option<&mut SessionObservation<P>>,
+    event: &SessionObservation<P>,
+) -> bool {
+    match (pending, event) {
+        (
+            Some(SessionObservation::AssistantDelta(pending)),
+            SessionObservation::AssistantDelta(text),
+        ) => append_delta(pending, text),
+        (
+            Some(SessionObservation::ReasoningDelta {
+                location_key: pending_key,
+                text: pending,
+            }),
+            SessionObservation::ReasoningDelta { location_key, text },
+        ) if pending_key == location_key => append_delta(pending, text),
+        (
+            Some(SessionObservation::TranscriptStream {
+                scope: pending_scope,
+                delta: pending,
+            }),
+            SessionObservation::TranscriptStream { scope, delta },
+        ) if pending_scope == scope => coalesce_stream(pending, delta),
+        _ => false,
+    }
+}
 
 /// Where a hosted session publishes its observations.
 ///
@@ -834,7 +903,12 @@ fn transcript_observation<P: ProtocolExtension>(event: &SessionObservation<P>) -
         SessionObservation::Row(_)
         | SessionObservation::UserMessage { .. }
         | SessionObservation::AssistantDelta(_)
+        | SessionObservation::AssistantDone
+        | SessionObservation::ReasoningDelta { .. }
+        | SessionObservation::ReasoningSealed { .. }
+        | SessionObservation::ToolLine { .. }
         | SessionObservation::TranscriptPatch(_)
+        | SessionObservation::TranscriptStream { .. }
         | SessionObservation::PresentationSnapshot(_) => true,
         _ => false,
     }
@@ -983,6 +1057,7 @@ impl<P: ProtocolExtension> ObservationSender<P> {
         let scope = match event {
             SessionObservation::TranscriptPatch(patch) => patch.scope.clone(),
             SessionObservation::PresentationSnapshot(snapshot) => snapshot.scope.clone(),
+            SessionObservation::TranscriptStream { scope, .. } => scope.clone(),
             _ => TranscriptScope::Root,
         };
         self.0
@@ -990,6 +1065,37 @@ impl<P: ProtocolExtension> ObservationSender<P> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(scope);
+    }
+
+    fn supersede_baseline(
+        &self,
+        snapshot: &crate::views::PresentationSnapshot,
+        queue: &mut VecDeque<SessionObservation<P>>,
+    ) {
+        // A new baseline covers every older queued patch in this scope.
+        queue.retain(|queued| match queued {
+            SessionObservation::TranscriptPatch(patch) => patch.scope != snapshot.scope,
+            SessionObservation::TranscriptStream { scope, .. } => *scope != snapshot.scope,
+            _ => true,
+        });
+        if matches!(snapshot.scope, TranscriptScope::Agent(_)) {
+            // A face has one open agent view. Replacing it retires queued
+            // content and gap bookkeeping for the old agent.
+            queue.retain(|queued| {
+                let scope = match queued {
+                    SessionObservation::PresentationSnapshot(old) => &old.scope,
+                    SessionObservation::TranscriptPatch(old) => &old.scope,
+                    SessionObservation::TranscriptStream { scope, .. } => scope,
+                    _ => return true,
+                };
+                *scope == TranscriptScope::Root || *scope == snapshot.scope
+            });
+            self.0
+                .transcript_gaps
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|scope| *scope == TranscriptScope::Root || *scope == snapshot.scope);
+        }
     }
 
     /// Bounded delivery that never waits for renderer capacity. Mutex ownership
@@ -1025,12 +1131,24 @@ impl<P: ProtocolExtension> ObservationSender<P> {
         mut event: SessionObservation<P>,
         queue: &mut VecDeque<SessionObservation<P>>,
     ) -> Result<(), SessionObservation<P>> {
-        if let SessionObservation::AssistantDelta(delta) = &mut event
-            && let Some(SessionObservation::AssistantDelta(pending)) = queue.back_mut()
-            && pending.len().saturating_add(delta.len()) <= COALESCED_DELTA_BYTES
-        {
-            pending.push_str(delta);
+        if coalesce_delta(queue.back_mut(), &event) {
             return Ok(());
+        }
+        if let SessionObservation::TranscriptPatch(next) = &event
+            && let Some((index, previous)) =
+                queue.iter().enumerate().rev().find_map(|(index, queued)| {
+                    let SessionObservation::TranscriptPatch(previous) = queued else {
+                        return None;
+                    };
+                    (previous.scope == next.scope).then_some((index, previous))
+                })
+        {
+            let Some(merged) = previous.merged(next) else {
+                self.note_transcript_gap(&event);
+                return Err(event);
+            };
+            queue.remove(index);
+            event = SessionObservation::TranscriptPatch(merged);
         }
         if latest_state_event(&event) {
             let same_kind = |queued: &SessionObservation<P>| same_kind(queued, &event);
@@ -1043,29 +1161,18 @@ impl<P: ProtocolExtension> ObservationSender<P> {
                 self.0.correlation_gap.store(true, Ordering::Release);
             }
             if let SessionObservation::PresentationSnapshot(snapshot) = &event {
-                // A new baseline covers every older queued patch in this scope.
-                queue.retain(|queued| !matches!(queued, SessionObservation::TranscriptPatch(patch) if patch.scope == snapshot.scope));
-                if matches!(snapshot.scope, TranscriptScope::Agent(_)) {
-                    // A face has one open agent view. Replacing it retires
-                    // queued content and gap bookkeeping for the old agent.
-                    queue.retain(|queued| match queued {
-                        SessionObservation::PresentationSnapshot(old) => {
-                            old.scope == TranscriptScope::Root || old.scope == snapshot.scope
-                        }
-                        SessionObservation::TranscriptPatch(old) => {
-                            old.scope == TranscriptScope::Root || old.scope == snapshot.scope
-                        }
-                        _ => true,
-                    });
-                    self.0
-                        .transcript_gaps
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .retain(|scope| {
-                            *scope == TranscriptScope::Root || *scope == snapshot.scope
-                        });
-                }
+                self.supersede_baseline(snapshot, queue);
             }
+        }
+        if agent_observation(&event)
+            && queue
+                .iter()
+                .filter(|event| agent_observation(event))
+                .count()
+                >= AGENT_OBSERVATION_SHARE
+        {
+            self.note_transcript_gap(&event);
+            return Err(event);
         }
         if queue.len() >= OBSERVATION_QUEUE_CAPACITY {
             let Some(index) = eviction_index(&event, queue) else {

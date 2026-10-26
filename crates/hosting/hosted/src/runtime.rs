@@ -306,6 +306,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .presentations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(
+            value,
+            HostEvent::AssistantDelta(_) | HostEvent::ReasoningDelta { .. }
+        ) {
+            let _ = presentations.observe(
+                plakous_host_protocol::views::transcript::TranscriptScope::Root,
+                &value,
+                &self.inner,
+            );
+            return self.inner.send(value).is_ok();
+        }
         let sent = self.inner.send(value.clone()).is_ok();
         let _ = presentations.observe(
             plakous_host_protocol::views::transcript::TranscriptScope::Root,
@@ -343,16 +354,36 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         agent_id: &str,
         event: &HostEvent<plakous_host_protocol::Core>,
     ) -> bool {
-        self.presentations
+        use plakous_host_protocol::views::transcript::{TranscriptScope, TranscriptStreamDelta};
+        let scope = TranscriptScope::Agent(agent_id.to_owned());
+        let delta = match event {
+            HostEvent::AssistantDelta(text) => Some(TranscriptStreamDelta::Assistant(text.clone())),
+            HostEvent::ReasoningDelta { location_key, text } => {
+                Some(TranscriptStreamDelta::Reasoning {
+                    location_key: location_key.clone(),
+                    text: text.clone(),
+                })
+            }
+            _ => None,
+        };
+        if let Some(delta) = delta {
+            let _ = self.inner.send(HostEvent::TranscriptStream {
+                scope: scope.clone(),
+                delta,
+            });
+        }
+        let sent = self
+            .presentations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .observe(
-                plakous_host_protocol::views::transcript::TranscriptScope::Agent(
-                    agent_id.to_owned(),
-                ),
-                event,
-                &self.inner,
-            )
+            .observe(scope, event, &self.inner);
+        if matches!(event, HostEvent::AssistantDone) {
+            let _ = self.inner.send(HostEvent::TranscriptStream {
+                scope: TranscriptScope::Agent(agent_id.to_owned()),
+                delta: TranscriptStreamDelta::AssistantDone,
+            });
+        }
+        sent
     }
 
     pub(crate) fn resync_transcript(

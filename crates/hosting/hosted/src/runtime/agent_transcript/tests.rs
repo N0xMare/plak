@@ -17,6 +17,34 @@ use std::sync::atomic::AtomicU64;
 const SECRET: &str = "sk-abcdefghijklmnopqrstuvwxyz0123";
 const CALL: &str = "00000000-0000-4000-8000-0000000000ca";
 
+pub(in crate::runtime) fn assert_full_and_narrow_source_keys(
+    source: &plakous::sessions::SessionTranscriptSource,
+) {
+    let full = super::items_from_source(source, &[], false);
+    for width in 1..=source.tail(512, usize::MAX).items().len() {
+        let narrow = super::rows_within(
+            source,
+            &[],
+            false,
+            width,
+            super::MAX_SNAPSHOT_ROWS,
+            super::MAX_PRESENTATION_BYTES,
+        );
+        for retained in narrow {
+            if let Some(call) = retained.row.call_id() {
+                let original = full
+                    .iter()
+                    .find(|item| item.row.call_id() == Some(call))
+                    .unwrap();
+                assert_eq!(
+                    retained.key, original.key,
+                    "call {call} shifted at window {width}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn child_history_keeps_image_chips_in_the_same_user_row_as_root_history() {
     let chip = crate::sessions::image_chip("image/png", 1234, Some((80, 60)));
@@ -37,6 +65,32 @@ fn child_history_keeps_image_chips_in_the_same_user_row_as_root_history() {
         rows,
         vec![TranscriptRow::user(format!("inspect this\n{chip}\nplease"))]
     );
+}
+
+#[test]
+fn a_retained_canonical_item_keeps_its_child_keys_across_full_and_narrow_reads() {
+    let mut reads = vec![
+        item(Actor::User, vec![TranscriptPart::Text("older")]),
+        item(
+            Actor::Assistant,
+            vec![TranscriptPart::Text("before nested effect")],
+        ),
+        item(
+            Actor::Assistant,
+            vec![TranscriptPart::Text("after nested effect")],
+        ),
+    ];
+    reads[0].position = 3;
+    reads[1].position = 4;
+    reads[2].position = 4;
+    reads[2].part_offset = 1;
+    let full = super::items_from_reads(&reads, locator(), &[], false);
+    // L0's bounded reader now retains an indivisible position group, including
+    // every injected fragment, even for a one-item requested window.
+    let narrow = super::items_from_reads(&reads[1..], locator(), &[], false);
+    assert_eq!(narrow.len(), 2);
+    assert_eq!(narrow, full[1..]);
+    assert_ne!(narrow[0].key, narrow[1].key);
 }
 
 #[test]
@@ -585,25 +639,27 @@ async fn a_finished_sessions_history_reads_as_root_rows() -> TestResult {
         super::items_from_reads(&super::transcript_tail(tail), target, &[], false)
     };
     assert_eq!(keyed(&before_reopen), keyed(&full));
-    let narrow = reopened
-        .transcript_source(target)
-        .await?
-        .tail(2, usize::MAX);
-    for item in narrow.items() {
-        assert!(
-            full.items()
-                .iter()
-                .any(|full| full.position() == item.position()
-                    && full.part_offset() == item.part_offset()
-                    && full == item)
-        );
-    }
-    let full_rows = keyed(&full);
-    for retained in keyed(&narrow) {
-        assert!(
-            full_rows.contains(&retained),
-            "retained row key moved: {retained:?}"
-        );
+    for width in [1, 2] {
+        let narrow = reopened
+            .transcript_source(target)
+            .await?
+            .tail(width, usize::MAX);
+        for item in narrow.items() {
+            assert!(
+                full.items()
+                    .iter()
+                    .any(|full| full.position() == item.position()
+                        && full.part_offset() == item.part_offset()
+                        && full == item)
+            );
+        }
+        let full_rows = keyed(&full);
+        for retained in keyed(&narrow) {
+            assert!(
+                full_rows.contains(&retained),
+                "retained row key moved: {retained:?}"
+            );
+        }
     }
     Ok(())
 }

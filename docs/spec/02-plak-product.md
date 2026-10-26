@@ -1828,13 +1828,24 @@ text/tool/reasoning observations still supply the closed JSONL v1 projection.
 The host also folds their content through one scoped keyed live-row reducer:
 assistant and reasoning deltas update their existing provisional key, tool
 updates use call identity, and retry discards delete the provisional response
-tail. This live state is the resync baseline, so busy resync preserves in-flight
+tail. Deltas append in place to staged live rows; they do not clone accumulated
+text or publish keyed patches. Root raw observations and scoped
+`TranscriptStream` appends for an agent drive the same TUI live reducer between
+boundaries. These scoped appends are in-process only, not JSONL v1 events.
+Keyed live publication occurs at assistant completion, a new user/tool row,
+sealed reasoning, retry discard, status or idle boundaries. Consecutive queued
+same-scope patches compose into one patch; prose and reasoning appends coalesce
+without crossing a boundary or a different scope/location.
+This live state is the resync baseline, so busy resync preserves in-flight
 previews and subsequent deltas continue their same keys. Resync does not reset
 the reducer's stream boundary, call index or reasoning clocks. Canonical
 settlement replaces provisional rows with the committed projector rows.
 The TUI keeps a keyed baseline and applies only exact-revision patches. A gap
 keeps the last good presentation and requests one scope resync; later patches
-are ignored until a valid snapshot replaces it. An observation-channel gap is
+are ignored until a valid snapshot replaces it. A pending request re-arms only
+after one second or evidence of a baseline newer than the revision recorded
+when that request was sent; repeated refused patches do not each send a request.
+An observation-channel gap is
 scoped: a root snapshot does not pay an agent's presentation debt. Replacing
 the one open agent view retires its previous scope's queued patches and gap
 bookkeeping. Presentation refreshes do not cancel a pending root continuation.

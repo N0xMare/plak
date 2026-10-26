@@ -6,18 +6,32 @@ use super::*;
 fn bounded_history_positions_and_fragment_offsets_do_not_shift_with_the_window() {
     let source = source("exec", true);
     let full = source.tail(512, usize::MAX);
-    let narrow = source.tail(3, usize::MAX);
-    assert!(full.items().len() >= narrow.items().len());
-    for retained in narrow.items() {
-        let same_position = full
-            .items()
-            .iter()
-            .find(|item| {
-                item.position() == retained.position()
-                    && item.part_offset() == retained.part_offset()
-            })
-            .unwrap();
-        assert_eq!(same_position, retained);
+    for width in [1, 2, 3] {
+        let narrow = source.tail(width, usize::MAX);
+        assert!(full.items().len() >= narrow.items().len());
+        for retained in narrow.items() {
+            let same_position = full
+                .items()
+                .iter()
+                .find(|item| {
+                    item.position() == retained.position()
+                        && item.part_offset() == retained.part_offset()
+                })
+                .unwrap();
+            assert_eq!(same_position, retained);
+            assert_eq!(
+                full.items()
+                    .iter()
+                    .filter(|item| item.position() == retained.position())
+                    .count(),
+                narrow
+                    .items()
+                    .iter()
+                    .filter(|item| item.position() == retained.position())
+                    .count(),
+                "a narrow window must keep every fragment of a retained position"
+            );
+        }
     }
     assert!(
         full.items()
@@ -628,7 +642,9 @@ fn retained_effects_are_ordered_deduplicated_and_charge_tail_item_and_byte_bound
     assert!(!tail.truncated());
     let bounded = source.tail(3, usize::MAX);
     assert!(bounded.truncated());
-    assert_eq!(bounded.items().len(), 3);
+    // The four-fragment marker position is indivisible: do not retain its
+    // suffix with freshly restarted child-row ordinals.
+    assert_eq!(bounded.items().len(), 1);
     assert!(
         !bounded
             .items()

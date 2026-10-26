@@ -508,7 +508,14 @@ impl ChildObservers {
                 self.open_agent_view(runtime, sessions, session_id, agent_id, events)
                     .await;
             }
-            UserAction::CloseAgentTranscript => self.close_agent_view(),
+            UserAction::CloseAgentTranscript => {
+                self.close_agent_view();
+                events
+                    .presentations
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .close_agent();
+            }
             _ => {}
         }
     }

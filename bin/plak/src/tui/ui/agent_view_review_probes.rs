@@ -352,11 +352,12 @@ fn the_open_agents_stream_gets_the_streaming_cadence() {
     let mut app = root_app();
     app.busy = true;
     open_served(&mut app, AGENT, Some("t1"));
-    app.apply_host_event(super::test_support::agent_patch(
-        AGENT,
-        1,
-        vec![(20, TranscriptRow::assistant("streaming"))],
-    ));
+    app.apply_host_event(HostEvent::TranscriptStream {
+        scope: plakous_host_protocol::views::transcript::TranscriptScope::Agent(AGENT.into()),
+        delta: plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(
+            "streaming".into(),
+        ),
+    });
     assert!(app.pane.assistant_stream_active);
     assert!(
         app.redraw_demand().streaming,
