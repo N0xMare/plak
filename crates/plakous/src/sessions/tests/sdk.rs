@@ -17,7 +17,7 @@ const CELLS: &[(&str, &str)] = &[
         "saved 4",
     ),
     (
-        "print((await state.get('answer'))['n'])\ntry:\n    await state.put('large', [None] * 100000)\nexcept OverflowError:\n    print('quota refused')\nprint(await state.get('large', 'not stored'))\ntry:\n    await state.put('bad key', 1)\nexcept ValueError:\n    print('invalid key')",
+        "print((await state.get('answer'))['n'])\ntry:\n    await state.put('large', [None] * 100000)\nexcept OverflowError:\n    print('quota refused')\nprint(await state.get('large', 'not stored'))\ntry:\n    await state.put('float_large', [1e16] * 35000)\nexcept ValueError:\n    print('inexact float refused')\nprint(await state.get('float_large', 'float not stored'))\nawait state.put('float_near', [1e15] * 26000)\nassert len(await state.get('float_near')) == 26000\nawait state.drop('float_near')\nprint('canonical round trip')\ntry:\n    await state.put('bad key', 1)\nexcept ValueError:\n    print('invalid key')",
         "quota refused",
     ),
     (
@@ -124,7 +124,10 @@ impl LanguageModel for SdkModel {
                 assert!(
                     text.contains("42")
                         && text.contains("invalid key")
-                        && text.contains("not stored"),
+                        && text.contains("not stored")
+                        && text.contains("inexact float refused")
+                        && text.contains("canonical round trip")
+                        && text.contains("float not stored"),
                     "{text}"
                 );
             }

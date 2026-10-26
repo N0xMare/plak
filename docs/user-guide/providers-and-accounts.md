@@ -290,7 +290,8 @@ awaits are allowed.
 
 This build runs Monty 1.2.0 in `plakous-py-host` on the cell protocol under
 adapter `plakous.monty-python-adapter.v9`. It refuses to reopen py-ptc roots
-and children recorded under an earlier engine contract (monty-pool with
+and children recorded under an earlier engine contract (the cell-protocol v1
+contract with adapter v8, monty-pool with
 adapter v7, the Monty 1.1.0 contract, adapter v4 or v5 (Monty 0.0.21) or v6), profile
 `plakous.python-ptc-profile.v2`, or presentation
 `plakous.python-ptc-presentation.v3`. There is no migration; recover with

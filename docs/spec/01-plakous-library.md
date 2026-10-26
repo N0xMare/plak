@@ -6955,8 +6955,9 @@ most 4 MiB. A refused write changes nothing; replacement and deletion release
 capacity. Numbers use IEEE doubles; integer inputs outside
 `-(2^53-1)..=2^53-1` are refused before canonicalization rather than silently
 rounded. Integral floats read back as integers, and negative zero reads back
-as zero. Integral float inputs beyond 2^53 are accepted as exact doubles and,
-when representable as JSON integers, read back as integers. Refusals use typed
+as zero. Integral floats outside the same exact-integer range are refused,
+including values that canonicalization would encode as integers. Restored
+canonical values are checked against that rule too. Refusals use typed
 `StateError` values, not string classifications; manifest validation preserves
 them in its error source chain.
 
@@ -7071,7 +7072,9 @@ evicting oldest references first. Process output receives a reference only
 when bytes were omitted. If no reference can be issued, the process result
 still succeeds with an omission whose `full` is null. Named-state puts refuse
 values whose encoded CellValue would exceed the per-result quota, before
-changing the overlay. Quotas use an early-stopping counting writer without
+changing the overlay. The measured value is decoded from canonical named-state
+JSON, including number normalization, exactly as a later get returns it.
+Quotas use an early-stopping counting writer without
 allocating a serialized buffer. `Omission` retains canonical counts for omitted
 lines, clipped lines, hits and entries; incomplete walks and truncated process
 output are marked without inventing counts of unseen data. No media attachment

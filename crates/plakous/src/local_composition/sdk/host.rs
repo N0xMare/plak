@@ -271,6 +271,29 @@ fn state_error(error: &StateError) -> V {
     };
     error_value(kind, error.to_string())
 }
+
+fn validate_state_put(input: &Value) -> Result<(), V> {
+    let name = string(input, "name");
+    // Measure what get decodes, not the pre-canonicalization number forms.
+    let state = plakous_agent::internal::NamedState::default()
+        .put(name.into(), &input["value"])
+        .map_err(|error| state_error(&error))?;
+    let value = state
+        .get(name)
+        .map_err(|error| state_error(&error))?
+        .ok_or_else(|| error_value("runtime", "validated state value is missing"))?;
+    values::result_bytes(&V::from(value)).map_err(|error| match error {
+        values::ValueQuotaError::Result { bytes } => error_value(
+            "quota",
+            format!(
+                "named-state value encodes to at least {bytes} bytes (maximum {})",
+                Limits::RESULT_BYTES
+            ),
+        ),
+        other => error_value("quota", other.to_string()),
+    })?;
+    Ok(())
+}
 fn string<'a>(input: &'a Value, key: &str) -> &'a str {
     input[key].as_str().unwrap_or_default()
 }
@@ -337,14 +360,7 @@ async fn execute(scope: &Scope, name: &str, input: Value) -> Result<V, V> {
             };
         }
         "state.put" => {
-            values::result_bytes(&V::from(input["value"].clone())).map_err(
-                |error| match error {
-                    values::ValueQuotaError::Result { bytes } => {
-                        state_error(&StateError::ValueTooLarge { bytes })
-                    }
-                    other => error_value("quota", other.to_string()),
-                },
-            )?;
+            validate_state_put(&input)?;
             scope
                 .state(StateOp::Put {
                     key: string(&input, "name").into(),

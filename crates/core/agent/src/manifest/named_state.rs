@@ -201,6 +201,7 @@ pub(crate) fn decode_state_value(bytes: &[u8]) -> Result<Value, StateError> {
 
 pub(crate) fn validate_state_value(bytes: &[u8]) -> Result<(), StateError> {
     let value = decode_state_value(bytes)?;
+    validate_numbers(&value)?;
     if serde_json_canonicalizer::to_vec(&value).map_err(StateError::from)? != bytes {
         return Err(StateError::NonCanonical);
     }
@@ -214,7 +215,10 @@ fn validate_numbers(value: &Value) -> Result<(), StateError> {
             if number
                 .as_i64()
                 .is_some_and(|n| n.unsigned_abs() > MAX_EXACT)
-                || number.as_u64().is_some_and(|n| n > MAX_EXACT) =>
+                || number.as_u64().is_some_and(|n| n > MAX_EXACT)
+                || number
+                    .as_f64()
+                    .is_some_and(|n| n.fract() == 0.0 && n.abs() >= 2.0_f64.powi(53)) =>
         {
             Err(StateError::InexactNumber)
         }
@@ -237,6 +241,9 @@ mod tests {
             json!((1_u64 << 53) + 1),
             json!(-((1_i64 << 53) + 1)),
             json!(1_792_956_173_562_340_043_u64),
+            json!(1e16),
+            json!(-1e16),
+            json!(18_014_398_509_481_984.0_f64),
         ] {
             assert!(matches!(
                 state.put("number".to_owned(), &json!({"nested": [number]})),
@@ -248,13 +255,32 @@ mod tests {
             .put("zero".to_owned(), &json!(-0.0))?;
         assert_eq!(normalized.get("one")?, Some(json!(1)));
         assert_eq!(normalized.get("zero")?, Some(json!(0)));
-        let large_double = state.put("large".to_owned(), &json!(18_014_398_509_481_984.0_f64))?;
-        assert_eq!(large_double.get("large")?, Some(json!(1_u64 << 54)));
         assert!(
             state
                 .put("max".to_owned(), &json!((1_u64 << 53) - 1))
                 .is_ok()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn named_state_integral_float_lists_round_trip_or_refuse_before_storage()
+    -> Result<(), StateError> {
+        let state = NamedState::default();
+        assert!(matches!(
+            state.put("near".into(), &json!(vec![1e16; 35_000])),
+            Err(StateError::InexactNumber)
+        ));
+        assert_eq!(state.get("near")?, None);
+        let state = state.put("near".into(), &json!(vec![1e15; 26_000]))?;
+        assert_eq!(
+            state.get("near")?,
+            Some(json!(vec![1_000_000_000_000_000_u64; 26_000]))
+        );
+        assert!(matches!(
+            validate_state_value(b"10000000000000000"),
+            Err(StateError::InexactNumber)
+        ));
         Ok(())
     }
 
