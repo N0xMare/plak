@@ -481,7 +481,8 @@ pub(super) fn ledger_needs_retention(ledger: &RuntimeOperationLedger) -> bool {
 /// provider record, which the paid-fold guard reads (a failed fold before a
 /// refused turn would otherwise be dropped and paid for again); and every
 /// composition group any kept record belongs to, since a group is only valid
-/// whole.
+/// whole. The newest finalized harness fold and its provider record also stay,
+/// so the next summary instruction survives ordinary rounds and reopen.
 pub(super) fn retain_quiescent_ledger(
     ledger: &RuntimeOperationLedger,
     owned_turns: &BTreeSet<TurnId>,
@@ -543,11 +544,14 @@ pub(super) fn retain_quiescent_ledger(
                 && matches!(record.kind(), DurableOperationKind::Provider { .. })
         })
         .map(|record| record.operation_id());
+    let latest_harness = crate::runtime::compaction::instruction::latest_harness_fold(ledger)
+        .map(|(compaction, provider)| [compaction.operation_id(), provider.operation_id()]);
     let base = |record: &DurableOperationRecord| {
         !matches!(record.state(), DurableOperationState::Finalized(_))
             || record.operation_id() >= last_turn_start
             || Some(record.operation_id()) == latest_response
             || Some(record.operation_id()) == latest_provider
+            || latest_harness.is_some_and(|pair| pair.contains(&record.operation_id()))
             || root_of(record).is_some_and(|turn_id| kept_roots.contains(&turn_id))
     };
     let groups = operations

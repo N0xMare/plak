@@ -315,6 +315,7 @@ fn a_round_re_anchors_only_on_a_positive_provider_count_with_its_request_estimat
 
 mod placeholders {
     use crate::SessionWorkflowId;
+    use crate::runtime::compaction::instruction::CompactionInstruction;
     use crate::runtime::compaction::placeholder::{
         PLACEHOLDER_HARNESS_NOTE_MARKER, PlaceholderCandidate, REPLACED_TOOL_RESULT_MARKER,
         collect_placeholder_candidates, placeholder_successor,
@@ -640,14 +641,36 @@ mod placeholders {
     }
 
     #[test]
+    fn recovery_accepts_exactly_both_instruction_variants_at_every_depth() {
+        use crate::runtime::compaction::request::{
+            harness_compaction_input_at_depth, harness_compaction_reduction_count,
+            validate_harness_compaction_input,
+        };
+        let cut = reduction_cut();
+        for instruction in CompactionInstruction::ALL {
+            for depth in 0..=harness_compaction_reduction_count(&cut) {
+                let input = harness_compaction_input_at_depth(&cut, workflow(), depth, instruction)
+                    .expect("closed input");
+                assert_eq!(
+                    validate_harness_compaction_input(&cut, workflow(), &input).expect("validate"),
+                    Some(depth)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn summary_reductions_preserve_r0_and_everything_but_selected_bodies() {
         use crate::runtime::compaction::request::{
             harness_compaction_input, harness_compaction_input_at_depth,
             harness_compaction_reduction_count, validate_harness_compaction_input,
         };
         let cut = reduction_cut();
-        let original = harness_compaction_input(&cut, workflow()).expect("R0");
-        let zero = harness_compaction_input_at_depth(&cut, workflow(), 0).expect("depth zero");
+        let original = harness_compaction_input(&cut, workflow(), CompactionInstruction::Standard)
+            .expect("R0");
+        let zero =
+            harness_compaction_input_at_depth(&cut, workflow(), 0, CompactionInstruction::Standard)
+                .expect("depth zero");
         assert_eq!(
             serde_json::to_vec(&zero).expect("bytes"),
             serde_json::to_vec(&original).expect("original bytes")
@@ -655,7 +678,13 @@ mod placeholders {
         assert_eq!(harness_compaction_reduction_count(&cut), 3);
         let retained = cut.retained_segments().to_vec();
         for depth in 0_usize..=3 {
-            let input = harness_compaction_input_at_depth(&cut, workflow(), depth).expect("input");
+            let input = harness_compaction_input_at_depth(
+                &cut,
+                workflow(),
+                depth,
+                CompactionInstruction::Standard,
+            )
+            .expect("input");
             assert_eq!(
                 validate_harness_compaction_input(&cut, workflow(), &input).expect("validate"),
                 Some(depth)
@@ -717,8 +746,13 @@ mod placeholders {
             retained,
             "fresh exchange and retained intent"
         );
-        assert!(harness_compaction_input_at_depth(&cut, workflow(), 4).is_err());
-        let first = harness_compaction_input_at_depth(&cut, workflow(), 2).expect("portable R1");
+        assert!(
+            harness_compaction_input_at_depth(&cut, workflow(), 4, CompactionInstruction::Standard)
+                .is_err()
+        );
+        let first =
+            harness_compaction_input_at_depth(&cut, workflow(), 2, CompactionInstruction::Standard)
+                .expect("portable R1");
         assert!(placeholder_bodies(first.history())[0].contains("tool: read_file"));
         assert_eq!(harness_notes(first.history()), [] as [String; 0]);
     }
@@ -736,9 +770,11 @@ mod placeholders {
         let cut = reduction_cut();
         let retained = cut.retained_segments().to_vec();
         let deepest =
-            harness_compaction_input_at_depth(&cut, workflow(), 0).expect("original input");
+            harness_compaction_input_at_depth(&cut, workflow(), 0, CompactionInstruction::Standard)
+                .expect("original input");
         let portable =
-            harness_compaction_input_at_depth(&cut, workflow(), 1).expect("portable candidate");
+            harness_compaction_input_at_depth(&cut, workflow(), 1, CompactionInstruction::Standard)
+                .expect("portable candidate");
         assert_eq!(
             validate_harness_compaction_input(&cut, workflow(), &portable).expect("validate"),
             Some(1)
@@ -762,7 +798,9 @@ mod placeholders {
             "instruction"
         );
         assert_eq!(cut.retained_segments(), retained);
-        let full = harness_compaction_input_at_depth(&cut, workflow(), 0).expect("full input");
+        let full =
+            harness_compaction_input_at_depth(&cut, workflow(), 0, CompactionInstruction::Standard)
+                .expect("full input");
         let candidates = collect_compaction_reduction_candidates(&cut);
         let second_only =
             replace_compaction_result_body(full.history(), &candidates[1]).expect("second only");
@@ -788,7 +826,8 @@ mod placeholders {
         };
         use plakous_model::{ConversationView, WorkingProjection};
         let cut = reduction_cut();
-        let zero = harness_compaction_input(&cut, workflow()).expect("R0");
+        let zero = harness_compaction_input(&cut, workflow(), CompactionInstruction::Standard)
+            .expect("R0");
         let candidates = collect_compaction_reduction_candidates(&cut);
         let subset = ConversationView::from_shared(
             replace_compaction_result_body(zero.history(), &candidates[1]).expect("second only"),
@@ -798,7 +837,9 @@ mod placeholders {
             validate_harness_compaction_input(&cut, workflow(), &subset).expect("validate"),
             None
         );
-        let one = harness_compaction_input_at_depth(&cut, workflow(), 2).expect("portable R1");
+        let one =
+            harness_compaction_input_at_depth(&cut, workflow(), 2, CompactionInstruction::Standard)
+                .expect("portable R1");
         for (from, to) in [
             ("removed_bytes: 4000", "removed_bytes: 3999"),
             (REPLACED_TOOL_RESULT_MARKER, "[plak: forged marker]"),
@@ -931,7 +972,9 @@ mod placeholders {
         let plan = ContextHistoryPlan::new(&source).expect("plan");
         let cut = SemanticCompactionCut::seal(&source, &plan).expect("cut");
         assert_eq!(harness_compaction_reduction_count(&cut), 4);
-        let reduced = harness_compaction_input_at_depth(&cut, workflow(), 4).expect("portable R3");
+        let reduced =
+            harness_compaction_input_at_depth(&cut, workflow(), 4, CompactionInstruction::Standard)
+                .expect("portable R3");
         assert_eq!(placeholder_bodies(reduced.history()).len(), 3);
         assert_eq!(cut.retained_segments().len(), 2);
         assert_eq!(cut.retained_segments()[1], history.segments()[5]);
@@ -944,7 +987,9 @@ mod placeholders {
         let plan = ContextHistoryPlan::new(&source).expect("plan");
         let cut = SemanticCompactionCut::seal(&source, &plan).expect("cut");
         assert_eq!(harness_compaction_reduction_count(&cut), 3);
-        let reduced = harness_compaction_input_at_depth(&cut, workflow(), 3).expect("portable R2");
+        let reduced =
+            harness_compaction_input_at_depth(&cut, workflow(), 3, CompactionInstruction::Standard)
+                .expect("portable R2");
         assert_eq!(placeholder_bodies(reduced.history()).len(), 3);
         assert_eq!(
             validate_harness_compaction_input(&cut, workflow(), &reduced).expect("validate"),

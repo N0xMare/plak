@@ -754,7 +754,9 @@ are **not** canonical history and can never reconstruct it.
 Every branch has a quiescent safe head and may also have one mutable,
 non-authoritative, non-forkable working turn. Ledger nodes and large content
 may be shared or content-addressed; sharing never aliases mutable branch
-authority.
+authority. Releasing uniquely owned command-ledger links, operation-mutation
+links and canonical-history ancestry is iterative, stopping at a shared link;
+session length does not turn their destruction into an unbounded call stack.
 
 Live publication and compaction recovery share one pure successor-candidate
 constructor for the manifest, object bundle, expected reference and commit
@@ -7363,11 +7365,11 @@ separate cap on rounds whose output is withheld; the root round limit and the
 pressure-fold cap bound them. Native route enrollment alone does not authorize portable projection:
 apart from that identical-wire rule, it is permitted only after a native
 `ProtectedHistory` refusal or when the unprojected successor cannot be prepared
-or no unchanged placeholder depth Fits and strictly shrinks.
+or no unchanged placeholder depth Fits and meets the 5 % reduction minimum.
 A preparable, fitting placeholder-only pass without that native refusal keeps all unselected
 reasoning and opaque replay byte-exact. A native refusal does not invalidate an
 accepted unchanged successor: if portable projection is identical, fails to
-measure, or yields no strictly shrinking fitting successor, the driver commits
+measure, or yields no fitting successor meeting the reduction minimum, the driver commits
 that unchanged pass. Whenever portable projection differs
 from the source, the measured and published successor includes a visible
 Instruction-provenance Steering note describing replay loss, and its selection
@@ -7385,10 +7387,12 @@ requires exactly one selected group; placeholder provenance requires at least on
 The replay-omission constructor refuses an unchanged source/projection pair.
 It dispatches nothing and never reruns tools. A Steering
 note with Instruction provenance tells the model earlier reasoning was dropped
-to fit. A pass commits only when its independently measured input strictly
-shrinks and Fits; the source checkpoint remains immutable.
+to fit. A pass commits only when its independently measured input Fits and is
+at least 5 % smaller than the comparable fresh source input; the source
+checkpoint remains immutable.
 
-Only when no strictly shrinking offline successor fits does compaction report
+Only when no offline successor fits and meets the reduction minimum (or the
+unbound-rescue landing rule) does compaction report
 `NoEligibleRange` and the overflow stay typed and refused. One tool result larger
 than the window is that case.
 When preparation fails and the offline rungs cannot act, the failure detail
@@ -7398,8 +7402,8 @@ reason into the session log; it does not add a telemetry field.
 When the offline rung commits after paid-rung preparation refused, the
 compaction-finished detail still records that preparation refusal; a free
 commit must not hide why the paid rung could not run.
-An ordinary `NoEligibleRange` at the turn fence likewise records that no strictly
-shrinking offline successor fits.
+An ordinary `NoEligibleRange` at the turn fence likewise records that no
+qualifying offline successor fits.
 Withheld or clipped tool output is not itself a terminal capacity refusal.
 After a non-committed pressure fold, the driver continues on the retained head
 when the next round fits. A structurally exhausted ladder fails proactively
@@ -7415,7 +7419,13 @@ start a workflow or spend a paid-fold or overflow-recovery guard.
 tool results of the current turn, oldest first, with a bounded placeholder.
 Candidate depths are measured independently because placeholder and notice
 text can make small replacements expand rather than shrink the request. The
-driver commits only a successor whose measured input is smaller than the source.
+driver commits only a successor whose measured input is at least 5 % smaller
+than the comparable fresh source input, including the full successor's notices.
+A near-null fold must not consume the compaction slot. A candidate below this
+minimum is not eligible: if none qualifies, the pass reports `NoEligibleRange`,
+not a paid failure, and does not start paid-fold backoff. The unbound-replay
+rescue has no comparable source wire and still requires fresh preparation below
+the landing fence instead of a percentage comparison.
 It measures shallow to deep and stops as soon as the shallowest fitting depth
 below 50 % of the **working envelope** (the tighter of the reported window and
 the admitted input ceiling) is proven. If none clears that fence, it measures
@@ -7554,7 +7564,8 @@ no distinct candidate to probe; the unchanged dispatch request still admits
 separately.
 
 The durable request records the exact selected input. Completion and recovery
-verify byte-for-byte membership in this closed source-derived sequence,
+verify byte-for-byte membership in this closed source-derived sequence for
+either exact Standard or Tight instruction text,
 including the unchanged full-input candidate, in addition to the exact cut,
 prefix, configuration, metadata and prepared-call checks. A familiar marker
 or arbitrary truncated body is not evidence. Recovery neither chooses a new
@@ -7578,8 +7589,25 @@ would forfeit the cache prefix and the exact admission identity — and is cappe
 by this bound instead. A Messages manual thinking budget stays strictly below
 the bound. **A summary that stops for `Length` is rejected**: it lost whatever it
 would have said last, usually the open work and the next step, so the fold is a
-definite failure that publishes nothing (§10.5), and mid-turn it falls to the
-placeholder rung like any failed paid fold. The instruction
+definite paid failure that publishes no summary (§10.5). It falls to the free
+placeholder rung over the unchanged source, including idle manual and scheduled
+passes; cancellation and ambiguous outcomes do not fall back. A placeholder
+commit keeps the paid failure visible and does not authorize a paid follow-on
+at the same fence. If no offline successor qualifies, the paid failure stands.
+The next independently permitted harness fold uses the Tight instruction when
+the branch's newest finalized harness-fold provider operation completed with
+`Length`. This selection is read from the ledger, not transient driver state;
+the newest harness fold and its provider evidence survive quiescent pruning,
+ordinary rounds and reopen. Native folds and unpaid rungs do not change that
+selection. Tight keeps the same sections, constraints and exact values, but
+quotes only the newest non-in-progress request, merges all earlier requests
+into at most five lines, lists only changed files and open failures under Work
+done, and aims under about 800 words. A subsequent successful harness fold
+returns selection to Standard. Existing backoff, admission and per-turn failure
+caps still decide whether another fold is permitted: **one paid dispatch per
+fold, never an immediate tighter retry**. Recovery checks membership in the two
+exact closed texts at every depth and never re-selects an instruction.
+The Standard instruction
 (`SEMANTIC_COMPACTION_INSTRUCTION`) asks for fixed sections, each written once
 in order: Requests, Constraints, Values, Work done, Decisions, Open errors,
 Plan and Next step. Requests lists the user's requests oldest first, quotes
@@ -8173,6 +8201,8 @@ queued prompt. If it `Fits` with more than the reserved observation headroom,
 the queue drains without a human. If the token trigger or observation-reserve
 trigger still holds, at most **one** additional scheduled compact may run under
 a new `SessionOperationId` — a new paid operation, not a recovery of the first.
+This paid follow-on is not permitted when the first pass's paid rung failed
+and only its free placeholder rung committed (§10.2).
 Otherwise the host parks with a typed idle outcome, leaving the prompt queued
 and files untouched.
 
@@ -8216,9 +8246,10 @@ without a result and restores quiescence over the unchanged semantic source.
 **A provider failure keeps the disposition the provider gave it.** Compaction
 publishes nothing until it holds a complete result, so a failure the provider
 classified definitely — a deadline, a rate limit, an overload — leaves the
-canonical history exactly as it was: no compaction segment was written, nothing was
-replaced, and the session continues on the history it already had. That is a
-failed compaction, and the turn carries on without one. A failure whose outcome
+canonical history exactly as it was at that paid rung: no summary was written.
+The separately recorded free rung may still replace eligible tool results
+under §10.2; when it cannot, the session continues on the unchanged history.
+A failure whose outcome
 the provider itself could not determine still keeps the exact-recovery boundary,
 and that is the one condition: paid recovery is not a second one, because a
 model error may only carry it when its kind is already `OutcomeUnknown`.
@@ -8256,7 +8287,8 @@ what happened: nothing was applied, and only billing is unknown. When the turn
 is cancelled (Esc), the fold's deadline elapses, or the runtime's control
 closes, the fold ends as a definite failure carrying that evidence, its two
 operations are finalized, and it is never redispatched. A cancelled turn then
-ends `Cancelled`; an idle `/compact` ends with no change. Only process or lease
+ends `Cancelled`; a cancelled idle `/compact` ends with no change. Other definite
+failures may take the free rung under §10.2. Only process or lease
 loss mid-fold leaves the obligations for the next open, which abandons them with
 the `CompactionNotApplied` claim; an idle session-workflow compaction is closed
 by the workflow rows of §5.5 at that open.

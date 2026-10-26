@@ -73,10 +73,9 @@ impl Driver {
         // free rung still has the whole source to work on, and the
         // turn goes on under the window instead of over it. It is a
         // new workflow: the failed fold keeps its own record. A
-        // cancelled fold is not retried in any form, and an idle
-        // `/compact` reports its failure to the operator who asked.
-        if !origin.is_turn_fence()
-            || !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
+        // cancelled fold is not retried in any form. Endpoint folds also
+        // take this unpaid rung; no failure authorizes another paid dispatch.
+        if !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
             || error.kind() == AgentErrorKind::Cancelled
         {
             return Ok(failed);
@@ -186,8 +185,8 @@ impl Driver {
                         None,
                     )
                     .await;
-                if !origin.is_turn_fence()
-                    || !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
+                if !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
+                    || error.kind() == AgentErrorKind::Cancelled
                 {
                     return Ok(failed);
                 }
@@ -204,7 +203,7 @@ impl Driver {
         }
     }
 
-    /// The free rung after a definite paid-fold failure at a turn fence, as a
+    /// The free rung after a definite paid-fold failure, as a
     /// new workflow on the current head; `failed` stands when it cannot act.
     async fn placeholders_after_failed_fold(
         &mut self,

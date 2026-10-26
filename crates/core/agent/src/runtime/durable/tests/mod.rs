@@ -71,6 +71,7 @@ mod checkpoint_fixtures;
 mod code_cell_abandonment;
 mod code_cell_composition;
 mod compaction_admission;
+mod compaction_instruction;
 mod compaction_recovery_cases;
 mod composition_scheduler;
 mod continuation_reopen;

@@ -16,6 +16,18 @@ pub(super) struct LedgerNode<T> {
     pub(super) identity: Digest,
 }
 
+impl<T> Drop for LedgerNode<T> {
+    fn drop(&mut self) {
+        let mut previous = self.previous.take();
+        while let Some(link) = previous {
+            let Ok(mut node) = Arc::try_unwrap(link) else {
+                break;
+            };
+            previous = node.previous.take();
+        }
+    }
+}
+
 /// One node in the persistent exact command-identity membership index.
 #[derive(Debug)]
 pub(super) struct CommandIdNode {
@@ -67,6 +79,18 @@ pub(super) struct OperationLedgerMutation {
     pub(super) inserted: bool,
     pub(super) entry: AuthenticatedOperationRecord,
     pub(super) operation_identity: Digest,
+}
+
+impl Drop for OperationLedgerMutation {
+    fn drop(&mut self) {
+        let mut previous = self.previous.take();
+        while let Some(link) = previous {
+            let Ok(mut node) = Arc::try_unwrap(link) else {
+                break;
+            };
+            previous = node.previous.take();
+        }
+    }
 }
 
 /// A borrowed operation mutation used by incremental checkpoint persistence.

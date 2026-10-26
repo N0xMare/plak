@@ -80,12 +80,18 @@ impl SourceAudit {
 
     fn accepts(self, candidate: &AcceptedPlaceholders) -> bool {
         match self {
-            Self::Fresh { audit, .. } => candidate.after.input_tokens() < audit.input_tokens(),
+            Self::Fresh { audit, .. } => {
+                meaningful_reduction(audit.input_tokens(), candidate.after.input_tokens())
+            }
             // No comparable source wire exists. Only successful fresh
             // preparation below the landing fence can rescue this history.
             Self::UnboundRescue { .. } => candidate.clears_fence && candidate.wire_digest.is_some(),
         }
     }
+}
+
+fn meaningful_reduction(before: u64, after: u64) -> bool {
+    after < before && u128::from(after) * 100 <= u128::from(before) * 95
 }
 
 /// One offline measurement of a candidate depth.
@@ -119,7 +125,7 @@ impl PlaceholderPreference {
         clears_fence: bool,
         after_input_tokens: u64,
     ) -> bool {
-        if !fits || after_input_tokens >= self.before_input_tokens {
+        if !fits || !meaningful_reduction(self.before_input_tokens, after_input_tokens) {
             return false;
         }
         if clears_fence {
@@ -381,14 +387,14 @@ impl Driver {
         )))
     }
 
-    /// Finds a measured net-shrinking successor, preferring the shallowest one
+    /// Finds a measured successor meeting the reduction minimum, preferring the shallowest one
     /// that also lands below the fence.
     ///
     /// Placeholder text and the two notices have real size. Replacing another
     /// small result can therefore grow the projection, so candidate depths are
     /// not a monotone predicate and cannot be binary searched. Every accepted
     /// depth is measured independently against the source. The first
-    /// net-shrinking depth that clears the fence is therefore the shallowest
+    /// qualifying depth that clears the fence is therefore the shallowest
     /// qualifying depth and ends the search. If none clears the fence, every
     /// depth is measured and the smallest fitting successor wins for a fresh
     /// source. An unbound rescue has no comparable source wire and must clear
@@ -813,7 +819,9 @@ fn placeholders_clear_the_fence(status: &ContextStatus, occupied: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::PlaceholderPreference;
+    use super::{AcceptedPlaceholders, PlaceholderPreference, SourceAudit};
+    use crate::ContextEvaluationAudit;
+    use plakous_model::{Digest, DigestDomain};
 
     fn choose(
         before: u64,
@@ -828,6 +836,38 @@ mod tests {
             }
         }
         (preference.smallest(), prepared)
+    }
+
+    #[test]
+    fn near_null_placeholder_is_not_an_eligible_fold() {
+        for clears in [false, true] {
+            assert_eq!(choose(1_000, [(1, true, clears, 951)]), (None, 1));
+            assert_eq!(choose(1_000, [(1, true, clears, 950)]), (Some(1), 1));
+        }
+        assert_eq!(choose(1_001, [(1, true, false, 951)]), (None, 1));
+        assert_eq!(choose(1_001, [(1, true, false, 950)]), (Some(1), 1));
+    }
+
+    #[test]
+    fn fresh_source_audit_enforces_the_minimum_even_below_the_landing_fence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let digest = Digest::sha256(DigestDomain::ContextAdmission, 1, &[b"boundary"])?;
+        let measurement = Digest::sha256(DigestDomain::TokenMeasurement, 1, &[b"boundary"])?;
+        let source = SourceAudit::Fresh {
+            audit: ContextEvaluationAudit::new(measurement, digest, 1_000)?,
+            occupancy: Some(1_000),
+        };
+        for (after, eligible) in [(951, false), (950, true)] {
+            let candidate = AcceptedPlaceholders {
+                count: 1,
+                after: ContextEvaluationAudit::new(measurement, digest, after)?,
+                occupancy_after: Some(after),
+                wire_digest: Some(digest),
+                clears_fence: true,
+            };
+            assert_eq!(source.accepts(&candidate), eligible);
+        }
+        Ok(())
     }
 
     #[test]

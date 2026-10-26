@@ -6,6 +6,34 @@ use crate::{
 };
 use uuid::Uuid;
 
+#[test]
+fn million_history_parents_drop_on_a_small_stack() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut history = CanonicalHistory::empty().expect("empty history");
+            for _ in 0..1_000_000 {
+                history = CanonicalHistory {
+                    inner: Arc::new(CanonicalHistoryInner {
+                        parent: Some(history.inner.clone()),
+                        roots: Arc::new([]),
+                        entries: None,
+                        appended_segment: None,
+                        identity: history.inner.identity,
+                        segment_count: 0,
+                        item_count: 0,
+                        segment_retained_bytes: 0,
+                        tree_node_count: 0,
+                    }),
+                };
+            }
+            drop(history);
+        })
+        .expect("spawn drop thread")
+        .join()
+        .expect("history-chain drop thread");
+}
+
 fn entry(value: u128, actor: Actor, block: ContentBlock) -> ConversationItem {
     ConversationItem::new(
         EntryId::try_from(Uuid::from_u128(value)).expect("entry ID"),

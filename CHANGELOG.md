@@ -182,6 +182,10 @@ one cross-build carrier (a build imports its own and the previous version).
   instead of a grant lineage, so a same-account re-login can continue and
   reopen. This identity change rides unreleased epoch 33 without changing
   the embedded history or binding encodings.
+  Unreleased epoch 33 also accepts the exact Tight compaction instruction in
+  recovery, additively, without changing serialized fields or state keys.
+  Older builds refuse that request as a non-source-derived compaction input;
+  rollback to an older epoch-33 build is not supported.
   Carrying a Claude session from an epoch-32 build preserves visible history
   but drops provider replay once: the account digest changes from grant lineage
   to the provider UUID, so old opaque replay is not retagged to the new scope.

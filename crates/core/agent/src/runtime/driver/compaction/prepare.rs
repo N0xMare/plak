@@ -7,6 +7,7 @@ use super::{
 use crate::runtime::OperationId;
 use crate::runtime::admission::validate_configuration_runtime_authority;
 use crate::runtime::compaction::fold::compact_diagnostic;
+use crate::runtime::compaction::instruction::CompactionInstruction;
 use crate::runtime::compaction::record::{compaction_attempt_id, compaction_operation_component};
 use crate::runtime::compaction::request::{
     compact_runtime_endpoint_error, compact_runtime_endpoint_rejected, harness_compaction_input,
@@ -118,10 +119,12 @@ impl Driver {
             }
         }
         if let Some(cut) = cut {
+            let instruction =
+                CompactionInstruction::for_ledger(measured.checkpoint.manifest().ledger());
             // With no tool results and an identical portable input there is
             // nothing to fit beyond the separately admitted dispatch request.
             let has_distinct_candidate = harness_compaction_reduction_count(&cut) > 1
-                || harness_compaction_input_at_depth(&cut, identity.workflow_id, 1)
+                || harness_compaction_input_at_depth(&cut, identity.workflow_id, 1, instruction)
                     .map_err(|error| compact_runtime_endpoint_error(&error))?
                     != *plan.request.input();
             if has_distinct_candidate {
@@ -131,6 +134,7 @@ impl Driver {
                     &measured.cache_affinity,
                     &cut,
                     &mut plan.request,
+                    instruction,
                 )
                 .await?;
             }
@@ -209,7 +213,9 @@ impl Driver {
             runtime.provider_configuration.effective_identity(),
         )
         .map_err(|error| compact_runtime_endpoint_error(&error))?;
-        let input = harness_compaction_input(&cut, identity.workflow_id)
+        let instruction =
+            CompactionInstruction::for_ledger(measured.checkpoint.manifest().ledger());
+        let input = harness_compaction_input(&cut, identity.workflow_id, instruction)
             .map_err(|error| compact_runtime_endpoint_error(&error))?;
         let plan = CompactionRequestPlan {
             request: ModelRequest::from_parts(
@@ -237,13 +243,14 @@ impl Driver {
         cache_affinity: &ModelCacheAffinity,
         cut: &SemanticCompactionCut,
         request: &mut ModelRequest,
+        instruction: CompactionInstruction,
     ) -> Result<(), AgentSessionEndpointError> {
         // Measure each candidate with its own offline attempt identity.
         // Only the selected request is prepared with the provider attempt
         // below, persisted, and dispatched. A refusal during a fit probe
         // must never consume or reuse that dispatch capability.
         for depth in 0..=harness_compaction_reduction_count(cut) {
-            let input = harness_compaction_input_at_depth(cut, workflow_id, depth)
+            let input = harness_compaction_input_at_depth(cut, workflow_id, depth, instruction)
                 .map_err(|error| compact_runtime_endpoint_error(&error))?;
             let candidate = ModelRequest::from_parts(
                 request.stable_prefix().clone(),

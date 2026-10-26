@@ -625,6 +625,18 @@ struct CanonicalHistoryInner {
     tree_node_count: usize,
 }
 
+impl Drop for CanonicalHistoryInner {
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(link) = parent {
+            let Ok(mut node) = Arc::try_unwrap(link) else {
+                break;
+            };
+            parent = node.parent.take();
+        }
+    }
+}
+
 /// Immutable provider-neutral canonical history composed of shared groups.
 #[derive(Clone, Debug)]
 pub struct CanonicalHistory {

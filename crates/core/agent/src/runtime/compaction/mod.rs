@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 pub(in crate::runtime) mod live;
 
+pub(in crate::runtime) mod instruction;
+
 pub(in crate::runtime) mod record;
 
 pub(in crate::runtime) mod request;

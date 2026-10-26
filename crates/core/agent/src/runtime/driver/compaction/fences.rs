@@ -594,7 +594,7 @@ impl Driver {
                     workflow_id,
                     CompactionEventOutcome::NoEligibleRange,
                     None,
-                    Some("no strictly shrinking offline successor fits".to_owned()),
+                    Some("no offline successor meets the 5% reduction minimum and fits".to_owned()),
                     None,
                 );
                 Ok(TurnCompactionOutcome::Exhausted {

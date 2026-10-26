@@ -31,6 +31,79 @@ use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn million_command_links_drop_on_a_small_stack() -> TestResult {
+    let identity = digest(DigestDomain::Blob, b"drop-chain")?;
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let mut tail = None;
+            for _ in 0..1_000_000 {
+                tail = Some(Arc::new(LedgerNode {
+                    record: (),
+                    previous: tail,
+                    identity,
+                }));
+            }
+            let shared = tail.clone();
+            drop(tail);
+            drop(shared);
+        })?
+        .join()
+        .map_err(|_| "command-chain drop thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn million_operation_mutations_drop_on_a_small_stack() -> TestResult {
+    let entry = AuthenticatedOperationRecord::new(prepared_operation(1)?)?;
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let mut tail = None;
+            for _ in 0..1_000_000 {
+                tail = Some(Arc::new(OperationLedgerMutation {
+                    previous: tail,
+                    inserted: false,
+                    operation_identity: entry.identity,
+                    entry: entry.clone(),
+                }));
+            }
+            drop(tail);
+        })?
+        .join()
+        .map_err(|_| "operation-chain drop thread panicked")?;
+    Ok(())
+}
+
+#[test]
+fn ledger_drop_stops_at_a_shared_ancestor_and_releases_each_record_once() -> TestResult {
+    struct Record(Arc<std::sync::atomic::AtomicUsize>);
+    impl Drop for Record {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    let dropped = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let identity = digest(DigestDomain::Blob, b"shared-drop-chain")?;
+    let ancestor = Arc::new(LedgerNode {
+        record: Record(Arc::clone(&dropped)),
+        previous: None,
+        identity,
+    });
+    let tail = Arc::new(LedgerNode {
+        record: Record(Arc::clone(&dropped)),
+        previous: Some(Arc::clone(&ancestor)),
+        identity,
+    });
+    drop(tail);
+    assert_eq!(Arc::strong_count(&ancestor), 1);
+    assert_eq!(dropped.load(std::sync::atomic::Ordering::Relaxed), 1);
+    drop(ancestor);
+    assert_eq!(dropped.load(std::sync::atomic::Ordering::Relaxed), 2);
+    Ok(())
+}
+
 fn numeric_tool_segment(raw: &str) -> TestResult<HistorySegment> {
     let call_id = CallId::try_from(Uuid::from_u128(101))?;
     let correlation = ToolCorrelation::default();

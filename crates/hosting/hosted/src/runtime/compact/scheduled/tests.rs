@@ -4,7 +4,7 @@ use super::{
     SCHEDULED_COMPACT_FAILED_FITS_NOTE, SCHEDULED_COMPACT_MAIL_DEFERRED_NOTE,
     SCHEDULED_COMPACT_MAIL_UNREAD_CLAUSE, SCHEDULED_COMPACT_NOTHING_ELIGIBLE_NOTE, ScheduledPrompt,
     run_scheduled_compaction_until_fits_with, scheduled_compact_queue_drain_state,
-    scheduled_prompt_sendable,
+    scheduled_paid_outcome, scheduled_prompt_sendable,
 };
 use crate::context::test_verdicts::idle_fence_schedules;
 use crate::context::{ContextDisposition, ContextProjection, PreparedInputCount};
@@ -25,6 +25,38 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
+
+#[test]
+fn a_free_commit_after_a_paid_failure_never_pays_for_a_scheduled_follow_on() {
+    let due = ContextProjection::test_fits(
+        PreparedInputCount::UpperBound(99_000),
+        100_000,
+        100_000,
+        None,
+    )
+    .with_anchored_occupied_tokens(99_000);
+    assert!(due.compaction_verdict().is_due());
+    for after in [due, due.with_disposition(ContextDisposition::WouldOverflow)] {
+        let pass = scheduled_paid_outcome(CompactPass::Committed, true);
+        let (outcome, ran, _, _) = run_scripted_scheduled_loop(vec![pass], after, None);
+        assert_eq!(ran, 1);
+        assert_eq!(
+            outcome,
+            if after.disposition() == ContextDisposition::Fits {
+                ScheduledPrompt::Send {
+                    over_window: false,
+                    drop_mail: false,
+                }
+            } else {
+                ScheduledPrompt::Parked
+            }
+        );
+    }
+    assert_eq!(
+        scheduled_paid_outcome(CompactPass::Committed, false),
+        CompactPass::Committed
+    );
+}
 
 /// A scheduled pass that finds nothing to compact never pays for a
 /// follow-on, and the prompt goes to ordinary turn admission whether or

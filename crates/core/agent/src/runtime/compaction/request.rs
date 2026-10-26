@@ -4,13 +4,14 @@ use crate::compaction_verdict::input_headroom_tokens;
 use crate::runtime::AgentBuilder;
 use crate::runtime::admission::sealed_runtime_admission;
 use crate::runtime::compaction::fold::{compact_diagnostic, measure_compaction_successor};
+use crate::runtime::compaction::instruction::CompactionInstruction;
 use crate::runtime::compaction::placeholder::{
     collect_compaction_reduction_candidates, replace_compaction_result_body,
 };
 use crate::runtime::compaction::record::{compaction_attempt_id, compaction_uuid};
 use crate::runtime::compaction::{
-    COMPACTION_INSTRUCTION, DurableCompactionIdentity, DurableCompactionRequestRecord,
-    ExactCompactionRuntime, NATIVE_COMPACTION_NAMESPACE, NATIVE_COMPACTION_TRIGGER_V1,
+    DurableCompactionIdentity, DurableCompactionRequestRecord, ExactCompactionRuntime,
+    NATIVE_COMPACTION_NAMESPACE, NATIVE_COMPACTION_TRIGGER_V1,
 };
 use crate::runtime::continuation::runtime_manifest_error;
 use crate::runtime::durable::branch::validate_durable_builder;
@@ -343,6 +344,7 @@ pub(in crate::runtime) fn native_compaction_dispatch_prefix(
 pub(in crate::runtime) fn harness_compaction_input(
     cut: &SemanticCompactionCut,
     workflow_id: SessionWorkflowId,
+    instruction: CompactionInstruction,
 ) -> Result<ConversationView, AgentError> {
     let entry_id = EntryId::try_from(compaction_uuid(workflow_id, b"compact-user-instruction")?)
         .map_err(|error| AgentError::from_identity(&error))?;
@@ -350,7 +352,7 @@ pub(in crate::runtime) fn harness_compaction_input(
         entry_id,
         Actor::User,
         vec![ContentBlock::Text(
-            TextBlock::new(COMPACTION_INSTRUCTION, None).map_err(|_| {
+            TextBlock::new(instruction.text(), None).map_err(|_| {
                 AgentError::new(
                     AgentErrorKind::Internal,
                     "compaction user instruction is invalid",
@@ -400,8 +402,9 @@ pub(in crate::runtime) fn harness_compaction_input_at_depth(
     cut: &SemanticCompactionCut,
     workflow_id: SessionWorkflowId,
     depth: usize,
+    instruction: CompactionInstruction,
 ) -> Result<ConversationView, AgentError> {
-    let input = harness_compaction_input(cut, workflow_id)?;
+    let input = harness_compaction_input(cut, workflow_id, instruction)?;
     if depth == 0 {
         return Ok(input);
     }
@@ -426,8 +429,8 @@ pub(in crate::runtime) fn harness_compaction_input_at_depth(
     ))
 }
 
-/// Validates against the CLOSED source-derived sequence, including R0 for old
-/// requests. Never recognizes a reduction by trusting a marker or replacement
+/// Validates against the CLOSED source-derived sequence for both instructions.
+/// Never recognizes a reduction by trusting a marker or replacement
 /// text. Incremental rewriting avoids rebuilding earlier depths on recovery.
 /// No provider measurement or dispatch is performed here.
 pub(in crate::runtime) fn validate_harness_compaction_input(
@@ -435,7 +438,21 @@ pub(in crate::runtime) fn validate_harness_compaction_input(
     workflow_id: SessionWorkflowId,
     input: &ConversationView,
 ) -> Result<Option<usize>, AgentError> {
-    let mut expected = harness_compaction_input(cut, workflow_id)?;
+    for instruction in CompactionInstruction::ALL {
+        if let Some(depth) = validate_harness_instruction(cut, workflow_id, input, instruction)? {
+            return Ok(Some(depth));
+        }
+    }
+    Ok(None)
+}
+
+fn validate_harness_instruction(
+    cut: &SemanticCompactionCut,
+    workflow_id: SessionWorkflowId,
+    input: &ConversationView,
+    instruction: CompactionInstruction,
+) -> Result<Option<usize>, AgentError> {
+    let mut expected = harness_compaction_input(cut, workflow_id, instruction)?;
     if *input == expected {
         return Ok(Some(0));
     }

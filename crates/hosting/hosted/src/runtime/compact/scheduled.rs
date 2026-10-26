@@ -56,7 +56,7 @@ pub(in crate::runtime) fn run_scheduled_compaction_until_fits<
         last_enrolled_source_bytes(opened),
         bare.is_some(),
         |config| {
-            handle_compact(
+            let pass = handle_compact(
                 executor,
                 watch,
                 config,
@@ -66,7 +66,11 @@ pub(in crate::runtime) fn run_scheduled_compaction_until_fits<
                 log,
                 sessions::ProductCompactReason::Scheduled,
                 Some(command),
-            )
+            )?;
+            Ok(scheduled_paid_outcome(
+                pass,
+                opened.paid_fold_failed_since_last_round(),
+            ))
         },
         |use_bare| {
             let input = bare.filter(|_| use_bare).unwrap_or(command);
@@ -77,6 +81,18 @@ pub(in crate::runtime) fn run_scheduled_compaction_until_fits<
             )
         },
     )
+}
+
+/// A free commit after a paid failure must not buy a follow-on at this fence.
+fn scheduled_paid_outcome(pass: CompactPass, paid_failed: bool) -> CompactPass {
+    if pass == CompactPass::Committed && paid_failed {
+        CompactPass::Failed {
+            note: "paid summary failed; offline compaction committed without a paid retry"
+                .to_owned(),
+        }
+    } else {
+        pass
+    }
 }
 
 /// Whether a remeasured prompt goes to admission without another fold.

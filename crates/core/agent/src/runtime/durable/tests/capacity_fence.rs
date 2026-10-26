@@ -790,7 +790,7 @@ async fn native_protected_refusal_authorizes_portable_even_when_placeholders_fit
 }
 
 #[tokio::test]
-async fn native_protected_refusal_keeps_unchanged_successor_when_portable_notice_expands()
+async fn native_protected_refusal_rejects_near_null_successor_when_portable_notice_expands()
 -> TestResult {
     preparable_native_placeholder_case(true, true).await
 }
@@ -923,8 +923,25 @@ async fn preparable_native_placeholder_case(protected: bool, tiny_replay: bool) 
             AgentCompactionReason::Manual,
             builder,
         ))
-        .await
-        .map_err(|error| format!("{error:?}"))?;
+        .await;
+    if tiny_replay {
+        assert!(
+            matches!(&outcome, Err(AgentSessionEndpointError::Rejected { reason })
+                if reason.contains("no fitting offline successor")),
+            "a near-null saving must not consume a fold: {outcome:?}"
+        );
+        assert_eq!(agent.checkpoint().id(), source.checkpoint_id);
+        assert_eq!(
+            compact_model.paid_compaction_calls.load(Ordering::Acquire),
+            0
+        );
+        assert!(!crate::runtime::driver::paid_fold_failed_since_last_round(
+            &agent.checkpoint()
+        ));
+        agent.shutdown().await?;
+        return Ok(());
+    }
+    let outcome = outcome.map_err(|error| format!("{error:?}"))?;
     assert!(
         matches!(outcome, AgentCompactSessionOutcome::Compacted { .. }),
         "{outcome:?}"
@@ -1355,7 +1372,7 @@ async fn turn_fence_without_a_shrinking_offline_successor_reports_why() -> TestR
     assert_eq!(finished[1].0, CompactionEventOutcome::NoEligibleRange);
     assert_eq!(
         finished[1].1.as_deref(),
-        Some("no strictly shrinking offline successor fits")
+        Some("no offline successor meets the 5% reduction minimum and fits")
     );
     assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 1);
     agent.shutdown().await?;
