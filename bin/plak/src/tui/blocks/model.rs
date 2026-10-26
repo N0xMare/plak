@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use crate::tui::presentation::{ActivityKind, ActivityState};
+use crate::tui::presentation::ActivityKind;
 use plakous_host_protocol::views::CallDetailOutcome;
 use plakous_host_protocol::views::transcript::{
     AgentMilestone, MilestoneEvent, NoticePlacement, NoticeScope, NoticeTone, ProcessNotice,
@@ -487,21 +487,10 @@ impl ScrollBlock {
     /// A persisted tool row, with the state label a live row of the same call
     /// earned: a resumed `12.3s` does not reload as `12315ms`, a rejection
     /// stays `⊘` and a failure keeps its detail.
-    fn from_tool_item(tool: ToolItem) -> Self {
+    pub(in crate::tui) fn from_tool_item(tool: ToolItem) -> Self {
         let kind = tool.kind;
-        let state = match tool.activity_state() {
-            ActivityState::Pending | ActivityState::Running => "running".to_owned(),
-            ActivityState::Succeeded => tool.duration_ms().map_or_else(
-                || "done".to_owned(),
-                |ms| format!("done:{}", format_tool_elapsed(Duration::from_millis(ms))),
-            ),
-            ActivityState::Failed { reason } => match reason {
-                Some(reason) if reason.starts_with("rejected") || reason == "overflow" => reason,
-                Some(reason) => format!("failed:{reason}"),
-                None => "failed".to_owned(),
-            },
-            ActivityState::Cancelled => "cancelled".to_owned(),
-        };
+        let state =
+            super::presented_tool_state(&tool.state, tool.duration_ms().map(Duration::from_millis));
         Self::Tool {
             call_id: Some(tool.call_id),
             // Host lineage only: a resumed transcript folds exactly like the

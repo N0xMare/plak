@@ -2,8 +2,8 @@
 
 use super::{
     App, ControlTab, DisplayMode, Duration, HostEvent, PROMPT_HISTORY_LIMIT, ResumeMenu,
-    ScrollBlock, SettingsMenu, UserAction, blocks, format_tool_elapsed,
-    terminal_state_keeping_duration, theme_for, tool_is_running, unix_now, unknown_context_usage,
+    ScrollBlock, SettingsMenu, UserAction, blocks, terminal_state_keeping_duration, theme_for,
+    tool_is_running, unix_now, unknown_context_usage,
 };
 use crate::tui::SurfaceObservation;
 
@@ -343,7 +343,7 @@ impl App {
             HostEvent::ToolLine {
                 call_id,
                 name,
-                mut state,
+                state,
                 subject,
                 detail,
                 parent_call_id,
@@ -381,6 +381,7 @@ impl App {
                     ScrollBlock::Tool { state, .. } => !tool_is_running(state),
                     _ => false,
                 });
+                let mut elapsed = None;
                 if tool_is_running(&state) {
                     // A Compose head the host put back in flight after a yield is
                     // not a new measurement: re-arming the clock replaced the
@@ -410,23 +411,19 @@ impl App {
                     if let Some(key) = call_id.as_deref().and_then(|id| self.detail_key(id)) {
                         self.call_details.note_ended(key);
                     }
-                    let measured = self.pane.tool_started.remove(&timing_key).map(|started| {
-                        format_tool_elapsed(self.now().saturating_duration_since(started))
-                    });
-                    let timing = duration_ms
-                        .map(|ms| format_tool_elapsed(Duration::from_millis(ms)))
+                    let measured = self
+                        .pane
+                        .tool_started
+                        .remove(&timing_key)
+                        .map(|started| self.now().saturating_duration_since(started));
+                    elapsed = started_at_ms
+                        .zip(finished_at_ms)
+                        .and_then(|(start, finish)| finish.checked_sub(start))
+                        .or(duration_ms)
+                        .map(Duration::from_millis)
                         .or(measured);
-                    if let Some(timing) = timing {
-                        if state == "done" || state == "overflow" {
-                            state = format!("{state}:{timing}");
-                        } else {
-                            // Every terminal keeps its elapsed, `cancelled` and
-                            // `rejected:*` included.
-                            state.push_str(" · ");
-                            state.push_str(&timing);
-                        }
-                    }
                 }
+                let state = blocks::presented_tool_state(&state, elapsed);
                 let before_bytes = idx.map_or(0, |idx| self.pane.blocks[idx].retained_bytes());
                 let lineage_bearing = parent_call_id.is_some()
                     || cell_id.is_some()
@@ -533,23 +530,27 @@ impl App {
                     }
                     return;
                 }
-                self.push_live_block(ScrollBlock::Tool {
-                    call_id,
-                    parent_call_id,
-                    cell_id,
-                    kind,
-                    name,
-                    state,
-                    subject,
-                    detail,
-                    mode: DisplayMode::Collapsed,
-                    manual: false,
-                    group_open: false,
-                    wait,
-                    started_at_ms,
-                    finished_at_ms,
-                    view: blocks::ItemView::default(),
-                });
+                let optional_id = call_id.clone();
+                let mut block = ScrollBlock::from_tool_item(
+                    plakous_host_protocol::views::transcript::ToolItem {
+                        call_id: call_id.unwrap_or_default(),
+                        parent_call_id,
+                        cell_id,
+                        kind,
+                        name,
+                        exposed_name: None,
+                        state,
+                        subject,
+                        detail,
+                        wait,
+                        started_at_ms,
+                        finished_at_ms,
+                    },
+                );
+                if let ScrollBlock::Tool { call_id, .. } = &mut block {
+                    *call_id = optional_id;
+                }
+                self.push_live_block(block);
             }
             HostEvent::ReasoningDelta { location_key, text } => {
                 if root {

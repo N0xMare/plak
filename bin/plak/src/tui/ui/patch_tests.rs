@@ -187,6 +187,71 @@ fn patch_block_work_depends_only_on_changed_keys_for_root_and_child() {
 }
 
 #[test]
+fn live_and_keyed_tools_share_lifecycle_labels_and_terminal_elapsed() {
+    for state in [
+        "start",
+        "running",
+        "done",
+        "succeeded",
+        "failed",
+        "failed:exit 1",
+        "rejected:Rule",
+        "cancelled",
+        "cancelled after 1 of 2",
+        "overflow",
+        "interrupted",
+    ] {
+        let mut tool = tool_item("same-tool", "read_file");
+        tool.state = state.into();
+        tool.subject = Some("src/main.rs".into());
+        tool.detail = Some("fixture detail".into());
+        tool.started_at_ms = Some(1_000);
+        let running = super::tool_is_running(state);
+        tool.finished_at_ms = (!running).then_some(2_200);
+        let mut live = App::new(launch_basic(), true);
+        pin_clock(&mut live);
+        live.apply_host_event(HostEvent::ToolLine {
+            call_id: Some(tool.call_id.clone()),
+            parent_call_id: None,
+            cell_id: None,
+            kind: tool.kind,
+            name: tool.name.clone(),
+            state: tool.state.clone(),
+            subject: tool.subject.clone(),
+            detail: tool.detail.clone(),
+            duration_ms: (!running).then_some(1_200),
+            started_at_ms: tool.started_at_ms,
+            finished_at_ms: tool.finished_at_ms,
+            wait: None,
+        });
+        let expected = live.pane.blocks.clone();
+        for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+            let mut keyed = App::new(launch_basic(), true);
+            pin_clock(&mut keyed);
+            if matches!(scope, TranscriptScope::Agent(_)) {
+                keyed.open_agent_view("c1".into(), "child".into());
+            }
+            let mut baseline = snapshot(
+                1,
+                &BTreeMap::from([(
+                    RowKey::new(1, Lane::Runtime, 0),
+                    TranscriptRow::Tool(tool.clone()),
+                )]),
+            );
+            baseline.scope = scope.clone();
+            keyed.apply_host_event(HostEvent::PresentationSnapshot(baseline));
+            assert_eq!(keyed.pane.blocks, expected, "state={state} scope={scope:?}");
+        }
+        if !running {
+            assert!(
+                matches!(&expected[0], super::ScrollBlock::Tool { state, .. }
+                if super::blocks::recorded_tool_duration(state) == Some("1.2s"))
+            );
+        }
+    }
+}
+
+#[test]
 fn raw_streaming_never_rebuilds_keyed_history_in_root_or_child_panes() {
     use plakous_host_protocol::views::transcript::TranscriptStreamDelta;
     for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {

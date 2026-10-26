@@ -71,8 +71,8 @@ fn resume_controls_suffix(values: [Option<String>; 2]) -> String {
 
 use crate::tui::blocks::{
     self, DisplayMode, MAX_LIVE_TRANSCRIPT_BLOCKS, MAX_LIVE_TRANSCRIPT_BYTES, PROMPT_PREFIX,
-    ScrollBlock, TRANSCRIPT_TRUNCATION_MARKER, TranscriptChange, format_tool_elapsed,
-    layout_anchor, sticky_user_lines, terminal_state_keeping_duration, tool_is_running,
+    ScrollBlock, TRANSCRIPT_TRUNCATION_MARKER, TranscriptChange, layout_anchor, sticky_user_lines,
+    terminal_state_keeping_duration, tool_is_running,
 };
 use crate::tui::composer_selection::{
     ClickSelection, ComposerClick, ComposerSelection, ComposerUndo, EditKind, PointerButton,

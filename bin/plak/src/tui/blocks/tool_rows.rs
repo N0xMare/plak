@@ -4,7 +4,7 @@
 use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;
 
-use crate::tui::blocks::{SUBMILLISECOND_ELAPSED, wrap_plain};
+use crate::tui::blocks::{SUBMILLISECOND_ELAPSED, format_tool_elapsed, wrap_plain};
 use crate::tui::presentation::{ActivityKind, McpCall};
 
 /// Humanize a canonical tool name (`run_process` → `run process`).
@@ -410,6 +410,38 @@ pub fn recorded_tool_duration(state: &str) -> Option<&str> {
             .map(|(_, timing)| timing)
             .filter(|timing| is_elapsed_label(timing))
     })
+}
+
+/// The same lifecycle label for live observations and keyed/restored tools.
+/// Host stamps take precedence; an unstamped update retains an embedded time.
+pub(in crate::tui) fn presented_tool_state(
+    state: &str,
+    elapsed: Option<std::time::Duration>,
+) -> String {
+    let state = match state {
+        "start" => "running",
+        "succeeded" | "completed" => "done",
+        _ => state,
+    };
+    if tool_is_running(state) {
+        return state.to_owned();
+    }
+    let Some(elapsed) = elapsed else {
+        return state.to_owned();
+    };
+    let bare = if tool_duration_label(state).is_some() {
+        state.split_once(':').map_or(state, |(state, _)| state)
+    } else if recorded_tool_duration(state).is_some() {
+        state.rsplit_once(" · ").map_or(state, |(state, _)| state)
+    } else {
+        state
+    };
+    let elapsed = format_tool_elapsed(elapsed);
+    if matches!(bare, "done" | "overflow") {
+        format!("{bare}:{elapsed}")
+    } else {
+        format!("{bare} · {elapsed}")
+    }
 }
 
 /// Folds a later terminal update into the state a row already recorded.

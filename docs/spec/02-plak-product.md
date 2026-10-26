@@ -1851,6 +1851,10 @@ prepared-request boundary before consuming its model output. The earlier
 `SteeringApplied` observation alone is not commit evidence. This places the
 applied steer after the completed round's prose/tools, including during live
 viewing, and never adds a row for a steer accepted but not applied.
+Live tool observations and keyed/restored tool rows use one TUI tool presenter
+and lifecycle-label function. All terminal outcomes retain their elapsed time,
+including rejection, cancellation and overflow; host start/finish stamps take
+precedence over duration-only reports and the local monotonic fallback.
 The TUI keeps a keyed baseline and applies only exact-revision patches,
 updating only the indexed blocks named by changed keys. Tool and thinking UI
 state stays on its existing block; local approval rows, refusal messages and
