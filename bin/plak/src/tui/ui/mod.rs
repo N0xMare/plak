@@ -494,6 +494,8 @@ pub(crate) struct App {
     /// Drafts the host acknowledged whose own row has not landed yet; they
     /// stay provisional `sending…` rows until it does.
     accepted_drafts: VecDeque<provisional::AcceptedDraft>,
+    /// Steers retired by queued acknowledgements whose applied ack is pending.
+    queued_steers_retired: usize,
     /// Exact queued edit awaiting a durable host disposition.
     pending_queue_edit: Option<(String, String)>,
     /// Prior submitted prompts (newest last).
@@ -873,6 +875,7 @@ impl App {
             queue_editing: None,
             pending_drafts: VecDeque::new(),
             accepted_drafts: VecDeque::new(),
+            queued_steers_retired: 0,
             pending_queue_edit: None,
             prompt_history: Vec::new(),
             recovered_drafts: Vec::new(),

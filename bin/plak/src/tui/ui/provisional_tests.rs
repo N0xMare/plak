@@ -368,6 +368,66 @@ fn a_steer_is_provisional_until_its_steer_row_lands() {
     );
 }
 
+#[test]
+fn an_applied_steer_ack_keeps_the_next_steer_provisional_until_its_queued_ack() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.set_input("steer A".into());
+    let first = app.submit_line(true).expect("first steer");
+    dispatch_action(&mut app, &first, Some(&sender));
+    app.apply_host_event(HostEvent::DraftAccepted(first));
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "queued".into(),
+        position: Some(1),
+    });
+    assert_eq!(showing(&mut app, "sending…"), Vec::<String>::new());
+    app.set_input("steer B".into());
+    let second = app.submit_line(true).expect("second steer");
+    dispatch_action(&mut app, &second, Some(&sender));
+    app.apply_host_event(HostEvent::DraftAccepted(second));
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "applied".into(),
+        position: None,
+    });
+    let provisional = showing(&mut app, "steer B");
+    assert!(
+        provisional.len() == 1 && provisional[0].contains("sending…"),
+        "the first steer's application cannot acknowledge the second: {provisional:?}"
+    );
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "queued".into(),
+        position: Some(1),
+    });
+    assert_eq!(showing(&mut app, "sending…"), Vec::<String>::new());
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "applied".into(),
+        position: None,
+    });
+    assert_eq!(showing(&mut app, "sending…"), Vec::<String>::new());
+}
+
+#[test]
+fn an_applied_steer_ack_retires_a_draft_accepted_after_its_queued_ack() {
+    let (sender, _receiver) = user_action_channel();
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.set_input("acknowledgements raced".into());
+    let action = app.submit_line(true).expect("steer");
+    dispatch_action(&mut app, &action, Some(&sender));
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "queued".into(),
+        position: Some(1),
+    });
+    app.apply_host_event(HostEvent::DraftAccepted(action));
+    assert_eq!(showing(&mut app, "sending…").len(), 1);
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "applied".into(),
+        position: None,
+    });
+    assert_eq!(showing(&mut app, "sending…"), Vec::<String>::new());
+}
+
 /// The reviewed look of every provisional kind: an idle prompt at the
 /// transcript tail, and a follow-up and a steer under a host queue row.
 #[test]

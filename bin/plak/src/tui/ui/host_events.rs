@@ -763,6 +763,7 @@ impl App {
             }
             HostEvent::ClearView => {
                 self.accepted_drafts.clear();
+                self.queued_steers_retired = 0;
                 self.clear_pending = false;
                 self.last_turn = None;
                 self.pane.blocks.clear();
@@ -1095,6 +1096,7 @@ impl App {
                     self.phase_started = Some(self.now());
                 }
                 if !busy {
+                    self.queued_steers_retired = 0;
                     self.turn_started = None;
                     self.phase_started = None;
                     self.model_request_started = None;
@@ -1195,11 +1197,17 @@ impl App {
             HostEvent::SteerAck { state, .. } => {
                 match state.as_str() {
                     "queued" => {
-                        self.retire_accepted_steer();
+                        if self.retire_accepted_steer() {
+                            self.queued_steers_retired += 1;
+                        }
                         self.composer_chrome.sent_steers += 1;
                     }
                     "applied" => {
-                        self.retire_accepted_steer();
+                        if self.queued_steers_retired == 0 {
+                            self.retire_accepted_steer();
+                        } else {
+                            self.queued_steers_retired -= 1;
+                        }
                         self.composer_chrome.sent_steers =
                             self.composer_chrome.sent_steers.saturating_sub(1);
                     }

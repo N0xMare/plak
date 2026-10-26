@@ -49,14 +49,16 @@ impl App {
     }
 
     /// The host acknowledged the oldest accepted steer in its own chrome.
-    pub(super) fn retire_accepted_steer(&mut self) {
+    pub(super) fn retire_accepted_steer(&mut self) -> bool {
         if let Some(index) = self
             .accepted_drafts
             .iter()
             .position(|accepted| matches!(accepted.action, UserAction::Steer(_)))
         {
             self.accepted_drafts.remove(index);
+            return true;
         }
+        false
     }
 
     /// A user row landed: it is the prompt `PromptStarted` named, or else the

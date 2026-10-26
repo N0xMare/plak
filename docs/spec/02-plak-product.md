@@ -4390,6 +4390,10 @@ loses the text. An idle prompt retires on its `UserMessage` (the one after the
 `PromptStarted` naming its item); a steer on its `SteerAck` queued or applied
 acknowledgement, when the host's sent/waiting chrome takes over. Its transcript
 row arrives later in the applied canonical patch, not as a live acceptance row. A queued
+retirement is counted until its applied acknowledgement, so applying one steer
+cannot retire a later steer's shelf row. An applied acknowledgement retires a
+provisional steer only when no queued retirement is pending, including when
+the queued acknowledgement preceded `DraftAccepted`. A queued
 prompt retires on the queue snapshot that shows the item its `PromptAdmitted`
 named: at once when the queue already shows it, or else on the next snapshot
 applied, even one the item has left again. The host publishes the snapshot
