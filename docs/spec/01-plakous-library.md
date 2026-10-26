@@ -7655,11 +7655,8 @@ physical dispatch; it seals the current-binding anchor and uses the same
 minimum of anchored item-delta and whole-wire upper bounds as ordinary admission.
 An enrolled reference-client complete-input bound participates in that same
 minimum (§6.8), including for a native request or a fresh harness-summary
-projection that cannot reuse the previous request's item digests. Ciphertext
-and replay inflation must not make every locally transformed summary fail a
-stronger byte-only test than its already-admitted reference envelope. This uses
-only the current descriptor's certified counter, never a guessed conversion
-factor derived from a live session's local/provider ratio.
+projection that cannot reuse the previous request's item digests. Only the
+current descriptor's certified counter takes part.
 It never uses the unanchored bytes/4 permission. Elision is probed only when
 that minimum overflows. The sealed
 fold-span reduction family first elides oversized eligible tool-result bodies,
