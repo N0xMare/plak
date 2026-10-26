@@ -1486,9 +1486,12 @@ the interpreter raises is refused inside the worker, which never forwards one
 to the host; nested tool calls are the only requests that leave it, and the
 host checks each against the allowlist and core admission. Both workers'
 path and SHA-256 are re-checked immediately before spawn. Host `import`
-raises `ModuleNotFoundError`. Production cells are not type-checked
-(`type_check: false`); a stub request (`import_stubs`), if any, receives no
-stubs. `Path.scan` (including `os.scandir`) raises `RuntimeError` explaining
+raises `ModuleNotFoundError`. Python PTC cells run with type checking disabled
+(`type_check: false`). Python SDK cells run with type checking enabled against
+the host-generated SDK stubs; diagnostics end the cell with `type errors;
+nothing ran` before any nested host call (chapter 01 §9.9). A module stub
+request (`import_stubs`), if any, receives no host stubs. `Path.scan`
+(including `os.scandir`) raises `RuntimeError` explaining
 that filesystem
 access is not available in cells and nested tools must be used. This non-`OSError`
 refusal also makes `Path.glob`, `Path.rglob`, `os.walk` and `Path.walk` raise
