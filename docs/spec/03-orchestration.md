@@ -140,8 +140,15 @@ writes to these controls are refused (chapter 07).
 
 The epoch is the only spawn authority a session has: `spawn_agent`, its card
 text, and the binder all read the one roster its tree's digest covers, and
-nothing outside the digest widens it. A successor epoch installs on a
-quiescent tree (a roster apply, or a model rebind that stays on the tree). A
+nothing outside the digest widens it. Changed epoch-scoped orchestration or
+roster configuration is applied by `/reload` on an idle root with no live
+children or background processes: it carries the full history into a new
+session whose tree freezes the current settings at genesis and recompiles the
+root's tool descriptions. The transcript says `orchestration settings changed;
+carried into a new session to apply them` and links `carried forward from <id>`.
+The source keeps its tree and frozen bounds; no config edit silently changes
+an existing tree. Unchanged settings keep exact reopen. A successor epoch may
+also install on a quiescent tree during a model rebind that stays on it. A
 profile's **Fork now** is different: the new session opens a **tree of its
 own**, keyed by its session id, whose genesis freezes the profile's roster.
 The source keeps its tree, epoch, and cards, so its checkpoint reopens with

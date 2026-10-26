@@ -568,8 +568,11 @@ anything is sent, only when that fresh read could not be used: a signed-out or
 quarantined credential names `plak login codex`, `grok`, or `claude`. A same-account
 Claude login preserves the session binding; retry the prompt or `/attach`.
 Another account or a changed model binding refuses exact reopen: restore the
-original login/configuration, or export/import to carry the full history into
-a new session. `/agents` is not a repair for a frozen binding mismatch.
+original login/configuration, or use `/rebind` to carry the full history into
+a new session under current configuration and login. This works while the root
+is unattached; `/reload` from that binding refusal takes the same carry path.
+Both refuse live children and background processes. `/agents` is not a repair
+for a frozen binding mismatch.
 `plak doctor` and `plak status` show the sanitized last refresh failure with its
 time and credential generation; no raw response body or token is retained.
 After fixing the login, retry the prompt: it reads the catalog afresh rather

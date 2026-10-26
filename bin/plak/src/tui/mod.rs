@@ -422,6 +422,11 @@ pub enum TuiOutcome {
 pub enum TuiHandoff {
     /// Open the product configuration editor.
     EditConfig,
+    /// Carry the full history into a new session using the current root binding.
+    Rebind {
+        /// Why exact reopen cannot continue, or the operator's explicit request.
+        cause: String,
+    },
     /// Relaunch the exact recorded session binding in the same Plak process.
     ResumeSession {
         /// Exact durable product session id.

@@ -80,7 +80,7 @@ pub(super) fn execute_config_set(
             .map_err(|error| CliFailure::new(error.into_message()))?;
         let disposition = match outcome {
             topology_product::RosterApplyOutcome::Saved => {
-                "saved; applies at the next session genesis"
+                "saved; applies to new sessions and at the next /reload of an idle session"
             }
             topology_product::RosterApplyOutcome::Applied
             | topology_product::RosterApplyOutcome::AppliedDurabilityUncertain(_) => "applied",

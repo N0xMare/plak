@@ -241,6 +241,16 @@ impl App {
     /// the TUI would close for nothing, so all three refuse. The loop performs
     /// the handoff, because it owns the host mailbox the explicit quit uses.
     fn request_reload(&mut self) -> Option<UserAction> {
+        if self.phase == "not_ready"
+            && let Some(cause) = self.status_detail.clone().filter(|detail| {
+                detail.contains("bound to a different")
+                    || detail.contains("binding mismatch")
+                    || detail.contains("explicit rebind required")
+                    || detail.contains("different account")
+            })
+        {
+            return self.request_rebind(cause);
+        }
         let refusal = self.reload_refusal().or_else(|| {
             crate::build_identity::installed_executable()
                 .is_none()
@@ -251,6 +261,15 @@ impl App {
             return None;
         }
         self.pending_reload = true;
+        None
+    }
+
+    fn request_rebind(&mut self, cause: String) -> Option<UserAction> {
+        if let Some(refusal) = self.reload_refusal() {
+            self.push_block(ScrollBlock::System(refusal.replacen("reload", "rebind", 1)));
+        } else {
+            self.pending_rebind = Some(cause);
+        }
         None
     }
 
@@ -277,6 +296,9 @@ impl App {
                 None
             }
             SlashEffect::Reload => self.request_reload(),
+            SlashEffect::Rebind => self.request_rebind(
+                "explicit /rebind requested under the current configuration and login".to_owned(),
+            ),
             SlashEffect::AttachImage(argument) => {
                 let paths = super::image_paths::PathBase::current()
                     .map(|base| base.named_files(&argument))

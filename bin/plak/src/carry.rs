@@ -7,6 +7,7 @@
 //! empty named state; version 7 is no longer importable.
 
 mod document;
+mod epoch;
 mod export;
 mod history;
 mod import;
@@ -30,6 +31,16 @@ pub(crate) use reload::{CarryCapacityProbe, ReloadProbe, reload_probe};
 pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
 
 pub(crate) use reference::remove_retained_archive;
+
+pub(crate) fn rebind_session(
+    services: &crate::shell::services::Services,
+    record: &crate::store::sessions::SessionRecord,
+    cause: &str,
+) -> crate::CliResult<(crate::store::sessions::SessionRecord, String)> {
+    let document = export_session(services.paths()?, record)
+        .map_err(|error| crate::CliFailure::new(format!("cannot carry this session: {error}")))?;
+    crate::commands::session::rebind_document(services, document, cause)
+}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]

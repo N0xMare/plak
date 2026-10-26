@@ -1178,6 +1178,7 @@ fn new_launch_exact_selection_keeps_selected_binding_instead_of_defaults() {
     product_sessions::save_session(&paths, &mut selected).expect("persist selected session");
 
     apply_tui_handoff(
+        &Services::for_home(paths.clone()),
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
@@ -1576,6 +1577,7 @@ fn recoverable_selected_attach_failure_restores_former_exact_attachment() {
     let mut rollback = None;
 
     apply_tui_handoff(
+        &Services::for_home(paths.clone()),
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
@@ -1632,6 +1634,7 @@ fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
     let mut resume_pending = false;
     let mut rollback = None;
     apply_tui_handoff(
+        &Services::for_home(paths.clone()),
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
@@ -1644,6 +1647,7 @@ fn failed_in_process_resume_switch_keeps_last_attached_rollback_authority() {
     .expect("stage failed selection");
 
     apply_tui_handoff_after_host(
+        &Services::for_home(paths.clone()),
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
@@ -1690,6 +1694,7 @@ fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
     product_sessions::save_session(&paths, &mut selected).expect("persist selected session");
 
     handle_tui_handoff(
+        &Services::for_home(paths.clone()),
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,
@@ -1713,6 +1718,7 @@ fn exact_session_selection_preserves_record_and_refuses_workspace_mismatch() {
     product_sessions::save_session(&paths, &mut mismatched).expect("persist mismatched session");
     let selected_id = active.id.clone();
     let failure = handle_tui_handoff(
+        &Services::for_home(paths.clone()),
         &paths,
         &store::session_records::SqliteSessionStore::new(paths.clone()),
         &mut active,

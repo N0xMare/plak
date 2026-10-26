@@ -79,6 +79,25 @@ pub(crate) fn import_document(
     import_prepared(services, PreparedImport::new(document, local_handoff)?)
 }
 
+pub(crate) fn rebind_document(
+    services: &crate::shell::services::Services,
+    document: crate::carry::CarryDocument,
+    cause: &str,
+) -> CliResult<(product_sessions::SessionRecord, String)> {
+    let estimated_tokens = document.estimated_tokens();
+    let messages = document.message_count();
+    let config = product_config::ProductConfig::load(services.paths()?).map_err(CliFailure::new)?;
+    let carried = document.into_rebound_import(&config, cause)?;
+    import_prepared(
+        services,
+        PreparedImport {
+            carried,
+            estimated_tokens,
+            messages,
+        },
+    )
+}
+
 pub(crate) fn import_prepared(
     services: &crate::shell::services::Services,
     prepared: PreparedImport,

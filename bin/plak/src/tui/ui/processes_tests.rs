@@ -439,6 +439,40 @@ fn reload_rechecks_running_processes_after_an_idle_terminal_snapshot() {
 }
 
 #[test]
+fn unattached_binding_refusal_can_carry_via_reload_or_rebind() {
+    let mut app = fixture();
+    app.apply_process_snapshot(Arc::new(Vec::new()));
+    app.agent_enabled = false;
+    app.phase = "not_ready".into();
+    app.status_detail = Some(
+        "resolve_failed: resolved harness plan is bound to a different model/route/adapter".into(),
+    );
+    app.apply_slash_effect(SlashEffect::Reload);
+    assert!(
+        app.pending_rebind
+            .as_deref()
+            .is_some_and(|cause| cause.contains("bound to a different"))
+    );
+    assert!(!app.pending_reload);
+    app.pending_rebind = None;
+    app.apply_slash_effect(SlashEffect::Rebind);
+    assert!(app.pending_rebind.is_some());
+    app.pending_rebind = None;
+    app.tree_live_descendants = 1;
+    app.apply_slash_effect(SlashEffect::Rebind);
+    assert!(app.pending_rebind.is_none());
+    assert!(blocks_contain(&app, "rebind refused: sub-agents"));
+}
+
+#[test]
+fn rebind_refuses_running_background_processes() {
+    let mut app = fixture();
+    app.apply_slash_effect(SlashEffect::Rebind);
+    assert!(app.pending_rebind.is_none());
+    assert!(blocks_contain(&app, "rebind refused: background processes"));
+}
+
+#[test]
 fn processes_testbackend_stories_match_reviewable_goldens() {
     let mut actual = String::new();
     let theme = SettingsTheme::DefaultDark;

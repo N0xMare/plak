@@ -237,11 +237,12 @@ as the refresh kept the same account binding. For Claude, a new
 `plak login claude` with the same account continues at the next request and
 permits exact session reopen: retry the prompt or `/attach`.
 A different Claude account refuses exact reopen. Restore the original account,
-or export/import the session to carry its full history into a new session under
-the current login. Merely reopening or choosing `/agents` cannot repair a frozen
-binding. Codex and Grok retain their live login-selection fence: a new login
-stops the old running receipt before sending anything and needs explicit carry
-or rebind, even for the same account.
+or use `/rebind` to carry its full history into a new session under
+the current configuration and login, even while the root is unattached.
+`/reload` from a binding mismatch takes the same carry path. Choosing `/agents`
+cannot repair a frozen binding. Codex and Grok retain their live login-selection
+fence: a new login stops the old running receipt before sending anything and
+needs explicit carry or rebind, even for the same account.
 
 Use **one login per machine; never copy credential dirs between hosts**.
 Refresh tokens rotate: refreshing a copied directory can invalidate the source

@@ -224,6 +224,21 @@ A refusal never closes the TUI. When the installed build cannot read this
 build's state, `/reload` carries the session forward into a linked session
 with the full conversation and typed transcript. The handoff reports
 `N messages, ~T tokens; the first request rebuilds the prompt cache`.
+
+`/rebind` carries the full history into a new session under your current root
+configuration and login, even if the old root cannot attach. The new transcript
+links `carried forward from <id>` and names the cause; the old session stays
+unchanged. It refuses while a turn, child or background process is live. A
+different-account or model/route/adapter binding refusal also makes `/reload`
+take this path. Missing login or quarantine alone still needs the named login
+command, not a new binding.
+
+After changing orchestration or roster settings, `/reload` on an idle session
+with no live children/processes carries the history to apply them at fresh
+genesis. It says `orchestration settings changed; carried into a new session to
+apply them`. For example, changing `orchestration.max_children` changes the new
+session's spawn cap, not the old tree's cap. Unchanged settings keep exact
+reopen. Ordinary prompts do not silently replace the epoch.
 Before closing the old session, `/reload` checks the destination route.
 If the estimated conversation exceeds its admitted input window, a confirmation
 shows the route/window and warns that the first prompt will refuse unless the

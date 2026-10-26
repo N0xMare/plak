@@ -56,7 +56,7 @@ fn settle_tui_round(
         if !matches!(
             &ui,
             Ok(tui::TuiOutcome::Handoff {
-                handoff: tui::TuiHandoff::Reload { .. },
+                handoff: tui::TuiHandoff::Reload { .. } | tui::TuiHandoff::Rebind { .. },
                 ..
             })
         ) {
@@ -85,7 +85,7 @@ fn settle_tui_round(
     if matches!(
         &ui,
         Ok(tui::TuiOutcome::Handoff {
-            handoff: tui::TuiHandoff::Reload { .. },
+            handoff: tui::TuiHandoff::Reload { .. } | tui::TuiHandoff::Rebind { .. },
             ..
         })
     ) {
@@ -273,6 +273,7 @@ fn adopt_attached_session(
 }
 
 pub(crate) fn apply_tui_handoff(
+    services: &Services,
     paths: &product_paths::PlakPaths,
     store: &dyn store::session_records::SessionRecordStore,
     record: &mut product_sessions::SessionRecord,
@@ -284,7 +285,14 @@ pub(crate) fn apply_tui_handoff(
 ) -> CliResult<()> {
     let selected_exact_session = matches!(&handoff, tui::TuiHandoff::ResumeSession { .. });
     let former = selected_exact_session.then(|| (record.clone(), *resume, *resume_pending));
-    handle_tui_handoff(paths, store, record, handoff, reload_note)?;
+    let carried = matches!(&handoff, tui::TuiHandoff::Rebind { .. });
+    let previous_id = record.id.clone();
+    handle_tui_handoff(services, paths, store, record, handoff, reload_note)?;
+    if carried && record.id != previous_id {
+        *resume = true;
+        *resume_pending = true;
+        *former_attachment = None;
+    }
     if let Some(former) = former {
         *former_attachment = Some(former);
         *resume = true;
@@ -294,6 +302,7 @@ pub(crate) fn apply_tui_handoff(
 }
 
 pub(crate) fn apply_tui_handoff_after_host(
+    services: &Services,
     paths: &product_paths::PlakPaths,
     store: &dyn store::session_records::SessionRecordStore,
     record: &mut product_sessions::SessionRecord,
@@ -306,10 +315,14 @@ pub(crate) fn apply_tui_handoff_after_host(
     // A failed pending resume must not become the rollback source for another
     // exact selection. Successful publication already cleared the former
     // attachment and `resume_pending` before this boundary.
-    if *resume_pending && former_attachment.is_some() {
+    if *resume_pending
+        && former_attachment.is_some()
+        && !matches!(&handoff, tui::TuiHandoff::Rebind { .. })
+    {
         let _ = restore_former_attachment(record, resume, resume_pending, former_attachment);
     }
     apply_tui_handoff(
+        services,
         paths,
         store,
         record,
@@ -415,7 +428,7 @@ pub(crate) fn launch_tui_with_attacher(
     refuse_without_terminal(services, session_id.as_deref(), resume_picker)?;
     let (launch, rounds) =
         prepare_tui_launch(services, session_id, resume_picker, opening_note, attacher)?;
-    run_tui_rounds(launch, rounds, attacher)
+    run_tui_rounds(services, launch, rounds, attacher)
 }
 
 /// What stays fixed for every round of one TUI launch.
@@ -626,6 +639,7 @@ fn prepare_tui_launch(
 }
 
 fn run_tui_rounds(
+    services: &Services,
     launch: TuiLaunchContext,
     mut state: TuiRoundState,
     attacher: &impl TuiAttacher,
@@ -1020,6 +1034,7 @@ fn run_tui_rounds(
         };
 
         if let Some(outcome) = finish_tui_round(
+            services,
             &paths,
             store.as_ref(),
             &mut state,
@@ -1172,6 +1187,7 @@ fn prepare_deferred_tui_host(
 
 /// Settles one round: re-attach, apply a handoff, or end the launch.
 fn finish_tui_round(
+    services: &Services,
     paths: &product_paths::PlakPaths,
     store: &dyn store::session_records::SessionRecordStore,
     state: &mut TuiRoundState,
@@ -1214,7 +1230,9 @@ fn finish_tui_round(
         }) => {
             if matches!(
                 &handoff,
-                tui::TuiHandoff::EditConfig | tui::TuiHandoff::Reload { .. }
+                tui::TuiHandoff::EditConfig
+                    | tui::TuiHandoff::Reload { .. }
+                    | tui::TuiHandoff::Rebind { .. }
             ) {
                 state.persistent_tui = None;
             }
@@ -1227,6 +1245,7 @@ fn finish_tui_round(
                 attached_session.as_deref(),
             )?;
             apply_tui_handoff_after_host(
+                services,
                 paths,
                 store,
                 &mut state.record,
@@ -1301,6 +1320,7 @@ fn supported_provider_rows() -> Vec<plakous_host_protocol::views::ProviderDef> {
 }
 
 pub(crate) fn handle_tui_handoff(
+    services: &Services,
     paths: &product_paths::PlakPaths,
     store: &dyn store::session_records::SessionRecordStore,
     record: &mut product_sessions::SessionRecord,
@@ -1308,6 +1328,20 @@ pub(crate) fn handle_tui_handoff(
     reload_note: &mut Option<String>,
 ) -> CliResult<()> {
     match handoff {
+        tui::TuiHandoff::Rebind { cause } => {
+            match carry::rebind_session(services, record, &cause) {
+                Ok((next, note)) => {
+                    *record = next;
+                    *reload_note = Some(note);
+                }
+                Err(error) => {
+                    *reload_note = Some(format!(
+                        "rebind kept this session open: {}",
+                        error.message()
+                    ));
+                }
+            }
+        }
         tui::TuiHandoff::EditConfig => {
             edit_config_file(paths)?;
         }

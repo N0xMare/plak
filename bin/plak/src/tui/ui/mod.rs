@@ -518,6 +518,7 @@ pub(crate) struct App {
     request_reattach: bool,
     host_disconnected: bool,
     terminal_handoff: Option<TuiHandoff>,
+    pending_rebind: Option<String>,
     /// `plak` on `PATH` is no longer the file this process runs; the composer
     /// offers `/reload`. Rechecked every [`BUILD_CHECK_INTERVAL`].
     newer_build_installed: bool,
@@ -891,6 +892,7 @@ impl App {
             request_reattach: false,
             host_disconnected: false,
             terminal_handoff: None,
+            pending_rebind: None,
             newer_build_installed: false,
             next_build_check: Instant::now(),
             pending_reload: false,

@@ -571,8 +571,16 @@ Because the digest covers the resolved template **contents**, editing a
 template file mid-epoch changes nothing: the running tree keeps binding what
 was frozen. The same holds for a referenced tool table: editing an MCP server's
 command mid-epoch changes nothing a running tree binds. Editing a table no
-frozen list reaches changes no digest at all. The edit takes effect when a successor epoch installs — a new
-session at genesis, or a roster apply against a quiescent tree. A profile's
+frozen list reaches changes no digest at all. The edit takes effect in a new
+session at genesis, including the in-process history carry `/reload` performs
+when these settings changed. Reload requires an idle root with no live children
+or background processes; it creates a linked session under current config and
+login, freezes the new tree's spawn bounds and roster, and recompiles root tool
+descriptions. It records `orchestration settings changed; carried into a new
+session to apply them`. The source epoch is unchanged. An unchanged digest
+keeps exact reopen. `/rebind` explicitly performs the same carry even when
+exact reopen cannot attach the root. Neither path relabels provider replay for
+another account; no prompt is automatically submitted. A profile's
 Fork now does not touch the running tree at all: the new session opens a tree
 of its own whose genesis freezes the profile's roster (spec 03 §1.2). Two
 homes with byte-different but semantically identical templates produce the
@@ -580,9 +588,10 @@ same digest, because the digest is taken over the canonical rendering, not the
 file bytes.
 
 `plak config set` on `root.agent`, any `roster.*`, or an epoch-scoped
-`orchestration.*` key (all except `turn.auto_continue`) routes through the roster-apply path: it is accepted only from a quiescent
-tree, and the command reports `applied` or `saved; applies at the next session
-genesis`. `turn.auto_continue` is home-only and Immediate:
+`orchestration.*` key (all except `turn.auto_continue`) is accepted only with
+quiescent persisted trees and reports `saved; applies to new sessions and at
+the next /reload of an idle session`. It does not modify an attached epoch.
+`turn.auto_continue` is home-only and Immediate:
 it saves without tree quiescence, and the attached interactive host re-reads
 it before waking. Every other immediate key saves immediately.
 

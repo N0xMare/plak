@@ -1,5 +1,54 @@
 use super::*;
 
+#[test]
+fn rebind_keeps_full_history_and_source_lineage_without_an_attachment() {
+    let root = tempfile::tempdir().unwrap();
+    let history = PortableSessionHistory::new(
+        (1..=4)
+            .map(|n| {
+                HistorySegment::new(
+                    HistorySegmentKind::Conversation,
+                    vec![entry(
+                        n,
+                        Actor::User,
+                        vec![ContentBlock::Text(
+                            TextBlock::new(format!("turn {n}"), None).unwrap(),
+                        )],
+                    )],
+                )
+                .unwrap()
+            })
+            .collect(),
+        "source-account".into(),
+        ModelId::new("source-model").unwrap(),
+    );
+    let mut document = crate::carry::document::sample_document();
+    document.version = crate::carry::VERSION;
+    document.workspace_root = root.path().to_path_buf();
+    document.checkpoint = None;
+    document.archive = None;
+    document.history = Some(History::export(&history).unwrap());
+    let source_id = document.source.session_id.clone();
+    let mut config = crate::product_config::ProductConfig::default_product();
+    config.bind_root_tuple("claude", "claude-opus-5", Some("high"));
+    let carried = document
+        .into_rebound_import(&config, "different account binding")
+        .unwrap();
+    assert_eq!(carried.history.segments(), history.segments());
+    assert_eq!(carried.history.replay_account(), "");
+    assert!(carried.record.plakous_locator.is_none());
+    assert_ne!(carried.record.id, source_id);
+    assert_eq!(carried.record.account.as_deref(), Some("claude"));
+    assert_eq!(carried.record.model.as_deref(), Some("claude-opus-5"));
+    assert_eq!(carried.record.effort.as_deref(), Some("high"));
+    assert_eq!(
+        carried.record.carried_forward_from().map(|(id, _)| id),
+        Some(source_id.as_str())
+    );
+    assert!(carried.note.contains("different account binding"));
+    assert!(format!("{:?}", carried.record.transcript).contains("different account binding"));
+}
+
 fn replay() -> ReplayEnvelope {
     ReplayEnvelope::new(
         ProtocolId::new("carry.protocol").unwrap(),

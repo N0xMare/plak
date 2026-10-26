@@ -521,6 +521,9 @@ pub(super) fn run_app(
         app.refresh_launch_binary_id();
         app.maybe_flush_pending_prompt_after_attach(actions);
         app.poll_attachments();
+        if let Some(cause) = app.pending_rebind.take() {
+            request_terminal_handoff(&mut app, actions, TuiHandoff::Rebind { cause });
+        }
         if std::mem::take(&mut app.pending_reload) {
             // Asked while the session is still attached: once the handoff
             // starts there is nothing left to show a slow answer on.
@@ -530,8 +533,14 @@ pub(super) fn run_app(
                 crate::carry::reload_target_for_session(&workspace, session_id.as_deref())
             });
         }
-        if let Some(super::reload::ReloadOutcome::HandOff(target)) = app.poll_reload_probe() {
-            request_terminal_handoff(&mut app, actions, TuiHandoff::Reload { target });
+        match app.poll_reload_probe() {
+            Some(super::reload::ReloadOutcome::HandOff(target)) => {
+                request_terminal_handoff(&mut app, actions, TuiHandoff::Reload { target });
+            }
+            Some(super::reload::ReloadOutcome::Carry(cause)) => {
+                request_terminal_handoff(&mut app, actions, TuiHandoff::Rebind { cause });
+            }
+            Some(super::reload::ReloadOutcome::Refused) | None => {}
         }
 
         #[cfg(feature = "test-hooks")]
@@ -730,8 +739,10 @@ pub(super) fn request_terminal_handoff(
     actions: Option<&crate::tui::UserActionSender>,
     handoff: TuiHandoff,
 ) {
-    if matches!(&handoff, TuiHandoff::Reload { .. })
-        || send_user_action(app, actions, UserAction::Quit)
+    if matches!(
+        &handoff,
+        TuiHandoff::Reload { .. } | TuiHandoff::Rebind { .. }
+    ) || send_user_action(app, actions, UserAction::Quit)
     {
         crate::tui_timing::quit_requested();
         app.terminal_handoff = Some(handoff);

@@ -15,6 +15,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("usage", "View usage data for connected providers"),
     ("context", "View context window data"),
     ("attach", "Reconnect the agent"),
+    (
+        "rebind",
+        "Carry this conversation under the current configuration and login",
+    ),
     ("recover", "Recover an interrupted turn"),
     ("clear", "Start a new conversation"),
     ("compact", "Compact this conversation"),
@@ -52,6 +56,8 @@ pub enum SlashEffect {
     Action(UserAction),
     /// Quit and re-exec the installed `plak` on this session (`/reload`).
     Reload,
+    /// Carry history to a new session under the current configuration and login.
+    Rebind,
     /// Pure UI: append a system note; no host action.
     LocalNote(String),
     /// Attach the image files these paths name to the draft (`/image <path>...`).
@@ -188,6 +194,7 @@ const IRREVERSIBLE: &[&str] = &[
     "fork",
     "drop",
     "recover",
+    "rebind",
 ];
 
 /// Whether `name` acts for good, so a partial word never runs it.
@@ -218,6 +225,7 @@ const TAKES_NO_ARGUMENTS: &[&str] = &[
     "stop_all",
     "drop",
     "reload",
+    "rebind",
     "quit",
     "exit",
 ];
@@ -265,6 +273,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         ),
         "image" => SlashEffect::AttachImage(parsed.args.clone()),
         "reload" => SlashEffect::Reload,
+        "rebind" => SlashEffect::Rebind,
         "quit" | "exit" => SlashEffect::Quit,
         other => SlashEffect::LocalNote(format!("unknown command /{other} — try /help")),
     }
@@ -500,6 +509,7 @@ mod tests {
             ("/compact now", "compact"),
             ("/clear all", "clear"),
             ("/reload please", "reload"),
+            ("/rebind now", "rebind"),
             ("/quit later", "quit"),
             ("/exit now", "exit"),
             ("/drop 2", "drop"),

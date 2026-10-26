@@ -3273,7 +3273,7 @@ nothing but announce a deferred capability is not one of them:
 `/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`, `/mcp`,
 `/usage`, `/context`, `/attach`, `/recover`, `/clear`, `/compact`,
 `/config`, `/resume`, `/tree`, `/ps`, `/stop-all`, `/fork`, `/fork-then-compact`,
-`/drop`, `/image`, `/reload`, `/quit`. Two spellings are accepted aliases rather than extra rows:
+`/drop`, `/image`, `/reload`, `/rebind`, `/quit`. Two spellings are accepted aliases rather than extra rows:
 `/stop_all` for `/stop-all` and `/exit` for `/quit`.
 
 A command whose grammar is the bare word — every row except `/agents`,
@@ -3302,7 +3302,33 @@ answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl
 is not paused it changes nothing and says `agent tree is not paused; nothing to
 resume`. Bare `/tree` opens the Agents list. Other tree arguments are refused.
 
-`/reload` restarts on the installed build, carrying the session forward when
+`/rebind` carries the full neutral conversation and typed transcript into a new
+session at genesis under the current root configuration and login. It works
+when the root is unattached: export reads canonical history without exact
+runtime reopen. The source is unchanged, the new session is linked as
+`carried forward from <id>`, and a transcript notice names the cause. Provider
+replay is stripped rather than relabeled for a new account. Missing or invalid
+configuration, an unexportable source or failed import leaves the selected
+source open with a repair notice. It is refused while the root turn, children
+or background processes are live. Queued prompts carry paused, never dispatch
+automatically. No shell export/import round trip is required.
+
+An unattached exact reopen refusal naming a different account or frozen
+model/route/adapter binding offers `/rebind`; `/reload` from that refusal takes
+the same in-process carry path. Restoring the original account/configuration
+instead permits exact reopen. A missing login or quarantined credential alone
+is not a binding mismatch and is repaired with the named login command.
+
+`/reload` also compares the current epoch-scoped orchestration/roster settings
+with the session's frozen epoch. A changed digest on an idle session with no
+live children or background processes takes the same in-process carry and
+records `orchestration settings changed; carried into a new session to apply
+them`, linked to the source. The new tree freezes current bounds and roster
+and recompiles root tool descriptions at genesis; the source tree is not
+mutated. Unchanged settings keep the exact reopen path. The comparison runs
+off the UI thread, and the ordinary refusal checks run again before handoff.
+
+Otherwise `/reload` restarts on the installed build, carrying the session forward when
 that build has another state key (§2.5.1). It is refused while a turn runs,
 while sub-agents or background processes are live, or when no installed `plak` resolves on `PATH`, so a
 refusal never closes the TUI. Asking the installed build its state key runs off
@@ -3332,7 +3358,8 @@ There is no `/skills`, `/sandbox`, `/workflows`, `/login`,
 There is no `/model`, `/account` or `/effort` either: the session's binding
 (account, model, effort, Fast, composition, protocol) changes only through
 templates and profiles — the Agents tab's **Fork now**, **Use now** on an
-unattached session with no conversation, **Next session**, or a new session.
+unattached session with no conversation, **Next session**, or a new session
+(including `/rebind` carrying history under the current root configuration).
 Each of those names is an unknown command with the ordinary unknown-command
 note.
 `/help` names deferred capabilities in prose instead, which is the honest place

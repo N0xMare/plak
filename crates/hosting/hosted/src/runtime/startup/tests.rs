@@ -241,7 +241,7 @@ fn claude_refresh_rejection_and_attach_guidance_name_distinct_repairs() {
     assert!(attach_repair_guidance(failure.message()).contains("same-account Claude"));
     assert!(
         attach_repair_guidance("resolved harness plan is bound to a different model/route/adapter")
-            .contains("export/import")
+            .contains("/rebind")
     );
     assert!(attach_repair_guidance("credential is unavailable").contains("no usable login"));
 }
