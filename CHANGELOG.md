@@ -93,6 +93,10 @@ one cross-build carrier (a build imports its own and the previous version).
   protocol is `plakous-cell-protocol.v2` (Reset, SDK configuration and typed
   stopped outcomes), refusing stale workers at hello. Both revisions ride
   this unreleased epoch. Existing non-SDK model-visible text is unchanged.
+  The Codex reference measurement revision also rotates the descriptor's
+  semantic binding: same-epoch sessions need an explicit rebind. This rides
+  unreleased epoch 33; installed epoch-32 sessions are not reopened by this
+  build and use the cross-build conversation carrier instead.
   Runtime SQLite schema 26 admits `NamedStateValue` objects (kind 20). The
   manifest gains a sorted named-state key/address group; checkpoint integrity
   and commit identities bind keys and immutable value addresses.

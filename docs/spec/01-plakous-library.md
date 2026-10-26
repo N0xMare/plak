@@ -2698,29 +2698,36 @@ are used only under exact binding. An unchanged binding and canonical item prefi
 retain the manifest family artifact across completed tool exchanges, follow-up
 root turns and reopen. Executing a local or MCP tool appends its result; it does
 not rewrite the model's stored call or invalidate the covered prefix. A genuinely
-different request projection, a different stable request prefix, an expired
+different request projection, a stable request prefix outside the refinements
+below, an expired
 artifact or a missing artifact prepares fresh rather than acquiring aggregate
 replay authority from item envelopes: the artifact is dropped and the complete
 current context is sent. The binding holds the stable prefix's reuse identity,
 which leaves `tool_choice` out: a round that changes only tool selection keeps
-bound replay, and every other prefix field difference prepares fresh. A
-different dialect, route, account, model, model family, adapter, semantic
+bound replay. The workflow-only native compaction trigger is the one other
+prefix refinement that keeps bound replay: removing exactly that option must
+reproduce the artifact's stable prefix (`matches_replay_prefix`), after all
+target, expiry and canonical-coverage checks. Every other prefix field
+difference prepares fresh. A different dialect, route, account, model, model family, adapter, semantic
 model, semantic revisions, tool plan or storage mode is an authority mismatch
 that still refuses preparation and names its axis; it is checked before the
 stable prefix, so it is never downgraded to a fresh request. Within one driver the stable prefix is fixed at construction, and a
 reopen must reproduce it exactly (a mismatch is an incompatible session whose
 diagnostic names the differing fields), so the in-session changes are the
 operation-budget wrap-up's `tool_choice` (§3.3), which keeps bound replay, and
-the paid compaction dispatch's own prefix, which never attaches the artifact;
-context and compaction measurements use the live prefix. A rebind clears the
-artifact. When the driver observed the round that produced the active
+the native compaction dispatch's own prefix, which differs only by that
+workflow-only trigger and carries the validated active artifact.
+Harness-summary, portable-retry and offline-successor probe prefixes never
+attach the artifact; native fit probes use the same replay basis as native
+dispatch. A rebind clears the artifact. When the driver observed the round that produced the active
 artifact, a round whose full stable prefix differs, `tool_choice` included,
 emits `ModelArtifactPrefixDrift` telemetry naming the fields (§11.2); the
 artifact binding holds only the reuse digest, so a producer from before a
 reopen is unnamed.
 There is no artifact replay floor: an artifact authorizes every compatible
 historical envelope in its covered prefix. The exact binding, the stable-prefix
-reuse identity and fresh preparation on any prefix difference are the guards;
+reuse identity with its closed native-trigger refinement and fresh preparation
+on every other prefix difference are the guards;
 the offline compaction rules of §10.2 keep a pass from re-admitting replay a
 later artifact would resurrect.
 For Responses, compatibility requires the envelope's exact producing account,
@@ -7164,6 +7171,10 @@ same live head:
    preparation, before any dispatch capability or operation exists, tries the
    harness summary over the same sealed head, then the offline rungs. A native
    operation that dispatched never falls back to a second paid summary.
+   An attached artifact's hard reuse refusal is typed `ArtifactReuse` during
+   preparation (ordinary model-error projection remains `InvalidRequest`).
+   This undispatched native refusal also advances to the artifact-free harness
+   cut; it never admits the rejected artifact or changes target authority.
    Preparation over the unchanged active head carries its validated family
    artifact, preserving byte-exact replay and anchored wire-item identities.
    The sole native-trigger option is a workflow-only replay-prefix refinement:

@@ -1500,6 +1500,8 @@ impl<'de> Deserialize<'de> for PreparedModelProjection {
 pub enum ModelPreparationErrorKind {
     /// The admitted plan cannot be lowered for this exact provider binding.
     InvalidRequest,
+    /// The attached family artifact failed reuse validation; no call was prepared.
+    ArtifactReuse,
     /// Required route/model behavior has no certified lowering.
     UnsupportedCapability,
     /// Exact family projection or serialization failed.

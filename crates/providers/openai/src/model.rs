@@ -673,6 +673,15 @@ fn codex_dispatch_service(
 
 #[cfg(feature = "native-auth")]
 impl OpenAiLanguageModel {
+    fn artifact_preparation_error(
+        error: plakous_responses_dialect::ResponsesRequestError,
+    ) -> ModelPreparationError {
+        preparation_rejection(
+            ModelPreparationErrorKind::ArtifactReuse,
+            format!("Codex active Responses artifact is not reusable: {error}"),
+        )
+    }
+
     /// Binds an admitted native target to the provider-blind HTTP client.
     pub(crate) fn new_codex(
         target: OpenAiTarget,
@@ -986,12 +995,7 @@ impl LanguageModel for OpenAiLanguageModel {
             authority.clone(),
             context.prepared_at(),
         )
-        .map_err(|error| {
-            preparation_rejection(
-                ModelPreparationErrorKind::InvalidRequest,
-                format!("Codex active Responses artifact is not reusable: {error}"),
-            )
-        })?;
+        .map_err(Self::artifact_preparation_error)?;
         let prepared_attempt = prepare_responses_attempt(
             authority,
             plan.request(),
@@ -1213,13 +1217,8 @@ impl LanguageModel for OpenAiLanguageModel {
     }
 }
 
-/// Token estimate for the exact serialized Codex request body.
-///
-/// Ordinary items match the pinned Codex client: `ceil(utf8_bytes / 4)`.
-/// Encrypted reasoning and native compaction items use the same client's
-/// encrypted-reasoning
-/// heuristic: `ceil((len*3/4 − 650) / 4)` of `encrypted_content`.
-/// Whole-body ceil/4 of ciphertext JSON is not that envelope.
+/// At least the pinned client's estimate: whole serialized bytes / 4, with
+/// encrypted reasoning and compaction items substituted by `estimate_reasoning_length`.
 #[cfg(feature = "native-auth")]
 pub(crate) fn codex_complete_input_token_upper_bound(wire_size: u64) -> Option<u64> {
     wire_size
@@ -2354,6 +2353,43 @@ mod tests {
         )?)?;
         fixture.active = active(&fixture.candidate)?;
         Ok(fixture)
+    }
+
+    #[test]
+    fn native_artifact_hard_refusals_keep_typed_preparation_provenance() -> TestResult {
+        let fixture = transition_fixture()?;
+        let request = native_request(&fixture.second)?;
+        let mut bytes = fixture.active.bytes().to_vec();
+        *bytes.last_mut().ok_or("artifact bytes")? ^= 1;
+        let corrupt = ActiveFamilyArtifact::new(
+            fixture.active.family(),
+            fixture.active.schema_revision(),
+            fixture.active.codec_revision(),
+            fixture.active.binding(),
+            bytes,
+        )?;
+        for (active, route) in [
+            (&corrupt, OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID),
+            (&fixture.active, "foreign.route"),
+        ] {
+            let error = codex_artifact_replay_bridge(
+                Some(active),
+                &request,
+                authority(&request, route)?,
+                now()?,
+            )
+            .expect_err("hard artifact refusal");
+            let preparation = super::OpenAiLanguageModel::artifact_preparation_error(error);
+            assert_eq!(
+                preparation.rejection_kind(),
+                Some(plakous_model::ModelPreparationErrorKind::ArtifactReuse)
+            );
+            assert_eq!(
+                plakous_model::ModelError::from(preparation).kind(),
+                plakous_model::ModelErrorKind::InvalidRequest
+            );
+        }
+        Ok(())
     }
 
     #[test]

@@ -391,6 +391,19 @@ impl Driver {
             Ok(prepared) => prepared,
             Err(error)
                 if measured.native
+                    && error.rejection_kind()
+                        == Some(plakous_model::ModelPreparationErrorKind::ArtifactReuse) =>
+            {
+                let error =
+                    self.project_model_error(ModelError::from(error), ModelErrorPhase::Preparation);
+                committed_detail.diagnostic = Some(format!(
+                    "native facet artifact reuse refused: {}",
+                    compact_diagnostic(&error)
+                ));
+                return Ok(CompactionPhase::RetryWithoutNative);
+            }
+            Err(error)
+                if measured.native
                     && ModelError::from(error.clone()).kind() == ModelErrorKind::ContextLimit =>
             {
                 let error =

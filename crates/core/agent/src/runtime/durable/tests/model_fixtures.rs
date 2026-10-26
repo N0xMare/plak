@@ -156,6 +156,7 @@ pub(super) struct ArtifactModel {
     /// Exercises a summary-only envelope tighter than ordinary round input.
     pub(super) summary_context_overhead: AtomicUsize,
     pub(super) native_context_overhead: AtomicUsize,
+    pub(super) native_artifact_binding: Mutex<Option<Digest>>,
     pub(super) summary_capacity_refusal: Mutex<Option<SummaryCapacityRefusal>>,
     pub(super) summary_preparation_errors: Mutex<Vec<ModelPreparationError>>,
     pub(super) ordinary_context_overhead: AtomicUsize,
@@ -284,6 +285,7 @@ impl ArtifactModel {
             context_token_multiplier: AtomicUsize::new(1),
             summary_context_overhead: AtomicUsize::new(0),
             native_context_overhead: AtomicUsize::new(0),
+            native_artifact_binding: Mutex::new(None),
             summary_capacity_refusal: Mutex::new(None),
             summary_preparation_errors: Mutex::new(Vec::new()),
             ordinary_context_overhead: AtomicUsize::new(0),
@@ -665,6 +667,17 @@ impl LanguageModel for ArtifactModel {
         let paid_compaction_request = compaction_request || native_compaction_request;
         if paid_compaction_request {
             lock_mutex(&self.observed_compaction_contexts).push(context.clone());
+        }
+        if native_compaction_request
+            && let Some(expected) = *lock_mutex(&self.native_artifact_binding)
+            && context
+                .active_family_artifact()
+                .is_some_and(|artifact| artifact.binding() != expected)
+        {
+            return Err(ModelPreparationError::rejected(
+                ModelPreparationErrorKind::ArtifactReuse,
+                "native family artifact belongs to a foreign replay binding",
+            ));
         }
         if native_compaction_request
             && self.ordinary_calls.load(Ordering::Acquire)

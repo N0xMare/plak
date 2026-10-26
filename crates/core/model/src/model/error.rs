@@ -2012,6 +2012,7 @@ impl From<ModelPreparationError> for ModelError {
             },
             ModelPreparationError::Rejected { kind, .. } => match kind {
                 ModelPreparationErrorKind::InvalidRequest
+                | ModelPreparationErrorKind::ArtifactReuse
                 | ModelPreparationErrorKind::Projection => ModelErrorKind::InvalidRequest,
                 ModelPreparationErrorKind::UnsupportedCapability => {
                     ModelErrorKind::UnsupportedCapability
