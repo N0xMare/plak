@@ -20,6 +20,35 @@ fn snapshot(scope: TranscriptScope, rows: &[(u64, &str)]) -> PresentationSnapsho
 }
 
 #[test]
+fn generic_send_refuses_keyed_frames_without_bypassing_the_publisher() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let sender = crate::runtime::Sender::over(sink);
+    for event in [
+        HostEvent::PresentationSnapshot(snapshot(TranscriptScope::Root, &[(1, "row")])),
+        HostEvent::TranscriptPatch(TranscriptPatch {
+            scope: TranscriptScope::Root,
+            from_revision: 1,
+            to_revision: 2,
+            upserts: Vec::new(),
+            deletes: Vec::new(),
+        }),
+    ] {
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sender.send(event)));
+        if cfg!(debug_assertions) {
+            assert!(refused.is_err());
+        } else {
+            assert!(!refused.unwrap());
+        }
+    }
+    assert!(receiver.try_recv().is_err());
+    assert!(sender.replace_transcript(snapshot(TranscriptScope::Root, &[(1, "row")])));
+    let HostEvent::PresentationSnapshot(baseline) = receiver.try_recv().unwrap() else {
+        panic!("baseline");
+    };
+    assert!(baseline.revision > 0);
+}
+
+#[test]
 fn streaming_cost_is_constant_in_history_rows_and_does_not_copy_accumulated_text() {
     for scope in [
         TranscriptScope::Root,

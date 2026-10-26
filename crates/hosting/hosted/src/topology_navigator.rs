@@ -4,7 +4,6 @@
 //! in deterministic preorder. Missing hub fails closed.
 
 use crate::surface_protocol::{HostEvent, UserAction};
-use plakous::model::Actor;
 use plakous::sessions::{
     SESSION_HISTORY_VISIBILITY_REVISION, SessionHistoryDirection, SessionHistoryPageRequest,
     SessionHistoryVisibility, SessionLocator,
@@ -43,14 +42,17 @@ pub(crate) async fn dispatch_topology_navigator_action<
 >(
     rows: &dyn crate::runtime::TopologyRows,
     session: &SessionRecord,
-    send: impl Fn(HostEvent<P>),
+    events: &crate::runtime::Sender<P>,
     action: &UserAction<P>,
 ) {
+    let send = |event| {
+        let _ = events.send(event);
+    };
     let tree_id = tree_id_for_session(rows, session);
     let Some(runtime) = crate::topology_runtime::lookup(&tree_id) else {
         match action {
             UserAction::OpenAgentTranscript { agent_id } => {
-                send(HostEvent::PresentationSnapshot(PresentationSnapshot {
+                events.replace_transcript(PresentationSnapshot {
                     scope: TranscriptScope::Agent(agent_id.clone()),
                     items: vec![KeyedItem {
                         key: RowKey::TRUNCATION,
@@ -60,7 +62,7 @@ pub(crate) async fn dispatch_topology_navigator_action<
                         ),
                     }],
                     ..PresentationSnapshot::default()
-                }));
+                });
                 return;
             }
             UserAction::CloseAgentTranscript => return,
@@ -79,10 +81,10 @@ pub(crate) async fn dispatch_topology_navigator_action<
         // A refresh re-emits the current revision even when it has not advanced,
         // so a dropped push is always recoverable by hand.
         UserAction::OpenTopologyNavigator | UserAction::RefreshTopologyTree => {
-            emit_snapshot(&runtime, session, &send, true);
+            emit_snapshot(&runtime, session, send, true);
         }
         UserAction::ResumeTopologyTree => {
-            resume_tree(session, &runtime, &send);
+            resume_tree(session, &runtime, send);
             // The caller starts the tree's background recovery pass.
             crate::agent::rejoin_inflight_after_resume(&tree_id).await;
         }
@@ -207,115 +209,6 @@ fn resume_tree<P: plakous_host_protocol::ProtocolExtension>(
         return;
     }
     emit_snapshot(runtime, session, send, true);
-}
-
-/// One committed history entry reduced to what the rehearsal prints.
-struct TranscriptItem {
-    actor: String,
-    text: String,
-    blocks: usize,
-    /// Tool blocks in canonical order: the call identity, and the exact tool
-    /// name when this block is the call rather than its result.
-    tools: Vec<(String, Option<String>)>,
-}
-
-/// One printed line of a child page: an actor label and its text.
-#[derive(Debug)]
-struct TranscriptLine {
-    actor: String,
-    text: String,
-}
-
-fn lines_from_items(items: Vec<plakous::sessions::SessionHistoryItem>) -> Vec<TranscriptLine> {
-    project_transcript_lines(items.into_iter().map(|item| {
-        TranscriptItem {
-            actor: transcript_actor_label(&item).to_owned(),
-            text: item.display_text().unwrap_or("").to_owned(),
-            blocks: item.block_count(),
-            tools: item
-                .tool_blocks()
-                .iter()
-                .map(|block| {
-                    (
-                        block.call_id().to_string(),
-                        block.tool().map(|tool| tool.as_str().to_owned()),
-                    )
-                })
-                .collect(),
-        }
-    }))
-}
-
-/// Repository-only bounded snapshot of a child's first committed history page,
-/// read offline; no live child attachment is attempted.
-#[doc(hidden)]
-pub fn rehearse_child_presentation_snapshot(
-    items: Vec<plakous::sessions::SessionHistoryItem>,
-) -> PresentationSnapshot {
-    let transcript = lines_from_items(items)
-        .into_iter()
-        .map(|line| match line.actor.as_str() {
-            "user" => TranscriptRow::user(line.text),
-            "assistant" => TranscriptRow::assistant(line.text),
-            actor => TranscriptRow::info(NoticeScope::Tree, format!("{actor}: {}", line.text)),
-        })
-        .collect::<Vec<_>>();
-    crate::runtime::rehearse_presentation_snapshot(&transcript)
-}
-
-/// Projects one committed child page as inert lines.
-///
-/// One history entry is not one line: an assistant entry carries its text and
-/// the tool calls it made, and a tool entry carries results. Each block gets
-/// its own line with a subject, and an entry that carries only structure says
-/// so instead of printing an empty line.
-///
-/// Result rows resolve their tool name from the calls on the same page; a call
-/// paged earlier leaves the row named `result`, never a guess. This is a view:
-/// it names blocks, never their arguments or results.
-fn project_transcript_lines(
-    items: impl IntoIterator<Item = TranscriptItem>,
-) -> Vec<TranscriptLine> {
-    let mut called: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let mut lines = Vec::new();
-    for item in items {
-        let before = lines.len();
-        if let Some(text) = mail_row(&item.text) {
-            lines.push(TranscriptLine {
-                actor: "mail".to_owned(),
-                text,
-            });
-        } else {
-            for text in item.text.lines() {
-                lines.push(TranscriptLine {
-                    actor: item.actor.clone(),
-                    text: text.to_owned(),
-                });
-            }
-        }
-        for (call_id, tool) in item.tools {
-            let text = match tool {
-                Some(tool) => {
-                    called.insert(call_id, tool.clone());
-                    tool
-                }
-                None => called
-                    .get(&call_id)
-                    .map_or_else(|| "result".to_owned(), |tool| format!("{tool} · result")),
-            };
-            lines.push(TranscriptLine {
-                actor: "tool".to_owned(),
-                text,
-            });
-        }
-        if lines.len() == before && item.blocks > 0 {
-            lines.push(TranscriptLine {
-                actor: item.actor,
-                text: format!("· {} blocks without display text", item.blocks),
-            });
-        }
-    }
-    lines
 }
 
 /// Purposes a host-authored mail envelope may carry. `result` is
@@ -631,35 +524,6 @@ pub fn initial_history_page_request(locator: SessionLocator) -> SessionHistoryPa
         HISTORY_PAGE_MAX_BYTES,
         None,
     )
-}
-
-/// The label a paged transcript row carries.
-///
-/// A harness note is `Actor::User` because a steering segment must lower as a
-/// user-role message on every protocol, so labelling by actor alone would
-/// present text the harness injected mid-turn as something the operator typed.
-/// Provenance is what separates them.
-fn transcript_actor_label(item: &plakous::sessions::SessionHistoryItem) -> &'static str {
-    transcript_actor_label_for(item.actor(), item.is_harness_authored())
-}
-
-const fn transcript_actor_label_for(actor: Actor, harness_authored: bool) -> &'static str {
-    if harness_authored {
-        return "harness";
-    }
-    actor_label(actor)
-}
-
-const fn actor_label(actor: Actor) -> &'static str {
-    match actor {
-        Actor::Developer => "developer",
-        Actor::System => "system",
-        Actor::User => "user",
-        Actor::Assistant => "assistant",
-        Actor::Tool => "tool",
-        Actor::Harness => "harness",
-        _ => "other",
-    }
 }
 
 #[cfg(test)]

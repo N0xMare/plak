@@ -194,10 +194,11 @@ fn report_head(
     let rows: Vec<_> = views
         .transcript(intents)
         .into_iter()
-        .map(|(_, row)| row)
+        .map(|(key, row)| plakous_host_protocol::views::transcript::TranscriptItem { key, row })
         .collect();
-    let snapshot = plakous_hosted::runtime::rehearse_presentation_snapshot(&rows);
-    let presentation_valid = report_snapshot(label, rows.len(), &snapshot, output)?;
+    let row_count = rows.len();
+    let snapshot = plakous_hosted::runtime::rehearse_presentation_snapshot(rows);
+    let presentation_valid = report_snapshot(label, row_count, &snapshot, output)?;
     Ok(report.outcome != OfflineReopenOutcome::RefusesRecoveryScope
         && report.evaluator_verified
         && report.job_config_verified
@@ -495,14 +496,24 @@ mod tests {
 
     #[test]
     fn oversized_transcript_projects_a_valid_suffix_without_content_in_report() {
+        use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem};
         use plakous_hosted::sessions::{NoticeScope, TranscriptRow};
         let transcript = (0..MAX_SNAPSHOT_ROWS + 100)
-            .map(|_| TranscriptRow::error(NoticeScope::Turn, "synthetic-private-text"))
+            .map(|index| TranscriptItem {
+                key: RowKey::new((index as u64 + 1) * 3, Lane::Product, 7),
+                row: TranscriptRow::error(NoticeScope::Turn, "synthetic-private-text"),
+            })
             .collect::<Vec<_>>();
-        let snapshot = plakous_hosted::runtime::rehearse_presentation_snapshot(&transcript);
+        let row_count = transcript.len();
+        let snapshot = plakous_hosted::runtime::rehearse_presentation_snapshot(transcript);
         assert_eq!(snapshot.items.len(), MAX_SNAPSHOT_ROWS);
+        assert_eq!(snapshot.items[0].key, RowKey::new(303, Lane::Product, 7));
+        assert_eq!(
+            snapshot.items.last().unwrap().key,
+            RowKey::new(row_count as u64 * 3, Lane::Product, 7)
+        );
         let mut report = Vec::new();
-        assert!(report_snapshot("root", transcript.len(), &snapshot, &mut report).unwrap());
+        assert!(report_snapshot("root", row_count, &snapshot, &mut report).unwrap());
         assert!(
             !String::from_utf8(report)
                 .unwrap()

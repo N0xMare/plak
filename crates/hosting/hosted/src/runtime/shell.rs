@@ -116,7 +116,7 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
     });
     emit_shell_empty_state(events, config);
     send_shell_binding(events, config);
-    let _ = events.send(project_session_snapshot(&config.session));
+    let _ = events.replace_transcript(project_session_snapshot(&config.session));
     emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
     let _ = events.send(HostEvent::Status {
@@ -207,7 +207,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
                 return ShellStep::Continue;
             }
             let _ = events.send(HostEvent::ClearView);
-            let _ = events.send(project_session_snapshot(&config.session));
+            let _ = events.replace_transcript(project_session_snapshot(&config.session));
             emit_shell_empty_state(events, config);
             send_shell_binding(events, config);
             let _ = events.notice(TranscriptRow::info(

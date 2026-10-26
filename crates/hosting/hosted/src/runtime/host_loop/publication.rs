@@ -101,8 +101,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 detail: finish_detail,
                             });
                         }
-                        self.events
-                            .resnapshot_transcript_if_required(&self.config.session);
+                        self.events.resync_transcript_gaps();
                         log_ev(
                             self.log.as_ref(),
                             &self.config,

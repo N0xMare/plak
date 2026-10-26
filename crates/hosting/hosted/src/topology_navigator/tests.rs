@@ -12,6 +12,20 @@ use crate::agent_tree_protocol::{
 use std::str::FromStr;
 use std::sync::Arc;
 
+async fn dispatch_captured_action(
+    rows: &dyn crate::runtime::TopologyRows,
+    session: &SessionRecord,
+    send: impl Fn(HostEvent),
+    action: &UserAction,
+) {
+    let (wire, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = crate::runtime::Sender::over(wire);
+    dispatch_topology_navigator_action(rows, session, &events, action).await;
+    for event in receiver.try_iter() {
+        send(event);
+    }
+}
+
 /// An operator who types the frame sentence and an unterminated
 /// `<child_message` block must not swallow the real appended batch nor
 /// show a forged sender: the real batch is the last frame that parses.
@@ -29,25 +43,6 @@ fn split_child_mail_ignores_a_forged_unterminated_block_before_the_real_batch() 
     assert_eq!(rows, vec!["question · #real · real body".to_owned()]);
 }
 
-/// A paged transcript must not present a harness note as a user turn.
-///
-/// The placeholder rung leaves its note as a steering segment, which has to
-/// carry `Actor::User` to lower as a user-role message on every protocol.
-/// Labelling by actor alone showed it as
-/// `user: [plak: oldest tool results replaced this round] …`, which reads as something
-/// the operator typed.
-#[test]
-fn a_harness_authored_item_is_labelled_harness_not_user() {
-    assert_eq!(transcript_actor_label_for(Actor::User, true), "harness");
-    assert_eq!(transcript_actor_label_for(Actor::User, false), "user");
-    // Every other actor keeps its own label.
-    assert_eq!(
-        transcript_actor_label_for(Actor::Assistant, false),
-        "assistant"
-    );
-    assert_eq!(transcript_actor_label_for(Actor::Tool, false), "tool");
-    assert_eq!(transcript_actor_label_for(Actor::System, false), "system");
-}
 use crate::runtime::test_kit::MemoryRows;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -68,60 +63,6 @@ fn tree() -> (tempfile::TempDir, ProductAgentTree) {
 
 fn spawn_req() -> SpawnAgentRequest {
     SpawnAgentRequest::test_review()
-}
-
-fn item(actor: &str, text: &str, blocks: usize, tools: &[(&str, Option<&str>)]) -> TranscriptItem {
-    TranscriptItem {
-        actor: actor.to_owned(),
-        text: text.to_owned(),
-        blocks,
-        tools: tools
-            .iter()
-            .map(|(call, tool)| ((*call).to_owned(), tool.map(str::to_owned)))
-            .collect(),
-    }
-}
-
-/// A child page carrying every entry kind must project every
-/// entry kind, not just the `[user]` prompts.
-#[test]
-fn child_transcript_projects_assistant_tool_and_system_rows() {
-    let lines = project_transcript_lines([
-        item("system", "You are a review agent.", 1, &[]),
-        item("user", "Start: read README.md", 1, &[]),
-        item(
-            "assistant",
-            "Reading the file.",
-            2,
-            &[("call-1", Some("read_file"))],
-        ),
-        item("tool", "", 1, &[("call-1", None)]),
-        // A reasoning-only entry: structure with nothing displayable.
-        item("assistant", "", 1, &[]),
-        item("assistant", "Two sentences.\nSecond sentence.", 1, &[]),
-        // A result whose call was paged earlier is named `result`, not guessed.
-        item("tool", "", 1, &[("call-0", None)]),
-    ]);
-    let rendered = lines
-        .iter()
-        .map(|line| format!("[{}] {}", line.actor, line.text))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        rendered,
-        vec![
-            "[system] You are a review agent.",
-            "[user] Start: read README.md",
-            "[assistant] Reading the file.",
-            "[tool] read_file",
-            "[tool] read_file · result",
-            "[assistant] · 1 blocks without display text",
-            "[assistant] Two sentences.",
-            "[assistant] Second sentence.",
-            "[tool] result",
-        ]
-    );
-    // Nothing in the projection may be blank: a blank row hid the content.
-    assert!(lines.iter().all(|line| !line.text.is_empty()));
 }
 
 /// Plan §F trap 1, host half: the TUI's glyph table is keyed on the strings
@@ -224,14 +165,12 @@ fn a_pushed_result_retains_its_body_in_one_notice() {
         "output": "{\"verdict\":\"ok\"}\nsecond line\nthird line",
     })
     .to_string();
-    let lines = project_transcript_lines([item("user", &envelope, 1, &[])]);
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert_eq!(lines[0].actor, "mail");
+    let row = mail_row(&envelope).unwrap();
     assert_eq!(
-        lines[0].text,
+        row,
         "result · #c1 · a2 · #0f3a91b2 · {\"verdict\":\"ok\"}\nsecond line\nthird line"
     );
-    assert!(lines[0].text.contains("second line"));
+    assert!(row.contains("second line"));
 }
 
 #[test]
@@ -260,11 +199,8 @@ fn a_followup_renders_as_mail_with_its_purpose() {
         "body": "also cover the error path",
     })
     .to_string();
-    let lines = project_transcript_lines([item("user", &envelope, 1, &[])]);
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert_eq!(lines[0].actor, "mail");
     assert_eq!(
-        lines[0].text,
+        mail_row(&envelope).unwrap(),
         "followup · #root · also cover the error path"
     );
 }
@@ -273,20 +209,8 @@ fn a_followup_renders_as_mail_with_its_purpose() {
 /// child happened to print stays exactly the lines it was.
 #[test]
 fn an_ordinary_entry_is_never_reshaped_into_a_mail_row() {
-    let lines = project_transcript_lines([
-        item("assistant", "{\"purpose\":\"unrelated\"}", 1, &[]),
-        item("user", "plain text", 1, &[]),
-    ]);
-    assert_eq!(
-        lines
-            .iter()
-            .map(|line| format!("[{}] {}", line.actor, line.text))
-            .collect::<Vec<_>>(),
-        vec![
-            "[assistant] {\"purpose\":\"unrelated\"}",
-            "[user] plain text"
-        ]
-    );
+    assert!(mail_row("{\"purpose\":\"unrelated\"}").is_none());
+    assert!(mail_row("plain text").is_none());
 }
 
 /// The reset time and the usage counters live on the
@@ -603,7 +527,7 @@ async fn missing_hub_fails_closed_without_load() {
     let paths = MemoryRows::new();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
-    dispatch_topology_navigator_action(
+    dispatch_captured_action(
         &paths,
         &session,
         |event| events.lock().unwrap().push(event),
@@ -628,7 +552,7 @@ async fn missing_hub_resume_tree_reports_unavailable_like_any_other_intent() {
     let paths = MemoryRows::new();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
-    dispatch_topology_navigator_action(
+    dispatch_captured_action(
         &paths,
         &session,
         |event| events.lock().unwrap().push(event),
@@ -673,7 +597,7 @@ async fn attach_intents_paint_a_restored_paused_tree_and_never_resume_it() {
         UserAction::RefreshTopologyTree,
     ] {
         let events = std::sync::Mutex::new(Vec::new());
-        dispatch_topology_navigator_action(
+        dispatch_captured_action(
             &paths,
             &session,
             |event| events.lock().unwrap().push(event),
@@ -727,7 +651,7 @@ async fn hub_open_emits_snapshot() {
     crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
-    dispatch_topology_navigator_action(
+    dispatch_captured_action(
         &paths,
         &session,
         |event| events.lock().unwrap().push(event),
@@ -767,7 +691,7 @@ async fn resume_and_interrupt_resnapshot() {
     crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
-    dispatch_topology_navigator_action(
+    dispatch_captured_action(
         &paths,
         &session,
         |event| events.lock().unwrap().push(event),
@@ -795,7 +719,7 @@ async fn resume_and_interrupt_resnapshot() {
     events.lock().unwrap().clear();
     // A second resume finds the tree live and says so instead of
     // returning silently.
-    dispatch_topology_navigator_action(
+    dispatch_captured_action(
         &paths,
         &session,
         |event| events.lock().unwrap().push(event),
@@ -824,7 +748,7 @@ async fn resume_and_interrupt_resnapshot() {
         .lock()
         .unwrap()
         .revision;
-    dispatch_topology_navigator_action(
+    dispatch_captured_action(
         &paths,
         &session,
         |event| events.lock().unwrap().push(event),
@@ -865,7 +789,7 @@ async fn refresh_re_emits_the_current_revision_even_when_it_did_not_advance() {
     let session = session_for(&tree_id, root.path().to_path_buf());
     let events = std::sync::Mutex::new(Vec::new());
     for _ in 0..2 {
-        dispatch_topology_navigator_action(
+        dispatch_captured_action(
             &paths,
             &session,
             |event| events.lock().unwrap().push(event),

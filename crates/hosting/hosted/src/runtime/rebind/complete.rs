@@ -453,7 +453,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             config.runtime_factory.clone(),
         ));
         emit_queue_snapshot(events, &config.session);
-        let _ = events.send(crate::runtime::logging::project_session_snapshot(
+        let _ = events.replace_transcript(crate::runtime::logging::project_session_snapshot(
             &config.session,
         ));
         send_binding(events, config);

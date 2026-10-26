@@ -880,12 +880,7 @@ async fn result_observation_is_bounded_and_deduplicated_before_admission() {
         restored.transcript.iter().collect::<Vec<_>>(),
         session.transcript.iter().collect::<Vec<_>>()
     );
-    let restored_event = crate::runtime::logging::project_presentation_snapshot::<TestExtension>(
-        &restored.transcript.iter().cloned().collect::<Vec<_>>(),
-    );
-    let HostEvent::PresentationSnapshot(snapshot) = restored_event else {
-        panic!("snapshot")
-    };
+    let snapshot = crate::runtime::logging::project_keyed_snapshot(restored.transcript.items());
     let tools: Vec<_> = snapshot
         .items
         .iter()

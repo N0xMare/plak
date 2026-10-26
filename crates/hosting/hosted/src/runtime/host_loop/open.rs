@@ -392,7 +392,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         }
         emit_agent_plan_notes(&events, &config, &stderr_buf);
         send_binding(&events, &config);
-        let _ = events.send(super::super::logging::project_session_snapshot(
+        let _ = events.replace_transcript(super::super::logging::project_session_snapshot(
             &config.session,
         ));
         emit_prompt_history(&events, &config.session);
@@ -457,7 +457,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             if restored_recovery_blocked {
                 config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
             }
-            events.resnapshot_transcript_if_required(&config.session);
+            events.resync_transcript_gaps();
         }
         if let Err(error) = report_context(
             &executor,

@@ -583,9 +583,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     crate::topology_navigator::dispatch_topology_navigator_action(
                         self.host.rows,
                         self.host.session,
-                        |event| {
-                            let _ = self.host.events.send(event);
-                        },
+                        self.host.events,
                         &action,
                     )
                     .await;

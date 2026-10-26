@@ -249,7 +249,7 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
     let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(tx);
     let initial = SessionRecord::new(PathBuf::from("/workspace"));
-    assert!(events.send(logging::project_session_snapshot(&initial)));
+    assert!(events.replace_transcript(logging::project_session_snapshot(&initial)));
     let _ = rx.try_iter().count();
     for index in 0..2_000 {
         assert!(events.notice(TranscriptRow::error(
@@ -262,11 +262,7 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
     let mut session = SessionRecord::new(PathBuf::from("/workspace"));
     session.append_transcript(TranscriptRow::user("prompt"));
     session.append_transcript(TranscriptRow::assistant("authoritative TurnResult output"));
-    let HostEvent::PresentationSnapshot(canonical) =
-        logging::project_session_snapshot::<TestExtension>(&session)
-    else {
-        unreachable!("canonical presentation");
-    };
+    let canonical = logging::project_session_snapshot(&session);
     assert!(events.publish_transcript(canonical));
     assert!(events.send(HostEvent::SetBusy(false)));
     assert!(events.send(HostEvent::Status {
@@ -275,11 +271,7 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
         detail: Some("terminal".into()),
     }));
     let drained = rx.try_iter().collect::<Vec<_>>();
-    let HostEvent::PresentationSnapshot(expected) =
-        logging::project_session_snapshot::<TestExtension>(&session)
-    else {
-        unreachable!("session presentation");
-    };
+    let expected = logging::project_session_snapshot(&session);
     assert!(drained.iter().any(|event| matches!(event, HostEvent::PresentationSnapshot(snapshot) if snapshot.items == expected.items && snapshot.revision > 0)));
     assert!(drained.contains(&HostEvent::SetBusy(false)));
     assert!(drained.iter().any(|event| matches!(

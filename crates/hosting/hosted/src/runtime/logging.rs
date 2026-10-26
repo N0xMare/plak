@@ -2,11 +2,14 @@
 
 use std::time::Instant;
 
+use plakous_host_protocol::views::PresentationSnapshot;
+use plakous_host_protocol::views::transcript::TranscriptItem;
+
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions::{self, TranscriptRow};
 
+use super::HostConfig;
 use super::resources::process_resources;
-use super::{HostConfig, HostEvent};
 
 /// The muted first row of a session's presentation: its id and, for a
 /// carried session, the source it was imported from. Derived from the record,
@@ -27,13 +30,11 @@ pub(super) fn session_header(session: &sessions::SessionRecord) -> TranscriptRow
 
 /// A session's restore snapshot: its header, then the restore window of its
 /// transcript.
-pub(super) fn project_session_snapshot<P: plakous_host_protocol::ProtocolExtension>(
-    session: &sessions::SessionRecord,
-) -> HostEvent<P> {
+pub(super) fn project_session_snapshot(session: &sessions::SessionRecord) -> PresentationSnapshot {
     let mut items = session.transcript.items();
     items.insert(
         0,
-        plakous_host_protocol::views::transcript::TranscriptItem {
+        TranscriptItem {
             key: sessions::projector::RowKey::TRUNCATION,
             row: session_header(session),
         },
@@ -41,33 +42,9 @@ pub(super) fn project_session_snapshot<P: plakous_host_protocol::ProtocolExtensi
     project_keyed_snapshot(items)
 }
 
-/// Repository-only rehearsal of unkeyed rows. Real session snapshots retain
-/// the keys read from the projector instead of reconstructing them by index.
-pub(super) fn project_presentation_snapshot<P: plakous_host_protocol::ProtocolExtension>(
-    transcript: &[TranscriptRow],
-) -> HostEvent<P> {
-    use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem};
-    project_keyed_snapshot(
-        transcript
-            .iter()
-            .enumerate()
-            .map(|(index, row)| TranscriptItem {
-                key: RowKey::new(
-                    u64::try_from(index).unwrap_or(u64::MAX) + 1,
-                    Lane::Runtime,
-                    0,
-                ),
-                row: row.clone(),
-            })
-            .collect(),
-    )
-}
-
-fn project_keyed_snapshot<P: plakous_host_protocol::ProtocolExtension>(
-    items: Vec<plakous_host_protocol::views::transcript::TranscriptItem>,
-) -> HostEvent<P> {
+pub(super) fn project_keyed_snapshot(items: Vec<TranscriptItem>) -> PresentationSnapshot {
     use plakous_host_protocol::views::presentation::{
-        MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, PresentationSnapshot, row_bytes,
+        MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, row_bytes,
     };
     let header = items
         .first()
@@ -112,7 +89,7 @@ fn project_keyed_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     }
     let mut snapshot = PresentationSnapshot::empty(0);
     snapshot.items = kept;
-    HostEvent::PresentationSnapshot(snapshot)
+    snapshot
 }
 
 pub(super) fn log_event(log: Option<&SessionLog>, session_id: &str, event: SessionEvent) {
@@ -247,6 +224,7 @@ pub(super) fn log_host_ready<P: plakous_host_protocol::ProtocolExtension>(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
+    use super::{TranscriptItem, project_keyed_snapshot};
     use crate::runtime::test_kit::TestExtension;
     type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
     type Sender = crate::runtime::Sender<TestExtension>;
@@ -259,11 +237,20 @@ mod tests {
     use std::time::Instant;
 
     fn snapshot_rows(transcript: &[TranscriptRow]) -> Vec<TranscriptRow> {
-        let HostEvent::PresentationSnapshot(snapshot) =
-            project_presentation_snapshot::<TestExtension>(transcript)
-        else {
-            panic!("snapshot");
-        };
+        let snapshot = project_keyed_snapshot(
+            transcript
+                .iter()
+                .enumerate()
+                .map(|(index, row)| TranscriptItem {
+                    key: sessions::projector::RowKey::new(
+                        index as u64 + 1,
+                        sessions::projector::Lane::Runtime,
+                        0,
+                    ),
+                    row: row.clone(),
+                })
+                .collect(),
+        );
         snapshot.validate().unwrap();
         snapshot.items.into_iter().map(|item| item.row).collect()
     }

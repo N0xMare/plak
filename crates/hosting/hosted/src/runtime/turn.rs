@@ -319,11 +319,7 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
                 let _ = events.send(HostEvent::AssistantDone);
             }
             if finish_reason == plakous::model::FinishReason::Refusal {
-                let HostEvent::PresentationSnapshot(snapshot) =
-                    super::logging::project_session_snapshot::<P>(session)
-                else {
-                    unreachable!("session presentation");
-                };
+                let snapshot = super::logging::project_session_snapshot(session);
                 let _ = events.publish_transcript(snapshot);
                 let _ = events.send(HostEvent::ModelRefusal {
                     detail: finish_detail,

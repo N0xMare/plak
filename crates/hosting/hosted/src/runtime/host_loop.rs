@@ -328,11 +328,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .retain(|item| !self.config.session.queue_commands.is_consumed(item));
         self.config.session.queue_projection_debt = self.config.session.queue_projection_debt
             && self.config.session.queue_commands.has_pending();
-        let HostEvent::PresentationSnapshot(snapshot) =
-            super::logging::project_session_snapshot::<P>(&self.config.session)
-        else {
-            unreachable!("session presentation");
-        };
+        let snapshot = super::logging::project_session_snapshot(&self.config.session);
         let _ = self.events.publish_transcript(snapshot);
     }
 

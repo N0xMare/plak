@@ -553,6 +553,7 @@ ALLOWED_CLI_MACROS = {
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Disposable transcript projection invariants, with release-mode resync.
     ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert"},
+    ("plakous-hosted", "src/runtime.rs"): {"debug_assert"},
     ("plakous-hosted", "src/sessions/transcript.rs"): {"debug_assert"},
     # Fold integrity refusals: fixed diagnostics and the affected agent id only.
     ("plakous-recursive-subagents", "src/tree/candidates.rs"): {"error"},

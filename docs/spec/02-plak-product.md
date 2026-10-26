@@ -1840,6 +1840,13 @@ This live state is the resync baseline, so busy resync preserves in-flight
 previews and subsequent deltas continue their same keys. Resync does not reset
 the reducer's stream boundary, call index or reasoning clocks. Canonical
 settlement replaces provisional rows with the committed projector rows.
+Canonical projection returns keyed snapshot values, not generic observations.
+The host explicitly replaces, publishes or resyncs them through its scoped
+publisher; generic observation send refuses snapshots and patches (a programmer
+assertion in debug builds). Automatic gap repayment and explicit resync use
+the same retained live baseline, never a separate stale session snapshot.
+Reload rehearsal keeps the projector's keys through bounded presentation
+projection rather than manufacturing identities from window indices.
 The TUI keeps a keyed baseline and applies only exact-revision patches. A gap
 keeps the last good presentation and requests one scope resync; later patches
 are ignored until a valid snapshot replaces it. A pending request re-arms only

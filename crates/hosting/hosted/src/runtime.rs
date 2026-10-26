@@ -81,17 +81,12 @@ use events::{
     apply_event, observe_cancelled_tool_activity, observe_terminal_tool_activity,
     resolve_approval_intent, settle_live_thinking,
 };
-use logging::project_presentation_snapshot;
-
-/// Repository-only access to the exact TUI restore projection.
+/// Repository-only bounded restore projection preserving the supplied keys.
 #[doc(hidden)]
 pub fn rehearse_presentation_snapshot(
-    transcript: &[TranscriptRow],
+    items: Vec<plakous_host_protocol::views::transcript::TranscriptItem>,
 ) -> plakous_host_protocol::views::presentation::PresentationSnapshot {
-    match project_presentation_snapshot::<plakous_host_protocol::Core>(transcript) {
-        HostEvent::PresentationSnapshot(snapshot) => snapshot,
-        _ => unreachable!("restore projection always produces a snapshot"),
-    }
+    logging::project_keyed_snapshot(items)
 }
 use factory::observe_boundary;
 pub use resume::note_idle_only;
@@ -288,12 +283,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     /// Publish one observation; false when the driver has gone. This is
     /// presentation only, including when the observation carries a row.
     pub fn send(&self, value: HostEvent<P>) -> bool {
-        if let HostEvent::PresentationSnapshot(snapshot) = value {
-            return self
-                .presentations
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .snapshot(snapshot, &self.inner);
+        if matches!(
+            value,
+            HostEvent::PresentationSnapshot(_) | HostEvent::TranscriptPatch(_)
+        ) {
+            debug_assert!(
+                false,
+                "keyed transcript publication requires replace_transcript or publish_transcript"
+            );
+            return false;
         }
         if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations
@@ -428,14 +426,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .map(|mut notices| notices.drain(..).collect())
             .unwrap_or_default()
     }
-    fn resnapshot_transcript_if_required(&self, session: &SessionRecord) {
-        if self.inner.transcript_resnapshot_required() {
-            if !self
-                .resync_transcript(&plakous_host_protocol::views::transcript::TranscriptScope::Root)
-            {
-                let _ = self.send(logging::project_session_snapshot(session));
-            }
-        }
+    fn resync_transcript_gaps(&self) {
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .resync_gaps(&self.inner);
     }
 }
 

@@ -74,7 +74,6 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({"README.md"}), "a tool-call argument fixture"),
     "crates/hosting/hosted/src/mcp_binding/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "crates/hosting/hosted/src/runtime/tool_facts.rs": (frozenset({"README.md"}), "a conflict path fixture"),
-    "crates/hosting/hosted/src/topology_navigator/tests.rs": (frozenset({"README.md"}), "a path fixture"),
     "crates/orchestration/recursive-subagents/src/tools/tests/registrations.rs": (
         frozenset({'"docs"'}), "an MCP server id fixture"),
     "eval/harbor_adapter/pmux_provenance.py": (frozenset({"README.md"}), "docstring naming eval/README.md"),

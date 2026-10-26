@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
-use crate::runtime::logging::project_presentation_snapshot;
+use crate::runtime::logging::project_keyed_snapshot;
 
 use crate::runtime::test_kit::TestExtension;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
@@ -375,11 +375,7 @@ fn compose_counts_moved_by_wait_children_survive_resume() {
     // A marker the host never persisted has nothing to move.
     observe_compose_subject(&mut session, "missing", "9 tools".into());
 
-    let HostEvent::PresentationSnapshot(snapshot) =
-        project_presentation_snapshot(&session.transcript)
-    else {
-        unreachable!("snapshot projection")
-    };
+    let snapshot = project_keyed_snapshot(session.transcript.items());
     let tools: Vec<_> = snapshot
         .items
         .iter()

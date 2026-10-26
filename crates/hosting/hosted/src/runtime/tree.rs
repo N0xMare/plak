@@ -581,12 +581,7 @@ pub(super) fn dispatch_topology_navigator_sync<P: plakous_host_protocol::Protoco
     }
     if let Err(error) = executor.block_on(async {
         crate::topology_navigator::dispatch_topology_navigator_action(
-            rows,
-            session,
-            |event| {
-                let _ = events.send(event);
-            },
-            action,
+            rows, session, events, action,
         )
         .await;
         if let Some(runtime) = push.runtime(rows, session) {
