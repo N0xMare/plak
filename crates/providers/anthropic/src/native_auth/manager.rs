@@ -551,8 +551,26 @@ impl ClaudeNativeAuthManager {
         expires_in: i64,
         scope: &str,
     ) -> Result<ClaudeSubscriptionStatus, ClaudeNativeAuthError> {
+        self.persist_test_grant_for_account(
+            access_token,
+            refresh_token,
+            expires_in,
+            scope,
+            "12345678-1234-4234-8234-123456789abc",
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn persist_test_grant_for_account(
+        &self,
+        access_token: &str,
+        refresh_token: &str,
+        expires_in: i64,
+        scope: &str,
+        account: &str,
+    ) -> Result<ClaudeSubscriptionStatus, ClaudeNativeAuthError> {
         let body = format!(
-            r#"{{"access_token":"{access_token}","refresh_token":"{refresh_token}","expires_in":{expires_in},"scope":"{scope}","account":{{"uuid":"12345678-1234-4234-8234-123456789abc"}}}}"#
+            r#"{{"access_token":"{access_token}","refresh_token":"{refresh_token}","expires_in":{expires_in},"scope":"{scope}","account":{{"uuid":"{account}"}}}}"#
         );
         let grant = parse_claude_oauth_token_grant(body.as_bytes())
             .map_err(|_| ClaudeNativeAuthError::InvalidTokenResponse)?;

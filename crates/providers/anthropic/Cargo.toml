@@ -55,6 +55,7 @@ zeroize = { workspace = true, optional = true }
 [dev-dependencies]
 futures-util = { workspace = true, features = ["std"] }
 plakous-agent.workspace = true
+plakous-store.workspace = true
 plakous-http = { workspace = true, features = ["fault-injection"] }
 plakous-tools.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

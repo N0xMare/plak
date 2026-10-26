@@ -231,10 +231,12 @@ new grant immediately and prints when the new access token expires.
 
 A refresh by one Plak process does not interrupt another: running Codex and
 Grok sessions and children renew their credential before their next model
-request, as long as the refresh kept the same login. A new `plak login` of the
-same provider, even for the same account, is a different login: running
-sessions on the old one stop before sending anything and need a reopen or
-rebind.
+request, as long as the refresh kept the same login. For Claude, a new
+`plak login claude` to the same provider account continues at the next request
+and permits exact session reopen. Logging in to a different account is refused
+and needs a new session. Codex and Grok keep a separate live login-selection
+fence: a new login stops the old running receipt before sending anything and
+needs a reopen or rebind.
 
 A Codex login made by an earlier Plak build must be redone once: run
 `plak login codex`, which replaces it locally. Until then `plak status` shows

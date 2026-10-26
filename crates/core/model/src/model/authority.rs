@@ -435,6 +435,9 @@ impl fmt::Debug for RuntimeModelAuthority {
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum RuntimeModelAuthorityError {
+    /// A login selected a different provider account; a new session is required.
+    #[error("provider account changed; start a new session for the newly logged-in account")]
+    AccountChanged,
     /// The adapter has no honest authority producer for this route.
     #[error("fresh model/account authority is unavailable")]
     Unavailable,

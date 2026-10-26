@@ -99,6 +99,10 @@ one cross-build carrier (a build imports its own and the previous version).
   State key `r26.e33.p33.t9`; carry conversation history with `/reload` or
   export and import. Export document version 8 is unchanged and does not
   carry named state; an imported session starts with empty named state.
+  Claude OAuth session authority now binds the canonical provider account UUID
+  instead of a grant lineage, so a same-account re-login can continue and
+  reopen. This identity change rides unreleased epoch 33; export document v8
+  and its embedded history and binding encodings are unchanged.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine
   contract and adapter `plakous.monty-python-adapter.v8` instead of the
   monty-pool contract and adapter v7. Its worker artifact, host and containment

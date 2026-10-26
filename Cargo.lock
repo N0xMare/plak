@@ -3931,6 +3931,7 @@ dependencies = [
  "plakous-http",
  "plakous-messages",
  "plakous-model",
+ "plakous-store",
  "plakous-tools",
  "rcgen",
  "rustls",

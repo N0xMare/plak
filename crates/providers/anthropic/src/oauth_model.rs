@@ -1,7 +1,10 @@
 //! Production Claude OAuth LanguageModel: identity-first Messages + HTTP factory.
 
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+use futures_util::StreamExt as _;
 
 use plakous_auth::subscription_limit::SubscriptionRequestPermit;
 use plakous_http::{Client, Origin};
@@ -95,8 +98,15 @@ pub struct ClaudeOAuthLanguageModel {
     client: Client,
     authority: RuntimeModelAuthority,
     credentials: ClaudeNativeAuthManager,
+    observation: Mutex<AuthorityObservation>,
+    login_renewed: Arc<AtomicBool>,
     #[cfg(test)]
     test_dial_origin: Option<Origin>,
+}
+
+struct AuthorityObservation {
+    authority: RuntimeModelAuthority,
+    grant: Option<plakous_auth::AccountBinding>,
 }
 
 impl ClaudeOAuthLanguageModel {
@@ -107,10 +117,19 @@ impl ClaudeOAuthLanguageModel {
         credentials: ClaudeNativeAuthManager,
         identity: crate::ClaudeOAuthRequestIdentity,
     ) -> Self {
+        let grant = credentials
+            .identity_credentials()
+            .ok()
+            .map(|((_, _, grant), _)| grant);
         Self {
             identity,
             resolved,
             client,
+            observation: Mutex::new(AuthorityObservation {
+                authority: authority.clone(),
+                grant,
+            }),
+            login_renewed: Arc::new(AtomicBool::new(false)),
             authority,
             credentials,
             #[cfg(test)]
@@ -156,13 +175,13 @@ impl ClaudeOAuthLanguageModel {
         let mut permit = refresh_then_reserve_inference(&self.credentials, input_bound)
             .await
             .map_err(|_| oauth_retry_error())?;
-        let ((access_token, _, grant_binding), identity) = self
+        let ((access_token, _, _), identity) = self
             .credentials
             .identity_credentials()
             .map_err(|_| oauth_retry_error())?;
         let account_binding = digest_binding(
-            b"claude-oauth-grant-lineage-account",
-            grant_binding.as_str().as_bytes(),
+            b"claude-oauth-provider-account",
+            identity.account_uuid().as_str().as_bytes(),
         )
         .map_err(|_| oauth_retry_error())?;
         if identity != self.identity || account_binding != self.authority.account_binding() {
@@ -203,27 +222,37 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
         self: Arc<Self>,
         checked_at: Timestamp,
     ) -> RuntimeModelAuthorityOperation {
-        let authority = self.authority.clone();
         let descriptor = self.resolved.descriptor().clone();
-        let credentials = self.credentials.clone();
-        let identity = self.identity.clone();
         Box::pin(async move {
-            let Ok(((_, generation, account_binding), current_identity)) =
-                credentials.identity_credentials()
+            let Ok(((_, generation, grant), current_identity)) =
+                self.credentials.identity_credentials()
             else {
                 return Err(RuntimeModelAuthorityError::Stale);
             };
-            if current_identity != identity {
+            if current_identity.account_uuid() != self.identity.account_uuid() {
+                return Err(RuntimeModelAuthorityError::AccountChanged);
+            }
+            if current_identity != self.identity {
+                return Err(RuntimeModelAuthorityError::ForeignAuthority);
+            }
+            let mut observation = self
+                .observation
+                .lock()
+                .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
+            let authority = &observation.authority;
+            if generation < authority.credential_generation()
+                || checked_at < authority.observed_at()
+            {
                 return Err(RuntimeModelAuthorityError::Stale);
             }
             let account = digest_binding(
-                b"claude-oauth-grant-lineage-account",
-                account_binding.as_str().as_bytes(),
+                b"claude-oauth-provider-account",
+                current_identity.account_uuid().as_str().as_bytes(),
             )
             .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
             let credential_authority = digest_binding(
-                b"claude-oauth-grant-lineage-credential",
-                account_binding.as_str().as_bytes(),
+                b"claude-oauth-provider-account-credential",
+                current_identity.account_uuid().as_str().as_bytes(),
             )
             .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
             if account != authority.account_binding()
@@ -233,7 +262,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
             }
             if generation == authority.credential_generation() {
                 authority.validate(&descriptor, checked_at)?;
-                return Ok(authority);
+                return Ok(authority.clone());
             }
             let refreshed = RuntimeModelAuthority::new(
                 &descriptor,
@@ -245,6 +274,15 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
             )
             .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
             refreshed.validate(&descriptor, checked_at)?;
+            if observation
+                .grant
+                .as_ref()
+                .is_some_and(|previous| previous != &grant)
+            {
+                self.login_renewed.store(true, Ordering::Release);
+            }
+            observation.authority = refreshed.clone();
+            observation.grant = Some(grant);
             Ok(refreshed)
         })
     }
@@ -345,6 +383,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
             ModelOperationRoot::Turn(_)
         );
         let retry_model = Arc::clone(&self);
+        let login_renewed = Arc::clone(&self.login_renewed);
         #[cfg(test)]
         let test_dial_origin = self.test_dial_origin.clone();
         Ok(PreparedModelCall::new(
@@ -354,7 +393,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                     let permit = refresh_then_reserve_inference(&credentials, input_bound)
                         .await
                         .map_err(|error| contextual_refresh_error(error, &descriptor))?;
-                    let ((access_token, _, grant_binding), current_identity) =
+                    let ((access_token, _, _), current_identity) =
                         credentials.identity_credentials().map_err(|_| {
                             ModelError::new(
                                 ModelErrorKind::Authentication,
@@ -362,8 +401,8 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                             )
                         })?;
                     let account_binding = digest_binding(
-                        b"claude-oauth-grant-lineage-account",
-                        grant_binding.as_str().as_bytes(),
+                        b"claude-oauth-provider-account",
+                        current_identity.account_uuid().as_str().as_bytes(),
                     )
                     .map_err(map_credential_error)?;
                     if current_identity != identity || account_binding != expected_account_binding {
@@ -435,13 +474,12 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                                     .revalidate_runtime_authority(checked_at)
                                     .await
                                     .map_err(|_| oauth_retry_error())?;
-                                let ((access_token, _, grant_binding), current_identity) =
-                                    credentials
-                                        .identity_credentials()
-                                        .map_err(|_| oauth_retry_error())?;
+                                let ((access_token, _, _), current_identity) = credentials
+                                    .identity_credentials()
+                                    .map_err(|_| oauth_retry_error())?;
                                 let account_binding = digest_binding(
-                                    b"claude-oauth-grant-lineage-account",
-                                    grant_binding.as_str().as_bytes(),
+                                    b"claude-oauth-provider-account",
+                                    current_identity.account_uuid().as_str().as_bytes(),
                                 )
                                 .map_err(|_| oauth_retry_error())?;
                                 if current_identity != identity
@@ -457,7 +495,18 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                             })
                         }))
                     };
-                    start_anthropic_messages_model_call(factory, descriptor, call_context).await
+                    let stream =
+                        start_anthropic_messages_model_call(factory, descriptor, call_context)
+                            .await?;
+                    let notice = login_renewed.swap(false, Ordering::AcqRel).then(|| {
+                        Ok(plakous_model::ModelEvent::Diagnostic(
+                            plakous_model::ModelDiagnostic::new(
+                                "Claude login renewed; continuing on the same account",
+                            ),
+                        ))
+                    });
+                    Ok(Box::pin(futures_util::stream::iter(notice).chain(stream))
+                        as plakous_model::ModelStream)
                 })
             },
         ))
@@ -568,22 +617,22 @@ impl ClaudeNativeAuthManager {
         }
         self.refresh_if_needed().await?;
         self.ensure_account_identity().await?;
-        let ((access_token, generation, grant_binding), identity) = self.identity_credentials()?;
+        let ((access_token, generation, _), identity) = self.identity_credentials()?;
         let key = AnthropicApiKey::new(access_token)
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
-        let account = AnthropicAccountIdentity::new(grant_binding.as_str())
+        let account = AnthropicAccountIdentity::new(identity.account_uuid().as_str())
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
         let route = AnthropicPlatformRoute::claude_oauth(key, account)
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
         let now = SubscriptionClock.now();
         let expires_at = pin_expires_at(now)?;
         let account_binding = digest_binding(
-            b"claude-oauth-grant-lineage-account",
-            grant_binding.as_str().as_bytes(),
+            b"claude-oauth-provider-account",
+            identity.account_uuid().as_str().as_bytes(),
         )?;
         let credential_authority_binding = digest_binding(
-            b"claude-oauth-grant-lineage-credential",
-            grant_binding.as_str().as_bytes(),
+            b"claude-oauth-provider-account-credential",
+            identity.account_uuid().as_str().as_bytes(),
         )?;
         let context_authority_binding = RuntimeModelAuthority::authority_class_for(
             account_binding,
@@ -677,13 +726,13 @@ impl ClaudeCredentialRenewal for ClaudeForcedRenewal {
             let permit = gate
                 .acquire_inference(self.input_bound)
                 .map_err(|_| renewal_error())?;
-            let ((access_token, _, grant_binding), identity) = self
+            let ((access_token, _, _), identity) = self
                 .credentials
                 .identity_credentials()
                 .map_err(|_| renewal_error())?;
             let account_binding = digest_binding(
-                b"claude-oauth-grant-lineage-account",
-                grant_binding.as_str().as_bytes(),
+                b"claude-oauth-provider-account",
+                identity.account_uuid().as_str().as_bytes(),
             )
             .map_err(|_| renewal_error())?;
             if identity != self.identity || account_binding != self.expected_account_binding {
@@ -993,6 +1042,10 @@ fn configuration_identity(error: impl std::fmt::Display) -> AnthropicError {
 }
 
 #[cfg(test)]
+#[path = "oauth_model/auth_binding_tests.rs"]
+mod auth_binding_tests;
+
+#[cfg(test)]
 #[allow(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -1003,7 +1056,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use futures_util::StreamExt as _;
     use plakous_auth::subscription_limit::{
         InMemorySubscriptionRequestGate, SubscriptionRequestClass, SubscriptionRequestGate,
         SubscriptionRequestLimits, SystemSubscriptionGateClock,
@@ -1032,7 +1084,7 @@ mod tests {
     };
     use crate::{AnthropicMessagesTargetBinding, ClaudeCompatibilityAcceptance};
 
-    const TEST_GRANT_BINDING: &str = "grant-fixture-authority";
+    pub(super) const TEST_GRANT_BINDING: &str = "12345678-1234-4234-8234-123456789abc";
 
     #[test]
     fn claude_oauth_default_dispatch_budget_is_the_native_route_budget() {
@@ -1045,12 +1097,12 @@ mod tests {
     fn test_context_authority() -> Digest {
         RuntimeModelAuthority::authority_class_for(
             digest_binding(
-                b"claude-oauth-grant-lineage-account",
+                b"claude-oauth-provider-account",
                 TEST_GRANT_BINDING.as_bytes(),
             )
             .expect("account binding"),
             digest_binding(
-                b"claude-oauth-grant-lineage-credential",
+                b"claude-oauth-provider-account-credential",
                 TEST_GRANT_BINDING.as_bytes(),
             )
             .expect("credential binding"),
@@ -1058,7 +1110,7 @@ mod tests {
         .expect("context authority")
     }
 
-    fn private_store(temp: &tempfile::TempDir) -> PathBuf {
+    pub(super) fn private_store(temp: &tempfile::TempDir) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;
         let directory = temp.path().join("credentials");
         std::fs::create_dir(&directory).unwrap();
@@ -1066,11 +1118,11 @@ mod tests {
         directory.join("claude.json")
     }
 
-    fn manager(path: PathBuf) -> ClaudeNativeAuthManager {
+    pub(super) fn manager(path: PathBuf) -> ClaudeNativeAuthManager {
         manager_with_client(path, Client::new_http1(Limits::default()).unwrap())
     }
 
-    fn manager_with_client(path: PathBuf, client: Client) -> ClaudeNativeAuthManager {
+    pub(super) fn manager_with_client(path: PathBuf, client: Client) -> ClaudeNativeAuthManager {
         let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).unwrap();
         let acceptance = ClaudeCompatibilityAcceptance::accept_exact(
             CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
@@ -1120,7 +1172,9 @@ mod tests {
         request
     }
 
-    async fn local_peer(responses: Vec<Vec<u8>>) -> (Client, Origin, JoinHandle<Vec<Vec<u8>>>) {
+    pub(super) async fn local_peer(
+        responses: Vec<Vec<u8>>,
+    ) -> (Client, Origin, JoinHandle<Vec<Vec<u8>>>) {
         let CertifiedKey { cert, signing_key } =
             generate_simple_self_signed(vec!["localhost".to_owned(), "127.0.0.1".to_owned()])
                 .unwrap();
@@ -1176,7 +1230,7 @@ mod tests {
         (client, origin, peer)
     }
 
-    fn inference_gate(inference: u32) -> Arc<InMemorySubscriptionRequestGate> {
+    pub(super) fn inference_gate(inference: u32) -> Arc<InMemorySubscriptionRequestGate> {
         request_gate(0, inference)
     }
 
@@ -1196,14 +1250,14 @@ mod tests {
         ))
     }
 
-    fn local_response(status: u16, content_type: &str, body: &str) -> Vec<u8> {
+    pub(super) fn local_response(status: u16, content_type: &str, body: &str) -> Vec<u8> {
         format!(
             "HTTP/1.1 {status} Local\r\ncontent-type: {content_type}\r\nrequest-id: req_oauth_local\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
         ).into_bytes()
     }
 
-    const LOCAL_SUCCESS_SSE: &str = concat!(
+    pub(super) const LOCAL_SUCCESS_SSE: &str = concat!(
         "event: message_start\n",
         "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_local_01\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\n",
         "event: content_block_start\n",
@@ -1228,10 +1282,10 @@ mod tests {
             .resolve_model("claude-sonnet-5", client.clone(), SessionLineage::Root)
             .await?;
         let now = authority.observed_at();
-        let (token, _, binding) = manager.dispatch_credentials()?;
+        let ((token, _, _), identity) = manager.identity_credentials()?;
         let route = AnthropicPlatformRoute::claude_oauth(
             AnthropicApiKey::new(token)?,
-            AnthropicAccountIdentity::new(binding.as_str())?,
+            AnthropicAccountIdentity::new(identity.account_uuid().as_str())?,
         )?;
         let resolved = oauth_resolved_target(
             route,
@@ -1364,8 +1418,8 @@ mod tests {
         .expect("request")
     }
 
-    #[test]
-    fn refreshed_oauth_target_replays_persisted_thinking_without_reusing_stale_plans() {
+    #[tokio::test]
+    async fn same_account_relogin_replays_persisted_thinking_without_reusing_stale_plans() {
         use plakous_model::{
             CapabilityRequirement, FixedClock, HistorySegment, HistorySegmentKind, ReasoningEffort,
             ReasoningPolicy, SystemIdGenerator,
@@ -1373,9 +1427,55 @@ mod tests {
 
         let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).unwrap();
         let later = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX + 60, 0).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let manager = manager(private_store(&temp));
+        manager
+            .persist_test_grant(
+                "first-access",
+                "first-refresh",
+                3600,
+                CLAUDE_OAUTH_INFERENCE_SCOPE,
+            )
+            .unwrap();
+        let (before, _, _) = manager
+            .resolve_oauth_model(
+                "claude-opus-5",
+                Client::new_http1(Limits::default()).unwrap(),
+                SessionLineage::Root,
+            )
+            .await
+            .unwrap();
+        manager
+            .persist_test_grant(
+                "second-access",
+                "second-refresh",
+                3600,
+                CLAUDE_OAUTH_INFERENCE_SCOPE,
+            )
+            .unwrap();
+        let (after, _, _) = manager
+            .resolve_oauth_model(
+                "claude-opus-5",
+                Client::new_http1(Limits::default()).unwrap(),
+                SessionLineage::Root,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            before
+                .resolved
+                .descriptor()
+                .semantic_binding_digest()
+                .unwrap(),
+            after
+                .resolved
+                .descriptor()
+                .semantic_binding_digest()
+                .unwrap()
+        );
         let route = AnthropicPlatformRoute::claude_oauth(
             AnthropicApiKey::new("oauth-access-token-fixture").unwrap(),
-            AnthropicAccountIdentity::new(TEST_GRANT_BINDING).unwrap(),
+            AnthropicAccountIdentity::new(after.identity.account_uuid().as_str()).unwrap(),
         )
         .unwrap();
         let resolve = |time| {
@@ -1817,12 +1917,12 @@ mod tests {
         let authority = RuntimeModelAuthority::new(
             &descriptor,
             digest_binding(
-                b"claude-oauth-grant-lineage-account",
+                b"claude-oauth-provider-account",
                 TEST_GRANT_BINDING.as_bytes(),
             )
             .unwrap(),
             digest_binding(
-                b"claude-oauth-grant-lineage-credential",
+                b"claude-oauth-provider-account-credential",
                 TEST_GRANT_BINDING.as_bytes(),
             )
             .unwrap(),
@@ -2004,10 +2104,10 @@ mod tests {
             .await
             .unwrap();
         let now = authority.observed_at();
-        let (token, _, binding) = manager.dispatch_credentials().unwrap();
+        let ((token, _, _), identity) = manager.identity_credentials().unwrap();
         let route = AnthropicPlatformRoute::claude_oauth(
             AnthropicApiKey::new(token).unwrap(),
-            AnthropicAccountIdentity::new(binding.as_str()).unwrap(),
+            AnthropicAccountIdentity::new(identity.account_uuid().as_str()).unwrap(),
         )
         .unwrap();
         let resolved = oauth_resolved_target(
@@ -2058,7 +2158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revalidation_rejects_new_grant_even_for_same_provider_uuid() {
+    async fn revalidation_accepts_new_grant_for_same_provider_uuid() {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(private_store(&temp));
         manager
@@ -2079,10 +2179,77 @@ mod tests {
             )
             .unwrap();
         let now = model.authority.observed_at();
-        assert!(matches!(
+        let before = model.authority.clone();
+        let after = model.revalidate_runtime_authority(now).await.unwrap();
+        assert!(after.credential_generation() > before.credential_generation());
+        assert_eq!(after.account_binding(), before.account_binding());
+        assert_eq!(
+            after.credential_authority_binding(),
+            before.credential_authority_binding()
+        );
+        assert!(after.observed_at() >= before.observed_at());
+    }
+
+    #[tokio::test]
+    async fn revalidation_refuses_new_grant_for_different_provider_uuid() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = manager(private_store(&temp));
+        manager
+            .persist_test_grant(
+                "first-access",
+                "first-refresh",
+                3600,
+                CLAUDE_OAUTH_INFERENCE_SCOPE,
+            )
+            .unwrap();
+        let (model, _) = refreshed_session_models(manager.clone()).await;
+        manager
+            .persist_test_grant_for_account(
+                "second-access",
+                "second-refresh",
+                3600,
+                CLAUDE_OAUTH_INFERENCE_SCOPE,
+                "87654321-4321-4321-8321-cba987654321",
+            )
+            .unwrap();
+        let now = model.authority.observed_at();
+        assert_eq!(
             model.revalidate_runtime_authority(now).await,
+            Err(RuntimeModelAuthorityError::AccountChanged)
+        );
+    }
+
+    #[tokio::test]
+    async fn revalidation_rejects_regressing_observation_after_relogin() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = manager(private_store(&temp));
+        manager
+            .persist_test_grant(
+                "first-access",
+                "first-refresh",
+                3600,
+                CLAUDE_OAUTH_INFERENCE_SCOPE,
+            )
+            .unwrap();
+        let (model, _) = refreshed_session_models(manager.clone()).await;
+        manager
+            .persist_test_grant(
+                "second-access",
+                "second-refresh",
+                3600,
+                CLAUDE_OAUTH_INFERENCE_SCOPE,
+            )
+            .unwrap();
+        let then = model.authority.observed_at();
+        let later = Timestamp::new(then.seconds() + 1, then.nanoseconds()).unwrap();
+        Arc::clone(&model)
+            .revalidate_runtime_authority(later)
+            .await
+            .unwrap();
+        assert_eq!(
+            model.revalidate_runtime_authority(then).await,
             Err(RuntimeModelAuthorityError::Stale)
-        ));
+        );
     }
 
     #[tokio::test]

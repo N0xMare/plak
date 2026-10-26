@@ -1698,8 +1698,11 @@ a historical Working attempt or authorizes its redispatch.
 An attached host may perform this exact reopen at a quiescent prompt boundary
 after fresh provider resolution, rather than mutating the old model's captured
 credential/catalog receipt. A new login selection epoch is not a refresh, even
-when its account and credential authority are unchanged. The old prepared or
-Working attempt is never upgraded to the new generation.
+when its account and credential authority are unchanged. Claude OAuth accepts
+a new grant for the same validated provider account at the next request and
+at exact reopen; its grant lineage is a credential-store write fence, not a
+session binding. A different account is refused by name and needs a new
+session. An old Working attempt is never upgraded to the new generation.
 
 Exact reopen validates the recorded and fresh runtime admission evidence against
 their respective complete provider configurations. Credential generations may
@@ -4083,7 +4086,15 @@ and provider-hosted-effect safeguards remain unchanged.
 Claude OAuth `metadata.user_id.account_uuid` is the authenticated provider's
 canonical account UUID from the token grant's `account.uuid` or the exact
 `GET /api/oauth/profile` endpoint. It is retained in the existing private
-credential payload, independently of the internal grant-lineage binding. Model
+credential payload. Both the session's account binding and credential-authority
+binding use this validated UUID, in separate Claude OAuth domains: the latter
+names the fixed OAuth route/client authority for that account, not a token,
+refresh-token lineage, device identity, or login selection. The private store
+retains its grant-lineage fence for credential CAS. A same-account re-login
+advances credential generation without changing session identity; live authority
+observations reject generation rollback and regressing observation time. The
+next dispatch emits `Claude login renewed; continuing on the same account`.
+Model
 resolution refreshes through the existing credential manager and hydrates missing
 UUID metadata under a Ready lease, then persists it using generation CAS. A stale
 writer cannot replace a concurrent login or refresh. Missing or invalid profile
@@ -4091,6 +4102,17 @@ identity fails before inference; it never becomes a digest, an invented UUID,
 or a prerequisite to delete credentials and log in again. Refresh preserves an
 omitted UUID and quarantines a conflicting UUID. Prepared model identity is
 checked again during revalidation and credential materialization.
+
+Claude Messages carries the full conversation, not grant-owned server-side
+continuation state. Thinking signatures and hosted artifacts remain scoped to
+the exact route, provider account and model; a new grant neither retags them nor
+weakens replay validation. Prior message ids and prompt-cache billing facts are
+diagnostic observations, not dispatch authority or a cache guarantee. They may
+name a prior response on the same account after re-login; the provider may miss
+its cache without changing the request's semantic input. SuperGrok's durable
+account identity already names its selected provider account and its credential
+authority names the local exact credential slot, not a grant lineage. Its
+separate live catalog/login-selection fence remains in force.
 
 `metadata.user_id.device_id` is an independent 32-byte random installation
 identity encoded as 64 lowercase hex characters. Plak persists its own value

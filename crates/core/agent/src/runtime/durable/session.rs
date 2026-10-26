@@ -306,6 +306,25 @@ impl DurableSessionRuntime {
         .await
         .map_err(StoreCallError::into_agent)?;
         validate_loaded_address(&loaded, address, self.durability)?;
+        if loaded
+            .checkpoint()
+            .checkpoint()
+            .manifest()
+            .provider_configuration()
+            .effective()
+            .authority()
+            .account_binding()
+            != builder
+                .provider_configuration
+                .effective()
+                .authority()
+                .account_binding()
+        {
+            return Err(AgentError::new(
+                AgentErrorKind::InvalidInput,
+                "provider account changed; start a new session for the newly logged-in account",
+            ));
+        }
         // An unfinished turn this open closes itself is not recovery-only:
         // opening it is how it recovers (spec 01 §13.1). Everything else
         // outstanding still is.
