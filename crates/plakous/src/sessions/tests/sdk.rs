@@ -7,6 +7,7 @@ use plakous_compose::PythonHarnessSdkV1;
 use plakous_model::{CallId, ToolCallBlock, ToolCallState, ToolCorrelation, ToolExecutionOwner};
 
 struct SdkModel {
+    cells: &'static [(&'static str, &'static str)],
     scripted: Arc<plakous_test_support::ScriptedModel>,
     calls: AtomicUsize,
 }
@@ -16,7 +17,7 @@ const CELLS: &[(&str, &str)] = &[
         "saved 4",
     ),
     (
-        "print((await state.get('answer'))['n'])\nawait state.put('large', [None] * 100000)\ntry:\n    await state.get('large')\nexcept OverflowError:\n    print('quota refused')\ntry:\n    await state.put('bad key', 1)\nexcept ValueError:\n    print('invalid key')",
+        "print((await state.get('answer'))['n'])\ntry:\n    await state.put('large', [None] * 100000)\nexcept OverflowError:\n    print('quota refused')\nprint(await state.get('large', 'not stored'))\ntry:\n    await state.put('bad key', 1)\nexcept ValueError:\n    print('invalid key')",
         "quota refused",
     ),
     (
@@ -35,6 +36,27 @@ const CELLS: &[(&str, &str)] = &[
     (
         "print((await ctx.read(Ref('__REF__'), lines=(1, 1))).text.startswith('x'))",
         "True",
+    ),
+    (
+        "listing = await ctx.list('.')\nhits = await ctx.grep('hello', path='seed')\nrevision = (await ctx.read('seed')).revision\nawait fs.apply([fs.Replace('seed', 'hello SDK', 'updated SDK\\n', expect=revision)])\nprint(len(listing.entries), len(hits.hits))\nprint(await plan.update([plan.Step('exercise SDK', 'completed')]))\nprint((await proc.shell('printf shell-ok')).output)",
+        "shell-ok",
+    ),
+    (
+        "job = await proc.start('read a; read b; printf \"%s/%s\" \"$a\" \"$b\"', stdin=True)\nawait proc.stdin(job, 'first\\n')\nprint((await proc.poll(job)).status)\nawait proc.stdin(job, 'second\\n', close=True)\nprint((await proc.join(job, timeout_s=2)).output)\njob = await proc.start(['/bin/cat'], stdin=True)\nprint((await proc.cancel(job)).status)",
+        "first/second",
+    ),
+    (
+        "for i in range(66):\n    result = await proc.run(['/bin/echo', 'complete'])\n    assert result.exit_code == 0\n    assert len(result.omitted) == 0\nprint('66 complete jobs')\nresult = await proc.shell(\"head -c 60000 /dev/zero | tr '\\\\0' q\")\nassert len(result.omitted) > 0\nfull = result.omitted[0].full\nassert full is not None\nprint((await ctx.read(full)).text.startswith('q'))",
+        "66 complete jobs",
+    ),
+    ("print('x' * 1100000)", "output bytes omitted"),
+    (
+        "try:\n    await ctx.read(Ref('__REF__'), lines=(1, 1))\nexcept OverflowError:\n    print('oversized read refused')",
+        "oversized read refused",
+    ),
+    (
+        "try:\n    for i in range(17):\n        await state.get('missing', 'x' * 1000000)\nexcept OverflowError:\n    print('cell quota refused')",
+        "cell quota refused",
     ),
 ];
 
@@ -94,13 +116,15 @@ impl LanguageModel for SdkModel {
                 .collect::<Vec<_>>()
                 .join("\n");
             assert!(
-                text.contains(CELLS[ordinal - 1].1),
+                text.contains(self.cells[ordinal - 1].1),
                 "cell {}: {text}",
                 ordinal - 1
             );
             if ordinal == 2 {
                 assert!(
-                    text.contains("42") && text.contains("invalid key"),
+                    text.contains("42")
+                        && text.contains("invalid key")
+                        && text.contains("not stored"),
                     "{text}"
                 );
             }
@@ -119,16 +143,16 @@ impl LanguageModel for SdkModel {
                 .try_into()
                 .map_err(|_| failure())?,
         );
-        let block = if ordinal < CELLS.len() {
-            let code = if CELLS[ordinal].0.contains("__REF__") {
+        let block = if ordinal < self.cells.len() {
+            let code = if self.cells[ordinal].0.contains("__REF__") {
                 let reference = last_output
                     .split_once("Ref('")
                     .and_then(|(_, rest)| rest.split_once("')"))
                     .map(|(id, _)| id)
                     .ok_or_else(failure)?;
-                CELLS[ordinal].0.replace("__REF__", reference)
+                self.cells[ordinal].0.replace("__REF__", reference)
             } else {
-                CELLS[ordinal].0.to_owned()
+                self.cells[ordinal].0.to_owned()
             };
             ContentBlock::ToolCall(
                 ToolCallBlock::new(
@@ -194,6 +218,15 @@ impl LanguageModel for SdkModel {
 
 #[tokio::test]
 async fn real_python_sdk_driver_values_edits_state_and_quotas() -> TestResult {
+    sdk_driver(false).await
+}
+
+#[tokio::test]
+async fn real_python_sdk_driver_foreground_stop() -> TestResult {
+    sdk_driver(true).await
+}
+
+async fn sdk_driver(foreground_stop: bool) -> TestResult {
     let worker = std::env::var_os("PLAK_PY_HOST")
         .map(PathBuf::from)
         .ok_or("real Python worker prerequisite is missing")?;
@@ -220,6 +253,11 @@ async fn real_python_sdk_driver_values_edits_state_and_quotas() -> TestResult {
         None,
     )?;
     let model = Arc::new(SdkModel {
+        cells: if foreground_stop {
+            &[("while True:\n    pass", "cell stopped: ForegroundBudget")]
+        } else {
+            CELLS
+        },
         scripted: Arc::new(
             plakous_test_support::ScriptedModel::new(facts.clone(), [])
                 .with_runtime_authority(authority.clone())
@@ -289,8 +327,16 @@ async fn real_python_sdk_driver_values_edits_state_and_quotas() -> TestResult {
         .engine_artifact(artifact)
         .product_extension_evidence(evidence)
         .build()?;
+    let attachment = if foreground_stop {
+        attachment.with_sdk_foreground_budget(Duration::from_millis(20))
+    } else {
+        attachment
+    };
     let builder = crate::local_composition::attach_local_composition(
         AgentBuilder::new(configured, registry, workspace)
+            .job_host(Arc::new(SdkJobHost(plakous_tools::JobOutputRoot::open(
+                &directory.path().join("jobs"),
+            )?)))
             .tool_policy(Arc::new(AlwaysAllowPolicy))
             .harness_plan(plan)
             .request_policy(AgentRequestPolicy::new(
@@ -321,12 +367,29 @@ async fn real_python_sdk_driver_values_edits_state_and_quotas() -> TestResult {
         "{:?}",
         result.outcome()
     );
-    assert_eq!(
-        std::fs::read_to_string(directory.path().join("result"))?,
-        "hello SDK\n"
-    );
+    if !foreground_stop {
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("result"))?,
+            "hello SDK\n"
+        );
+    }
     assert!(!directory.path().join("not-run").exists());
-    assert_eq!(model.calls.load(Ordering::Acquire), CELLS.len() + 1);
+    assert_eq!(model.calls.load(Ordering::Acquire), model.cells.len() + 1);
     session.release().await?;
     Ok(())
+}
+
+struct SdkJobHost(plakous_tools::JobOutputRoot);
+impl plakous_tools::JobHost for SdkJobHost {
+    fn service(&self, _: SessionId, _: BranchId) -> Option<plakous_tools::JoinedProcessSessions> {
+        None
+    }
+    fn attach(
+        &self,
+        owner: plakous_tools::JobOwner,
+        fresh: plakous_tools::JoinedProcessSessions,
+    ) -> Result<plakous_tools::JoinedProcessSessions, plakous_tools::ExecutionBackendError> {
+        fresh.bind_job_outputs(self.0.clone(), owner.session_id, owner.branch_id);
+        Ok(fresh)
+    }
 }

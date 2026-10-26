@@ -276,6 +276,7 @@ impl SdkApi {
                     p("cmd", "str | list[str]", Command),
                     cwd(),
                     p("tty", "bool", Bool).default("False"),
+                    p("stdin", "bool", Bool).default("False"),
                 ],
                 returns: "Job",
                 description: "Start a long-running job. A list is literal argv; a string is a shell command.",
@@ -689,8 +690,8 @@ mod tests {
         assert_eq!(
             vec![digest(&api.stubs())?, digest(&api.bootstrap().source)?],
             vec![
-                "228e933e6cca14d0611df2c39702cb57b64188cb3b23cc5c2d093c8c96923692",
-                "ff59fc459f24eca8c830bada9c49302c3c4da08e2cef16813cf34115be0f9446"
+                "3f6ddd3f3620a7c8372237ad98127453d32d9193a1f3ecb8d1241aaa9cc820c1",
+                "d22b0f6b2b3bf1976338492a9dce756e3a4df3630be7ecbab9987789fdc40e5c"
             ]
         );
         Ok(())

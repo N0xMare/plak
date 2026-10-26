@@ -278,9 +278,11 @@ fn extension_facts(profile: &LocalCompositionProfile) -> Result<ExtensionFacts, 
         plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => javascript_extension_limits(),
         plakous_compose::CellDescriptor::PythonPtcV1(_) => python_extension_limits(),
         plakous_compose::CellDescriptor::PythonHarnessSdkV1(_) => ProductExtensionLimits {
-            max_source_bytes: 262_144,
-            max_yield_time_ms: 300_000,
-            max_output_tokens: 16_384,
+            max_source_bytes: u64::from(
+                plakous_compose::PythonHarnessSdkDescriptorV1::SOURCE_BYTES,
+            ),
+            max_yield_time_ms: plakous_compose::PythonHarnessSdkDescriptorV1::FOREGROUND_MS,
+            max_output_tokens: plakous_compose::PythonHarnessSdkDescriptorV1::OUTPUT_BYTES as u64,
         },
         plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
         | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_) => {

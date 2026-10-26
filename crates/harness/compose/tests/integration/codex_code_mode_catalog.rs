@@ -134,23 +134,23 @@ fn cell_descriptor_v3_identities_pin_every_presentation() -> Result<(), TestErro
         [
             (
                 "codex-native",
-                "96c094f0fa4073048044c11bbac78ca4165bbc20d5735d07069709de6d219b9d".to_owned()
+                "8887770c58d20ddce51c61c16a073ec2ebab09d8146961054f3c0d61b92e213a".to_owned()
             ),
             (
                 "codex-minimal",
-                "3e8b6d8466c5042c670ac345f05ab99615c5d5f102db987436c6022bf44a93fd".to_owned()
+                "bbd080736e1dbb1e97a60471182dc2e10e7a1d06580d716e09ea71a0e52b9c31".to_owned()
             ),
             (
                 "javascript",
-                "f0dd2ca40bea33fb5ed480e8c591ba5dddb46c3c52b0bc92cb3764898dc79b3e".to_owned()
+                "36a19959360f84bb579f693c7763f31c9012f4d2cb3e8fb2dc39240339fe2321".to_owned()
             ),
             (
                 "python-structured",
-                "c08ca7b6ccf462c05a6516539254443128c067fb574a9f592ce3bd6f8114c9e9".to_owned()
+                "54f4b59ca62573641b377b111af6d537ba3452995a2242490ff99d810f1ac4bf".to_owned()
             ),
             (
                 "python-custom",
-                "e4677b3be8def61b40580fa4cea79c3f10f5330bf6f0b32870fe8eb8b3e86525".to_owned()
+                "6d8f2598a4011835c14948395e2cbea4e8cc1cd9c6570bcd0babc4fe2c3d343c".to_owned()
             ),
         ]
     );

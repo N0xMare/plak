@@ -13,7 +13,7 @@ import struct
 import subprocess
 import time
 
-REVISION = "plakous-cell-protocol.v1"
+REVISION = "plakous-cell-protocol.v2"
 MAX_FRAME = 8 * 1024 * 1024
 
 

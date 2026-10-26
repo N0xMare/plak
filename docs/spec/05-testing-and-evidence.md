@@ -2501,14 +2501,20 @@ not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
 
-The typed Python SDK's real-worker driver fixture exercises parallel typed
-reads, transactional `edit_files`, named-state round trip and failed-cell
-rollback, encoded-value quota refusal, typed state errors, literal argv,
-non-TTY stdin and fast job observation. A type-error cell must run no file
+The typed Python SDK's real-worker driver fixture exercises gathered typed
+reads (without asserting execution overlap), listing, grep, plan updates,
+transactional `edit_files` and the read-revision/CAS round trip, named-state
+round trip and failed-cell rollback, per-result and per-cell encoded quotas,
+put-time state quota errors, literal argv, shell execution, cancellation,
+non-TTY stdin keep-open, and more than 64 processes with a bound jobs root
+including a job-output reference read. A type-error cell must run no file
 operation, and a forged `MemoryError` message remains an ordinary failure.
-The serial foreground-budget test requires a typed stop and joined worker.
+The serial full-driver foreground-budget test requires a typed stop;
+the session-level test also requires a joined worker.
 SDK stub/bootstrap hashes and generated-validator keyword coverage are pinned;
-the pre-existing presentation and descriptor pins are unchanged.
+the SDK descriptor identity is pinned beside the existing goldens. Existing
+text pins are unchanged; descriptors naming the revised cell protocol rotate
+in unreleased epoch 33.
 
 Child-observation regressions exercise the eight-subscription activity bound,
 live counter replacement and terminal clearing, canonical prefix before the

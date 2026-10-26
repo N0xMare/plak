@@ -7,6 +7,12 @@
 
 use super::*;
 
+struct NestedRequest {
+    digest: Digest,
+    sequence: u32,
+    want_value: bool,
+}
+
 impl Driver {
     /// Commits inside a running cell are settlement, so a nested call is the
     /// cell's new work and meets the ordinary threshold here, before anything
@@ -40,7 +46,11 @@ impl Driver {
             attempt_id,
             state,
             pending.call,
-            (pending.request_digest, pending.request_sequence, want_value),
+            NestedRequest {
+                digest: pending.request_digest,
+                sequence: pending.request_sequence,
+                want_value,
+            },
         ))
         .await;
         let (result, value) = match result {
@@ -64,7 +74,11 @@ impl Driver {
         attempt_id: AttemptId,
         state: &mut CompositionOwner,
         nested: crate::local_composition::LocalCompositionNestedCall,
-        (request_digest, request_sequence, want_value): (Digest, u32, bool),
+        NestedRequest {
+            digest: request_digest,
+            sequence: request_sequence,
+            want_value,
+        }: NestedRequest,
     ) -> Result<(serde_json::Value, Option<plakous_tools::ExecutionValue>), AgentError> {
         const MAX_LOCAL_COMPOSITION_DEPTH: u16 = 1;
         if state.cell() != Some(nested.cell_id.as_str()) {
@@ -215,7 +229,10 @@ impl Driver {
                 command,
                 attempt_id,
                 &call,
-                (presentation, want_value),
+                super::super::tools::AdmissionPresentation {
+                    presentation,
+                    want_value,
+                },
                 ToolDispatchOrigin::NestedComposition,
                 state.exec_call_id(),
             )

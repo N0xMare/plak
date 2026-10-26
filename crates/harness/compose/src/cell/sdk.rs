@@ -75,7 +75,7 @@ impl PythonHarnessSdkV1 {
                 marker: "run_py",
                 input_field: Some("code"),
                 input: OuterInput::Structured(plakous_tools::object_schema(
-                    serde_json::json!({"code":{"type":"string","minLength":1,"maxLength":262_144}}),
+                    serde_json::json!({"code":{"type":"string","minLength":1,"maxLength":PythonHarnessSdkDescriptorV1::SOURCE_BYTES}}),
                     &["code"],
                 )),
             },
@@ -84,10 +84,10 @@ impl PythonHarnessSdkV1 {
             lifecycle: CellLifecycle::AgentIncarnationPersistent,
             result: "BytesRunPyV1",
             limits: CellLimits::PythonSdk {
-                source_bytes: 262_144,
-                foreground_ms: 300_000,
-                result_bytes: 1_048_576,
-                cell_bytes: 16_777_216,
+                source_bytes: PythonHarnessSdkDescriptorV1::SOURCE_BYTES,
+                foreground_ms: PythonHarnessSdkDescriptorV1::FOREGROUND_MS,
+                result_bytes: PythonHarnessSdkDescriptorV1::RESULT_BYTES,
+                cell_bytes: PythonHarnessSdkDescriptorV1::CELL_BYTES,
                 consumes_values: true,
             },
             catalog: CatalogStyle::PythonSdk,
@@ -136,6 +136,20 @@ pub struct PythonHarnessSdkDescriptorV1 {
     job_config: JobConfig,
 }
 impl PythonHarnessSdkDescriptorV1 {
+    /// Maximum UTF-8 source size per cell.
+    pub const SOURCE_BYTES: u32 = 262_144;
+    /// Foreground wall-clock budget in milliseconds.
+    pub const FOREGROUND_MS: u64 = 300_000;
+    /// Maximum encoded CellValue bytes per result.
+    pub const RESULT_BYTES: usize = 1_048_576;
+    /// Maximum cumulative encoded CellValue bytes per cell.
+    pub const CELL_BYTES: usize = 16_777_216;
+    /// Maximum retained output references, evicted oldest first.
+    pub const REF_ENTRIES: usize = 64;
+    /// Maximum retained reference bytes.
+    pub const REF_BYTES: usize = 16_777_216;
+    /// Maximum model-visible observation bytes.
+    pub const OUTPUT_BYTES: usize = 16_384;
     /// Complete v3 presentation identity.
     #[must_use]
     pub const fn identity(&self) -> Digest {

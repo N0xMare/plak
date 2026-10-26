@@ -97,7 +97,8 @@ pub(super) fn compile_cell(
     validate_catalog(&api, presentation)?;
     let execute_text = if let Some(sdk) = &api.sdk {
         format!(
-            "Run a type-checked Python SDK cell. Supply code; await I/O. Fresh globals each cell; only state survives. No wait or background cells. Foreground limit 300 seconds. Processes are not sandboxed.\n\n{}",
+            "Run a type-checked Python SDK cell. Supply code; await I/O. Fresh globals each cell; only state survives. No wait or background cells. Foreground limit {} seconds. Processes are not sandboxed.\n\n{}",
+            super::PythonHarnessSdkDescriptorV1::FOREGROUND_MS / 1000,
             sdk.stubs()
         )
     } else if presentation.catalog == CatalogStyle::Python {

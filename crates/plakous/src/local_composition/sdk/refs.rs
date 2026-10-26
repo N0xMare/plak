@@ -1,14 +1,24 @@
-use std::collections::BTreeMap;
+use plakous_compose::PythonHarnessSdkDescriptorV1 as Limits;
+use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Default)]
 pub(super) struct Refs {
     values: BTreeMap<String, Reference>,
     bytes: usize,
+    order: VecDeque<String>,
 }
 
 pub(super) enum Reference {
     Text(String),
     JobOutput(String),
+}
+
+impl Reference {
+    fn bytes(&self) -> usize {
+        match self {
+            Self::Text(text) | Self::JobOutput(text) => text.len(),
+        }
+    }
 }
 
 impl Refs {
@@ -28,11 +38,22 @@ impl Refs {
         self.insert_reference(Reference::JobOutput(path), bytes)
     }
     fn insert_reference(&mut self, value: Reference, bytes: usize) -> Result<String, String> {
-        if self.values.len() >= 64 || self.bytes.saturating_add(bytes) > 16_777_216 {
+        if bytes > Limits::REF_BYTES {
             return Err("SDK output reference capacity exceeded".into());
+        }
+        while self.values.len() >= Limits::REF_ENTRIES
+            || self.bytes.saturating_add(bytes) > Limits::REF_BYTES
+        {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(value) = self.values.remove(&oldest) {
+                self.bytes -= value.bytes();
+            }
         }
         let id = format!("ref_{}", uuid::Uuid::new_v4().simple());
         self.bytes += bytes;
+        self.order.push_back(id.clone());
         self.values.insert(id.clone(), value);
         Ok(id)
     }
@@ -53,10 +74,14 @@ mod tests {
         for _ in 1..64 {
             refs.insert(String::new())?;
         }
-        assert!(refs.insert(String::new()).is_err());
+        refs.insert(String::new())?;
+        assert!(refs.get(&id).is_none());
+        assert_eq!(refs.values.len(), Limits::REF_ENTRIES);
         let mut bytes = Refs::default();
-        bytes.insert("x".repeat(16_777_216))?;
-        assert!(bytes.insert("x".into()).is_err());
+        let oldest = bytes.insert("x".repeat(Limits::REF_BYTES))?;
+        bytes.insert("x".into())?;
+        assert!(bytes.get(&oldest).is_none());
+        assert!(bytes.insert("x".repeat(Limits::REF_BYTES + 1)).is_err());
         assert!(refs.get("ref_not_issued").is_none());
         Ok(())
     }

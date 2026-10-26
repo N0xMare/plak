@@ -568,7 +568,7 @@ mod quickjs_upgrade_tests {
                 b"plakous.cell-engine-contract.v1",
                 b"quickjs",
                 b"rquickjs-0.12",
-                b"plakous-cell-protocol.v1",
+                b"plakous-cell-protocol.v2",
                 b"plakous-js-host-bootstrap.v7",
             ],
         )
@@ -647,8 +647,8 @@ mod monty_upgrade_tests {
                 b"plakous.cell-engine-contract.v1",
                 b"monty",
                 b"1.2.0",
-                b"plakous-cell-protocol.v1",
-                b"plakous.monty-python-adapter.v8",
+                b"plakous-cell-protocol.v2",
+                b"plakous.monty-python-adapter.v9",
             ],
         )
         .map_err(identity_error)?;

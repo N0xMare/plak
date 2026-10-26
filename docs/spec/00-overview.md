@@ -102,7 +102,7 @@ classes and directory policy.
 | `plakous-attempt` | `crates/common/attempt` | `common` | Family-agnostic attempt lifecycle: phase transitions, observation ledger, pure acceptance outcomes |
 | `plakous-http` | `crates/common/http` | `common` | Provider-blind bounded HTTP transport and SSE framing. One fresh connection per execute unless the client is explicitly pooled; no redirect, proxy, retry, or auth semantics |
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
-| `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v1`), worker client and session for isolated interpreter workers; never links an interpreter |
+| `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family kernel: wire grammar, stream framing, limits, sequencing |

@@ -21,7 +21,7 @@ pub(super) fn observation(response: &mut LocalCompositionResponse, refs: &Arc<Mu
         text.push('\n');
         text.push_str(error);
     }
-    let bound = 16_384;
+    let bound = plakous_compose::PythonHarnessSdkDescriptorV1::OUTPUT_BYTES;
     if text.len() <= bound {
         return;
     }

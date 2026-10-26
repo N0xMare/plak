@@ -13,7 +13,7 @@ use serde_json::Value;
 pub use crate::process_resources::ProcessResourceUsage as ResourceUsage;
 
 /// The protocol revision both sides name in `Hello` and `Configure`.
-pub const CELL_PROTOCOL_REVISION: &str = "plakous-cell-protocol.v1";
+pub const CELL_PROTOCOL_REVISION: &str = "plakous-cell-protocol.v2";
 
 /// A worker build: the engine and adapter its `Hello` names, and the engine
 /// version its engine contract records.
@@ -38,7 +38,7 @@ pub const MONTY_WORKER: WorkerIdentity = WorkerIdentity {
     binary: "plakous-py-host",
     engine: "monty",
     version: "1.2.0",
-    adapter: "plakous.monty-python-adapter.v8",
+    adapter: "plakous.monty-python-adapter.v9",
 };
 
 /// Parent to worker.

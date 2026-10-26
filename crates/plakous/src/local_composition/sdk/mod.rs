@@ -28,6 +28,7 @@ mod render;
 mod values;
 
 pub(super) struct SdkPresentation {
+    pub(super) budget: std::time::Duration,
     pub(super) evidence: ProductExtensionEvidence,
     pub(super) api: plakous_compose::HostApi,
 }
@@ -65,7 +66,7 @@ pub(super) fn descriptor(
 
 impl Presentation for SdkPresentation {
     fn foreground_budget(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_secs(300))
+        Some(self.budget)
     }
     fn consumes_values(&self) -> bool {
         true
@@ -98,13 +99,15 @@ impl Presentation for SdkPresentation {
         }
         let input: Input =
             serde_json::from_value(input).map_err(|_| "run_py requires exactly one code string")?;
-        if input.code.is_empty() || input.code.len() > 262_144 {
+        if input.code.is_empty()
+            || input.code.len() > PythonHarnessSdkDescriptorV1::SOURCE_BYTES as usize
+        {
             return Err("SDK code must be non-empty and at most 256 KiB".into());
         }
         Ok(LocalCompositionExecuteInput {
             source: input.code,
-            yield_time_ms: 300_000,
-            max_output_tokens: 16_384,
+            yield_time_ms: PythonHarnessSdkDescriptorV1::FOREGROUND_MS,
+            max_output_tokens: PythonHarnessSdkDescriptorV1::OUTPUT_BYTES,
         })
     }
     fn parse_wait(&self, _input: serde_json::Value) -> Result<LocalCompositionWaitInput, String> {
@@ -187,10 +190,10 @@ impl Presentation for SdkPresentation {
         super::python::truncate_python_items(items, bound)
     }
     fn max_yield_time_ms(&self) -> u64 {
-        300_000
+        PythonHarnessSdkDescriptorV1::FOREGROUND_MS
     }
     fn max_output_tokens(&self) -> usize {
-        16_384
+        PythonHarnessSdkDescriptorV1::OUTPUT_BYTES
     }
     fn worker(&self) -> (plakous_cell::WorkerIdentity, plakous_cell::EngineConfig) {
         (
@@ -202,10 +205,7 @@ impl Presentation for SdkPresentation {
         super::verify_cell_worker_before_spawn(super::CellEngine::Monty, path, identity)
     }
     fn session_engine(&self) -> Box<dyn SessionEngine> {
-        Box::new(SdkEngine::new(
-            self.api.clone(),
-            std::time::Duration::from_secs(300),
-        ))
+        Box::new(SdkEngine::new(self.api.clone(), self.budget))
     }
 }
 

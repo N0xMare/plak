@@ -136,7 +136,7 @@ impl Driver {
                     command,
                     attempt_id,
                     &call,
-                    (presentation,state.integration().consumes_values() && pending.responder.wants_value()),
+                    super::super::tools::AdmissionPresentation { presentation, want_value: state.integration().consumes_values() && pending.responder.wants_value() },
                     ToolDispatchOrigin::NestedComposition,
                     state.exec_call_id(),
                 )

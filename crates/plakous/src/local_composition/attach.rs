@@ -100,6 +100,8 @@ impl fmt::Debug for LocalCompositionProfile {
 
 /// One exact profile-to-engine binding for an agent.
 pub struct LocalCompositionAttachment {
+    #[cfg(test)]
+    sdk_foreground_budget: Option<std::time::Duration>,
     profile: LocalCompositionProfile,
     artifact: LocalCompositionEngineArtifact,
     binding_identity: Digest,
@@ -109,6 +111,11 @@ pub struct LocalCompositionAttachment {
 }
 
 impl LocalCompositionAttachment {
+    #[cfg(test)]
+    pub(crate) fn with_sdk_foreground_budget(mut self, budget: std::time::Duration) -> Self {
+        self.sdk_foreground_budget = Some(budget);
+        self
+    }
     /// Starts a builder for one exact profile binding.
     #[must_use]
     pub fn builder(profile: LocalCompositionProfile) -> LocalCompositionAttachmentBuilder {
@@ -265,6 +272,8 @@ impl LocalCompositionAttachmentBuilder {
             evidence_receipt,
         )?;
         Ok(LocalCompositionAttachment {
+            #[cfg(test)]
+            sdk_foreground_budget: None,
             profile: self.profile,
             artifact,
             binding_identity,
@@ -314,6 +323,8 @@ pub fn attach_local_composition(
         return Ok(builder);
     };
     let LocalCompositionAttachment {
+        #[cfg(test)]
+        sdk_foreground_budget,
         profile,
         artifact,
         binding_identity,
@@ -361,6 +372,14 @@ pub fn attach_local_composition(
             (plakous_compose::CellDescriptor::PythonHarnessSdkV1(descriptor), Some(evidence)) => (
                 sdk::descriptor(&descriptor).map_err(invalid)?,
                 Box::new(sdk::SdkPresentation {
+                    budget: {
+                        let budget = std::time::Duration::from_millis(
+                            plakous_compose::PythonHarnessSdkDescriptorV1::FOREGROUND_MS,
+                        );
+                        #[cfg(test)]
+                        let budget = sdk_foreground_budget.unwrap_or(budget);
+                        budget
+                    },
                     evidence,
                     api: descriptor.host_api().clone(),
                 }),

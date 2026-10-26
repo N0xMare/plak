@@ -11,6 +11,7 @@ use plakous_agent::internal::{
     StateError, StateOp, StateResult,
 };
 use plakous_cell::{CellSessionEvent, CellSessionEvents, CellValue as V};
+use plakous_compose::PythonHarnessSdkDescriptorV1 as Limits;
 use plakous_tools::{ExecutionValue, ProcessValue};
 use serde_json::{Value, json};
 use std::sync::{
@@ -280,8 +281,12 @@ fn optional(input: &Value, key: &str, out: &mut Value, target: &str) {
 }
 fn timeout(input: &Value) -> Result<u64, V> {
     let seconds = input["timeout_s"].as_f64().unwrap_or(120.0);
-    if !seconds.is_finite() || seconds < 0.0 || seconds > 300.0 {
-        return Err(error_value("value", "timeout_s must be within 0..=300"));
+    let bound = std::time::Duration::from_millis(Limits::FOREGROUND_MS).as_secs_f64();
+    if !seconds.is_finite() || seconds < 0.0 || seconds > bound {
+        return Err(error_value(
+            "value",
+            format!("timeout_s must be within 0..={bound}"),
+        ));
     }
     let duration = std::time::Duration::try_from_secs_f64(seconds)
         .map_err(|_| error_value("value", "invalid timeout_s"))?;
@@ -332,6 +337,14 @@ async fn execute(scope: &Scope, name: &str, input: Value) -> Result<V, V> {
             };
         }
         "state.put" => {
+            values::result_bytes(&V::from(input["value"].clone())).map_err(
+                |error| match error {
+                    values::ValueQuotaError::Result { bytes } => {
+                        state_error(&StateError::ValueTooLarge { bytes })
+                    }
+                    other => error_value("quota", other.to_string()),
+                },
+            )?;
             scope
                 .state(StateOp::Put {
                     key: string(&input, "name").into(),
@@ -442,19 +455,20 @@ async fn process(scope: &Scope, tool: &str, args: Value) -> Result<ProcessValue,
     }
 }
 
-fn process_value(scope: &Scope, mut value: ProcessValue) -> Result<V, V> {
-    value.full_output = value
-        .full_output
-        .map(|path| {
+fn process_value(scope: &Scope, mut value: ProcessValue) -> V {
+    value.full_output = if value.truncated || value.omitted_bytes > 0 {
+        value.full_output.and_then(|path| {
             scope
                 .refs
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .job_output(path)
+                .ok()
         })
-        .transpose()
-        .map_err(|message| error_value("quota", message))?;
-    Ok(values::process(value))
+    } else {
+        None
+    };
+    values::process(value)
 }
 async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V> {
     let background = name == "proc.start";
@@ -468,7 +482,11 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
     } else {
         &input["cmd"]
     };
-    let pipe = background || !input["stdin"].is_null();
+    let pipe = if background {
+        input["stdin"].as_bool().unwrap_or(false)
+    } else {
+        !input["stdin"].is_null()
+    };
     let wait = 0;
     let mut args = json!({"workdir":input["cwd"].as_str().unwrap_or("."),"yield_time_ms":wait,"max_output_bytes":40000,"tty":input["tty"].as_bool().unwrap_or(false)});
     let tool = if command.is_array() {
@@ -496,7 +514,7 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
                         .saturating_duration_since(tokio::time::Instant::now())
                         .as_millis(),
                 )
-                .unwrap_or(300_000);
+                .unwrap_or(Limits::FOREGROUND_MS);
                 merge_process(
                     &mut value,
                     process(scope, "process_session_poll", poll_args(id, remaining)).await?,
@@ -511,7 +529,7 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
             value.session_id = None;
         }
     }
-    process_value(scope, value)
+    Ok(process_value(scope, value))
 }
 
 fn merge_process(value: &mut ProcessValue, observed: ProcessValue) {
@@ -551,5 +569,5 @@ async fn observe_process(scope: &Scope, name: &str, input: &Value) -> Result<V, 
             ),
         )
     };
-    process_value(scope, process(scope, tool, args).await?)
+    Ok(process_value(scope, process(scope, tool, args).await?))
 }

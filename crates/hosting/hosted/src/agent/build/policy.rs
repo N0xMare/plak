@@ -284,11 +284,10 @@ pub(in crate::agent) struct OccupancyReadOnlyPolicy {
 }
 
 /// The process-session tool family, by the canonical names
-/// `plakous_tools::coding::PROCESS_SESSION_*` register (shell/argv start,
+/// `plakous_tools::coding::PROCESS_SESSION_*` register (shell start,
 /// write, poll, terminate). Spelled here because the CLI's pinned plakous facade surface
 /// does not export the constants.
-pub(in crate::agent) const PROCESS_SESSION_TOOLS: [&str; 5] = [
-    "process_session_exec",
+pub(in crate::agent) const PROCESS_SESSION_TOOLS: [&str; 4] = [
     "process_session_start",
     "process_session_write",
     "process_session_poll",
@@ -341,9 +340,9 @@ pub(crate) fn occupancy_read_only_allows(name: &str, effect: ToolEffect) -> bool
 impl ToolPolicy for OccupancyReadOnlyPolicy {
     fn revision(&self) -> ToolPolicyRevision {
         let identity = if self.execute_copy {
-            "plak.occupancy.execute.v6"
+            "plak.occupancy.execute.v5"
         } else {
-            "plak.occupancy.read-only.v9"
+            "plak.occupancy.read-only.v8"
         };
         #[allow(
             clippy::expect_used,

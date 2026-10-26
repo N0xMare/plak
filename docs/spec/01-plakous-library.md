@@ -6480,7 +6480,7 @@ in-place checkpoint reopen; the export document encoding is unchanged.
 The JavaScript engine contract is the five-part recipe
 `sha256(ExecutionEnvironment, 1, ["plakous.cell-engine-contract.v1", engine,
 engine version, cell protocol revision, adapter revision])`, today
-`quickjs`, `rquickjs-0.12`, `plakous-cell-protocol.v1` and
+`quickjs`, `rquickjs-0.12`, `plakous-cell-protocol.v2` and
 `plakous-js-host-bootstrap.v7`. The official V8 `codex-code-mode-host` is **not
 an evaluator**, and no host is embedded by `include_bytes`.
 
@@ -6537,7 +6537,7 @@ drops it and the cell completes with its remaining output. Genuinely
 unrepresentable content, such as an undecodable media URL, is answered with
 a bounded model-visible notice rather than failing the turn.
 
-The sidecar speaks the cell protocol (`plakous-cell-protocol.v1`): each frame
+The sidecar speaks the cell protocol (`plakous-cell-protocol.v2`): each frame
 is a 4-byte big-endian length and one JSON value, capped at 8 MiB before any
 allocation, so a truncated length, an oversize length and an unterminated
 body are all loss. The worker opens with a `Hello` naming the protocol
@@ -6685,7 +6685,7 @@ that abandons held results emits `Delivery{NotObserved}` before `CellDone`
 for every result never handed to the interpreter. Cancellation
 or interpreter loss after admission does not roll back effects or authorize
 replay. The engine contract is the cell recipe over `monty`, `1.2.0`,
-`plakous-cell-protocol.v1` and `plakous.monty-python-adapter.v8`. Exact reopen requires the current engine,
+`plakous-cell-protocol.v2` and `plakous.monty-python-adapter.v9`. Exact reopen requires the current engine,
 adapter, profile and presentation identities. Cross-build session transfer
 uses export/carry; there is no migration. The library's incompatible evaluator
 refusal is product-neutral. Plak renders the recovery commands with the actual
@@ -7056,17 +7056,23 @@ A Python-raised `MemoryError("memory limit exceeded")` remains an ordinary
 cell failure, never a typed stop. In-engine memory remains bounded at 256 MiB.
 `proc.start` is for long work; `proc.run` and `proc.shell` join within their
 `timeout_s` bound (0–300 s) and stop a job that exceeds it. `proc.stdin` writes
-and optionally closes stdin. Processes have the user's full authority and
-are not sandboxed. Both process-enabled occupancy tiers admit literal argv
-under the same fence as shell start; file edits remain denied on those tiers.
+and optionally closes stdin. `proc.start(stdin=False)` closes non-TTY input
+by default; `stdin=True` keeps it open for subsequent writes. Processes have
+the user's full authority and are not sandboxed. The SDK is root-only, so
+child occupancy fences do not admit its literal-argv capability.
 
 One nested result may encode to at most 1 MiB as `CellValue`, and all results
 of a cell to at most 16 MiB. These quotas count encoded values, not tool text
 or Rust allocation estimates; refused results do not spend capacity. Output
 observations contain at most 16 KiB of UTF-8 text. Larger output gets an
 unpredictable 128-bit `Ref`; `ctx.read(ref, lines=(first,last))` reads a bounded
-page. The session retains at most 64 references and 16 MiB of full text.
-Capacity refusal is explicit. `Omission` retains canonical counts for omitted
+page. The session retains at most 64 references and 16 MiB of full text,
+evicting oldest references first. Process output receives a reference only
+when bytes were omitted. If no reference can be issued, the process result
+still succeeds with an omission whose `full` is null. Named-state puts refuse
+values whose encoded CellValue would exceed the per-result quota, before
+changing the overlay. Quotas use an early-stopping counting writer without
+allocating a serialized buffer. `Omission` retains canonical counts for omitted
 lines, clipped lines, hits and entries; incomplete walks and truncated process
 output are marked without inventing counts of unseen data. No media attachment
 is produced by this core SDK surface.

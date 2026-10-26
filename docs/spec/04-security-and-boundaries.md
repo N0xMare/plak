@@ -113,10 +113,9 @@ capabilities over children and own processes; the allowlist admits them under
 the same fence, and their child half needs the agent grant the node already
 holds.
 `TaskOutput` is not an enrolled tool and is not allowlisted. The execute
-occupancy identity is `plak.occupancy.execute.v6`; process-enabled read-only is
-`plak.occupancy.read-only.v9`. Both admit literal-argv `process_session_exec`
-under the same process fence as `process_session_start`; argv execution does
-not reduce the operator authority already available through the shell. Both
+occupancy identity is `plak.occupancy.execute.v5`; process-enabled read-only is
+`plak.occupancy.read-only.v8`. The root-only SDK does not enter these child
+occupancy fences; its `process_session_exec` is not allowlisted. Both tiers
 still deny `edit_files` and other file-tool writes.
 Both tiers compile without file-writing presentations. Plan tools are allowed
 by canonical name (`update_plan`, `merge_plan`) without changing their mutating
@@ -1404,7 +1403,7 @@ upstream bindings may use unsafe internally. The evaluator's heap and stack
 limits are construction-time bounds, **not an OS sandbox**.
 
 JavaScript's Rust-side callback payloads, event queues, accumulated output and
-cell protocol frames (`plakous-cell-protocol.v1`) have the independent hard
+cell protocol frames (`plakous-cell-protocol.v2`) have the independent hard
 limits in chapter 01 §9.4.
 Queue saturation is terminal evaluator loss; cancellation and loss control
 remain available under backpressure. The parent owns cancelable pipe tasks and

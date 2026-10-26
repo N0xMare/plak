@@ -1749,7 +1749,7 @@ async fn read_execute_admission_refuses_a_forged_sdk_edit() -> Result<(), Box<dy
             (
                 "process_session_exec",
                 serde_json::json!({"argv":["/bin/echo","allowed"],"workdir":".","yield_time_ms":0,"max_output_bytes":100}),
-                true,
+                false,
             ),
             (
                 "process_session_start",

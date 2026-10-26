@@ -35,6 +35,11 @@ use crate::{
     TelemetryTerminalStatus, ToolAuditIdentity, ToolCallAttemptIdentity, ToolCallerLineageView,
 };
 use futures_util::StreamExt;
+
+pub(super) struct AdmissionPresentation {
+    pub presentation: ToolPresentation,
+    pub want_value: bool,
+}
 use futures_util::stream::FuturesUnordered;
 use plakous_model::{
     Actor, AttemptId, CallId, ContentBlock, ConversationItem, EntryId, HistorySegmentKind,
@@ -1315,7 +1320,10 @@ impl Driver {
             command,
             attempt_id,
             call,
-            (self.tool_presentation.clone(), false),
+            AdmissionPresentation {
+                presentation: self.tool_presentation.clone(),
+                want_value: false,
+            },
             ToolDispatchOrigin::TopLevel,
             parent_call_id,
         )
@@ -1433,7 +1441,10 @@ impl Driver {
         command: &PromptCommand,
         attempt_id: AttemptId,
         call: &ToolCallBlock,
-        (presentation, want_value): (ToolPresentation, bool),
+        AdmissionPresentation {
+            presentation,
+            want_value,
+        }: AdmissionPresentation,
         origin: ToolDispatchOrigin,
         parent_call_id: Option<CallId>,
     ) -> Result<ToolAdmission, AgentError> {

@@ -43,6 +43,93 @@ use serde_json::json;
 
 type TestError = Box<dyn std::error::Error>;
 
+fn sdk_registry(marker_in_nested: bool) -> Result<FrozenToolRegistry, TestError> {
+    let mut builder = ToolRegistryBuilder::default();
+    let process = Arc::new(ProcessSessionTools::posix_sh()?);
+    register_packs(
+        &standard_coding_packs(
+            Arc::new(InMemoryPlanState::with_identity(PlanStateIdentity::new(
+                "golden.plan",
+                1,
+            )?)),
+            Arc::clone(&process),
+        ),
+        &mut builder,
+    )?;
+    plakous_compose::PythonHarnessSdkV1::register_into(&mut builder, process)?;
+    let real = stable_serialization_fixture(&builder.freeze())?;
+    if !marker_in_nested {
+        return Ok(real);
+    }
+    let mut forged = ToolRegistryBuilder::default();
+    let fixed: Arc<dyn ToolExecutor> = Arc::new(ExtensionTool);
+    for definition in real.definitions() {
+        if definition.name().as_str() == "run_py" {
+            continue;
+        }
+        let identity = real.identity(definition.name()).ok_or("missing identity")?;
+        let executor = if definition.name().as_str() == "read_file" {
+            ToolExecutorId::new(plakous_tools::PYTHON_SDK_DRIVER_MARKER_EXECUTOR_ID_V1)?
+        } else {
+            identity.executor_id().clone()
+        };
+        let registration = ToolRegistration::new(
+            identity.tool_id().clone(),
+            executor,
+            identity.executor_binding_identity(),
+            definition.clone(),
+            Arc::clone(&fixed),
+        );
+        forged.register(match identity.nested_eligibility() {
+            NestedToolEligibility::NestedEligible => registration.nested_eligible(),
+            NestedToolEligibility::DirectOnly => registration.direct_only(),
+        })?;
+    }
+    Ok(forged.freeze())
+}
+
+#[test]
+fn python_harness_sdk_identity_golden() -> Result<(), TestError> {
+    let descriptor = plakous_compose::PythonHarnessSdkV1::compile(
+        plakous_tools::JobConfig::default(),
+        sdk_registry(false)?,
+        target()?,
+    )?;
+    assert_eq!(
+        descriptor.identity().to_string(),
+        "d102c7ad56a5d5ef16e4ed4370f6b03f9a69047661b8d57fb9c4c23eb996b80d"
+    );
+    Ok(())
+}
+
+#[test]
+fn python_harness_sdk_compile_refuses_missing_registration_and_nested_marker()
+-> Result<(), TestError> {
+    assert!(
+        plakous_compose::PythonHarnessSdkV1::compile(
+            plakous_tools::JobConfig::default(),
+            registry(false)?,
+            target()?
+        )
+        .is_err()
+    );
+    let error = plakous_compose::PythonHarnessSdkV1::compile(
+        plakous_tools::JobConfig::default(),
+        sdk_registry(true)?,
+        target()?,
+    )
+    .err()
+    .ok_or("nested marker accepted")?;
+    assert!(
+        error.to_string().contains("markers cannot enter"),
+        "{error}"
+    );
+    // Both representable classes (Standard and Custom) are admitted; an
+    // unknown target class is refused while decoding, before compilation.
+    assert!(serde_json::from_value::<IntegrationClass>(json!("native-subscription")).is_err());
+    Ok(())
+}
+
 /// identity golden: a change here is a wire/durable-format change and needs the
 /// maintainers' decision.
 ///

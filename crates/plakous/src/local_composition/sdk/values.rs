@@ -1,7 +1,9 @@
 //! Typed canonical execution values become the catalog's plain-data records.
 
 use plakous_cell::CellValue as V;
+use plakous_compose::PythonHarnessSdkDescriptorV1 as Limits;
 use plakous_tools::{ExecutionValue, FileChangeAction, ListedEntryKind};
+use std::io::Write;
 
 pub(super) fn record(name: &str, fields: impl IntoIterator<Item = (&'static str, V)>) -> V {
     V::Record {
@@ -215,9 +217,9 @@ pub(super) fn process(v: plakous_tools::ProcessValue) -> V {
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ValueQuotaError {
-    #[error("SDK result encodes to {bytes} bytes (maximum 1 MiB)")]
+    #[error("SDK result encodes to at least {bytes} bytes (maximum {limit})", limit = Limits::RESULT_BYTES)]
     Result { bytes: usize },
-    #[error("SDK cell results encode to {bytes} bytes (maximum 16 MiB)")]
+    #[error("SDK cell results encode to at least {bytes} bytes (maximum {limit})", limit = Limits::CELL_BYTES)]
     Cell { bytes: usize },
     #[error("SDK result encoding failed")]
     Encoding(#[source] serde_json::Error),
@@ -229,18 +231,52 @@ pub(super) struct ValueBudget {
 }
 impl ValueBudget {
     pub(super) fn admit(&mut self, value: &V) -> Result<(), ValueQuotaError> {
-        let bytes = serde_json::to_vec(value)
-            .map_err(ValueQuotaError::Encoding)?
-            .len();
-        if bytes > 1_048_576 {
+        let limit = Limits::RESULT_BYTES.min(Limits::CELL_BYTES.saturating_sub(self.bytes));
+        let bytes = bounded_bytes(value, limit).map_err(ValueQuotaError::Encoding)?;
+        if bytes > Limits::RESULT_BYTES {
             return Err(ValueQuotaError::Result { bytes });
         }
         let total = self.bytes.saturating_add(bytes);
-        if total > 16_777_216 {
+        if total > Limits::CELL_BYTES {
             return Err(ValueQuotaError::Cell { bytes: total });
         }
         self.bytes = total;
         Ok(())
+    }
+}
+
+struct Count {
+    bytes: usize,
+    limit: usize,
+}
+impl Write for Count {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.limit.saturating_sub(self.bytes) {
+            self.bytes = self.limit + 1;
+            return Err(std::io::Error::other("encoded value exceeds budget"));
+        }
+        self.bytes += bytes.len();
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+pub(super) fn result_bytes(value: &V) -> Result<usize, ValueQuotaError> {
+    let bytes = bounded_bytes(value, Limits::RESULT_BYTES).map_err(ValueQuotaError::Encoding)?;
+    if bytes > Limits::RESULT_BYTES {
+        return Err(ValueQuotaError::Result { bytes });
+    }
+    Ok(bytes)
+}
+
+fn bounded_bytes(value: &V, limit: usize) -> Result<usize, serde_json::Error> {
+    let mut count = Count { bytes: 0, limit };
+    match serde_json::to_writer(&mut count, value) {
+        _ if count.bytes > count.limit => Ok(count.bytes),
+        Err(error) => Err(error),
+        Ok(()) => Ok(count.bytes),
     }
 }
 

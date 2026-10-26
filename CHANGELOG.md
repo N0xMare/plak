@@ -82,11 +82,10 @@ one cross-build carrier (a build imports its own and the previous version).
   The typed Python SDK adds a `PythonHarnessSdkV1` v3 cell descriptor and
   a driver-only `run_py` marker; SDK attachments and product-extension
   receipts bind that descriptor and its exact outer/nested projections.
-  Process-enabled occupancy policies admit literal-argv `process_session_exec`
-  beside shell start; their identities are now `plak.occupancy.execute.v6`
-  and `plak.occupancy.read-only.v9`.
-  Model-visible text, engine/artifact/host identities and projection digests
-  are unchanged.
+  The Monty adapter is `plakous.monty-python-adapter.v9`; the shared cell
+  protocol is `plakous-cell-protocol.v2` (Reset, SDK configuration and typed
+  stopped outcomes), refusing stale workers at hello. Both revisions ride
+  this unreleased epoch. Existing non-SDK model-visible text is unchanged.
   Runtime SQLite schema 26 admits `NamedStateValue` objects (kind 20). The
   manifest gains a sorted named-state key/address group; checkpoint integrity
   and commit identities bind keys and immutable value addresses.
@@ -94,7 +93,7 @@ one cross-build carrier (a build imports its own and the previous version).
   export and import. Export document version 8 is unchanged and does not
   carry named state; an imported session starts with empty named state.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine
-  contract and adapter `plakous.monty-python-adapter.v8` instead of the
+  contract and adapter `plakous.monty-python-adapter.v9` instead of the
   monty-pool contract and adapter v7. Its worker artifact, host and containment
   identities also change, so sessions created by an epoch-31 build are not
   opened in place. The JavaScript adapter becomes
@@ -102,7 +101,7 @@ one cross-build carrier (a build imports its own and the previous version).
   State key `r25.e32.p33.t8`; carry a session with `/reload`
   or export and import. Export document version 8 is unchanged.
 - Runtime format epoch 31: the JavaScript worker speaks the cell protocol
-  (`plakous-cell-protocol.v1`, length-prefixed frames checked in the worker's
+  (`plakous-cell-protocol.v2`, length-prefixed frames checked in the worker's
   hello) instead of JSONL, and the recorded engine contract and Code Mode
   descriptor identities name the cell worker revision. A session recorded
   under the previous engine contract is refused as incompatible before any
