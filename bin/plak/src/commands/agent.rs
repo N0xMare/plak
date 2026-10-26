@@ -171,6 +171,12 @@ pub(crate) fn new_agent_record(
         super::support::admit_account_model(account, model)
             .map_err(|refusal| CliFailure::classified(CliFailureKind::Usage, refusal))?;
     }
+    plakous_hosted::binding::RootTemplateFact::root_tool_selection(
+        cfg.root_template_fact().as_ref(),
+        record.account.as_deref(),
+        record.model.as_deref(),
+    )
+    .admit_composition(record.composition)?;
     Ok(record)
 }
 
@@ -187,8 +193,8 @@ fn run_agent_after_admission(
     composition: Option<product_config::ProductCompositionSelection>,
     resume_tree: bool,
 ) -> CliResult<AdmittedAgent> {
-    if composition == Some(product_config::ProductCompositionSelection::PyPtc) {
-        crate::build_features::require_feature("python")?;
+    if let Some(composition) = composition {
+        crate::build_features::require_composition(composition)?;
     }
     let paths = services.paths()?;
     let cfg = super::support::admit_product_config(paths, &mut io::stderr().lock())?;

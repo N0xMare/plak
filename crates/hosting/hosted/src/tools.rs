@@ -34,6 +34,11 @@ pub struct ProductToolExtensions {
 }
 
 impl ProductToolExtensions {
+    pub(crate) fn admit_sdk(&self) -> CliResult<()> {
+        let names = self.names().map(ToString::to_string).collect::<Vec<_>>();
+        admit_sdk_extensions(names)
+    }
+
     /// The current product ships no additional composition tools.
     #[must_use]
     pub fn empty() -> Self {
@@ -243,6 +248,16 @@ impl ProductToolExtensions {
     }
 }
 
+pub(crate) fn admit_sdk_extensions(names: Vec<String>) -> CliResult<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    Err(CliFailure::new(format!(
+        "py-sdk does not support configured optional tools or MCP extensions: {}; remove them from the root template's tools key or select another [root] composition",
+        names.join(", "),
+    )))
+}
+
 impl ToolPack for ProductToolExtensions {
     fn id(&self) -> &'static str {
         "plak.product-extensions.v1"
@@ -312,11 +327,12 @@ pub(crate) fn product_surface_with_fence(
     runtime: Option<plakous::tools::CompositionRuntime>,
 ) -> CliResult<CompiledSurface> {
     let mut packs = if runtime == Some(plakous::tools::CompositionRuntime::PythonHarnessSdk) {
-        if fence != crate::agent::SessionToolFence::Full || extensions.names().next().is_some() {
+        if fence != crate::agent::SessionToolFence::Full {
             return Err(CliFailure::new(
-                "py-sdk requires a single-agent root with core tools only; topology, child tiers and optional tools are unavailable",
+                "py-sdk requires a single-agent root with the full tool fence; child tiers are unavailable",
             ));
         }
+        extensions.admit_sdk()?;
         let descriptor = plakous::tools::PythonHarnessSdkV1::compile(
             job_config,
             registry.clone(),

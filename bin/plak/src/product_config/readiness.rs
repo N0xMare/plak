@@ -78,8 +78,9 @@ pub fn template_readiness(
     credential: CredentialReadiness,
     catalog: &[plakous_host_protocol::views::ProviderSection],
 ) -> TemplateReadiness {
-    if (template.composition == Some(super::ProductCompositionSelection::PyPtc)
-        && crate::build_features::require_feature("python").is_err())
+    if template
+        .composition
+        .is_some_and(|composition| crate::build_features::require_composition(composition).is_err())
         || (template.tools.mcp_servers().next().is_some()
             && crate::build_features::require_feature("mcp").is_err())
     {

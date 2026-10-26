@@ -1,4 +1,4 @@
-//! The root-only typed Python SDK presentation, built by the shared compiler.
+//! The typed Python SDK presentation, built by the shared compiler.
 
 use plakous_model::{Digest, ToolName};
 use plakous_tools::{
@@ -71,8 +71,8 @@ impl PythonHarnessSdkV1 {
         let presentation = CellPresentation {
             profile: "PythonHarnessSdkV1",
             execute: OuterTool {
-                name: "run_py",
-                marker: "run_py",
+                name: plakous_tools::PYTHON_SDK_RUN_NAME_V1,
+                marker: plakous_tools::PYTHON_SDK_RUN_NAME_V1,
                 input_field: Some("code"),
                 input: OuterInput::Structured(plakous_tools::object_schema(
                     serde_json::json!({"code":{"type":"string","minLength":1,"maxLength":PythonHarnessSdkDescriptorV1::SOURCE_BYTES}}),

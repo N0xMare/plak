@@ -949,7 +949,7 @@ or maintainer build for daily work because debug binaries are large and slow
 to start.
 
 At run time, js-ptc and Codex native-ptc locate `PLAK_JS_HOST` or a sibling
-`plakous-js-host`, and py-ptc locates `PLAK_PY_HOST` or a sibling `plakous-py-host`.
+`plakous-js-host`, and py-ptc/py-sdk locate `PLAK_PY_HOST` or a sibling `plakous-py-host`.
 Keep all three executables together when installing manually. Missing workers
 fail closed and `plak doctor` names the missing configuration. Official V8
 and `@openai/codex` are not fetched and are not evaluators.

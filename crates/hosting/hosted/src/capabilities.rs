@@ -10,7 +10,7 @@ use crate::binding::{PlatformProvider, ResolvedProtocol};
 mod build;
 pub use build::{
     BUILD_CAPABILITIES, BuildCapability, CapabilityKind, CapabilityUnavailable, compiled_features,
-    omitted_features, require_feature,
+    omitted_features, require_composition, require_feature,
 };
 
 mod anthropic;

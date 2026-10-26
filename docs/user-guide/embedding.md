@@ -210,8 +210,11 @@ Invalid state keys/values raise `ValueError`, capacity refusals raise
 by their encoded representation (1 MiB per result, 16 MiB per cell); the
 foreground budget is 300 seconds. There is no wait tool: use `proc.start` for
 long jobs. Processes have the user's full authority and are not sandboxed.
-The SDK is root-only: child tiers and optional tool namespaces cannot select
-it. Output over 16 KiB carries a `Ref` that `ctx.read` can page when available;
+Plak restricts its `py-sdk` selection to a single-agent root: product child
+tiers and optional tool namespaces cannot select it. The library has no tree
+or root/child distinction; an embedder can attach the SDK to any isolated
+single agent with the required fixed catalog and authority. Output over
+16 KiB carries a `Ref` that `ctx.read` can page when available;
 references evict oldest-first. Export v9 carries the committed named values;
 v8 imports with empty state. Oversized puts are refused before storing a value
 that could not be read back within the per-result quota.

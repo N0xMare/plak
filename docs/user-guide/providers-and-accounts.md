@@ -186,7 +186,9 @@ and full window and output bound, and for a usable model its accepted
 compositions and what `plakous-default` picks there: `native-ptc` (Codex Code
 Mode) on the OpenAI API's `CodeModeOnly` models, `direct` on the Anthropic and
 xAI APIs. `--composition js-ptc` and
-`py-ptc` select the local workers. `plak run`, `plak agent` and a new TUI
+`py-ptc` select the local workers. `py-sdk` selects the typed Python SDK on a
+Direct-capable route, for a single-agent root with core tools only.
+`plak run`, `plak agent` and a new TUI
 session from your root template all make the same choice for the same model.
 API sessions persist their exact credential binding. If you replace a key,
 Plak refuses to resume the old binding under it; select the new target explicitly.
@@ -272,6 +274,7 @@ that calls the tools.
 | `native-ptc` | where the vertical enrolls one: today **Codex and the OpenAI API** | The vertical's own PTC system; today only Codex Code Mode is enrolled |
 | `js-ptc` | every account | Plak's JavaScript harness PTC |
 | `py-ptc` | every account | Plak's Python harness PTC |
+| `py-sdk` | every account | Typed Python SDK; single-agent root only, on a Direct-capable route |
 
 The default follows the catalog: Codex `CodeModeOnly` rows take `native-ptc`,
 and so does every OpenAI API model (Plak enrolls them as `CodeModeOnly`, as the
@@ -306,7 +309,7 @@ and an unsupported tuple fails before inference.
 
 Both `native-ptc` and `js-ptc` need the `plakous-js-host` sidecar — `PLAK_JS_HOST`
 or a `plakous-js-host` beside the `plak` binary, which the separate worker build
-produces beside `plak`. `py-ptc` needs `PLAK_PY_HOST` or a sibling `plakous-py-host`. The normal build
+produces beside `plak`. `py-ptc` and `py-sdk` need `PLAK_PY_HOST` or a sibling `plakous-py-host`. The normal build
 produces both workers, including the pinned upstream Monty runtime. A missing
 sidecar fails closed.
 

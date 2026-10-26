@@ -137,6 +137,7 @@ pub(crate) fn prepare(config: &ProductConfig, home: &Path, name: &str) -> Result
         .iter()
         .map(|(name, _)| name.as_str())
         .collect();
+    prepared.root_composition = None;
     prepared.set_key("root.agent", &resolved.root.0)?;
     prepared.set_key("roster.working_set", &cards.join(","))?;
     Ok(Prepared {

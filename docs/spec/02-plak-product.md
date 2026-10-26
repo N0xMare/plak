@@ -59,8 +59,10 @@ picker refuse without `tui`; CLI verbs, `run`, and JSONL remain available.
 Without `clipboard`, Ctrl+V reports `clipboard image paste is not in this build`;
 file attachments still work with `images`. Without `images`, `--image`, path
 attachments and JSONL image inputs refuse; canonical image history still
-replays without a decoder. Without `python`, composition options omit `py-ptc`
-and Python config/session bindings refuse before session writes. Without `mcp`,
+replays without a decoder. Without `python`, composition options and model
+capability listings omit both `py-ptc` and `py-sdk`
+and Python config/session bindings refuse before session writes, with the
+selected composition as the refusal id. Without `mcp`,
 `plak mcp` commands refuse, `/mcp` is omitted, and MCP-selecting templates
 refuse session admission (server definitions alone enable nothing). Read-only session
 show/log/export and carry export do not require the bound evaluator.
@@ -245,7 +247,7 @@ launch directory — the cwd of the process, resolved once.
       subagents.sqlite3           the agent tree, schema 9
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
-  references/<id>.json        imported archives, 0600 in 0700 (§2.5.1)
+  references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
   telemetry/telemetry-v19.sqlite3 disposable analytics, schema 19
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
@@ -1200,9 +1202,11 @@ on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
 
 Versions 8 and 9 carry full conversation rather than a separate archive;
-neither has a restart checkpoint or archive import arm. `session reference`
-reports this distinction. Retained inert reference files remain read-only
-operator data, never import authority.
+neither has a restart checkpoint or archive import arm. There is no
+`session reference` command or search/tail archive reader. Old retained
+reference files are never read or used as import authority;
+session deletion cleans them up, and `state prune-legacy
+--prune-orphaned-references` still explicitly removes orphaned files.
 
 `/reload` (§5.1) resolves the installed build and asks its state key with the
 hidden `plak version --state-key` while the session is still attached, before
@@ -1769,7 +1773,7 @@ genesis identity derived from the immutable create operation. The projector
 restores that creation join, so a committed clear remains settled even when
 its source request's anchor is still retained.
 Submissions and workflow requests carry the applied cursor at their first
-durable write (schema 33's immutable `anchor` columns). Once that anchor is
+durable write (schema 34's immutable `anchor` columns). Once that anchor is
 below `feed_retained_from`, their join settles them as consumed, both on an
 incremental pass and after view deletion. No withdrawal notice, command row
 or counter is derived, and a historical clear's successor is never treated as
@@ -1989,7 +1993,7 @@ version. There is no top-level prompt positional.
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags |
 | `usage [--account <id>] [--session <uuid>]` | the two options conflict |
-| `session list`, `session show <id>[.cN]`, `session log <id>[.cN] [--kind <k>] [--tail <n>] [--json]`, `session recover <id>`, `session export <id> [--out <path>]`, `session import <path>`, `session reference <path-or-session> [--search <text>] [--tail <n>]`, `session delete <id> [--yes] [--abandon-children]`, `session gc <id> \| --all` | log `--tail` defaults to 100; reference `--tail` defaults to 20; both must be at least 1; `recover` opens the session, abandons an unfinished turn once, and releases it; `export`, `import`, and `reference` implement the cross-build session reference (§2.5.1); `delete` removes a session and its retained history (§2.5.2); `gc` reclaims superseded history (§2.5.3) |
+| `session list`, `session show <id>[.cN]`, `session log <id>[.cN] [--kind <k>] [--tail <n>] [--json]`, `session recover <id>`, `session export <id> [--out <path>]`, `session import <path>`, `session delete <id> [--yes] [--abandon-children]`, `session gc <id> \| --all` | log `--tail` defaults to 100; it must be at least 1; `recover` opens the session, abandons an unfinished turn once, and releases it; `export` and `import` implement the cross-build session reference (§2.5.1); `delete` removes a session and its retained history (§2.5.2); `gc` reclaims superseded history (§2.5.3) |
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state; retain session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
 | `telemetry status [--views]`, `telemetry sql [<query>] [--json]`, `telemetry prune [--max-age-days <n>] [--max-bytes <n>] [--yes]` | the local analytics store |
 | `models [<account>]` | read-only catalog discovery, in every build |
@@ -2026,10 +2030,6 @@ observed fact, not a promise that the owner will remain present.
 Adopted candidates also display `merged at <commit>` from their durable target
 snapshot commit. On Git this is an internal snapshot identity, not a
 Plak-authored commit on the user's branch.
-
-`session reference` accepts an existing export file or the full/prefix session
-id of a retained reference. A missing path or unresolved prefix names both
-alternatives instead of claiming no argument was supplied.
 
 `session show` and `session log` resolve `<id>` like every session command:
 the full id, or an unambiguous prefix of at least four characters among the
@@ -2161,7 +2161,7 @@ the rule for `login`, `logout`, `refresh`, `key`, `key set`, `key clear`,
 `secret`, `secret set`, `secret rm`, `mcp` and each `mcp` verb without its id
 (`login`, `logout` and `prompts` included),
 `run`, `config`, `config set` without a key, `session`, `session show`,
-`session log`, `session recover`, `session export`, `session import`, `session reference`, `session delete`, `session gc`, `telemetry`, `telemetry sql`, and `models`. The exceptions are
+`session log`, `session recover`, `session export`, `session import`, `session delete`, `session gc`, `telemetry`, `telemetry sql`, and `models`. The exceptions are
 the bare forms that are themselves complete commands — `status` (every
 vertical), `key status`, `secret list`, `mcp list`, `usage`, `resume`, `session list`, `doctor`, and
 `agent` — and `telemetry prune`, which refuses (§3.4).
@@ -3782,7 +3782,7 @@ row's own start-to-finish span; a failed wait keeps its timeout and actual
 wait. The live tool line carries the same wait facts as the persisted row. The
 projector writes rows into the product transcript
 (`transcript_rows.row`, one JSON payload per row with its ordering key,
-schema 33) by the provenance rules of §2.6; the export document carries them
+schema 34) by the provenance rules of §2.6; the export document carries them
 (§2.5.1), the host emits the same row live as one `Row` observation once the
 projector wrote it, and restore reads them as the rows of the presentation
 snapshot. Live and restored rows are the same values; the renderer maps a row
@@ -5900,6 +5900,11 @@ The root settings picker and JSONL binding use this same vocabulary.
 `[root] composition` overrides the named root template's default for its exact
 account/model tuple; explicit CLI selection takes precedence. Settings save
 this root override, not a child-template SDK capability.
+The override obeys the same account/model composition checks as the root
+template. Changing the root template pointer clears it; applying a profile
+also clears it when reapplying the same pointer. The profile fork and saved
+config use that profile template's own composition, which remains the
+composition inherited by its template-defined children.
 The axis is the one spec 01 §9.4 defines: `native-ptc` is the vertical's own
 programmatic tool calling system, `js-ptc` and `py-ptc` are harness PTC on
 every vertical, and `plakous-default` is the per-model recommendation. What
@@ -6592,7 +6597,7 @@ The Plak home is created lazily by the first command that actually needs
 state — a run, an agent session, a session query, a session-scoped usage read —
 not by `doctor`, `status`, `key status`, or `config show`. Those readers
 create no home, subscription state, diagnostic log or telemetry store, even
-in maintainer builds. `session show`, `session log` and `session reference`
+in maintainer builds. `session show` and `session log`
 also inspect without state admission; a missing product database is an empty
 workspace session list for prefix resolution. That is deliberate: a diagnosis must not
 manufacture the thing it is diagnosing.

@@ -223,6 +223,9 @@ fn document(version: u32, transcript: serde_json::Value) -> CarryDocument {
     let path = dir.path().join("export.json");
     let mut value = serde_json::to_value(sample_document()).unwrap();
     value["version"] = serde_json::json!(version);
+    if version == 8 {
+        value.as_object_mut().unwrap().remove("named_state");
+    }
     value["transcript"] = transcript;
     fs::write(&path, value.to_string()).unwrap();
     read_document(&path).unwrap()

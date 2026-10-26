@@ -327,6 +327,26 @@ pub struct NodeToolSelection {
 }
 
 impl NodeToolSelection {
+    /// Refuses an SDK selection before optional tools or MCP are bound.
+    ///
+    /// # Errors
+    /// Returns the configured extension names and the key to change.
+    pub fn admit_composition(
+        &self,
+        composition: crate::binding::CompositionSelection,
+    ) -> crate::CliResult<()> {
+        if composition == crate::binding::CompositionSelection::PySdk {
+            crate::tools::admit_sdk_extensions(
+                self.selection
+                    .entries()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            )?;
+        }
+        Ok(())
+    }
+
     /// A selection that reaches no table.
     #[must_use]
     pub fn new(selection: TemplateToolSelection) -> Self {

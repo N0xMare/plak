@@ -283,16 +283,12 @@ impl AgentTemplate {
                 "template {name} account is not a supported template account"
             ));
         }
-        if self.account == "openrouter" {
-            if self.composition == Some(ProductCompositionSelection::NativePtc) {
-                return Err(format!(
-                    "template {name}: {}",
-                    plakous_hosted::binding::OPENROUTER_NATIVE_PTC_REFUSAL
-                ));
-            }
-        } else if self
-            .protocol
-            .is_some_and(|protocol| protocol != ProductProtocolSelection::Auto)
+        self.validate_composition(self.composition)
+            .map_err(|error| format!("template {name}: {error}"))?;
+        if self.account != "openrouter"
+            && self
+                .protocol
+                .is_some_and(|protocol| protocol != ProductProtocolSelection::Auto)
         {
             return Err(format!("template {name} protocol is OpenRouter-only"));
         }
@@ -307,10 +303,6 @@ impl AgentTemplate {
                         .and_then(crate::platform_catalog::api_effort),
                 )
                 .map_err(|error| format!("template {name}: {error}"))?;
-            if let Some(composition) = self.composition {
-                plakous_hosted::platform::api_composition(provider, &self.model, composition)
-                    .map_err(|error| format!("template {name}: {error}"))?;
-            }
         }
         match self.extra.as_deref() {
             None => {}
@@ -348,6 +340,24 @@ impl AgentTemplate {
         }
         if self.max_turns == Some(0) {
             return Err(format!("template {name} max_turns must be 1 or more"));
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_composition(
+        &self,
+        composition: Option<ProductCompositionSelection>,
+    ) -> Result<(), String> {
+        if self.account == "openrouter"
+            && composition == Some(ProductCompositionSelection::NativePtc)
+        {
+            return Err(plakous_hosted::binding::OPENROUTER_NATIVE_PTC_REFUSAL.to_owned());
+        }
+        if let (Some(provider), Some(composition)) = (
+            plakous_hosted::binding::PlatformProvider::for_account(&self.account),
+            composition,
+        ) {
+            plakous_hosted::platform::api_composition(provider, &self.model, composition)?;
         }
         Ok(())
     }

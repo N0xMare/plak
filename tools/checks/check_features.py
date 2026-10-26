@@ -198,6 +198,8 @@ def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> l
         if "python" not in selected:
             cases.append(("python", ["run", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-ptc", "--", "hello"], 2, "feature `python`"))
             cases.append(("python-jsonl", ["agent", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-ptc"], 2, "feature `python`"))
+            cases.append(("sdk", ["run", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-sdk", "--", "hello"], 2, "`py-sdk` is not included in this build (compiled without feature `python`)"))
+            cases.append(("sdk-jsonl", ["agent", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-sdk"], 2, "`py-sdk` is not included in this build (compiled without feature `python`)"))
         if "images" not in selected:
             cases.append(("images", ["run", "--account", "codex", "--model", "gpt-6-astra", "--image", "missing.png", "--", "hello"], 2, "feature `images`"))
         for kind, arguments, code, expected in cases:
@@ -205,10 +207,12 @@ def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> l
                                        text=True, capture_output=True, check=False, timeout=30)
             if completed.returncode != code or expected not in completed.stdout + completed.stderr:
                 errors.append(f"plak [{profile}] {kind}: expected exit {code} and {expected!r}; got {completed.returncode}: {completed.stdout}{completed.stderr}")
-            if kind == "python-jsonl":
+            if kind in ("python-jsonl", "sdk-jsonl"):
                 records = [json.loads(line) for line in completed.stdout.splitlines()]
                 if [record.get("kind") for record in records] != ["error", "bye"]:
                     errors.append(f"plak [{profile}] Python JSONL refusal must terminate with error/bye")
+            if kind.startswith("sdk") and (Path(directory) / "state").exists():
+                errors.append(f"plak [{profile}] SDK admission refusal created state")
         doctor = subprocess.run([executable, "doctor"], cwd=directory, env=environment,
                                 text=True, capture_output=True, check=False, timeout=30)
         omitted = sorted(set(PRODUCT_FEATURES) - set(selected))

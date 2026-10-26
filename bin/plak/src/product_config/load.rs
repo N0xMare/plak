@@ -1207,6 +1207,11 @@ impl ProductConfig {
                 "[root] agent names no template file {agent}.toml under ~/.plak/agents or .plak/agents"
             ));
         }
+        if let Some(template) = self.root_template() {
+            template
+                .validate_composition(self.root_composition.or(template.composition))
+                .map_err(|error| format!("[root] composition: {error}"))?;
+        }
         for name in self.working_set.names() {
             let Some(record) = self.templates.get(name.as_str()) else {
                 return Err(format!(
@@ -1313,6 +1318,9 @@ impl ProductConfig {
     pub fn set_key(&mut self, key: &str, value: &str) -> Result<(), String> {
         let mut candidate = self.clone();
         candidate.assign_key(key, value)?;
+        if candidate.root_agent != self.root_agent {
+            candidate.root_composition = None;
+        }
         candidate.validate()?;
         *self = candidate;
         Ok(())

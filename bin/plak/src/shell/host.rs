@@ -57,19 +57,22 @@ pub fn settings_save_changes_root_binding(
                     template.protocol.unwrap_or_default(),
                 )
             };
-            normalize(existing) != normalize(requested)
+            let mut effective = existing.clone();
+            effective.composition = current.root_composition.or(existing.composition);
+            normalize(&effective) != normalize(requested)
         }
     }
 }
 
 pub fn commit_root_template(
     config: &mut ProductConfig,
-    template: crate::product_config::AgentTemplate,
+    mut template: crate::product_config::AgentTemplate,
 ) {
     if template.account.is_empty() || template.model.is_empty() {
         config.clear_root_binding();
         return;
     }
+    config.root_composition = template.composition.take();
     *config.root_template_mut() = template;
 }
 

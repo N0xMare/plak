@@ -76,9 +76,7 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     composition: CompositionSelection,
     processing_tier: ProcessingTierDisposition,
 ) -> CliResult<SelectedProviderConfiguration> {
-    if composition == CompositionSelection::PyPtc {
-        crate::capabilities::require_feature("python")?;
-    }
+    crate::capabilities::require_composition(composition)?;
     if provider == NativeProvider::Codex && effort == Some(ReasoningEffort::Ultra) {
         return Err(CliFailure::new(
             "Codex Ultra is a multi-agent orchestration mode, not a single-agent reasoning effort",
@@ -334,14 +332,13 @@ pub(super) async fn api_session_runtime_binding_with_owner(
     cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<PreparedApiRuntime> {
-    if parent.composition == CompositionSelection::PyPtc {
-        crate::capabilities::require_feature("python")?;
-    }
-    if parent.composition == CompositionSelection::PySdk && parent.topology_caller_id.is_some() {
-        return Err(CliFailure::new(
-            "py-sdk is root-only and has no child result channel",
-        ));
-    }
+    crate::capabilities::require_composition(parent.composition)?;
+    parent
+        .composition
+        .admit_role(parent.topology_caller_id.is_some())?;
+    parent
+        .tool_selection
+        .admit_composition(parent.composition)?;
     let tool_plan = bind_node_tool_plan(
         &parent.tool_selection,
         Some(crate::tool_plan::ToolRoute::api(parent.target)),
@@ -528,11 +525,10 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
     attached_tree: &mut Option<String>,
 ) -> CliResult<SessionRuntimeBinding> {
     let topology_spec = spec.clone();
-    if spec.composition == CompositionSelection::PySdk && spec.topology_caller_id.is_some() {
-        return Err(CliFailure::new(
-            "py-sdk is root-only and has no child result channel",
-        ));
-    }
+    crate::capabilities::require_composition(spec.composition)?;
+    spec.composition
+        .admit_role(spec.topology_caller_id.is_some())?;
+    spec.tool_selection.admit_composition(spec.composition)?;
     let ProductAgentSpec {
         product_home,
         prompt_host_facts: _,

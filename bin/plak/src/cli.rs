@@ -1295,14 +1295,6 @@ enum SessionAction {
     },
     /// Create a new session from an export document.
     Import { path: Option<std::path::PathBuf> },
-    /// Read bounded excerpts from a version 2 session archive without import.
-    Reference {
-        path: Option<std::path::PathBuf>,
-        #[arg(long)]
-        search: Option<String>,
-        #[arg(long, default_value_t = 20)]
-        tail: usize,
-    },
     /// Delete a session and all of its retained history. Refused while it is
     /// open, while its agent tree has running children, or while other
     /// sessions continue from it; never refused because the store is full.
@@ -1337,7 +1329,6 @@ impl SessionAction {
             | Self::Recover { id: None }
             | Self::Export { id: None, .. }
             | Self::Import { path: None }
-            | Self::Reference { path: None, .. }
             | Self::Delete { id: None, .. }
             | Self::Gc {
                 id: None,
@@ -1351,16 +1342,6 @@ impl SessionAction {
             Self::Rehearse { id } => Ok(Command::SessionRehearse { id }),
             Self::Export { id: Some(id), out } => Ok(Command::SessionExport { id, out }),
             Self::Import { path: Some(path) } => Ok(Command::SessionImport { path }),
-            Self::Reference {
-                path: Some(path),
-                search,
-                tail,
-            } => {
-                if tail == 0 {
-                    return Err("session reference --tail must be >= 1".to_owned());
-                }
-                Ok(Command::SessionReference { path, search, tail })
-            }
             Self::Delete {
                 id: Some(id),
                 yes,

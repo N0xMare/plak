@@ -581,7 +581,7 @@ Safe independent entries may be removed while protected entries are kept.
 Review `kept:` reasons before manually removing anything. Export files under
 `carry/` are never selected. Implementation details live in spec 02 §2.5.
 
-### `plak session list|show|log|recover|export|import|reference|delete|gc`
+### `plak session list|show|log|recover|export|import|delete|gc`
 
 ```
 plak session list
@@ -590,7 +590,6 @@ plak session log <uuid>[.cN] [--kind tool] [--tail N] [--json]
 plak session recover <uuid>
 plak session export <uuid> [--out <path>]
 plak session import <path>
-plak session reference <path-or-session> [--search <text>] [--tail N]
 plak session delete <uuid> [--yes] [--abandon-children]
 plak session gc <uuid> | --all
 ```

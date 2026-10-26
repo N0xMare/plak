@@ -160,7 +160,7 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
-| `root.composition` | enum | `(unset)` | direct\|plakous-default\|native-ptc\|js-ptc\|py-ptc\|py-sdk | Root-only composition override for the exact root account/model tuple. py-sdk uses the typed Python SDK and is not valid in child templates. |
+| `root.composition` | enum | `(unset)` | direct\|plakous-default\|native-ptc\|js-ptc\|py-ptc\|py-sdk | Root-only composition override for the exact root account/model tuple, validated against its account/model. Changing root.agent or applying a profile clears it. Children keep their own template composition. py-sdk uses the typed Python SDK and is not valid in child templates. |
 | `root.agent` | string | `(unset)` | names an agents/<name>.toml file; [a-z][a-z0-9-]{0,31}, and never a section name | Template a new session binds at genesis; unset leaves the tuple to the CLI flags or the shell binding. |
 | `roster.working_set` | array of string | `[]` | 0..=5 names, no duplicates, each a template file with a description | Templates the root may spawn this epoch; every other node spawns from its own template's spawns list. |
 | `orchestration.subagents` | bool | `true` | true or false | Whether the topology tools are compiled into the root catalog at all. |

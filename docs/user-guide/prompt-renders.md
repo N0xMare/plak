@@ -36,12 +36,15 @@ writes nothing.
 | `target/prompt-renders/rendered/lifecycle/*.md` | Post-first-turn surfaces: `tool-results`, `compaction`, `child-mail`, `mid-session` |
 | the gitignored local capture directory | Gitignored vendor CLI captures (`claude` / `codex` / `grok` / `opencode`) from `just prompts native-compare`; witnesses for comparison, not Plak runtime |
 
-86 routes: 76 subscription and OpenRouter routes (providers × compositions ×
+95 routes: the existing 76 subscription and OpenRouter routes (providers × compositions ×
 topology, minus `native-ptc` where no native PTC is enrolled) and 10 direct API routes, rendered as
 the single-agent root only. The API routes go through the production API
 profile and each route's Platform wire: the OpenAI API (`openai-api.*`) in
 `direct`, `native-ptc`, `js-ptc` and `py-ptc`, and the xAI (`xai-api.*`) and
-Anthropic (`anthropic-api.*`) APIs in `direct`, `js-ptc` and `py-ptc`.
+Anthropic (`anthropic-api.*`) APIs in `direct`, `js-ptc` and `py-ptc`, plus nine
+single-agent `py-sdk` roots: `codex`, `grok`, `claude`, `openrouter-chat`,
+`openrouter-responses`, `openrouter-messages`, `openai-api`, `xai-api` and
+`anthropic-api` (each named `<route>.py-sdk.root.single-agent`).
 `native-ptc` is the vertical's own PTC system; today only Codex Code Mode is
 enrolled, on Codex and on the OpenAI API, whose models Plak enrolls as
 `CodeModeOnly`. The Markdown `## Request`
@@ -89,7 +92,7 @@ Never edit a rendered artifact — `just prompts render` overwrites it from Rust
 
 ## What the tests assert without files
 
-- The route matrix is exactly 86 included routes plus two documented
+- The route matrix is exactly 95 included routes plus two documented
   exclusions, and every API route is a composition the API table admits.
 - Rendered wire JSON equals the kernel-lowered request, and the Markdown
   `## Request` fence equals the jsonc formatter's output.

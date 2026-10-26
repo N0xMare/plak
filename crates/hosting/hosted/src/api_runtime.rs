@@ -59,11 +59,8 @@ pub(crate) fn runtime_binding(
     registry: plakous::tools::FrozenToolRegistry,
     clock: Arc<dyn plakous::model::Clock>,
 ) -> CliResult<SessionRuntimeBinding> {
-    if spec.composition == CompositionSelection::PySdk && spec.spawned_child {
-        return Err(CliFailure::new(
-            "py-sdk is root-only and has no child result channel",
-        ));
-    }
+    crate::capabilities::require_composition(spec.composition)?;
+    spec.composition.admit_role(spec.spawned_child)?;
     let _binding_span = tracing::info_span!(
         "api_runtime_binding",
         provider = spec.account,

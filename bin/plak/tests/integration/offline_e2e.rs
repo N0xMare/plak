@@ -4642,6 +4642,84 @@ pub(super) fn enable_fake_mcp(fixture: &Fixture, args: &[&str]) {
     write_private(&lead, &body);
 }
 
+#[test]
+fn agent_sdk_hello_and_configured_mcp_refusal_are_offline() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    let arguments = [
+        "--account",
+        "codex",
+        "--model",
+        "offline-loopback-v1",
+        "--effort",
+        "medium",
+        "--composition",
+        "py-sdk",
+    ];
+    let mut agent = AgentProcess::start(&fixture, &arguments);
+    let hello = agent.wait_for("SDK hello", |record| record["kind"] == "hello");
+    assert_eq!(hello["composition"], "py-sdk");
+    agent.send(&quit_frame());
+    let finished = agent.finish();
+    assert!(finished.status.success(), "{}", finished.stderr);
+
+    let blocked = Fixture::new(&json!({"version":1,"steps":[]}));
+    let calls = blocked.root.join("mcp-calls.log");
+    enable_fake_mcp(&blocked, &["--call-log", calls.to_str().unwrap()]);
+    let mut command = blocked.command();
+    let outcome = command
+        .arg("agent")
+        .args(arguments)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!outcome.status.success());
+    let stderr = String::from_utf8(outcome.stderr).unwrap();
+    assert!(
+        stderr.contains(
+            "py-sdk does not support configured optional tools or MCP extensions: mcp:fake"
+        ),
+        "{stderr}"
+    );
+    assert!(stderr.contains("root template's tools key"), "{stderr}");
+    assert!(!calls.exists(), "no MCP call dispatched");
+    let paths = plak::home::paths::PlakPaths::explicit(blocked.home());
+    assert!(
+        plak::store::sessions::list_sessions_for_cwd(&paths, &blocked.workspace())
+            .unwrap()
+            .is_empty(),
+        "no refused session created"
+    );
+}
+
+#[test]
+fn v8_sdk_fields_refuse_file_import_without_creating_sessions() {
+    for field in ["empty_state", "null_state", "selection"] {
+        let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+        let mut document: Value =
+            serde_json::from_str(include_str!("../fixtures/session-export-v8.json")).unwrap();
+        document["workspace_root"] = json!(fixture.workspace());
+        match field {
+            "empty_state" => document["named_state"] = json!({}),
+            "null_state" => document["named_state"] = Value::Null,
+            _ => document["binding"]["composition"] = json!("py-sdk"),
+        }
+        let path = fixture.root.join("refused.json");
+        write_private(&path, &document.to_string());
+        let result = run_cli(&fixture, &["session", "import", path.to_str().unwrap()]);
+        assert!(!result.status.success(), "{}", result.stdout);
+        assert!(
+            result
+                .stderr
+                .contains("version 8 exports cannot carry named state or py-sdk selection"),
+            "{}",
+            result.stderr
+        );
+        let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+        assert!(!paths.runtime_database().exists());
+        assert!(!paths.product_database().exists());
+    }
+}
+
 /// A Code Mode cell reaches a template's MCP tool as a nested call: the
 /// product catalog admits it, and the cell gets the server's answer.
 #[test]
@@ -4684,7 +4762,6 @@ fn every_session_command_names_a_foreign_build_instead_of_not_found() {
         vec!["session", "show", id],
         vec!["session", "log", id],
         vec!["session", "export", id],
-        vec!["session", "reference", id],
         vec!["session", "gc", id],
         vec!["run", "--session", "00000000", "--", "continue"],
     ] {
@@ -7172,22 +7249,6 @@ fn carry_output_is_faithful_to_pipes_and_inert_on_a_terminal() {
         Path::new(&path_text),
         &serde_json::to_string(&document).expect("hostile document json"),
     );
-
-    let piped = run_cli(&fixture, &["session", "reference", &path_text]);
-    assert!(piped.status.success(), "{}", piped.stderr);
-    let expected_pipe =
-        "Version 9 carries conversation history, not a separate text archive.\n".to_owned();
-    assert_eq!(piped.stdout.as_bytes(), expected_pipe.as_bytes());
-
-    let (status, terminal_bytes) = run_cli_pty(&fixture, &["session", "reference", &path_text]);
-    assert!(status.success());
-    let terminal = String::from_utf8(terminal_bytes).expect("terminal UTF-8");
-    let expected_terminal = expected_pipe
-        .replace(['\u{1b}', '\u{7}', '\u{9b}', '\u{202e}'], "�")
-        .replace('\n', "\r\n");
-    assert_eq!(terminal, expected_terminal);
-    assert!(!terminal.as_bytes().contains(&0x1b));
-    assert!(!terminal.contains("\u{202e}"));
 
     // Import prints producer provenance from the untrusted document too. One
     // distinct source proves the pipe policy; another proves the PTY policy

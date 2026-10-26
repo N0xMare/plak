@@ -119,6 +119,7 @@ pub fn list_platform_models(
             CompositionSelection::PySdk,
         ]
         .into_iter()
+        .filter(|composition| crate::build_features::require_composition(*composition).is_ok())
         .filter(|composition| api_composition(catalog.provider, &row.model, *composition).is_ok())
         .map(CompositionSelection::as_str)
         .collect::<Vec<_>>()

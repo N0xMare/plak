@@ -285,13 +285,9 @@ fn apply_profile(
         model: root.model.clone(),
         effort: root.effort.clone(),
         extra: root.is_fast().then(|| "priority".to_owned()),
-        composition: prepared
-            .config
-            .root_composition
-            .or(root.composition)
-            .map(|composition| {
-                plakous_host_protocol::CompositionSelection::from(composition).into()
-            }),
+        composition: root.composition.map(|composition| {
+            plakous_host_protocol::CompositionSelection::from(composition).into()
+        }),
         protocol: root.protocol,
         roster,
         finish: Box::new({
@@ -343,7 +339,7 @@ pub fn settings_snapshot(config: &ProductConfig) -> crate::surface_protocol::Set
         ]
         .into_iter()
         .filter(|composition| {
-            *composition != plakous_hosted::binding::CompositionSelection::PyPtc
+            !composition.requires_python_worker()
                 || crate::build_features::require_feature("python").is_ok()
         })
         .map(
@@ -2035,6 +2031,70 @@ mod tests {
         assert_eq!(
             ProductConfig::load(&paths).unwrap().root_agent.as_deref(),
             Some("mine-root")
+        );
+    }
+
+    #[test]
+    fn applying_claude_profile_discards_saved_sdk_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = profile_paths(dir.path());
+        let mut config = ProductConfig::load(&paths).unwrap();
+        config.bind_root_tuple("codex", "gpt-exact", Some("medium"));
+        config.save(&paths).unwrap();
+        let mut catalog = codex_catalog();
+        let (events, rx) = host_event_sink();
+        let mut update = settings_snapshot(&config);
+        update.composition = plakous_host_protocol::CompositionSelection::PySdk;
+        let config = save_settings(&paths, update, &catalog, &events)
+            .unwrap_or_else(|| panic!("{:?}", rx.try_iter().collect::<Vec<_>>()));
+        assert_eq!(
+            ProductConfig::load(&paths).unwrap().root_composition,
+            Some(crate::product_config::ProductCompositionSelection::PySdk)
+        );
+        let unchanged =
+            save_settings(&paths, settings_snapshot(&config), &catalog, &events).unwrap();
+        assert_eq!(
+            unchanged.root_agent, config.root_agent,
+            "an unchanged SDK selection does not mint a template"
+        );
+        catalog[0].account = "claude".into();
+        let effect = ProductSurface::new(paths.clone()).dispatch(
+            SurfaceIntent::ApplyProfile {
+                name: "claude-default".into(),
+                fork_now: true,
+            },
+            SurfaceFacts {
+                session: None,
+                phase: SurfacePhase::Idle,
+                attached_one_shot: false,
+                catalog: &catalog,
+                queue_len: 0,
+                usage_reads: UsageReads::default(),
+            },
+            &events,
+        );
+        let fork = effect
+            .profile_fork
+            .unwrap_or_else(|| panic!("{:?}", rx.try_iter().collect::<Vec<_>>()));
+        let prepared = crate::profiles::prepare(&config, paths.home(), "claude-default").unwrap();
+        assert_eq!(
+            fork.composition,
+            prepared
+                .root
+                .composition
+                .map(|c| plakous_host_protocol::CompositionSelection::from(c).into())
+        );
+        assert_ne!(
+            fork.composition,
+            Some(plakous_host_protocol::CompositionSelection::PySdk.into())
+        );
+        (fork.finish)(ProfileForkOutcome::Forked);
+        let saved = ProductConfig::load(&paths).unwrap();
+        assert_eq!(saved.root_agent.as_deref(), Some("claude-default-root"));
+        assert_eq!(saved.root_composition, None);
+        assert_eq!(
+            saved.default_composition(),
+            prepared.root.composition.unwrap_or_default()
         );
     }
 

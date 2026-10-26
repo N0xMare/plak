@@ -2,13 +2,13 @@
 use super::document::IMPORTABLE_VERSIONS;
 use super::document::privately_owned;
 use super::document::{
-    CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild,
-    read_document,
+    CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild, read_document,
 };
 #[cfg(any(test, feature = "tui"))]
-use super::export::new_carry_file;
-#[cfg(any(test, feature = "tui"))]
-use super::reload::{export_with_snapshot, snapshot_export_version, snapshot_for_key};
+use super::{
+    export::new_carry_file,
+    reload::{export_with_snapshot, snapshot_export_version, snapshot_for_key},
+};
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
 use crate::store::sessions::{ProductTranscript, QueueDrainState, QueueItem, SessionRecord};
@@ -37,7 +37,6 @@ impl CarryDocument {
         let note = self.import_note(&record.id);
         let history = self
             .history
-            .ok_or_else(|| ImportError::Invalid("conversation history is required".into()))?
             .import()?
             .with_named_state(self.named_state)
             .map_err(|error| ImportError::Invalid(error.to_string()))?;
@@ -66,10 +65,7 @@ impl CarryDocument {
     }
 
     fn import_note(&self, new_id: &str) -> String {
-        let carried = self.history.as_ref().map_or_else(
-            || "conversation unavailable".to_owned(),
-            |history| format!("conversation carried; {}", history.summary()),
-        );
+        let carried = format!("conversation carried; {}", self.history.summary());
         import_note(&self.source, self.source_subagents, new_id, &carried)
     }
 }

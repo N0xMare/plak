@@ -340,7 +340,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::RootComposition,
         kind: "enum",
         constraint: "direct|plakous-default|native-ptc|js-ptc|py-ptc|py-sdk",
-        doc: "Root-only composition override for the exact root account/model tuple. py-sdk uses the typed Python SDK and is not valid in child templates.",
+        doc: "Root-only composition override for the exact root account/model tuple, validated against its account/model. Changing root.agent or applying a profile clears it. Children keep their own template composition. py-sdk uses the typed Python SDK and is not valid in child templates.",
         example: "\"py-sdk\"",
         scope: ConfigScope::Epoch,
     },

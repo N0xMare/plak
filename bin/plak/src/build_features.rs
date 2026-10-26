@@ -1,21 +1,20 @@
 use crate::{CliResult, command::Command};
 pub(crate) use plakous_hosted::capabilities::{
-    compiled_features, omitted_features, require_feature,
+    compiled_features, omitted_features, require_composition, require_feature,
 };
 
 pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
     match command {
         Command::Tui { .. } | Command::Resume { .. } => require_feature("tui")?,
         Command::Mcp(_) => require_feature("mcp")?,
-        Command::Run { composition, .. }
-            if composition == &Some(crate::product_config::ProductCompositionSelection::PyPtc) =>
-        {
-            require_feature("python")?;
+        Command::Run {
+            composition: Some(composition),
+            ..
+        } => {
+            require_composition(*composition)?;
         }
-        Command::RunOpenRouter { composition, .. } | Command::RunPlatform { composition, .. }
-            if *composition == crate::product_config::ProductCompositionSelection::PyPtc =>
-        {
-            require_feature("python")?;
+        Command::RunOpenRouter { composition, .. } | Command::RunPlatform { composition, .. } => {
+            require_composition(*composition)?;
         }
         _ => {}
     }
@@ -32,9 +31,10 @@ pub(crate) fn description() -> String {
 }
 
 pub(crate) fn admit_config(config: &crate::product_config::ProductConfig) -> CliResult<()> {
+    require_composition(config.default_composition())?;
     for template in config.templates.values() {
-        if template.composition == Some(crate::product_config::ProductCompositionSelection::PyPtc) {
-            require_feature("python")?;
+        if let Some(composition) = template.composition {
+            require_composition(composition)?;
         }
         if template.tools.mcp_servers().next().is_some() {
             require_feature("mcp")?;
@@ -49,9 +49,7 @@ pub(crate) fn admit_selected(
     model: Option<&str>,
     composition: crate::product_config::ProductCompositionSelection,
 ) -> CliResult<()> {
-    if composition == crate::product_config::ProductCompositionSelection::PyPtc {
-        require_feature("python")?;
-    }
+    require_composition(composition)?;
     if let Some(template) = config.root_template()
         && Some(template.account.as_str()) == account
         && Some(template.model.as_str()) == model
@@ -63,9 +61,7 @@ pub(crate) fn admit_selected(
 }
 
 pub(crate) fn admit_session(record: &crate::store::sessions::SessionRecord) -> CliResult<()> {
-    if record.composition == crate::product_config::ProductCompositionSelection::PyPtc {
-        require_feature("python")?;
-    }
+    require_composition(record.composition)?;
     if record
         .frozen_tools
         .as_ref()
@@ -95,6 +91,33 @@ pub(crate) fn version_suffix() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn python_compositions_share_the_worker_gate_but_keep_selected_refusal_ids() {
+        use crate::product_config::ProductCompositionSelection;
+        for composition in [
+            ProductCompositionSelection::PyPtc,
+            ProductCompositionSelection::PySdk,
+        ] {
+            assert!(composition.requires_python_worker());
+            if let Err(error) = require_composition(composition) {
+                assert_eq!(error.id, composition.as_str());
+                assert_eq!(error.feature, "python");
+                assert!(
+                    error
+                        .to_string()
+                        .starts_with(&format!("`{}` is not included", composition.as_str()))
+                );
+            }
+        }
+        let snapshot = crate::shell::settings::settings_snapshot(
+            &crate::product_config::ProductConfig::default_product(),
+        );
+        for option in snapshot.composition_options {
+            let composition: ProductCompositionSelection = option.composition.into();
+            assert!(require_composition(composition).is_ok());
+        }
+    }
 
     #[test]
     fn session_admission_ignores_unused_python_and_mcp_templates() {

@@ -435,6 +435,21 @@ pub enum CompositionSelection {
 }
 
 impl CompositionSelection {
+    /// Whether this selection needs the Python evaluator worker.
+    #[must_use]
+    pub const fn requires_python_worker(self) -> bool {
+        matches!(self, Self::PyPtc | Self::PySdk)
+    }
+
+    pub(crate) fn admit_role(self, spawned_child: bool) -> crate::CliResult<()> {
+        if self == Self::PySdk && spawned_child {
+            return Err(crate::CliFailure::new(
+                "py-sdk is root-only and has no child result channel",
+            ));
+        }
+        Ok(())
+    }
+
     /// The program runtime this selection runs under; `None` is Direct.
     pub(crate) const fn runtime(self) -> Option<plakous::tools::CompositionRuntime> {
         use plakous::tools::CompositionRuntime;

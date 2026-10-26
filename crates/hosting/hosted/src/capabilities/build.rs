@@ -111,6 +111,19 @@ pub fn require_feature(feature: &str) -> Result<(), CapabilityUnavailable> {
     Ok(())
 }
 
+/// Admits a composition's worker with the selected label in a refusal.
+pub fn require_composition(
+    composition: crate::binding::CompositionSelection,
+) -> Result<(), CapabilityUnavailable> {
+    if composition.requires_python_worker() {
+        require_feature("python").map_err(|mut error| {
+            error.id = composition.as_str();
+            error
+        })?;
+    }
+    Ok(())
+}
+
 pub fn omitted_features() -> Vec<&'static str> {
     BUILD_CAPABILITIES
         .iter()

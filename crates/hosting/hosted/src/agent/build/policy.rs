@@ -251,7 +251,14 @@ fn python_cell_attachment(
     configuration: &CompiledProviderConfiguration,
     presentation_kind: Option<CodingPresentation>,
 ) -> CliResult<plakous::agent::LocalCompositionAttachment> {
-    crate::capabilities::require_feature("python")?;
+    crate::capabilities::require_feature("python").map_err(|mut error| {
+        error.id = match descriptor {
+            plakous::tools::CellDescriptor::PythonHarnessSdkV1(_) => CompositionSelection::PySdk,
+            _ => CompositionSelection::PyPtc,
+        }
+        .as_str();
+        error
+    })?;
     let artifact = plakous::agent::LocalCompositionEngineArtifact::monty_worker_v1(host_path)
         .map_err(|error| CliFailure::new(format!("Python host identity is invalid: {error}")))?;
     let profile = plakous::agent::LocalCompositionProfile::cell(descriptor)

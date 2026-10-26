@@ -197,10 +197,8 @@ fn export_projected(
         named_state: history
             .named_state()
             .map_err(|error| ExportRefusal::Runtime(error.to_string()))?,
-        history: Some(
-            history::History::export(&history)
-                .map_err(|e| ExportRefusal::Runtime(e.to_string()))?,
-        ),
+        history: history::History::export(&history)
+            .map_err(|e| ExportRefusal::Runtime(e.to_string()))?,
         pending_work,
         queue: record
             .pending_queue

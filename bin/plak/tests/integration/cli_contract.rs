@@ -165,54 +165,17 @@ fn publication_missing_session_is_usage_without_creating_state() {
 }
 
 #[test]
-fn publication_reference_resolves_short_id_and_names_missing_path() {
-    use plak::home::paths::PlakPaths;
-    use plak::store::ProductStore;
+fn publication_obsolete_reference_command_is_refused_without_state() {
     let root = tempfile::tempdir().unwrap();
-    let home = root.path().join("home");
-    let paths = PlakPaths::resolve(Some(home.as_os_str()), None).unwrap();
-    paths.ensure_layout().unwrap();
-    let mut store = ProductStore::open(&paths).unwrap();
-    let mut record = plak::store::sessions::SessionRecord::new(root.path().to_path_buf());
-    store.commit(&mut record).unwrap();
-    let out = publication_command(root.path(), &["session", "reference", &record.id[..8]])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("could not inspect retained reference"),
-        "{stderr}"
-    );
-    assert!(stderr.contains(&record.id), "{stderr}");
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        let references = home.join("references");
-        std::fs::create_dir_all(&references).unwrap();
-        std::fs::set_permissions(&references, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let archive = references.join(format!("{}.json", record.id));
-        std::fs::write(
-            &archive,
-            r#"{"entries":[{"actor":"user","text":"retained short-id answer"}]}"#,
-        )
-        .unwrap();
-        std::fs::set_permissions(&archive, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    let out = publication_command(root.path(), &["session", "reference", &record.id[..8]])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("retained short-id answer"));
     let out = publication_command(root.path(), &["session", "reference", "missing.json"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains(
-        "`missing.json` is neither an existing export file nor a session in this workspace"
-    ));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "plak: unknown command; run `plak help` for the command list\n"
+    );
+    assert!(!root.path().join("home").exists());
 }
 
 #[test]

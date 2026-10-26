@@ -7055,9 +7055,12 @@ worker contract. The SDK has one ordinary structured outer tool, `run_py`,
 with exactly one `code` string (nonempty, at most 256 KiB UTF-8). It has no
 wait tool, no result channel and no topology tools. Its runtime contract has
 `supports_yield = false`, lifecycle `AgentIncarnationPersistent` and result
-projection `BytesRunPyV1`. It is an explicit root embedding API and the
-product's `py-sdk` selection; `plakous-default` never selects it. Child
-templates, topology and optional tool namespaces cannot select this surface.
+projection `BytesRunPyV1`. It is an explicit embedding API and the product's
+`py-sdk` selection; `plakous-default` never selects it. Root-only is a Plak
+product rule: product child templates, topology and optional tool namespaces
+cannot select this surface. The library has no root/child or topology tiers;
+an embedder may attach it to any isolated single agent whose registry and
+authority satisfy the fixed SDK catalog.
 
 The descriptor's `HostApi` is the sole SDK catalog. It generates the typing
 module, runtime wrappers, plain-data record definitions and host argument
@@ -7106,8 +7109,9 @@ cell failure, never a typed stop. In-engine memory remains bounded at 256 MiB.
 `timeout_s` bound (0–300 s) and stop a job that exceeds it. `proc.stdin` writes
 and optionally closes stdin. `proc.start(stdin=False)` closes non-TTY input
 by default; `stdin=True` keeps it open for subsequent writes. Processes have
-the user's full authority and are not sandboxed. The SDK is root-only, so
-child occupancy fences do not admit its literal-argv capability.
+the user's full authority and are not sandboxed. Plak's SDK selection is
+root-only, so product child occupancy fences do not admit its literal-argv
+capability; this does not define a library tier restriction.
 
 One nested result may encode to at most 1 MiB as `CellValue`, and all results
 of a cell to at most 16 MiB. These quotas count encoded values, not tool text

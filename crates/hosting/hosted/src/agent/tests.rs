@@ -3,6 +3,127 @@
 use super::*;
 
 #[test]
+fn sdk_child_selection_refusals_are_exact_and_create_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let error = CompositionSelection::PySdk.admit_role(true).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "py-sdk is root-only and has no child result channel"
+    );
+    assert!(CompositionSelection::PySdk.admit_role(false).is_ok());
+    for provider in [
+        NativeProvider::Codex,
+        NativeProvider::Claude,
+        NativeProvider::Xai,
+    ] {
+        for (parent, pinned) in [
+            (CompositionSelection::PySdk, None),
+            (
+                CompositionSelection::Direct,
+                Some(CompositionSelection::PySdk),
+            ),
+        ] {
+            assert_eq!(
+                spawn_child_composition(parent, provider, pinned).unwrap_err(),
+                "spawn child: py-sdk is root-only and has no child result channel"
+            );
+        }
+    }
+    assert_eq!(
+        ChildAssignmentStartKind::from_composition(
+            plakous::prompts::vocabulary::Composition::PythonSdk
+        )
+        .unwrap_err(),
+        "py-sdk is root-only and has no child result channel"
+    );
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn sdk_spawned_api_binding_refuses_before_discovery_or_creation() {
+    let directory = tempfile::tempdir().unwrap();
+    for target in [
+        crate::binding::ApiTarget::OpenRouter {
+            wire: ResolvedProtocol::Chat,
+        },
+        crate::binding::ApiTarget::Platform {
+            provider: crate::binding::PlatformProvider::Anthropic,
+        },
+    ] {
+        let mut parent = openrouter_test_parent();
+        parent.workspace_root = directory.path().join("uncreated");
+        parent.cwd = parent.workspace_root.clone();
+        parent.target = target;
+        parent.composition = CompositionSelection::PySdk;
+        parent.topology_caller_id = Some("c0".into());
+        let failure = api_session_runtime_binding(&parent, false, SessionToolFence::Full, None)
+            .await
+            .err()
+            .expect("SDK child refused");
+        assert_eq!(
+            failure.message(),
+            "py-sdk is root-only and has no child result channel"
+        );
+    }
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn sdk_optional_tools_and_fence_refuse_before_surface_compilation() {
+    use crate::agent::rendered_prompts::suite::synthetic_target;
+    use crate::tools::{product_surface_with_fence, test_support::extensions};
+    for names in [vec!["web_search"], vec!["mcp__fake__echo"]] {
+        let extra = extensions(&names);
+        let registry = coding_tool_registry_with_extensions(
+            "sdk-refusal",
+            CompositionSelection::Direct,
+            false,
+            &extra,
+        )
+        .unwrap();
+        let error = product_surface_with_fence(
+            plakous::tools::JobConfig::default(),
+            presentation_for(NativeProvider::Xai),
+            registry,
+            synthetic_target(b"sdk-refusal"),
+            &extra,
+            SessionToolFence::Full,
+            Some(plakous::tools::CompositionRuntime::PythonHarnessSdk),
+        )
+        .expect_err("optional surface refused");
+        assert_eq!(
+            error.message(),
+            format!(
+                "py-sdk does not support configured optional tools or MCP extensions: {}; remove them from the root template's tools key or select another [root] composition",
+                names.join(", ")
+            )
+        );
+    }
+    let extra = empty_product_extensions();
+    let registry = coding_tool_registry_with_extensions(
+        "sdk-fence",
+        CompositionSelection::Direct,
+        false,
+        &extra,
+    )
+    .unwrap();
+    let error = product_surface_with_fence(
+        plakous::tools::JobConfig::default(),
+        presentation_for(NativeProvider::Xai),
+        registry,
+        synthetic_target(b"sdk-fence"),
+        &extra,
+        SessionToolFence::OccupancyReadOnly,
+        Some(plakous::tools::CompositionRuntime::PythonHarnessSdk),
+    )
+    .expect_err("SDK child fence refused");
+    assert_eq!(
+        error.message(),
+        "py-sdk requires a single-agent root with the full tool fence; child tiers are unavailable"
+    );
+}
+
+#[test]
 fn sdk_selection_requires_exact_direct_capable_route_authority() {
     for (provider, mode) in [
         (NativeProvider::Codex, None),

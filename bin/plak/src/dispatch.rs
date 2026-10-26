@@ -1,7 +1,6 @@
 //! Large `execute_command` arms, kept out of the crate root.
 
 use std::io;
-use std::path::PathBuf;
 
 use plakous::subscriptions::NativeProvider;
 
@@ -292,59 +291,6 @@ pub(super) fn execute_session_list(
             .write_table(stdout, &table)
             .map_err(|_| CliFailure::new("stdout failed"))?;
     }
-    Ok(ProcessOutcome::Success)
-}
-
-pub(super) fn execute_session_reference(
-    services: &Services,
-    stdout: &mut dyn io::Write,
-    path: PathBuf,
-    search: Option<String>,
-    tail: usize,
-) -> CliResult<ProcessOutcome> {
-    let destination = cli_output::TerminalMode::of_stdout();
-    let rendered = if path.exists() {
-        carry::read_document(&path)
-            .map_err(|error| CliFailure::new(error.to_string()))?
-            .reference_text(search.as_deref(), tail, destination)
-    } else {
-        let session_id = path.to_str().ok_or_else(|| {
-            CliFailure::new("session reference requires a session id or export path")
-        })?;
-        let session_id = commands::session::resolve_read_only_session_id(
-            services.paths()?,
-            session_id,
-        )
-        .map_err(|failure| {
-            if failure.exit_code() != 2 {
-                return failure;
-            }
-            CliFailure::classified(
-                CliFailureKind::Usage,
-                format!(
-                    "`{session_id}` is neither an existing export file nor a session in this workspace"
-                ),
-            )
-        })?;
-        let paths = services.paths()?;
-        carry::read_retained_archive(
-            paths,
-            &session_id,
-            search.as_deref(),
-            tail,
-            destination,
-        )
-        .map_err(|error| {
-            let archive = paths.home().join("references").join(format!("{session_id}.json"));
-            if matches!(std::fs::symlink_metadata(archive), Err(ref failure) if failure.kind() == io::ErrorKind::NotFound)
-                && let Err(current) = store::ProductStore::inspect_session_read_only(paths, &session_id)
-            {
-                return CliFailure::new(current);
-            }
-            CliFailure::new(error)
-        })?
-    };
-    write!(stdout, "{rendered}").map_err(|_| CliFailure::new("stdout failed"))?;
     Ok(ProcessOutcome::Success)
 }
 

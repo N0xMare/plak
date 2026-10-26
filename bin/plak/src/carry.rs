@@ -28,7 +28,7 @@ pub(crate) use reload::{ReloadPlan, ReloadTarget, reload_plan, reload_target_for
 pub(crate) use import::carry_foreign_session;
 pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
 
-pub(crate) use reference::{read_retained_archive, remove_retained_archive};
+pub(crate) use reference::remove_retained_archive;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]

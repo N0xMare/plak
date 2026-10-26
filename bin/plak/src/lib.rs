@@ -1024,9 +1024,6 @@ fn execute_command(
                 .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
-        Command::SessionReference { path, search, tail } => {
-            dispatch::execute_session_reference(services, stdout, path, search, tail)
-        }
         Command::SessionDelete {
             id,
             yes,

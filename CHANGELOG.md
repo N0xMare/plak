@@ -14,8 +14,6 @@ one cross-build carrier (a build imports its own and the previous version).
   Omitted capabilities refuse explicitly (exit 2), never select another route;
   doctor, non-default version labels and JSONL hello report build capabilities.
 
-### Plakous
-
 - `py-sdk` is selectable for a single-agent root through settings, CLI and
   JSONL. Its typed Python base replaces the family base; existing composition
   text stays unchanged. This root opens no topology; child templates and
@@ -25,6 +23,12 @@ one cross-build carrier (a build imports its own and the previous version).
   removed. Product schema 34 admits `py-sdk`; state key `r26.e33.p34.t9`.
   `[root] composition` overrides the root template's composition without
   granting that selection to children.
+
+- Settings persist composition in `[root] composition` rather than changing
+  the root template, so children inherit the template's own composition.
+  Changing the root template or applying a profile clears that override.
+
+### Plakous
 
 - All local cell profiles use `LocalCompositionProfile::cell(&CellDescriptor)`.
   The four per-engine profile constructors and Python-only component identity

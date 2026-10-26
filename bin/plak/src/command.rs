@@ -100,11 +100,6 @@ pub(crate) enum Command {
     SessionImport {
         path: PathBuf,
     },
-    SessionReference {
-        path: PathBuf,
-        search: Option<String>,
-        tail: usize,
-    },
     SessionDelete {
         id: String,
         yes: bool,
@@ -303,7 +298,6 @@ impl Command {
             | Self::SessionRecover { .. }
             | Self::SessionExport { .. }
             | Self::SessionImport { .. }
-            | Self::SessionReference { .. }
             | Self::SessionDelete { .. }
             | Self::SessionGc { .. }
             | Self::SessionLog { .. } => "session",
@@ -377,7 +371,6 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             | Command::ConfigShow
             | Command::SessionShow { .. }
             | Command::SessionLog { .. }
-            | Command::SessionReference { .. }
     )
 }
 

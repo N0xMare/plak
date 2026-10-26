@@ -21,7 +21,6 @@ pub(super) const FORMAT: &str = "plak-session-export";
 pub(crate) const VERSION: u32 = 9;
 const PREVIOUS_VERSION: u32 = 8;
 pub(crate) const IMPORTABLE_VERSIONS: [u32; 2] = [PREVIOUS_VERSION, VERSION];
-pub(super) const MAX_REFERENCE_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
 /// One exported session.
@@ -39,8 +38,7 @@ pub(crate) struct CarryDocument {
     /// Version 8 has no named state; its importer supplies the empty map.
     #[serde(default)]
     pub(super) named_state: std::collections::BTreeMap<String, serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) history: Option<history::History>,
+    pub(super) history: history::History,
     /// Unresolved source workflow facts retained as inert operator context.
     /// They are never restored into the new session's executable journal.
     pub(super) pending_work: Vec<PendingWorkEntry>,
@@ -56,22 +54,6 @@ pub(crate) struct CarryDocument {
     /// Settled source topology rows omitted from the unresolved ledger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) source_resolved_count: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CarryArchive {
-    /// Readable, inert evidence. Import never feeds these entries to a model.
-    pub(super) entries: Vec<ArchiveEntry>,
-    #[serde(default)]
-    pub(super) omitted_entries: usize,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ArchiveEntry {
-    pub(super) actor: String,
-    pub(super) text: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -211,8 +193,8 @@ impl CarryDocument {
                     .into(),
             );
         }
-        match (self.version, &self.history) {
-            (VERSION | PREVIOUS_VERSION, Some(history)) => {
+        match self.version {
+            VERSION | PREVIOUS_VERSION => {
                 if self.version == PREVIOUS_VERSION
                     && (!self.named_state.is_empty()
                         || self.binding.composition == ProductCompositionSelection::PySdk)
@@ -221,7 +203,7 @@ impl CarryDocument {
                         "version 8 exports cannot carry named state or py-sdk selection".into(),
                     ));
                 }
-                history.validate_size()
+                self.history.validate_size()
             }
             _ => Err(ImportError::Invalid(
                 "export payload does not match its version".to_owned(),
@@ -240,23 +222,16 @@ impl CarryDocument {
     }
 
     pub(crate) fn message_count(&self) -> usize {
-        self.history
-            .as_ref()
-            .map_or(0, history::History::message_count)
+        self.history.message_count()
     }
 
     pub(crate) fn estimated_tokens(&self) -> u64 {
-        self.history
-            .as_ref()
-            .map_or(0, history::History::estimated_tokens)
+        self.history.estimated_tokens()
     }
 
     #[cfg(any(test, feature = "tui"))]
     pub(crate) fn carry_summary(&self) -> String {
-        self.history.as_ref().map_or_else(
-            || "conversation unavailable".to_owned(),
-            history::History::summary,
-        )
+        self.history.summary()
     }
 }
 
@@ -328,6 +303,11 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
             header.version
         )));
     }
+    if header.version == PREVIOUS_VERSION && header.named_state_present {
+        return Err(ImportError::Invalid(
+            "version 8 exports cannot carry named state or py-sdk selection".into(),
+        ));
+    }
     if header.raw_history.is_none() || header.checkpoint_present || header.archive_present {
         return Err(ImportError::Invalid(
             "export payload fields do not match its version".to_owned(),
@@ -369,6 +349,8 @@ struct DocumentHeader<'a> {
     checkpoint_present: bool,
     #[serde(default, rename = "archive", deserialize_with = "field_present")]
     archive_present: bool,
+    #[serde(default, rename = "named_state", deserialize_with = "field_present")]
+    named_state_present: bool,
 }
 
 fn field_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
@@ -382,6 +364,7 @@ fn raw_history_field<'de, D: serde::Deserializer<'de>>(
     <&serde_json::value::RawValue>::deserialize(d).map(Some)
 }
 
+#[cfg(any(test, feature = "tui"))]
 pub(super) fn write_private_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -461,7 +444,7 @@ pub(super) fn sample_document() -> CarryDocument {
             composition: ProductCompositionSelection::Direct,
             target_selection: ProductTargetSelection::Native,
         },
-        history: Some(serde_json::from_value(serde_json::json!({"replay_account":"00ff","replay_model":"offline-loopback-v1","groups":[]})).unwrap()),
+        history: serde_json::from_value(serde_json::json!({"replay_account":"00ff","replay_model":"offline-loopback-v1","groups":[]})).unwrap(),
         named_state: std::collections::BTreeMap::new(),
         pending_work: Vec::new(),
         queue: vec!["held follow-up".to_owned()],

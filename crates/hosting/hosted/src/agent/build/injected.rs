@@ -28,6 +28,9 @@ pub fn injected_root_tool_registrations(
     state_roots: &ProductStateRoots,
 ) -> Result<Vec<plakous::tools::ToolRegistration>, String> {
     let tools = frozen.selection();
+    tools
+        .admit_composition(session.composition)
+        .map_err(|failure| failure.message().to_owned())?;
     let plan = bind_node_tool_plan(
         &tools,
         crate::tool_plan::ToolRoute::native(NativeProvider::Codex),
@@ -41,6 +44,11 @@ pub fn injected_root_tool_registrations(
     let extensions = ProductToolExtensions::empty()
         .with_plan(&plan)
         .map_err(|failure| failure.message().to_owned())?;
+    if session.composition == crate::binding::CompositionSelection::PySdk {
+        extensions
+            .admit_sdk()
+            .map_err(|failure| failure.message().to_owned())?;
+    }
     Ok(extensions.registrations().to_vec())
 }
 

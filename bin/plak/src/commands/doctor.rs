@@ -44,18 +44,16 @@ pub(crate) fn run_doctor(
     let runtime_store = product_doctor::inspect_runtime_store(&paths.runtime_database());
     let selected_composition = platform_catalog::root_composition(&selected);
     let telemetry = telemetry_sink::inspect_product_telemetry(paths);
-    let local_composition_required = matches!(
-        selected_composition,
-        product_config::ProductCompositionSelection::JsPtc
-            | product_config::ProductCompositionSelection::PyPtc
-            | product_config::ProductCompositionSelection::PySdk
-            | product_config::ProductCompositionSelection::NativePtc
-    ) || (selected_composition
-        == product_config::ProductCompositionSelection::FollowCatalog
-        && selected.default_account() == Some("codex"));
+    let local_composition_required = selected_composition.requires_python_worker()
+        || matches!(
+            selected_composition,
+            product_config::ProductCompositionSelection::JsPtc
+                | product_config::ProductCompositionSelection::NativePtc
+        )
+        || (selected_composition == product_config::ProductCompositionSelection::FollowCatalog
+            && selected.default_account() == Some("codex"));
     let composition_host = match selected_composition {
-        product_config::ProductCompositionSelection::PyPtc
-        | product_config::ProductCompositionSelection::PySdk => {
+        composition if composition.requires_python_worker() => {
             match sidecars::python_bundle::locate() {
                 Ok(path) => product_doctor::CompositionHostStatus::Included {
                     identity: path.display().to_string(),
@@ -183,11 +181,7 @@ pub(crate) fn run_doctor(
             product_doctor::Requirement::Optional
         },
         composition_host,
-        python_containment_required: matches!(
-            selected_composition,
-            product_config::ProductCompositionSelection::PyPtc
-                | product_config::ProductCompositionSelection::PySdk
-        ),
+        python_containment_required: selected_composition.requires_python_worker(),
         runtime_directory: env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
         openrouter_catalog,
         root_template,

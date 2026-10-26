@@ -28,6 +28,50 @@ fn sdk_is_a_root_override_not_a_child_template_capability() {
             .contains("py-sdk is root-only and has no child result channel")
     );
 }
+
+#[test]
+fn changing_root_template_clears_only_its_composition_override() {
+    let mut config = ProductConfig::default_product();
+    config.bind_root_tuple("grok", "grok-4.6", None);
+    config.set_key("root.composition", "py-sdk").unwrap();
+    let current = config.root_agent.clone().unwrap();
+    config.set_key("root.agent", &current).unwrap();
+    assert_eq!(
+        config.root_composition,
+        Some(ProductCompositionSelection::PySdk)
+    );
+    config
+        .templates
+        .insert("another".into(), config.root_template().unwrap().clone());
+    config.set_key("root.agent", "another").unwrap();
+    assert_eq!(config.root_composition, None);
+}
+
+#[test]
+fn root_composition_cross_field_rules_apply_on_load_and_save() {
+    for (account, model) in [
+        ("openrouter", "vendor/model"),
+        ("anthropic", "claude-haiku-5-5"),
+    ] {
+        let (_tmp, paths) = PlakPaths::isolated_test_home();
+        let mut config = ProductConfig::default_product();
+        config.bind_root_tuple(account, model, Some("medium"));
+        config.save(&paths).unwrap();
+        let before = fs::read(paths.config_file()).unwrap();
+        config.root_composition = Some(ProductCompositionSelection::NativePtc);
+        let error = config.save(&paths).unwrap_err();
+        assert!(error.contains("[root] composition:"), "{error}");
+        assert_eq!(fs::read(paths.config_file()).unwrap(), before);
+        let text = String::from_utf8(before).unwrap();
+        fs::write(
+            paths.config_file(),
+            text.replace("[root]", "[root]\ncomposition = \"native-ptc\""),
+        )
+        .unwrap();
+        let error = ProductConfig::load(&paths).unwrap_err();
+        assert!(error.contains("[root] composition:"), "{error}");
+    }
+}
 use crate::home::paths::PlakPaths;
 use plakous::model::ProcessingTierDisposition;
 use plakous_hosted::agent_tree_protocol::{Delegation, TemplateName, Tier, WorkingSet, WriterMode};

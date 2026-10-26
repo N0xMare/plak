@@ -7,7 +7,6 @@ USAGE:
   plak session recover <session>
   plak session export <session> [--out <path>]
   plak session import <path>
-  plak session reference <path-or-session> [--search <text>] [--tail N (default 20)]
   plak session delete <session> [--yes] [--abandon-children]
   plak session gc <session> | --all
 
@@ -20,9 +19,8 @@ USAGE:
   export writes a portable session document (0600; default ~/.plak/carry/)
   that carries the full conversation to another plak build. import creates a
   linked session that continues from it; live tools, processes and sub-agents
-  are not restored, and queued work stays paused. reference prints bounded
-  excerpts of a version 7 document's archive (or of a session imported from
-  one) without importing or running them.
+  are not restored, and queued work stays paused. Version 9 also carries named
+  state; version 8 imports with empty named state. Older versions are refused.
   Session IDs accept an unambiguous prefix of at least four characters.
   --abandon-children explicitly retires recovery-required children before delete.
 
