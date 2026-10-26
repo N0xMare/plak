@@ -12,9 +12,10 @@ use super::{
     ENVELOPE_OVERHEAD, EncodedBody, INTEGRITY_DOMAIN, MAGIC, MAX_BODY_BYTES, MAX_ID_BYTES,
     MAX_OPAQUE_ID_BYTES, MAX_RESPONSES_ARTIFACT_BYTES, RESPONSES_ARTIFACT_CODEC_REVISION,
     RESPONSES_ARTIFACT_SCHEMA_REVISION, ResponsesArtifact, ResponsesArtifactBinding,
-    ResponsesArtifactError, ResponsesArtifactProduction, ResponsesArtifactReplayKind,
-    ResponsesCacheFact, ResponsesContinuation, ResponsesReplayContract, ResponsesSemanticRevisions,
-    ResponsesStorageMode, UUID_TEXT_BYTES, validate_digest,
+    ResponsesArtifactError, ResponsesArtifactProduction, ResponsesArtifactProductionParts,
+    ResponsesArtifactReplayKind, ResponsesCacheFact, ResponsesContinuation,
+    ResponsesReplayContract, ResponsesSemanticRevisions, ResponsesStorageMode, UUID_TEXT_BYTES,
+    validate_digest,
 };
 
 /// Closed family-local codec for canonical Responses artifact bytes.
@@ -222,17 +223,17 @@ fn decode_operation_root(
 fn decode_production(
     reader: &mut Reader<'_>,
 ) -> Result<ResponsesArtifactProduction, ResponsesArtifactError> {
-    ResponsesArtifactProduction::from_parts(
-        reader.digest(DigestDomain::RequestPlan)?,
-        reader.digest(DigestDomain::CanonicalItemPrefix)?,
-        reader.digest(DigestDomain::RequestPlan)?,
-        reader.digest(DigestDomain::ProviderOperation)?,
-        reader.digest(DigestDomain::ProviderOperation)?,
-        reader.u32()?,
-        reader.u32()?,
-        reader.u32()?,
-        reader.digest(DigestDomain::CanonicalItemPrefix)?,
-    )
+    ResponsesArtifactProduction::validated(ResponsesArtifactProductionParts {
+        producer_request: reader.digest(DigestDomain::RequestPlan)?,
+        producing_projection: reader.digest(DigestDomain::CanonicalItemPrefix)?,
+        validated_plan: reader.digest(DigestDomain::RequestPlan)?,
+        physical_request: reader.digest(DigestDomain::ProviderOperation)?,
+        terminal_response: reader.digest(DigestDomain::ProviderOperation)?,
+        producing_projection_items: reader.u32()?,
+        output_items: reader.u32()?,
+        covered_projection_items: reader.u32()?,
+        covered_projection: reader.digest(DigestDomain::CanonicalItemPrefix)?,
+    })
 }
 
 fn decode_replay_kind(

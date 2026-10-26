@@ -486,6 +486,19 @@ pub struct ResponsesArtifactProduction {
     covered_projection: Digest,
 }
 
+#[derive(Clone, Copy)]
+struct ResponsesArtifactProductionParts {
+    producer_request: Digest,
+    producing_projection: Digest,
+    validated_plan: Digest,
+    physical_request: Digest,
+    terminal_response: Digest,
+    producing_projection_items: u32,
+    output_items: u32,
+    covered_projection_items: u32,
+    covered_projection: Digest,
+}
+
 impl ResponsesArtifactProduction {
     /// Binds a terminal response and its canonical output coverage to one admitted request.
     pub fn from_admitted_response(
@@ -506,32 +519,33 @@ impl ResponsesArtifactProduction {
             .identity();
         let producing_projection_items = u32::try_from(request.input().items().len())
             .map_err(|_| ResponsesArtifactError::InvalidCoordinates)?;
-        Self::from_parts(
-            request.identity(),
+        Self::validated(ResponsesArtifactProductionParts {
+            producer_request: request.identity(),
             producing_projection,
-            plan.digest(),
+            validated_plan: plan.digest(),
             physical_request,
             terminal_response,
             producing_projection_items,
             output_items,
-            producing_projection_items
+            covered_projection_items: producing_projection_items
                 .checked_add(output_items)
                 .ok_or(ResponsesArtifactError::InvalidCoordinates)?,
             covered_projection,
-        )
+        })
     }
 
-    fn from_parts(
-        producer_request: Digest,
-        producing_projection: Digest,
-        validated_plan: Digest,
-        physical_request: Digest,
-        terminal_response: Digest,
-        producing_projection_items: u32,
-        output_items: u32,
-        covered_projection_items: u32,
-        covered_projection: Digest,
-    ) -> Result<Self, ResponsesArtifactError> {
+    fn validated(parts: ResponsesArtifactProductionParts) -> Result<Self, ResponsesArtifactError> {
+        let ResponsesArtifactProductionParts {
+            producer_request,
+            producing_projection,
+            validated_plan,
+            physical_request,
+            terminal_response,
+            producing_projection_items,
+            output_items,
+            covered_projection_items,
+            covered_projection,
+        } = parts;
         validate_digest(
             producer_request,
             DigestDomain::RequestPlan,

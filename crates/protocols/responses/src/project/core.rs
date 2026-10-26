@@ -444,6 +444,10 @@ impl ResponseProjectorCore {
     }
 
     /// Start a function-call tool block at provider block 0 (emit + Requested).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "public signature; typed-parameter pass follows with the provider/hosted wave"
+    )]
     pub fn start_tool_block(
         &mut self,
         provider_index: u32,

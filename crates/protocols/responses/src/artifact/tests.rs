@@ -903,17 +903,17 @@ fn count_and_aggregate_replay_bounds_fail_before_body_amplification() {
         fixture.envelope.clone(),
     );
     let count = u32::try_from(MAX_RESPONSES_REPLAY_ITEMS + 1).expect("count");
-    let production = ResponsesArtifactProduction::from_parts(
-        fixture.production.producer_request(),
-        fixture.production.producing_projection(),
-        fixture.production.validated_plan(),
-        fixture.production.physical_request(),
-        fixture.production.terminal_response(),
-        0,
-        count,
-        count,
-        digest(DigestDomain::CanonicalItemPrefix, b"large-covered"),
-    )
+    let production = ResponsesArtifactProduction::validated(ResponsesArtifactProductionParts {
+        producer_request: fixture.production.producer_request(),
+        producing_projection: fixture.production.producing_projection(),
+        validated_plan: fixture.production.validated_plan(),
+        physical_request: fixture.production.physical_request(),
+        terminal_response: fixture.production.terminal_response(),
+        producing_projection_items: 0,
+        output_items: count,
+        covered_projection_items: count,
+        covered_projection: digest(DigestDomain::CanonicalItemPrefix, b"large-covered"),
+    })
     .expect("production");
     assert_eq!(
         ResponsesArtifact::new(
@@ -933,17 +933,17 @@ fn count_and_aggregate_replay_bounds_fail_before_body_amplification() {
     );
 
     let output_count = 4_u32;
-    let production = ResponsesArtifactProduction::from_parts(
-        fixture.production.producer_request(),
-        fixture.production.producing_projection(),
-        fixture.production.validated_plan(),
-        fixture.production.physical_request(),
-        fixture.production.terminal_response(),
-        0,
-        output_count,
-        output_count,
-        digest(DigestDomain::CanonicalItemPrefix, b"aggregate-covered"),
-    )
+    let production = ResponsesArtifactProduction::validated(ResponsesArtifactProductionParts {
+        producer_request: fixture.production.producer_request(),
+        producing_projection: fixture.production.producing_projection(),
+        validated_plan: fixture.production.validated_plan(),
+        physical_request: fixture.production.physical_request(),
+        terminal_response: fixture.production.terminal_response(),
+        producing_projection_items: 0,
+        output_items: output_count,
+        covered_projection_items: output_count,
+        covered_projection: digest(DigestDomain::CanonicalItemPrefix, b"aggregate-covered"),
+    })
     .expect("production");
     let large = format!(r#"{{"opaque":"{}"}}"#, "x".repeat(800_000));
     let replay = (0..output_count)

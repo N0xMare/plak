@@ -1241,6 +1241,10 @@ impl ResponsesLifecycle {
     /// # Errors
     ///
     /// Lifecycle errors.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "public signature; typed-parameter pass follows with the provider/hosted wave"
+    )]
     pub fn terminal_response(
         &self,
         response_id: &str,

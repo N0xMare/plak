@@ -47,14 +47,13 @@
 
 #![forbid(unsafe_code)]
 // Protocol docs name OpenAI/OpenRouter/SuperGrok; Result-heavy pure wire helpers;
-// lifecycle policy bool tables; projector/tool start arity matches wire correlation.
+// lifecycle policy bool tables.
 #![allow(
     clippy::doc_markdown,
     clippy::missing_errors_doc,
     clippy::struct_excessive_bools,
     clippy::must_use_candidate,
-    clippy::too_many_arguments,
-    reason = "product names in ownership docs; pure Result helpers; policy bool tables; wire correlation arity"
+    reason = "product names in ownership docs; pure Result helpers; policy bool tables"
 )]
 
 mod artifact;
