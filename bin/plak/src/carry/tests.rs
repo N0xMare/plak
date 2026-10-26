@@ -11,10 +11,10 @@ fn another_version_or_format_is_refused_by_name() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("doc.json");
     let mut value = serde_json::to_value(sample_document()).unwrap();
-    value["version"] = serde_json::json!(9);
+    value["version"] = serde_json::json!(7);
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let error = read_document(&path).unwrap_err();
-    assert!(error.to_string().contains("version 9"), "{error}");
+    assert!(error.to_string().contains("version 7"), "{error}");
     value["format"] = serde_json::json!("something-else");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     assert!(
@@ -143,7 +143,7 @@ fn an_import_links_back_and_holds_its_queue() {
     assert_eq!(
         note,
         format!(
-            "session {} linked from 5f0e2a43-7d3c-4c1e-9a55-4b1f7f0c9a11 (r1.e1.p1.t1, producer binary abcdef012345); resumed from a bounded checkpoint, with the readable archive retained only as untrusted reference data",
+            "session {} linked from 5f0e2a43-7d3c-4c1e-9a55-4b1f7f0c9a11 (r1.e1.p1.t1, producer binary abcdef012345); conversation carried; 0 messages, ~0 tokens; the first request rebuilds the prompt cache",
             record.id
         )
     );
@@ -221,8 +221,7 @@ fn oversized_export_document_refuses_before_parsing() {
 fn document(version: u32, transcript: serde_json::Value) -> CarryDocument {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("export.json");
-    let mut value: serde_json::Value =
-        serde_json::from_str(include_str!("../../tests/fixtures/session-export-v7.json")).unwrap();
+    let mut value = serde_json::to_value(sample_document()).unwrap();
     value["version"] = serde_json::json!(version);
     value["transcript"] = transcript;
     fs::write(&path, value.to_string()).unwrap();
@@ -235,7 +234,7 @@ fn document(version: u32, transcript: serde_json::Value) -> CarryDocument {
 #[test]
 fn an_imported_process_command_is_redacted_like_a_live_one() {
     let document = document(
-        7,
+        8,
         serde_json::json!([{
             "kind": "process",
             "job_id": "p1",
@@ -267,7 +266,7 @@ fn an_imported_tool_detail_is_redacted_like_a_live_one() {
         .unwrap();
     let mut row = serde_json::to_value(tool).unwrap();
     row["detail"] = serde_json::json!("GITHUB_TOKEN=ghp_abcdefghijklmnopqrst gh pr list");
-    let document = document(7, serde_json::json!([row]));
+    let document = document(8, serde_json::json!([row]));
     let CarriedImport { record, .. } = document.into_import().unwrap();
     let detail = record
         .transcript

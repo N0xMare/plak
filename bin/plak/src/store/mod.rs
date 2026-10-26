@@ -24,7 +24,7 @@ use sessions::{
     StoreBaseline, digest_parts,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 33;
+pub(crate) const SCHEMA_VERSION: i64 = 34;
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -1249,7 +1249,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "sessions",
-        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)))",
+        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc','py-sdk')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)))",
     ),
     (
         "sessions_workspace_updated",
@@ -2242,7 +2242,7 @@ mod tests {
     fn current_schema_rejects_previous_product_store_without_modification() {
         // A product schema change moves the state directory; a store at
         // another version in this directory is refused with its rows intact.
-        assert_eq!(SCHEMA_VERSION, 33);
+        assert_eq!(SCHEMA_VERSION, 34);
         let root = tempdir().unwrap();
         let paths = PlakPaths::explicit(root.path().join("p"));
         paths.ensure_layout().unwrap();
@@ -2252,7 +2252,7 @@ mod tests {
             store.commit(&mut session).unwrap();
         }
         let connection = Connection::open(paths.product_database()).unwrap();
-        connection.pragma_update(None, "user_version", 32).unwrap();
+        connection.pragma_update(None, "user_version", 33).unwrap();
         drop(connection);
 
         let error = ProductStore::open(&paths).unwrap_err();
@@ -2261,7 +2261,7 @@ mod tests {
             ProductStoreOpenErrorKind::UnsupportedPersistence
         );
         assert!(
-            error.to_string().contains("product schema 32, expected 33"),
+            error.to_string().contains("product schema 33, expected 34"),
             "{error}"
         );
         assert!(

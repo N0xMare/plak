@@ -16,59 +16,35 @@ fn published_export_survives_directory_sync_failure() {
 }
 
 #[test]
-fn oversized_checkpoints_and_archives_refuse_with_typed_errors() {
+fn oversized_named_state_is_refused_before_import() {
     let mut document = sample_document();
-    document.checkpoint.as_mut().unwrap().user_intent = "x".repeat(MAX_CHECKPOINT_BYTES + 1);
-    assert!(matches!(
-        document.into_import(),
-        Err(ImportError::Oversized {
-            section: "checkpoint",
-            ..
-        })
-    ));
-    let mut document = sample_document();
-    document.archive.as_mut().unwrap().entries[0].text = "x".repeat(MAX_ARCHIVE_BYTES + 1);
-    assert!(matches!(
-        document.into_import(),
-        Err(ImportError::Oversized {
-            section: "archive",
-            ..
-        })
-    ));
+    document
+        .named_state
+        .insert("large".into(), serde_json::json!("x".repeat(1_048_576)));
+    assert!(document.into_import().is_err());
 }
 
 #[test]
-fn previous_checkpoint_halves_have_independent_ceilings() {
+fn v8_import_starts_with_empty_named_state_and_v7_is_refused() {
     let root = tempfile::tempdir().unwrap();
-    for reference in [false, true] {
-        let mut document = sample_document();
-        document.checkpoint.as_mut().unwrap().user_intent.clear();
-        document.checkpoint.as_mut().unwrap().reference.clear();
-        let text = "x".repeat(MAX_CHECKPOINT_BYTES / 2 + 1);
-        if reference {
-            document.checkpoint.as_mut().unwrap().reference = text;
-        } else {
-            document.checkpoint.as_mut().unwrap().user_intent = text;
-        }
-        let path = root.path().join(format!("{reference}.json"));
-        write_document(&path, &document).unwrap();
-        assert_eq!(
-            read_document(&path).unwrap_err(),
-            ImportError::Oversized {
-                section: if reference {
-                    "checkpoint reference"
-                } else {
-                    "checkpoint user intent"
-                },
-                bytes: MAX_CHECKPOINT_BYTES / 2 + 1,
-                maximum: MAX_CHECKPOINT_BYTES / 2,
-            }
-        );
-    }
+    let mut value = serde_json::to_value(sample_document()).unwrap();
+    value["version"] = serde_json::json!(8);
+    value.as_object_mut().unwrap().remove("named_state");
+    let path = root.path().join("v8.json");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let imported = read_document(&path).unwrap().into_import().unwrap();
+    assert!(imported.history.named_state().unwrap().is_empty());
+    value["version"] = serde_json::json!(7);
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let error = read_document(&path).unwrap_err().to_string();
+    assert!(
+        error.contains("version 7 session export; this build imports versions 8 and 9"),
+        "{error}"
+    );
 }
 
 #[test]
-fn v8_document_round_trips_full_history_and_confirms_cache_rebuild() {
+fn v9_document_round_trips_named_state_selection_and_full_history() {
     use plakous::model::{
         Actor, ContentBlock, ConversationItem, EntryId, HistorySegment, HistorySegmentKind,
         ModelId, Provenance, TextBlock,
@@ -90,11 +66,13 @@ fn v8_document_round_trips_full_history_and_confirms_cache_rebuild() {
     );
     let mut document = sample_document();
     document.version = VERSION;
-    document.checkpoint = None;
-    document.archive = None;
+    document.binding.composition = ProductCompositionSelection::PySdk;
+    document
+        .named_state
+        .insert("answer".into(), serde_json::json!({"n":42}));
     document.history = Some(history::History::export(&original).unwrap());
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("v8.json");
+    let path = root.path().join("v9.json");
     write_document(&path, &document).unwrap();
     let bytes = fs::read(&path).unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -114,7 +92,14 @@ fn v8_document_round_trips_full_history_and_confirms_cache_rebuild() {
     );
     let import = document.into_import().unwrap();
     assert_eq!(import.history.segments(), original.segments());
-    assert!(import.archive.is_none());
+    assert_eq!(
+        import.record.composition,
+        ProductCompositionSelection::PySdk
+    );
+    assert_eq!(
+        import.history.named_state().unwrap()["answer"],
+        serde_json::json!({"n":42})
+    );
     assert!(
         import
             .note

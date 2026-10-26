@@ -304,7 +304,7 @@ impl ProductMailDeliverer {
                 &request.agent_id,
                 bind.account.as_deref(),
             )?,
-        ));
+        ))?;
         let prompt = assignment_start_prompt(
             start_kind,
             &template,

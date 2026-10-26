@@ -20,6 +20,7 @@ pub const fn prompt_composition(selection: ProductCompositionSelection) -> Compo
         ProductCompositionSelection::NativePtc => Composition::NativeCell,
         ProductCompositionSelection::JsPtc => Composition::JavaScriptCell,
         ProductCompositionSelection::PyPtc => Composition::PythonCell,
+        ProductCompositionSelection::PySdk => Composition::PythonSdk,
     }
 }
 

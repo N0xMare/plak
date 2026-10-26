@@ -2,7 +2,7 @@
 use super::document::IMPORTABLE_VERSIONS;
 use super::document::privately_owned;
 use super::document::{
-    CarryArchive, CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild,
+    CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild,
     read_document,
 };
 #[cfg(any(test, feature = "tui"))]
@@ -35,11 +35,12 @@ impl CarryDocument {
         self.validate()?;
         let mut record = SessionRecord::new(self.workspace_root.clone());
         let note = self.import_note(&record.id);
-        let history = if let Some(history) = self.history {
-            history.import()?
-        } else {
-            super::v7::import_checkpoint(self.checkpoint)?
-        };
+        let history = self
+            .history
+            .ok_or_else(|| ImportError::Invalid("conversation history is required".into()))?
+            .import()?
+            .with_named_state(self.named_state)
+            .map_err(|error| ImportError::Invalid(error.to_string()))?;
         let history = if local_handoff {
             history.with_replay_validation()
         } else {
@@ -61,17 +62,14 @@ impl CarryDocument {
             record,
             history,
             note,
-            archive: self.archive,
         })
     }
 
     fn import_note(&self, new_id: &str) -> String {
-        let carried = self
-            .history
-            .as_ref()
-            .map_or_else(super::v7::checkpoint_carried_note, |history| {
-                format!("conversation carried; {}", history.summary())
-            });
+        let carried = self.history.as_ref().map_or_else(
+            || "conversation unavailable".to_owned(),
+            |history| format!("conversation carried; {}", history.summary()),
+        );
         import_note(&self.source, self.source_subagents, new_id, &carried)
     }
 }
@@ -128,7 +126,6 @@ pub(crate) struct CarriedImport {
     pub(crate) record: SessionRecord,
     pub(crate) history: PortableSessionHistory,
     pub(crate) note: String,
-    pub(crate) archive: Option<CarryArchive>,
 }
 
 /// The session in `workspace` already carried forward from `source_id` of

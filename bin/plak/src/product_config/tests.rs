@@ -2,6 +2,32 @@
 
 use super::policy::template;
 use super::*;
+
+#[test]
+fn sdk_is_a_root_override_not_a_child_template_capability() {
+    let (_tmp, paths) = PlakPaths::isolated_test_home();
+    let mut config = ProductConfig::default_product();
+    config.bind_root_tuple("grok", "grok-4.6", None);
+    config.set_key("root.composition", "py-sdk").unwrap();
+    config.save(&paths).unwrap();
+    let loaded = ProductConfig::load(&paths).unwrap();
+    assert_eq!(
+        loaded.composition_for_tuple(Some("grok"), Some("grok-4.6")),
+        ProductCompositionSelection::PySdk
+    );
+    assert_eq!(
+        loaded.composition_for_tuple(Some("grok"), Some("different")),
+        ProductCompositionSelection::FollowCatalog
+    );
+    let mut template = loaded.root_template().unwrap().clone();
+    template.composition = Some(ProductCompositionSelection::PySdk);
+    assert!(
+        template
+            .validate("child")
+            .unwrap_err()
+            .contains("py-sdk is root-only and has no child result channel")
+    );
+}
 use crate::home::paths::PlakPaths;
 use plakous::model::ProcessingTierDisposition;
 use plakous_hosted::agent_tree_protocol::{Delegation, TemplateName, Tier, WorkingSet, WriterMode};

@@ -94,7 +94,9 @@ pub fn api_composition(
         CompositionSelection::FollowCatalog | CompositionSelection::Direct => {
             Ok(CompositionSelection::Direct)
         }
-        CompositionSelection::JsPtc | CompositionSelection::PyPtc => Ok(selection),
+        CompositionSelection::JsPtc | CompositionSelection::PyPtc | CompositionSelection::PySdk => {
+            Ok(selection)
+        }
         CompositionSelection::NativePtc if code_mode_only => Ok(selection),
         CompositionSelection::NativePtc => Err(provider.native_ptc_refusal()),
     }

@@ -2171,15 +2171,21 @@ session, or damaged store with the ordinary typed errors.
 It also refuses a job row without durable terminal evidence as
 `AgentSessionsErrorKind::UnsettledProcesses`. The remedy is to resume the
 session and send a prompt to deliver its process notices before exporting.
-Lease-release metadata is not evidence that a process stopped. The portable history API is unchanged; the product export encoding is
-owned by chapter 02 §2.5.1.
+Lease-release metadata is not evidence that a process stopped. The product
+export encoding is owned by chapter 02 §2.5.1.
 
 `PortableSessionHistory` is plain data: the segments, oldest first, and the
 account reference (lowercase hex of the admitted account binding) and model
 the provider replay material is bound to. `PortableSessionHistory::new`
 reassembles one a consumer carried in its own format, and
 `retains_replay_for(&SessionRuntimeBinding)` says whether a seed keeps the
-replay material.
+replay material. Export also captures the committed named-state map.
+`with_named_state` accepts a portable JSON map and validates the named-state
+grammar and quotas; `named_state` returns those values as JSON. Session creation
+seeds them atomically with history at genesis. Replay stripping and validation
+do not discard named state; reopen and fork retain the ordinary map authority.
+This neutral JSON carrier is always available; it does not require the
+`composition` feature or link a worker, provider or HTTP implementation.
 
 For consumers encoding histories neutrally, the facade also names
 `ImageDetailHint`, `ToolResultUpdateBlock`, `SummarizedTurns`, and
@@ -2734,9 +2740,8 @@ For Responses, compatibility requires the envelope's exact producing account,
 model, family and dialect. The canonical replay scope and its digest include the
 full account-binding digest, including its version; an accountless envelope
 never acquires Responses replay authority. This check applies to historical
-prefixes as well as newly appended output and hosted-program lineage. Export v8
-preserves the scope; v7's accountless items remain unbound rather than being
-retagged by its importer. Ordinary forks and validated imports cannot widen it.
+prefixes as well as newly appended output and hosted-program lineage. Export
+v8 and v9 preserve the scope. Ordinary forks and validated imports cannot widen it.
 The Responses limits of 4,096 replay items and 3 MiB replay payload apply to
 one newly appended response, not the accumulated canonical history. An exact
 active artifact remains reusable beyond either historical total, including
@@ -5011,7 +5016,7 @@ format 4 and host backend semantic revision 15 bind them, and exact reopen rejec
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
 the ceiling boolean, including when false. The runtime format epoch isolates
 these bindings from earlier state. CarryBinding does not embed an environment
-descriptor; export remains v8 with its existing v7 importer.
+descriptor; export v9 retains the v8 importer.
 Unsupported descriptors have no compatibility path.
 The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
@@ -6492,15 +6497,16 @@ recommended choice among them. Local programmatic runtimes (Codex Code Mode,
 `js-ptc`, `py-ptc`) share the coordinator below; provider-hosted PTC keeps its
 own replay and recovery rules.
 
-Product selection enrolls three local PTC deployments plus `direct` (no PTC).
-The SDK is an explicit embedding presentation, not a product selector:
+Product selection enrolls three local PTC deployments, the typed Python SDK,
+and `direct` (no PTC).
+The SDK is an explicit embedding presentation and the root-only `py-sdk` product selection:
 
 | Selector | Owner | Outer tools | Engine |
 | --- | --- | --- | --- |
 | `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the cell client that `composition` links |
 | `js-ptc` | Product | `exec_js`, `wait_js`, JSON field `source` | rquickjs in the sidecar `plakous-js-host`, one process per agent |
 | `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.2.0` in the cell worker `plakous-py-host`, one worker per agent incarnation |
-| Embedding SDK (no selector) | Consumer | `run_py`, JSON field `code`; no wait tool | Same Monty worker; fresh globals per cell, named session state |
+| `py-sdk` / embedding SDK | Product / consumer | `run_py`, JSON field `code`; no wait tool | Same Monty worker; fresh globals per cell, named session state |
 | `direct` | — | none | — |
 
 The host identity carries the deployment — `rquickjs-host/<digest>` or
@@ -7035,9 +7041,10 @@ lists saved keys and their sizes, plus running promoted job numbers. Values
 themselves are not included in that note. Compaction may drop a state-only note
 because the next boundary re-emits it.
 
-The Python SDK presentation issues these state operations. Export documents do not carry
-named state; an imported session, including one carried by `/reload` across
-builds, starts with empty named state.
+The Python SDK presentation issues these state operations. Export v9 carries
+the committed named values as JSON and validates their keys, values and quotas
+before seeding the new session's genesis atomically with its history. Export
+v8 has no named values, so its importer starts with empty named state.
 
 ### 9.9 Typed Python SDK cells
 
@@ -7048,8 +7055,9 @@ worker contract. The SDK has one ordinary structured outer tool, `run_py`,
 with exactly one `code` string (nonempty, at most 256 KiB UTF-8). It has no
 wait tool, no result channel and no topology tools. Its runtime contract has
 `supports_yield = false`, lifecycle `AgentIncarnationPersistent` and result
-projection `BytesRunPyV1`. It is an explicit root embedding API; it is not
-selected by `plakous-default` or exposed as a product composition selector.
+projection `BytesRunPyV1`. It is an explicit root embedding API and the
+product's `py-sdk` selection; `plakous-default` never selects it. Child
+templates, topology and optional tool namespaces cannot select this surface.
 
 The descriptor's `HostApi` is the sole SDK catalog. It generates the typing
 module, runtime wrappers, plain-data record definitions and host argument
@@ -7778,7 +7786,7 @@ contain no anchor, so import is unanchored. A nonempty root genesis seed
 (never a fork, rebind or clear successor) may use the destination's unanchored
 occupancy measure, once, for its first preflight fold; this is not paid admission
 authority.
-The export document is version 8; this build imports versions 8 and 7 (chapter 02 §2.5.1).
+The export document is version 9; this build imports versions 9 and 8 (chapter 02 §2.5.1).
 
 A paid fold's **own input must admit under a conservative bound, or on a
 `ReferenceClientEnvelope` contract its enrolled reference envelope (§6.8,
@@ -8199,9 +8207,9 @@ it, so the position survives compaction, reopen and fork unchanged. A
 compaction segment without the record leaves
 the position unknown and the indices are omitted, as native omits an unknown
 position. The record is an optional field of the canonical compaction block
-encoding; export v8 carries the turn record in its independent neutral
+encoding; exports v8 and v9 carry the turn record in its independent neutral
 compaction fields, so conversation carry preserves the position (spec 02
-§2.5.1). The v7 importer can only seed its old restart checkpoint. Carrying a history to
+§2.5.1). Carrying a history to
 another binding turns a native compaction block into a plain compaction block
 that keeps its record and places that segment at position zero, ahead of the
 retained prefix (§5.10); `(prompts, turns)` is unchanged. Withheld-prompt note

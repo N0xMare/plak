@@ -392,6 +392,13 @@ fn process_agreements(host_wakes: bool) -> Vec<PromptContribution> {
             PROCESS_PI_WAKE_AGREEMENTS,
             PROCESS_PI_WAIT_AGREEMENTS,
         ),
+        (
+            "process_session_poll",
+            "plak.agreements.process-sdk-wake",
+            "plak.agreements.process-sdk-wait",
+            crate::bases::python_sdk::WAKE,
+            crate::bases::python_sdk::WAIT,
+        ),
     ] {
         let (id, text) = if host_wakes {
             (wake_id, wake_text)
@@ -1001,6 +1008,7 @@ mod tests {
                 "plak.agreements.process-grok-wait",
                 "plak.agreements.process-claude-wait",
                 "plak.agreements.process-pi-wait",
+                "plak.agreements.process-sdk-wait",
             ]
         );
         assert_eq!(
@@ -1025,6 +1033,7 @@ mod tests {
                 "plak.agreements.process-grok-wake",
                 "plak.agreements.process-claude-wake",
                 "plak.agreements.process-pi-wake",
+                "plak.agreements.process-sdk-wake",
             ]
         );
         // A Grok hub presents its await as get_command_or_subagent_output, not

@@ -147,6 +147,7 @@ pub(crate) fn product_target_identity_profile(
     let profile_id = match composition {
         CompositionSelection::JsPtc => composition_profile_id(&profile_id, ".js-ptc.v1")?,
         CompositionSelection::PyPtc => composition_profile_id(&profile_id, ".py-ptc.v1")?,
+        CompositionSelection::PySdk => composition_profile_id(&profile_id, ".py-sdk.v1")?,
         CompositionSelection::Direct
         | CompositionSelection::FollowCatalog
         | CompositionSelection::NativePtc => profile_id,

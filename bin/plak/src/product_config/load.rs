@@ -159,6 +159,8 @@ pub struct ProductConfig {
     pub(super) present: BTreeSet<ConfigField>,
     /// `[root] agent`: the template new sessions bind at genesis.
     pub root_agent: Option<String>,
+    /// `[root] composition`: a root-only override, not a child template field.
+    pub root_composition: Option<ProductCompositionSelection>,
     /// `[roster] working_set = [...]`: the templates spawnable this epoch.
     pub working_set: WorkingSet,
     pub subagents: bool,
@@ -228,6 +230,7 @@ impl PartialEq for ProductConfig {
     fn eq(&self, other: &Self) -> bool {
         self.templates == other.templates
             && self.root_agent == other.root_agent
+            && self.root_composition == other.root_composition
             && self.working_set == other.working_set
             && self.subagents == other.subagents
             && self.occupancy == other.occupancy
@@ -350,7 +353,8 @@ impl ProductConfig {
             (Some(template), Some(account), Some(model))
                 if template.account == account && template.model == model =>
             {
-                template.composition_or_default()
+                self.root_composition
+                    .unwrap_or_else(|| template.composition_or_default())
             }
             _ => ProductCompositionSelection::FollowCatalog,
         }
@@ -512,6 +516,7 @@ impl ProductConfig {
     fn assign_overlay_field(&mut self, field: ConfigField, source: &Self) {
         match field {
             ConfigField::RootAgent => self.root_agent = source.root_agent.clone(),
+            ConfigField::RootComposition => self.root_composition = source.root_composition,
             ConfigField::WorkingSet => self.working_set = source.working_set.clone(),
             ConfigField::Subagents => self.subagents = source.subagents,
             ConfigField::AutoContinue => {
@@ -635,6 +640,7 @@ impl ProductConfig {
             warnings: Vec::new(),
             present: BTreeSet::new(),
             root_agent: None,
+            root_composition: None,
             working_set: WorkingSet::default(),
             subagents: true,
             occupancy: WriterMode::SingleLease,
@@ -702,10 +708,12 @@ impl ProductConfig {
 
     #[must_use]
     pub fn default_composition(&self) -> ProductCompositionSelection {
-        self.root_template()
-            .map_or(ProductCompositionSelection::FollowCatalog, |template| {
-                template.composition_or_default()
-            })
+        self.root_composition.unwrap_or_else(|| {
+            self.root_template()
+                .map_or(ProductCompositionSelection::FollowCatalog, |template| {
+                    template.composition_or_default()
+                })
+        })
     }
 
     #[must_use]
@@ -788,6 +796,7 @@ impl ProductConfig {
     /// pointer goes; a partial tuple is not an expressible template.
     pub fn clear_root_binding(&mut self) {
         self.root_agent = None;
+        self.root_composition = None;
     }
 
     /// Readiness for every template, in name order.
@@ -897,6 +906,7 @@ impl ProductConfig {
     pub(super) fn field_value(&self, field: ConfigField) -> Option<Value> {
         Some(match field {
             ConfigField::RootAgent => Value::from(self.root_agent.as_deref()?),
+            ConfigField::RootComposition => Value::from(self.root_composition?.as_str()),
             ConfigField::WorkingSet => Value::Array(
                 self.working_set
                     .names()
@@ -1347,6 +1357,11 @@ impl ProductConfig {
         value: FieldValue<'_>,
     ) -> Result<(), String> {
         match key.field {
+            ConfigField::RootComposition => {
+                self.root_composition = Some(ProductCompositionSelection::parse_config(
+                    value.string(key)?,
+                )?);
+            }
             ConfigField::RootAgent => {
                 // Empty clears the pointer, the same spelling that empties the
                 // working set; a partial tuple is not an expressible template.

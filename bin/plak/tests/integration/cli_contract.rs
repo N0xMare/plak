@@ -2058,23 +2058,18 @@ fn rejected_exports_do_not_create_state_or_reference_files() {
     for version in [6, 7] {
         let dir = isolated_home_dir();
         let path = dir.path().join("export.json");
-        let mut doc: serde_json::Value =
-            serde_json::from_str(include_str!("../fixtures/session-export-v7.json")).unwrap();
+        let source = if version == 7 {
+            include_str!("../fixtures/session-export-v7.json")
+        } else {
+            include_str!("../fixtures/session-export-v8.json")
+        };
+        let mut doc: serde_json::Value = serde_json::from_str(source).unwrap();
         doc["version"] = serde_json::json!(version);
-        if version == 7 {
-            doc["checkpoint"]["user_intent"] = serde_json::json!("x".repeat(65537));
-            doc["checkpoint"]["reference"] = serde_json::json!("");
-            doc["checkpoint"].as_object_mut().unwrap().remove("text");
-        }
         std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
         let rejected = run_plak(dir.path(), &["session", "import", path.to_str().unwrap()]);
         assert!(!rejected.status.success());
         assert!(
-            stderr(&rejected).contains(if version == 6 {
-                "version 6"
-            } else {
-                "oversized"
-            }),
+            stderr(&rejected).contains(&format!("version {version}")),
             "{}",
             stderr(&rejected)
         );
@@ -2092,10 +2087,7 @@ fn malformed_v8_history_refuses_before_any_state_admission() {
     let dir = isolated_home_dir();
     let path = dir.path().join("v8.json");
     let mut doc: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v7.json")).unwrap();
-    let fields = doc.as_object_mut().unwrap();
-    fields.remove("checkpoint");
-    fields.remove("archive");
+        serde_json::from_str(include_str!("../fixtures/session-export-v8.json")).unwrap();
     doc["version"] = serde_json::json!(8);
     doc["history"] = serde_json::json!({"replay_account":"00ff","replay_model":"carry.model","groups":[{"kind":"conversation","messages":[{"id":"not-a-uuid","actor":"user","origin":"user_input","blocks":[{"kind":"text","text":"hello","phase":null}]}]}]});
     std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();

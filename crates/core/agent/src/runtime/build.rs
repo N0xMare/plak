@@ -159,6 +159,10 @@ impl fmt::Debug for AgentBuilder {
 }
 
 impl AgentBuilder {
+    pub(crate) fn seed_named_state(mut self, state: crate::manifest::NamedState) -> Self {
+        self.initial_named_state = state;
+        self
+    }
     pub(crate) fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
         self.model.reachability_probe()
     }
@@ -232,6 +236,7 @@ impl AgentBuilder {
         let provider_configuration = Arc::new(configured_model.configuration().clone());
         let initial_model_authority = configured_model.initial_authority().clone();
         Self {
+            initial_named_state: crate::manifest::NamedState::default(),
             model,
             provider_configuration,
             initial_model_authority,

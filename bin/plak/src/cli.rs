@@ -2364,6 +2364,10 @@ mod tests {
                 "py-ptc",
                 crate::product_config::ProductCompositionSelection::PyPtc,
             ),
+            (
+                "py-sdk",
+                crate::product_config::ProductCompositionSelection::PySdk,
+            ),
         ] {
             let command = parse(args(&[
                 "run",

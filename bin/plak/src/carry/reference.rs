@@ -1,9 +1,8 @@
 //! Retained reference archives and their bounded search excerpts.
 
-use super::document::{
-    ArchiveEntry, CarryArchive, CarryDocument, MAX_REFERENCE_OUTPUT_BYTES, VERSION, private_dir,
-    write_private_new,
-};
+use super::document::{ArchiveEntry, CarryArchive, CarryDocument, MAX_REFERENCE_OUTPUT_BYTES};
+#[cfg(test)]
+use super::document::{private_dir, write_private_new};
 use crate::cli_output::{TerminalMode, safe_terminal_block};
 use crate::home::paths::PlakPaths;
 use std::fs;
@@ -11,24 +10,14 @@ use std::fs;
 impl CarryDocument {
     pub(crate) fn reference_text(
         &self,
-        search: Option<&str>,
-        tail: usize,
-        destination: TerminalMode,
+        _search: Option<&str>,
+        _tail: usize,
+        _destination: TerminalMode,
     ) -> String {
-        match &self.archive {
-            Some(archive) => render_reference_with_omissions(
-                &archive.entries,
-                archive.omitted_entries,
-                search,
-                tail,
-                destination,
-            ),
-            None => {
-                format!(
-                    "Version {VERSION} carries conversation history, not a separate text archive.\n"
-                )
-            }
-        }
+        format!(
+            "Version {} carries conversation history, not a separate text archive.\n",
+            self.version
+        )
     }
 }
 
@@ -246,7 +235,8 @@ fn bound_text(mut text: String, maximum: usize) -> (String, bool) {
 
 /// Retains an archive after a reload spends its transient carry file.
 /// The session id is parsed before it becomes a path component.
-pub(crate) fn write_retained_archive(
+#[cfg(test)]
+fn write_retained_archive(
     paths: &PlakPaths,
     session_id: &str,
     archive: &CarryArchive,

@@ -21,6 +21,7 @@ pub fn effective_presentation_label(
         CompositionSelection::Direct => "direct",
         CompositionSelection::JsPtc => "js-ptc",
         CompositionSelection::PyPtc => "py-ptc",
+        CompositionSelection::PySdk => "py-sdk",
         CompositionSelection::NativePtc => "native-ptc",
         CompositionSelection::FollowCatalog => {
             if provider == Some(NativeProvider::Codex)
@@ -228,10 +229,32 @@ pub(crate) fn product_python_attachment(
     configuration: &CompiledProviderConfiguration,
     presentation_kind: CodingPresentation,
 ) -> CliResult<plakous::agent::LocalCompositionAttachment> {
+    python_cell_attachment(
+        &descriptor.into(),
+        host_path,
+        configuration,
+        Some(presentation_kind),
+    )
+}
+
+pub(crate) fn product_sdk_attachment(
+    descriptor: &plakous::tools::PythonHarnessSdkDescriptorV1,
+    host_path: &Path,
+    configuration: &CompiledProviderConfiguration,
+) -> CliResult<plakous::agent::LocalCompositionAttachment> {
+    python_cell_attachment(&descriptor.into(), host_path, configuration, None)
+}
+
+fn python_cell_attachment(
+    descriptor: &plakous::tools::CellDescriptor,
+    host_path: &Path,
+    configuration: &CompiledProviderConfiguration,
+    presentation_kind: Option<CodingPresentation>,
+) -> CliResult<plakous::agent::LocalCompositionAttachment> {
     crate::capabilities::require_feature("python")?;
     let artifact = plakous::agent::LocalCompositionEngineArtifact::monty_worker_v1(host_path)
         .map_err(|error| CliFailure::new(format!("Python host identity is invalid: {error}")))?;
-    let profile = plakous::agent::LocalCompositionProfile::cell(&descriptor.into())
+    let profile = plakous::agent::LocalCompositionProfile::cell(descriptor)
         .map_err(|error| CliFailure::new(format!("Python profile identity is invalid: {error}")))?;
     let issuer = plakous::model::Digest::sha256(
         plakous::model::DigestDomain::ExecutionEnvironment,
@@ -255,10 +278,15 @@ pub(crate) fn product_python_attachment(
         configuration,
     )
     .map_err(|error| CliFailure::new(format!("Python extension evidence is invalid: {error}")))?;
-    plakous::agent::LocalCompositionAttachment::builder(profile)
+    let builder = plakous::agent::LocalCompositionAttachment::builder(profile)
         .engine_artifact(artifact)
-        .product_extension_evidence(evidence)
-        .coding_presentation_kind(presentation_kind)
+        .product_extension_evidence(evidence);
+    let builder = if let Some(kind) = presentation_kind {
+        builder.coding_presentation_kind(kind)
+    } else {
+        builder
+    };
+    builder
         .build()
         .map_err(|error| CliFailure::new(format!("Python attachment is invalid: {error}")))
 }

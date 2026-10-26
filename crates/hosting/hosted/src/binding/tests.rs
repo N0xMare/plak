@@ -110,12 +110,13 @@ fn api_targets_reconstruct_without_crossing_account_or_oauth_authority() {
     }
 }
 
-const COMPOSITIONS: [CompositionSelection; 5] = [
+const COMPOSITIONS: [CompositionSelection; 6] = [
     CompositionSelection::Direct,
     CompositionSelection::FollowCatalog,
     CompositionSelection::NativePtc,
     CompositionSelection::JsPtc,
     CompositionSelection::PyPtc,
+    CompositionSelection::PySdk,
 ];
 const PROTOCOLS: [ProtocolSelection; 4] = [
     ProtocolSelection::Auto,

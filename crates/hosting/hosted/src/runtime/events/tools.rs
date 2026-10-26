@@ -182,21 +182,39 @@ pub(in crate::runtime) fn started_tool_text(
     // §5.8: a Compose head's detail is the program itself, so the
     // expanded rail shows the code the cell ran rather than its JSON
     // encoding.
-    let detail = (kind == plakous_host_protocol::views::presentation::ActivityKind::Compose)
-        .then(|| {
-            compose_program_source(observation.map(ToolCallObservation::arguments_preview))
-                .map(|program| redact_text_preview(&program))
-        })
-        .flatten()
-        .or_else(|| {
-            observation.and_then(|item| {
-                crate::activity::tool_detail_text(
-                    Some(&redact_text_preview(item.arguments_preview())),
-                    None,
-                )
+    let detail = if name == "run_py" {
+        compose_program_source(observation.map(ToolCallObservation::arguments_preview)).map(
+            |source| {
+                let source = redact_text_preview(&source);
+                let fence = "`".repeat(
+                    source
+                        .split(|c| c != '`')
+                        .map(str::len)
+                        .max()
+                        .unwrap_or(0)
+                        .max(2)
+                        + 1,
+                );
+                format!("{fence}python\n{source}\n{fence}")
+            },
+        )
+    } else {
+        (kind == plakous_host_protocol::views::presentation::ActivityKind::Compose)
+            .then(|| {
+                compose_program_source(observation.map(ToolCallObservation::arguments_preview))
+                    .map(|program| redact_text_preview(&program))
             })
+            .flatten()
+    }
+    .or_else(|| {
+        observation.and_then(|item| {
+            crate::activity::tool_detail_text(
+                Some(&redact_text_preview(item.arguments_preview())),
+                None,
+            )
         })
-        .or_else(|| info.map(|item| item.detail.clone()));
+    })
+    .or_else(|| info.map(|item| item.detail.clone()));
     StartedToolText { subject, detail }
 }
 

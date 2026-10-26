@@ -330,6 +330,7 @@ pub(super) fn prepare_durable_genesis(
         Some(admission.fact),
         durability,
         history,
+        builder.initial_named_state.clone(),
         builder.job_counter_seed,
     )
 }

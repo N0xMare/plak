@@ -391,6 +391,12 @@ declarations. Workspace-inherited features and local additions are additive.
 In particular, the facade's dev-dependency and the offline-crash harness's
 dependency explicitly enable `uuid/v4`; both support standalone
 `cargo check -p <package> --all-targets --locked`.
+
+The facade's portable-history named-state JSON API is always available.
+`serde_json` is therefore a normal facade dependency, not an optional edge
+enabled by `composition`. The reviewed dependency-surface pin records that
+change; default-feature consumers still link no worker, provider or HTTP
+implementation through this neutral carrier.
 `native-subscriptions` implies `composition`, so the
 product closure is unchanged by the split.
 

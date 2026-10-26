@@ -15,6 +15,7 @@
 pub fn instruction_prompt_pins() -> Vec<&'static [plakous_tools::PromptPin]> {
     vec![
         crate::bases::codex_vendor::CODEX_VENDOR_PROMPT_PINS,
+        crate::bases::python_sdk::PINS,
         crate::identity::IDENTITY_PROMPT_PINS,
         crate::ptc::PTC_PROMPT_PINS,
         crate::content_filter::CONTENT_FILTER_PROMPT_PINS,

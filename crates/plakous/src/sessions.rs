@@ -402,7 +402,7 @@ impl AgentSessions {
         ))
     }
 
-    /// Reads the committed conversation of one exact quiescent SQLite branch
+    /// Reads the committed conversation and named state of one exact quiescent SQLite branch
     /// head so it can seed a new session elsewhere, without opening a mutable
     /// runtime, acquiring a lease, or calling a provider or tool.
     ///
@@ -433,11 +433,13 @@ impl AgentSessions {
                 .iter()
                 .any(|row| row.terminal.is_none()),
         )?;
-        Ok(PortableSessionHistory::new(
+        let mut history = PortableSessionHistory::new(
             manifest.canonical().history().segments().to_vec(),
             manifest.binding().account().subject().to_owned(),
             manifest.binding().requested_model().clone(),
-        ))
+        );
+        history.named_state = manifest.named_state().clone();
+        Ok(history)
     }
 
     /// Composes the high-level workflows over one opaque semantic backend.
@@ -693,6 +695,11 @@ impl AgentSessions {
             history,
         } = request;
         let mut replay_validation_error = None;
+        let named_state = history
+            .as_ref()
+            .map_or_else(plakous_agent::internal::NamedState::default, |history| {
+                history.named_state.clone()
+            });
         let history = match history {
             Some(history) => {
                 let mut retain_replay = history.retains_replay_for(&runtime);
@@ -713,10 +720,14 @@ impl AgentSessions {
             None => plakous_model::CanonicalHistory::default(),
         };
         let _reservation = self.drivers.reserve(&operation_id)?;
-        match Box::pin(
-            self.runtime
-                .create_seeded(operation_id.as_str(), runtime.builder, history),
-        )
+        match Box::pin(self.runtime.create_seeded(
+            operation_id.as_str(),
+            plakous_agent::internal::facade_support::agent_builder_with_named_state(
+                runtime.builder,
+                named_state,
+            ),
+            history,
+        ))
         .await
         {
             Ok(agent) => {

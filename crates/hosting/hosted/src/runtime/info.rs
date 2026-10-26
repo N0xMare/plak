@@ -233,6 +233,7 @@ pub(super) fn session_info_facts(
         "native-ptc" => "Code Mode (native-ptc)",
         "js-ptc" => "js-ptc",
         "py-ptc" => "py-ptc",
+        "py-sdk" => "py-sdk",
         _ => "not resolved",
     };
     let mut admitted_options = Vec::new();

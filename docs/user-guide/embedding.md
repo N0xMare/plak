@@ -152,7 +152,8 @@ use that same builder and attach path but forbid product evidence.
 
 The SDK is an explicit embedding choice through `composition`. It uses the
 same `plakous-py-host` sidecar, but exposes only `run_py` and starts each cell
-with fresh globals. It is not a product selector yet.
+with fresh globals. Plak selects it with `--composition py-sdk` or the root
+settings picker, on a Direct-capable single-agent route.
 
 Register the coding packs and SDK extensions with the same process service:
 
@@ -208,10 +209,12 @@ Invalid state keys/values raise `ValueError`, capacity refusals raise
 `OverflowError`, and host failures raise `RuntimeError`. Values are bounded
 by their encoded representation (1 MiB per result, 16 MiB per cell); the
 foreground budget is 300 seconds. There is no wait tool: use `proc.start` for
-long jobs. Processes have the user's full authority, including on
-process-enabled read-only and execute tiers. File edits remain denied on those
-tiers. Output over 16 KiB carries a `Ref` that `ctx.read` can page. Exports do
-not carry named state.
+long jobs. Processes have the user's full authority and are not sandboxed.
+The SDK is root-only: child tiers and optional tool namespaces cannot select
+it. Output over 16 KiB carries a `Ref` that `ctx.read` can page when available;
+references evict oldest-first. Export v9 carries the committed named values;
+v8 imports with empty state. Oversized puts are refused before storing a value
+that could not be read back within the per-result quota.
 
 ## Construction
 

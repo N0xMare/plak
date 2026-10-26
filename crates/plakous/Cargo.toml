@@ -46,7 +46,6 @@ composition = [
     "dep:uuid",
     "dep:plakous-cell",
     "dep:serde",
-    "dep:serde_json",
     "dep:sha2",
 ]
 full = [
@@ -108,7 +107,7 @@ plakous-store.workspace = true
 plakous-http = { workspace = true, optional = true }
 rustix = { workspace = true, features = ["fs", "process"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
-serde_json = { workspace = true, optional = true }
+serde_json.workspace = true
 sha2 = { workspace = true, optional = true }
 plakous-tools.workspace = true
 plakous-xai = { workspace = true, optional = true }

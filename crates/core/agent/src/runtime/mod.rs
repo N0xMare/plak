@@ -139,6 +139,7 @@ pub(crate) struct DurableRuntimeBootstrap {
 
 /// Builder for one independently owned agent actor.
 pub struct AgentBuilder {
+    initial_named_state: crate::manifest::NamedState,
     model: Arc<dyn LanguageModel>,
     provider_configuration: Arc<CompiledProviderConfiguration>,
     initial_model_authority: RuntimeModelAuthority,

@@ -368,6 +368,7 @@ mod tests {
             CompositionSelection::NativePtc,
             CompositionSelection::JsPtc,
             CompositionSelection::PyPtc,
+            CompositionSelection::PySdk,
         ];
         assert_eq!(
             compositions.map(CompositionSelection::as_str),
@@ -376,7 +377,8 @@ mod tests {
                 "plakous-default",
                 "native-ptc",
                 "js-ptc",
-                "py-ptc"
+                "py-ptc",
+                "py-sdk"
             ]
         );
         assert_eq!(CompositionSelection::ALL, compositions);

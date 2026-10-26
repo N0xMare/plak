@@ -16,6 +16,16 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plakous
 
+- `py-sdk` is selectable for a single-agent root through settings, CLI and
+  JSONL. Its typed Python base replaces the family base; existing composition
+  text stays unchanged. This root opens no topology; child templates and
+  optional tools refuse this root-only surface before inference.
+- Session export v9 carries the selected composition and committed named
+  state. V8 imports with empty named state; the v7 checkpoint importer is
+  removed. Product schema 34 admits `py-sdk`; state key `r26.e33.p34.t9`.
+  `[root] composition` overrides the root template's composition without
+  granting that selection to children.
+
 - All local cell profiles use `LocalCompositionProfile::cell(&CellDescriptor)`.
   The four per-engine profile constructors and Python-only component identity
   accessors are removed. `CellDescriptor` is available at the compose crate
@@ -100,13 +110,13 @@ one cross-build carrier (a build imports its own and the previous version).
   Runtime SQLite schema 26 admits `NamedStateValue` objects (kind 20). The
   manifest gains a sorted named-state key/address group; checkpoint integrity
   and commit identities bind keys and immutable value addresses.
-  State key `r26.e33.p33.t9`; carry conversation history with `/reload` or
-  export and import. Export document version 8 is unchanged and does not
-  carry named state; an imported session starts with empty named state.
+  State key `r26.e33.p34.t9`; carry conversation history and named state with
+  `/reload` or export/import through document version 9; version 8 imports
+  with empty named state.
   Claude OAuth session authority now binds the canonical provider account UUID
   instead of a grant lineage, so a same-account re-login can continue and
-  reopen. This identity change rides unreleased epoch 33; export document v8
-  and its embedded history and binding encodings are unchanged.
+  reopen. This identity change rides unreleased epoch 33 without changing
+  the embedded history or binding encodings.
   Carrying a Claude session from an epoch-32 build preserves visible history
   but drops provider replay once: the account digest changes from grant lineage
   to the provider UUID, so old opaque replay is not retagged to the new scope.
@@ -195,8 +205,8 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plak
 
-- Agent trees use schema 9 and state key `r26.e33.p33.t9`. Carry sessions by
-  `/reload` or export/import; export document v8 is unchanged. Forks use short
+- Agent trees use schema 9 and state key `r26.e33.p34.t9`. Carry sessions by
+  `/reload` or v9 export/import; v8 remains importable. Forks use short
   `plak/<tree8>/<agent_id>` branches and `<tree8>-<agent_id>` copy directories,
   with a full-digest prefix collision guard. Base, candidate and landing
   provenance pins retain work independently of checkout removal. Submitted

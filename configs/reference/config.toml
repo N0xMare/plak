@@ -8,6 +8,10 @@
 # The template new sessions bind at genesis.
 [root]
 
+# Root-only composition override for the exact root account/model tuple. py-sdk uses the typed Python SDK and is not valid in child templates.
+# type: enum · default: (unset) · direct|plakous-default|native-ptc|js-ptc|py-ptc|py-sdk
+# composition = "py-sdk"
+
 # Template a new session binds at genesis; unset leaves the tuple to the CLI flags or the shell binding.
 # type: string · default: (unset) · names an agents/<name>.toml file; [a-z][a-z0-9-]{0,31}, and never a section name
 agent = "root-agent"

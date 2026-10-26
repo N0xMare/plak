@@ -353,7 +353,7 @@ pub(in crate::agent) async fn create_spawned_child_session(
     let account = Some(start.account.as_str()).filter(|account| !account.is_empty());
     let start_kind = ChildAssignmentStartKind::from_composition(prompt_composition(
         spawn_child_start_composition(parent, &spawned.agent_id, account)?,
-    ));
+    ))?;
     let runtime = child_session_runtime_binding(
         parent,
         &spawned.agent_id,

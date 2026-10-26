@@ -285,9 +285,13 @@ fn apply_profile(
         model: root.model.clone(),
         effort: root.effort.clone(),
         extra: root.is_fast().then(|| "priority".to_owned()),
-        composition: root.composition.map(|composition| {
-            plakous_host_protocol::CompositionSelection::from(composition).into()
-        }),
+        composition: prepared
+            .config
+            .root_composition
+            .or(root.composition)
+            .map(|composition| {
+                plakous_host_protocol::CompositionSelection::from(composition).into()
+            }),
         protocol: root.protocol,
         roster,
         finish: Box::new({
@@ -335,6 +339,7 @@ pub fn settings_snapshot(config: &ProductConfig) -> crate::surface_protocol::Set
             plakous_hosted::binding::CompositionSelection::NativePtc,
             plakous_hosted::binding::CompositionSelection::JsPtc,
             plakous_hosted::binding::CompositionSelection::PyPtc,
+            plakous_hosted::binding::CompositionSelection::PySdk,
         ]
         .into_iter()
         .filter(|composition| {

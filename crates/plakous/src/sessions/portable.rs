@@ -1,7 +1,7 @@
 //! A session's committed conversation, carried out of one durable session to
 //! seed a new one.
 //!
-//! The carrier holds canonical history segments and nothing a store owns: no
+//! The carrier holds committed history and named JSON values, but no live
 //! operation ledger, context anchors, family artifacts or provider
 //! continuation. Provider-opaque replay material (encrypted reasoning,
 //! thinking signatures, opaque items, native compaction items) travels with it
@@ -19,9 +19,11 @@ use super::{AgentSessionsError, AgentSessionsErrorKind, SessionRuntimeBinding};
 use plakous_agent::internal::facade_support::agent_builder_target_authority;
 
 /// The committed canonical conversation of one quiescent session head, plus
-/// the account and model its provider replay material is bound to.
+/// the account and model its provider replay material is bound to, and its
+/// committed session-owned named values.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortableSessionHistory {
+    pub(super) named_state: plakous_agent::internal::NamedState,
     segments: Vec<HistorySegment>,
     replay_account: String,
     replay_model: ModelId,
@@ -35,17 +37,54 @@ impl PortableSessionHistory {
     /// (lowercase hex of its account binding) and `replay_model` the model it
     /// requested; both only decide whether replay material is kept.
     #[must_use]
-    pub const fn new(
+    pub fn new(
         segments: Vec<HistorySegment>,
         replay_account: String,
         replay_model: ModelId,
     ) -> Self {
         Self {
+            named_state: plakous_agent::internal::NamedState::default(),
             segments,
             replay_account,
             replay_model,
             validate_replay: false,
         }
+    }
+
+    /// Attaches session-owned named JSON values, validated before creation.
+    ///
+    /// # Errors
+    /// Refuses invalid keys, non-interoperable values, or named-state quotas.
+    pub fn with_named_state(
+        mut self,
+        values: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Result<Self, AgentSessionsError> {
+        let mut state = plakous_agent::internal::NamedState::default();
+        for (key, value) in values {
+            state = state
+                .put(key, &value)
+                .map_err(|error| invalid_history(&error))?;
+        }
+        self.named_state = state;
+        Ok(self)
+    }
+
+    /// The session-owned named values as portable JSON, ordered by key.
+    ///
+    /// # Errors
+    /// Returns invalid content if a retained canonical value cannot be decoded.
+    pub fn named_state(
+        &self,
+    ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, AgentSessionsError> {
+        self.named_state
+            .values()
+            .iter()
+            .map(|(key, bytes)| {
+                serde_json::from_slice(bytes)
+                    .map(|value| (key.clone(), value))
+                    .map_err(|error| invalid_history(&error))
+            })
+            .collect()
     }
 
     /// Removes all provider replay from an externally supplied document.

@@ -160,6 +160,7 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
+| `root.composition` | enum | `(unset)` | direct\|plakous-default\|native-ptc\|js-ptc\|py-ptc\|py-sdk | Root-only composition override for the exact root account/model tuple. py-sdk uses the typed Python SDK and is not valid in child templates. |
 | `root.agent` | string | `(unset)` | names an agents/<name>.toml file; [a-z][a-z0-9-]{0,31}, and never a section name | Template a new session binds at genesis; unset leaves the tuple to the CLI flags or the shell binding. |
 | `roster.working_set` | array of string | `[]` | 0..=5 names, no duplicates, each a template file with a description | Templates the root may spawn this epoch; every other node spawns from its own template's spawns list. |
 | `orchestration.subagents` | bool | `true` | true or false | Whether the topology tools are compiled into the root catalog at all. |
@@ -416,6 +417,7 @@ Cross-field rules, all checked at load and again before any save:
   may be a parent, and every child runs on its own template's tier.
 - `protocol` other than `auto` requires `account = "openrouter"`.
 - `composition = "native-ptc"` selects the vertical's own programmatic tool calling system (spec 02 §6.5); today only Codex Code Mode is enrolled, on Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`, and other verticals have none enrolled. It is refused for `openrouter`, `anthropic` and `xai-api`; on `openai` it is valid only for a model the API enrollment table marks `CodeModeOnly` (spec 02 §3.1), checked at load. On a subscription account it is checked at bind.
+- `composition = "py-sdk"` in any agent template is a load error: `py-sdk is root-only and has no child result channel`. Select it with `[root] composition = "py-sdk"`, the root settings picker or `--composition py-sdk`. It requires the core single-agent surface and a Direct-capable route; the root opens no topology, and optional tools are refused before inference. `plakous-default` never chooses it.
 - Direct API accounts require an enrolled model and an explicit effort on that model's published ladder (`plak models <account>`); the provider route fixes their wire protocol.
 - `max_turns` must be 1 or more.
 - `tools` entries are parsed in order: a name outside the closed set, a

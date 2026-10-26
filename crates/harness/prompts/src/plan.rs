@@ -117,6 +117,7 @@ pub fn target_instructions(
     let base = match composition {
         Composition::JavaScriptCell => PtcHarness::JavaScript.instructions(surface.exposed_names()),
         Composition::PythonCell => PtcHarness::Python.instructions(surface.exposed_names()),
+        Composition::PythonSdk => crate::bases::python_sdk::BASE.to_owned(),
         Composition::Direct | Composition::NativeCell => {
             let base = crate::bases::codex::model_base(
                 family_base,

@@ -1,5 +1,13 @@
 # Configuration
 
+For the typed Python SDK, select `py-sdk` in `/settings` or pass
+`--composition py-sdk` to `plak run` or `plak agent`. To save it for the root,
+set `composition = "py-sdk"` in `[root]` beside the root `agent` name.
+The SDK is single-agent and core-tools-only; do not put `py-sdk` in an agent
+template. Cells have fresh globals; save JSON with `state.put` to retain it.
+Session export v9 preserves those named values and the selection. V8 imports
+with empty state; v7 exports are no longer accepted.
+
 Plak keeps editable preferences in config.toml and agent templates under
 agents/. These are ordinary TOML files; credentials and durable session state
 are separate and must not be copied as configuration. Comments, multi-line

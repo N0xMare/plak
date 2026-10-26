@@ -430,6 +430,8 @@ pub enum CompositionSelection {
     JsPtc,
     /// Harness Python PTC (`exec_py`/`wait_py`), on every vertical.
     PyPtc,
+    /// Root-only typed Python SDK (`run_py`).
+    PySdk,
 }
 
 impl CompositionSelection {
@@ -441,6 +443,7 @@ impl CompositionSelection {
             Self::NativePtc => Some(CompositionRuntime::CodexNative),
             Self::JsPtc => Some(CompositionRuntime::ProductJavaScript),
             Self::PyPtc => Some(CompositionRuntime::PythonPtc),
+            Self::PySdk => Some(CompositionRuntime::PythonHarnessSdk),
         }
     }
 
@@ -459,6 +462,7 @@ impl CompositionSelection {
             Self::NativePtc => "native-ptc",
             Self::JsPtc => "js-ptc",
             Self::PyPtc => "py-ptc",
+            Self::PySdk => "py-sdk",
         }
     }
 
@@ -470,8 +474,10 @@ impl CompositionSelection {
             "native-ptc" => Ok(Self::NativePtc),
             "js-ptc" => Ok(Self::JsPtc),
             "py-ptc" => Ok(Self::PyPtc),
+            "py-sdk" => Ok(Self::PySdk),
             _ => Err(
-                "composition must be direct|plakous-default|native-ptc|js-ptc|py-ptc".to_owned(),
+                "composition must be direct|plakous-default|native-ptc|js-ptc|py-ptc|py-sdk"
+                    .to_owned(),
             ),
         }
     }
@@ -490,6 +496,7 @@ impl From<CompositionSelection> for plakous_host_protocol::CompositionSelection 
             CompositionSelection::NativePtc => Self::NativePtc,
             CompositionSelection::JsPtc => Self::JsPtc,
             CompositionSelection::PyPtc => Self::PyPtc,
+            CompositionSelection::PySdk => Self::PySdk,
         }
     }
 }
@@ -502,6 +509,7 @@ impl From<plakous_host_protocol::CompositionSelection> for CompositionSelection 
             plakous_host_protocol::CompositionSelection::NativePtc => Self::NativePtc,
             plakous_host_protocol::CompositionSelection::JsPtc => Self::JsPtc,
             plakous_host_protocol::CompositionSelection::PyPtc => Self::PyPtc,
+            plakous_host_protocol::CompositionSelection::PySdk => Self::PySdk,
         }
     }
 }

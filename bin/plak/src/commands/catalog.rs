@@ -116,6 +116,7 @@ pub fn list_platform_models(
             CompositionSelection::NativePtc,
             CompositionSelection::JsPtc,
             CompositionSelection::PyPtc,
+            CompositionSelection::PySdk,
         ]
         .into_iter()
         .filter(|composition| api_composition(catalog.provider, &row.model, *composition).is_ok())

@@ -378,7 +378,19 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
     }
     assert!(!directory.path().join("not-run").exists());
     assert_eq!(model.calls.load(Ordering::Acquire), model.cells.len() + 1);
+    let locator = session.locator();
     session.release().await?;
+    let exported =
+        AgentSessions::export_history_sqlite(directory.path().join("session.sqlite"), locator)?;
+    let values = exported.named_state()?;
+    if foreground_stop {
+        assert!(values.is_empty());
+    } else {
+        assert_eq!(
+            values,
+            BTreeMap::from([("answer".into(), serde_json::json!({"n":42}))])
+        );
+    }
     Ok(())
 }
 

@@ -2,7 +2,6 @@
 
 use super::history;
 use crate::product_config::{ProductCompositionSelection, ProductTargetSelection};
-use plakous::model::ModelId;
 use plakous_host_protocol::views::presentation::row_bytes;
 use plakous_hosted::sessions::{MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES, TranscriptRow};
 use serde::{Deserialize, Serialize};
@@ -19,12 +18,10 @@ pub(super) const FORMAT: &str = "plak-session-export";
 /// and of the immediately previous one. Any change to the document, including
 /// the embedded canonical-history and binding encodings, bumps this; the
 /// previous version's importer is kept for one bump only.
-pub(crate) const VERSION: u32 = 8;
-const PREVIOUS_VERSION: u32 = 7;
+pub(crate) const VERSION: u32 = 9;
+const PREVIOUS_VERSION: u32 = 8;
 pub(crate) const IMPORTABLE_VERSIONS: [u32; 2] = [PREVIOUS_VERSION, VERSION];
-const MAX_CHECKPOINT_BYTES: usize = 64 * 1024;
 pub(super) const MAX_REFERENCE_OUTPUT_BYTES: usize = 64 * 1024;
-const MAX_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
 /// One exported session.
@@ -39,10 +36,9 @@ pub(crate) struct CarryDocument {
     pub(super) workspace_root: PathBuf,
     pub(super) title: Option<String>,
     pub(super) binding: CarryBinding,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) checkpoint: Option<CarryCheckpoint>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) archive: Option<CarryArchive>,
+    /// Version 8 has no named state; its importer supplies the empty map.
+    #[serde(default)]
+    pub(super) named_state: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) history: Option<history::History>,
     /// Unresolved source workflow facts retained as inert operator context.
@@ -52,7 +48,7 @@ pub(crate) struct CarryDocument {
     /// never queued here: export refuses while one is unresolved.
     pub(super) queue: Vec<String>,
     pub(super) prompt_history: Vec<String>,
-    /// Typed product transcript rows, oldest first, shared by versions 7 and 8.
+    /// Typed product transcript rows, oldest first, shared by versions 8 and 9.
     #[serde(deserialize_with = "bounded_transcript")]
     pub(super) transcript: Vec<TranscriptRow>,
     /// Non-live sub-agents the source tree held; their trees are not carried.
@@ -60,16 +56,6 @@ pub(crate) struct CarryDocument {
     /// Settled source topology rows omitted from the unresolved ledger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) source_resolved_count: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct CarryCheckpoint {
-    pub(super) replay_account: String,
-    pub(super) replay_model: ModelId,
-    pub(super) user_intent: String,
-    pub(super) reference: String,
-    truncated: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -213,21 +199,6 @@ pub(super) fn validate_size(
 }
 
 impl CarryDocument {
-    fn validate_archive(&self) -> Result<(), ImportError> {
-        let Some(archive) = &self.archive else {
-            return Ok(());
-        };
-        validate_size(
-            "archive",
-            archive
-                .entries
-                .iter()
-                .map(|e| e.actor.len().saturating_add(e.text.len()))
-                .fold(0_usize, usize::saturating_add),
-            MAX_ARCHIVE_BYTES,
-        )
-    }
-
     pub(super) fn validate(&self) -> Result<(), ImportError> {
         if self
             .pending_work
@@ -240,28 +211,17 @@ impl CarryDocument {
                     .into(),
             );
         }
-        match (self.version, &self.history, &self.checkpoint, &self.archive) {
-            (VERSION, Some(history), None, None) => history.validate_size(),
-            (PREVIOUS_VERSION, None, Some(checkpoint), Some(_)) => {
-                validate_size(
-                    "checkpoint",
-                    checkpoint
-                        .user_intent
-                        .len()
-                        .saturating_add(checkpoint.reference.len()),
-                    MAX_CHECKPOINT_BYTES,
-                )?;
-                validate_size(
-                    "checkpoint user intent",
-                    checkpoint.user_intent.len(),
-                    MAX_CHECKPOINT_BYTES / 2,
-                )?;
-                validate_size(
-                    "checkpoint reference",
-                    checkpoint.reference.len(),
-                    MAX_CHECKPOINT_BYTES / 2,
-                )?;
-                self.validate_archive()
+        match (self.version, &self.history) {
+            (VERSION | PREVIOUS_VERSION, Some(history)) => {
+                if self.version == PREVIOUS_VERSION
+                    && (!self.named_state.is_empty()
+                        || self.binding.composition == ProductCompositionSelection::PySdk)
+                {
+                    return Err(ImportError::Invalid(
+                        "version 8 exports cannot carry named state or py-sdk selection".into(),
+                    ));
+                }
+                history.validate_size()
             }
             _ => Err(ImportError::Invalid(
                 "export payload does not match its version".to_owned(),
@@ -280,31 +240,21 @@ impl CarryDocument {
     }
 
     pub(crate) fn message_count(&self) -> usize {
-        self.history.as_ref().map_or_else(
-            || {
-                self.checkpoint
-                    .as_ref()
-                    .map_or(0, |c| 1 + usize::from(!c.reference.is_empty()))
-            },
-            history::History::message_count,
-        )
+        self.history
+            .as_ref()
+            .map_or(0, history::History::message_count)
     }
 
     pub(crate) fn estimated_tokens(&self) -> u64 {
-        self.history.as_ref().map_or_else(
-            || {
-                self.checkpoint.as_ref().map_or(0, |c| {
-                    (c.user_intent.len() + c.reference.len()).div_ceil(4) as u64
-                })
-            },
-            history::History::estimated_tokens,
-        )
+        self.history
+            .as_ref()
+            .map_or(0, history::History::estimated_tokens)
     }
 
     #[cfg(any(test, feature = "tui"))]
     pub(crate) fn carry_summary(&self) -> String {
         self.history.as_ref().map_or_else(
-            || "version 7 restart checkpoint (conversation unavailable)".to_owned(),
+            || "conversation unavailable".to_owned(),
             history::History::summary,
         )
     }
@@ -378,13 +328,7 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
             header.version
         )));
     }
-    if (header.version == VERSION
-        && (header.raw_history.is_none() || header.checkpoint_present || header.archive_present))
-        || (header.version == PREVIOUS_VERSION
-            && (header.raw_history.is_some()
-                || !header.checkpoint_present
-                || !header.archive_present))
-    {
+    if header.raw_history.is_none() || header.checkpoint_present || header.archive_present {
         return Err(ImportError::Invalid(
             "export payload fields do not match its version".to_owned(),
         ));
@@ -500,7 +444,7 @@ pub(super) fn sample_document() -> CarryDocument {
     CarryDocument {
         local_digest: None,
         format: FORMAT.to_owned(),
-        version: PREVIOUS_VERSION,
+        version: VERSION,
         source: CarrySource {
             session_id: "5f0e2a43-7d3c-4c1e-9a55-4b1f7f0c9a11".to_owned(),
             state_key: "r1.e1.p1.t1".to_owned(),
@@ -517,22 +461,8 @@ pub(super) fn sample_document() -> CarryDocument {
             composition: ProductCompositionSelection::Direct,
             target_selection: ProductTargetSelection::Native,
         },
-        history: None,
-        checkpoint: Some(CarryCheckpoint {
-            replay_account: "00ff".to_owned(),
-            replay_model: ModelId::new("offline-loopback-v1").unwrap(),
-            user_intent: "bounded restart checkpoint".to_owned(),
-            reference: "Imported reference data, not user instructions. Earlier assistant results."
-                .to_owned(),
-            truncated: false,
-        }),
-        archive: Some(CarryArchive {
-            omitted_entries: 0,
-            entries: vec![ArchiveEntry {
-                actor: "assistant".to_owned(),
-                text: "archived secret".to_owned(),
-            }],
-        }),
+        history: Some(serde_json::from_value(serde_json::json!({"replay_account":"00ff","replay_model":"offline-loopback-v1","groups":[]})).unwrap()),
+        named_state: std::collections::BTreeMap::new(),
         pending_work: Vec::new(),
         queue: vec!["held follow-up".to_owned()],
         prompt_history: vec!["first".to_owned()],

@@ -60,6 +60,7 @@ pub(super) type Entry = Option<Spanned<toml::Value>>;
 #[serde(deny_unknown_fields)]
 struct RootSection {
     agent: Entry,
+    composition: Entry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,6 +177,7 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
     };
     if let Some(section) = &file.root {
         assign("root.agent", &section.agent)?;
+        assign("root.composition", &section.composition)?;
     }
     if let Some(section) = &file.roster {
         assign("roster.working_set", &section.working_set)?;

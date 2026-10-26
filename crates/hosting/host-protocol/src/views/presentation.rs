@@ -654,7 +654,7 @@ pub struct SessionInfoView {
     /// never from whether a thought block happened to render.
     pub thinking: String,
     /// Resolved tool policy: `Direct`, `Code Mode (native-ptc)`, `js-ptc`, or
-    /// `py-ptc` (resolved — never `plakous-default`).
+    /// `py-ptc` or `py-sdk` (resolved — never `plakous-default`).
     pub tool_policy: Option<String>,
     /// Admitted options, e.g. `effort = medium`, `Fast (extra = priority)`,
     /// `protocol = chat`. Empty means none.

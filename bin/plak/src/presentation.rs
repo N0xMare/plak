@@ -446,9 +446,11 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
                             let composition_refusal = match composition {
                                 ProductCompositionSelection::JsPtc
                                 | ProductCompositionSelection::PyPtc
+                                | ProductCompositionSelection::PySdk
                                     if direct_composition_capable => None,
                                 ProductCompositionSelection::JsPtc
-                                | ProductCompositionSelection::PyPtc => Some(
+                                | ProductCompositionSelection::PyPtc
+                                | ProductCompositionSelection::PySdk => Some(
                                     "Plak-owned custom composition requires exact Direct-capable catalog authority"
                                         .to_owned(),
                                 ),

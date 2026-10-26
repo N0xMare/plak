@@ -643,7 +643,7 @@ async fn mail_start_composition_of_an_openrouter_child_never_takes_the_oauth_spe
         ChildAssignmentStartKind::from_composition(
             plakous_hosted::prompt_inputs::prompt_composition(composition)
         ),
-        ChildAssignmentStartKind::Direct
+        Ok(ChildAssignmentStartKind::Direct)
     );
     plakous_hosted::topology_runtime::force_release(&tree_id).await;
 }

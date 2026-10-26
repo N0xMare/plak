@@ -194,7 +194,8 @@ impl CreateSessionRequest {
     /// Seeds the new session with a carried conversation instead of an empty
     /// one. Its provider replay material is kept only when `runtime` binds the
     /// account and model it was produced under; see
-    /// [`super::PortableSessionHistory::retains_replay_for`].
+    /// [`super::PortableSessionHistory::retains_replay_for`]. Its validated
+    /// named state is seeded atomically with the conversation.
     #[must_use]
     pub fn with_history(mut self, history: super::PortableSessionHistory) -> Self {
         self.history = Some(history);

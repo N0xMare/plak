@@ -1,6 +1,53 @@
 //! Unit tests for the product coding session (construction and children).
 
 use super::*;
+
+#[test]
+fn sdk_selection_requires_exact_direct_capable_route_authority() {
+    for (provider, mode) in [
+        (NativeProvider::Codex, None),
+        (NativeProvider::Codex, Some(NativeToolMode::CodeMode)),
+        (NativeProvider::Claude, Some(NativeToolMode::Direct)),
+    ] {
+        assert!(
+            selected_coding_provider_configuration(
+                provider,
+                ModelId::new("fixture").unwrap(),
+                ReasoningEffort::Medium,
+                mode,
+                CompositionSelection::PySdk
+            )
+            .is_err()
+        );
+    }
+    for (provider, model, mode) in [
+        (
+            NativeProvider::Codex,
+            "gpt-5.6-sol",
+            Some(NativeToolMode::CodeModeOnly),
+        ),
+        (NativeProvider::Xai, "grok-4.6", None),
+        (NativeProvider::Claude, "claude-sonnet-5", None),
+    ] {
+        let selected = selected_coding_provider_configuration(
+            provider,
+            ModelId::new(model).unwrap(),
+            ReasoningEffort::Medium,
+            mode,
+            CompositionSelection::PySdk,
+        )
+        .unwrap();
+        assert_eq!(
+            selected
+                .behavior()
+                .tools
+                .iter()
+                .map(|tool| tool.definition().name().as_str())
+                .collect::<Vec<_>>(),
+            ["run_py"]
+        );
+    }
+}
 use crate::agent_tree::MemoryTreeStore;
 use crate::agent_tree_tools::TreeDriver;
 use crate::error::CliResult;
@@ -2670,6 +2717,7 @@ fn newly_enrolled_oauth_models_compile_every_valid_product_presentation() {
                 }
                 CompositionSelection::JsPtc => assert_eq!(names, ["exec_js", "wait_js"]),
                 CompositionSelection::PyPtc => assert_eq!(names, ["exec_py", "wait_py"]),
+                CompositionSelection::PySdk => assert_eq!(names, ["run_py"]),
                 CompositionSelection::FollowCatalog
                 | CompositionSelection::Direct
                 | CompositionSelection::NativePtc => {

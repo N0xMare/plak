@@ -133,6 +133,7 @@ pub(super) fn fresh_checkpoint_authority(
         None,
         RuntimeDurability::Disabled,
         CanonicalHistory::default(),
+        builder.initial_named_state.clone(),
         builder.job_counter_seed,
     )?;
     let bundle =
@@ -417,6 +418,7 @@ pub(in crate::runtime) fn initial_memory_checkpoint(
     fresh_admission: Option<crate::RevalidationFact>,
     durability: RuntimeDurability,
     history: CanonicalHistory,
+    named_state: crate::manifest::NamedState,
     job_counter_seed: u32,
 ) -> Result<RuntimeCheckpoint, AgentError> {
     let (binding, tool_manifest) = runtime_manifest_binding_and_tools(
@@ -481,7 +483,7 @@ pub(in crate::runtime) fn initial_memory_checkpoint(
         None,
         crate::manifest::JobLedger::new(job_counter_seed, Vec::new())
             .map_err(runtime_manifest_error)?,
-        crate::manifest::NamedState::default(),
+        named_state,
         durability,
     )
     .map_err(runtime_manifest_error)?;

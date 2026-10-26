@@ -404,6 +404,8 @@ fn tool_policy_explanation(policy: &str) -> &'static str {
     let lower = policy.to_ascii_lowercase();
     if lower.contains("direct") {
         "the model calls plak's tools directly"
+    } else if lower == "py-sdk" {
+        "the model uses the typed Python SDK in fresh, type-checked cells"
     } else if lower.contains("js") {
         "the model calls plak's tools from JavaScript inside a Code Mode cell"
     } else if lower.contains("py") {
@@ -563,6 +565,29 @@ mod tests {
         );
         // Said once, however often the host republishes the projection.
         assert_eq!(face.lines(&HostEvent::SessionInfo(info)), [] as [String; 0]);
+    }
+
+    #[test]
+    fn python_composition_lines_name_the_observable_selection() {
+        for (policy, explanation) in [
+            (
+                "py-ptc",
+                "the model calls plak's tools from Python inside a Code Mode cell",
+            ),
+            (
+                "py-sdk",
+                "the model uses the typed Python SDK in fresh, type-checked cells",
+            ),
+        ] {
+            let info = SessionInfoView {
+                tool_policy: Some(policy.into()),
+                ..SessionInfoView::default()
+            };
+            assert_eq!(
+                face().lines(&HostEvent::SessionInfo(info)),
+                vec![format!("plak: composition {policy}: {explanation}")]
+            );
+        }
     }
 
     #[test]

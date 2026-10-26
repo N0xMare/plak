@@ -92,7 +92,6 @@ pub(crate) fn import_prepared(
         record,
         history,
         mut note,
-        archive,
     } = carried;
     let paths = crate::home::paths::PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
@@ -154,19 +153,6 @@ pub(crate) fn import_prepared(
     if projected.is_err() {
         note.push_str(&format!(
             "; warning: session {} was imported but its views need a projector pass; open it once",
-            record.id
-        ));
-    }
-    if let Some(archive) = &archive
-        && let Err(error) =
-            crate::carry::write_retained_archive(services.paths()?, &record.id, archive)
-    {
-        note = note.replace(
-            "with the readable archive retained only as untrusted reference data",
-            "without a retained readable archive",
-        );
-        note.push_str(&format!(
-            "; warning: session {} was created without its retained reference: {error}",
             record.id
         ));
     }

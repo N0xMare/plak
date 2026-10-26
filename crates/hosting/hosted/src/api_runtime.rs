@@ -59,6 +59,11 @@ pub(crate) fn runtime_binding(
     registry: plakous::tools::FrozenToolRegistry,
     clock: Arc<dyn plakous::model::Clock>,
 ) -> CliResult<SessionRuntimeBinding> {
+    if spec.composition == CompositionSelection::PySdk && spec.spawned_child {
+        return Err(CliFailure::new(
+            "py-sdk is root-only and has no child result channel",
+        ));
+    }
     let _binding_span = tracing::info_span!(
         "api_runtime_binding",
         provider = spec.account,
@@ -197,6 +202,26 @@ pub(crate) fn runtime_binding(
                 |error| CliFailure::new(format!("Python attachment is invalid: {error}")),
             )?;
         }
+        CompositionSelection::PySdk => {
+            let descriptor = plakous::tools::PythonHarnessSdkV1::compile(
+                spec.job_config,
+                registry.clone(),
+                target,
+            )
+            .map_err(|error| {
+                CliFailure::new(format!("Python SDK composition is invalid: {error}"))
+            })?;
+            let host = spec.sidecars.python_host().map_err(|error| {
+                CliFailure::new(format!(
+                    "Python SDK host is unavailable: {error}; no inference was dispatched"
+                ))
+            })?;
+            let attachment =
+                crate::agent::build::product_sdk_attachment(&descriptor, &host, &configuration)?;
+            builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
+                |error| CliFailure::new(format!("Python SDK attachment is invalid: {error}")),
+            )?;
+        }
         CompositionSelection::NativePtc => {
             let descriptor = CodexMinimalLocalCodeModeV1::compile_for_catalog(
                 spec.job_config,
@@ -308,6 +333,7 @@ pub(crate) fn api_product_profile(
         CompositionSelection::Direct | CompositionSelection::FollowCatalog => "direct",
         CompositionSelection::JsPtc => "js-ptc",
         CompositionSelection::PyPtc => "py-ptc",
+        CompositionSelection::PySdk => "py-sdk",
         CompositionSelection::NativePtc => "native-ptc",
     };
     let id = subagent_catalog_profile_id(

@@ -60,6 +60,14 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     };
     use plakous::model::{CompiledProviderConfiguration, Digest};
     use plakous::tools::CellDescriptor;
+    use plakous::tools::{PythonHarnessSdkDescriptorV1, PythonHarnessSdkV1};
+
+    fn compile_sdk(
+        registry: plakous::tools::FrozenToolRegistry,
+        target: plakous::tools::ProviderModelProjectionIdentityV2,
+    ) -> Result<PythonHarnessSdkDescriptorV1, Box<dyn std::error::Error>> {
+        Ok(PythonHarnessSdkV1::compile(plakous::tools::JobConfig::default(), registry, target)?)
+    }
 
     fn select_profile(descriptor: &CellDescriptor) -> Result<LocalCompositionProfile, AgentError> {
         LocalCompositionProfile::cell(descriptor)
@@ -115,6 +123,7 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
     hold(&std::any::type_name::<LocalCompositionProfile>());
     hold(&std::any::type_name::<ProductExtensionLimits>());
     hold(&select_profile);
+    hold(&compile_sdk);
     hold(&verify_sidecar_artifact);
     hold(&verify_python_artifact);
     hold(&close_binding);

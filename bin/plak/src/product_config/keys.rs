@@ -209,6 +209,8 @@ pub enum ConfigScope {
 pub enum ConfigField {
     /// `[root] agent`.
     RootAgent,
+    /// `[root] composition`, independent of child template capabilities.
+    RootComposition,
     /// `[roster] working_set`.
     WorkingSet,
     /// `[orchestration] subagents`.
@@ -333,6 +335,15 @@ pub fn config_key(key: &str) -> Option<&'static ConfigKey> {
 
 /// Every `config.toml` key, in render order.
 pub const CONFIG_KEYS: &[ConfigKey] = &[
+    ConfigKey {
+        path: "root.composition",
+        field: ConfigField::RootComposition,
+        kind: "enum",
+        constraint: "direct|plakous-default|native-ptc|js-ptc|py-ptc|py-sdk",
+        doc: "Root-only composition override for the exact root account/model tuple. py-sdk uses the typed Python SDK and is not valid in child templates.",
+        example: "\"py-sdk\"",
+        scope: ConfigScope::Epoch,
+    },
     ConfigKey {
         path: "root.agent",
         field: ConfigField::RootAgent,

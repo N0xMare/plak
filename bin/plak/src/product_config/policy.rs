@@ -261,6 +261,11 @@ impl AgentTemplate {
     /// rendered, and `spawns` names only other files: [`ProductConfig::validate`]
     /// checks both.
     pub fn validate(&self, name: &str) -> Result<(), String> {
+        if self.composition == Some(ProductCompositionSelection::PySdk) {
+            return Err(format!(
+                "template {name}: py-sdk is root-only and has no child result channel; select it in [root] or --composition"
+            ));
+        }
         if self.account == "xai" {
             return Err(
                 "`xai` is ambiguous: use `grok` (SuperGrok subscription) or `xai-api` (API key)"

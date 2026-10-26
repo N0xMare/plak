@@ -565,7 +565,8 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         kind: sessions::SessionWorkflowKind::Fork,
     }
     .successor_product_id();
-    let own_tree = config.live_topology_enabled()?;
+    let own_tree = composition != crate::binding::CompositionSelection::PySdk
+        && config.live_topology_enabled()?;
     if own_tree {
         crate::agent::seed_genesis_tree(
             &config.state_roots,
@@ -576,7 +577,11 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
             roster.clone(),
         )?;
     }
-    let topology_tree_id = decided_topology_tree_id(config, own_tree, &target_product_id);
+    let topology_tree_id = if composition == crate::binding::CompositionSelection::PySdk {
+        target_product_id.clone()
+    } else {
+        decided_topology_tree_id(config, own_tree, &target_product_id)
+    };
     let target = if api_root {
         let mut record = SessionRecord::new(config.session.workspace_root.clone());
         record.id.clone_from(&target_product_id);

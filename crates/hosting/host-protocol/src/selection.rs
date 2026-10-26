@@ -20,16 +20,19 @@ pub enum CompositionSelection {
     JsPtc,
     /// Plak-owned Python PTC profile.
     PyPtc,
+    /// Root-only typed Python harness SDK (`run_py`).
+    PySdk,
 }
 
 impl CompositionSelection {
     /// Every selection, in settings-menu order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Direct,
         Self::FollowCatalog,
         Self::NativePtc,
         Self::JsPtc,
         Self::PyPtc,
+        Self::PySdk,
     ];
 
     /// Stable configuration label.
@@ -41,6 +44,7 @@ impl CompositionSelection {
             Self::NativePtc => "native-ptc",
             Self::JsPtc => "js-ptc",
             Self::PyPtc => "py-ptc",
+            Self::PySdk => "py-sdk",
         }
     }
 

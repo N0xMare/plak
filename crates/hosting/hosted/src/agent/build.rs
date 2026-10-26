@@ -37,8 +37,8 @@ pub use policy::{
 pub(super) use policy::{NATIVE_RUN_ROUND_INPUT_LIABILITY_CEILING, PROCESS_SESSION_TOOLS};
 pub(crate) use policy::{
     SessionToolFence, attach_codex_minimal, occupancy_read_only_allows, occupancy_session_fence,
-    product_javascript_candidate_attachment, product_python_attachment, session_tool_policy,
-    stamped_workspace_policy,
+    product_javascript_candidate_attachment, product_python_attachment, product_sdk_attachment,
+    session_tool_policy, stamped_workspace_policy,
 };
 #[cfg(test)]
 pub(super) use profile::product_identity_profile;

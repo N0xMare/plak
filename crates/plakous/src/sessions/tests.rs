@@ -7464,15 +7464,23 @@ mod portable_history {
     fn assert_next_request_history(
         seen: &[HistorySegment],
         expected: &[HistorySegment],
+        named_state: bool,
     ) -> TestResult {
         let (carried, new) = seen
             .split_at_checked(expected.len())
             .ok_or("history was cut")?;
         assert_eq!(
             new.len(),
-            1,
-            "only the new prompt follows the carried history"
+            if named_state { 2 } else { 1 },
+            "only the new prompt and expected state note follow the carried history"
         );
+        if named_state {
+            let text = serde_json::to_string(new)?;
+            assert!(
+                text.contains("<session_state>") && text.contains("answer: 8"),
+                "{text}"
+            );
+        }
         assert!(serde_json::to_string(new)?.contains("continue"));
         assert_same_history(carried, expected)
     }
@@ -7538,19 +7546,27 @@ mod portable_history {
             carried_segments()?,
             account_reference(account)?,
             ModelId::new("test.model")?,
-        );
+        )
+        .with_named_state(BTreeMap::from([(
+            "answer".into(),
+            serde_json::json!({"n":42}),
+        )]))?;
         let (seen, database, locator) =
             seed_and_prompt(directory.path(), "same", carried, descriptor()?, account).await?;
-        assert_next_request_history(&seen, &carried_segments()?)?;
+        assert_next_request_history(&seen, &carried_segments()?, true)?;
 
         let exported = AgentSessions::export_history_sqlite(&database, locator)?;
         assert_eq!(exported.replay_account(), account_reference(account)?);
         assert_eq!(exported.replay_model().as_str(), "test.model");
+        assert_eq!(
+            exported.named_state()?["answer"],
+            serde_json::json!({"n":42})
+        );
         let segments = exported.segments();
         assert!(segments.len() > carried_segments()?.len());
         assert_same_history(&segments[..carried_segments()?.len()], &carried_segments()?)?;
 
-        let (reimported, _, _) = seed_and_prompt(
+        let (reimported, again_database, again_locator) = seed_and_prompt(
             directory.path(),
             "again",
             exported.clone(),
@@ -7558,7 +7574,11 @@ mod portable_history {
             account,
         )
         .await?;
-        assert_next_request_history(&reimported, exported.segments())?;
+        assert_next_request_history(&reimported, exported.segments(), true)?;
+        assert_eq!(
+            AgentSessions::export_history_sqlite(again_database, again_locator)?.named_state()?,
+            exported.named_state()?
+        );
         Ok(())
     }
 
@@ -7697,7 +7717,7 @@ mod portable_history {
             account,
         )
         .await?;
-        assert_next_request_history(&other_model, &stripped_segments()?)?;
+        assert_next_request_history(&other_model, &stripped_segments()?, false)?;
         let (other_account, _, _) = seed_and_prompt(
             directory.path(),
             "other-account",
@@ -7706,7 +7726,7 @@ mod portable_history {
             b"another-account",
         )
         .await?;
-        assert_next_request_history(&other_account, &stripped_segments()?)?;
+        assert_next_request_history(&other_account, &stripped_segments()?, false)?;
         for history in [&other_model, &other_account] {
             let serialized = serde_json::to_string(history)?;
             assert!(!serialized.contains("opaque-compaction-ciphertext"));

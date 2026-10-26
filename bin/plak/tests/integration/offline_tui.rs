@@ -2395,7 +2395,7 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
 fn install_carry_target(fixture: &Fixture, fake_bin: &Path, admitted: u64) -> (PathBuf, PathBuf) {
     let args = fixture.root.join("reload-args");
     let copy = fixture.root.join("carried.json");
-    let probe = json!({"state_key":"r0.e0.p0.t0","export_versions":[7,8],"config_error":null});
+    let probe = json!({"state_key":"r0.e0.p0.t0","export_versions":[8,9],"config_error":null});
     let capacity = json!({"route":"test.route","total_window":1_000_000,"admitted_input":admitted,"estimated_tokens":100,"messages":3});
     write_script_file(
         &fake_bin.join("plak"),

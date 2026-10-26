@@ -162,7 +162,8 @@ pub(crate) mod suite {
         assignment_start_prompt(
             ChildAssignmentStartKind::from_composition(crate::prompt_inputs::prompt_composition(
                 composition,
-            )),
+            ))
+            .expect("child composition has a result channel"),
             "reviewer",
             crate::agent_tree_protocol::Tier::ReadOnly,
             "reviewer",
@@ -180,7 +181,8 @@ pub(crate) mod suite {
         assignment_start_prompt(
             ChildAssignmentStartKind::from_composition(crate::prompt_inputs::prompt_composition(
                 composition,
-            )),
+            ))
+            .expect("child composition has a result channel"),
             "supervisor",
             crate::agent_tree_protocol::Tier::ReadOnly,
             "supervisor",
@@ -303,6 +305,7 @@ pub(crate) mod suite {
             ProductCompositionSelection::NativePtc => "Code Mode",
             ProductCompositionSelection::JsPtc => "JS PTC",
             ProductCompositionSelection::PyPtc => "Python PTC",
+            ProductCompositionSelection::PySdk => "Python SDK",
         }
     }
 
@@ -317,6 +320,7 @@ pub(crate) mod suite {
             ) => " (Code Mode exec/wait)",
             (_, ProductCompositionSelection::JsPtc) => " (exec_js/wait_js)",
             (_, ProductCompositionSelection::PyPtc) => " (exec_py)",
+            (_, ProductCompositionSelection::PySdk) => " (run_py)",
             _ => "",
         };
         match provider {
@@ -431,6 +435,7 @@ pub(crate) mod suite {
             ProductCompositionSelection::NativePtc,
             ProductCompositionSelection::JsPtc,
             ProductCompositionSelection::PyPtc,
+            ProductCompositionSelection::PySdk,
         ];
         let occupancies = [
             Occupancy::SingleAgent,
@@ -446,6 +451,11 @@ pub(crate) mod suite {
                     continue;
                 }
                 for occupancy in occupancies {
+                    if composition == ProductCompositionSelection::PySdk
+                        && occupancy != Occupancy::SingleAgent
+                    {
+                        continue;
+                    }
                     let (model, code_mode) = match (provider, composition) {
                         (ProviderKind::Codex, ProductCompositionSelection::NativePtc) => {
                             ("gpt-6.1-sol", true)
@@ -487,18 +497,21 @@ pub(crate) mod suite {
     /// product's API table admits, through the production API profile and
     /// the route's Platform wire.
     fn api_routes() -> Vec<RouteSpec> {
-        use ProductCompositionSelection::{Direct, JsPtc, NativePtc, PyPtc};
+        use ProductCompositionSelection::{Direct, JsPtc, NativePtc, PyPtc, PySdk};
         [
             (PlatformProvider::OpenAi, "gpt-5.6-luna", Direct),
             (PlatformProvider::OpenAi, "gpt-5.6-sol", NativePtc),
             (PlatformProvider::OpenAi, "gpt-5.6-luna", JsPtc),
             (PlatformProvider::OpenAi, "gpt-5.6-luna", PyPtc),
+            (PlatformProvider::OpenAi, "gpt-5.6-luna", PySdk),
             (PlatformProvider::Xai, "grok-4.6", Direct),
             (PlatformProvider::Xai, "grok-4.6", JsPtc),
             (PlatformProvider::Xai, "grok-4.6", PyPtc),
+            (PlatformProvider::Xai, "grok-4.6", PySdk),
             (PlatformProvider::Anthropic, "claude-sonnet-5", Direct),
             (PlatformProvider::Anthropic, "claude-sonnet-5", JsPtc),
             (PlatformProvider::Anthropic, "claude-sonnet-5", PyPtc),
+            (PlatformProvider::Anthropic, "claude-sonnet-5", PySdk),
         ]
         .into_iter()
         .map(|(provider, model, composition)| {
@@ -1067,6 +1080,7 @@ pub(crate) mod suite {
 
     pub(crate) fn catalog_authority(spec: &RouteSpec) -> &'static str {
         match (spec.provider, spec.composition) {
+            (_, ProductCompositionSelection::PySdk) => "golden-python-sdk",
             (ProviderKind::Codex, ProductCompositionSelection::Direct) => "golden-codex-direct",
             (ProviderKind::Codex, ProductCompositionSelection::NativePtc) => {
                 "golden-codex-native-ptc"
@@ -1233,6 +1247,13 @@ pub(crate) mod suite {
                 .map(|descriptor| descriptor.outer_projection().clone())
                 .map_err(|error| error.to_string())
             }
+            ProductCompositionSelection::PySdk => plakous::tools::PythonHarnessSdkV1::compile(
+                plakous::tools::JobConfig::default(),
+                registry,
+                target,
+            )
+            .map(|descriptor| descriptor.outer_projection().clone())
+            .map_err(|error| error.to_string()),
             ProductCompositionSelection::PyPtc => {
                 let names = route_surface(spec, extras).exposed_names().to_vec();
                 PythonPtcV1::compile_for_kind(
@@ -1425,6 +1446,42 @@ pub(crate) mod suite {
     // Claude pins include explicit account/device/session fixture identities and
     // body attestation, alongside instruction text and complete tool payloads.
     const PROMPT_RENDER_PINS: &[(&str, &str)] = &[
+        (
+            "codex.py-sdk.root.single-agent",
+            "66b370afa7fb7afc88656f2d598d4664f42959388088beebfcd649c7f5078a62",
+        ),
+        (
+            "grok.py-sdk.root.single-agent",
+            "59b1ad2cc8f281a1efb3c7915235d9bae69a9fd8c662d187c3023206a2e36dba",
+        ),
+        (
+            "claude.py-sdk.root.single-agent",
+            "5b991da02112b8262ba239f10cb9d89b6556ae40bad41cdc91508ec103326452",
+        ),
+        (
+            "openrouter-chat.py-sdk.root.single-agent",
+            "dc5cd16bf2af670b19275bc205c8d45fe6438a702d81ad95accd273990ee6d77",
+        ),
+        (
+            "openrouter-responses.py-sdk.root.single-agent",
+            "27c6b3d227409bf10fab7f40496f608e9dc870f304f472c2afee09857a4603c1",
+        ),
+        (
+            "openrouter-messages.py-sdk.root.single-agent",
+            "414a03915f052193bb82eb5cec6633aaeea12b8408ab66ec588d5eaa90e91451",
+        ),
+        (
+            "openai-api.py-sdk.root.single-agent",
+            "f2a64c71746817e2d1fdc3717215c591bc14aac6bf7fefbb0505140db0d610b9",
+        ),
+        (
+            "xai-api.py-sdk.root.single-agent",
+            "121a79fe36ec55e4e103454d6f8aa6865ad05f3856689db1dfc9871451ec50dc",
+        ),
+        (
+            "anthropic-api.py-sdk.root.single-agent",
+            "333e5d46d10a84c27e57d39c955cae8112213e448e293c0470222f884b0c8f69",
+        ),
         (
             "codex.direct.root.single-agent",
             "a570b0325954439a7fbcffacfc2022019183ff51d3987ace59c9b11bc0f29539",
@@ -1916,8 +1973,12 @@ pub(crate) mod suite {
                     &extras,
                     fence,
                     route_runtime(&spec),
-                )
-                .expect("filtered surface");
+                );
+                if spec.composition == ProductCompositionSelection::PySdk {
+                    assert!(surface.is_err(), "SDK child occupancy must refuse");
+                    continue;
+                }
+                let surface = surface.expect("filtered surface");
                 let (profile, _) = route_profile(&spec, &extras, &surface, &home, &root, &cwd);
                 let instructions = profile.base_instructions();
                 for name in full
@@ -2112,13 +2173,13 @@ pub(crate) mod suite {
     fn rendered_product_prompts_match_review_goldens() {
         assert_eq!(
             routes().len(),
-            86,
+            95,
             "included route matrix is providers×compositions×topology minus documented exclusions"
         );
         assert_eq!(excluded_routes().len(), 2);
         assert_eq!(
             PROMPT_RENDER_PINS.len(),
-            86,
+            95,
             "the prompt render pin table covers every included route"
         );
         let (_tmp, home, root, cwd) = instruction_fixture();

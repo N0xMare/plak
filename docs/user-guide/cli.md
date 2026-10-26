@@ -349,7 +349,7 @@ plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- '
 | `--account <id>` | `codex`, `grok`, `claude`, `openrouter`, `openai`, `anthropic` or `xai-api`. `--provider` is an accepted alias. |
 | `--model <exact-id>` | An exact catalog model id. No prefixes, no inference, no fuzzy match. |
 | `--effort <level>` | `none`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Required for a reasoning model, refused for the rest. `none` is explicit; omitting the flag is not `none`. There is no default; the catalog row decides. |
-| `--composition <c>` | `direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`. `native-ptc` is the vertical's own programmatic tool calling; today only Codex Code Mode is enrolled (Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`), and elsewhere it is refused naming the vertical. `js-ptc` and `py-ptc` are harness PTC on every account. `plakous-default` (the default when omitted) is the per-model recommendation: `native-ptc` where Codex Code Mode is enrolled, `direct` on Grok, Claude, OpenRouter and the Anthropic and xAI API accounts. |
+| `--composition <c>` | `direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`, `py-sdk`. `py-sdk` selects the typed, fresh-cell Python SDK for a core-tools-only single-agent root; it never follows from `plakous-default`. `native-ptc` is the vertical's own programmatic tool calling; today only Codex Code Mode is enrolled (Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`), and elsewhere it is refused naming the vertical. `js-ptc` and `py-ptc` are harness PTC on every account. `plakous-default` (the default when omitted) is the per-model recommendation: `native-ptc` where Codex Code Mode is enrolled, `direct` on Grok, Claude, OpenRouter and the Anthropic and xAI API accounts. |
 | `--protocol <p>` | `auto`, `chat`, `responses`, `messages`. OpenRouter only, default `auto` → `chat`. Other accounts reject it at parse time. |
 | `--session <id>` | Continue an idle session: the full UUID or the short id `plak resume` accepts, resolved among this directory's sessions. Its recorded binding wins, so `--account`, `--model`, `--effort`, `--composition` and `--protocol` are refused alongside it. |
 | `--resume-tree` | Resume a `RestoredPaused` topology. Requires `--session`. |
@@ -389,7 +389,7 @@ Model-launched process tools run with your full host authority on both
 Linux x86_64 musl and macOS; there is no OS sandbox. See
 [known limits and security model](known-limits-and-security-model.md).
 `native-ptc` and `js-ptc` locate `PLAK_JS_HOST` or a
-`plakous-js-host` beside the binary; `py-ptc` locates `PLAK_PY_HOST` or a
+`plakous-js-host` beside the binary; `py-ptc` and `py-sdk` locate `PLAK_PY_HOST` or a
 sibling `plakous-py-host` worker. That is worker isolation, not workspace isolation, and
 it does not isolate Plak itself. Unsupported process-tool targets, including
 Intel macOS, fail closed.
@@ -470,13 +470,13 @@ Version            OK       available · 0.0.2                             —
 Home               OK       available · /home/you/.plak                   —
 Home free space    OK       available · product home volume has at least 5120 MiB available   —
 Config             OK       valid · /home/you/.plak/config.toml           —
-Product db         OK       available · /home/you/.plak/state/r26.e33.p33.t9/product.sqlite3   —
-Runtime db         OK       available · /home/you/.plak/state/r26.e33.p33.t9/runtime.sqlite3   —
+Product db         OK       available · /home/you/.plak/state/r26.e33.p34.t9/product.sqlite3   —
+Runtime db         OK       available · /home/you/.plak/state/r26.e33.p34.t9/runtime.sqlite3   —
 Runtime store      OK       available · checkpoints 412/524288 (new work stops at 458752), …   —
-Subagents db       OK       available · /home/you/.plak/state/r26.e33.p33.t9/subagents.sqlite3   —
+Subagents db       OK       available · /home/you/.plak/state/r26.e33.p34.t9/subagents.sqlite3   —
 Telemetry db       OK       ok · 1189 rows                                —
 Secrets dir        OK       available · /home/you/.plak/secrets           —
-Sessions dir       OK       available · /home/you/.plak/state/r26.e33.p33.t9/sessions          —
+Sessions dir       OK       available · /home/you/.plak/state/r26.e33.p34.t9/sessions          —
 Carry files        OK       none · /home/you/.plak/carry                  —
 Cwd                OK       available · /home/you/project                 —
 Jj cli             OK       missing · native workspace operations need no jj CLI; library not built   —
@@ -640,11 +640,12 @@ A smaller destination route schedules compaction at the first prompt when
 needed; if its protected history or summary input still cannot fit, it returns
 the normal context-limit refusal rather than silently truncating conversation.
 An unknown destination window is reported but does not block carry.
-This build writes version 8 and imports versions 8 and 7. Version 7 has only its
-old bounded checkpoint, not a complete conversation; its archive remains
-available through `session reference <path-or-session> [--search <text>]
-[--tail N]` as untrusted reference data. New exports have no separate archive. Keep exports private: they contain full
-conversation/tool contents, not a redacted transcript.
+This build writes version 9 and imports versions 9 and 8. Version 9 preserves
+the composition selection, including `py-sdk`, and session-owned named state.
+Version 8 imports with empty named state; version 7 is refused with
+`this build imports versions 8 and 9`. New exports have no separate archive.
+Keep exports private: they contain full conversation/tool contents and named
+values, not a redacted transcript.
 Documents larger than 256 MiB, histories larger than 128 MiB/100,000 messages,
 and malformed content are refused, not truncated. A document already imported
 into this workspace is refused, naming its existing successor.

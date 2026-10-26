@@ -48,12 +48,14 @@ pub(crate) fn run_doctor(
         selected_composition,
         product_config::ProductCompositionSelection::JsPtc
             | product_config::ProductCompositionSelection::PyPtc
+            | product_config::ProductCompositionSelection::PySdk
             | product_config::ProductCompositionSelection::NativePtc
     ) || (selected_composition
         == product_config::ProductCompositionSelection::FollowCatalog
         && selected.default_account() == Some("codex"));
     let composition_host = match selected_composition {
-        product_config::ProductCompositionSelection::PyPtc => {
+        product_config::ProductCompositionSelection::PyPtc
+        | product_config::ProductCompositionSelection::PySdk => {
             match sidecars::python_bundle::locate() {
                 Ok(path) => product_doctor::CompositionHostStatus::Included {
                     identity: path.display().to_string(),
@@ -181,8 +183,11 @@ pub(crate) fn run_doctor(
             product_doctor::Requirement::Optional
         },
         composition_host,
-        python_containment_required: selected_composition
-            == product_config::ProductCompositionSelection::PyPtc,
+        python_containment_required: matches!(
+            selected_composition,
+            product_config::ProductCompositionSelection::PyPtc
+                | product_config::ProductCompositionSelection::PySdk
+        ),
         runtime_directory: env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
         openrouter_catalog,
         root_template,

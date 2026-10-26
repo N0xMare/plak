@@ -557,7 +557,7 @@ mod tests {
         let anthropic = listing(PlatformProvider::Anthropic);
         assert_eq!(anthropic.lines().count(), 15, "{anthropic}");
         assert!(anthropic.contains(
-            "claude-haiku-5-5\tusable\tefforts=low,medium,high,xhigh,max\twindow=100000\tfull_window=1000000\tmax_output=128000\tcomposition=direct,js-ptc,py-ptc\tplakous-default=direct\n"
+            "claude-haiku-5-5\tusable\tefforts=low,medium,high,xhigh,max\twindow=100000\tfull_window=1000000\tmax_output=128000\tcomposition=direct,js-ptc,py-ptc,py-sdk\tplakous-default=direct\n"
         ), "{anthropic}");
         assert!(anthropic.contains(
             "claude-sonnet-5-5\tusable\tefforts=low,medium,high,xhigh,max\twindow=1000000\tfull_window=1000000\tmax_output=128000\t"

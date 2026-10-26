@@ -1,5 +1,6 @@
 //! Runtime bindings and provider configuration.
 
+use crate::tools::ProductToolExtensions;
 use crate::{CliFailure, CliResult};
 
 use super::policy::{
@@ -124,7 +125,8 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
             Some(NativeToolMode::CodeModeOnly),
             CompositionSelection::Direct
             | CompositionSelection::JsPtc
-            | CompositionSelection::PyPtc,
+            | CompositionSelection::PyPtc
+            | CompositionSelection::PySdk,
         ) => false,
         (NativeProvider::Codex, Some(NativeToolMode::CodeMode), _) => {
             return Err(CliFailure::new(
@@ -145,7 +147,8 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     };
     let product_javascript = composition_is_js_ptc(composition);
     let product_python = composition_is_py_ptc(composition);
-    if (product_javascript || product_python)
+    let product_sdk = composition == CompositionSelection::PySdk;
+    if (product_javascript || product_python || product_sdk)
         && !direct_composition_capable(provider, native_tool_mode)
     {
         return Err(CliFailure::new(
@@ -154,7 +157,7 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     }
     let registry = coding_tool_registry("provider-selection", composition, code_mode_candidate)?;
     let catalog = crate::coding_routes::selected_route_presentation(provider, model.as_str())?;
-    let outer_selection = if product_javascript || product_python {
+    let outer_selection = if product_javascript || product_python || product_sdk {
         composition
     } else if code_mode_candidate {
         CompositionSelection::NativePtc
@@ -334,6 +337,11 @@ pub(super) async fn api_session_runtime_binding_with_owner(
     if parent.composition == CompositionSelection::PyPtc {
         crate::capabilities::require_feature("python")?;
     }
+    if parent.composition == CompositionSelection::PySdk && parent.topology_caller_id.is_some() {
+        return Err(CliFailure::new(
+            "py-sdk is root-only and has no child result channel",
+        ));
+    }
     let tool_plan = bind_node_tool_plan(
         &parent.tool_selection,
         Some(crate::tool_plan::ToolRoute::api(parent.target)),
@@ -342,13 +350,17 @@ pub(super) async fn api_session_runtime_binding_with_owner(
         &parent.state_roots,
     )?;
     let spawn_parent = SpawnParent::Api(parent.clone());
-    let topology_extensions = topology_extensions_if_enabled_with_owner(
-        &spawn_parent,
-        &parent.model,
-        topology_attach,
-        opening_durable_session,
-        acquired_owner,
-    )?
+    let topology_extensions = if parent.composition == CompositionSelection::PySdk {
+        ProductToolExtensions::empty().with_host_facts(parent.prompt_host_facts)
+    } else {
+        topology_extensions_if_enabled_with_owner(
+            &spawn_parent,
+            &parent.model,
+            topology_attach,
+            opening_durable_session,
+            acquired_owner,
+        )?
+    }
     .with_plan(&tool_plan)?;
     install_occupancy_fence(&parent.cwd)?;
     match parent.target {
@@ -516,6 +528,11 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
     attached_tree: &mut Option<String>,
 ) -> CliResult<SessionRuntimeBinding> {
     let topology_spec = spec.clone();
+    if spec.composition == CompositionSelection::PySdk && spec.topology_caller_id.is_some() {
+        return Err(CliFailure::new(
+            "py-sdk is root-only and has no child result channel",
+        ));
+    }
     let ProductAgentSpec {
         product_home,
         prompt_host_facts: _,
@@ -550,19 +567,20 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         && is_exact_code_mode_attachment(provider, resolved.selected_model(), resolved_tool_mode);
     let product_javascript = composition_is_js_ptc(composition);
     let product_python = composition_is_py_ptc(composition);
+    let product_sdk = composition == CompositionSelection::PySdk;
     if composition == CompositionSelection::NativePtc && !code_mode_candidate {
         return Err(CliFailure::new(crate::binding::native_ptc_refusal(
             provider,
         )));
     }
-    if (product_javascript || product_python)
+    if (product_javascript || product_python || product_sdk)
         && !direct_composition_capable(provider, resolved_tool_mode)
     {
         return Err(CliFailure::new(
             "Plak-owned custom composition requires exact Direct-capable catalog authority; no inference was dispatched",
         ));
     }
-    if product_javascript || product_python {
+    if product_javascript || product_python || product_sdk {
         if resolved.configuration().selected().behavior().tool_mode != ToolPresentationMode::Direct
             || resolved.configuration().effective().behavior().tool_mode
                 != ToolPresentationMode::Direct
@@ -626,13 +644,17 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         &workspace_root,
         &state_roots,
     )?;
-    let product_extensions = topology_extensions_if_enabled(
-        &SpawnParent::from_native(topology_spec.clone()),
-        resolved.selected_model().as_str(),
-        topology_attach,
-        opening_durable_session,
-        attached_tree,
-    )?
+    let product_extensions = if product_sdk {
+        ProductToolExtensions::empty().with_host_facts(topology_spec.prompt_host_facts)
+    } else {
+        topology_extensions_if_enabled(
+            &SpawnParent::from_native(topology_spec.clone()),
+            resolved.selected_model().as_str(),
+            topology_attach,
+            opening_durable_session,
+            attached_tree,
+        )?
+    }
     .with_plan(&tool_plan)?;
     install_occupancy_fence(&cwd)?;
     product_extensions.connect_retrieval(resolved.retrieval_port())?;
@@ -644,14 +666,19 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         &product_extensions,
     )?;
     let extra_nested = product_extensions.names().cloned().collect::<Vec<_>>();
-    let direct_extras =
-        !extra_nested.is_empty() && !product_javascript && !product_python && !code_mode_candidate;
+    let direct_extras = !extra_nested.is_empty()
+        && !product_javascript
+        && !product_python
+        && !product_sdk
+        && !code_mode_candidate;
     // One callable surface for this node, compiled once with the session's
     // own configuration: the presentation's core menu plus every extension.
     // It is the nested catalog the PTC descriptors list, the names the PTC
     // base instruction names, and the set the earned agreement paragraphs are
     // judged against.
-    let runtime = if product_javascript {
+    let runtime = if product_sdk {
+        Some(CompositionRuntime::PythonHarnessSdk)
+    } else if product_javascript {
         Some(CompositionRuntime::ProductJavaScript)
     } else if product_python {
         Some(CompositionRuntime::PythonPtc)
@@ -794,7 +821,29 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         builder = builder.telemetry(telemetry);
     }
 
-    if product_javascript {
+    if product_sdk {
+        let target = projection_target(resolved.configuration(), "Python SDK target")?;
+        let descriptor = plakous::tools::PythonHarnessSdkV1::compile(
+            state_roots.job_config(),
+            frozen_tools.clone(),
+            target,
+        )
+        .map_err(|error| {
+            CliFailure::new(format!(
+                "Python SDK descriptor is invalid: {error}; no inference was dispatched"
+            ))
+        })?;
+        let host = state_roots.sidecars().python_host().map_err(|error| {
+            CliFailure::new(format!(
+                "Python SDK host is unavailable: {error}; no inference was dispatched"
+            ))
+        })?;
+        let attachment =
+            super::policy::product_sdk_attachment(&descriptor, &host, resolved.configuration())?;
+        builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
+            |error| CliFailure::new(format!("Python SDK attachment is invalid: {error}")),
+        )?;
+    } else if product_javascript {
         let target = projection_target(resolved.configuration(), "product JavaScript target")?;
         let descriptor = ProductJavaScriptCompositionV1::compile_for_kind(
             state_roots.job_config(),

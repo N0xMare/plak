@@ -16,6 +16,39 @@ use plakous::agent::AgentEvent;
 use std::time::{Duration, Instant};
 
 #[test]
+fn sdk_uses_a_generic_tool_row_with_safely_fenced_code_and_output() {
+    let observation = serde_json::from_value(serde_json::json!({
+        "subject": null,
+        "arguments_preview": serde_json::json!({"code":"print('```')"}).to_string(),
+    }))
+    .unwrap();
+    let commands = std::collections::HashMap::new();
+    let started = super::started_tool_text(
+        "run_py",
+        None,
+        Some(&observation),
+        None,
+        super::ProcessContext {
+            label: None,
+            args: None,
+            locator: None,
+            processes: &[],
+            commands: &commands,
+        },
+    );
+    assert_eq!(
+        crate::activity::tool_activity_kind("run_py"),
+        plakous_host_protocol::views::presentation::ActivityKind::Tool
+    );
+    let detail = super::completed_tool_detail(started.detail.as_deref(), Some("finished")).unwrap();
+    assert!(
+        detail.contains("````python\nprint('```')\n````"),
+        "{detail}"
+    );
+    assert!(detail.ends_with("finished"), "{detail}");
+}
+
+#[test]
 fn process_wait_uses_its_result_after_timeout_exit_race() {
     use plakous::model::{Digest, DigestDomain};
     use plakous::tools::{JobHost, JobOwner, JobStatus, JobView};

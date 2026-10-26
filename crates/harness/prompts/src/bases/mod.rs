@@ -24,6 +24,7 @@ mod grok;
 pub mod legacy;
 mod pi;
 pub mod plak_authored;
+pub(crate) mod python_sdk;
 mod variant;
 
 pub use claude::claude_direct_base_instructions_for;

@@ -238,10 +238,10 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r26.e33.p33.t9/             this build's state (§2.5)
+    r26.e33.p34.t9/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 26, epoch 33
-      product.sqlite3             Plak intents and feed-derived views, schema 33
+      product.sqlite3             Plak intents and feed-derived views, schema 34
       subagents.sqlite3           the agent tree, schema 9
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
@@ -779,7 +779,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r26.e33.p33.t9`. The key is derived from the stores'
+schema>`, for example `r26.e33.p34.t9`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -1019,13 +1019,13 @@ is a warning, not an export refusal.
 The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
-writes **version 8** and imports **8 and 7**, never older documents. Runtime
-canonical format epochs are not export versions: v8 carries a Plak-owned neutral
+writes **version 9** and imports **9 and 8**, never older documents. Runtime
+canonical format epochs are not export versions: v9 carries a Plak-owned neutral
 conversation encoding, not canonical segment bytes, digests, checkpoints, or
 runtime serde representations.
 
 `plak session export <id> [--out <path>]` writes one JSON document with
-`"format": "plak-session-export", "version": 8` and prints its path. The
+`"format": "plak-session-export", "version": 9` and prints its path. The
 exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
 state key and producer build provenance (verified binary id, or explicitly
@@ -1035,6 +1035,11 @@ export inspects that projection and history without opening a writable runtime,
 so even SQLite maintenance cannot change the settled source's store bytes.
 Otherwise the common lease-free projector first catches the views up to the
 feed tail; any required writes remain derived product-view writes, not attach.
+The binding carries `py-sdk` like every other explicit selection. `named_state`
+is a key-ordered JSON map of committed session-owned values (01 §9.8); import
+validates it and seeds it atomically with history. The v8 importer uses the
+same history decoder with empty named state. Version 7 is refused with
+`this build imports versions 8 and 9`.
 
 `history` contains `replay_account` (source account reference), `replay_model`
 (model identifier string), and ordered `groups`. Each group contains its
@@ -1168,8 +1173,8 @@ unresolved rows belong in `pending_work`; settled rows are the optional typed
 `source_resolved_count`, never a pseudo obligation of that name (which import
 refuses). Closed children's dirty/adopted workspaces remain unresolved reference
 facts when appropriate. Live process ownership, store/feed/event state, usage,
-telemetry, provider continuation, composition named state (01 §9.8), and
-model/tool-owned runtime state do not carry.
+telemetry, provider continuation and other model/tool-owned runtime state do
+not carry. Session-owned named state is the explicit v9 exception.
 Earlier compaction has already replaced superseded history; carry cannot recover
 what that compaction removed. Old stores, source children and workspaces remain
 untouched.
@@ -1194,23 +1199,10 @@ same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
 on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
 
-**Version 7 reader:** v7 contains no full conversation. Its bounded checkpoint
-(32 KiB user intent plus 32 KiB imported assistant reference) alone seeds history;
-its inert archive (64 MiB actor/text) never enters model context. Typed rows still
-carry exposed tool names. This reader cannot invent missing conversation or
-opaque replay. Only this previous reader retains the checkpoint/archive path;
-new v8 documents have neither field. `session reference` retains bounded,
-terminal-safe search/tail inspection for v7 archives (64 KiB projected output,
-newest-first budget, chronological display, literal ASCII-insensitive search,
-UTF-8-safe hit-centered excerpts). Empty search means recent entries. Pipes
-receive faithful UTF-8; terminals neutralize controls and bidi formatting. v8
-reports that it carries conversation rather than a separate archive.
-A v7 archive is retained only after seed commitment at
-`~/.plak/references/<new-id>.json` (0600 in 0700); failure warns without undoing
-the committed successor. Canonical UUIDs, not document-supplied paths, select
-retained files. Deletion best-effort removes only an owned regular target;
-links, missing targets, parent-mode or inspection errors do not block deletion.
-Orphans can be pruned explicitly with `state prune-legacy --prune-orphaned-references`.
+Versions 8 and 9 carry full conversation rather than a separate archive;
+neither has a restart checkpoint or archive import arm. `session reference`
+reports this distinction. Retained inert reference files remain read-only
+operator data, never import authority.
 
 `/reload` (§5.1) resolves the installed build and asks its state key with the
 hidden `plak version --state-key` while the session is still attached, before
@@ -2084,7 +2076,7 @@ intersection. A Codex catalog default of `ultra` becomes no default without
 dropping the row. It withholds `ultra` as multi-agent orchestration, outside the
 single-agent reasoning contract; an explicit bind refusal remains a backstop.
 `--composition` is `direct`, `plakous-default`,
-`native-ptc`, `js-ptc`, `py-ptc`; omitting it resolves to `plakous-default`.
+`native-ptc`, `js-ptc`, `py-ptc`, `py-sdk`; omitting it resolves to `plakous-default`.
 `--protocol` is `auto`, `chat`,
 `responses`, `messages`, is accepted **only** with `--account openrouter`, and
 resolves once at parse time, with `auto` landing on `chat`.
@@ -2150,7 +2142,7 @@ marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
 `plak version --carry-probe <file>` is a hidden machine form: it validates a
-v8/v7 export and reports the destination route, optional total/admitted input
+v9/v8 export and reports the destination route, optional total/admitted input
 windows, estimated history tokens and message count. It performs no inference
 or session creation and emits no startup event.
 
@@ -5367,7 +5359,7 @@ The export document does not carry queued items' images (§2.5.1).
 
 Everything in this section is model-visible text: it is part of the product's
 behavior in the same way a screen is, and it changes only deliberately. The
-render pipeline that pins it — 86 routes, sha256 tables in code, and the
+render pipeline that pins it — 95 routes, sha256 tables in code, and the
 `just prompts render` review artifact — is described in chapter 05 §2.5.
 
 ### 6.1 The composition of a first turn
@@ -5379,9 +5371,9 @@ A first turn is built in one fixed order, and each layer has one owner:
    OAuth carries a model-visible costume block; §6.4 states the costume law.
 2. **The family and composition base instruction**, owned by `plakous-prompts`
    for the three OAuth verticals' Direct and native Code Mode profiles, for
-   the JavaScript and Python PTC harnesses and for the pi base that OpenRouter
+   the JavaScript and Python PTC harnesses, the typed Python SDK and for the pi base that OpenRouter
    Direct wears (§6.3). A
-   JavaScript or Python PTC composition replaces the family base outright, so
+   JavaScript, Python PTC or Python SDK composition replaces the family base outright, so
    the family wording described below reaches Direct and native Code Mode only.
 3. **The identity tail**, owned by `plakous-prompts`: workspace root, cwd, OS,
    `You are {model}.`, the current-turn-wins sentence, the selected reasoning
@@ -5900,15 +5892,20 @@ child detection is the explicit session lineage Plak passes in — a TUI root, a
 rebind, an attach, and a qualification run are all roots, and only a spawned
 child spec produces a child.
 
-### 6.5 The four composition presentations
+### 6.5 Composition presentations
 
 The composition selector is closed: `direct`, `plakous-default`,
-`native-ptc`, `js-ptc`, `py-ptc`, with omission meaning `plakous-default`.
+`native-ptc`, `js-ptc`, `py-ptc`, `py-sdk`, with omission meaning `plakous-default`.
+The root settings picker and JSONL binding use this same vocabulary.
+`[root] composition` overrides the named root template's default for its exact
+account/model tuple; explicit CLI selection takes precedence. Settings save
+this root override, not a child-template SDK capability.
 The axis is the one spec 01 §9.4 defines: `native-ptc` is the vertical's own
 programmatic tool calling system, `js-ptc` and `py-ptc` are harness PTC on
 every vertical, and `plakous-default` is the per-model recommendation. What
 the model sees differs per selection, and the nested membership is always that
-vertical's own Direct exposed names — never a renamed neutral set.
+vertical's own Direct exposed names, except for the typed SDK's fixed neutral
+core catalog.
 
 - **`direct`** — the vertical's pack as provider-visible function tools. No
   `exec`/`wait`.
@@ -5948,6 +5945,20 @@ vertical's own Direct exposed names — never a renamed neutral set.
   `max_output_bytes` defaults to and is capped at 1 MiB. Steer preemption
   yields the observation without killing the cell. Agent/process awaits
   may be called inside Python cells, just as in JavaScript.
+
+- **`py-sdk`** — root-only typed Python on the same Monty worker, with just
+  `run_py`. Cells are type-checked before I/O, start with fresh globals, and
+  preserve only session-owned `state` values. The base instruction replaces
+  the family base, names the typed namespaces, requires awaited I/O, directs
+  long work to `proc.start`, and states processes have full user authority.
+  Core tools only: this root does not open a topology even when subagents are
+  enabled globally; child templates and optional namespaces are refused.
+  The host-wake paragraph uses `proc.join`.
+  Routes must admit ordinary structured tools and an exact Direct-capable
+  configuration; refusals occur before inference. `plakous-default` never
+  chooses the SDK.
+  The TUI uses the ordinary tool row for `run_py`, with safely fenced Python
+  source and bounded output; it needs no SDK-specific row type.
 
 Both PTC harnesses tell the model that if the user supplies JavaScript or
 Python, it calls the cell tool with that source rather than echoing it as
@@ -5998,7 +6009,10 @@ no table here restates numbers that move with every prompt edit.
 
 Nineteen route families times four scenarios is the 76-route matrix, with the
 one documented exclusion that `native-ptc` is enrolled only for Codex Code
-Mode.
+Mode. Ten direct-API rows and nine SDK single-agent roots bring the complete
+matrix to 95 routes. SDK rows cover the three native accounts, the three
+OpenRouter wires and the three direct-API accounts; they do not replace or
+change the existing 86 route pins.
 
 Two footprint budgets are normative, in approximate tokens, over the harness
 environment as defined above:

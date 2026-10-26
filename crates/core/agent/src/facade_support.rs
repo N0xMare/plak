@@ -6,6 +6,15 @@
 
 use std::sync::Arc;
 
+/// Seeds validated session-owned named state at the new session's genesis.
+#[must_use]
+pub fn agent_builder_with_named_state(
+    builder: AgentBuilder,
+    state: crate::manifest::NamedState,
+) -> AgentBuilder {
+    builder.seed_named_state(state)
+}
+
 use crate::internal::{Agent, AgentBuilder, AgentError, SessionStoreCapacity, SessionStoreError};
 pub use crate::internal::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason,

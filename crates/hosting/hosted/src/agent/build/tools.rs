@@ -18,7 +18,7 @@ use plakous::tools::{
     CodexNativeLocalCodeModeV1, CodingPresentation, CompiledSurface, CompositionRuntime,
     FrozenToolRegistry, InMemoryPlanState, PROCESS_TOOL_PROJECTION_REVISION, PlanStateIdentity,
     ProcessSessionTools, ProductJavaScriptCompositionV1, ProviderModelProjectionIdentityV2,
-    PythonPtcV1, ToolProjectionMap, ToolRegistryBuilder,
+    PythonHarnessSdkV1, PythonPtcV1, ToolProjectionMap, ToolRegistryBuilder,
     process_presentation_candidate_with_extensions_v2,
 };
 use std::path::Path;
@@ -57,7 +57,7 @@ pub(crate) fn coding_tool_registry_with_extensions(
     plakous::tools::register_packs(
         &plakous::tools::standard_coding_packs(
             Arc::new(InMemoryPlanState::with_identity(identity)),
-            process,
+            Arc::clone(&process),
         ),
         &mut builder,
     )
@@ -81,6 +81,11 @@ pub(crate) fn coding_tool_registry_with_extensions(
         CompositionSelection::PyPtc => {
             PythonPtcV1::register_markers_into(&mut builder)
                 .map_err(|_| CliFailure::new("product Python markers could not be initialized"))?;
+        }
+        CompositionSelection::PySdk => {
+            PythonHarnessSdkV1::register_into(&mut builder, process).map_err(|error| {
+                CliFailure::new(format!("Python SDK registration is invalid: {error}"))
+            })?;
         }
         CompositionSelection::FollowCatalog | CompositionSelection::NativePtc => {}
     }
@@ -250,6 +255,9 @@ pub fn spawn_child_composition(
             _ => parent_composition,
         },
     };
+    if child_composition == CompositionSelection::PySdk {
+        return Err("spawn child: py-sdk is root-only and has no child result channel".into());
+    }
     if child_composition == CompositionSelection::NativePtc
         && target_provider != NativeProvider::Codex
     {

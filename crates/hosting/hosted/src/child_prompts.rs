@@ -18,13 +18,18 @@ pub enum ChildAssignmentStartKind {
 
 impl ChildAssignmentStartKind {
     /// The Start template one composition's children are given.
-    #[must_use]
-    pub const fn from_composition(composition: Composition) -> Self {
-        match composition {
+    ///
+    /// # Errors
+    /// Refuses root-only compositions without a child result channel.
+    pub const fn from_composition(composition: Composition) -> Result<Self, &'static str> {
+        Ok(match composition {
             Composition::PythonCell => Self::PyPtc,
             Composition::NativeCell | Composition::JavaScriptCell => Self::ToolsPtc,
             Composition::Direct => Self::Direct,
-        }
+            Composition::PythonSdk => {
+                return Err("py-sdk is root-only and has no child result channel");
+            }
+        })
     }
 }
 

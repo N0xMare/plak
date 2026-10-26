@@ -20,6 +20,8 @@ pub enum Composition {
     JavaScriptCell,
     /// The node calls tools inside a Python cell.
     PythonCell,
+    /// The node uses the typed, fresh-cell Python harness SDK.
+    PythonSdk,
 }
 
 /// A child's capability ceiling, as its Start prompt says it.

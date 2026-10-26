@@ -71,7 +71,11 @@ fn apply_draft(template: &mut AgentTemplate, draft: RootBindingDraft) {
 
 impl RootBindingEdit for OpenProductRootBinding {
     fn current(&self) -> Option<RootBindingDraft> {
-        self.config.root_template().map(draft_from)
+        self.config.root_template().map(|template| {
+            let mut draft = draft_from(template);
+            draft.composition = self.config.root_composition.or(draft.composition);
+            draft
+        })
     }
 
     fn composition_for(
@@ -82,13 +86,14 @@ impl RootBindingEdit for OpenProductRootBinding {
         self.config.composition_for_tuple(account, model)
     }
 
-    fn commit(self: Box<Self>, draft: RootBindingDraft) -> Result<(), RootBindingSaveError> {
+    fn commit(self: Box<Self>, mut draft: RootBindingDraft) -> Result<(), RootBindingSaveError> {
         let mut config = self.config;
         // A bind stages a fresh template; config.toml publishes its pointer.
         // A bind with no account or model clears only that pointer.
         if draft.account.is_empty() || draft.model.is_empty() {
             config.clear_root_binding();
         } else {
+            config.root_composition = draft.composition.take();
             apply_draft(config.root_template_mut(), draft);
         }
         // Inside a trusted project the save lands in the project override —

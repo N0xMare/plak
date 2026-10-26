@@ -866,7 +866,10 @@ pub(super) fn api_root_binding(
         (_, CompositionSelection::FollowCatalog | CompositionSelection::Direct) => {
             CompositionSelection::Direct
         }
-        (_, CompositionSelection::JsPtc | CompositionSelection::PyPtc) => composition,
+        (
+            _,
+            CompositionSelection::JsPtc | CompositionSelection::PyPtc | CompositionSelection::PySdk,
+        ) => composition,
         (_, CompositionSelection::NativePtc) => {
             return Err(crate::binding::OPENROUTER_NATIVE_PTC_REFUSAL);
         }

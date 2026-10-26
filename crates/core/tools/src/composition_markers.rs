@@ -641,6 +641,8 @@ pub enum CompositionRuntime {
     ProductJavaScript,
     /// Product Python (`py-ptc`): `exec_py` and `wait_py`.
     PythonPtc,
+    /// Root-only typed Python harness SDK (`py-sdk`): `run_py`.
+    PythonHarnessSdk,
 }
 
 impl CompositionRuntime {
@@ -651,11 +653,12 @@ impl CompositionRuntime {
             Self::CodexNative => "native-ptc",
             Self::ProductJavaScript => "js-ptc",
             Self::PythonPtc => "py-ptc",
+            Self::PythonHarnessSdk => "py-sdk",
         }
     }
 
-    /// The runtime's two provider-visible markers: its run marker, then its
-    /// wait marker. This is the one marker vocabulary; a product selection
+    /// The runtime's provider-visible markers: its run marker, then its
+    /// optional wait marker. This is the one marker vocabulary; a product selection
     /// names its outer tools through it.
     #[must_use]
     pub const fn marker_names(self) -> &'static [&'static str] {
@@ -669,6 +672,7 @@ impl CompositionRuntime {
                 PRODUCT_JAVASCRIPT_WAIT_NAME_V1,
             ],
             Self::PythonPtc => &[PYTHON_PTC_RUN_NAME_V1, PYTHON_PTC_WAIT_NAME_V1],
+            Self::PythonHarnessSdk => &["run_py"],
         }
     }
 
@@ -680,16 +684,6 @@ impl CompositionRuntime {
     ///
     /// Returns an invalid-definition error if a marker name cannot be a tool name.
     pub fn marker_presentations(self) -> Result<Vec<NamespacePresentation>, ToolRuntimeError> {
-        let &[run, wait] = self.marker_names() else {
-            return Err(ToolRuntimeError::new(
-                ToolRuntimeErrorKind::InvalidDefinition,
-                "a composition runtime has exactly two outer markers",
-            ));
-        };
-        let run_slots: &[&str] = match self {
-            Self::PythonPtc => &[PYTHON_PTC_RUN_NAME_V1, PYTHON_PTC_CUSTOM_RUN_MARKER_NAME_V1],
-            Self::CodexNative | Self::ProductJavaScript => &[run],
-        };
         let marker = |exposed: &str, slots: &[&str]| -> Result<_, ToolRuntimeError> {
             Ok(NamespacePresentation::new(
                 PresentationProvider::Runtime(self.name()),
@@ -700,7 +694,18 @@ impl CompositionRuntime {
                     .collect::<Result<Vec<_>, _>>()?,
             ))
         };
-        Ok(vec![marker(run, run_slots)?, marker(wait, &[wait])?])
+        self.marker_names()
+            .iter()
+            .enumerate()
+            .map(|(index, &name)| {
+                let slots: &[&str] = if self == Self::PythonPtc && index == 0 {
+                    &[PYTHON_PTC_RUN_NAME_V1, PYTHON_PTC_CUSTOM_RUN_MARKER_NAME_V1]
+                } else {
+                    &[name]
+                };
+                marker(name, slots)
+            })
+            .collect()
     }
 }
 

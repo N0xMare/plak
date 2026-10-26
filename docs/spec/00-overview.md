@@ -180,18 +180,17 @@ Monty worker package needs.
 ## Persisted versions
 
 The workspace release is **0.0.2**. The current versions below are the 0.0.2
-state tuple; 0.0.1 state is not opened. Carry a 0.0.1 session with `/reload`
-from the running old build, or export it with the 0.0.1 binary and import its
-v7 document with 0.0.2 (§2.5.1 of chapter 02).
+state tuple; older state is not opened. This build imports export documents
+of versions 8 and 9 only (§2.5.1 of chapter 02).
 
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **26** |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **33** (the named-state manifest, checkpoint integrity and commit identity encodings, the unified v3 cell descriptor identities, the Python cell-worker engine, artifact and containment identities, cell-protocol engine contracts and the Code Mode descriptor identities that name the cell worker revision, inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
-| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
+| Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **34** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **9** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
-| Session export document | Plak | version **8**, imports **8** and **7** |
+| Session export document | Plak | version **9**, imports **9** and **8** |
 
 Tree schema 9 records candidate `target_before` provenance and each workspace's
 `input_candidate_id`; retained snapshots have independent Git-backend pins.
@@ -204,10 +203,10 @@ and submit-result replay receipts keep a digest summary. Provisional wait
 receipts retain the exact views they returned.
 The canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Builds open
-only their current version tuple as state authority. Export v8 carries
-conversation history and CarryBinding, not tree seal outcomes. Its v8
-history encoding also preserves exact account/model replay scope; the v7
-importer keeps accountless material unbound rather than retagging it.
+only their current version tuple as state authority. Export v9 carries
+conversation history, CarryBinding (including `py-sdk`) and session-owned
+named state, not tree seal outcomes. Its history preserves exact account/model
+replay scope. The v8 importer starts with empty named state; v7 is refused.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the
@@ -216,7 +215,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r26.e33.p33.t9`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r26.e33.p34.t9`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

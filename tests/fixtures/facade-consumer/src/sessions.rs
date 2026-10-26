@@ -14,6 +14,9 @@ pub(crate) fn surface_is_nameable() {
     let _ = |history: plakous::sessions::PortableSessionHistory| {
         history.without_replay().map(|history| history.with_replay_validation())
     };
+    let _ = |history: plakous::sessions::PortableSessionHistory| {
+        history.with_named_state(Default::default()).and_then(|history| history.named_state())
+    };
     let _ = |session: &plakous::sessions::OpenedSession| {
         let _: Option<&plakous::agent::AgentError> = session.replay_validation_error();
     };

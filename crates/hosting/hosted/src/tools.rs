@@ -311,7 +311,27 @@ pub(crate) fn product_surface_with_fence(
     fence: crate::agent::SessionToolFence,
     runtime: Option<plakous::tools::CompositionRuntime>,
 ) -> CliResult<CompiledSurface> {
-    let mut packs = standard_coding_menus(job_config);
+    let mut packs = if runtime == Some(plakous::tools::CompositionRuntime::PythonHarnessSdk) {
+        if fence != crate::agent::SessionToolFence::Full || extensions.names().next().is_some() {
+            return Err(CliFailure::new(
+                "py-sdk requires a single-agent root with core tools only; topology, child tiers and optional tools are unavailable",
+            ));
+        }
+        let descriptor = plakous::tools::PythonHarnessSdkV1::compile(
+            job_config,
+            registry.clone(),
+            target.clone(),
+        )
+        .map_err(|error| CliFailure::new(format!("Python SDK catalog is invalid: {error}")))?;
+        let names = descriptor
+            .nested_projection()
+            .entries()
+            .iter()
+            .map(|entry| entry.exposed_name().clone());
+        vec![Arc::new(PassthroughPack::new(names)) as Arc<dyn ToolPack>]
+    } else {
+        standard_coding_menus(job_config)
+    };
     packs.push(Arc::new(extensions.clone()));
     packs.push(Arc::new(ProductAgreementPack::with_host_wake(
         extensions.host_facts.host_wakes,
