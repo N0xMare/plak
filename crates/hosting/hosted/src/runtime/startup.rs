@@ -543,12 +543,10 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
             )));
         }
     };
-    if !FreshNativeBinding::from_resolved(previous)?
-        .admits(&FreshNativeBinding::from_resolved(&fresh)?)
-    {
-        return Err(CliFailure::new(format!(
-            "exact reopen refused: {label} is bound to a different account, login, or model; log in to the original account with `plak login {account}`, or carry the history into a new session"
-        )));
+    let previous_binding = FreshNativeBinding::from_resolved(previous)?;
+    let fresh_binding = FreshNativeBinding::from_resolved(&fresh)?;
+    if !previous_binding.admits(&fresh_binding) {
+        return Err(previous_binding.refusal(&fresh_binding, label, account));
     }
     let HostTargetAuthority::Native { resolved, .. } = &mut config.target else {
         unreachable!("the native target was checked above");
@@ -600,6 +598,23 @@ pub(super) struct FreshNativeBinding {
 }
 
 impl FreshNativeBinding {
+    fn refusal(&self, fresh: &Self, label: &str, account: &str) -> CliFailure {
+        if self.selected == fresh.selected
+            && self.effective == fresh.effective
+            && self.account == fresh.account
+            && self.credential_authority == fresh.credential_authority
+            && self.selection != fresh.selection
+        {
+            CliFailure::new(format!(
+                "exact reopen refused: {label} login selection changed; use /reload or /rebind to carry the history under the current login; Fork now is available only while attached"
+            ))
+        } else {
+            CliFailure::new(format!(
+                "exact reopen refused: {label} is bound to a different account or model; restore the original account and configuration with `plak login {account}`, or use /rebind to carry the history into a new session"
+            ))
+        }
+    }
+
     pub(super) fn from_resolved(provider: &ResolvedProvider) -> CliResult<Self> {
         Ok(Self {
             selected: provider.configuration().selected_identity(),

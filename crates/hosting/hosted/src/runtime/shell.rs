@@ -600,6 +600,10 @@ pub(super) fn attach_repair_guidance(detail: &str) -> String {
         || detail.contains("Python host is unavailable")
     {
         "fix: set PLAK_PY_HOST or place plakous-py-host beside plak, then /attach"
+    } else if detail.contains("login selection changed") {
+        "fix: the live login-selection fence changed; use /reload or /rebind to carry this history under the current login; logging in to the same account cannot restore the old selection"
+    } else if detail.contains("provider account changed") || detail.contains("AccountChanged") {
+        "fix: log in to the original account to reopen exactly, or use /rebind to carry this history into a new session under the newly logged-in account"
     } else if detail.contains("bound to a different")
         || detail.contains("binding mismatch")
         || detail.contains("explicit rebind required")

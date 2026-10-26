@@ -756,6 +756,7 @@ struct FakeBackend {
     revoke_refused: bool,
     refresh_failure: Option<&'static str>,
     access_token_expired: bool,
+    host_identity_unavailable: bool,
 }
 
 impl FakeBackend {
@@ -778,6 +779,7 @@ impl FakeBackend {
             revoke_refused: false,
             refresh_failure: None,
             access_token_expired: false,
+            host_identity_unavailable: false,
         }
     }
 }
@@ -915,6 +917,10 @@ impl AccountOps for FakeBackend {
             .unwrap_or(commands::application::LoginOutcome::Completed(
                 self.terminal,
             )))
+    }
+
+    fn record_login_host(&mut self, _provider: NativeProvider) -> bool {
+        !self.host_identity_unavailable
     }
 
     fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
@@ -2069,6 +2075,25 @@ fn invoke(
         &mut commands::login_flow::TestLoginUi::default(),
     );
     (result, stdout, stderr)
+}
+
+#[test]
+fn successful_login_stays_ready_when_host_identity_is_unavailable() {
+    let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+    backend.host_identity_unavailable = true;
+    let (result, _, stderr) = invoke(
+        Command::AuthLogin {
+            provider: NativeProvider::Claude,
+            mode: NativeLoginMode::Remote,
+        },
+        &mut backend,
+        b"fixture-code\n",
+    );
+    assert!(result.is_ok(), "{result:?}");
+    let stderr = String::from_utf8(stderr).unwrap();
+    assert!(stderr.contains("login succeeded"));
+    assert!(stderr.contains("host login provenance unavailable; credential is ready"));
+    assert!(!stderr.contains("machine-id"));
 }
 
 fn status_report(backend: &mut FakeBackend, paths: &product_paths::PlakPaths) -> String {

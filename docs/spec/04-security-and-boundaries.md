@@ -564,12 +564,17 @@ per-provider lock files. `XDG_STATE_HOME` must be
 absolute; otherwise `$HOME/.local/state` is used, and `HOME` must be absolute
 too.
 
-A successful Plak native login also writes `login-host` in that provider's
-credential directory, through the same private atomic metadata writer. Its
+A successful Plak product login also attempts to write `login-host` in that
+provider's credential directory, as private product metadata. Its
 versioned text contains the SHA-256 of `plak-login-host-v1`, NUL, and the
 platform-tagged host identity (Linux machine-id or macOS platform UUID), not
-credential material. Only login writes it; refresh never certifies a copied
-directory. Harbor verifies this marker against the current host before any
+credential material. Host identity reads and the macOS subprocess run on a
+blocking worker, never inside the published facade's async login ladder.
+Marker failure is best-effort: the credential remains Ready and login succeeds
+with a content-free warning; an unavailable identity removes any stale marker.
+A missing marker only makes Harbor refuse, never normal Plak authentication.
+Only product login writes it; refresh never certifies a copied directory.
+Harbor verifies this marker against the current host before any
 refresh or upload, including after taking its trial lock, and refuses absent
 or foreign provenance with a local-login remedy. This is an accidental-copy
 guard, not a boundary against an operator who can rewrite the marker. One login

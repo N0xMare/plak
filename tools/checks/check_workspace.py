@@ -493,6 +493,10 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
     ("plak", "src/commands/support.rs"): [
         ("std::process::Command", (("string", "/bin/sh"),)),
     ],
+    # Product-only, best-effort local host provenance for Harbor login pins.
+    ("plak", "src/commands/login_host.rs"): [
+        ("std::process::Command", (("string", "/usr/sbin/ioreg"),)),
+    ],
     # Carry-forward asks the installed `plak` for its reload verdict (the
     # destination/config and carry-capacity probes, then the bare state-key
     # fallback) and has a kept

@@ -21,6 +21,11 @@ foreign-host directory before any host refresh or upload. Log in locally to
 create it; do not copy or manufacture the marker. Native comparator stores must
 likewise come from their own login, not a copy of Plak's credentials.
 
+Pre-existing Plak logins lack this marker and need one local `plak login
+<account>` before Harbor trials. If host identity is unavailable (for example
+an uninitialized container machine-id), normal login still succeeds and the
+credential is Ready, but Harbor refuses until a login can write provenance.
+
 - Python 3.12 or newer on `PATH`, a local Docker daemon with buildx, and [uv](https://docs.astral.sh/uv/).
   Harbor is pinned at 0.23.0 in `eval/pyproject.toml` and always runs through
   `uv run --project eval`, never a global `harbor`.

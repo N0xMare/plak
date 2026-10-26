@@ -6132,7 +6132,10 @@ turns. Those captures are witnesses, not a target and not a benchmark.
 
 Plak attaches a telemetry sink to every runtime it constructs — `plak run`,
 `plak agent`, and the TUI — and persists two families of typed, content-free
-observations into `telemetry/telemetry-v<schema>.sqlite3`. Each schema version
+observations into `telemetry/telemetry-v<schema>.sqlite3`. The one bounded
+provider-prose exception is the credential-filtered OAuth refresh
+`oauth_error_description`; it contains printable ASCII only, never raw bodies
+or token fields. Each schema version
 has its own file; builds never destructively rebuild another schema. Old and
 legacy files remain untouched and doctor reports them for explicit removal.
 The library's sink and its lifecycle
@@ -6398,10 +6401,11 @@ is never provider staleness. Shared Ready leases do not block a credential-free 
 `Busy` means local writer or refresh contention: a writer's brief record
 replacement, or a refresh claim still in flight in this or another process,
 which is not reported as a quarantine. Usage prepares its manager and snapshots
-the consent and credential generations under the compatibility lock, then
+the consent and credential generations under the compatibility lock, with a
+100 ms try-lock retry budget before reporting Busy, then
 releases that guard before network I/O. The provider's Ready lease still
 protects the credential across processes. After the read, Usage reacquires the
-compatibility lock and discards an observation whose consent or credential
+compatibility lock with the same bounded wait and discards an observation whose consent or credential
 generation changed. Sibling providers' concurrent network reads do not make
 one another Busy. The line does not guess which process holds a credential:
 `the subscription credential is busy (usage read, login, or refresh); nothing
@@ -6881,7 +6885,8 @@ the telemetry schema cannot be read.
 Refresh failure rows also retain the provider's OAuth `error` code (at most
 32 bytes) and sanitized `error_description` (at most 112 bytes on the telemetry
 lane). Parsing is bounded; only those two fields are considered, control
-characters are stripped, and token-looking values are redacted before
+characters and non-ASCII characters (including Unicode format/bidi/zero-width
+characters) are stripped, and token-looking values are redacted before
 truncation. Raw bodies, token fields and headers are never recorded. All three
 native providers use this path. Doctor and status show the available failure
 code, description, time and claimed generation; absent fields are explicitly

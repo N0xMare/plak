@@ -273,6 +273,12 @@ pub trait AccountOps {
         response: LoginResponse<'_>,
     ) -> CliResult<LoginOutcome>;
 
+    /// Best-effort product-only provenance for Harbor. Failure never changes
+    /// the successfully persisted credential or its Ready outcome.
+    fn record_login_host(&mut self, _provider: NativeProvider) -> bool {
+        true
+    }
+
     fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
 
     /// Claims one refresh grant regardless of expiry; returns the new state
@@ -653,6 +659,20 @@ impl AccountOps for PlakousApplication {
             .map(credential_state)
             .map(LoginOutcome::Completed)
             .map_err(|error| self.subscription_failure(error, Some(provider)))
+    }
+
+    fn record_login_host(&mut self, provider: NativeProvider) -> bool {
+        let directory = self
+            .state_home
+            .join("plak/subscriptions")
+            .join(provider.as_str());
+        self.executor
+            .block_on(async move {
+                tokio::task::spawn_blocking(move || super::login_host::record(&directory))
+                    .await
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
     }
 
     fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {

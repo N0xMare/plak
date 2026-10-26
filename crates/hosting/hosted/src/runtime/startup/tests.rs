@@ -216,9 +216,24 @@ fn exact_native_refresh_preserves_semantics_and_account_with_monotonic_generatio
     fresh.credential_authority = old.credential_authority;
     fresh.selection = digest(DigestDomain::ModelBinding, b"relogin epoch");
     assert!(!old.admits(&fresh));
+    assert!(
+        old.refusal(&fresh, "Codex", "codex")
+            .message()
+            .contains("login selection changed")
+    );
+    assert!(
+        !old.refusal(&fresh, "Codex", "codex")
+            .message()
+            .contains("plak login")
+    );
     fresh.selection = old.selection;
     fresh.effective = effective(b"changed model semantics");
     assert!(!old.admits(&fresh));
+    assert!(
+        old.refusal(&fresh, "Claude", "claude")
+            .message()
+            .contains("original account and configuration")
+    );
     fresh.effective = old.effective;
     fresh.selected = selected(b"changed selection");
     assert!(!old.admits(&fresh));

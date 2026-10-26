@@ -573,6 +573,10 @@ a new session under current configuration and login. This works while the root
 is unattached; `/reload` from that binding refusal takes the same carry path.
 Both refuse live children and background processes. `/agents` is not a repair
 for a frozen binding mismatch.
+For Codex/Grok, a new login changes the live login-selection fence even for the
+same account. Re-login cannot restore that old selection: use `/reload` or
+`/rebind` to carry history. **Fork now** is an alternative only while the source
+is attached; an unattached session with history refuses it and needs the carry.
 `plak doctor` and `plak status` show the sanitized last refresh failure with its
 time and credential generation; no raw response body or token is retained.
 After fixing the login, retry the prompt: it reads the catalog afresh rather

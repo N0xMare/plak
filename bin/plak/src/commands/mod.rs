@@ -12,6 +12,7 @@ pub(crate) mod doctor;
 pub mod host_config;
 pub mod login;
 pub(crate) mod login_flow;
+mod login_host;
 pub(crate) mod mcp;
 pub(crate) mod mcp_login;
 #[cfg(feature = "maintainer")]

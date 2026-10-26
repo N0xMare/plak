@@ -23,6 +23,23 @@ impl UsageReader {
 }
 
 impl NativeSubscriptions {
+    async fn usage_lock(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<PrivateFilesystemLock, SubscriptionUsageUnavailable> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(100);
+        loop {
+            match self.try_acquire_compatibility_lock(provider).await {
+                Ok(Some(lock)) => return Ok(lock),
+                Err(_) => return Err(SubscriptionUsageUnavailable::LocalState),
+                Ok(None) if tokio::time::Instant::now() >= deadline => {
+                    return Err(SubscriptionUsageUnavailable::Busy);
+                }
+                Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(5)).await,
+            }
+        }
+    }
+
     /// Performs one observational subscription allowance read, with one claimed
     /// refresh and retry if the endpoint rejects the access token. Provider
     /// credential leases protect the network read; the compatibility guard is
@@ -55,10 +72,11 @@ impl NativeSubscriptions {
         provider: NativeProvider,
         refresh: bool,
     ) -> SubscriptionUsageRead {
-        // Blocking acquisition is confined to local snapshot work. Sibling
-        // providers queue briefly rather than misreporting one another as Busy.
-        let Ok(lock) = self.acquire_compatibility_lock(provider).await else {
-            return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
+        // A pending login may retain this guard through a browser wait. Local
+        // siblings can settle, but Usage never waits indefinitely on login.
+        let lock = match self.usage_lock(provider).await {
+            Ok(lock) => lock,
+            Err(reason) => return self.usage_unavailable(reason),
         };
         if refresh
             && !matches!(
@@ -130,8 +148,9 @@ impl NativeSubscriptions {
         };
         drop(lock);
         let observation = read.await;
-        let Ok(lock) = self.acquire_compatibility_lock(provider).await else {
-            return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
+        let lock = match self.usage_lock(provider).await {
+            Ok(lock) => lock,
+            Err(reason) => return self.usage_unavailable(reason),
         };
         match self.usage_snapshot(provider).await {
             Ok(after) if before == after && lock.verify().is_ok() => observation,

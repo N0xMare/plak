@@ -76,6 +76,12 @@ pub(crate) fn auth_login(
     .map_err(|failure| failure.or_kind(CliFailureKind::Auth))?;
     let status = super::login_flow::perform_login(backend, provider, mode, stdin, stderr, ui)?;
     require_ready(provider, status)?;
+    if !backend.record_login_host(provider) {
+        let _ = writeln!(
+            stderr,
+            "warning: host login provenance unavailable; credential is ready, but Harbor trials require a login with host identity available"
+        );
+    }
     writeln!(stderr)
         .and_then(|()| {
             writeln!(

@@ -25,7 +25,10 @@ pub(super) fn decode(body: &[u8]) -> (Option<String>, Option<String>) {
 }
 
 fn sanitize_description(value: &str) -> String {
-    let clean: String = value.chars().filter(|c| !c.is_control()).collect();
+    let clean: String = value
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_ascii_control())
+        .collect();
     let mut output = String::new();
     for word in clean.split_whitespace() {
         let token =
@@ -72,12 +75,13 @@ mod tests {
     fn oauth_error_strips_controls_and_bounds_fields() {
         let body = serde_json::json!({
             "error": "invalid_grant",
-            "error_description": format!("rejected\n\u{1b} {}", "word ".repeat(200)),
+            "error_description": format!("rejected\n\u{1b}\u{202e}\u{200b} {}", "word ".repeat(200)),
         });
         let (_, description) = decode(body.to_string().as_bytes());
         let description = description.unwrap_or_default();
         assert!(description.len() <= 112);
         assert!(!description.chars().any(char::is_control));
+        assert!(description.is_ascii());
         assert_eq!(decode(br#"{"error":"sk-secret"}"#).0, None);
     }
 }

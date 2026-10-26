@@ -244,6 +244,8 @@ impl App {
         if self.phase == "not_ready"
             && let Some(cause) = self.status_detail.clone().filter(|detail| {
                 detail.contains("bound to a different")
+                    || detail.contains("login selection changed")
+                    || detail.contains("provider account changed")
                     || detail.contains("binding mismatch")
                     || detail.contains("explicit rebind required")
                     || detail.contains("different account")

@@ -1041,11 +1041,10 @@ async fn subscription_usage_dispatches_native_providers_without_unqualified_clau
     Ok(())
 }
 
-/// Local preparation queues behind a peer's compatibility mutation, rather
-/// than returning Busy for a different provider.
+/// A pending browser login cannot make Usage wait for its whole lifetime.
 #[cfg(unix)]
 #[tokio::test]
-async fn subscription_usage_waits_while_a_sibling_holds_the_compatibility_lock()
+async fn subscription_usage_bounds_wait_while_a_login_holds_the_compatibility_lock()
 -> Result<(), Box<dyn Error>> {
     let root = unique_test_root("usage-busy-sibling")?;
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
@@ -1055,16 +1054,21 @@ async fn subscription_usage_waits_while_a_sibling_holds_the_compatibility_lock()
     let subscriptions = NativeSubscriptions::new(paths).with_clock(Arc::new(
         plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
     ));
-    let read = subscriptions.subscription_usage(NativeProvider::Xai);
-    tokio::pin!(read);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(20), &mut read)
-            .await
-            .is_err()
-    );
+    let read = tokio::time::timeout(
+        Duration::from_secs(1),
+        subscriptions.subscription_usage(NativeProvider::Xai),
+    )
+    .await?;
+    assert!(matches!(
+        read,
+        SubscriptionUsageRead::Unavailable {
+            reason: SubscriptionUsageUnavailable::Busy,
+            ..
+        }
+    ));
     drop(held);
     assert!(matches!(
-        read.await,
+        subscriptions.subscription_usage(NativeProvider::Xai).await,
         SubscriptionUsageRead::Unavailable { reason, .. }
             if reason != SubscriptionUsageUnavailable::Busy
                 && reason != SubscriptionUsageUnavailable::Transport(None)

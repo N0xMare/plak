@@ -8417,7 +8417,8 @@ not credential recovery or admission authority.
 OAuth refresh rejection metadata is the one bounded provider-prose diagnostic
 on this lane: the OAuth error code (32 bytes) and credential-filtered description
 (112 bytes) occupy fixed-size copyable storage. Only the two named OAuth fields
-are parsed from a bounded error body, control characters are stripped and
+are parsed from a bounded error body, only printable ASCII is retained (no
+control or Unicode format/bidi/zero-width characters), and
 token-looking values are redacted before truncation. Tokens, raw bodies and
 headers cannot be retained in these fields. Native Codex, Claude and xAI all
 report this evidence, including the time and claimed generation already carried

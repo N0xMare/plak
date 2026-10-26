@@ -249,6 +249,9 @@ Refresh tokens rotate: refreshing a copied directory can invalidate the source
 machine's login. Harbor requires the host provenance marker written by a local
 `plak login <account>` and refuses copied or unmarked directories before refresh
 or upload. Log in again on that machine; do not manufacture or copy the marker.
+Pre-existing logins need one local `plak login <account>` before Harbor trials.
+If host identity is unavailable, normal login still succeeds with a warning;
+the missing marker only prevents Harbor trials, not ordinary Plak use.
 
 A Codex login made by an earlier Plak build must be redone once: run
 `plak login codex`, which replaces it locally. Until then `plak status` shows

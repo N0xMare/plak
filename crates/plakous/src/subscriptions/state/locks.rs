@@ -78,7 +78,7 @@ pub(super) fn acquire_private_filesystem_lock(
     acquire_private_filesystem_lock_inner(path, false)?.ok_or(NativeSubscriptionError::Internal)
 }
 
-#[cfg(all(unix, test))]
+#[cfg(unix)]
 pub(super) fn try_acquire_private_filesystem_lock(
     path: &Path,
 ) -> Result<Option<PrivateFilesystemLock>, NativeSubscriptionError> {
@@ -177,7 +177,7 @@ pub(super) fn acquire_private_filesystem_lock(
     Err(NativeSubscriptionError::UnsupportedPlatform)
 }
 
-#[cfg(all(not(unix), test))]
+#[cfg(not(unix))]
 pub(super) fn try_acquire_private_filesystem_lock(
     _path: &Path,
 ) -> Result<Option<PrivateFilesystemLock>, NativeSubscriptionError> {

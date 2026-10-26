@@ -902,7 +902,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         Ok(HostStep::Continue)
     }
 
-    /// Rebuild only stale Codex or xAI dispatch authority before context/compaction or
+    /// Rebuild stale native dispatch authority before context/compaction or
     /// admission. Exact reopen owns the semantic comparison and historical
     /// obligations; ordinary rebind would publish a new branch/tree epoch.
     pub(super) fn refresh_native_authority_before_prompt(&mut self) -> CliResult<()> {
