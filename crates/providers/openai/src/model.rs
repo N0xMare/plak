@@ -1216,7 +1216,8 @@ impl LanguageModel for OpenAiLanguageModel {
 /// Token estimate for the exact serialized Codex request body.
 ///
 /// Ordinary items match the pinned Codex client: `ceil(utf8_bytes / 4)`.
-/// Native `{type:compaction}` items use the same client's encrypted-reasoning
+/// Encrypted reasoning and native compaction items use the same client's
+/// encrypted-reasoning
 /// heuristic: `ceil((len*3/4 − 650) / 4)` of `encrypted_content`.
 /// Whole-body ceil/4 of ciphertext JSON is not that envelope.
 #[cfg(feature = "native-auth")]
@@ -1237,7 +1238,8 @@ fn codex_encrypted_item_visible_bytes(encrypted_len: u64) -> Option<u64> {
 
 /// Reference-client complete-input tokens for one serialized Codex body.
 ///
-/// Compaction items are substituted with [`codex_encrypted_item_visible_bytes`]
+/// Reasoning and compaction items with encrypted content are substituted with
+/// [`codex_encrypted_item_visible_bytes`]
 /// before the ordinary `ceil(bytes/4)` bound. Missing/unparseable bodies stay
 /// on the naive whole-body bound.
 #[cfg(feature = "native-auth")]
@@ -1252,7 +1254,10 @@ pub(crate) fn codex_reference_client_input_tokens(body: &[u8]) -> Option<u64> {
     let mut json_bytes = 0_u64;
     let mut visible_bytes = 0_u64;
     for item in input {
-        if item.get("type").and_then(serde_json::Value::as_str) != Some("compaction") {
+        if !matches!(
+            item.get("type").and_then(serde_json::Value::as_str),
+            Some("compaction" | "reasoning")
+        ) {
             continue;
         }
         let Some(encrypted) = item
@@ -2616,46 +2621,67 @@ mod tests {
     }
 
     #[test]
-    fn codex_reference_client_discounts_compaction_ciphertext() -> TestResult {
-        let ciphertext = "A".repeat(100_000);
-        let body = serde_json::to_vec(&serde_json::json!({
-            "model": "gpt-5.4",
-            "input": [
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "continue"}]
-                },
-                {
-                    "type": "compaction",
+    fn codex_reference_client_discounts_encrypted_reasoning_and_compaction() -> TestResult {
+        for kind in ["reasoning", "compaction"] {
+            for length in [0, 867, 868, 100_000] {
+                let ciphertext = "A".repeat(length);
+                let body = serde_json::to_vec(&serde_json::json!({
+                    "model": "gpt-5.4",
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "continue"}]
+                        },
+                        {
+                            "type": kind,
+                            "encrypted_content": ciphertext
+                        }
+                    ],
+                    "stream": true
+                }))?;
+                let naive = codex_complete_input_token_upper_bound(u64::try_from(body.len())?)
+                    .ok_or("naive bound")?;
+                let measured =
+                    codex_reference_client_input_tokens(&body).ok_or("reference-client bound")?;
+                assert!(
+                    measured < naive,
+                    "{kind} ciphertext must not be charged as ordinary JSON utf8/4 ({measured} < {naive})"
+                );
+                let visible = (u64::try_from(length)? * 3 / 4).saturating_sub(650);
+                let item = serde_json::json!({
+                    "type": kind,
                     "encrypted_content": ciphertext
-                }
-            ],
-            "stream": true
-        }))?;
-        let naive = codex_complete_input_token_upper_bound(u64::try_from(body.len())?)
-            .ok_or("naive bound")?;
-        let measured =
-            codex_reference_client_input_tokens(&body).ok_or("reference-client bound")?;
-        assert!(
-            measured < naive,
-            "compaction ciphertext must not be charged as ordinary JSON utf8/4 ({measured} < {naive})"
-        );
-        let visible = (100_000_u64 * 3 / 4).saturating_sub(650);
-        let item = serde_json::json!({
-            "type": "compaction",
-            "encrypted_content": ciphertext
-        });
-        let item_len = u64::try_from(serde_json::to_vec(&item)?.len())?;
-        let adjusted = u64::try_from(body.len())?
-            .checked_sub(item_len)
-            .ok_or("item larger than body")?
-            .checked_add(visible)
-            .ok_or("visible overflow")?;
-        assert_eq!(
-            measured,
-            codex_complete_input_token_upper_bound(adjusted).ok_or("expected bound")?
-        );
+                });
+                let item_len = u64::try_from(serde_json::to_vec(&item)?.len())?;
+                let adjusted = u64::try_from(body.len())?
+                    .checked_sub(item_len)
+                    .ok_or("item larger than body")?
+                    .checked_add(visible)
+                    .ok_or("visible overflow")?;
+                assert_eq!(
+                    measured,
+                    codex_complete_input_token_upper_bound(adjusted).ok_or("expected bound")?
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn codex_reference_meter_does_not_discount_unrecognized_or_missing_ciphertext() -> TestResult {
+        for item in [
+            serde_json::json!({"type":"reasoning","summary":[{"type":"summary_text","text":"visible reasoning"}]}),
+            serde_json::json!({"type":"reasoning","encrypted_content":null}),
+            serde_json::json!({"type":"reasoning","encrypted_content":123}),
+            serde_json::json!({"type":"message","encrypted_content":"A".repeat(10_000)}),
+        ] {
+            let body = serde_json::to_vec(&serde_json::json!({"input":[item]}))?;
+            assert_eq!(
+                codex_reference_client_input_tokens(&body),
+                codex_complete_input_token_upper_bound(u64::try_from(body.len())?)
+            );
+        }
         Ok(())
     }
 

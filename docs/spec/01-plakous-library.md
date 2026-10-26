@@ -8000,10 +8000,13 @@ the native item parses as a JSON object whose `type` is `compaction` and whose
 dropped. The producing dialect, model family, requested model and account
 binding must also match (§10.2); a missing or incompatible binding, malformed
 native item, or ciphertext mismatch refuses preparation as `ProtectedHistory`.
-Codex input
-metering substitutes each such item's serialized bytes with
+Codex input metering substitutes each such compaction item's and each
+`reasoning` item's serialized bytes, when `encrypted_content` is a string, with
 `max(0, len(encrypted_content) * 3 / 4 − 650)` before `ceil(bytes / 4)`,
-matching the official encrypted-reasoning heuristic. The family artifact stays
+matching the pinned Codex `rust-v0.162.1` `estimate_reasoning_length` rule for
+both encrypted Reasoning and Compaction items. The enrolled measurement
+revision is `codex-complete-input-utf8-bytes-div4-encrypted-v6`.
+The family artifact stays
 cleared after a native compaction success: next-turn authorization is the
 request policy plus those type and ciphertext checks, not a continuation id.
 

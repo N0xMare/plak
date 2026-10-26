@@ -182,7 +182,7 @@ const BROWSER_CALLBACK_PATH: &str = CODEX_OAUTH.browser_callback_path;
 const SUBSCRIPTION_INPUT_TOKEN_OVERHEAD: u64 = 512;
 const CODEX_REFERENCE_CAPACITY_REVISION: &str = "codex-reference-input-envelope-v2";
 const CODEX_REFERENCE_MEASUREMENT_REVISION: &str =
-    "codex-complete-input-utf8-bytes-div4-compaction-v5";
+    "codex-complete-input-utf8-bytes-div4-encrypted-v6";
 const RESPONSES_FAMILY_ID: &str = "responses-family";
 const RESPONSES_CANONICAL_PROJECTION_REVISION: &str = "responses-canonical-projection-v4";
 const RESPONSES_EXACT_WIRE_ACCOUNTING_REVISION: &str = "responses-exact-wire-accounting-v3";
