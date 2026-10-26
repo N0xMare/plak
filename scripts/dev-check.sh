@@ -229,6 +229,12 @@ run_group() {
       python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;
     variants)
       echo "== product feature-off builds and clippy: warnings denied =="
+      # A shared sccache server keeps the TMPDIR it started with; if that is a
+      # gate test directory, --fresh can delete its dep-info scratch mid-compile.
+      # Lane runners pin the server to a stable TMPDIR (spec 06); this group
+      # also bypasses the wrapper. Empty overrides Cargo's configured wrapper
+      # too, and only this subshell loses caching.
+      export RUSTC_WRAPPER=
       run_build_denying_warnings python3 tools/checks/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
     rustdoc)
       echo "== rustdoc =="

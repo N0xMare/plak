@@ -100,6 +100,7 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              plak_home=os.environ.get('PLAK_HOME'),
                              rustdocflags=os.environ.get('RUSTDOCFLAGS'),
                              rustflags=os.environ.get('RUSTFLAGS'),
+                             rustc_wrapper=os.environ.get('RUSTC_WRAPPER'),
                              git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
                              git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'),
                              target_rustflags=os.environ.get(
@@ -132,6 +133,7 @@ if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
                               rustflags=os.environ.get('RUSTFLAGS'),
+                              rustc_wrapper=os.environ.get('RUSTC_WRAPPER'),
                               target_rustflags=os.environ.get('CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'),
                               git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
 failure = json.loads(os.environ.get('GATE_PYTHON_FAILURES', '{}')).get(
@@ -187,6 +189,19 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         call = next(call for call in self.python_calls if '--product-builds' in call['python'])
         self.assertEqual(call['target_rustflags'], '-C target-feature=+crt-static -D warnings')
         self.assertEqual(call['rustflags'], 'unused-base-flags')
+
+    def test_variants_bypass_the_compiler_wrapper_without_disabling_other_groups(self):
+        self.env['RUSTC_WRAPPER'] = 'sccache'
+        result, calls, _ = self.run_gate('--steps', 'builds,variants,rustdoc')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        variants = next(call for call in self.python_calls
+                        if '--product-builds' in call['python'])
+        self.assertEqual(variants['rustc_wrapper'], '')
+        builds = [call for call in calls if call['args'][0] == 'build']
+        self.assertEqual(len(builds), len(BUILDS))
+        self.assertTrue(all(call['rustc_wrapper'] == 'sccache' for call in builds))
+        rustdoc = next(call for call in calls if call['args'][0] == 'doc')
+        self.assertEqual(rustdoc['rustc_wrapper'], 'sccache')
 
     @property
     def evidence(self):
