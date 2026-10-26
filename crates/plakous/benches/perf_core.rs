@@ -51,7 +51,7 @@ use tempfile::tempdir;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-const SCHEMA: &str = "plakous.perf-core.v4";
+const SCHEMA: &str = "plakous.perf-core.v5";
 const FIXTURE: &str = "public-facade-dynamic-text-v3";
 const EVENT_FIXTURE: &str = "public-content-event-history-instrumented-v1";
 const FIXTURE_REVISION: u32 = 3;
@@ -389,10 +389,9 @@ async fn measure_event_history(history_turns: usize) {
     let snapshot_clone = snapshot.clone();
     let snapshot_clone_elapsed_ns = snapshot_clone_started.elapsed().as_nanos();
     assert_eq!(snapshot_clone, snapshot);
-    let snapshot_projection_serialized_bytes =
-        serde_json::to_vec(snapshot.conversation().unwrap_or_default())
-            .expect("serialize event snapshot projection")
-            .len();
+    let snapshot_cursor_serialized_bytes = serde_json::to_vec(&snapshot.cursor())
+        .expect("serialize attach cursor")
+        .len();
     let pre_turn_sequence = snapshot.cursor().sequence();
     run_turn(&agent, "event-measured".to_owned()).await;
     let after = agent
@@ -400,10 +399,9 @@ async fn measure_event_history(history_turns: usize) {
         .await
         .expect("post-event content projection");
     let post_turn_sequence = after.snapshot().cursor().sequence();
-    let post_snapshot_projection_serialized_bytes =
-        serde_json::to_vec(after.snapshot().conversation().unwrap_or_default())
-            .expect("serialize post-event snapshot projection")
-            .len();
+    let post_snapshot_cursor_serialized_bytes = serde_json::to_vec(&after.snapshot().cursor())
+        .expect("serialize post-event attach cursor")
+        .len();
     let event_count = serde_json::to_value(post_turn_sequence)
         .expect("serialize post-event sequence")
         .as_u64()
@@ -443,10 +441,10 @@ async fn measure_event_history(history_turns: usize) {
             "snapshot_attach_elapsed_ns": attach_elapsed_ns,
             "snapshot_clone_elapsed_ns": snapshot_clone_elapsed_ns,
             "snapshot_clone_value_equal": true,
-            "snapshot_committed_conversation_items": snapshot.committed_conversation_items(),
-            "snapshot_projection_serialized_bytes": snapshot_projection_serialized_bytes,
-            "post_snapshot_projection_serialized_bytes": post_snapshot_projection_serialized_bytes,
-            "snapshot_projection_serialized_growth_bytes": post_snapshot_projection_serialized_bytes.saturating_sub(snapshot_projection_serialized_bytes),
+            "snapshot_retained_turns": snapshot.turns().len(),
+            "snapshot_cursor_serialized_bytes": snapshot_cursor_serialized_bytes,
+            "post_snapshot_cursor_serialized_bytes": post_snapshot_cursor_serialized_bytes,
+            "snapshot_cursor_serialized_growth_bytes": post_snapshot_cursor_serialized_bytes.saturating_sub(snapshot_cursor_serialized_bytes),
             "retained_bytes": Value::Null,
             "retained_bytes_external_probe": "tests/performance/baselines/perf_allocations.py process-isolated glibc memusage trace; ordinary timing remains uninstrumented",
             "instrumentation_scope": "separate fresh-agent public projection/subscriber workload executed after all primary prompt latency rows",

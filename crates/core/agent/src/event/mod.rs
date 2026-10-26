@@ -13,7 +13,7 @@ pub use hub::subscription::{
 pub(crate) use hub::{EventContext, EventHub, EventHubLimits};
 pub use projection::{
     AgentViewReducer, AgentViewSnapshot, AgentViewState, ConversationItemView,
-    PendingEffectDecisionView, ReducerError, ToolActivityView, TurnView, TurnViewState,
+    PendingEffectDecisionView, ReducerError, TurnView, TurnViewState,
 };
 pub(crate) use types::MAX_EVENT_DEBT_BYTES;
 pub use types::{

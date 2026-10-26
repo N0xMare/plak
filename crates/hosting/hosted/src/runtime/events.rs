@@ -5,6 +5,7 @@ mod compose;
 mod decisions;
 mod model;
 mod notes;
+pub(super) mod progress;
 mod projection;
 mod reasoning;
 mod tools;

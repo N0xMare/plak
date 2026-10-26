@@ -4,7 +4,6 @@
     reason = "unit tests may assert directly"
 )]
 
-use plakous_model::TextBlock;
 use uuid::Uuid;
 
 use super::*;
@@ -13,21 +12,10 @@ use crate::event::projection::*;
 use crate::event::test_support::*;
 use crate::event::types::*;
 use crate::{AgentErrorKind, TurnUsage};
-use plakous_model::{Actor, ContentBlock, ConversationItem, EntryId, Provenance};
 
 #[test]
-fn canonical_conversation_seeds_fresh_snapshot_without_events() -> TestResult {
-    let conversation = ConversationView::from_items(vec![ConversationItem::new(
-        EntryId::try_from(Uuid::from_u128(9))?,
-        Actor::User,
-        vec![ContentBlock::Text(TextBlock::new(
-            "seeded checkpoint",
-            None,
-        )?)],
-        Provenance::UserInput,
-    )?])?;
-    let fixture = fixture_with_run_and_conversation(4, &conversation, 8, 64 * 1024)?;
-
+fn attach_starts_at_the_current_epoch() -> TestResult {
+    let fixture = fixture_with_run(4, 8, 64 * 1024)?;
     let content = fixture.hub.attach(ViewRequest::content())?;
     assert_eq!(
         content.snapshot().cursor().run_id(),
@@ -37,46 +25,10 @@ fn canonical_conversation_seeds_fresh_snapshot_without_events() -> TestResult {
         content.snapshot().cursor().sequence(),
         EventSequence::INITIAL
     );
-    assert_eq!(content.snapshot().committed_conversation_items(), 1);
-    assert_eq!(
-        content
-            .snapshot()
-            .conversation()
-            .and_then(|items| items.first())
-            .and_then(ConversationItemView::display_text),
-        Some("seeded checkpoint")
-    );
-
+    assert_eq!(content.snapshot().turns(), []);
+    assert_eq!(content.snapshot().pending_effect_decisions(), []);
     let metadata = fixture.hub.attach(ViewRequest::metadata())?;
-    assert_eq!(metadata.snapshot().committed_conversation_items(), 1);
-    assert!(metadata.snapshot().conversation().is_none());
-    Ok(())
-}
-
-#[test]
-fn long_conversation_storage_is_shared_across_events_and_snapshots() -> TestResult {
-    let conversation = long_conversation(2_048)?;
-    let fixture = fixture_with_run_and_conversation(4, &conversation, 8, 4 * 1024 * 1024)?;
-    let before = fixture.hub.attach(ViewRequest::content())?;
-    let before_items = before
-        .snapshot()
-        .conversation()
-        .ok_or("content snapshot omitted conversation")?;
-    assert_eq!(before.snapshot().committed_conversation_items(), 2_048);
-    assert_eq!(before_items.len(), 8);
-
-    fixture.hub.publish(
-        EventContext::turn(fixture.turn_id),
-        AgentEventKind::TurnStarted,
-    )?;
-    let after = fixture.hub.attach(ViewRequest::content())?;
-    let after_items = after
-        .snapshot()
-        .conversation()
-        .ok_or("content snapshot omitted conversation")?;
-
-    assert_eq!(before_items, after_items);
-    assert!(std::ptr::eq(before_items.as_ptr(), after_items.as_ptr()));
+    assert_eq!(content.snapshot().turns(), metadata.snapshot().turns());
     Ok(())
 }
 
@@ -146,15 +98,13 @@ fn rejected_event_preserves_projection_indexes_and_cursor_exactly() -> TestResul
 
 #[test]
 fn predecessor_epoch_cursor_is_rejected_after_reopen() -> TestResult {
-    let predecessor =
-        fixture_with_run_and_conversation(4, &ConversationView::default(), 8, 64 * 1024)?;
+    let predecessor = fixture_with_run(4, 8, 64 * 1024)?;
     let cursor = predecessor
         .hub
         .attach(ViewRequest::metadata())?
         .snapshot()
         .cursor();
-    let reopened =
-        fixture_with_run_and_conversation(44, &ConversationView::default(), 8, 64 * 1024)?;
+    let reopened = fixture_with_run(44, 8, 64 * 1024)?;
 
     assert_eq!(cursor.session_id(), reopened.hub.inner.session_id);
     assert_eq!(cursor.branch_id(), reopened.hub.inner.branch_id);
@@ -268,6 +218,40 @@ fn publish_terminal_projection(pipeline: &EventPipeline, fixture: &Fixture) -> T
             usage: TurnUsage::default(),
         },
     )?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_delivery_reports_droppable_loss_without_claiming_filtered_events() -> TestResult {
+    let fixture = fixture(16, 64 * 1024)?;
+    publish_started(&fixture)?;
+    let mut events = fixture
+        .hub
+        .turn_events(fixture.turn_id, SubscriptionLimits::new(1, 64 * 1024)?)?;
+    for byte in *b"ab" {
+        fixture.hub.publish(
+            EventContext::attempt(fixture.turn_id, fixture.attempt_id),
+            delta(byte),
+        )?;
+    }
+    fixture.hub.publish(
+        EventContext::turn(fixture.turn_id),
+        AgentEventKind::TurnCompleted {
+            usage: TurnUsage::default(),
+        },
+    )?;
+    let EventDelivery::Lost(lost) = events.recv_delivery().await? else {
+        return Err("missing explicit turn loss".into());
+    };
+    assert_eq!(lost.first(), EventSequence(3));
+    assert_eq!(lost.through(), EventSequence(4));
+    let EventDelivery::Event(terminal) = events.recv_delivery().await? else {
+        return Err("terminal was dropped".into());
+    };
+    assert!(matches!(
+        terminal.kind(),
+        AgentEventKind::TurnCompleted { .. }
+    ));
     Ok(())
 }
 

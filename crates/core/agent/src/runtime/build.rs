@@ -714,7 +714,6 @@ impl PreparedAgent {
                 authority.durable_facts().is_some(),
             )?;
         let interpreter_observation = reopened_interpreter_observation(&builder, &authority)?;
-        let authoritative_conversation = authority.conversation();
         let events = EventHub::new(
             agent_id,
             session_id,
@@ -723,7 +722,6 @@ impl PreparedAgent {
             Arc::clone(&builder.clock),
             Arc::clone(&builder.event_ids),
             close_event_id,
-            &authoritative_conversation,
             EventHubLimits::new(
                 config.event_capacity,
                 config.event_byte_capacity,

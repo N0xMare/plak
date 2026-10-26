@@ -99,7 +99,41 @@ fn box_view_error(error: ViewError) -> Box<dyn std::error::Error> {
     Box::new(error)
 }
 
+/// The complete public attach contract, without a library presentation model.
+#[allow(dead_code)]
+fn attach_contract(
+    attachment: ViewAttachment,
+    event: &plakous::agent::AgentEvent,
+    delivery: &plakous::agent::EventDelivery,
+) -> Result<AgentViewSnapshot, plakous::agent::ReducerError> {
+    use plakous::agent::{AgentViewReducer, AgentViewState, TurnViewState};
+    let (snapshot, _tail) = attachment.into_parts();
+    let _cursor: plakous::agent::EventCursor = snapshot.cursor();
+    let _source: AgentViewState = snapshot.state();
+    for turn in snapshot.turns() {
+        let _identity: plakous::model::TurnId = turn.turn_id();
+        let _lifecycle: TurnViewState = turn.state();
+    }
+    for pending in snapshot.pending_effect_decisions() {
+        let _identity = pending.identity();
+        let _reference: &plakous::agent::EffectDecisionRef = pending.decision();
+        let _description = pending.prompt();
+        let _deadline: plakous::model::Timestamp = pending.expires_at();
+    }
+    let mut reducer = AgentViewReducer::from_snapshot(snapshot);
+    reducer.apply(event)?;
+    reducer.apply_delivery(delivery)?;
+    let _incomplete = reducer.snapshot().presentation_incomplete();
+    Ok(reducer.into_snapshot())
+}
+
 #[allow(dead_code)]
 fn name_agent_error(error: AgentError) -> AgentError {
     error
+}
+
+#[allow(dead_code)]
+async fn turn_loss_is_explicit(events: &mut plakous::agent::TurnEvents)
+    -> Result<plakous::agent::EventDelivery, plakous::agent::TurnEventError> {
+    events.recv_delivery().await
 }

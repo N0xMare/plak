@@ -188,26 +188,16 @@ impl VersionedJsonlTap {
     }
 
     fn push_snapshot(&mut self, snapshot: &AgentViewSnapshot) -> TestResult {
-        let conversation = snapshot.conversation().map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.display_text().map(str::to_owned))
-                .collect::<Vec<_>>()
-        });
         let turns = snapshot
             .turns()
             .iter()
             .map(|turn| {
                 json!({
-                    "model_attempts": turn.model_attempts(),
                     "state": turn_state_label(turn.state()),
-                    "tools_completed": turn.tools_completed(),
                 })
             })
             .collect::<Vec<_>>();
         let record = json!({
-            "committed_items": snapshot.committed_conversation_items(),
-            "conversation": conversation,
             "incomplete": snapshot.presentation_incomplete(),
             "record": "snapshot",
             "seq": snapshot.cursor().sequence().get(),
@@ -313,7 +303,6 @@ async fn public_line_printer_and_jsonl_tap_are_causal_versioned_and_redacted() -
     assert_eq!(metadata.tap.output(), GOLDEN_METADATA_JSONL);
     assert!(!metadata.tap.output().contains(PROMPT));
     assert!(!metadata.tap.output().contains(RESPONSE));
-    assert!(metadata.snapshot.conversation().is_none());
     assert_eq!(
         result.actual_model().map(ModelId::as_str),
         Some(ACTUAL_MODEL)
@@ -572,7 +561,7 @@ const GOLDEN_CONTENT_JSONL: &str = concat!(
     "{\"event\":{\"kind_version\":12,\"schema\":3},\"kind\":\"response_settled\",\"parent\":9,\"projection\":6,\"record\":\"event\",\"seq\":10,\"text\":null,\"v\":1,\"visibility\":\"content\"}\n",
     "{\"event\":{\"kind_version\":12,\"schema\":3},\"kind\":\"turn_completed\",\"parent\":10,\"projection\":6,\"record\":\"event\",\"seq\":11,\"text\":null,\"v\":1,\"visibility\":\"content\"}\n",
     "{\"conversation_items\":2,\"finish\":\"stop\",\"output\":\"golden response\",\"record\":\"result\",\"rounds\":1,\"tool_calls\":0,\"v\":1}\n",
-    "{\"committed_items\":0,\"conversation\":[],\"incomplete\":false,\"record\":\"snapshot\",\"seq\":11,\"state\":\"running\",\"turns\":[{\"model_attempts\":1,\"state\":\"completed\",\"tools_completed\":0}],\"v\":1,\"visibility\":\"content\"}\n",
+    "{\"incomplete\":false,\"record\":\"snapshot\",\"seq\":11,\"state\":\"running\",\"turns\":[{\"state\":\"completed\"}],\"v\":1,\"visibility\":\"content\"}\n",
 );
 
 const GOLDEN_METADATA_JSONL: &str = concat!(
@@ -587,5 +576,5 @@ const GOLDEN_METADATA_JSONL: &str = concat!(
     "{\"event\":{\"kind_version\":12,\"schema\":3},\"kind\":\"model.response_completed\",\"parent\":8,\"projection\":6,\"record\":\"event\",\"seq\":9,\"text\":null,\"v\":1,\"visibility\":\"metadata\"}\n",
     "{\"event\":{\"kind_version\":12,\"schema\":3},\"kind\":\"response_settled\",\"parent\":9,\"projection\":6,\"record\":\"event\",\"seq\":10,\"text\":null,\"v\":1,\"visibility\":\"metadata\"}\n",
     "{\"event\":{\"kind_version\":12,\"schema\":3},\"kind\":\"turn_completed\",\"parent\":10,\"projection\":6,\"record\":\"event\",\"seq\":11,\"text\":null,\"v\":1,\"visibility\":\"metadata\"}\n",
-    "{\"committed_items\":0,\"conversation\":null,\"incomplete\":false,\"record\":\"snapshot\",\"seq\":11,\"state\":\"running\",\"turns\":[{\"model_attempts\":1,\"state\":\"completed\",\"tools_completed\":0}],\"v\":1,\"visibility\":\"metadata\"}\n",
+    "{\"incomplete\":false,\"record\":\"snapshot\",\"seq\":11,\"state\":\"running\",\"turns\":[{\"state\":\"completed\"}],\"v\":1,\"visibility\":\"metadata\"}\n",
 );

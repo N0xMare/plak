@@ -58,9 +58,6 @@ pub enum ViewError {
     /// A monotonic lifetime fence cannot safely accept another identity.
     #[error("event lifetime fence requires a new session")]
     FenceSaturated,
-    /// The live projection cannot safely continue from the supplied fence state.
-    #[error("event lifetime fence is unavailable; attach a fresh observation epoch")]
-    FenceStateUnavailable,
 }
 
 /// An atomic snapshot and subscription whose first event is strictly after its cursor.
@@ -229,7 +226,13 @@ impl EventSubscription {
                 };
                 if remove {
                     state.turn_subscribers.remove(&turn_id);
-                    if !state.view.turns.contains_key(&turn_id) {
+                    if !state
+                        .view
+                        .attach
+                        .turns
+                        .iter()
+                        .any(|turn| turn.turn_id() == turn_id)
+                    {
                         state.turn_evicted_through.remove(&turn_id);
                     }
                 }
@@ -298,11 +301,15 @@ impl EventSubscription {
         if matching_items > self.request.limits.max_items()
             || matching_bytes > self.request.limits.max_bytes()
         {
-            if delivery_aware && self.turn_filter.is_none() {
+            if delivery_aware {
                 let mut structural_items = 0_usize;
                 let mut structural_bytes = 0_usize;
                 for event in state
                     .retained_from(self.next_sequence)
+                    .filter(|event| {
+                        self.turn_filter
+                            .is_none_or(|turn| event.turn_id == Some(turn))
+                    })
                     .filter(|event| event.delivery_class() == EventDeliveryClass::Structural)
                 {
                     structural_items = structural_items.saturating_add(1);
@@ -323,6 +330,12 @@ impl EventSubscription {
                     let mut kind = loss_kind(first.delivery_class());
                     let after_first = first.branch_sequence.0.saturating_add(1);
                     for event in state.retained_from(after_first.max(self.next_sequence)) {
+                        if self
+                            .turn_filter
+                            .is_some_and(|turn| event.turn_id != Some(turn))
+                        {
+                            continue;
+                        }
                         let class = event.delivery_class();
                         if class == EventDeliveryClass::Structural {
                             break;
@@ -478,22 +491,45 @@ impl TurnEvents {
     /// affecting the turn result.
     pub async fn recv(&mut self) -> Result<Arc<AgentEvent>, TurnEventError> {
         loop {
+            if let EventDelivery::Event(event) = self.receive(false).await? {
+                return Ok(event);
+            }
+        }
+    }
+
+    /// Waits for a turn event or an explicit range of omitted droppable events.
+    ///
+    /// Branch-wide sequence gaps are not loss: this subscription selects one
+    /// turn and may skip observations belonging to other turns.
+    ///
+    /// # Errors
+    /// Returns structural lag, terminal failure or closed status without
+    /// affecting the authoritative turn result.
+    pub async fn recv_delivery(&mut self) -> Result<EventDelivery, TurnEventError> {
+        self.receive(true).await
+    }
+
+    async fn receive(&mut self, delivery_aware: bool) -> Result<EventDelivery, TurnEventError> {
+        loop {
             if self.terminal_seen {
                 return Err(TurnEventError::Closed);
             }
             let next = if let Some(terminal_failure) = &mut self.terminal_failure {
                 tokio::select! {
                     biased;
-                    event = self.events.recv() => TurnEventDelivery::Event(event),
+                    event = self.events.receive(delivery_aware) => TurnEventDelivery::Event(event),
                     error = wait_for_terminal_failure(terminal_failure) => {
                         TurnEventDelivery::TerminalFailure(error)
                     }
                 }
             } else {
-                TurnEventDelivery::Event(self.events.recv().await)
+                TurnEventDelivery::Event(self.events.receive(delivery_aware).await)
             };
             match next {
-                TurnEventDelivery::Event(Ok(event)) => {
+                TurnEventDelivery::Event(Ok(EventDelivery::Lost(lost))) => {
+                    return Ok(EventDelivery::Lost(lost));
+                }
+                TurnEventDelivery::Event(Ok(EventDelivery::Event(event))) => {
                     self.terminal_seen = matches!(
                         event.kind(),
                         AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
@@ -501,7 +537,7 @@ impl TurnEvents {
                     if self.terminal_seen {
                         self.events.release_subscription();
                     }
-                    return Ok(event);
+                    return Ok(EventDelivery::Event(event));
                 }
                 TurnEventDelivery::Event(Err(SubscriptionEnd::SubscriberLagged {
                     last_delivered,
@@ -544,7 +580,7 @@ impl TurnEvents {
 }
 
 enum TurnEventDelivery {
-    Event(Result<Arc<AgentEvent>, SubscriptionEnd>),
+    Event(Result<EventDelivery, SubscriptionEnd>),
     TerminalFailure(Option<AgentError>),
 }
 

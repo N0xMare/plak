@@ -63,6 +63,10 @@ pub struct LiveRelease {
 /// delivery never retains the table lock. Its per-child barrier orders queued
 /// result registration before terminal handoff, restart, and release.
 pub trait LiveChildHandle: Send + Sync {
+    /// The host owns this type; the hub never inspects it.
+    fn host_observation(&self) -> Option<Arc<dyn Any + Send + Sync>> {
+        None
+    }
     /// Runtime capability retained for lease-only process-exit release.
     fn agent(&self) -> Option<Agent>;
     /// Content-free exact-route readiness; neutral handles have no probe.

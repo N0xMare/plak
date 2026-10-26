@@ -1,9 +1,8 @@
 //! Shared observation fixtures, compiled only for tests.
 use super::*;
 use plakous_model::{
-    Actor, AgentId, AttemptId, BranchId, ContentBlock, ConversationItem, ConversationView, EntryId,
-    EventId, FixedClock, ModelEvent, OutputLocation, Provenance, RunId, SequenceIdGenerator,
-    SessionId, TextBlock, TextDelta, Timestamp, TurnId,
+    AgentId, AttemptId, BranchId, EventId, FixedClock, ModelEvent, OutputLocation, RunId,
+    SequenceIdGenerator, SessionId, TextDelta, Timestamp, TurnId,
 };
 use std::{error::Error, sync::Arc};
 use uuid::Uuid;
@@ -16,17 +15,11 @@ pub(super) struct Fixture {
 }
 
 pub(super) fn fixture(retained_items: usize, retained_bytes: usize) -> TestResult<Fixture> {
-    fixture_with_run_and_conversation(
-        4,
-        &ConversationView::default(),
-        retained_items,
-        retained_bytes,
-    )
+    fixture_with_run(4, retained_items, retained_bytes)
 }
 
-pub(super) fn fixture_with_run_and_conversation(
+pub(super) fn fixture_with_run(
     run: u128,
-    conversation: &ConversationView,
     retained_items: usize,
     retained_bytes: usize,
 ) -> TestResult<Fixture> {
@@ -43,7 +36,6 @@ pub(super) fn fixture_with_run_and_conversation(
         Arc::new(FixedClock::new(timestamp)),
         event_ids,
         close_event_id,
-        conversation,
         EventHubLimits::new(retained_items, retained_bytes, 16),
     )?;
     Ok(Fixture {
@@ -70,20 +62,4 @@ pub(super) fn publish_started(fixture: &Fixture) -> Result<(), ViewError> {
         AgentEventKind::ModelStarted,
     )?;
     Ok(())
-}
-
-pub(super) fn conversation_item(id: u128, text: &str) -> TestResult<ConversationItem> {
-    Ok(ConversationItem::new(
-        EntryId::try_from(Uuid::from_u128(id))?,
-        Actor::User,
-        vec![ContentBlock::Text(TextBlock::new(text, None)?)],
-        Provenance::UserInput,
-    )?)
-}
-
-pub(super) fn long_conversation(item_count: u128) -> TestResult<ConversationView> {
-    let items = (0..item_count)
-        .map(|index| conversation_item(10_000 + index, &format!("history item {index}")))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(ConversationView::from_items(items)?)
 }

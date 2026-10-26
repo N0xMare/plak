@@ -42,7 +42,7 @@ class PerformanceIdentityTests(unittest.TestCase):
 
     def test_each_rust_perf_validator_requires_host_id(self) -> None:
         cases = (
-            (VALIDATOR.validate_core, "plakous.perf-core.v4"),
+            (VALIDATOR.validate_core, "plakous.perf-core.v5"),
             (VALIDATOR.validate_project, "plakous.perf-project.v6"),
             (VALIDATOR.validate_store, "plakous.perf-store.v6"),
         )

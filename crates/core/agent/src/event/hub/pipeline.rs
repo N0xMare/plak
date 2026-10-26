@@ -86,8 +86,7 @@ fn pipeline_view_error(error: ViewError) -> AgentError {
         | ViewError::IncompatibleCursor
         | ViewError::CursorAhead
         | ViewError::InvalidEvent
-        | ViewError::FenceSaturated
-        | ViewError::FenceStateUnavailable => AgentErrorKind::Internal,
+        | ViewError::FenceSaturated => AgentErrorKind::Internal,
     };
     AgentError::new(kind, error.to_string())
 }

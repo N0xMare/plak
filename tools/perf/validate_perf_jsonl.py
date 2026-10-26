@@ -279,7 +279,7 @@ SUPPORTED_SCHEMAS = {
     "plakous.perf-build.v9",
     "plakous.perf-core.v2",
     "plakous.perf-core.v3",
-    "plakous.perf-core.v4",
+    "plakous.perf-core.v5",
     "plakous.perf-project.v3",
     "plakous.perf-project.v4",
     "plakous.perf-project.v5",
@@ -895,7 +895,7 @@ def validate_core(rows: list[dict[str, Any]]) -> None:
         metadata, "samples_per_point"
     )
     expected = Counter({"metadata": 1, "turn": expected_turns, "prompt-bound": 1})
-    if schema in {"plakous.perf-core.v3", "plakous.perf-core.v4"}:
+    if schema in {"plakous.perf-core.v3", "plakous.perf-core.v5"}:
         expected["event-history-instrumented-sample"] = len(
             field(metadata, "history_sweep_turns")
         )
@@ -923,7 +923,7 @@ def validate_core(rows: list[dict[str, Any]]) -> None:
             exact(row, capacity, "admitted_queued_turns")
             exact(row, capacity + 1, "admitted_turns_including_active")
         else:
-            if schema not in {"plakous.perf-core.v3", "plakous.perf-core.v4"}:
+            if schema not in {"plakous.perf-core.v3", "plakous.perf-core.v5"}:
                 fail("instrumented event rows require perf-core v3")
             exact(row, field(metadata, "event_history_instrumented_fixture"), "fixture")
             history_turns = nonnegative_int(row, "history_prefill_turns")
@@ -938,29 +938,29 @@ def validate_core(rows: list[dict[str, Any]]) -> None:
             nonnegative_int(row, "snapshot_attach_elapsed_ns")
             nonnegative_int(row, "snapshot_clone_elapsed_ns")
             exact(row, True, "snapshot_clone_value_equal")
-            nonnegative_int(row, "snapshot_committed_conversation_items")
-            positive_int(row, "snapshot_projection_serialized_bytes")
+            nonnegative_int(row, "snapshot_retained_turns")
+            positive_int(row, "snapshot_cursor_serialized_bytes")
             exact(row, None, "retained_bytes")
-            if schema == "plakous.perf-core.v4":
+            if schema == "plakous.perf-core.v5":
                 event_bytes = positive_int(row, "projected_event_serialized_bytes")
                 exact(
                     row,
                     event_bytes // events,
                     "projected_event_serialized_bytes_per_event",
                 )
-                before_bytes = positive_int(row, "snapshot_projection_serialized_bytes")
+                before_bytes = positive_int(row, "snapshot_cursor_serialized_bytes")
                 after_bytes = positive_int(
-                    row, "post_snapshot_projection_serialized_bytes"
+                    row, "post_snapshot_cursor_serialized_bytes"
                 )
                 exact(
                     row,
                     max(0, after_bytes - before_bytes),
-                    "snapshot_projection_serialized_growth_bytes",
+                    "snapshot_cursor_serialized_growth_bytes",
                 )
                 external = field(row, "retained_bytes_external_probe")
                 if not isinstance(external, str) or not external:
-                    fail("perf-core v4 must name its external retained-byte probe")
-    if schema in {"plakous.perf-core.v3", "plakous.perf-core.v4"}:
+                    fail("perf-core v5 must name its external retained-byte probe")
+    if schema in {"plakous.perf-core.v3", "plakous.perf-core.v5"}:
         event_rows = [
             row for row in rows if row["kind"] == "event-history-instrumented-sample"
         ]
@@ -1518,7 +1518,7 @@ VALIDATORS = {
     "plakous.perf-build.v9": validate_build,
     "plakous.perf-core.v2": validate_core,
     "plakous.perf-core.v3": validate_core,
-    "plakous.perf-core.v4": validate_core,
+    "plakous.perf-core.v5": validate_core,
     "plakous.perf-project.v3": validate_project,
     "plakous.perf-project.v4": validate_project,
     "plakous.perf-project.v5": validate_project,

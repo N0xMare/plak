@@ -4033,24 +4033,52 @@ over the same executor, not a second control plane.
 
 ## 16. Hosted tree access and child retirement
 
-The host observes each running child with one independent bounded activity
-subscription, with at most eight such subscriptions per host face. The complete
+The host reduces each child turn from admission through one `TurnProjection`,
+using the admission-created event receiver before acknowledgement delivery.
+Its live child handle owns that projection, independent of attached faces.
+Queued follow-ups own their projections from admission; taking the follow-up
+and restarting a fresh turn rebind the handle to the correct projection.
+The projection dies with its owning handle. This is process-local presentation,
+not persistence or reload authority.
+
+Observation delivery cannot reject an admitted child turn: if taking its
+admission receiver fails, hosted recovers through a fresh atomic attachment
+while retaining the acknowledgement, control and result. Recovered observation
+closes immediately for a terminal turn snapshot. Throwaway cancellation/release
+handles start no presentation task. On explicit source loss, the reducer marks
+a gap; structural lag reattaches after a one-second backoff without replacing
+the shared observation or its cursor. It never infers loss from the branch-wide
+sequence of a turn-filtered receiver. A live source's observation failure does
+not retire the child or its presentation capability.
+
+`LiveChildHandle::host_observation` carries an opaque host-owned capability;
+the tree hub never inspects its type. Hosted has one typed downcast helper,
+and every face uses that helper rather than creating another reducer. Faces
+read a snapshot and its cursor atomically, then follow already-reduced live
+updates. At most eight child progress views are selected per host face. The complete
 tree view carries optional `live_progress`: exact turn identity, current activity
 verb (the same classification the root HUD uses), dispatched tool-call count,
 last-observed activity time, and provider-reported live token counters. A progress
 material change can publish a complete snapshot at the same durable tree revision,
 with progress-only publications limited to about one per second. Timestamps alone
 do not trigger a projection. Existing observers retain their slots; stable agent-id
-order selects newcomers, and failed attachments back off before retrying. Counters
-are seeded from the atomic snapshot, not reset on attachment; it
-does not manufacture a tree mutation. Terminal observation or removal clears
+order selects newcomers. Tool and usage counters come from the shared
+projection, including for a late face after the earlier event prefix was
+evicted. They are exact while the reducer has seen every turn event; after a
+marked source gap (droppable loss or structural lag) they are approximate until
+the terminal usage corrects them. No face replays a prefix or reads
+presentation counters from L0.
+This does not manufacture a tree mutation. Terminal observation or removal clears
 the live progress. These counters and timestamps are observations, not billing,
 terminal authority, or reconstructed history.
 
-The open agent transcript (below) is the only child content subscription. Its
-live turn is attached through the live child's attached agent capability for an
-atomic snapshot and its gapless tail. The admission-created `TurnEvents` is never
-retained for later viewing. An atomic snapshot does not replay prior uncommitted
+The open agent transcript (below) is the only child content view per face. Its
+committed rows come from the live child's atomic transcript attachment; its
+live updates come from the shared hosted projection, never a per-face raw-event
+subscription or reducer. Updates at or before the history cursor cannot repeat
+canonical items, and a turn ending during the history read refreshes the committed
+baseline. The admission-created `TurnEvents` is owned by the reducer, not retained
+for later viewing. A face attachment does not replay prior uncommitted
 streaming blocks: when prior activity is not covered, or the tail loses activity
 or lags out, an addressed `earlier activity not shown` marker makes the gap
 explicit. Closing drops this subscription; a lagged tail reattaches, at most once
@@ -4081,11 +4109,12 @@ never reset, re-send or refuse it. The host resolves the agent as a non-root nod
 of the attached session's tree, in any status. A node without a live turn is read
 from its own bound session through `AgentSessions::transcript_source`, at the
 current head of that session and branch in one load. A node with a live turn is
-attached first, through `SessionTranscriptSource::attach`: one atomic snapshot
-yields both the committed history at the attachment's cursor and the gapless tail
-after it, so the rows are exactly that history and the ops exactly that tail; no
-item committed before the cursor is in neither, none is sent twice, and what the
-tail cannot replay is marked with the same gap notice. Items map to the
+served with two cursors: register its hosted observation tail first, then
+capture canonical history through `SessionTranscriptSource::attach`. Reduced
+updates at or before the history cursor are skipped; later updates remain in
+the already registered tail. Thus no intervening live update is lost and no
+committed item is sent twice. What the tail cannot replay is marked with the
+same gap notice. Items map to the
 row types the root's live path writes: a non-harness user prompt is `User`,
 with inline images represented by the same metadata-only image chips as the
 root transcript; assistant text is `Assistant`, reasoning is `Thinking` under the root's

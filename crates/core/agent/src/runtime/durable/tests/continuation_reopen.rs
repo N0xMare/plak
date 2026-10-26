@@ -1647,16 +1647,8 @@ async fn durable_duplicate_reopens_exact_historical_terminal_without_redispatch(
     ));
     let commits_before_attach = store.commit_calls.load(Ordering::Acquire);
     let attachment = opened.attach(ViewRequest::content()).await?;
-    assert_eq!(
-        attachment.snapshot().committed_conversation_items(),
-        second.conversation().items().len()
-    );
-    assert!(
-        attachment
-            .snapshot()
-            .conversation()
-            .is_some_and(|items| !items.is_empty())
-    );
+    assert_eq!(attachment.snapshot().turns(), []);
+    assert_eq!(&opened.conversation(), second.conversation());
     let cursor = attachment.snapshot().cursor();
     drop(attachment);
     assert!(matches!(

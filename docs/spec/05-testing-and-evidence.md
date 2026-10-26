@@ -2443,7 +2443,7 @@ on a synthetic wire body. `perf_store` (`-p plakous-store --features sqlite`;
 memory and SQLite backends, then a separately instrumented SQLite trace, a
 process-isolated reopen with Linux RSS, and a bounded-actor saturation
 fixture that requires typed `BackendBusy` backpressure. Each emits JSON Lines
-(`plakous.perf-core.v4`, `plakous.perf-project.v6`, `plakous.perf-store.v6`)
+(`plakous.perf-core.v5`, `plakous.perf-project.v6`, `plakous.perf-store.v6`)
 whose metadata binds toolchain, target, feature closure, declared profile,
 commit, dirty state and a tracked-content closure; the caller supplies
 `PLAKOUS_PERF_HOST_ID`, `PLAKOUS_PERF_FEATURE_FLAGS` and
@@ -2457,6 +2457,28 @@ because the workspace forbids an `unsafe` global allocator wrapper; instead
 Linux glibc `memusage` and emits that evidence as separate JSONL.
 `tools/perf/perf-check.sh --quick` (or `--full`) runs and schema-validates all
 workloads into `target/perf-check.*`.
+
+The instrumented event-history sample measures atomic attach and clone time,
+retained turn count, and serialized cursor bytes before and after its measured
+turn. It does not serialize or retain an L0 conversation-presentation cache;
+canonical item count is a separate authoritative-history workload fact.
+
+The opt-in hosted test
+`runtime::child_projection::perf::streaming_children_and_faces_cost` emits
+`plakous.perf-child-observation.v1` rows for eight streaming children with
+0, 1 and 3 faces per child, 8,192 events per row and 64 text bytes per event.
+Every live child reduces even with no face attached, including headless
+`plak run`; zero-face reduction is not free. One Linux x86_64 debug/test run
+measured respectively 4,757, 4,879 and 5,045 ns/event, with 520,576, 520,832
+and 521,344 accounted retained bytes across all eight children. These are raw
+observations, not thresholds or a cross-host baseline. Timing includes source
+delivery, reduction, snapshot reads and face-tail reads, not providers, stores
+or terminal rendering. Retained-byte accounting covers state, inline reducer,
+ring capacity, shared update allocations, text payload capacities and tail
+values; allocator overhead, task stacks and process RSS are excluded. Tail
+reads share Arc-backed updates; the open overlay clones the ops it emits. Run
+this ignored test explicitly
+with `PLAKOUS_PERF_HOST_ID` set; ordinary gates never enforce its timings.
 
 ### 2.8 Transport fault injection
 

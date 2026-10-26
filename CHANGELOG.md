@@ -34,6 +34,13 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plakous
 
+- Atomic attachment now exposes only the cursor, source/turn lifecycles and
+  pending decisions. Presentation counters, usage, conversation summaries and
+  `ToolActivityView` are removed from the snapshot API. `AgentViewReducer`
+  advances only attach state; hosted `TurnProjection` owns live presentation.
+  Committed history still uses the facade's atomic transcript attachment.
+  `TurnEvents::recv_delivery` reports turn-filtered lost ranges, and
+  `SubscriptionEnd` and `SubscriptionLimits` are nameable through the facade.
 - All local cell profiles use `LocalCompositionProfile::cell(&CellDescriptor)`.
   The four per-engine profile constructors and Python-only component identity
   accessors are removed. `CellDescriptor` is available at the compose crate

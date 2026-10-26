@@ -1349,6 +1349,52 @@ async fn length_stopped_tool_proposal_retries_once_without_dispatch_or_commit() 
     Ok(())
 }
 
+#[tokio::test]
+async fn atomic_attach_recovers_pending_decisions_and_converges_after_resolution() -> TestResult {
+    let (agent, mut turn, _tool, _workspace) = pending_decision_fixture().await?;
+    let mut admitted_events = turn.take_events()?;
+    let decision = next_pending(&mut admitted_events).await?;
+    let (snapshot, mut tail) = agent.attach(ViewRequest::content()).await?.into_parts();
+    assert_eq!(snapshot.pending_effect_decisions().len(), 1);
+    assert_eq!(snapshot.pending_effect_decisions()[0].decision(), &decision);
+    assert!(snapshot.pending_effect_decisions()[0].prompt().is_some());
+    let metadata = agent.attach(ViewRequest::metadata()).await?;
+    assert_eq!(
+        metadata.snapshot().pending_effect_decisions()[0].decision(),
+        &decision
+    );
+    assert!(
+        metadata.snapshot().pending_effect_decisions()[0]
+            .prompt()
+            .is_none()
+    );
+    let mut reducer = plakous_agent::AgentViewReducer::from_snapshot(snapshot);
+    turn.control()
+        .allow_effect(
+            decision,
+            plakous_tools::EffectDecisionAuditId::new("test.attach")?,
+        )
+        .await?;
+    loop {
+        let event = tail.recv().await?;
+        reducer.apply(&event)?;
+        if matches!(
+            event.kind(),
+            AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
+        ) {
+            break;
+        }
+    }
+    assert_eq!(reducer.snapshot().pending_effect_decisions(), []);
+    assert_eq!(
+        reducer.snapshot(),
+        agent.attach(ViewRequest::content()).await?.snapshot()
+    );
+    let _ = turn.result().await;
+    agent.shutdown().await?;
+    Ok(())
+}
+
 /// A Direct tool round carries `Direct` lineage on every lifecycle observation.
 ///
 /// One serial tool that passes an operator decision publishes the complete

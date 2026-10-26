@@ -13,18 +13,13 @@ fn child_success_uses_the_root_done_vocabulary() {
         &lineage,
         serde_json::json!({"succeeded":true,"preview":"read result","subject":null}),
     );
-    let ops = transcript_ops(
-        &event,
-        &mut TurnProjection::default(),
-        &mut Progress::default(),
-    );
+    let ops = transcript_ops(&event, &mut TurnProjection::default());
     assert!(matches!(&ops[0], HostEvent::ToolLine {state,..} if state=="done"));
 }
 
 #[test]
 fn child_subject_capacity_evicts_the_oldest_started_call() {
     let lineage = plakous::agent::ToolCallerLineageView::direct();
-    let mut progress = Progress::default();
     let mut projection = TurnProjection::default();
     for index in (1..=513).rev() {
         let event = tool_lifecycle_event(
@@ -34,13 +29,17 @@ fn child_subject_capacity_evicts_the_oldest_started_call() {
             &lineage,
             serde_json::json!({"arguments_preview":"{}","subject":"subject"}),
         );
-        transcript_ops(&event, &mut projection, &mut progress);
+        transcript_ops(&event, &mut projection);
     }
-    assert_eq!(progress.subjects.len(), 512);
+    assert_eq!(projection.progress.subjects.len(), 512);
     for (index, retained) in [(513, false), (512, true), (1, true)] {
         let id = uuid::Uuid::from_u128(index).to_string();
         assert_eq!(
-            progress.subjects.iter().any(|(call, _)| call == &id),
+            projection
+                .progress
+                .subjects
+                .iter()
+                .any(|(call, _)| call == &id),
             retained,
             "call {index}"
         );
@@ -104,11 +103,10 @@ async fn real_finished_cells_restore_nested_rows_and_failure_tally_from_the_ledg
         let mut turn = session.agent().prompt("run the cell").await.unwrap();
         let mut events = turn.take_events().unwrap();
         let mut projection = TurnProjection::default();
-        let mut progress = Progress::default();
         let mut live = BTreeMap::new();
         loop {
             let event = events.recv().await.unwrap();
-            for op in transcript_ops(&event, &mut projection, &mut progress) {
+            for op in transcript_ops(&event, &mut projection) {
                 if let HostEvent::ToolLine {
                     call_id: Some(id),
                     parent_call_id,
@@ -183,7 +181,7 @@ async fn real_finished_cells_restore_nested_rows_and_failure_tally_from_the_ledg
     }
 }
 
-fn tool_lifecycle_event(
+pub(in crate::runtime) fn tool_lifecycle_event(
     name: &str,
     call_id: &str,
     kind: &str,
@@ -220,7 +218,6 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
     let starting = ToolCallerLineageView::local_composition_marker(None);
     let marker = ToolCallerLineageView::local_composition_marker(Some("cell-7"));
     let mut projection = TurnProjection::default();
-    let mut progress = Progress::default();
     transcript_ops(
         &tool_lifecycle_event(
             "exec",
@@ -230,7 +227,6 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             serde_json::Value::Null,
         ),
         &mut projection,
-        &mut progress,
     );
     let marker_ops = transcript_ops(
         &tool_lifecycle_event(
@@ -241,7 +237,6 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             serde_json::json!({"succeeded":true,"preview":"Script running with cell ID cell-7","subject":null}),
         ),
         &mut projection,
-        &mut progress,
     );
     let wait_ops = transcript_ops(
         &tool_lifecycle_event(
@@ -252,7 +247,6 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             serde_json::Value::Null,
         ),
         &mut projection,
-        &mut progress,
     );
     let end_ops = transcript_ops(
         &tool_lifecycle_event(
@@ -263,7 +257,6 @@ fn live_and_rebuilt_marker_and_continuation_rows_match_after_a_yield() {
             serde_json::json!({"succeeded":true,"preview":"Script completed","subject":null}),
         ),
         &mut projection,
-        &mut progress,
     );
     let rows = rows_from_items(
         &[
@@ -375,7 +368,6 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
             "succeeded": succeeded, "preview": "read result", "subject": null,
         });
         let mut projection = TurnProjection::default();
-        let mut progress = Progress::default();
         let start_ops = transcript_ops(
             &tool_lifecycle_event(
                 "read_file",
@@ -385,7 +377,6 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
                 serde_json::to_value(&started).unwrap(),
             ),
             &mut projection,
-            &mut progress,
         );
         let end_ops = transcript_ops(
             &tool_lifecycle_event(
@@ -396,7 +387,6 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
                 completed.clone(),
             ),
             &mut projection,
-            &mut progress,
         );
         let HostEvent::ToolLine {
             parent_call_id,
@@ -486,14 +476,9 @@ fn live_and_rebuilt_nested_rows_match_for_the_same_tool_history() {
 }
 
 #[tokio::test]
-async fn child_attach_failures_are_throttled_for_progress() {
-    let (_root, _sessions, attached, turn) = fixture().await;
+async fn cached_child_progress_does_not_need_a_core_subscriber() {
+    let (_root, _sessions, attached, turn, live) = fixture().await;
     let agent = attached.agent().clone();
-    let turn_id = turn.id();
-    turn.control().cancel().await.unwrap();
-    turn.result().await.unwrap();
-    // Shutdown preserves read-only views. Exhaust real subscriber admission
-    // instead, retaining the attachments so the observer's attach must fail.
     let mut held = Vec::new();
     loop {
         match agent.attach(ViewRequest::content()).await {
@@ -508,42 +493,60 @@ async fn child_attach_failures_are_throttled_for_progress() {
         }
     }
     let mut observations = ChildObservers::default();
-    observations.sync_children(vec![("c1".into(), turn_id, agent.clone())]);
-    while !observations.children["c1"].task.is_finished() {
-        tokio::task::yield_now().await;
-    }
-    let progress_task = observations.children["c1"].task.id();
     for _ in 0..3 {
-        observations.sync_children(vec![("c1".into(), turn_id, agent.clone())]);
-        assert_eq!(observations.children["c1"].task.id(), progress_task);
+        observations.sync_children(vec![(
+            "c1".into(),
+            turn.id(),
+            agent.clone(),
+            live.owner.observation.clone(),
+        )]);
+        assert!(Arc::ptr_eq(
+            &observations.children["c1"].observation,
+            &live.owner.observation
+        ));
     }
     drop(held);
+    turn.control().cancel().await.unwrap();
+    turn.result().await.unwrap();
     attached.release().await.unwrap();
 }
 
 #[test]
 fn child_progress_usage_updates_and_terminal_clears_activity() {
     let mut progress = Progress::default();
-    progress.observe(&AgentEventKind::model(ModelEvent::Usage(UsageUpdate::new(
-        Usage::new(11, 3, 2, 7, 0),
-    ))));
+    progress.observe(
+        &AgentEventKind::model(ModelEvent::Usage(UsageUpdate::new(Usage::new(
+            11, 3, 2, 7, 0,
+        )))),
+        None,
+    );
     assert_eq!(progress.view.input_tokens, 11);
     assert_eq!(progress.view.output_tokens, 3);
     progress.view.activity = Some("writing".into());
-    progress.observe(&AgentEventKind::TurnCompleted {
-        usage: plakous::agent::TurnUsage::default(),
-    });
+    progress.observe(
+        &AgentEventKind::TurnCompleted {
+            usage: plakous::agent::TurnUsage::default(),
+        },
+        None,
+    );
     assert!(progress.view.activity.is_none());
 }
 
 #[tokio::test]
 async fn child_progress_subscriptions_are_bounded_to_eight() {
-    let (_root, _sessions, attached, turn) = fixture().await;
+    let (_root, _sessions, attached, turn, live) = fixture().await;
     let agent = attached.agent().clone();
     let mut observations = ChildObservers::default();
     observations.sync_children(
         (0..9)
-            .map(|id| (format!("c{id}"), turn.id(), agent.clone()))
+            .map(|id| {
+                (
+                    format!("c{id}"),
+                    turn.id(),
+                    agent.clone(),
+                    live.owner.observation.clone(),
+                )
+            })
             .collect(),
     );
     assert_eq!(observations.children.len(), 8);
@@ -557,15 +560,21 @@ async fn child_progress_subscriptions_are_bounded_to_eight() {
 fn child_progress_usage_snapshots_do_not_double_count() {
     let mut progress = Progress::default();
     for output in [2, 3] {
-        progress.observe(&AgentEventKind::model(ModelEvent::Usage(UsageUpdate::new(
-            Usage::new(11, output, 1, 7, 0),
-        ))));
+        progress.observe(
+            &AgentEventKind::model(ModelEvent::Usage(UsageUpdate::new(Usage::new(
+                11, output, 1, 7, 0,
+            )))),
+            None,
+        );
     }
     assert_eq!(progress.view.output_tokens, 3);
-    progress.observe(&AgentEventKind::ModelDispatchStarted);
-    progress.observe(&AgentEventKind::model(ModelEvent::Usage(UsageUpdate::new(
-        Usage::new(17, 5, 2, 9, 0),
-    ))));
+    progress.observe(&AgentEventKind::ModelDispatchStarted, None);
+    progress.observe(
+        &AgentEventKind::model(ModelEvent::Usage(UsageUpdate::new(Usage::new(
+            17, 5, 2, 9, 0,
+        )))),
+        None,
+    );
     assert_eq!(progress.view.input_tokens, 28);
     assert_eq!(progress.view.output_tokens, 8);
 }
@@ -576,9 +585,9 @@ fn child_progress_usage_snapshots_do_not_double_count() {
 /// a reason for the child's cancellation or result to wait.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
-    let (_root, sessions, attached, mut turn) = fixture().await;
+    let (_root, sessions, attached, turn, mut live) = fixture().await;
     let agent = attached.agent().clone();
-    let mut admission = turn.take_events().unwrap();
+    let admission = &mut live.admission;
     let event = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let event = admission.recv().await.unwrap();
@@ -596,7 +605,7 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
         "c1",
         attached.locator(),
         Arc::clone(&sessions),
-        Some((turn.id(), agent.clone())),
+        Some((turn.id(), agent.clone(), live.owner.observation.clone())),
         &sender,
     );
     let mut ops = Vec::new();
@@ -615,11 +624,7 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
         matches!(&gap, HostEvent::TranscriptPatch(patch) if patch.scope == TranscriptScope::Agent("c1".into()) && carries_text(&gap, GAP)),
         "{gap:?}"
     );
-    let ops = transcript_ops(
-        &event,
-        &mut TurnProjection::default(),
-        &mut Progress::default(),
-    );
+    let ops = transcript_ops(&event, &mut TurnProjection::default());
     assert!(
         ops.iter()
             .any(|op| matches!(op, HostEvent::AssistantDelta(text) if text == "live text"))
@@ -636,11 +641,104 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
     attached.release().await.unwrap();
 }
 
+pub(in crate::runtime) struct LiveFixture {
+    pub(in crate::runtime) owner: super::super::child_projection::ChildTurnProjection,
+    admission: plakous::agent::EventSubscription,
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
+    use plakous_offline_crash_harness::gate::GateHandle;
+    let release_burst = GateHandle::new();
+    let finish = GateHandle::new();
+    let mut stream = vec![serde_json::json!({"gate":release_burst.script()})];
+    stream.extend((0..256).map(|_| serde_json::json!({"text":"burst"})));
+    stream.push(serde_json::json!({"gate":finish.script()}));
+    let (_root, sessions, attached, turn, live) = fixture_with(serde_json::json!([
+        {"output":{"text":"prefix"}}, {"stream":stream, "output":{"text":"committed end"}}
+    ]))
+    .await;
+    release_burst.entered().await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    let notified = entered.clone();
+    let resumed = resume.clone();
+    hooks::set_before_follow(
+        "lagged-face",
+        Arc::new(move || {
+            let entered = notified.clone();
+            let resume = resumed.clone();
+            Box::pin(async move {
+                entered.notify_one();
+                resume.notified().await;
+            })
+        }),
+    );
+    let (wire, received) = crate::surface_protocol::host_event_channel();
+    let sender: Sender = Sender::over(wire);
+    let mut observers = ChildObservers::default();
+    observers.start_agent_view(
+        false,
+        "s1",
+        "lagged-face",
+        attached.locator(),
+        sessions,
+        Some((
+            turn.id(),
+            attached.agent().clone(),
+            live.owner.observation.clone(),
+        )),
+        &sender,
+    );
+    entered.notified().await;
+    let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
+    let mut ops = Vec::new();
+    next_agent_transcript(&received, &mut state, &mut ops).await;
+    // Discard the honest attach-prefix notice; only the later lag is counted.
+    for event in received.try_iter() {
+        if let HostEvent::TranscriptPatch(patch) = event {
+            state.apply(patch).unwrap();
+        }
+    }
+    let before = live.owner.observation.snapshot().cursor;
+    release_burst.release();
+    finish.entered().await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while live.owner.observation.snapshot().cursor < before + 256 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    resume.notify_one();
+    let gap = next_event(&received).await;
+    assert!(carries_text(&gap, GAP), "{gap:?}");
+    if let HostEvent::TranscriptPatch(patch) = gap {
+        state.apply(patch).unwrap();
+    }
+    finish.release();
+    turn.result().await.unwrap();
+    let ended = next_agent_transcript(&received, &mut state, &mut ops).await;
+    assert!(
+        ended
+            .rows
+            .contains(&TranscriptRow::assistant("committed end")),
+        "{ended:?}"
+    );
+    assert!(
+        !ops.iter().any(|op| carries_text(op, GAP)),
+        "a single lag produces one gap notice"
+    );
+    drop(observers);
+    attached.release().await.unwrap();
+}
+
 async fn fixture() -> (
     tempfile::TempDir,
     Arc<AgentSessions>,
     plakous::sessions::OpenedSession,
     plakous::agent::Turn,
+    LiveFixture,
 ) {
     fixture_with(serde_json::json!([
         {"output":{"text":"committed prefix"},"finish":"stop"},
@@ -649,13 +747,14 @@ async fn fixture() -> (
     .await
 }
 
-async fn fixture_with(
+pub(in crate::runtime) async fn fixture_with(
     steps: serde_json::Value,
 ) -> (
     tempfile::TempDir,
     Arc<AgentSessions>,
     plakous::sessions::OpenedSession,
     plakous::agent::Turn,
+    LiveFixture,
 ) {
     use plakous::sessions::{
         AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend,
@@ -706,25 +805,51 @@ async fn fixture_with(
         .result()
         .await
         .unwrap();
-    let turn = agent.prompt("live").await.unwrap();
-    (root, sessions, session, turn)
+    let (_, admission) = agent
+        .attach(ViewRequest::content())
+        .await
+        .unwrap()
+        .into_parts();
+    let mut turn = agent.prompt("live").await.unwrap();
+    let owner = super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent);
+    (
+        root,
+        sessions,
+        session,
+        turn,
+        LiveFixture { owner, admission },
+    )
 }
 
 #[tokio::test]
 async fn child_observer_selection_keeps_existing_children() {
-    let (_root, _sessions, attached, turn) = fixture().await;
+    let (_root, _sessions, attached, turn, live) = fixture().await;
     let agent = attached.agent().clone();
     let mut observations = ChildObservers::default();
     observations.sync_children(
         (0..9)
-            .map(|id| (format!("c{id}"), turn.id(), agent.clone()))
+            .map(|id| {
+                (
+                    format!("c{id}"),
+                    turn.id(),
+                    agent.clone(),
+                    live.owner.observation.clone(),
+                )
+            })
             .collect(),
     );
     let initial = observations.children.keys().cloned().collect::<Vec<_>>();
     observations.sync_children(
         (0..9)
             .rev()
-            .map(|id| (format!("c{id}"), turn.id(), agent.clone()))
+            .map(|id| {
+                (
+                    format!("c{id}"),
+                    turn.id(),
+                    agent.clone(),
+                    live.owner.observation.clone(),
+                )
+            })
             .collect(),
     );
     assert_eq!(
@@ -845,7 +970,7 @@ fn test_runtime(root: &std::path::Path) -> (String, Arc<ProductTopologyRuntime>)
 /// a follow-up turn re-sends and streams; close stops every op.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
-    let (root, sessions, attached, turn) = fixture_with(serde_json::json!([
+    let (root, sessions, attached, turn, live) = fixture_with(serde_json::json!([
         {"output":{"text":"committed prefix"},"finish":"stop"},
         {"stream":[{"text":"live text"},{"stall":30000}],"finish":"stop"},
         {"stream":[{"text":"second turn"},{"stall":30000}],"finish":"stop"}
@@ -861,7 +986,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
         "c1",
         attached.locator(),
         Arc::clone(&sessions),
-        Some((turn.id(), agent.clone())),
+        Some((turn.id(), agent.clone(), live.owner.observation.clone())),
         &sender,
     );
     let mut ops = Vec::new();
@@ -883,7 +1008,12 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
 
     let turn_id = turn.id();
     // A tree revision for the same turn neither resets nor re-sends.
-    observations.sync_children(vec![("c1".to_owned(), turn_id, agent.clone())]);
+    observations.sync_children(vec![(
+        "c1".to_owned(),
+        turn_id,
+        agent.clone(),
+        live.owner.observation.clone(),
+    )]);
     tokio::time::sleep(Duration::from_millis(100)).await;
     turn.control().cancel().await.unwrap();
     turn.result().await.unwrap();
@@ -905,8 +1035,15 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
     }
     assert!(received.try_recv().is_err(), "the turn's end re-sends once");
 
-    let follow_up = agent.prompt("again").await.unwrap();
-    observations.sync_children(vec![("c1".to_owned(), follow_up.id(), agent.clone())]);
+    let mut follow_up = agent.prompt("again").await.unwrap();
+    let next_projection =
+        super::super::child_projection::ChildTurnProjection::admitted(&mut follow_up, &agent);
+    observations.sync_children(vec![(
+        "c1".to_owned(),
+        follow_up.id(),
+        agent.clone(),
+        next_projection.observation.clone(),
+    )]);
     ops.clear();
     let next = next_agent_transcript(&received, &mut state, &mut ops).await;
     assert!(
@@ -944,7 +1081,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn another_session_drops_the_agent_view() {
-    let (_root, sessions, attached, turn) = fixture().await;
+    let (_root, sessions, attached, turn, _live) = fixture().await;
     let (wire, _received) = crate::surface_protocol::host_event_channel();
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
@@ -971,7 +1108,7 @@ async fn another_session_drops_the_agent_view() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unknown_root_unbound_and_another_trees_agents_answer_with_a_note() {
     use crate::agent_tree_protocol::SpawnAgentRequest;
-    let (root, sessions, attached, turn) = fixture().await;
+    let (root, sessions, attached, turn, _live) = fixture().await;
     let (tree_id, runtime) = test_runtime(root.path());
     let unbound = runtime
         .mutate_then_emit(false, |tree| {
@@ -1039,7 +1176,7 @@ async fn unknown_root_unbound_and_another_trees_agents_answer_with_a_note() {
 /// so the view converges without waiting for another turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn turn_end_resend_holds_the_finished_turn() {
-    let (_root, sessions, attached, turn) = fixture_with(serde_json::json!([
+    let (_root, sessions, attached, turn, live) = fixture_with(serde_json::json!([
         {"output":{"text":"committed prefix"},"finish":"stop"},
         {"stream":[{"text":"live answer"},{"stall":400}],"finish":"stop"}
     ]))
@@ -1054,7 +1191,7 @@ async fn turn_end_resend_holds_the_finished_turn() {
         "c1",
         attached.locator(),
         Arc::clone(&sessions),
-        Some((turn.id(), agent.clone())),
+        Some((turn.id(), agent.clone(), live.owner.observation.clone())),
         &sender,
     );
     let mut ops = Vec::new();
@@ -1100,7 +1237,7 @@ fn has_tool_result(agent: &Agent) -> bool {
 /// the attach's cursor is missing from both.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_commit_while_the_view_opens_is_in_its_rows() {
-    let (_root, sessions, attached, turn) = fixture_with(serde_json::json!([
+    let (_root, sessions, attached, turn, live) = fixture_with(serde_json::json!([
         {"output":{"text":"committed prefix"},"finish":"stop"},
         {"output":{"tool":{"name":"loopback_effect","arguments":{}}},"finish":"tool_calls","stall_ms":500},
         {"stream":[{"text":"after the tool"},{"stall":30000}],"finish":"stop"}
@@ -1132,7 +1269,7 @@ async fn a_commit_while_the_view_opens_is_in_its_rows() {
         "c-commit",
         attached.locator(),
         Arc::clone(&sessions),
-        Some((turn.id(), agent.clone())),
+        Some((turn.id(), agent.clone(), live.owner.observation.clone())),
         &sender,
     );
     let mut ops = Vec::new();
@@ -1156,7 +1293,7 @@ async fn a_commit_while_the_view_opens_is_in_its_rows() {
 /// never replaces the last good rows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_read_keeps_the_last_good_rows_and_stale_serves_send_nothing() {
-    let (_root, sessions, attached, turn) = fixture().await;
+    let (_root, sessions, attached, turn, _live) = fixture().await;
     let (wire, received) = crate::surface_protocol::host_event_channel();
     let sender: Sender = Sender::over(wire);
     let gate = Arc::new(ViewGate::default());
@@ -1213,7 +1350,7 @@ async fn a_failed_read_keeps_the_last_good_rows_and_stale_serves_send_nothing() 
 /// before them cannot send after them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn close_and_session_switch_retire_the_views_generation() {
-    let (_root, sessions, attached, turn) = fixture().await;
+    let (_root, sessions, attached, turn, live) = fixture().await;
     let (wire, _received) = crate::surface_protocol::host_event_channel();
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
@@ -1223,7 +1360,11 @@ async fn close_and_session_switch_retire_the_views_generation() {
         "c1",
         attached.locator(),
         Arc::clone(&sessions),
-        Some((turn.id(), attached.agent().clone())),
+        Some((
+            turn.id(),
+            attached.agent().clone(),
+            live.owner.observation.clone(),
+        )),
         &sender,
     );
     let open = *observations.gate.lock();
@@ -1369,7 +1510,9 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
         panic!("session required");
     };
     let agent = attached.agent().clone();
-    let turn = agent.prompt("live").await.unwrap();
+    let mut turn = agent.prompt("live").await.unwrap();
+    let projection =
+        super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent);
     tokio::time::timeout(Duration::from_secs(10), started.notified())
         .await
         .expect("the tool starts");
@@ -1383,7 +1526,7 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
         "c-held",
         attached.locator(),
         Arc::clone(&sessions),
-        Some((turn.id(), agent.clone())),
+        Some((turn.id(), agent.clone(), projection.observation.clone())),
         &sender,
     );
     let mut ops = Vec::new();
@@ -1421,7 +1564,7 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
 /// instant: after a turn advanced the head, the head it is now.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_attach_names_the_checkpoint_of_its_history() {
-    let (_root, _sessions, attached, turn) = fixture_with(serde_json::json!([
+    let (_root, _sessions, attached, turn, _live) = fixture_with(serde_json::json!([
         {"output":{"text":"committed prefix"},"finish":"stop"},
         {"output":{"text":"second answer"},"finish":"stop"}
     ]))

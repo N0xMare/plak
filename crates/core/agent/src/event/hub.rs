@@ -6,22 +6,19 @@ pub(super) mod subscription;
 
 use self::subscription::{EventSubscription, ResumeOutcome, TurnEvents, ViewAttachment, ViewError};
 use super::projection::{
-    AgentViewSnapshot, AgentViewState, ConversationItemView, ConversationProjection, LifetimeFence,
-    LifetimeFenceDomain, ProjectionState, TurnViewState, apply_projection_delta,
-    preflight_projection,
+    AgentViewSnapshot, ProjectionState, TurnViewState, apply_projection_delta, preflight_projection,
 };
 use super::types::{
     AgentEvent, AgentEventKind, EVENT_KIND_VERSION, EVENT_SCHEMA_VERSION, EffectDecisionResolution,
     EventCursor, EventScope, EventSequence, EventVisibility, PROJECTION_REVISION,
     SubscriptionLimits, ViewRequest, event_metadata,
 };
-use crate::UsageTotals;
 use crate::feed::FeedSeq;
 use plakous_model::{
-    AgentId, AttemptId, BranchId, CallId, Clock, ConversationView, EventId, IdGenerator, RunId,
-    SessionId, Timestamp, TurnId,
+    AgentId, AttemptId, BranchId, CallId, Clock, EventId, IdGenerator, RunId, SessionId, Timestamp,
+    TurnId,
 };
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
@@ -163,7 +160,6 @@ impl EventHub {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGenerator>,
         close_event_id: EventId,
-        initial_conversation: &ConversationView,
         limits: EventHubLimits,
     ) -> Result<Self, ViewError> {
         if limits.retained_items == 0 || limits.retained_bytes == 0 || limits.max_subscribers == 0 {
@@ -171,19 +167,6 @@ impl EventHub {
         }
         let epoch = Timestamp::new(0, 0).map_err(|_| ViewError::Identity)?;
         let (changed, _) = watch::channel(0);
-        let initial_items = initial_conversation.items();
-        let retained_start = initial_items.len().saturating_sub(limits.retained_items);
-        let conversation = ConversationProjection::from_flat_bounded(
-            Arc::from(
-                initial_items
-                    .iter()
-                    .skip(retained_start)
-                    .map(ConversationItemView::from_item)
-                    .collect::<Vec<_>>(),
-            ),
-            limits.retained_items,
-            limits.retained_bytes,
-        );
         Ok(Self {
             inner: Arc::new(EventHubInner {
                 agent_id,
@@ -201,25 +184,7 @@ impl EventHub {
                     retained_bytes: 0,
                     subscribers: 0,
                     closed: false,
-                    view: ProjectionState {
-                        lifecycle: AgentViewState::Running,
-                        turns: BTreeMap::new(),
-                        terminal_turn_tombstones: VecDeque::new(),
-                        terminal_turn_fence: LifetimeFence::new(LifetimeFenceDomain::TerminalTurn),
-                        recovery_promotable_turn: None,
-                        active_attempts: BTreeSet::new(),
-                        committed_conversation_items: initial_items.len(),
-                        conversation,
-                        retained_conversation_items: limits.retained_items,
-                        retained_conversation_bytes: limits.retained_bytes,
-                        pending_effect_decisions: Vec::new(),
-                        tool_activity: Vec::new(),
-                        tool_activity_tombstones: VecDeque::new(),
-                        retired_tool_fence: LifetimeFence::new(
-                            LifetimeFenceDomain::RetiredToolCall,
-                        ),
-                        usage: UsageTotals::default(),
-                    },
+                    view: ProjectionState::new(limits.retained_items),
                     turn_parents: BTreeMap::new(),
                     attempt_parents: BTreeMap::new(),
                     call_parents: BTreeMap::new(),
@@ -363,7 +328,7 @@ impl EventHub {
             content_retained_bytes: prepared.content_retained_bytes,
         });
         validate_causal_context(&state, &event).map_err(|()| ViewError::InvalidEvent)?;
-        let delta = preflight_projection(&state.view, &event, self.inner.limits.retained_items)?;
+        let delta = preflight_projection(&state.view, &event)?;
         apply_projection_delta(&mut state.view, delta);
         state.branch_sequence = branch_sequence;
         state.last_timestamp = event.timestamp;
@@ -391,7 +356,12 @@ impl EventHub {
                 break;
             };
             if let Some(turn_id) = evicted.turn_id
-                && (state.view.turns.contains_key(&turn_id)
+                && (state
+                    .view
+                    .attach
+                    .turns
+                    .binary_search_by_key(&turn_id, super::projection::TurnView::turn_id)
+                    .is_ok()
                     || state.turn_subscribers.contains_key(&turn_id))
             {
                 state
@@ -511,12 +481,7 @@ impl EventHub {
             request.visibility,
             turn_filter,
         );
-        let snapshot = snapshot_from(
-            state,
-            cursor,
-            request.visibility,
-            self.inner.limits.retained_items,
-        );
+        let snapshot = AgentViewSnapshot::new(cursor, state.view.attach.clone());
         let events = self.subscribe_locked(state, request, turn_filter, cursor, true)?;
         Ok(ViewAttachment { snapshot, events })
     }
@@ -617,61 +582,16 @@ fn cursor_compatible(inner: &EventHubInner, cursor: EventCursor, request: ViewRe
         && cursor.scope == EventScope::Agent
 }
 
-fn snapshot_from(
-    state: &EventHubState,
-    cursor: EventCursor,
-    visibility: EventVisibility,
-    retained_turns: usize,
-) -> AgentViewSnapshot {
-    AgentViewSnapshot {
-        cursor,
-        state: state.view.lifecycle,
-        presentation_incomplete: false,
-        turns: state.view.turns.values().cloned().collect(),
-        committed_conversation_items: state.view.committed_conversation_items,
-        conversation: (visibility == EventVisibility::Content)
-            .then(|| state.view.conversation.clone()),
-        pending_effect_decisions: state
-            .view
-            .pending_effect_decisions
-            .iter()
-            .cloned()
-            .map(|mut decision| {
-                if visibility == EventVisibility::Metadata {
-                    decision.prompt = None;
-                }
-                decision
-            })
-            .collect(),
-        tool_activity: state
-            .view
-            .tool_activity
-            .iter()
-            .cloned()
-            .map(|mut activity| {
-                if visibility == EventVisibility::Metadata {
-                    activity.message = None;
-                }
-                activity
-            })
-            .collect(),
-        tool_activity_tombstones: state.view.tool_activity_tombstones.clone(),
-        retired_tool_fence: state.view.retired_tool_fence.clone(),
-        active_attempts: state.view.active_attempts.clone(),
-        usage: state.view.usage,
-        completed_turns: state.completed_turns.clone(),
-        terminal_turn_tombstones: state.view.terminal_turn_tombstones.clone(),
-        terminal_turn_fence: state.view.terminal_turn_fence.clone(),
-        recovery_promotable_turn: state.view.recovery_promotable_turn,
-        retained_turns,
-        retained_conversation_bytes: state.view.retained_conversation_bytes,
-    }
-}
-
 fn validate_causal_context(state: &EventHubState, event: &AgentEvent) -> Result<(), ()> {
     if matches!(event.kind(), AgentEventKind::ConversationCommitted { .. }) {
         let turn_id = event.turn_id.ok_or(())?;
-        let turn = state.view.turns.get(&turn_id);
+        let turn = state
+            .view
+            .attach
+            .turns
+            .binary_search_by_key(&turn_id, super::projection::TurnView::turn_id)
+            .ok()
+            .map(|index| &state.view.attach.turns[index]);
         let active = turn.is_some_and(|turn| turn.state() == TurnViewState::Running);
         let completed = turn.is_some_and(|turn| turn.state() != TurnViewState::Running)
             && state.completed_turn_parents.contains_key(&turn_id);
@@ -735,8 +655,11 @@ fn update_causal_parents(
         }
         if !state
             .view
+            .attach
             .turns
-            .get(&turn_id)
+            .binary_search_by_key(&turn_id, super::projection::TurnView::turn_id)
+            .ok()
+            .map(|index| &state.view.attach.turns[index])
             .is_some_and(|turn| turn.state() == TurnViewState::Running)
         {
             return;
@@ -796,11 +719,6 @@ fn complete_turn_indexes(state: &mut EventHubState, turn_id: TurnId, retained_tu
             break;
         };
         state.completed_turn_parents.remove(&evicted_turn);
-        state.view.turns.remove(&evicted_turn);
-        state.view.terminal_turn_tombstones.push_back(evicted_turn);
-        while state.view.terminal_turn_tombstones.len() > retained_turns {
-            let _ = state.view.terminal_turn_tombstones.pop_front();
-        }
         if !state.turn_subscribers.contains_key(&evicted_turn) {
             state.turn_evicted_through.remove(&evicted_turn);
         }

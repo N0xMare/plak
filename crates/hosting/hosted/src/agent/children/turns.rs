@@ -356,7 +356,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         return Err("opened child has no agent".into());
     };
     let mut acknowledged = Some(acknowledged);
-    let submission = loop {
+    let mut submission = loop {
         let command = if result_context.instruction {
             plakous::agent::TurnCommand::StartInstruction {
                 command_id,
@@ -369,7 +369,9 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             }
         };
         let submission = match agent.command(command).await {
-            Ok(submission) => submission,
+            Ok(submission) => {
+                crate::runtime::child_projection::ChildAdmission::new(submission, agent)
+            }
             Err(error) => {
                 let message = format!("child turn start was refused: {error}");
                 release_startup(runtime, agent_id, startup, attached).await;
@@ -386,9 +388,9 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             &attached.sessions,
             attached.locator().session_id(),
             &command_text,
-            submission.acknowledgement().disposition(),
+            submission.acknowledgement.disposition(),
             submission
-                .acknowledgement()
+                .acknowledgement
                 .rejection()
                 .is_some_and(|rejection| {
                     rejection.kind() == plakous::agent::ControlErrorKind::Reclaimed
@@ -461,7 +463,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             }
         }
     };
-    if let Some(rejection) = submission.acknowledgement().rejection() {
+    if let Some(rejection) = submission.acknowledgement.rejection() {
         let storage_pressure =
             rejection.kind() == plakous::agent::ControlErrorKind::StoragePressure;
         let rejection = rejection.to_string();
@@ -511,7 +513,7 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             })
             .into());
     }
-    let Some(turn_id) = submission.acknowledgement().turn_id() else {
+    let Some(turn_id) = submission.acknowledgement.turn_id() else {
         release_startup(runtime, agent_id, startup, attached).await;
         return Err("start produced no turn identity".into());
     };
@@ -548,17 +550,15 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     }
     // A fresh turn can retire before registration; its admission capability
     // survives retirement. Duplicates have no new turn capability to retain.
-    let control = match submission.acknowledgement().disposition() {
-        plakous::agent::CommandAckDisposition::Accepted => {
-            submission.turn().map(plakous::agent::Turn::control)
-        }
+    let control = match submission.acknowledgement.disposition() {
+        plakous::agent::CommandAckDisposition::Accepted => submission.control.clone(),
         plakous::agent::CommandAckDisposition::Duplicate => agent.turn_control(turn_id),
         _ => None,
     };
     let Some(control) = control else {
         drop(registration.take());
         release_startup(runtime, agent_id, startup, attached).await;
-        if submission.acknowledgement().disposition()
+        if submission.acknowledgement.disposition()
             == plakous::agent::CommandAckDisposition::Duplicate
         {
             return Err(
@@ -567,18 +567,24 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
         }
         return Err("child turn control is unavailable".into());
     };
-    let Some(result) = submission.result().cloned() else {
+    let Some(result) = submission.result.clone() else {
         drop(registration.take());
         release_startup(runtime, agent_id, startup, attached).await;
         return Err("start produced no result handle".into());
     };
     let feed = ChildFeedSource::of(&attached);
+    let projection = submission.projection.take().unwrap_or_else(|| {
+        crate::runtime::child_projection::ChildTurnProjection::recovered(
+            Some(agent.clone()),
+            turn_id,
+        )
+    });
     let child: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
-        crate::agent::live::ProductLiveChild::new(attached, turn_id, control),
+        crate::agent::live::ProductLiveChild::admitted(attached, turn_id, control, projection),
     );
     startup.set_stage(ChildStartupStage::Registering);
     let accepted = matches!(
-        submission.acknowledgement().disposition(),
+        submission.acknowledgement.disposition(),
         plakous::agent::CommandAckDisposition::Accepted
             | plakous::agent::CommandAckDisposition::Duplicate
     );

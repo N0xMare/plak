@@ -526,14 +526,18 @@ fn run_bounds_and_interrupt_join_a_real_child_and_allow_reopen() {
                 );
                 assert!(
                     host.executor
-                        .block_on(runtime.try_occupy_live(
-                            child.clone(),
-                            Box::new(crate::agent::live::ProductLiveChild::new(
-                                attached,
-                                turn_id,
-                                turn.control()
-                            ))
-                        ))
+                        .block_on(async {
+                            runtime
+                                .try_occupy_live(
+                                    child.clone(),
+                                    Box::new(crate::agent::live::ProductLiveChild::new(
+                                        attached,
+                                        turn_id,
+                                        turn.control(),
+                                    )),
+                                )
+                                .await
+                        })
                         .unwrap()
                         .is_ok()
                 );

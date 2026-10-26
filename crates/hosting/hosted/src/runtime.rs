@@ -103,6 +103,7 @@ mod admission;
 mod agent_transcript;
 mod binding_document;
 mod child_live;
+pub(crate) mod child_projection;
 mod clear;
 mod compact;
 pub(crate) mod events;
@@ -1278,6 +1279,7 @@ struct PendingApproval {
 /// inventing structure.
 #[derive(Debug)]
 struct TurnProjection<P: plakous_host_protocol::ProtocolExtension> {
+    progress: events::progress::Progress,
     reasoning: HashMap<(u32, u32), ReasoningLocation>,
     /// Reasoning blocks the in-flight model response sealed, persisted once
     /// that response completes or the turn ends: a replay that discards the
@@ -1328,6 +1330,7 @@ struct TurnProjection<P: plakous_host_protocol::ProtocolExtension> {
 impl<P: plakous_host_protocol::ProtocolExtension> Default for TurnProjection<P> {
     fn default() -> Self {
         Self {
+            progress: events::progress::Progress::default(),
             reasoning: HashMap::new(),
             unsettled_thinking: Vec::new(),
             settled_assistant_len: 0,

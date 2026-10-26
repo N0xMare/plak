@@ -1,11 +1,11 @@
 //! Non-authoritative child observations, independent of admission and turn control.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use plakous::agent::{
-    Agent, AgentEvent, AgentEventKind, AgentViewSnapshot, EventSubscription, ViewRequest,
+    Agent, AgentEvent, AgentEventKind, AgentViewSnapshot, TurnViewState, ViewRequest,
 };
 use plakous::model::{ModelEvent, TurnId, Usage};
 use plakous::sessions::{AgentSessions, SessionLocator, SessionTranscriptSource};
@@ -14,109 +14,27 @@ use plakous_host_protocol::views::transcript::{TranscriptItem, TranscriptScope};
 use plakous_host_protocol::views::{ChildProgress, PresentationSnapshot, TreeView};
 use tokio::task::JoinHandle;
 
+use super::child_projection::ChildObservation;
+#[cfg(test)]
+use super::events::progress::Progress;
 use super::{HostEvent, Sender, TurnProjection, UserAction};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::topology_runtime::ProductTopologyRuntime;
 
 const MAX_CHILDREN: usize = 8;
-const GAP: &str = "earlier activity not shown";
+pub(super) const GAP: &str = "earlier activity not shown";
 
-#[derive(Default)]
-struct Progress {
-    view: ChildProgress,
-    terminal: bool,
-    base: [u64; 5],
-    subjects: VecDeque<(String, Option<String>)>,
-}
-
-impl Progress {
-    fn observe(&mut self, kind: &AgentEventKind) {
-        self.view.last_activity_unix_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .and_then(|value| u64::try_from(value.as_millis()).ok());
-        match kind {
-            AgentEventKind::ModelDispatchStarted => {
-                self.base = [
-                    self.view.input_tokens,
-                    self.view.output_tokens,
-                    self.view.reasoning_tokens,
-                    self.view.cached_input_tokens,
-                    self.view.cache_write_tokens,
-                ];
-                self.view.activity = Some("thinking".into());
-            }
-            AgentEventKind::ModelRequestQueued { slots } => {
-                self.view.activity = Some(format!("waiting for a {slots} slot"));
-            }
-            AgentEventKind::ToolStarted {
-                identity,
-                observation,
-                ..
-            } => {
-                self.view.tool_calls = self.view.tool_calls.saturating_add(1);
-                let arguments = observation.as_ref().and_then(|item| {
-                    serde_json::from_str::<serde_json::Value>(item.arguments_preview()).ok()
-                });
-                let name = plakous_host_protocol::topology::presented_slot_name(
-                    identity.canonical_name().as_str(),
-                    arguments.as_ref(),
-                    plakous_host_protocol::topology::is_topology_registration(
-                        identity.registered_tool_id().as_str(),
-                    ),
-                );
-                self.view.activity = Some(
-                    plakous_host_protocol::views::presentation::activity_label(
-                        name,
-                        crate::activity::tool_activity_kind(name),
-                    )
-                    .into(),
-                );
-            }
-            AgentEventKind::ToolCompleted { .. } => self.view.activity = None,
-            AgentEventKind::Model {
-                event: Some(model), ..
-            } => match model.as_ref() {
-                ModelEvent::TextDelta(_) => self.view.activity = Some("writing".into()),
-                ModelEvent::ReasoningDelta(_) => self.view.activity = Some("thinking".into()),
-                ModelEvent::Usage(update) => self.usage(update.usage()),
-                _ => {}
-            },
-            AgentEventKind::TurnCompleted { usage } | AgentEventKind::TurnFailed { usage, .. } => {
-                self.base = [0; 5];
-                self.usage(usage.model());
-                self.view.activity = None;
-                self.terminal = true;
-            }
-            _ => {}
-        }
-    }
-
-    fn usage(&mut self, usage: Usage) {
-        self.view.input_tokens = self.base[0].saturating_add(usage.input_tokens());
-        self.view.output_tokens = self.base[1].saturating_add(usage.output_tokens());
-        self.view.reasoning_tokens = self.base[2].saturating_add(usage.reasoning_tokens());
-        self.view.cached_input_tokens = self.base[3].saturating_add(usage.cached_input_tokens());
-        self.view.cache_write_tokens = self.base[4].saturating_add(usage.cache_write_tokens());
-    }
-}
+type ObservedChild = (String, TurnId, Agent, Arc<ChildObservation>);
 
 struct Observer {
     turn_id: TurnId,
-    progress: Arc<Mutex<Progress>>,
-    task: JoinHandle<()>,
-    retry_after: Instant,
-}
-
-impl Drop for Observer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    observation: Arc<ChildObservation>,
 }
 
 /// Restarts an open agent view's serving task, optionally on a live turn,
 /// under a send generation.
-type ServeAgent = Box<dyn Fn(Option<(TurnId, Agent)>, u64, bool) -> JoinHandle<()> + Send>;
+type ServeAgent =
+    Box<dyn Fn(Option<(TurnId, Agent, Arc<ChildObservation>)>, u64, bool) -> JoinHandle<()> + Send>;
 
 /// The send generation of a face's agent view. A serve sends only while the
 /// generation it was started under is current; close, replace, a new turn
@@ -185,13 +103,18 @@ pub(super) struct ChildObservers {
     published: BTreeMap<String, ChildProgress>,
 }
 
-fn running_children(runtime: &ProductTopologyRuntime) -> Option<Vec<(String, TurnId, Agent)>> {
+fn running_children(runtime: &ProductTopologyRuntime) -> Option<Vec<ObservedChild>> {
     let live = runtime.live.try_lock().ok()?;
     Some(
         live.keys()
             .filter_map(|id| {
                 let child = live.get(id)?;
-                Some((id.clone(), child.turn_id(), child.agent()?))
+                Some((
+                    id.clone(),
+                    child.turn_id(),
+                    child.agent()?,
+                    super::child_projection::of(child)?,
+                ))
             })
             .collect(),
     )
@@ -205,118 +128,40 @@ impl ChildObservers {
         self.sync_children(children);
     }
 
-    fn sync_children(&mut self, mut children: Vec<(String, TurnId, Agent)>) {
+    fn sync_children(&mut self, mut children: Vec<ObservedChild>) {
         self.follow_agent_view_turn(&children);
-        // Keep healthy existing observers first; choose newcomers by stable id.
-        children.sort_by(|(left, left_turn, _), (right, right_turn, _)| {
+        children.sort_by(|(left, turn, ..), (right, right_turn, ..)| {
             let existing = |id: &String, turn: &TurnId| {
                 self.children
                     .get(id)
                     .is_some_and(|observer| observer.turn_id == *turn)
             };
-            existing(right, right_turn)
-                .cmp(&existing(left, left_turn))
-                .then_with(|| left.cmp(right))
+            (!existing(left, turn), left).cmp(&(!existing(right, right_turn), right))
         });
         children.truncate(MAX_CHILDREN);
-        self.children.retain(|id, observer| {
-            children
-                .iter()
-                .any(|(current, turn_id, _)| current == id && *turn_id == observer.turn_id)
-        });
-        for (id, turn_id, agent) in children {
-            if self.children.get(&id).is_some_and(|observer| {
-                !observer.task.is_finished()
-                    || observer.progress.lock().is_ok_and(|state| state.terminal)
-                    || Instant::now() < observer.retry_after
-            }) {
-                continue;
-            }
-            let prior = self
-                .children
-                .get(&id)
-                .filter(|observer| observer.turn_id == turn_id)
-                .map(|observer| Arc::clone(&observer.progress));
-            let progress = prior.unwrap_or_else(|| {
-                Arc::new(Mutex::new(Progress {
-                    subjects: VecDeque::new(),
-                    view: ChildProgress {
-                        turn_id: turn_id.to_string(),
-                        ..ChildProgress::default()
+        self.children = children
+            .into_iter()
+            .map(|(id, turn_id, _, observation)| {
+                (
+                    id,
+                    Observer {
+                        turn_id,
+                        observation,
                     },
-                    terminal: false,
-                    base: [0; 5],
-                }))
-            });
-            let state = Arc::clone(&progress);
-            let task = tokio::spawn(async move {
-                let Ok(attachment) = agent.attach(ViewRequest::content()).await else {
-                    return;
-                };
-                let (snapshot, mut events) = attachment.into_parts();
-                if let Some(turn) = snapshot
-                    .turns()
-                    .iter()
-                    .find(|turn| turn.turn_id() == turn_id)
-                    && let Ok(mut state) = state.lock()
-                {
-                    state.view.tool_calls = turn.tools_started() as u64;
-                    let (usage, base) = turn.live_usage();
-                    state.base = [0; 5];
-                    state.usage(usage);
-                    state.base = [
-                        base.input_tokens(),
-                        base.output_tokens(),
-                        base.reasoning_tokens(),
-                        base.cached_input_tokens(),
-                        base.cache_write_tokens(),
-                    ];
-                    if let Some(usage) = turn.usage() {
-                        state.base = [0; 5];
-                        state.usage(usage.model());
-                    }
-                    state.terminal = turn.usage().is_some() || turn.failure().is_some();
-                }
-                if state.lock().is_ok_and(|state| state.terminal) {
-                    return;
-                }
-                while let Ok(event) = events.recv().await {
-                    if event.turn_id() != Some(turn_id) {
-                        continue;
-                    }
-                    let terminal = matches!(
-                        event.kind(),
-                        AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
-                    );
-                    if let Ok(mut state) = state.lock() {
-                        state.observe(event.kind());
-                    }
-                    if terminal {
-                        break;
-                    }
-                }
-            });
-            self.children.insert(
-                id,
-                Observer {
-                    turn_id,
-                    progress,
-                    task,
-                    retry_after: Instant::now() + Duration::from_secs(1),
-                },
-            );
-        }
+                )
+            })
+            .collect();
     }
 
     fn material_progress(&self) -> BTreeMap<String, ChildProgress> {
         self.children
             .iter()
             .filter_map(|(id, observer)| {
-                let state = observer.progress.lock().ok()?;
+                let state = observer.observation.snapshot();
                 if state.terminal {
                     return None;
                 }
-                let mut view = state.view.clone();
+                let mut view = state.progress;
                 view.last_activity_unix_ms = None;
                 Some((id.clone(), view))
             })
@@ -333,11 +178,8 @@ impl ChildObservers {
         let mut progress = BTreeMap::new();
         for node in &mut view.nodes {
             node.live_progress = self.children.get(&node.agent_id).and_then(|observer| {
-                observer
-                    .progress
-                    .lock()
-                    .ok()
-                    .and_then(|state| (!state.terminal).then(|| state.view.clone()))
+                let state = observer.observation.snapshot();
+                (!state.terminal).then_some(state.progress)
             });
             if let Some(value) = &node.live_progress {
                 let mut value = value.clone();
@@ -352,11 +194,12 @@ impl ChildObservers {
 
     /// A new turn of the open agent restarts its view: fresh committed rows,
     /// then that turn's ops. The same turn, or none, changes nothing.
-    fn follow_agent_view_turn(&mut self, children: &[(String, TurnId, Agent)]) {
+    fn follow_agent_view_turn(&mut self, children: &[ObservedChild]) {
         let Some(view) = self.agent_view.as_mut() else {
             return;
         };
-        let Some((_, turn_id, agent)) = children.iter().find(|(id, ..)| *id == view.agent_id)
+        let Some((_, turn_id, agent, observation)) =
+            children.iter().find(|(id, ..)| *id == view.agent_id)
         else {
             return;
         };
@@ -366,7 +209,11 @@ impl ChildObservers {
         view.task.abort();
         view.turn_id = Some(*turn_id);
         let generation = self.gate.bump();
-        view.task = (view.serve)(Some((*turn_id, agent.clone())), generation, false);
+        view.task = (view.serve)(
+            Some((*turn_id, agent.clone(), observation.clone())),
+            generation,
+            false,
+        );
     }
 
     /// Closes the open agent view; nothing it started sends afterwards.
@@ -433,12 +280,17 @@ impl ChildObservers {
         };
         let live = {
             let live = runtime.live.lock().await;
-            live.get(agent_id)
-                .and_then(|child| Some((child.turn_id(), child.agent()?)))
+            live.get(agent_id).and_then(|child| {
+                Some((
+                    child.turn_id(),
+                    child.agent()?,
+                    super::child_projection::of(child)?,
+                ))
+            })
         };
         if live
             .as_ref()
-            .is_some_and(|(turn_id, _)| self.serves(session_id, agent_id, *turn_id))
+            .is_some_and(|(turn_id, ..)| self.serves(session_id, agent_id, *turn_id))
         {
             return;
         }
@@ -466,7 +318,7 @@ impl ChildObservers {
         agent_id: &str,
         locator: SessionLocator,
         sessions: Arc<AgentSessions>,
-        live: Option<(TurnId, Agent)>,
+        live: Option<(TurnId, Agent, Arc<ChildObservation>)>,
         events: &Sender<P>,
     ) {
         self.close_agent_view();
@@ -492,7 +344,7 @@ impl ChildObservers {
                 replace,
             ))
         });
-        let turn_id = live.as_ref().map(|(turn_id, _)| *turn_id);
+        let turn_id = live.as_ref().map(|(turn_id, ..)| *turn_id);
         let task = serve(live, self.gate.bump(), true);
         self.agent_view = Some(AgentView {
             agent_id: agent_id.to_owned(),
@@ -689,32 +541,40 @@ impl<P: plakous_host_protocol::ProtocolExtension> ServeContext<P> {
 /// Serves one open agent view: its committed rows, then, when it has a live
 /// turn that has not ended, that turn's ops, then fresh committed rows once
 /// the turn ends so the view converges on committed history. A live turn's
-/// rows and ops come from one atomic attach: the rows are the history
-/// committed at the attach's cursor and the ops its tail after that cursor,
-/// so no committed item is in neither or sent twice; what the tail cannot
-/// replay is marked with the gap notice. A node with no live turn is read
-/// from its bound session in the store.
+/// tail is registered first at the hosted observation cursor, then history is
+/// captured at the core attachment cursor. Reduced updates at or before that
+/// history cursor are skipped; later updates remain in the registered tail.
+/// This two-cursor rule cannot lose an intervening live update or repeat a
+/// committed item. Missing uncommitted prefixes are marked with a gap notice.
+/// A node with no live turn is read from its bound session in the store.
 async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
     context: ServeContext<P>,
-    live: Option<(TurnId, Agent)>,
+    live: Option<(TurnId, Agent, Arc<ChildObservation>)>,
     replace: bool,
 ) {
-    let Some((turn_id, agent)) = live else {
+    let Some((turn_id, agent, observation)) = live else {
         let rows = context.stored_rows().await;
         context.send_transcript(rows, replace);
         return;
     };
     #[cfg(test)]
     hooks::before_attach(&context.agent_id).await;
+    let (live, tail) = observation.attach();
     let Ok((attachment, source)) = SessionTranscriptSource::attach(&agent, ViewRequest::content())
     else {
         let rows = context.stored_rows().await;
         context.send_transcript(rows, replace);
         return;
     };
-    let (snapshot, tail) = attachment.into_parts();
+    let (snapshot, unused_tail) = attachment.into_parts();
+    drop(unused_tail);
     let rows = context.project(source).await;
     if turn_ended(&snapshot, turn_id) {
+        context.send_transcript(rows, replace);
+        return;
+    }
+    if live.terminal {
+        let rows = context.committed_rows(&agent).await;
         context.send_transcript(rows, replace);
         return;
     }
@@ -722,12 +582,16 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
         return;
     }
     let emit = context.emitter();
-    emit_attach_prefix(&snapshot, turn_id, &emit);
+    if live.cursor > 1 {
+        emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
+    }
+    #[cfg(test)]
+    hooks::before_follow(&context.agent_id).await;
     follow_turn(
-        agent.clone(),
-        turn_id,
-        snapshot.cursor().sequence().get(),
+        observation,
         tail,
+        snapshot.cursor().sequence().get(),
+        live.cursor > 1,
         emit,
     )
     .await;
@@ -745,80 +609,52 @@ fn child_live_emitter<P: plakous_host_protocol::ProtocolExtension>(
     move |op| sender.observe_agent(&id, &op)
 }
 
-/// What an attachment says before its tail. An atomic attachment covers
-/// canonical items but not previously streamed, uncommitted blocks: say so
-/// rather than imply a full replay.
-fn emit_attach_prefix(
-    snapshot: &AgentViewSnapshot,
-    turn_id: TurnId,
-    emit: &impl Fn(HostEvent<Core>) -> bool,
-) {
-    if snapshot.presentation_incomplete()
-        || snapshot.turns().iter().any(|turn| {
-            turn.turn_id() == turn_id && (turn.model_attempts() > 0 || turn.tools_started() > 0)
-        })
-    {
-        emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
-    }
-}
-
-/// Streams `turn_id`'s ops from `tail` until the turn ends, reattaching
-/// (at most once a second) with a gap notice when the tail lags.
-async fn follow_turn(
-    agent: Agent,
-    turn_id: TurnId,
-    mut cursor: u64,
-    mut tail: EventSubscription,
+/// Follows already-reduced child observations; a lagging face resynchronizes
+/// its cursor without ever creating another reducer.
+pub(super) async fn follow_turn(
+    observation: Arc<ChildObservation>,
+    mut tail: super::child_projection::Tail,
+    committed_through: u64,
+    mut gap_emitted: bool,
     emit: impl Fn(HostEvent<Core>) -> bool,
 ) {
-    let mut projection = TurnProjection::<Core>::default();
-    let mut progress = Progress::default();
     let mut retry_after = Instant::now() + Duration::from_secs(1);
     loop {
-        let event = if let Ok(event) = tail.recv().await {
-            event
-        } else {
-            tokio::time::sleep_until(retry_after.into()).await;
-            retry_after = Instant::now() + Duration::from_secs(1);
-            emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
-            let Ok(attachment) = agent.attach(ViewRequest::content()).await else {
-                break;
-            };
-            let (snapshot, events) = attachment.into_parts();
-            if turn_ended(&snapshot, turn_id) {
-                break;
+        match tail.recv().await {
+            Ok(Some(update)) => {
+                if update.source_sequence <= committed_through {
+                    if !gap_emitted && !update.ops.is_empty() {
+                        emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
+                        gap_emitted = true;
+                    }
+                    continue;
+                }
+                for op in update.ops.iter() {
+                    if !emit(op.clone()) {
+                        emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
+                    }
+                }
             }
-            cursor = snapshot.cursor().sequence().get();
-            tail = events;
-            continue;
-        };
-        let next = event.cursor().sequence().get();
-        if next != cursor.saturating_add(1) {
-            emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
-        }
-        cursor = next;
-        if event.turn_id() != Some(turn_id) {
-            continue;
-        }
-        let terminal = matches!(
-            event.kind(),
-            AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
-        );
-        for op in transcript_ops(&event, &mut projection, &mut progress) {
-            if !emit(op) {
+            Ok(None) => break,
+            Err(()) => {
+                tokio::time::sleep_until(retry_after.into()).await;
+                retry_after = Instant::now() + Duration::from_secs(1);
                 emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
+                let (snapshot, next) = observation.attach();
+                if snapshot.terminal {
+                    break;
+                }
+                tail = next;
             }
-        }
-        if terminal {
-            break;
         }
     }
 }
 
 fn turn_ended(snapshot: &AgentViewSnapshot, turn_id: TurnId) -> bool {
-    snapshot.turns().iter().any(|turn| {
-        turn.turn_id() == turn_id && (turn.usage().is_some() || turn.failure().is_some())
-    })
+    snapshot
+        .turns()
+        .iter()
+        .any(|turn| turn.turn_id() == turn_id && turn.state() != TurnViewState::Running)
 }
 
 fn usage_op(usage: Usage, terminal: bool) -> HostEvent<Core> {
@@ -835,13 +671,14 @@ fn usage_op(usage: Usage, terminal: bool) -> HostEvent<Core> {
     }
 }
 
-fn transcript_ops(
+pub(super) fn transcript_ops(
     event: &AgentEvent,
     projection: &mut TurnProjection<Core>,
-    progress: &mut Progress,
 ) -> Vec<HostEvent<Core>> {
     let mut ops = Vec::new();
-    progress.observe(event.kind());
+    projection
+        .progress
+        .observe(event.kind(), event.attempt_id().zip(event.call_id()));
     match event.kind() {
         AgentEventKind::Model {
             event: Some(model), ..
@@ -876,7 +713,7 @@ fn transcript_ops(
                 }
             }
             ModelEvent::Usage(_) => {
-                let view = &progress.view;
+                let view = &projection.progress.view;
                 ops.push(usage_op(
                     Usage::new(
                         view.input_tokens,
@@ -945,11 +782,12 @@ fn transcript_ops(
                 },
             );
             if let Some(id) = call_id.as_ref() {
-                progress.subjects.retain(|(call, _)| call != id);
-                if progress.subjects.len() >= 512 {
-                    progress.subjects.pop_front();
+                projection.progress.subjects.retain(|(call, _)| call != id);
+                if projection.progress.subjects.len() >= 512 {
+                    projection.progress.subjects.pop_front();
                 }
-                progress
+                projection
+                    .progress
                     .subjects
                     .push_back((id.clone(), text.subject.clone()));
             }
@@ -1015,8 +853,14 @@ fn transcript_ops(
             };
             let subject = call_id
                 .as_ref()
-                .and_then(|id| progress.subjects.iter().position(|(call, _)| call == id))
-                .and_then(|index| progress.subjects.remove(index))
+                .and_then(|id| {
+                    projection
+                        .progress
+                        .subjects
+                        .iter()
+                        .position(|(call, _)| call == id)
+                })
+                .and_then(|index| projection.progress.subjects.remove(index))
                 .and_then(|(_, subject)| subject);
             let subject = super::events::completed_tool_summary(
                 &name,
@@ -1068,6 +912,26 @@ pub(super) mod hooks {
     type Hook = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
     static BEFORE_ATTACH: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
+    static BEFORE_FOLLOW: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
+
+    pub(in crate::runtime) fn set_before_follow(agent_id: &str, hook: Hook) {
+        BEFORE_FOLLOW
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(HashMap::new)
+            .insert(agent_id.to_owned(), hook);
+    }
+
+    pub(super) async fn before_follow(agent_id: &str) {
+        let hook = BEFORE_FOLLOW
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .and_then(|hooks| hooks.get(agent_id).cloned());
+        if let Some(hook) = hook {
+            hook().await;
+        }
+    }
 
     pub(in crate::runtime) fn set_before_attach(agent_id: &str, hook: Hook) {
         BEFORE_ATTACH
@@ -1090,4 +954,4 @@ pub(super) mod hooks {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

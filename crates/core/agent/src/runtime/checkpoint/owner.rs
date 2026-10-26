@@ -1065,9 +1065,6 @@ impl PreparedCheckpoint {
     pub(in crate::runtime) fn checkpoint(&self) -> Arc<RuntimeCheckpoint> {
         self.state.checkpoint()
     }
-    pub(in crate::runtime) fn conversation(&self) -> ConversationView {
-        self.state.conversation()
-    }
     pub(in crate::runtime) fn start(self) -> CheckpointOwner {
         let state = Arc::new(Mutex::new(self.state));
         let heartbeat = LeaseHeartbeat::start(Arc::clone(&state));

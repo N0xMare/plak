@@ -1276,6 +1276,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    ("plakous-hosted", "src/runtime/child_live.rs"): {
+        "agent": {"TurnViewState"},
+    },
+    ("plakous-hosted", "src/runtime/child_projection.rs"): {
+        "agent": {"CommandAck", "TurnEvents", "EventDelivery", "SubscriptionEnd", "AgentViewState", "TurnViewState"},
+    },
     # Plak owns the export document, not a second runtime. This one codec
     # reconstructs validated public content data, never mutable authority.
     ("plak", "src/carry/history.rs"): {

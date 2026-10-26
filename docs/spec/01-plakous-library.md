@@ -8275,12 +8275,49 @@ or a gap marker and then resynchronize; they never backpressure the agent
 without an explicit lossless contract. Raw provider data is opt-in, bounded,
 redacted, and outside canonical replay.
 
-An atomic read-model snapshot returns one immutable presentation projection and
-its cursor and watermarks. Cursor replay over retained in-memory observations
-reports complete range, gap, or resnapshot-required. Attaching after completion
-or restart converges from the authoritative checkpoint and result projection,
-never by reconstructing authority from events. **Result readiness does not
-depend on draining events.**
+The atomic attach contract is `ViewAttachment`: an immutable
+`AgentViewSnapshot` and a registered `EventSubscription` whose first event is
+strictly after the snapshot cursor. The snapshot contains only:
+
+- the cursor (session, branch, process-local run, sequence, event schema,
+  projection revision, visibility and selection scope);
+- the event source lifecycle, all active turns and a bounded recently terminal
+  turn tail in stable identity order, with each turn's identity and lifecycle;
+- every currently pending effect decision in admission order, with exact
+  binding-addressed reference, tool identity and expiry. Descriptive prompts
+  are present only under content visibility.
+
+Completed-turn eviction never resurrects a terminal identity: bounded
+process-local lifetime fences remain private bookkeeping. Pending decisions
+leave the snapshot on resolution, owning-turn termination, or source closure.
+
+The snapshot contains no conversation summaries, tool activity, token totals,
+tool/model counters, terminal usage or failure detail. `TurnResult` and the
+canonical history remain their authorities; the facade's
+`SessionTranscriptSource::attach` captures committed history atomically at the
+same attach boundary. The host owns presentation. Hosted `TurnProjection` is
+the live presentation reducer for root and child observations.
+
+`AgentViewReducer` advances only this attach contract over exact next events,
+using the same lifecycle/decision transitions as the publication hub. It checks
+scope and sequence before mutation; payload and tool-progress validity belong
+to the publisher, not this consumer. An adjacent typed droppable loss range
+advances its cursor and marks `presentation_incomplete` without changing turn
+states or pending decisions. Structural loss requires atomic reattachment.
+A fresh attachment clears that presentation-only incompleteness indicator; it
+does not assert replay of uncommitted presentation.
+
+`TurnEvents::recv_delivery` preserves explicit droppable loss ranges as
+`EventDelivery::Lost`, alongside the existing structural `Lagged`,
+`TerminalFailure` and `Closed` outcomes. `recv` remains the event-only reader.
+Turn subscriptions select one turn from a branch-wide sequence: skipped
+sequences belonging to other turns are not evidence of loss. Consumers use
+explicit loss deliveries or lag outcomes, not adjacency, to mark gaps.
+
+Cursor replay over retained in-memory observations reports complete range,
+gap, or resnapshot-required. After restart the event run is fresh; committed
+history and results come from checkpoint authority, never reconstructed events.
+**Result readiness does not depend on draining events.**
 
 Events and the change feed (§5.11) state the same facts at two strengths. An
 envelope that observes a committed mutation carries that mutation's feed
@@ -8297,10 +8334,11 @@ Observation publication holds one publication lock through reservation, prefligh
 materialization, and publication. One hub-state lock protects validation and the
 combined projection, causal-index, retention, and close transition; notification
 follows unlock. Attachment captures its snapshot and cursor and registers its
-subscription under that same state lock. Hub publication and consumer reduction
-share one transition planner, and rejected or stale prepared events do not mutate
-the current projection or cursor. Subscriptions are bounded cursors over that hub,
-not separate queue owners.
+subscription under that same state lock. Hub publication and attach-contract
+reduction share lifecycle and pending-decision transitions; publication keeps
+its causal and tool-validity bookkeeping private. Rejected or stale prepared
+events do not mutate the attach state or cursor. Subscriptions are bounded
+cursors over that hub, not separate queue owners.
 
 `ModelRetry` carries content-free loss accounting for the broken physical
 attempt: streamed assistant-text and reasoning bytes, closed output items/blocks
@@ -8344,11 +8382,11 @@ Request host, route path (no query), and serialized body byte count attached to
 retry notices are ephemeral logging facts, excluded from serialization.
 Their live strings still count against the event window's retained-byte budget.
 
-Live read-model turn snapshots expose observational token totals and the totals
-before the current model dispatch through `TurnView::live_usage()`. Content
-observers seed counters from that pair without double-counting cumulative usage
-updates. These numbers are presentation observations, never checked billing,
-checkpoint authority, or session export data. Tool adapters may attach a neutral
+Live token counters belong to the hosted turn projection, not L0 attach state.
+The host folds cumulative provider updates against each dispatch's observed
+base and replaces them with checked terminal usage when observed. These
+numbers are presentation observations, never checkpoint authority or session
+export data. Tool adapters may attach a neutral
 await receipt through `ToolOutcome::with_wait_observation`; the topology adapter
 supplies its typed wake classification, without topology entering L0.
 

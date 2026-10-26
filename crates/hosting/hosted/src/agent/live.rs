@@ -93,8 +93,16 @@ pub struct ProductLiveChild {
     pub turn_id: TurnId,
     pub control: TurnControl,
     /// Follow-up turns admitted behind the running turn, in admission order.
-    pub follow_ups:
-        Arc<std::sync::Mutex<std::collections::VecDeque<(TurnControl, TurnResultHandle)>>>,
+    follow_ups: Arc<
+        std::sync::Mutex<
+            std::collections::VecDeque<(
+                TurnControl,
+                TurnResultHandle,
+                crate::runtime::child_projection::ChildTurnProjection,
+            )>,
+        >,
+    >,
+    observation: Option<crate::runtime::child_projection::ChildTurnProjection>,
     delivery: Arc<tokio::sync::RwLock<()>>,
     delivery_serial: Arc<tokio::sync::Mutex<()>>,
 }
@@ -103,11 +111,43 @@ impl ProductLiveChild {
     /// One live child on its running turn, with no follow-up queued.
     #[must_use]
     pub fn new(attached: AttachedCodingSession, turn_id: TurnId, control: TurnControl) -> Self {
+        let observation = crate::runtime::child_projection::ChildTurnProjection::recovered(
+            attached.agent().cloned(),
+            turn_id,
+        );
+        Self::admitted(attached, turn_id, control, observation)
+    }
+
+    pub(crate) fn admitted(
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+        observation: crate::runtime::child_projection::ChildTurnProjection,
+    ) -> Self {
+        Self::with_observation(attached, turn_id, control, Some(observation))
+    }
+
+    /// A throwaway cancellation/release owner, without presentation or tasks.
+    pub(crate) fn without_observation(
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+    ) -> Self {
+        Self::with_observation(attached, turn_id, control, None)
+    }
+
+    fn with_observation(
+        attached: AttachedCodingSession,
+        turn_id: TurnId,
+        control: TurnControl,
+        observation: Option<crate::runtime::child_projection::ChildTurnProjection>,
+    ) -> Self {
         Self {
             attached,
             turn_id,
             control,
             follow_ups: Arc::default(),
+            observation,
             delivery: Arc::default(),
             delivery_serial: Arc::default(),
         }
@@ -140,16 +180,22 @@ impl ProductLiveChild {
                         error.to_string()
                     }
                 })?;
+            let mut submission =
+                crate::runtime::child_projection::ChildAdmission::new(submission, &agent);
             #[cfg(test)]
             super::park::hooks::after_follow_up_admission(&agent.id().to_string()).await;
             acknowledged.await;
             // A newly admitted follow-up is the child's next turn; an exact
             // duplicate was queued by the first delivery.
-            if let (Some(turn), Some(result)) = (submission.turn(), submission.result()) {
+            if let (Some(control), Some(result), Some(projection)) = (
+                submission.control.take(),
+                submission.result.take(),
+                submission.projection.take(),
+            ) {
                 follow_ups
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push_back((turn.control(), result.clone()));
+                    .push_back((control, result, projection));
             }
             Ok(())
         })
@@ -176,15 +222,17 @@ impl ProductLiveChild {
             })
             .await
             .map_err(|error| error.to_string())?;
+        let mut submission =
+            crate::runtime::child_projection::ChildAdmission::new(submission, agent);
         acknowledged.await;
         if crate::agent::ledger::consumed_below_retention(
             driver,
             &self.attached.sessions,
             self.attached.locator().session_id(),
             &command_text,
-            submission.acknowledgement().disposition(),
+            submission.acknowledgement.disposition(),
             submission
-                .acknowledgement()
+                .acknowledgement
                 .rejection()
                 .is_some_and(|rejection| {
                     rejection.kind() == plakous::agent::ControlErrorKind::Reclaimed
@@ -194,20 +242,18 @@ impl ProductLiveChild {
         {
             return Err(ChildRestartError::Consumed);
         }
-        if let Some(rejection) = submission.acknowledgement().rejection() {
+        if let Some(rejection) = submission.acknowledgement.rejection() {
             return Err(ChildRestartError::Runtime(format!(
                 "{RESTART_REJECTED}: {rejection}"
             )));
         }
         let turn_id = submission
-            .acknowledgement()
+            .acknowledgement
             .turn_id()
             .ok_or_else(|| "submit harness start produced no turn identity".to_owned())?;
-        let disposition = submission.acknowledgement().disposition();
+        let disposition = submission.acknowledgement.disposition();
         let control = match disposition {
-            plakous::agent::CommandAckDisposition::Accepted => {
-                submission.turn().map(plakous::agent::Turn::control)
-            }
+            plakous::agent::CommandAckDisposition::Accepted => submission.control.clone(),
             plakous::agent::CommandAckDisposition::Duplicate => agent.turn_control(turn_id),
             _ => None,
         }
@@ -219,11 +265,21 @@ impl ProductLiveChild {
             }
         })?;
         let result = submission
-            .result()
-            .cloned()
+            .result
+            .clone()
             .ok_or_else(|| "submit harness start produced no result handle".to_owned())?;
         // The table must name the turn that is actually running, or a
         // later follow-up steers a turn that has already ended.
+        if let Some(projection) = submission.projection.take() {
+            self.observation = Some(projection);
+        } else if self.turn_id != turn_id {
+            self.observation = Some(
+                crate::runtime::child_projection::ChildTurnProjection::recovered(
+                    Some(agent.clone()),
+                    turn_id,
+                ),
+            );
+        }
         self.turn_id = turn_id;
         self.control = control;
         Ok(result)
@@ -308,6 +364,10 @@ pub(crate) async fn released_with_feed(
 }
 
 impl LiveChildHandle for ProductLiveChild {
+    fn host_observation(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        Some(self.observation.as_ref()?.observation.clone())
+    }
+
     fn reachability_probe(&self) -> Option<plakous::model::ReachabilityProbe> {
         self.attached.reachability_probe.clone()
     }
@@ -351,11 +411,12 @@ impl LiveChildHandle for ProductLiveChild {
     }
 
     fn take_follow_up(&mut self) -> Option<TurnResultHandle> {
-        let (control, result) = self
+        let (control, result, observation) = self
             .follow_ups
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pop_front()?;
+        self.observation = Some(observation);
         self.turn_id = result.turn_id();
         self.control = control;
         Some(result)

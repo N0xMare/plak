@@ -68,7 +68,7 @@ pub(super) fn event_error(error: ViewError) -> AgentError {
         ViewError::SubscriberLimit => AgentErrorKind::Backpressure,
         ViewError::Identity => AgentErrorKind::Identity,
         ViewError::Closed => AgentErrorKind::Shutdown,
-        ViewError::FenceSaturated | ViewError::FenceStateUnavailable => AgentErrorKind::Session,
+        ViewError::FenceSaturated => AgentErrorKind::Session,
         ViewError::IncompatibleCursor | ViewError::CursorAhead | ViewError::InvalidEvent => {
             AgentErrorKind::Internal
         }

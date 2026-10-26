@@ -14,7 +14,11 @@ use plakous_offline_crash_harness::gate::GateHandle;
 use plakous_offline_crash_harness::protocol::CrashBoundary;
 use plakous_offline_crash_harness::{BoundaryController, scripted_runtime_binding};
 
-type Queue = std::collections::VecDeque<(TurnControl, TurnResultHandle)>;
+type Queue = std::collections::VecDeque<(
+    TurnControl,
+    TurnResultHandle,
+    crate::runtime::child_projection::ChildTurnProjection,
+)>;
 
 struct Fixture {
     _root: tempfile::TempDir,
@@ -284,6 +288,14 @@ async fn terminal_handoff_drains_registration_and_revalidates_concurrent_close()
                     panic!("follow-up handoff required")
                 };
                 assert_eq!(result.turn_id(), admitted_turn);
+                {
+                    let live = fixture.runtime.live.lock().await;
+                    let child = live.get(&fixture.child).unwrap();
+                    assert!(
+                        crate::runtime::child_projection::of(child).is_some(),
+                        "the opaque projection must rebind to the queued follow-up turn"
+                    );
+                }
                 assert_eq!(
                     fixture
                         .runtime

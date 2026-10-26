@@ -44,7 +44,7 @@ pub(in crate::agent) async fn rejoin_recovered_start(
     {
         Ok(admitted) => admitted,
         Err(error) => {
-            let _ = Box::new(crate::agent::live::ProductLiveChild::new(
+            let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
                 attached, turn, control,
             ))
             .cancel_and_release(runtime.driver().clone())
@@ -82,7 +82,7 @@ pub(in crate::agent) async fn rejoin_recovered_start(
     match bound {
         Ok(_) => {}
         Err(error) => {
-            let _ = Box::new(crate::agent::live::ProductLiveChild::new(
+            let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
                 attached, turn, control,
             ))
             .cancel_and_release(runtime.driver().clone())
