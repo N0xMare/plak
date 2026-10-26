@@ -1018,6 +1018,12 @@ pub(super) async fn reconcile_reopened_child_results(
         .as_ref()
         .filter(|_| mode.rejoin)
         .map(RecoveredTurnHandle::turn_id);
+    let expected_attempt = runtime
+        .read(|tree| {
+            tree.attempt(agent_id)
+                .map(|attempt| attempt.attempt_id.clone())
+        })
+        .map_err(|error| error.message)?;
     let reconciled = async {
         if !mode.recovery {
             let cursor = runtime
@@ -1071,7 +1077,12 @@ pub(super) async fn reconcile_reopened_child_results(
         }
         crate::agent::ledger::project_feed(runtime, agent_id, &sessions, session_id).await?;
         runtime.record_then_apply(agent_id, |tree| {
-            tree.record_host_retirement(agent_id, error.clone())
+            tree.record_host_retirement_for_attempt(
+                agent_id,
+                expected_attempt.as_ref(),
+                error.clone(),
+            )
+            .map(|_| ())
         })?;
         return Err(error);
     }

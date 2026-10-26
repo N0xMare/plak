@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use plakous::model::TurnId;
 
 use super::{
-    HOST_RETIRE_JOIN_TIMEOUT, LiveChildHandle, LiveRelease, ProductTopologyRuntime,
-    publish_release, record_retirement_fault, retirement_needs_recovery,
+    HOST_RETIRE_JOIN_TIMEOUT, LiveChildHandle, LiveRelease, ProductAgentTree,
+    ProductTopologyRuntime, publish_release, record_retirement_fault, retirement_needs_recovery,
 };
 
 /// Stage at which a child startup is waiting. A deadline is not cancellation.
@@ -32,8 +32,10 @@ pub struct ChildStartup {
     stage: Arc<Mutex<ChildStartupStage>>,
     completion: tokio::sync::watch::Sender<Option<Result<(), String>>>,
     driver: crate::tools::TreeDriver,
+    tree_id: String,
     agent_id: String,
     pub(super) expected_attempt: Option<crate::protocol::AttemptId>,
+    transferred_turn: Arc<Mutex<Option<TurnId>>>,
 }
 
 impl ChildStartup {
@@ -42,6 +44,7 @@ impl ChildStartup {
     const CLEANUP: u8 = 2;
 
     fn new(driver: crate::tools::TreeDriver, agent_id: String) -> Self {
+        let tree_id = driver.read(|tree| tree.tree_id.clone()).unwrap_or_default();
         let expected_attempt = driver
             .read(|tree| {
                 tree.attempt(&agent_id)
@@ -54,8 +57,10 @@ impl ChildStartup {
             stage: Arc::new(Mutex::new(ChildStartupStage::Creating)),
             completion: tokio::sync::watch::channel(None).0,
             driver,
+            tree_id,
             agent_id,
             expected_attempt,
+            transferred_turn: Arc::default(),
         }
     }
 
@@ -67,6 +72,37 @@ impl ChildStartup {
             Ordering::SeqCst,
             Ordering::SeqCst,
         );
+    }
+
+    /// Attempt captured by this reservation, never a later current attempt.
+    #[must_use]
+    pub fn attempt_id(&self) -> Option<&crate::protocol::AttemptId> {
+        self.expected_attempt.as_ref()
+    }
+
+    /// Records only this startup's uncertainty, never a successor's fault.
+    ///
+    /// # Errors
+    /// Returns the tree's intent-recording refusal.
+    pub fn record_retirement_failure(
+        &self,
+        tree: &mut ProductAgentTree,
+        message: String,
+    ) -> Result<bool, crate::protocol::TopologyError> {
+        let turn = *self
+            .transferred_turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if tree.tree_id != self.tree_id
+            || turn.is_some_and(|expected| {
+                tree.attempt(&self.agent_id)
+                    .and_then(|attempt| attempt.turn_id.as_deref())
+                    .is_some_and(|turn| turn != expected.to_string())
+            })
+        {
+            return Ok(false);
+        }
+        tree.record_host_retirement_for_attempt(&self.agent_id, self.attempt_id(), message)
     }
 
     /// Whether the owner must release rather than start or register work.
@@ -113,27 +149,10 @@ impl ChildStartup {
         &self,
     ) -> Result<super::LiveCancelOutcome, super::LiveCancelError> {
         self.request_cancel();
-        let mut completion = self.completion.subscribe();
-        let joined = async {
-            loop {
-                if let Some(result) = completion.borrow_and_update().clone() {
-                    return result
-                        .map(|()| super::LiveCancelOutcome::Cancelled)
-                        .map_err(super::LiveCancelError::OwnerFailure);
-                }
-                completion.changed().await.map_err(|_| {
-                    super::LiveCancelError::OwnerFailure(
-                        "child startup owner disappeared".to_owned(),
-                    )
-                })?;
-            }
-        };
-        // The startup owner's release is the same cancel-and-release a
-        // retirement runs, so it shares the retirement's store-bounded deadline.
-        if let Ok(result) = tokio::time::timeout(HOST_RETIRE_JOIN_TIMEOUT, joined).await {
+        // The startup owner's release has the same store-bounded deadline.
+        if let Ok(result) = tokio::time::timeout(HOST_RETIRE_JOIN_TIMEOUT, self.join()).await {
             result
         } else {
-            // The reservation owns startup deadline evidence, not its callers.
             record_retirement_fault(
                 &self.driver,
                 &self.agent_id,
@@ -147,6 +166,20 @@ impl ChildStartup {
             Err(super::LiveCancelError::JoinExpired)
         }
     }
+
+    pub(super) async fn join(&self) -> Result<super::LiveCancelOutcome, super::LiveCancelError> {
+        let mut completion = self.completion.subscribe();
+        loop {
+            if let Some(result) = completion.borrow_and_update().clone() {
+                return result
+                    .map(|()| super::LiveCancelOutcome::Cancelled)
+                    .map_err(super::LiveCancelError::OwnerFailure);
+            }
+            completion.changed().await.map_err(|_| {
+                super::LiveCancelError::OwnerFailure("child startup owner disappeared".to_owned())
+            })?;
+        }
+    }
 }
 
 /// The refusal [`ProductTopologyRuntime::reserve_startup`] returns for a
@@ -155,6 +188,33 @@ impl ChildStartup {
 pub const STARTUP_SLOT_OCCUPIED: &str = "child is already running, starting, or retiring";
 
 impl ProductTopologyRuntime {
+    /// Cancels only this reservation or the exact turn it transferred. A late
+    /// startup caller cannot retire a replacement child, even on the same attempt.
+    pub async fn cancel_startup(&self, agent_id: &str, startup: &ChildStartup) {
+        if agent_id != startup.agent_id
+            || !self
+                .driver
+                .read(|tree| tree.tree_id == startup.tree_id)
+                .unwrap_or(false)
+        {
+            return;
+        }
+        startup.request_cancel();
+        let turn = {
+            // Transfer checks cancellation under this same admission lock.
+            // Taking it before reading prevents a cancelled caller from missing
+            // a transfer that passed its check just before request_cancel.
+            let _live = self.live.lock().await;
+            *startup
+                .transferred_turn
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        if let Some(turn) = turn {
+            let _ = super::retire_live(&self.driver, &self.live, agent_id, Some(turn), true).await;
+        }
+    }
+
     /// Reserves a child before any session or turn operation can be admitted.
     ///
     /// # Errors
@@ -174,7 +234,7 @@ impl ProductTopologyRuntime {
     pub async fn reserve_startup_admitted(
         &self,
         agent_id: &str,
-        admit: impl FnOnce(&crate::tree::ProductAgentTree) -> Result<(), String>,
+        admit: impl FnOnce(&ProductAgentTree) -> Result<(), String>,
     ) -> Result<ChildStartup, String> {
         let mut live = self.live.lock().await;
         if !self.admits_live(&live, agent_id) {
@@ -234,6 +294,10 @@ impl ProductTopologyRuntime {
         {
             return Err(child);
         }
+        *startup
+            .transferred_turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(turn);
         live.starting.remove(&agent_id);
         live.children.insert(agent_id, child);
         startup.completion.send_replace(Some(Ok(())));

@@ -138,6 +138,13 @@ pub(in crate::agent) async fn start_child_turn_as(
     prompt: ChildCommand,
     admission: StartAdmission,
 ) -> Result<TurnId, ChildStartFailure> {
+    let expected_attempt = runtime
+        .read(|tree| {
+            tree.attempt(agent_id)
+                .map(|attempt| attempt.attempt_id.clone())
+        })
+        .ok()
+        .flatten();
     let deadline = tokio::time::Instant::now() + SPAWN_MATERIALIZE_TIMEOUT;
     let reserved = tokio::time::timeout_at(
         deadline,
@@ -159,22 +166,16 @@ pub(in crate::agent) async fn start_child_turn_as(
             return Err(ChildStartFailure::SlotOccupied(error));
         }
         Err(error) => {
-            let expected_attempt = runtime
-                .read(|tree| {
-                    tree.attempt(agent_id)
-                        .map(|attempt| attempt.attempt_id.clone())
-                })
-                .ok()
-                .flatten();
             // Release the rejected attachment independently of its caller.
             let owner = runtime.clone();
             let id = agent_id.to_owned();
+            let released_attempt = expected_attempt.clone();
             tokio::spawn(async move {
                 if attached.release_opened().await.is_err() {
                     let _ = owner.record_then_apply(&id, |tree| {
                         tree.record_host_retirement_for_attempt(
                             &id,
-                            expected_attempt.as_ref(),
+                            released_attempt.as_ref(),
                             "rejected startup attachment release failed".into(),
                         )
                         .map(|_| ())
@@ -182,7 +183,12 @@ pub(in crate::agent) async fn start_child_turn_as(
                 }
             });
             runtime.record_then_apply(agent_id, |tree| {
-                tree.record_host_retirement(agent_id, error.clone())
+                tree.record_host_retirement_for_attempt(
+                    agent_id,
+                    expected_attempt.as_ref(),
+                    error.clone(),
+                )
+                .map(|_| ())
             })?;
             return Err(error.into());
         }
@@ -222,7 +228,10 @@ pub(super) async fn await_child_start(
         caller
             .runtime
             .record_then_apply(&caller.agent_id, |tree| {
-                tree.record_host_retirement(&caller.agent_id, error.clone())
+                caller
+                    .startup
+                    .record_retirement_failure(tree, error.clone())
+                    .map(|_| ())
             })
             .map_err(|error| ChildStartFailure::Failed(error.clone()))?;
     }
@@ -887,7 +896,11 @@ pub(in crate::agent) async fn end_attempt_work(
         retire_live_child(driver, live, agent_id, identity.turn).await;
         mutate_child(driver, agent_id, |tree| {
             let _ = tree
-                .record_host_retirement(agent_id, error.clone())
+                .record_host_retirement_for_attempt(
+                    agent_id,
+                    Some(&identity.attempt),
+                    error.clone(),
+                )
                 .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value));
             persist_or_fault(driver, tree, agent_id);
         });

@@ -787,8 +787,10 @@ impl ChildController for StubCanceller {
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>
     {
+        let _ = signalled.send(());
         self.calls.lock().unwrap().push(agent_ids.clone());
         let result = if self.fail_empty_ids {
             Err(LiveCancelFailure {
@@ -805,8 +807,10 @@ impl ChildController for StubCanceller {
                 owner_failures: agent_ids
                     .iter()
                     .map(|id| crate::hub::LiveRetirementFailure {
+                        tree_id: "tree1".into(),
                         agent_id: id.clone(),
                         expected_attempt_id: Some(crate::protocol::AttemptId::new(id, 1)),
+                        expected_turn_id: None,
                         message: "child turn could not be cancelled".into(),
                     })
                     .collect(),

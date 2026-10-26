@@ -6,6 +6,21 @@ use crate::tools::jobs::{
     task_process_number, unlisted_job_admitted,
 };
 
+async fn joined_cancel_receipt(
+    driver: &TreeDriver,
+    operation: &str,
+) -> crate::tree::OperationRecord {
+    loop {
+        let receipt = driver
+            .read(|tree| tree.operations()[operation].clone())
+            .unwrap();
+        if receipt.terminal_response.is_some() || receipt.terminal_code.is_some() {
+            return receipt;
+        }
+        tokio::task::yield_now().await;
+    }
+}
+
 /// The await engine's process targets: a named own process wakes the
 /// await when it ends and is returned as a snapshot row; a finished one
 /// returns at once; an id outside the caller's session is refused.
@@ -141,8 +156,10 @@ impl ChildController for ExpiredCloseCanceller {
     fn cancel_agents(
         &self,
         ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>
     {
+        let _ = signalled.send(());
         Box::pin(async move {
             self.0
                 .mutate_and_settle(|tree| {
@@ -218,14 +235,19 @@ async fn close_joiner_expiry_does_not_refault_recovery_during_job_stop() {
         driver: driver.clone(),
         child: child.clone(),
     })));
-    let outcome = close_tool(
+    let _ = close_tool(
         driver.clone(),
         Some(Arc::new(ExpiredCloseCanceller(driver.clone()))),
     )
     .close_with("close-expired-joiner".into(), &json!({"agent_id": child}))
     .await
     .unwrap();
-    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(
+        joined_cancel_receipt(&driver, "close-expired-joiner")
+            .await
+            .terminal_code,
+        Some(TopologyErrorCode::OperationRecoveryRequired)
+    );
     driver
         .read(|tree| {
             assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Closed);
@@ -288,8 +310,10 @@ impl ChildController for LateJobCanceller {
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>
     {
+        let _ = signalled.send(());
         Box::pin(async move {
             assert_eq!(
                 self.driver
@@ -319,7 +343,7 @@ async fn a_job_promoted_between_closure_and_cancel_is_stopped_not_parked() {
         path: root.path().to_owned(),
         job: Mutex::new(None),
     });
-    let outcome = close_tool(driver, Some(canceller.clone()))
+    let outcome = close_tool(driver.clone(), Some(canceller.clone()))
         .close_with(
             "close-late-job".into(),
             &json!({"agent_id": child.agent_id}),
@@ -327,6 +351,12 @@ async fn a_job_promoted_between_closure_and_cancel_is_stopped_not_parked() {
         .await
         .unwrap();
     assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    assert!(
+        joined_cancel_receipt(&driver, "close-late-job")
+            .await
+            .terminal_code
+            .is_none()
+    );
     assert_eq!(
         canceller.job.lock().unwrap().as_ref().unwrap().0.jobs()[0].status,
         plakous::tools::JobStatus::Stopped(plakous::tools::JobStopReason::AttemptEnded)
@@ -341,8 +371,10 @@ impl ChildController for JobCheckingCanceller {
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>
     {
+        let _ = signalled.send(());
         Box::pin(async move {
             assert_eq!(
                 self.0.jobs()[0].status,
@@ -364,11 +396,20 @@ async fn close_cancels_live_turn_before_stopping_its_jobs() {
     let child = tree.spawn_agent("root", &spawn_request(), None).unwrap();
     let driver = driver_on(tree, store);
     let (jobs, _opened) = install_running_job(&driver, &child.agent_id, root.path()).await;
-    let closed = close_tool(driver, Some(Arc::new(JobCheckingCanceller(jobs.clone()))))
-        .close_with("close-order".into(), &json!({"agent_id": child.agent_id}))
-        .await
-        .unwrap();
+    let closed = close_tool(
+        driver.clone(),
+        Some(Arc::new(JobCheckingCanceller(jobs.clone()))),
+    )
+    .close_with("close-order".into(), &json!({"agent_id": child.agent_id}))
+    .await
+    .unwrap();
     assert_eq!(closed.kind(), ToolOutcomeKind::Success);
+    assert!(
+        joined_cancel_receipt(&driver, "close-order")
+            .await
+            .terminal_code
+            .is_none()
+    );
     assert_eq!(
         jobs.jobs()[0].status,
         plakous::tools::JobStatus::Stopped(plakous::tools::JobStopReason::AttemptEnded)

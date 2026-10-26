@@ -633,7 +633,10 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/hub.rs"): {"error", "info", "pin", "select", "warn"},
     # Bounded VCS refusal detail, once per workspace/detail change; never file content.
     ("plakous-recursive-subagents", "src/tree/dormancy.rs"): {"info", "warn"},
-    ("plakous-recursive-subagents", "src/tools/cancel.rs"): {"json"},
+    # Select the signal acknowledgement without cancelling the owned retirement join.
+    ("plakous-recursive-subagents", "src/tools/cancel.rs"): {"json", "select"},
+    ("plakous-hosted", "src/topology_navigator.rs"): {"error"},
+    ("plakous-hosted", "src/runtime/topology_state.rs"): {"error"},
     ("plakous-recursive-subagents", "src/tools/jobs.rs"): {"json"},
     ("plakous-recursive-subagents", "src/tools/mail.rs"): {"json"},
     ("plakous-recursive-subagents", "src/tools/mod.rs"): {"json"},

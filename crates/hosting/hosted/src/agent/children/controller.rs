@@ -73,6 +73,7 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Boxed<
         '_,
         Result<
@@ -80,7 +81,7 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
             crate::agent_tree_tools::LiveCancelFailure,
         >,
     > {
-        self.canceller.cancel_agents(agent_ids)
+        self.canceller.cancel_agents(agent_ids, signalled)
     }
 
     fn recover(

@@ -872,7 +872,7 @@ impl crate::topology_runtime::LiveChildHandle for RetiringChild {
 }
 
 #[tokio::test(start_paused = true)]
-async fn navigator_joiner_expiry_does_not_refault_a_settled_release() {
+async fn navigator_background_join_does_not_refault_a_settled_release() {
     use std::future::Future;
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
@@ -984,13 +984,12 @@ async fn navigator_joiner_expiry_does_not_refault_a_settled_release() {
             );
         })
         .unwrap();
-    assert!(events.lock().unwrap().iter().any(|event| matches!(event, ContentEvent::<TestExtension>::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("owner retained"))));
+    assert!(!events.lock().unwrap().iter().any(|event| matches!(event, ContentEvent::<TestExtension>::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("owner retained"))));
 }
 
 #[tokio::test]
-async fn interrupt_then_overlapping_close_and_stop_all_join_retirement_without_sealing() {
+async fn interrupt_then_overlapping_close_and_stop_all_return_before_retirement_without_sealing() {
     use crate::occupancy_vcs::fake::{FakeOp, FakeVcs};
-    use std::future::Future;
     use std::sync::Arc;
     let root = tempdir().unwrap();
     let vcs = Arc::new(FakeVcs::new());
@@ -1055,22 +1054,19 @@ async fn interrupt_then_overlapping_close_and_stop_all_join_retirement_without_s
     let cancel = tokio::spawn(async move { owner.cancel_live(&id).await });
     entered.notified().await;
     let session = session_for("close-retiring", root.path().to_path_buf());
-    let events = std::sync::Mutex::new(Vec::new());
+    let events = std::sync::Mutex::new(Vec::<ContentEvent<TestExtension>>::new());
     let send = |event| events.lock().unwrap().push(event);
-    let mut close = Box::pin(close_node(&session, &runtime, send, &child));
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        close_node(&session, &runtime, send, &child),
+    )
+    .await
+    .unwrap();
+    close_node(&session, &runtime, send, &child).await;
+    stop_all(&session, &runtime, send).await;
     assert!(
-        std::future::poll_fn(|cx| std::task::Poll::Ready(close.as_mut().poll(cx).is_pending()))
-            .await
-    );
-    let mut repeated = Box::pin(close_node(&session, &runtime, send, &child));
-    assert!(
-        std::future::poll_fn(|cx| std::task::Poll::Ready(repeated.as_mut().poll(cx).is_pending()))
-            .await
-    );
-    let mut stop = Box::pin(stop_all(&session, &runtime, send));
-    assert!(
-        std::future::poll_fn(|cx| std::task::Poll::Ready(stop.as_mut().poll(cx).is_pending()))
-            .await
+        !cancel.is_finished(),
+        "navigator must return while release is blocked"
     );
     assert!(vcs.calls_of(FakeOp::Seal).is_empty());
     assert!(
@@ -1083,9 +1079,6 @@ async fn interrupt_then_overlapping_close_and_stop_all_join_retirement_without_s
         cancel.await.unwrap().unwrap_err().to_string(),
         "release refused"
     );
-    close.await;
-    repeated.await;
-    stop.await;
     runtime
         .read(|tree| {
             assert_eq!(
@@ -1102,5 +1095,4 @@ async fn interrupt_then_overlapping_close_and_stop_all_join_retirement_without_s
         })
         .unwrap();
     assert!(vcs.calls_of(FakeOp::Seal).is_empty());
-    assert!(events.lock().unwrap().iter().any(|event| matches!(event, ContentEvent::<TestExtension>::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("release refused"))));
 }

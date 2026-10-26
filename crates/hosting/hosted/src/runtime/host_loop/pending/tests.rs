@@ -330,6 +330,30 @@ fn pending_store_observations_refresh_acknowledged_results() {
 }
 
 #[test]
+fn consumed_child_result_zero_survives_lifecycle_saturation() {
+    with_tree(1, |host, runtime, _, observed| {
+        assert_eq!(snapshots(observed).last().unwrap().results, 1);
+        runtime
+            .mutate_then_emit(false, |tree| {
+                let id = tree.unread_mail("root").next().unwrap().message_id.clone();
+                tree.acknowledge_mail(&id).map_err(|error| error.message)
+            })
+            .unwrap();
+        host.publish_pending_continuation();
+        assert_eq!(host.pending_track.last.unwrap().results, 0);
+        // The face still displays one. Admission traffic used to evict the
+        // accepted zero, which unchanged facts never caused the host to resend.
+        for _ in 0..1024 {
+            host.events.send(ContentEvent::IntentStarted(None));
+        }
+        let delivered = snapshots(observed);
+        host.publish_pending_continuation();
+        assert_eq!(delivered.last().map(|pending| pending.results), Some(0));
+        assert_eq!(snapshots(observed), [] as [PendingContinuation; 0]);
+    });
+}
+
+#[test]
 fn pending_refused_zero_is_resent_when_facts_are_unchanged() {
     with_tree(1, |host, runtime, _, observed| {
         assert_eq!(snapshots(observed).last().unwrap().results, 1);

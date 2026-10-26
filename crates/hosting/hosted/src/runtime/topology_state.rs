@@ -143,9 +143,19 @@ pub fn resume_tree(tree_id: &str) -> Result<(), String> {
 /// Root Ctrl-C: cancels this turn and interrupts every running descendant,
 /// without closing any. Returns how many children were interrupted.
 ///
-/// Joins the children's bounded retirement before the caller may quit. Failed
-/// cancellation is recorded as that child's retirement failure.
+/// Records the interrupt and signals children; release owners settle in the
+/// background and retain their own failure evidence.
 pub(crate) async fn mark_root_interrupted(tree_id: &str) -> Result<usize, String> {
+    interrupt_root(tree_id, false).await
+}
+
+/// A headless run is leaving its executor: join within the shutdown allowance
+/// so healthy child terminal/job publications finish before process teardown.
+pub(crate) async fn mark_root_interrupted_for_run(tree_id: &str) -> Result<usize, String> {
+    interrupt_root(tree_id, true).await
+}
+
+async fn interrupt_root(tree_id: &str, exiting: bool) -> Result<usize, String> {
     let Some(runtime) = lookup(tree_id) else {
         return Ok(0);
     };
@@ -158,39 +168,38 @@ pub(crate) async fn mark_root_interrupted(tree_id: &str) -> Result<usize, String
         Ok(())
     });
     let count = interrupted.len();
-    let cancellation = cancel_interrupted_children(&runtime, &interrupted).await;
     publication?;
-    cancellation?;
+    if exiting {
+        interrupted = runtime.live.lock().await.keys().cloned().collect();
+    }
+    cancel_interrupted_children(&runtime, &interrupted, exiting).await?;
     Ok(count)
 }
 
 async fn cancel_interrupted_children(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     interrupted: &[String],
+    exiting: bool,
 ) -> Result<(), String> {
     if interrupted.is_empty() {
         return Ok(());
     }
-    let report = runtime.cancel_live_many(interrupted).await;
-    if report.is_clean() {
-        return Ok(());
+    let join = runtime.begin_cancel_live_many(interrupted).await;
+    if exiting {
+        let report =
+            tokio::time::timeout(crate::topology_runtime::HOST_SHUTDOWN_RELEASE_TIMEOUT, join)
+                .await
+                .map_err(|_| {
+                    "child retirement exceeded the run-exit bound; owner retained".to_owned()
+                })?;
+        return report.first_failure.map_or(Ok(()), Err);
     }
-    let message = report
-        .first_failure
-        .unwrap_or_else(|| "child turn could not be cancelled".to_owned());
-    for owner in &report.owner_failures {
-        let _ = runtime.record_then_apply(&owner.agent_id, |tree| {
-            tree.record_host_retirement_for_attempt(
-                &owner.agent_id,
-                owner.expected_attempt_id.as_ref(),
-                owner.message.clone(),
-            )
-        });
-    }
-    if !report.owner_failures.is_empty() {
-        runtime.driver().request_retirement_recovery();
-    }
-    Err(message)
+    tokio::spawn(async move {
+        if let Some(error) = join.await.first_failure {
+            tracing::error!(target: "plak.topology", error, "interrupted child retirement failed");
+        }
+    });
+    Ok(())
 }
 
 /// Next root prompt on the same frozen tuple returns Live.
@@ -321,7 +330,10 @@ impl TopologyRows for HostRows<'_> {
 mod tests {
     use crate::agent_tree_protocol::{NodeStatus, SpawnAgentRequest};
 
-    struct DelayedChild(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    struct DelayedChild(
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::sync::Arc<tokio::sync::Notify>,
+    );
     impl crate::topology_runtime::LiveChildHandle for DelayedChild {
         fn agent(&self) -> Option<plakous::agent::Agent> {
             None
@@ -367,7 +379,7 @@ mod tests {
         ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>>
         {
             Box::pin(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                self.1.notified().await;
                 self.0.store(true, std::sync::atomic::Ordering::SeqCst);
                 crate::topology_runtime::LiveRelease::default()
             })
@@ -375,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn root_interrupt_from_async_drive_joins_live_children_before_returning() {
+    fn root_interrupt_signals_children_and_shutdown_joins_their_release() {
         let root = tempfile::tempdir().unwrap();
         let tree_id = uuid::Uuid::new_v4().to_string();
         let runtime = crate::runtime::test_kit::install_idle_topology_hub(&tree_id, root.path());
@@ -390,13 +402,14 @@ mod tests {
             })
             .unwrap();
         let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finish = std::sync::Arc::new(tokio::sync::Notify::new());
         let executor = plakous::application::ApplicationExecutor::new().unwrap();
         assert!(
             executor
-                .block_on(
-                    runtime
-                        .try_occupy_live(child.clone(), Box::new(DelayedChild(cancelled.clone())))
-                )
+                .block_on(runtime.try_occupy_live(
+                    child.clone(),
+                    Box::new(DelayedChild(cancelled.clone(), finish.clone()))
+                ))
                 .unwrap()
                 .is_ok()
         );
@@ -408,12 +421,14 @@ mod tests {
             1
         );
         assert!(
-            cancelled.load(std::sync::atomic::Ordering::SeqCst),
-            "run exit must wait for child retirement"
+            !cancelled.load(std::sync::atomic::Ordering::SeqCst),
+            "interrupt returns before release settles"
         );
+        finish.notify_one();
         executor
             .block_on(crate::topology_runtime::force_release(&tree_id))
             .unwrap();
+        assert!(cancelled.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     /// A root cancel interrupts the children that are running, so they stop

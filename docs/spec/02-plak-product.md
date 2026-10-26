@@ -3623,7 +3623,11 @@ it only while idle. Each idle check recomputes the counts from the hub's tree
 reads are limited to the tree observation interval. A failed read skips the
 observation and pause-row updates rather than publishing old facts or treating
 the tree as unpaused. A refused observation is retried on the next eligible
-check, even when the facts have not changed. On an interactive face, pausing
+check, even when the facts have not changed. The indicator's last accepted
+zero cannot be evicted by admission or lifecycle traffic: only a newer
+pending-continuation snapshot supersedes it. This keeps a
+consumed child result from remaining displayed when the host has no changed
+facts to send. On an interactive face, pausing
 auto-continue or the tree also writes one typed `tree` warning as a notice
 intent — `auto-continue paused until the next prompt` or
 `agents paused · /tree resume` — once per

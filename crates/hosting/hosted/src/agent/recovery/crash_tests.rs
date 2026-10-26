@@ -37,6 +37,62 @@ const ROOT_ENV: &str = "PLAK_CHILD_REOPEN_FIXTURE_ROOT";
 const MODE_ENV: &str = "PLAK_CHILD_REOPEN_FIXTURE_MODE";
 const READY: &str = "CHILD_CUT_READY";
 
+type LiveFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// Holds a real runtime's release result before the hub can publish its feed.
+struct UnpublishedRelease {
+    inner: Box<dyn crate::topology_runtime::LiveChildHandle>,
+    released: Arc<tokio::sync::Notify>,
+}
+
+impl crate::topology_runtime::LiveChildHandle for UnpublishedRelease {
+    fn agent(&self) -> Option<plakous::agent::Agent> {
+        self.inner.agent()
+    }
+    fn turn_id(&self) -> plakous::model::TurnId {
+        self.inner.turn_id()
+    }
+    fn turn_control(&self) -> plakous::agent::TurnControl {
+        self.inner.turn_control()
+    }
+    fn follow_up(
+        &self,
+        command: CommandId,
+        body: String,
+    ) -> LiveFuture<'static, Result<(), String>> {
+        self.inner.follow_up(command, body)
+    }
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        self.inner.follow_up_barrier()
+    }
+    fn restart(
+        &mut self,
+        driver: crate::agent_tree_tools::TreeDriver,
+        command: CommandId,
+        prompt: String,
+        delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+    ) -> LiveFuture<'_, Result<plakous::agent::TurnResultHandle, String>> {
+        self.inner.restart(driver, command, prompt, delivery)
+    }
+    fn release(
+        self: Box<Self>,
+        driver: crate::agent_tree_tools::TreeDriver,
+    ) -> LiveFuture<'static, crate::topology_runtime::LiveRelease> {
+        self.inner.release(driver)
+    }
+    fn cancel_and_release(
+        self: Box<Self>,
+        driver: crate::agent_tree_tools::TreeDriver,
+    ) -> LiveFuture<'static, crate::topology_runtime::LiveRelease> {
+        Box::pin(async move {
+            let release = self.inner.cancel_and_release(driver).await;
+            assert!(release.failure.is_none());
+            self.released.notify_one();
+            std::future::pending().await
+        })
+    }
+}
+
 struct Fixture {
     runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
     parent: SpawnParent,
@@ -307,16 +363,64 @@ impl Fixture {
             recovered_turn: None,
             topology_owner: None,
         };
+        let released = Arc::new(tokio::sync::Notify::new());
+        let live: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
+            crate::agent::live::ProductLiveChild::new(attached, turn, control),
+        );
+        let live = if mode == "retire-unpublished" {
+            Box::new(UnpublishedRelease {
+                inner: live,
+                released: released.clone(),
+            }) as Box<dyn crate::topology_runtime::LiveChildHandle>
+        } else {
+            live
+        };
         self.runtime
-            .try_occupy_live(
-                id.clone(),
-                Box::new(crate::agent::live::ProductLiveChild::new(
-                    attached, turn, control,
-                )),
-            )
+            .try_occupy_live(id.clone(), live)
             .await
             .map_err(|_| "live slot")
             .unwrap();
+        if mode.starts_with("retire-") {
+            let request = crate::agent_tree_protocol::AttemptScopedRequest {
+                agent_id: id.clone(),
+                expected_attempt_id: Some(identity.attempt.clone()),
+            };
+            let closed = self
+                .runtime
+                .mutate_then_emit(false, |tree| {
+                    tree.prepare_operation("retirement-cut", "root", "close_agent", &request)
+                        .map_err(|error| error.message)?;
+                    tree.close_agent("root", &request, None)
+                        .map_err(|error| error.message)
+                })
+                .unwrap();
+            if mode == "retire-intent" {
+                cut_ready(&id).await;
+            }
+            let join = self
+                .runtime
+                .begin_cancel_live_many(std::slice::from_ref(&id))
+                .await;
+            if mode == "retire-unpublished" {
+                released.notified().await;
+                assert!(self.runtime.live.lock().await.contains_key(&id));
+                cut_ready(&id).await;
+            }
+            assert!(join.await.is_clean());
+            self.runtime
+                .mutate_then_emit(false, |tree| {
+                    tree.remember_success(
+                        "retirement-cut",
+                        "root",
+                        "close_agent",
+                        &request,
+                        &closed,
+                    )
+                    .map_err(|error| error.message)
+                })
+                .unwrap();
+            cut_ready(&id).await;
+        }
         if mode == "wake" {
             if let Some(trace) = std::env::var_os("PLAK_TEST_COMMIT_TRACE") {
                 let ordinal = trace_rows(Path::new(&trace))
@@ -798,6 +902,34 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
             .count(),
         2
     );
+}
+
+#[test]
+fn child_retirement_sigkill_cuts_recover_closed_once_without_redispatch() {
+    for mode in ["retire-intent", "retire-unpublished", "retire-returned"] {
+        let root = tempfile::tempdir().unwrap();
+        let id = kill_owner(root.path(), mode);
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let fixture = Fixture::new(root.path(), mode, None, true);
+            let recoverer = super::ProductChildRecoverer {
+                parent: fixture.parent.clone(), runtime: fixture.runtime.clone(),
+            };
+            recoverer.recover(id.clone(), None).await.unwrap();
+            let before = fixture.runtime.read(|tree| {
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Closed);
+                assert_eq!(tree.attempt(&id).unwrap().status, crate::agent_tree_protocol::AttemptStatus::Closed);
+                assert_eq!(tree.pending_mail("root"), [] as [crate::agent_tree::MailRecord; 0]);
+                let receipt = &tree.operations()["retirement-cut"];
+                assert_eq!(receipt.terminal_response.is_some(), mode == "retire-returned");
+                (tree.attempts().clone(), tree.messages().clone())
+            }).unwrap();
+            assert!(!recoverer.recover(id.clone(), None).await.unwrap().recovered);
+            assert_eq!(fixture.runtime.read(|tree| (tree.attempts().clone(), tree.messages().clone())).unwrap(), before);
+            let evidence = plakous_offline_crash_harness::evidence::read_evidence(root.path().join("dispatch.jsonl")).unwrap();
+            assert_eq!(evidence.iter().filter(|row| row.kind == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched).count(), 1);
+            crate::topology_runtime::force_release(&fixture.tree_id).await;
+        });
+    }
 }
 
 #[test]

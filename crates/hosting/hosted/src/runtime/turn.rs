@@ -587,7 +587,7 @@ pub(super) async fn apply_cancel_settlement<P: plakous_host_protocol::ProtocolEx
                     let _ = events.notice(TranscriptRow::info(
                         NoticeScope::Tree,
                         format!(
-                            "stopped {children} running child agent{}; mail resumes {}",
+                            "interrupting {children} running child agent{}; mail resumes {} after release",
                             if children == 1 { "" } else { "s" },
                             if children == 1 { "it" } else { "them" }
                         ),

@@ -204,6 +204,7 @@ impl LiveChildTable {
             .flatten();
         let retirement_attempt = expected_attempt.clone();
         let recovery = self.retirement_recovery.clone();
+        let (dispatched, dispatch) = tokio::sync::oneshot::channel();
         // Spawn before yielding the admission lock: no caller cancellation can
         // strand an extracted child between reservation and task ownership.
         let task = tokio::spawn(async move {
@@ -220,6 +221,15 @@ impl LiveChildTable {
                 }
             };
             let result = std::panic::AssertUnwindSafe(async {
+                tokio::pin!(release);
+                let mut dispatched = Some(dispatched);
+                let release = std::future::poll_fn(|context| {
+                    let result = release.as_mut().poll(context);
+                    if let Some(dispatched) = dispatched.take() {
+                        let _ = dispatched.send(());
+                    }
+                    result
+                });
                 tokio::pin!(release);
                 let released = tokio::select! {
                     released = &mut release => released,
@@ -275,6 +285,8 @@ impl LiveChildTable {
             agent,
             turn,
             expected_attempt: retirement_attempt,
+            recovery: self.retirement_recovery.clone(),
+            dispatched: dispatch.map(|_| ()).boxed().shared(),
             abort: task.abort_handle(),
             completion: task
                 .map(|result| {
@@ -304,6 +316,8 @@ struct Retirement {
     agent: Option<Agent>,
     turn: TurnId,
     expected_attempt: Option<crate::protocol::AttemptId>,
+    recovery: Option<Arc<dyn Fn() + Send + Sync>>,
+    dispatched: futures_util::future::Shared<futures_util::future::BoxFuture<'static, ()>>,
     completion:
         futures_util::future::Shared<futures_util::future::BoxFuture<'static, Result<(), String>>>,
     abort: tokio::task::AbortHandle,
@@ -318,6 +332,29 @@ pub async fn retire_live(
     expected: Option<TurnId>,
     cancel: bool,
 ) -> Result<LiveCancelOutcome, LiveCancelError> {
+    begin_retire_live(driver, live, agent_id, expected, cancel)
+        .await
+        .join()
+        .await
+}
+
+enum RetirementJoin {
+    Startup(ChildStartup),
+    Live {
+        retirement: Retirement,
+        deadline: tokio::time::Instant,
+    },
+    NotLive,
+}
+
+async fn begin_retire_live(
+    driver: &TreeDriver,
+    live: &Arc<tokio::sync::Mutex<LiveChildTable>>,
+    agent_id: &str,
+    expected: Option<TurnId>,
+    cancel: bool,
+) -> RetirementJoin {
+    let deadline = tokio::time::Instant::now() + HOST_RETIRE_JOIN_TIMEOUT;
     let startup = {
         let live = live.lock().await;
         let startup = expected
@@ -330,29 +367,54 @@ pub async fn retire_live(
         startup
     };
     if let Some(startup) = startup {
-        return startup.join_cancel().await;
+        return RetirementJoin::Startup(startup);
     }
     let retirement =
         live.lock()
             .await
             .start_retire(live.clone(), driver.clone(), agent_id, expected, cancel);
-    match retirement {
-        Some(retirement) => {
-            if let Ok(result) =
-                tokio::time::timeout(HOST_RETIRE_JOIN_TIMEOUT, retirement.completion).await
-            {
-                result
-                    .map(|()| LiveCancelOutcome::Cancelled)
-                    .map_err(LiveCancelError::OwnerFailure)
-            } else {
-                let recovery = live.lock().await.retirement_recovery.clone();
-                if let Some(recovery) = recovery {
-                    recovery();
-                }
-                Err(LiveCancelError::JoinExpired)
-            }
+    if let Some(retirement) = &retirement {
+        retirement.dispatched.clone().await;
+    }
+    retirement.map_or(RetirementJoin::NotLive, |retirement| RetirementJoin::Live {
+        retirement,
+        deadline,
+    })
+}
+
+impl RetirementJoin {
+    async fn join_owned(self) -> Result<LiveCancelOutcome, LiveCancelError> {
+        match self {
+            Self::Startup(startup) => startup.join().await,
+            Self::Live { retirement, .. } => retirement
+                .completion
+                .await
+                .map(|()| LiveCancelOutcome::Cancelled)
+                .map_err(LiveCancelError::OwnerFailure),
+            Self::NotLive => Ok(LiveCancelOutcome::NotLive),
         }
-        None => Ok(LiveCancelOutcome::NotLive),
+    }
+
+    async fn join(self) -> Result<LiveCancelOutcome, LiveCancelError> {
+        match self {
+            Self::Startup(startup) => startup.join_cancel().await,
+            Self::Live {
+                retirement,
+                deadline,
+            } => {
+                if let Ok(result) = tokio::time::timeout_at(deadline, retirement.completion).await {
+                    result
+                        .map(|()| LiveCancelOutcome::Cancelled)
+                        .map_err(LiveCancelError::OwnerFailure)
+                } else {
+                    if let Some(recovery) = retirement.recovery {
+                        recovery();
+                    }
+                    Err(LiveCancelError::JoinExpired)
+                }
+            }
+            Self::NotLive => Ok(LiveCancelOutcome::NotLive),
+        }
     }
 }
 
@@ -938,44 +1000,92 @@ impl ProductTopologyRuntime {
     /// "there was nothing running" and "the turn was stopped" are different
     /// answers, and folding them into one `Ok(())` hid the difference.
     pub async fn cancel_live_many(&self, agent_ids: &[String]) -> LiveCancelReport {
-        let mut report = LiveCancelReport::default();
-        let outcomes =
-            futures_util::future::join_all(agent_ids.iter().map(|agent_id| async move {
-                let expected_attempt_id = self
-                    .driver
-                    .read(|tree| {
-                        tree.attempt(agent_id)
-                            .map(|attempt| attempt.attempt_id.clone())
-                    })
-                    .ok()
-                    .flatten();
-                (expected_attempt_id, self.cancel_live(agent_id).await)
-            }))
-            .await;
-        for (agent_id, (expected_attempt_id, outcome)) in agent_ids.iter().zip(outcomes) {
-            match outcome {
-                Ok(LiveCancelOutcome::Cancelled) => report.cancelled.push(agent_id.clone()),
-                Ok(LiveCancelOutcome::NotLive) => report.not_live.push(agent_id.clone()),
-                Err(LiveCancelError::JoinExpired) => {
-                    report.joiner_expired.push(agent_id.clone());
-                    report
-                        .first_failure
-                        .get_or_insert_with(|| RETIRE_JOIN_EXPIRED.to_owned());
+        self.begin_cancellation(agent_ids, true).await.await
+    }
+
+    /// Signals the exact owners after the caller's durable close/interrupt.
+    /// The returned join owns their outcomes even if a slot settles or is reused.
+    pub async fn begin_cancel_live_many(
+        &self,
+        agent_ids: &[String],
+    ) -> impl Future<Output = LiveCancelReport> + Send + 'static {
+        self.begin_cancellation(agent_ids, false).await
+    }
+
+    async fn begin_cancellation(
+        &self,
+        agent_ids: &[String],
+        bounded: bool,
+    ) -> impl Future<Output = LiveCancelReport> + Send + 'static {
+        let joins = futures_util::future::join_all(agent_ids.iter().map(|agent_id| async move {
+            let tree_id = self
+                .driver
+                .read(|tree| tree.tree_id.clone())
+                .unwrap_or_default();
+            self.driver.cancel_storage_waits(agent_id);
+            let join = begin_retire_live(&self.driver, &self.live, agent_id, None, true).await;
+            let (expected_attempt_id, expected_turn_id) = match &join {
+                RetirementJoin::Startup(startup) => (startup.expected_attempt.clone(), None),
+                RetirementJoin::Live { retirement, .. } => {
+                    (retirement.expected_attempt.clone(), Some(retirement.turn))
                 }
-                Err(LiveCancelError::OwnerFailure(message)) => {
-                    report.failed.push(agent_id.clone());
-                    report.owner_failures.push(LiveRetirementFailure {
-                        agent_id: agent_id.clone(),
+                RetirementJoin::NotLive => (None, None),
+            };
+            (
+                tree_id,
+                agent_id.clone(),
+                expected_attempt_id,
+                expected_turn_id,
+                join,
+            )
+        }))
+        .await;
+        async move {
+            let mut report = LiveCancelReport::default();
+            let outcomes = futures_util::future::join_all(joins.into_iter().map(
+                |(tree_id, agent_id, expected_attempt_id, expected_turn_id, join)| async move {
+                    let outcome = if bounded {
+                        join.join().await
+                    } else {
+                        join.join_owned().await
+                    };
+                    (
+                        tree_id,
+                        agent_id,
                         expected_attempt_id,
-                        message: message.clone(),
-                    });
-                    if report.first_failure.is_none() {
-                        report.first_failure = Some(message);
+                        expected_turn_id,
+                        outcome,
+                    )
+                },
+            ))
+            .await;
+            for (tree_id, agent_id, expected_attempt_id, expected_turn_id, outcome) in outcomes {
+                match outcome {
+                    Ok(LiveCancelOutcome::Cancelled) => report.cancelled.push(agent_id.clone()),
+                    Ok(LiveCancelOutcome::NotLive) => report.not_live.push(agent_id.clone()),
+                    Err(LiveCancelError::JoinExpired) => {
+                        report.joiner_expired.push(agent_id.clone());
+                        report
+                            .first_failure
+                            .get_or_insert_with(|| RETIRE_JOIN_EXPIRED.to_owned());
+                    }
+                    Err(LiveCancelError::OwnerFailure(message)) => {
+                        report.failed.push(agent_id.clone());
+                        report.owner_failures.push(LiveRetirementFailure {
+                            tree_id,
+                            agent_id: agent_id.clone(),
+                            expected_attempt_id,
+                            expected_turn_id,
+                            message: message.clone(),
+                        });
+                        if report.first_failure.is_none() {
+                            report.first_failure = Some(message);
+                        }
                     }
                 }
             }
+            report
         }
-        report
     }
 }
 
@@ -1011,12 +1121,31 @@ impl std::error::Error for LiveCancelError {}
 /// Owner-confirmed retirement failure, scoped before awaiting cancellation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveRetirementFailure {
+    /// Tree owning the original release; child ids can repeat in another tree.
+    pub tree_id: String,
     /// Agent whose release failed.
     pub agent_id: String,
     /// Attempt owning the release, or none for an unattached root.
     pub expected_attempt_id: Option<crate::protocol::AttemptId>,
+    /// Exact retiring turn, absent only for a startup without an admitted turn.
+    pub expected_turn_id: Option<TurnId>,
     /// The owner's cleanup failure.
     pub message: String,
+}
+
+impl LiveRetirementFailure {
+    pub(crate) fn matches(&self, tree: &ProductAgentTree) -> bool {
+        tree.tree_id == self.tree_id
+            && tree
+                .attempt(&self.agent_id)
+                .map(|attempt| &attempt.attempt_id)
+                == self.expected_attempt_id.as_ref()
+            && !self.expected_turn_id.is_some_and(|expected| {
+                tree.attempt(&self.agent_id)
+                    .and_then(|attempt| attempt.turn_id.as_deref())
+                    .is_some_and(|turn| turn != expected.to_string())
+            })
+    }
 }
 
 /// What one batch cancel did, agent by agent.
@@ -1423,9 +1552,9 @@ pub async fn release_unleased(tree_id: &str) {
     }
 }
 
-/// Shutdown joins children concurrently within this allowance. Expiry is a
+/// Shutdown and headless exit join children within this allowance. Expiry is a
 /// bounded refusal, not cancellation of the workers that still own release.
-const HOST_SHUTDOWN_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
+pub const HOST_SHUTDOWN_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 /// A retirement's release deadline: the cancel settle, then the runtime's
 /// store-bounded shutdown. Shorter than that, a slow but healthy release would
 /// be fenced as failed and close would refuse.

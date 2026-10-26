@@ -163,11 +163,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     Ok(errors) => failures.extend(errors),
                     Err(_) => failures.push("job terminal recording execution failed".to_owned()),
                 }
-                match self
-                    .executor
-                    .block_on(super::super::topology_state::mark_root_interrupted(
-                        &tree_id,
-                    )) {
+                match self.executor.block_on(
+                    super::super::topology_state::mark_root_interrupted_for_run(&tree_id),
+                ) {
                     Ok(Ok(_)) => {}
                     Ok(Err(error)) => failures.push(error),
                     Err(error) => failures.push(error.to_string()),

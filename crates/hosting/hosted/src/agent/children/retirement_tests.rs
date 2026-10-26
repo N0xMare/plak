@@ -2630,7 +2630,8 @@ async fn failed_normal_release_clears_slot_and_fails_joined_close_canceller() {
     let canceller = ProductLiveCanceller {
         runtime: runtime.clone(),
     };
-    let mut close = canceller.cancel_agents(vec![child_id.clone()]);
+    let mut close =
+        canceller.cancel_agents(vec![child_id.clone()], tokio::sync::oneshot::channel().0);
     assert!(
         std::future::poll_fn(|cx| std::task::Poll::Ready(close.as_mut().poll(cx).is_pending()))
             .await
@@ -2704,7 +2705,7 @@ impl LiveChildHandle for CountedCancellation {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replacement() {
     use plakous::tools::ToolOutcomeKind;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2784,19 +2785,57 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
                 .unwrap();
             if abandon_caller {
                 drop(original);
-                finish.notify_one();
-                assert!(runtime.cancel_live(&child_id).await.is_ok());
-                assert_eq!(invoke().await.unwrap().kind(), ToolOutcomeKind::Failure);
-                assert_eq!(calls.load(Ordering::SeqCst), 1);
-                continue;
+            } else {
+                // Acceptance is independent of the deliberately blocked release.
+                assert_eq!(
+                    tokio::time::timeout(Duration::from_secs(1), original)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .kind(),
+                    ToolOutcomeKind::Success
+                );
             }
+            assert!(runtime.live.lock().await.contains_key(&child_id));
+            tokio::time::advance(
+                plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
+                    + plakous_host_protocol::limits::HOST_SESSION_RELEASE_TIMEOUT
+                    + Duration::from_secs(1),
+            )
+            .await;
+            tokio::task::yield_now().await;
+            runtime
+                .read(|tree| {
+                    let receipt = &tree.operations()["exact-cancel"];
+                    assert!(receipt.terminal_response.is_none());
+                    assert!(
+                        receipt.terminal_code.is_none(),
+                        "background receipt waits past the joiner ceiling"
+                    );
+                })
+                .unwrap();
             finish.notify_one();
             let expected = if failed_release {
                 ToolOutcomeKind::Failure
             } else {
                 ToolOutcomeKind::Success
             };
-            assert_eq!(original.await.unwrap().kind(), expected);
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if runtime
+                        .read(|tree| {
+                            let receipt = &tree.operations()["exact-cancel"];
+                            receipt.terminal_response.is_some() || receipt.terminal_code.is_some()
+                        })
+                        .unwrap()
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
             assert_eq!(invoke().await.unwrap().kind(), expected);
             assert_eq!(calls.load(Ordering::SeqCst), 1);
             let replacement = TurnId::from_str("00000000-0000-0000-0000-000000000002").unwrap();
@@ -2829,6 +2868,92 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
 /// that exercises cancellation alone.
 struct CancelOnly(ProductLiveCanceller);
 
+#[tokio::test]
+async fn stale_startup_caller_is_scoped_to_its_tree_and_attempt() {
+    use crate::agent_tree_protocol::{MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest};
+    let root = tempfile::tempdir().unwrap();
+    let runtime = runtime(root.path());
+    let child = runtime
+        .mutate_then_emit(false, |tree| {
+            Ok(tree
+                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .unwrap()
+                .agent_id)
+        })
+        .unwrap();
+    let startup = runtime.reserve_startup(&child).await.unwrap();
+    let caller = StartupCaller::new(runtime.clone(), child.clone(), startup.clone());
+    runtime
+        .finish_startup(&child, &startup, LiveRelease::default())
+        .await;
+    runtime
+        .mutate_then_emit(false, |tree| {
+            tree.record_turn_completed(&child).unwrap();
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    agent_id: child.clone(),
+                    message: "next assignment".into(),
+                    purpose: Some(MessagePurpose::Followup),
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                    refresh: None,
+                },
+                None,
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    let before = runtime
+        .read(|tree| {
+            (
+                tree.revision,
+                tree.node(&child).unwrap().clone(),
+                tree.attempt(&child).unwrap().clone(),
+            )
+        })
+        .unwrap();
+    assert_ne!(before.2.attempt_id, *startup.attempt_id().unwrap());
+    let turn = TurnId::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    assert!(
+        runtime
+            .try_occupy_live(
+                child.clone(),
+                Box::new(CountedCancellation {
+                    child: EndingChild {
+                        turn,
+                        entered: Arc::default(),
+                        finish: Arc::default(),
+                        failure: false,
+                    },
+                    calls: calls.clone(),
+                })
+            )
+            .await
+            .is_ok()
+    );
+    drop(caller);
+    tokio::task::yield_now().await;
+    assert_eq!(
+        runtime
+            .read(|tree| (
+                tree.revision,
+                tree.node(&child).unwrap().clone(),
+                tree.attempt(&child).unwrap().clone()
+            ))
+            .unwrap(),
+        before
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(
+        runtime.live.lock().await.get(&child).unwrap().turn_id(),
+        turn
+    );
+}
+
 impl crate::agent_tree_tools::ChildController for CancelOnly {
     fn services(&self) -> crate::agent_tree_tools::ChildServices {
         crate::agent_tree_tools::ChildServices::CANCEL
@@ -2837,6 +2962,7 @@ impl crate::agent_tree_tools::ChildController for CancelOnly {
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Pin<
         Box<
             dyn Future<
@@ -2848,6 +2974,6 @@ impl crate::agent_tree_tools::ChildController for CancelOnly {
                 + '_,
         >,
     > {
-        self.0.cancel_agents(agent_ids)
+        self.0.cancel_agents(agent_ids, signalled)
     }
 }

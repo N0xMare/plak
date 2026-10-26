@@ -344,12 +344,7 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
     {
         return;
     }
-    if let Err(message) = runtime.cancel_live(agent_id).await {
-        send(ContentEvent::Row(TranscriptRow::error(
-            NoticeScope::Tree,
-            format!("node interrupted; live cancel failed: {message}"),
-        )));
-    }
+    signal_retirement(runtime, &[agent_id.to_owned()]).await;
     emit_snapshot(runtime, session, send, false);
 }
 
@@ -383,55 +378,7 @@ async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
         return;
     };
     let closed_ids: Vec<String> = closed.into_iter().map(|(id, _)| id).collect();
-    let cancel = runtime.cancel_live_many(&closed_ids).await;
-    if !cancel.is_clean() {
-        let message = cancel
-            .first_failure
-            .unwrap_or_else(|| "child turn could not be cancelled".to_owned());
-        let _ = mutate_tree(
-            runtime,
-            send,
-            "retirement failure could not be persisted",
-            |tree| {
-                for owner in &cancel.owner_failures {
-                    let id = &owner.agent_id;
-                    if !tree
-                        .record_host_retirement_for_attempt(
-                            id,
-                            owner.expected_attempt_id.as_ref(),
-                            owner.message.clone(),
-                        )
-                        .and_then(|value| runtime.driver().apply_recorded(tree, id).map(|()| value))
-                        .map_err(|error| error.message)?
-                    {
-                        continue;
-                    }
-                    tree.try_emit_tree_node_detached(
-                        writer.as_ref(),
-                        id,
-                        crate::agent_tree::NodeDetach::RecoveryRequired,
-                    );
-                }
-                Ok(())
-            },
-        );
-        if !cancel.owner_failures.is_empty() {
-            runtime.driver().request_retirement_recovery();
-        }
-        send(ContentEvent::Row(TranscriptRow::error(
-            NoticeScope::Tree,
-            format!(
-                "close applied; live cancel failed for {}: {message}",
-                cancel
-                    .failed
-                    .iter()
-                    .chain(&cancel.joiner_expired)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-        )));
-    }
+    signal_retirement(runtime, &closed_ids).await;
     emit_snapshot(runtime, session, send, false);
 }
 
@@ -457,56 +404,19 @@ async fn stop_all<P: plakous_host_protocol::ProtocolExtension>(
         return;
     };
     let closed_ids: Vec<String> = closed.into_iter().map(|(id, _)| id).collect();
-    let cancel = runtime.cancel_live_many(&closed_ids).await;
-    if !cancel.is_clean() {
-        let message = cancel
-            .first_failure
-            .unwrap_or_else(|| "child turn could not be cancelled".to_owned());
-        let _ = mutate_tree(
-            runtime,
-            send,
-            "retirement failure could not be persisted",
-            |tree| {
-                for owner in &cancel.owner_failures {
-                    let id = &owner.agent_id;
-                    if !tree
-                        .record_host_retirement_for_attempt(
-                            id,
-                            owner.expected_attempt_id.as_ref(),
-                            owner.message.clone(),
-                        )
-                        .and_then(|value| runtime.driver().apply_recorded(tree, id).map(|()| value))
-                        .map_err(|error| error.message)?
-                    {
-                        continue;
-                    }
-                    tree.try_emit_tree_node_detached(
-                        writer.as_ref(),
-                        id,
-                        crate::agent_tree::NodeDetach::RecoveryRequired,
-                    );
-                }
-                Ok(())
-            },
-        );
-        if !cancel.owner_failures.is_empty() {
-            runtime.driver().request_retirement_recovery();
-        }
-        send(ContentEvent::Row(TranscriptRow::error(
-            NoticeScope::Tree,
-            format!(
-                "stop-all applied; live cancel failed for {}: {message}",
-                cancel
-                    .failed
-                    .iter()
-                    .chain(&cancel.joiner_expired)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-        )));
-    }
+    signal_retirement(runtime, &closed_ids).await;
     emit_snapshot(runtime, session, send, false);
+}
+
+async fn signal_retirement(runtime: &ProductTopologyRuntime, ids: &[String]) {
+    let join = runtime.begin_cancel_live_many(ids).await;
+    tokio::spawn(async move {
+        let report = join.await;
+        if let Some(error) = report.first_failure {
+            // The release owner persists and requests recovery for its fault.
+            tracing::error!(target: "plak.topology", error, "navigator retirement failed");
+        }
+    });
 }
 
 /// The first committed page of a child's history, for the rehearsal's

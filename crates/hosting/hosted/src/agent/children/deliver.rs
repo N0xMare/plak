@@ -41,6 +41,7 @@ impl ProductLiveCanceller {
     pub(in crate::agent) fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Pin<
         Box<
             dyn Future<
@@ -53,7 +54,9 @@ impl ProductLiveCanceller {
         >,
     > {
         Box::pin(async move {
-            let report = self.runtime.cancel_live_many(&agent_ids).await;
+            let join = self.runtime.begin_cancel_live_many(&agent_ids).await;
+            let _ = signalled.send(());
+            let report = join.await;
             if report.is_clean() {
                 return Ok(crate::agent_tree_tools::LiveCancelOutcome {
                     cancelled_ids: report.cancelled,

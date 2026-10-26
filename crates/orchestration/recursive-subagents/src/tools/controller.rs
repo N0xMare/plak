@@ -158,13 +158,16 @@ pub trait ChildController: Send + Sync {
     }
 
     /// Cancels the live turns of these agents, after the tree has already
-    /// recorded the interrupt or close durably.
+    /// recorded the interrupt or close durably. Sends `signalled` once exact
+    /// owners are reserved and cancellation requested, before joining release.
     fn cancel_agents(
         &self,
         agent_ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
     ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>
     {
         Box::pin(async move {
+            let _ = signalled.send(());
             Err(LiveCancelFailure {
                 message: UNPROVIDED.to_owned(),
                 failed_ids: agent_ids,

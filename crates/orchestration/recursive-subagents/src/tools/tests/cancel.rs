@@ -3,6 +3,106 @@
 use super::*;
 
 #[tokio::test]
+async fn retirement_fault_law_rejects_another_tree_attempt_or_turn() {
+    struct Report(LiveCancelFailure);
+    impl ChildController for Report {
+        fn services(&self) -> ChildServices {
+            ChildServices::CANCEL
+        }
+        fn cancel_agents(
+            &self,
+            _: Vec<String>,
+            signalled: tokio::sync::oneshot::Sender<()>,
+        ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>
+        {
+            let _ = signalled.send(());
+            Box::pin(std::future::ready(Err(self.0.clone())))
+        }
+    }
+    let turn: plakous::model::TurnId = "00000000-0000-0000-0000-000000000002".parse().unwrap();
+    for mismatch in 0..5 {
+        let root = tempfile::tempdir().unwrap();
+        let (store, mut tree) = persist_fixture(&root);
+        let child = tree.spawn_agent("root", &spawn_request(), None).unwrap();
+        let sibling = tree.spawn_agent("root", &spawn_request(), None).unwrap();
+        tree.set_active_turn(&sibling.agent_id, true).unwrap();
+        tree.bind_attempt_turn(&sibling.agent_id, turn.to_string())
+            .unwrap();
+        tree.set_active_turn(&child.agent_id, true).unwrap();
+        tree.bind_attempt_turn(&child.agent_id, turn.to_string())
+            .unwrap();
+        let driver = driver_on(tree, store);
+        let controller = Report(LiveCancelFailure {
+            message: "release failed".into(),
+            failed_ids: vec![child.agent_id.clone()],
+            joiner_expired_ids: Vec::new(),
+            owner_failures: vec![crate::hub::LiveRetirementFailure {
+                tree_id: if mismatch == 0 {
+                    "another-tree"
+                } else {
+                    "tree1"
+                }
+                .into(),
+                agent_id: if mismatch == 3 {
+                    sibling.agent_id.clone()
+                } else {
+                    child.agent_id.clone()
+                },
+                expected_attempt_id: Some(if mismatch == 1 {
+                    crate::protocol::AttemptId::new(&child.agent_id, 99)
+                } else if mismatch == 3 {
+                    sibling.attempt_id.clone()
+                } else {
+                    child.attempt_id.clone()
+                }),
+                expected_turn_id: Some(if mismatch == 2 {
+                    "00000000-0000-0000-0000-000000000001".parse().unwrap()
+                } else {
+                    turn
+                }),
+                message: "release failed".into(),
+            }],
+            cancelled_ids: Vec::new(),
+            not_live_ids: Vec::new(),
+        });
+        let outcome = interrupt_tool(driver.clone(), Some(Arc::new(controller)))
+            .interrupt_with(
+                "scoped-interrupt".into(),
+                &agent_id_request(&child.agent_id),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+        driver
+            .read(|tree| {
+                assert_eq!(
+                    tree.node(&child.agent_id).unwrap().status,
+                    if mismatch == 4 {
+                        NodeStatus::RecoveryRequired
+                    } else {
+                        NodeStatus::Interrupted
+                    }
+                );
+                assert_eq!(
+                    tree.node(&sibling.agent_id).unwrap().status,
+                    NodeStatus::Running
+                );
+                assert!(tree.attempt(&sibling.agent_id).unwrap().failure.is_none());
+                if mismatch != 4 {
+                    assert!(tree.attempt(&child.agent_id).unwrap().failure.is_none());
+                    assert!(
+                        !tree
+                            .operations()
+                            .values()
+                            .any(|op| op.tool_name == "host_decision")
+                    );
+                }
+            })
+            .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn interrupt_cancels_live_child_and_replays() {
     let root = tempfile::tempdir().unwrap();
     let (store, mut tree) = persist_fixture(&root);

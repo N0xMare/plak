@@ -292,23 +292,26 @@ impl Drop for StartupCaller {
         }
         self.startup.request_cancel();
         let _ = self.runtime.record_then_apply(&self.agent_id, |tree| {
-            tree.record_host_retirement(
-                &self.agent_id,
-                format!(
-                    "child startup caller left at {:?}; cancellation and release remain owned",
-                    self.startup.stage()
-                ),
-            )
+            self.startup
+                .record_retirement_failure(
+                    tree,
+                    format!(
+                        "child startup caller left at {:?}; cancellation and release remain owned",
+                        self.startup.stage()
+                    ),
+                )
+                .map(|_| ())
         });
         let runtime = self.runtime.clone();
         let agent_id = self.agent_id.clone();
+        let startup = self.startup.clone();
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             tracing::error!(target: "plak.topology", agent_id = %self.agent_id,
                 "startup caller dropped without a runtime; cleanup cannot be spawned");
             return;
         };
         handle.spawn(async move {
-            let _ = runtime.cancel_live(&agent_id).await;
+            runtime.cancel_startup(&agent_id, &startup).await;
         });
     }
 }

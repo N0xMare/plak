@@ -4011,6 +4011,23 @@ Hosted attempt-end and spent-turn close laws refuse their consequence saves,
 then retry. A captured commit cut after closure publication and before seal
 settlement reopens without another seal ticket.
 
+Retirement laws block a scripted child's release while navigator close,
+stop-all, root interrupt and model tools return after durable intent and
+dispatch. Background completion settles the exact prepared operation once,
+including after its requesting future is dropped; replay cannot cancel a
+replacement. A stale startup caller cannot annotate or cancel a successor
+attempt. Process-local fault laws also deliver failures with identical child ids but
+another tree, attempt or turn and require no mutation; the exact report still
+fences its owner. The real-child SIGKILL law cuts after durable close intent,
+after the real runtime releases but before its feed reaches the tree (held by
+an explicit barrier), and after release/receipt publication, then exact-opens and
+recovers twice without another provider dispatch or result mail for the closed
+child. These retirement-specific cuts supplement `tree_child_submit_adopt`,
+whose natural completed-child release does not guarantee an outstanding close
+at a cut. Pending-indicator coverage consumes scripted child mail, enqueues its
+zero snapshot, saturates the face with admission traffic and proves zero is
+still delivered even though unchanged facts produce no resend.
+
 Tree fold metadata laws cover immutable first recording, distinct insert orders
 for all existing host intent kinds, unbound anchor 0 and cold recording at the
 current tree cursor (not the command acceptance sequence). SQLite laws cover

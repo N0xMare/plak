@@ -403,6 +403,11 @@ agent) in the Agents list, plus `/stop-all` in the composer, all behind the
 same confirmation pop-up: focus starts on the action, so `Enter` sends it and
 `←` then `Enter` declines. See [the TUI guide](tui.md#agents).
 
+Interrupt and close return once the request is saved and cancellation is
+dispatched. Session release finishes in the background; the child cannot take
+new work while it is still releasing. A cleanup failure remains visible as
+`recovery_required`, rather than making the screen wait for the release deadline.
+
 ## git and jj
 
 Release tarballs and default source builds use Git copies. In a colocated

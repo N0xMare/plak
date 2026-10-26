@@ -353,10 +353,11 @@ The owner persists the created locator before Start and the acknowledged turn
 before live registration. A late acknowledgement joins cancellation and release
 instead of dispatching a replacement. Cancellation and shutdown also see startup
 reservations: a startup's cancelled release is the same cancel-and-release a
-retirement runs, so cancel and close join it for the retirement release deadline
-(the cancel settle plus `HOST_SESSION_RELEASE_TIMEOUT`, section 16), and
-shutdown within its own bound; on expiry they record a joiner fault and report
-recovery while retaining unresolved ownership.
+retirement runs. Explicit bounded cancellation joiners use the retirement
+release deadline (the cancel settle plus `HOST_SESSION_RELEASE_TIMEOUT`,
+section 16), recording a scoped joiner fault on expiry while retaining ownership.
+Tool and navigator close/interrupt instead return after requesting startup
+cancellation and join it in the background; shutdown uses its own bound.
 A successful release publishes its locator before freeing the reservation;
 release failure keeps it fenced. Unresolved startup cannot trigger partial-work
 sealing, followup rollback, or automatic redispatch on replay/reopen. A binder
@@ -982,6 +983,11 @@ is `attempt_mismatch`.
 
 `interrupt_agent` returns `{ agent_id, status }`. `close_agent` returns
 `{ agents: [{ agent_id, status }, …] }` for the node and its descendants. A
+successful initial response acknowledges the durable intent and cancellation
+dispatch, not completed release. Release and the operation receipt settle in
+the background; replay while they are pending refuses rather than dispatching
+again. The navigator's close, interrupt and stop-all have the same prompt-return
+contract. A
 `recovery_required` node whose session outcome is unresolved is not closed:
 its row reports `recovery_required` with `remedy: "recover_agent"`, keeps its
 attempt failure, and authorizes no retry. Two kinds of `recovery_required` node
@@ -2455,12 +2461,20 @@ cancel settles (`Esc`, `Ctrl-C`, JSONL `cancel`, a `plak run` SIGINT), every
 descendant with a running turn becomes `interrupted` exactly as `interrupt_agent`
 leaves it, and its live turn is cancelled so it stops spending. Nothing is
 closed and no attempt ends: mail resumes a child as below, and the next root
-prompt can keep delegating. The transcript says how many children were stopped.
+prompt can keep delegating. The transcript says how many children are interrupting;
+release may still be in progress.
 A child whose cancel does not release is a retirement failure, as for a close.
 
-Hosted cancellation awaits descendant retirement on its existing async
-executor; only a synchronous application edge drives that future with its
-application executor. The interrupt marker never constructs a nested executor.
+Hosted cancellation records the descendant interrupt and dispatches retirement
+on its existing async executor, without joining release on the requesting path.
+Shutdown still joins its owned releases under its separate bound. Only a
+synchronous application edge drives these futures with its application
+executor. The interrupt marker never constructs a nested executor.
+An explicit headless-run exit joins child retirement within the same two-second
+allowance as shutdown, after stopping jobs and recording their terminals. This
+does not close admission on an otherwise reusable host. Expiry reports bounded
+cleanup failure without cancelling the release owner; the run never waits for
+the 65-second joiner ceiling before teardown.
 
 An interrupted child that was **not** closed keeps the node `interrupted` and
 its attempt `running`, with no failure kind, no seal, and no pushed result. The
@@ -4354,18 +4368,24 @@ After publication and slot removal the host requests the tree's background
 recovery pass only if a fault was recorded or session recovery remains required.
 Clean, fast retirement does not start a pass; a tree-read failure requests a pass
 rather than skipping one. Joiner deadline expiry is a typed refusal, separate
-from owner-confirmed failures through cancel, batch cancel and the tool/UI
-callers. Those callers return a bounded fail-closed answer without persisting
-another fault for expiry: the release owner records its deadline evidence.
-Caller publications of owner-confirmed failures from the close, interrupt,
-stop-jobs and navigator paths are scoped to the attempt captured before
-awaiting and skip an already settled or replaced attempt. The child-start
-caller and attempt-end work still publish unscoped after awaiting; in a narrow
-race they can leave a redundant `recovery_required` on an attempt a pass had
-already settled; nothing re-requests a pass for it, so it settles again on the
-next pass (root open, next prompt or `/recover`). Caller-layer faults,
+from owner-confirmed failures through the explicit bounded cancel and batch
+cancel interfaces. It does not authorize another fault publication: the release
+owner records its deadline evidence. Tool and navigator requesting paths use
+the background join instead of waiting for that deadline.
+Caller publications of owner-confirmed failures, including child-start,
+reopen reconciliation and attempt-end work, are scoped to the owning tree and
+the attempt captured before awaiting, and skip an already settled or replaced
+attempt. Dropping a startup caller requests only its exact reservation or the
+turn that reservation transferred, never a replacement live turn. Navigator
+and root-interrupt joiners do not republish owner failures. Caller-layer faults,
 including job-stop failure, request recovery after publication. A late joiner
 cannot re-fence, re-push or re-seal an already settled attempt.
+Process-local failure reports carry the owning tree, attempt and exact retired
+turn (or no turn for an unadmitted startup). A caller refuses a report from
+another tree, attempt or bound turn before recording any host decision; identical
+child ids in different trees are not interchangeable. Operation receipt
+completion retains the original operation id and request, never a current call's;
+caller fault publication is limited to that operation's captured target set.
 The release owner's confirmed fault is never discarded for an attempt mismatch:
 while its slot excludes startup, a newer attempt can only be an unstarted
 followup. The owner fences that attempt so refused startup cannot silently roll
@@ -4471,15 +4491,17 @@ admission, aborts and joins its recovery pass before collecting root/child
 runtime capabilities, cancels startups and aborts retirements. Live and retiring
 child leases are included in the root's batched release, without waiting for
 provider settlement or tree publication. A one-second product exit bound is
-mandatory; ordinary retirement and interrupt retain the joined contracts below.
+mandatory; ordinary retirement owners retain the joined cleanup contracts below.
 
-Retirement joiners have a 65-second ceiling (the five-second cancellation
+Explicit bounded retirement joiners have a 65-second ceiling (the five-second cancellation
 settle bound plus `HOST_SESSION_RELEASE_TIMEOUT`, 60 s). The worker continues awaiting
 release after this ceiling, records slow-retirement recovery evidence, and logs
 the returned cleanup result and total duration. Driver telemetry separately
 times tool drain, job-terminal publication, heartbeat join, lease release and
 backend flush as cleanup kinds in `durability_attempts`, with joined/failed
 outcomes; these observations are not recovery authority.
+The background operation-receipt owner waits for actual release completion,
+not the joiner ceiling; expiry does not settle its prepared receipt prematurely.
 
 Shutdown closes admission (no recovery pass starts after that), then gives a
 running recovery pass its
@@ -4499,12 +4521,17 @@ The owning attachment always attempts canonical parent release afterward and kee
 a successful parent locator available for final publication even when a child failed.
 
 Tool interrupt/close receipts remain prepared until cancellation, release, and
-locator publication have joined successfully. Replaying a prepared cancellation
+locator publication have joined successfully in the independently owned
+background task. The caller returns after the intent is saved and exact owners
+are signalled; it does not wait for the 65-second release deadline. Replaying
+a prepared cancellation
 returns `operation_recovery_required` without another dispatch; failed retirement
 records a failed receipt. Completed receipts replay without touching any later
-turn. If the requesting future is cancelled, its independently owned retirement
-still settles, while its unfinished operation receipt remains fail-closed under
-the existing uncertain-operation contract. No domain-intent receipt is presented
+turn. If the requesting future is cancelled after dispatch, its independently
+owned retirement still settles its operation receipt. A process crash instead
+leaves an unfinished receipt fail-closed and the existing close/interrupt intent,
+child feed and retirement recovery reconcile the child; no release is replayed
+against another turn. No domain-intent response is presented
 as proof that cancellation completed.
 
 ## 17. Known limits
