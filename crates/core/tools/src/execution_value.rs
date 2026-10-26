@@ -182,6 +182,11 @@ pub enum FileChangeAction {
 /// One process session observation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessValue {
+    /// Issued job number, including after a terminal observation.
+    pub job_id: u64,
+    /// Known output bytes skipped by the canonical observation window.
+    /// Additional tail truncation may have no known byte count.
+    pub omitted_bytes: u64,
     /// The canonical status token (`running`, `exited`, `timed_out`, ...).
     pub status: String,
     /// The exit code, when the process exited.

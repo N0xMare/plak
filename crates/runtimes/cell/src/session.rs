@@ -42,6 +42,11 @@ pub enum ObservationMode {
     /// how long the worker computes without a nested call, a wait on nested
     /// results or a terminal before it is killed.
     HostWindow { request_bound: Duration },
+    /// One foreground terminal, bounded across compute and external waits.
+    Foreground {
+        request_bound: Duration,
+        budget: Duration,
+    },
 }
 
 /// What an observation of a cell returns.
@@ -138,6 +143,7 @@ struct WindowStart {
     cell: u64,
     window: u64,
     request_bound: Duration,
+    foreground: Option<Duration>,
 }
 
 /// A host-window cell: output not yet observed, and its terminal once known.
@@ -156,6 +162,13 @@ struct WindowTerminal {
 impl WindowTerminal {
     fn from_outcome(outcome: CellOutcome, generation_lost: &AtomicBool) -> Self {
         match outcome {
+            CellOutcome::Stopped { reason } => {
+                generation_lost.store(true, Ordering::Release);
+                Self {
+                    value: None,
+                    error: Some(format!("cell stopped: {reason:?}")),
+                }
+            }
             CellOutcome::Completed { value, .. } => Self { value, error: None },
             CellOutcome::Failed {
                 message,
@@ -277,7 +290,7 @@ impl CellSession {
                 tools,
                 stored: self.stored.lock().await.clone(),
             },
-            monty @ CellPrelude::Monty { .. } => monty,
+            monty @ (CellPrelude::Monty { .. } | CellPrelude::MontySdk { .. }) => monty,
         };
         match self.mode {
             ObservationMode::EngineParked => {
@@ -289,6 +302,20 @@ impl CellSession {
                     cell,
                     window,
                     request_bound,
+                    foreground: None,
+                };
+                self.start_windowed(start, source, prelude, admit, &mut pump)
+                    .await
+            }
+            ObservationMode::Foreground {
+                request_bound,
+                budget,
+            } => {
+                let start = WindowStart {
+                    cell,
+                    window: u64::MAX,
+                    request_bound,
+                    foreground: Some(budget),
                 };
                 self.start_windowed(start, source, prelude, admit, &mut pump)
                     .await
@@ -348,6 +375,7 @@ impl CellSession {
             cell,
             window,
             request_bound,
+            foreground,
         }: WindowStart,
         source: &str,
         prelude: CellPrelude,
@@ -376,6 +404,7 @@ impl CellSession {
             entry,
             request_bound,
             Arc::clone(&self.generation_lost),
+            foreground,
         )))));
         let windows = Arc::clone(&self.windows);
         Ok(StartedCell {
@@ -402,7 +431,10 @@ impl CellSession {
                 error: Some("invalid cell id".into()),
             };
         };
-        if matches!(self.mode, ObservationMode::HostWindow { .. }) {
+        if matches!(
+            self.mode,
+            ObservationMode::HostWindow { .. } | ObservationMode::Foreground { .. }
+        ) {
             if !self.windows.lock().await.contains_key(&cell) {
                 return WaitOutcome::Missing { error: None };
             }
@@ -626,6 +658,9 @@ async fn pump_parked(pump: Pump) {
             }
             CellEvent::Done { outcome, .. } => {
                 let (stored, error) = match outcome {
+                    CellOutcome::Stopped { reason } => {
+                        (HashMap::new(), Some(format!("cell stopped: {reason:?}")))
+                    }
                     CellOutcome::Completed { stored, .. } => (stored, None),
                     CellOutcome::Failed {
                         message, stored, ..
@@ -646,15 +681,24 @@ async fn pump_windowed(
     entry: Arc<WindowCell>,
     request_bound: Duration,
     generation_lost: Arc<AtomicBool>,
+    foreground: Option<Duration>,
 ) {
     let end = |result: Result<WindowTerminal, String>| {
         entry.terminal.send_replace(Some(result));
     };
     let mut deadline = Some(tokio::time::Instant::now() + request_bound);
+    let foreground = foreground.map(|budget| tokio::time::Instant::now() + budget);
     let mut submitted = entry.submitted.subscribe();
     let mut waiting = BTreeSet::new();
     loop {
         let event = tokio::select! {
+            ()=sleep_until(foreground) => {
+                match pump.client.stop().await {
+                    Ok(_) => end(Ok(WindowTerminal::from_outcome(CellOutcome::Stopped{reason:crate::CellStopReason::ForegroundBudget},&generation_lost))),
+                    Err(loss) => end(Err(loss)),
+                }
+                break;
+            }
             event = pump.client.read_event() => event,
             changed = submitted.changed() => {
                 if changed.is_ok() && !waiting.is_empty() && entry.take_submitted(&waiting) {
@@ -901,6 +945,11 @@ impl NestedResponder {
         self.deliver(Ok(CellValue::from(value))).await
     }
 
+    /// Delivers a typed value, including plain-data records and bytes.
+    pub async fn resolve_cell(self, value: CellValue) -> NestedDeliveryOutcome {
+        self.deliver(Ok(value)).await
+    }
+
     /// Delivers the call's failure, which the cell observes as an error.
     pub async fn reject(self, reason: String) -> NestedDeliveryOutcome {
         self.deliver(Err(reason)).await
@@ -973,6 +1022,7 @@ mod tests {
 
     fn configure() -> HostFrame {
         HostFrame::Configure {
+            sdk_stubs: None,
             revision: CELL_PROTOCOL_REVISION.to_owned(),
             engine: EngineConfig::QUICKJS,
         }
@@ -1341,6 +1391,7 @@ mod tests {
 
     fn monty_configure() -> HostFrame {
         HostFrame::Configure {
+            sdk_stubs: None,
             revision: CELL_PROTOCOL_REVISION.to_owned(),
             engine: EngineConfig::MONTY,
         }

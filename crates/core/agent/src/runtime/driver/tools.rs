@@ -1315,7 +1315,7 @@ impl Driver {
             command,
             attempt_id,
             call,
-            self.tool_presentation.clone(),
+            (self.tool_presentation.clone(), false),
             ToolDispatchOrigin::TopLevel,
             parent_call_id,
         )
@@ -1433,7 +1433,7 @@ impl Driver {
         command: &PromptCommand,
         attempt_id: AttemptId,
         call: &ToolCallBlock,
-        presentation: ToolPresentation,
+        (presentation, want_value): (ToolPresentation, bool),
         origin: ToolDispatchOrigin,
         parent_call_id: Option<CallId>,
     ) -> Result<ToolAdmission, AgentError> {
@@ -1484,6 +1484,7 @@ impl Driver {
             invocation,
             projection_receipt,
         } = prepared;
+        let invocation = invocation.with_want_value(want_value);
         let audit_identity = ToolAuditIdentity::from_invocation(&invocation);
         let authorization =
             Box::pin(self.authorize_tool(command, call, invocation.clone())).await?;

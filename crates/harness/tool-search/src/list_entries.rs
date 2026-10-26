@@ -76,14 +76,44 @@ impl ToolExecutor for ListEntriesTool {
                     })
                 })
                 .collect();
-            ToolOutcome::success_text(
+            let outcome = ToolOutcome::success_text(
                 json!({
                     "entries":entries, "incomplete":result.incomplete(),
                     "entries_skipped":result.entries_skipped(),
                     "stop_reason":result.stop_reason().map(|reason| format!("{reason:?}"))
                 })
                 .to_string(),
-            )
+            )?;
+            if !invocation.want_value() {
+                return Ok(outcome);
+            }
+            let count = super::bounded_value_count::<plakous_tools::ListedEntry>(
+                result
+                    .matches()
+                    .iter()
+                    .map(|entry| entry.path().as_os_str().len()),
+            );
+            let entries = result
+                .matches()
+                .iter()
+                .take(count)
+                .map(|entry| plakous_tools::ListedEntry {
+                    path: entry.path().to_string_lossy().into_owned(),
+                    kind: if entry.is_directory() {
+                        plakous_tools::ListedEntryKind::Directory
+                    } else {
+                        plakous_tools::ListedEntryKind::File
+                    },
+                    size: entry.entry_size(),
+                })
+                .collect();
+            outcome.with_value(plakous_tools::ExecutionValue::Listing(
+                plakous_tools::ListingValue {
+                    entries,
+                    entries_cut: result.matches().len().saturating_sub(count) as u64,
+                    incomplete: result.incomplete(),
+                },
+            ))
         })
     }
 }

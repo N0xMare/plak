@@ -86,18 +86,17 @@ impl ProcessExecutionResult {
         }
         let value = value_output.map(|output| {
             plakous_tools::ExecutionValue::Process(plakous_tools::ProcessValue {
+                job_id: u64::from(JoinedProcessSessions::job_number(self.session_id)),
+                omitted_bytes: self.skipped,
                 status: self.status.to_owned(),
                 exit_code: self.projection.exit_code,
                 session_id: self.projection.session_id,
                 output,
                 truncated: self.truncated || self.skipped != 0,
-                full_output: if self.first_promotion || self.truncated {
-                    self.sessions
-                        .job_output_file(JoinedProcessSessions::job_number(self.session_id))
-                        .map(|file| file.path)
-                } else {
-                    None
-                },
+                full_output: self
+                    .sessions
+                    .job_output_file(JoinedProcessSessions::job_number(self.session_id))
+                    .map(|file| file.path),
             })
         });
         let mut canonical = json!({

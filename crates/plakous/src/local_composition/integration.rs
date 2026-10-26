@@ -27,6 +27,15 @@ pub(super) struct CellIntegration {
 
 /// One cell presentation: its model-visible contract and its worker.
 pub(super) trait Presentation: Send + Sync {
+    fn foreground_budget(&self) -> Option<std::time::Duration> {
+        None
+    }
+    fn consumes_values(&self) -> bool {
+        false
+    }
+    fn python_sdk_stubs(&self) -> Option<String> {
+        None
+    }
     fn runtime_contract(&self) -> LocalCompositionRuntimeContract;
     fn lifecycle(&self) -> LocalCompositionLifecycle;
     fn result_projection(&self) -> LocalCompositionResultProjection;
@@ -70,6 +79,12 @@ pub(super) trait Presentation: Send + Sync {
 }
 
 impl LocalCompositionIntegration for CellIntegration {
+    fn foreground_budget(&self) -> Option<std::time::Duration> {
+        self.presentation.foreground_budget()
+    }
+    fn consumes_values(&self) -> bool {
+        self.presentation.consumes_values()
+    }
     fn runtime_contract(&self) -> LocalCompositionRuntimeContract {
         self.presentation.runtime_contract()
     }
@@ -111,9 +126,12 @@ impl LocalCompositionIntegration for CellIntegration {
             self.presentation
                 .verify_worker(&self.worker, &self.identity)?;
             let (expected, config) = self.presentation.worker();
-            let client = CellClient::spawn(&self.worker, expected, config)
-                .await
-                .map_err(|error| error.to_string())?;
+            let client = if let Some(stubs) = self.presentation.python_sdk_stubs() {
+                CellClient::spawn_python_sdk(&self.worker, stubs).await
+            } else {
+                CellClient::spawn(&self.worker, expected, config).await
+            }
+            .map_err(|error| error.to_string())?;
             Ok(session_bundle(
                 Arc::new(client),
                 self.presentation.session_engine(),

@@ -35,7 +35,8 @@ impl LocalCompositionProfile {
     /// Returns an identity error if the required worker contract cannot be identified.
     pub fn cell(descriptor: &plakous_compose::CellDescriptor) -> Result<Self, AgentError> {
         let worker = match descriptor {
-            plakous_compose::CellDescriptor::PythonPtcV1(_) => &plakous_cell::MONTY_WORKER,
+            plakous_compose::CellDescriptor::PythonPtcV1(_)
+            | plakous_compose::CellDescriptor::PythonHarnessSdkV1(_) => &plakous_cell::MONTY_WORKER,
             plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
             | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_)
             | plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => {
@@ -78,7 +79,10 @@ impl LocalCompositionProfile {
             | plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => {
                 LocalCompositionLanguage::JavaScript
             }
-            plakous_compose::CellDescriptor::PythonPtcV1(_) => LocalCompositionLanguage::Python,
+            plakous_compose::CellDescriptor::PythonPtcV1(_)
+            | plakous_compose::CellDescriptor::PythonHarnessSdkV1(_) => {
+                LocalCompositionLanguage::Python
+            }
         }
     }
 }
@@ -229,7 +233,8 @@ impl LocalCompositionAttachmentBuilder {
             }
             (
                 plakous_compose::CellDescriptor::ProductJavaScriptV1(_)
-                | plakous_compose::CellDescriptor::PythonPtcV1(_),
+                | plakous_compose::CellDescriptor::PythonPtcV1(_)
+                | plakous_compose::CellDescriptor::PythonHarnessSdkV1(_),
                 Some(evidence),
             ) => {
                 validate_product_evidence(&self.profile, &artifact, &evidence)?;
@@ -237,7 +242,8 @@ impl LocalCompositionAttachmentBuilder {
             }
             (
                 plakous_compose::CellDescriptor::ProductJavaScriptV1(_)
-                | plakous_compose::CellDescriptor::PythonPtcV1(_),
+                | plakous_compose::CellDescriptor::PythonPtcV1(_)
+                | plakous_compose::CellDescriptor::PythonHarnessSdkV1(_),
                 None,
             ) => {
                 return Err(invalid(
@@ -352,6 +358,13 @@ pub fn attach_local_composition(
                     )?),
                 )
             }
+            (plakous_compose::CellDescriptor::PythonHarnessSdkV1(descriptor), Some(evidence)) => (
+                sdk::descriptor(&descriptor).map_err(invalid)?,
+                Box::new(sdk::SdkPresentation {
+                    evidence,
+                    api: descriptor.host_api().clone(),
+                }),
+            ),
             (plakous_compose::CellDescriptor::PythonPtcV1(descriptor), Some(evidence)) => {
                 let presentation_kind = presentation_kind.ok_or_else(|| {
                     invalid("product Python attachment requires presentation kind")

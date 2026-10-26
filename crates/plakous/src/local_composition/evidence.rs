@@ -277,6 +277,11 @@ fn extension_facts(profile: &LocalCompositionProfile) -> Result<ExtensionFacts, 
     let limits = match &profile.descriptor {
         plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => javascript_extension_limits(),
         plakous_compose::CellDescriptor::PythonPtcV1(_) => python_extension_limits(),
+        plakous_compose::CellDescriptor::PythonHarnessSdkV1(_) => ProductExtensionLimits {
+            max_source_bytes: 262_144,
+            max_yield_time_ms: 300_000,
+            max_output_tokens: 16_384,
+        },
         plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
         | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_) => {
             return Err(invalid(

@@ -44,6 +44,8 @@ pub enum LocalCompositionResultProjection {
     TokensScriptV1,
     /// Byte-budgeted `PythonPtcV1` Python-cell grammar.
     BytesPythonPtcV1,
+    /// Foreground typed Python SDK, with a byte-budgeted observation.
+    BytesRunPyV1,
 }
 
 /// Declared runtime behavior, independent of tool spelling or language.
@@ -232,6 +234,16 @@ pub struct LocalCompositionNotification {
 }
 
 pub trait LocalCompositionNestedResponder: Send + Sync {
+    fn wants_value(&self) -> bool {
+        false
+    }
+    fn resolve_value(
+        self: Box<Self>,
+        value: Value,
+        _execution: Option<plakous_tools::ExecutionValue>,
+    ) -> LocalCompositionFuture<'static, LocalCompositionNestedDelivery> {
+        self.resolve(value)
+    }
     fn resolve(
         self: Box<Self>,
         value: Value,
@@ -427,6 +439,13 @@ pub struct LocalCompositionSessionBundle {
 }
 
 pub trait LocalCompositionIntegration: Send + Sync {
+    /// A foreground cell owns its budget independently of model request deadlines.
+    fn foreground_budget(&self) -> Option<std::time::Duration> {
+        None
+    }
+    fn consumes_values(&self) -> bool {
+        false
+    }
     fn runtime_contract(&self) -> LocalCompositionRuntimeContract;
     /// Declares whether a healthy idle evaluator is root-turn or agent owned.
     fn lifecycle(&self) -> LocalCompositionLifecycle;

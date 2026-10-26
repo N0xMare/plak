@@ -235,7 +235,8 @@ impl Driver {
                 ),
             ));
         }
-        let exact = exact?;
+        let mut exact = exact?;
+        let value = exact.value.take();
         let observation = tool_result_observation_with_subject(
             &exact.result,
             exact.presentation_subject.as_deref(),
@@ -265,7 +266,11 @@ impl Driver {
                 observation: Some(observation),
             },
         );
-        Ok(MutatingExecution { item, dispatched })
+        Ok(MutatingExecution {
+            item,
+            dispatched,
+            value,
+        })
     }
 
     pub(super) async fn authorize_tool(

@@ -12,6 +12,8 @@ use super::render_py::normalize_python_identifier;
 #[derive(Clone, Debug, Serialize)]
 pub struct HostApi {
     pub(super) namespaces: Vec<ApiNamespace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) sdk: Option<super::sdk_api::SdkApi>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -72,9 +74,30 @@ impl ApiFunction {
 }
 
 impl HostApi {
+    /// Generates the SDK typing module, when this is an SDK host catalog.
+    #[must_use]
+    pub fn python_sdk_stubs(&self) -> Option<String> {
+        self.sdk.as_ref().map(super::sdk_api::SdkApi::stubs)
+    }
+
+    /// Validates a typed SDK call against this exact host catalog.
+    ///
+    /// # Errors
+    /// Rejects non-SDK catalogs, unknown functions, argument keys or shapes.
+    pub fn validate_python_sdk_call(
+        &self,
+        name: &str,
+        input: &serde_json::Value,
+    ) -> Result<(), String> {
+        self.sdk
+            .as_ref()
+            .ok_or_else(|| "host catalog is not a Python SDK".to_owned())?
+            .validate(name, input)
+    }
     #[cfg(test)]
     pub(super) fn codex_catalog(tools: &[CodexCodeModeNestedToolV1]) -> Self {
         Self {
+            sdk: None,
             namespaces: vec![ApiNamespace {
                 name: "tools".into(),
                 functions: tools
@@ -181,6 +204,7 @@ impl HostApi {
             })
             .collect::<Result<_, ToolRuntimeError>>()?;
         Ok(Self {
+            sdk: (style == CatalogStyle::PythonSdk).then(super::sdk_api::SdkApi::core),
             namespaces: vec![ApiNamespace {
                 name: "tools".to_owned(),
                 functions,

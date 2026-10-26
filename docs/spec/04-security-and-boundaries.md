@@ -113,8 +113,11 @@ capabilities over children and own processes; the allowlist admits them under
 the same fence, and their child half needs the agent grant the node already
 holds.
 `TaskOutput` is not an enrolled tool and is not allowlisted. The execute
-occupancy identity is `plak.occupancy.execute.v5`; process-enabled read-only is
-`plak.occupancy.read-only.v8`.
+occupancy identity is `plak.occupancy.execute.v6`; process-enabled read-only is
+`plak.occupancy.read-only.v9`. Both admit literal-argv `process_session_exec`
+under the same process fence as `process_session_start`; argv execution does
+not reduce the operator authority already available through the shell. Both
+still deny `edit_files` and other file-tool writes.
 Both tiers compile without file-writing presentations. Plan tools are allowed
 by canonical name (`update_plan`, `merge_plan`) without changing their mutating
 effects; Grok presents `merge_plan` as `todo_write`, not as a separate canonical

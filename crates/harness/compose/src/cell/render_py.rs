@@ -224,6 +224,9 @@ fn bootstrap_bindings(
 /// # Errors
 /// Rejects reserved/invalid Python exports and catalog or source bounds.
 pub fn python_bootstrap(api: &HostApi) -> Result<Option<PythonBootstrap>, String> {
+    if let Some(sdk) = &api.sdk {
+        return Ok(Some(sdk.bootstrap()));
+    }
     bootstrap_bindings(
         api.namespaces
             .iter()

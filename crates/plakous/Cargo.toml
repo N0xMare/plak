@@ -42,6 +42,8 @@ auth = [
 # This is the whole evaluator capability a Custom-model embedder needs; it
 # carries no credential, subscription, or HTTP machinery.
 composition = [
+    "dep:thiserror",
+    "dep:uuid",
     "dep:plakous-cell",
     "dep:serde",
     "dep:serde_json",
@@ -84,6 +86,8 @@ sessions-sqlite = ["plakous-store/sqlite"]
 xai = ["dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/fetch", "plakous-tool-web/image-gen"]
 
 [dependencies]
+thiserror = { workspace = true, optional = true }
+uuid = { workspace = true, features = ["v4"], optional = true }
 plakous-exchange = { workspace = true, optional = true }
 plakous-agent.workspace = true
 plakous-anthropic = { workspace = true, optional = true }

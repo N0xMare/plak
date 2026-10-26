@@ -70,6 +70,7 @@ mod javascript;
 mod python;
 #[cfg(all(test, unix))]
 mod python_tests;
+mod sdk;
 mod session;
 mod validate;
 

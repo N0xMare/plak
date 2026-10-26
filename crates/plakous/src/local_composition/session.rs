@@ -30,6 +30,13 @@ pub(super) type SessionFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + '
 /// The engine behind one session: how its cells start, how long an
 /// observation may wait, and how its worker stops.
 pub(super) trait SessionEngine: Send + Sync {
+    fn events(
+        &self,
+        events: CellSessionEvents,
+        exec_call: Arc<std::sync::Mutex<String>>,
+    ) -> Box<dyn LocalCompositionEventReceiver> {
+        Box::new(CellEventsAdapter { events, exec_call })
+    }
     fn mode(&self) -> ObservationMode;
 
     fn start<'a>(
@@ -136,6 +143,7 @@ pub(crate) fn session_bundle(
 ) -> LocalCompositionSessionBundle {
     let (session, events) = CellSession::new(Arc::clone(&client), engine.mode());
     let exec_call = Arc::new(std::sync::Mutex::new(String::new()));
+    let events = engine.events(events, Arc::clone(&exec_call));
     LocalCompositionSessionBundle {
         session: Box::new(CellSessionAdapter {
             core: SessionCore {
@@ -145,7 +153,7 @@ pub(crate) fn session_bundle(
             },
             engine,
         }),
-        events: Box::new(CellEventsAdapter { events, exec_call }),
+        events,
     }
 }
 
@@ -376,7 +384,7 @@ impl LocalCompositionEventReceiver for CellEventsAdapter {
 /// result never reached the evaluator, so the cell cannot have acted on it
 /// and nothing is unknown. Only a loss with the result already handed over
 /// leaves acceptance undetermined.
-fn delivery(outcome: NestedDeliveryOutcome) -> LocalCompositionNestedDelivery {
+pub(super) fn delivery(outcome: NestedDeliveryOutcome) -> LocalCompositionNestedDelivery {
     match outcome {
         NestedDeliveryOutcome::Accepted => LocalCompositionNestedDelivery::Accepted,
         NestedDeliveryOutcome::Refused(refusal) => LocalCompositionNestedDelivery::Refused(refusal),
@@ -508,6 +516,7 @@ mod tests {
     /// Bytes of the one `Configure` frame the client sends after `Hello`.
     fn configure_len() -> usize {
         encode_frame(&HostFrame::Configure {
+            sdk_stubs: None,
             revision: CELL_PROTOCOL_REVISION.to_owned(),
             engine: EngineConfig::QUICKJS,
         })

@@ -49,7 +49,11 @@ pub enum HostFrame {
     Configure {
         revision: String,
         engine: EngineConfig,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sdk_stubs: Option<String>,
     },
+    /// Clears Python globals before an SDK cell, retaining the warm worker.
+    Reset,
     /// Starts one cell. `window` is the engine-parked yield interval in
     /// milliseconds, when the presentation yields inside the engine.
     StartCell {
@@ -144,6 +148,8 @@ pub enum CellPrelude {
     },
     /// Monty: the session's tool wrappers, on the session's first cell only.
     Monty { bootstrap: Option<MontyBootstrap> },
+    /// Fresh Python SDK globals; the client sends Reset before StartCell.
+    MontySdk { bootstrap: MontyBootstrap },
 }
 
 /// The Python wrappers a Monty session installs before its first cell: the
@@ -201,6 +207,8 @@ pub enum DeliveryVerdict {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum CellOutcome {
+    /// A host or worker resource bound, never inferred from Python exception text.
+    Stopped { reason: CellStopReason },
     Completed {
         value: Option<String>,
         stored: HashMap<String, Value>,
@@ -210,6 +218,12 @@ pub enum CellOutcome {
         stored: HashMap<String, Value>,
         generation_lost: bool,
     },
+}
+
+/// Typed resource stop for a cell with a known terminal outcome.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum CellStopReason {
+    ForegroundBudget,
 }
 
 /// Why a worker lost its evaluator.

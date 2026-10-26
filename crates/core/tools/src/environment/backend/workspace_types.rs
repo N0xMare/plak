@@ -734,6 +734,7 @@ pub(super) fn compile_query_regex(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepositoryQueryMatch {
     pub(super) is_directory: bool,
+    pub(super) entry_size: u64,
     pub(super) path: PathBuf,
     pub(super) line: u64,
     pub(super) column: u64,
@@ -742,6 +743,11 @@ pub struct RepositoryQueryMatch {
     pub(super) content: WorkspaceContentIdentity,
 }
 impl RepositoryQueryMatch {
+    /// Size of a listed regular file in bytes; zero for other entries and content matches.
+    #[must_use]
+    pub const fn entry_size(&self) -> u64 {
+        self.entry_size
+    }
     /// Whether this listing entry is a directory (false for content matches).
     #[must_use]
     pub const fn is_directory(&self) -> bool {

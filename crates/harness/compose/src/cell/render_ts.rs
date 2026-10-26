@@ -312,6 +312,6 @@ pub(super) fn render_ts(api: &HostApi, style: CatalogStyle) -> String {
         CatalogStyle::CodexExact => render_codex(api, true),
         CatalogStyle::CodexMinimal => render_codex(api, false),
         CatalogStyle::ProductJavaScript => render_product(api),
-        CatalogStyle::Python => unreachable!("Python uses render_pyi"),
+        CatalogStyle::Python | CatalogStyle::PythonSdk => unreachable!("Python uses render_pyi"),
     }
 }

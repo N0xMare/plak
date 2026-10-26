@@ -79,6 +79,12 @@ one cross-build carrier (a build imports its own and the previous version).
   the Python profile, presentation, result, catalog and limits component
   identities are removed. Python product evidence now binds the exact outer
   and nested projection digests instead of the removed component identities.
+  The typed Python SDK adds a `PythonHarnessSdkV1` v3 cell descriptor and
+  a driver-only `run_py` marker; SDK attachments and product-extension
+  receipts bind that descriptor and its exact outer/nested projections.
+  Process-enabled occupancy policies admit literal-argv `process_session_exec`
+  beside shell start; their identities are now `plak.occupancy.execute.v6`
+  and `plak.occupancy.read-only.v9`.
   Model-visible text, engine/artifact/host identities and projection digests
   are unchanged.
   Runtime SQLite schema 26 admits `NamedStateValue` objects (kind 20). The

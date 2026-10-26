@@ -95,7 +95,12 @@ pub(super) fn compile_cell(
     validate_nested_eligibility(&nested_projection, names)?;
     let api = HostApi::from_projection(&nested_projection, names, presentation.catalog)?;
     validate_catalog(&api, presentation)?;
-    let execute_text = if presentation.catalog == CatalogStyle::Python {
+    let execute_text = if let Some(sdk) = &api.sdk {
+        format!(
+            "Run a type-checked Python SDK cell. Supply code; await I/O. Fresh globals each cell; only state survives. No wait or background cells. Foreground limit 300 seconds. Processes are not sandboxed.\n\n{}",
+            sdk.stubs()
+        )
+    } else if presentation.catalog == CatalogStyle::Python {
         render_pyi(&api)
     } else {
         render_ts(&api, presentation.catalog)

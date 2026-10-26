@@ -467,6 +467,7 @@ pub(in crate::runtime) struct IndexedToolExecution {
 pub(in crate::runtime) struct MutatingExecution {
     item: ConversationItem,
     dispatched: bool,
+    value: Option<plakous_tools::ExecutionValue>,
 }
 
 pub(in crate::runtime) struct IndexedReadOnlyRequest {

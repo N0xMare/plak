@@ -140,6 +140,14 @@ impl Worker {
             },
             CellEvent::Yielded { cell } => RuntimeEvent::Yielded { cell_id: cell },
             CellEvent::Done {
+                outcome: CellOutcome::Stopped { reason },
+                ..
+            } => {
+                return Err(format!(
+                    "QuickJS worker returned an SDK foreground stop: {reason:?}"
+                ));
+            }
+            CellEvent::Done {
                 cell,
                 outcome: CellOutcome::Completed { stored, .. },
             } => RuntimeEvent::Done {
@@ -1558,6 +1566,7 @@ fn worker_exchange(frames: &[plakous_cell::HostFrame]) -> (Vec<WorkerFrame>, boo
 #[test]
 fn the_worker_refuses_other_limits_and_a_repeated_configure() {
     let configure = |engine| plakous_cell::HostFrame::Configure {
+        sdk_stubs: None,
         revision: plakous_cell::CELL_PROTOCOL_REVISION.to_owned(),
         engine,
     };

@@ -31,7 +31,7 @@ use plakous_cell::{
     write_frame_blocking,
 };
 
-use crate::codec::{call_to_json, format_monty, nested_outcome_to_result};
+use crate::codec::{call_to_json, format_monty, nested_outcome_to_result, sdk_call_to_json};
 use crate::prompts::{
     PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_PREFIX, PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_SUFFIX,
     PLAKOUS_PY_PTC_ERROR_UNDECODABLE_TRACEBACK_PREFIX,
@@ -82,9 +82,10 @@ pub(crate) fn serve() -> ExitCode {
         return ExitCode::from(3);
     }
     let mut stdin = io::stdin().lock();
-    let result = configure(&mut stdin).and_then(|child| {
+    let result = configure(&mut stdin).and_then(|(child, configuration)| {
         let mut worker = Worker {
             child,
+            configuration,
             bindings: None,
             running: None,
         };
@@ -105,29 +106,37 @@ pub(crate) fn serve() -> ExitCode {
 
 /// Reads `Configure`, checks this protocol and these limits, and configures
 /// the interpreter session.
-fn configure(stdin: &mut impl io::Read) -> Result<Child, Lost> {
+fn configure(stdin: &mut impl io::Read) -> Result<(Child, pb::Configure), Lost> {
     let frame = read_frame_blocking(stdin, MAX_FRAME_BYTES)
         .map_err(Lost::protocol)?
         .ok_or_else(|| Lost::protocol("parent closed before configure"))?;
-    match serde_json::from_slice::<HostFrame>(&frame) {
-        Ok(HostFrame::Configure { revision, engine })
-            if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::MONTY => {}
+    let stubs = match serde_json::from_slice::<HostFrame>(&frame) {
+        Ok(HostFrame::Configure {
+            revision,
+            engine,
+            sdk_stubs,
+        }) if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::MONTY => sdk_stubs,
         Ok(HostFrame::Configure { .. }) => {
             return Err(Lost::protocol("configure names another revision or limits"));
         }
         _ => return Err(Lost::protocol("first parent frame is not configure")),
-    }
+    };
     let mut child = Child::default();
     let mut sink = TurnSink::default();
+    let configuration = pb::Configure {
+        type_check: stubs.is_some(),
+        type_check_stubs: stubs,
+        ..session_config()
+    };
     child
         .handle(
-            request(pb::parent_request::Kind::Configure(session_config())),
+            request(pb::parent_request::Kind::Configure(configuration.clone())),
             &mut sink,
         )
         .map_err(|error| Lost::engine(error.to_string()))?;
     apply_memory_limit(&child);
     match sink.turn_end.and_then(|event| event.kind) {
-        Some(pb::child_event::Kind::Ok(_)) => Ok(child),
+        Some(pb::child_event::Kind::Ok(_)) => Ok((child, configuration)),
         _ => Err(Lost::engine(
             "the interpreter refused its session configuration",
         )),
@@ -196,6 +205,7 @@ struct Binding {
 
 struct Worker {
     child: Child,
+    configuration: pb::Configure,
     bindings: Option<HashMap<String, Binding>>,
     running: Option<Running>,
 }
@@ -302,6 +312,28 @@ impl Worker {
             let frame = serde_json::from_slice::<HostFrame>(&frame)
                 .map_err(|_| Lost::protocol("malformed host frame"))?;
             match frame {
+                HostFrame::Reset => {
+                    if self.running.is_some() {
+                        return Err(Lost::protocol("reset while a cell runs"));
+                    }
+                    let event = self.handle(
+                        request(pb::parent_request::Kind::Reset(pb::Reset {})),
+                        false,
+                    )?;
+                    if !matches!(event.kind, Some(pb::child_event::Kind::Ok(_))) {
+                        return Err(Lost::engine("interpreter reset refused"));
+                    }
+                    self.bindings = None;
+                    let configured = self.handle(
+                        request(pb::parent_request::Kind::Configure(
+                            self.configuration.clone(),
+                        )),
+                        false,
+                    )?;
+                    if !matches!(configured.kind, Some(pb::child_event::Kind::Ok(_))) {
+                        return Err(Lost::engine("reset interpreter configuration refused"));
+                    }
+                }
                 HostFrame::StartCell {
                     cell,
                     source,
@@ -390,7 +422,7 @@ impl Worker {
             code: bootstrap.source,
             inputs: Vec::new().into(),
             values: None,
-            skip_type_check: false,
+            skip_type_check: true,
             cwd: "/".to_owned(),
         };
         let event = self
@@ -486,6 +518,13 @@ impl Worker {
                         .ok_or_else(|| Lost::protocol("error event with no exception"))?;
                     return self.done(exception_outcome(exception));
                 }
+                Some(pb::child_event::Kind::TypingError(error)) => {
+                    return self.done(CellOutcome::Failed {
+                        message: format!("type errors; nothing ran\n{}", error.diagnostics),
+                        stored: HashMap::new(),
+                        generation_lost: false,
+                    });
+                }
                 _ => return Err(Lost::protocol("unexpected interpreter event")),
             };
         }
@@ -569,7 +608,11 @@ impl Worker {
             );
             return Ok(resume_call(call_id, raise(ExcType::RuntimeError, message)));
         }
-        let input = match call_to_json(argument) {
+        let input = match if self.configuration.type_check {
+            sdk_call_to_json(argument)
+        } else {
+            call_to_json(argument)
+        } {
             Ok(input) if json_depth(&input) > MAX_CELL_VALUE_DEPTH => {
                 let reason =
                     format!("Python tool argument nests deeper than {MAX_CELL_VALUE_DEPTH} levels");
@@ -789,6 +832,7 @@ mod tests {
             // arrive first, but no ResumeFutures hands it to the interpreter.
             let mut worker = Worker {
                 child: Child::default(),
+                configuration: session_config(),
                 bindings: None,
                 running: Some(Running {
                     cell: 1,

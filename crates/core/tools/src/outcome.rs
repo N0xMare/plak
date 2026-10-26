@@ -534,6 +534,8 @@ mod tests {
     fn typed_value_moves_without_changing_or_exposing_canonical_content()
     -> Result<(), ToolRuntimeError> {
         let value = crate::ExecutionValue::Process(crate::ProcessValue {
+            job_id: 1,
+            omitted_bytes: 0,
             status: "exited".into(),
             exit_code: Some(0),
             session_id: None,
@@ -556,6 +558,8 @@ mod tests {
     -> Result<(), ToolRuntimeError> {
         let value = |bytes| {
             crate::ExecutionValue::Process(crate::ProcessValue {
+                job_id: 1,
+                omitted_bytes: 0,
                 status: "exited".into(),
                 exit_code: Some(0),
                 session_id: None,

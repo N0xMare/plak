@@ -33,6 +33,8 @@ pub enum CellDescriptor {
     ProductJavaScriptV1(ProductJavaScriptCompositionDescriptorV1),
     /// Product Python coroutine cells.
     PythonPtcV1(PythonPtcDescriptorV1),
+    /// Typed SDK cells with fresh globals and durable named state.
+    PythonHarnessSdkV1(super::PythonHarnessSdkDescriptorV1),
 }
 
 impl CellDescriptor {
@@ -44,6 +46,7 @@ impl CellDescriptor {
             Self::CodexMinimalLocalCodeModeV1(descriptor) => descriptor.identity(),
             Self::ProductJavaScriptV1(descriptor) => descriptor.identity(),
             Self::PythonPtcV1(descriptor) => descriptor.identity(),
+            Self::PythonHarnessSdkV1(descriptor) => descriptor.identity(),
         }
     }
 
@@ -55,6 +58,7 @@ impl CellDescriptor {
             Self::CodexMinimalLocalCodeModeV1(descriptor) => descriptor.outer_projection(),
             Self::ProductJavaScriptV1(descriptor) => descriptor.outer_projection(),
             Self::PythonPtcV1(descriptor) => descriptor.outer_projection(),
+            Self::PythonHarnessSdkV1(descriptor) => descriptor.outer_projection(),
         }
     }
 
@@ -66,6 +70,7 @@ impl CellDescriptor {
             Self::CodexMinimalLocalCodeModeV1(descriptor) => descriptor.nested_projection(),
             Self::ProductJavaScriptV1(descriptor) => descriptor.nested_projection(),
             Self::PythonPtcV1(descriptor) => descriptor.nested_projection(),
+            Self::PythonHarnessSdkV1(descriptor) => descriptor.nested_projection(),
         }
     }
 }
@@ -98,3 +103,4 @@ cell_descriptor_from!(
     ProductJavaScriptV1
 );
 cell_descriptor_from!(PythonPtcDescriptorV1, PythonPtcV1);
+cell_descriptor_from!(super::PythonHarnessSdkDescriptorV1, PythonHarnessSdkV1);

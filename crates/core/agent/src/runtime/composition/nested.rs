@@ -24,6 +24,16 @@ pub(in crate::runtime) fn queue_local_composition_nested_results(
     waiters: Vec<Box<dyn crate::local_composition::LocalCompositionNestedResponder>>,
     result: Result<serde_json::Value, AgentError>,
 ) -> Result<(), AgentError> {
+    queue_local_composition_nested_values(state, responder, waiters, result, None)
+}
+
+pub(in crate::runtime) fn queue_local_composition_nested_values(
+    state: &mut CompositionOwner,
+    responder: Box<dyn crate::local_composition::LocalCompositionNestedResponder>,
+    waiters: Vec<Box<dyn crate::local_composition::LocalCompositionNestedResponder>>,
+    result: Result<serde_json::Value, AgentError>,
+    execution: Option<plakous_tools::ExecutionValue>,
+) -> Result<(), AgentError> {
     let count = waiters.len().saturating_add(1);
     if state.pending_deliveries.len().saturating_add(count)
         > state.integration.max_outstanding_nested_calls()
@@ -50,8 +60,8 @@ pub(in crate::runtime) fn queue_local_composition_nested_results(
         .collect::<Vec<_>>();
     state
         .pending_deliveries
-        .push(Box::pin(deliver_local_composition_nested_result(
-            responder, result,
+        .push(Box::pin(deliver_local_composition_nested_value(
+            responder, result, execution,
         )));
     for delivery in duplicates {
         state.pending_deliveries.push(delivery);
@@ -70,13 +80,21 @@ pub(in crate::runtime) async fn deliver_local_composition_nested_result(
     responder: Box<dyn crate::local_composition::LocalCompositionNestedResponder>,
     result: Result<serde_json::Value, AgentError>,
 ) -> Result<NestedDeliveryReceipt, AgentError> {
+    deliver_local_composition_nested_value(responder, result, None).await
+}
+
+async fn deliver_local_composition_nested_value(
+    responder: Box<dyn crate::local_composition::LocalCompositionNestedResponder>,
+    result: Result<serde_json::Value, AgentError>,
+    execution: Option<plakous_tools::ExecutionValue>,
+) -> Result<NestedDeliveryReceipt, AgentError> {
     let recovery = result
         .as_ref()
         .err()
         .filter(|error| local_composition_recovery_authoritative(error))
         .cloned();
     let delivery = match result {
-        Ok(value) => responder.resolve(value).await,
+        Ok(value) => responder.resolve_value(value, execution).await,
         Err(error) => responder.reject(error.message().to_owned()).await,
     };
     let receipt = match delivery {

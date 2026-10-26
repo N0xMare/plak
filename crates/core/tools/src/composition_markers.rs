@@ -29,6 +29,38 @@ use crate::{
 
 const MAX_CELL_WAIT_TIME_MS: u32 = 600_000;
 
+/// Driver-only executor for the typed foreground Python SDK.
+pub const PYTHON_SDK_DRIVER_MARKER_EXECUTOR_ID_V1: &str = "plakous.python-sdk.driver-marker.v1";
+
+/// Registers the SDK's sole outer marker; ordinary execution fails closed.
+///
+/// # Errors
+/// Returns the ordinary definition or registration refusal.
+pub fn register_python_sdk_marker_into(
+    registry: &mut ToolRegistryBuilder,
+) -> Result<(), ToolRuntimeError> {
+    registry.register(ToolRegistration::new(
+        RegisteredToolId::new("plakous.python-sdk.run-marker.v1")?,
+        ToolExecutorId::new(PYTHON_SDK_DRIVER_MARKER_EXECUTOR_ID_V1)?,
+        ToolExecutorBindingIdentity::new(1, &[b"plakous-tools/python-sdk-driver-marker-v1"])?,
+        ToolDefinition::new(
+            ToolName::new("run_py").map_err(python_ptc_definition_error)?,
+            "plakous.python-sdk.v1",
+            "Driver-mediated typed Python SDK marker; ordinary execution is forbidden.",
+            ToolInputContract::structured(object_schema(
+                json!({"code":{"type":"string","minLength":1,"maxLength":262_144}}),
+                &["code"],
+            ))
+            .map_err(python_ptc_definition_error)?,
+            ToolOutputContract::utf8(16_384).map_err(python_ptc_definition_error)?,
+            ToolConcurrency::Serial,
+            ToolEffect::ReadOnly,
+        )
+        .map_err(python_ptc_definition_error)?,
+        Arc::new(DriverMediatedPythonMarker),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Product JavaScript (js-ptc)
 // ---------------------------------------------------------------------------
@@ -594,6 +626,7 @@ pub fn is_composition_marker_executor(executor: &ToolExecutorId) -> bool {
         executor.as_str(),
         PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1
             | PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1
+            | PYTHON_SDK_DRIVER_MARKER_EXECUTOR_ID_V1
             | CODEX_NATIVE_CODE_MODE_DRIVER_MARKER_EXECUTOR_ID_V1
     )
 }

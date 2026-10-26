@@ -25,10 +25,10 @@ pub use process_resources::{
     ProcessResourceUsage, children_rusage_delta, sample_children_rusage, sample_self_rusage,
 };
 pub use protocol::{
-    BindingInput, CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict,
-    EngineConfig, HostFrame, LossClass, MAX_CELL_VALUE_DEPTH, MONTY_WORKER, MontyBinding,
-    MontyBootstrap, OutputItem, QUICKJS_WORKER, ResourceUsage, WorkerFrame, WorkerIdentity,
-    json_depth,
+    BindingInput, CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellStopReason, CellValue,
+    DeliveryVerdict, EngineConfig, HostFrame, LossClass, MAX_CELL_VALUE_DEPTH, MONTY_WORKER,
+    MontyBinding, MontyBootstrap, OutputItem, QUICKJS_WORKER, ResourceUsage, WorkerFrame,
+    WorkerIdentity, json_depth,
 };
 pub use session::{
     CellCompletion, CellResponse, CellSession, CellSessionEvent, CellSessionEvents, CellStartError,

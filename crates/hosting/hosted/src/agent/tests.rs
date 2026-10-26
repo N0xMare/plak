@@ -1730,42 +1730,66 @@ async fn read_execute_admission_refuses_a_forged_sdk_edit() -> Result<(), Box<dy
     )?);
     let mut builder = ToolRegistryBuilder::default();
     builder.register(FilesToolPack::edit_files_registration()?)?;
+    let process = Arc::new(plakous::tools::ProcessSessionTools::posix_sh()?);
+    for registration in process.clone().registrations()? {
+        builder.register(registration)?;
+    }
+    builder.register(process.exec_registration()?)?;
     let registry = builder.freeze();
     for fence in [
         SessionToolFence::OccupancyReadOnly,
         SessionToolFence::OccupancyExecute,
     ] {
-        let invocation = registry.prepare(ToolInvocationRequest::new(
-            run,
-            "00000000-0000-0000-0000-000000000902".parse()?,
-            "00000000-0000-0000-0000-000000000903".parse()?,
-            "00000000-0000-0000-0000-000000000904".parse()?,
-            ToolName::new("edit_files")?,
-            ToolCorrelation::new(None, None, ToolCallerLineage::default())?,
-            Arc::<str>::from(r#"{"ops":[{"op":"write","path":"forged","content":"no"}]}"#),
-        ))?;
-        let definition = registry
-            .definition(invocation.identity().name())
-            .ok_or("missing edit_files")?
-            .clone();
-        let policy = session_tool_policy(fence);
-        let binding = plakous_tools::internal::authorization_binding(
-            &invocation,
-            environment.descriptor().clone(),
-            policy.revision(),
-        )?;
-        let request = plakous_tools::internal::policy_request(
-            invocation,
-            definition,
-            environment.clone(),
-            policy.revision(),
-            binding,
-        );
-        assert!(matches!(
-            policy.evaluate(request).await?,
-            ToolPolicyDecision::Denied(_)
-        ));
-        assert!(!root.path().join("forged").exists());
+        for (name, arguments, allowed) in [
+            (
+                "edit_files",
+                serde_json::json!({"ops":[{"op":"write","path":"forged","content":"no"}]}),
+                false,
+            ),
+            (
+                "process_session_exec",
+                serde_json::json!({"argv":["/bin/echo","allowed"],"workdir":".","yield_time_ms":0,"max_output_bytes":100}),
+                true,
+            ),
+            (
+                "process_session_start",
+                serde_json::json!({"command":"echo allowed","workdir":".","login":false,"tty":false,"keep_stdin_open":false,"yield_time_ms":0,"max_output_bytes":100}),
+                true,
+            ),
+        ] {
+            let invocation = registry.prepare(ToolInvocationRequest::new(
+                run,
+                "00000000-0000-0000-0000-000000000902".parse()?,
+                "00000000-0000-0000-0000-000000000903".parse()?,
+                "00000000-0000-0000-0000-000000000904".parse()?,
+                ToolName::new(name)?,
+                ToolCorrelation::new(None, None, ToolCallerLineage::default())?,
+                Arc::<str>::from(arguments.to_string()),
+            ))?;
+            let definition = registry
+                .definition(invocation.identity().name())
+                .ok_or("missing edit_files")?
+                .clone();
+            let policy = session_tool_policy(fence);
+            let binding = plakous_tools::internal::authorization_binding(
+                &invocation,
+                environment.descriptor().clone(),
+                policy.revision(),
+            )?;
+            let request = plakous_tools::internal::policy_request(
+                invocation,
+                definition,
+                environment.clone(),
+                policy.revision(),
+                binding,
+            );
+            assert_eq!(
+                matches!(policy.evaluate(request).await?, ToolPolicyDecision::Allowed),
+                allowed,
+                "{fence:?}: {name}"
+            );
+            assert!(!root.path().join("forged").exists());
+        }
     }
     Ok(())
 }

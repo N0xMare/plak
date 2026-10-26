@@ -377,7 +377,7 @@ impl ToolExecutor for ApplyPatchTool {
     }
 }
 
-fn file_change_inputs(
+pub(super) fn file_change_inputs(
     transaction: &WorkspaceMutationTransaction,
 ) -> Result<Vec<(String, Option<plakous_tools::WorkspaceContentIdentity>)>, ToolRuntimeError> {
     let mut inputs = Vec::with_capacity(transaction.mutations().len());

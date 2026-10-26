@@ -354,20 +354,16 @@ impl ToolExecutor for EditFilesTool {
                 .map_err(backend_runtime_error)?;
             let transaction =
                 WorkspaceMutationTransaction::new(changes).map_err(backend_runtime_error)?;
+            let value_inputs = invocation
+                .want_value()
+                .then(|| crate::patch::file_change_inputs(&transaction))
+                .transpose()?;
             let result = context
                 .environment()
                 .mutate_workspace(transaction, operation_control(&context))
                 .await;
             match result {
-                Ok(result) => ToolOutcome::success_text(format!(
-                    "changed_files={}",
-                    result
-                        .items()
-                        .iter()
-                        .filter(|item| item.disposition()
-                            != plakous_tools::WorkspaceMutationDisposition::Unchanged)
-                        .count()
-                )),
+                Ok(result) => edit_outcome(&result, value_inputs),
                 Err(error)
                     if matches!(
                         error.kind(),
@@ -383,4 +379,41 @@ impl ToolExecutor for EditFilesTool {
             }
         })
     }
+}
+
+fn edit_outcome(
+    result: &plakous_tools::WorkspaceMutationTransactionResult,
+    inputs: Option<Vec<(String, Option<WorkspaceContentIdentity>)>>,
+) -> Result<ToolOutcome, ToolRuntimeError> {
+    use plakous_tools::WorkspaceMutationDisposition as D;
+    let count = result
+        .items()
+        .iter()
+        .filter(|item| item.disposition() != D::Unchanged)
+        .count();
+    let outcome = ToolOutcome::success_text(format!("changed_files={count}"))?;
+    let Some(inputs) = inputs else {
+        return Ok(outcome);
+    };
+    let changes = result
+        .items()
+        .iter()
+        .zip(inputs)
+        .filter_map(|(item, (path, revision))| {
+            let action = match item.disposition() {
+                D::Created => plakous_tools::FileChangeAction::Add,
+                D::Updated => plakous_tools::FileChangeAction::Update,
+                D::Deleted => plakous_tools::FileChangeAction::Delete,
+                _ => return None,
+            };
+            Some(plakous_tools::FileChange {
+                path,
+                revision,
+                action,
+            })
+        })
+        .collect();
+    outcome.with_value(plakous_tools::ExecutionValue::FileChanges(
+        plakous_tools::FileChangesValue { changes },
+    ))
 }

@@ -176,7 +176,11 @@ pub(super) fn list_repository_query_paths(
             stop_reason = Some(RepositoryQueryStopReason::Matches);
             break;
         }
-        let is_directory = file.metadata().is_ok_and(|metadata| metadata.is_dir());
+        let metadata = file.metadata().ok();
+        let is_directory = metadata.as_ref().is_some_and(fs::Metadata::is_dir);
+        let entry_size = metadata
+            .filter(fs::Metadata::is_file)
+            .map_or(0, |metadata| metadata.len());
         if query.list_depth.is_some() {
             // Match the SDK's lossy JSON encoding, including escapes and separators.
             let row_bytes = serde_json::json!({
@@ -194,6 +198,7 @@ pub(super) fn list_repository_query_paths(
         }
         matches.push(RepositoryQueryMatch {
             is_directory,
+            entry_size,
             path: relative,
             line: 1,
             column: 1,
@@ -307,6 +312,7 @@ pub(super) fn scan_repository_query_files(
                         break 'files;
                     }
                     matches.push(RepositoryQueryMatch {
+                        entry_size: 0,
                         is_directory: false,
                         path: relative.clone(),
                         line: line_number,
@@ -355,6 +361,7 @@ pub(super) fn scan_repository_query_files(
                     break 'files;
                 }
                 matches.push(RepositoryQueryMatch {
+                    entry_size: 0,
                     is_directory: false,
                     path: relative.clone(),
                     line: line_number,

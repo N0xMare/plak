@@ -2180,6 +2180,7 @@ impl Driver {
                     parent_call_id,
                 ))
                 .await
+                .map(|_| ())
             }
             AuthorizationOutcome::Pending(_) => Err(AgentError::new(
                 AgentErrorKind::Internal,
@@ -2205,7 +2206,8 @@ impl Driver {
         dispatched: &mut usize,
         origin: ToolDispatchOrigin,
         parent_call_id: Option<CallId>,
-    ) -> Result<(), AgentError> {
+    ) -> Result<Option<plakous_tools::ExecutionValue>, AgentError> {
+        let mut value = None;
         let source_index = u32::try_from(index)
             .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
         let kind = DurableOperationKind::Effect {
@@ -2317,9 +2319,10 @@ impl Driver {
                 .await?;
                 *dispatched = dispatched.saturating_add(usize::from(execution.dispatched));
                 items[index] = Some(execution.item);
+                value = execution.value;
                 operations.push(operation_id);
             }
         }
-        Ok(())
+        Ok(value)
     }
 }

@@ -506,6 +506,8 @@ mod tests {
         let executor: ToolTaskFuture = Box::pin(async move {
             ToolOutcome::success_text("same text")?.with_value(ExecutionValue::Process(
                 ProcessValue {
+                    job_id: 1,
+                    omitted_bytes: 0,
                     status: "exited".into(),
                     exit_code: Some(0),
                     session_id: None,

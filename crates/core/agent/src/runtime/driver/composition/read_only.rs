@@ -136,7 +136,7 @@ impl Driver {
                     command,
                     attempt_id,
                     &call,
-                    presentation,
+                    (presentation,state.integration().consumes_values() && pending.responder.wants_value()),
                     ToolDispatchOrigin::NestedComposition,
                     state.exec_call_id(),
                 )
@@ -445,8 +445,10 @@ impl Driver {
         )?;
         self.transition_operation(command.turn_id, execution.operation_id, terminal)
             .await?;
+        let mut execution_value = None;
         let result = match execution.result {
-            Ok(result) => {
+            Ok(mut result) => {
+                execution_value = result.value.take();
                 // A nested composition child's own result goes to the cell,
                 // not the model, so the observation budget passes it through
                 // unclipped; the composed answer is clipped and announced once
@@ -515,6 +517,12 @@ impl Driver {
             },
         );
         let waiters = take_local_composition_nested_waiters(state, &pending.call.runtime_call_id);
-        queue_local_composition_nested_results(state, pending.responder, waiters, result)
+        crate::runtime::composition::nested::queue_local_composition_nested_values(
+            state,
+            pending.responder,
+            waiters,
+            result,
+            execution_value,
+        )
     }
 }

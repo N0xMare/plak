@@ -170,7 +170,11 @@ pub(in crate::runtime) fn local_composition_response_parts(
     wall_time: Duration,
     integration: &dyn LocalCompositionIntegration,
 ) -> Result<Vec<ToolResultPart>, AgentError> {
-    if integration.result_projection() == LocalCompositionResultProjection::BytesPythonPtcV1 {
+    if matches!(
+        integration.result_projection(),
+        LocalCompositionResultProjection::BytesPythonPtcV1
+            | LocalCompositionResultProjection::BytesRunPyV1
+    ) {
         return local_composition_python_response_parts(response, max_output_tokens, integration);
     }
     let (items, error) = match response {
@@ -211,7 +215,11 @@ pub(in crate::runtime) fn local_composition_refusal_parts(
     error: &AgentError,
 ) -> Result<Vec<ToolResultPart>, AgentError> {
     let notice = format!("Warning: cell output omitted: {}", error.message());
-    if projection == LocalCompositionResultProjection::BytesPythonPtcV1 {
+    if matches!(
+        projection,
+        LocalCompositionResultProjection::BytesPythonPtcV1
+            | LocalCompositionResultProjection::BytesRunPyV1
+    ) {
         let status = local_composition_projection_status(projection, response);
         return Ok(vec![fit_text_bytes(
             &format!("{status}\nOutput:\n{notice}"),
@@ -574,22 +582,26 @@ pub(in crate::runtime) fn local_composition_projection_status(
             LocalCompositionResponse::Result { error: None, .. },
         ) => prompts::PLAKOUS_RUNTIME_SCRIPT_STATUS_COMPLETED.to_owned(),
         (
-            LocalCompositionResultProjection::BytesPythonPtcV1,
+            LocalCompositionResultProjection::BytesPythonPtcV1
+            | LocalCompositionResultProjection::BytesRunPyV1,
             LocalCompositionResponse::Yielded { cell_id, .. },
         ) => format!(
             "{}{cell_id}",
             prompts::PLAKOUS_RUNTIME_PYTHON_CELL_STATUS_RUNNING_PREFIX
         ),
         (
-            LocalCompositionResultProjection::BytesPythonPtcV1,
+            LocalCompositionResultProjection::BytesPythonPtcV1
+            | LocalCompositionResultProjection::BytesRunPyV1,
             LocalCompositionResponse::Terminated { .. },
         ) => prompts::PLAKOUS_RUNTIME_PYTHON_CELL_STATUS_TERMINATED.to_owned(),
         (
-            LocalCompositionResultProjection::BytesPythonPtcV1,
+            LocalCompositionResultProjection::BytesPythonPtcV1
+            | LocalCompositionResultProjection::BytesRunPyV1,
             LocalCompositionResponse::Result { error: Some(_), .. },
         ) => prompts::PLAKOUS_RUNTIME_PYTHON_CELL_STATUS_FAILED.to_owned(),
         (
-            LocalCompositionResultProjection::BytesPythonPtcV1,
+            LocalCompositionResultProjection::BytesPythonPtcV1
+            | LocalCompositionResultProjection::BytesRunPyV1,
             LocalCompositionResponse::Result { error: None, .. },
         ) => prompts::PLAKOUS_RUNTIME_PYTHON_CELL_STATUS_COMPLETED.to_owned(),
     }

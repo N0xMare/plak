@@ -26,11 +26,31 @@ use plakous::model::{
 use plakous::sessions::{AgentSessions, SessionBackend};
 use plakous::tools::{
     CellDescriptor, ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
-    PythonPtcDescriptorV1, ToolRegistryBuilder, WorkspacePolicy,
+    PythonHarnessSdkDescriptorV1, PythonHarnessSdkV1, PythonPtcDescriptorV1, ToolRegistryBuilder,
+    WorkspacePolicy,
 };
 
 /// Names the composition-only surface for both JavaScript and Python cell workers.
 fn composition_surface_is_nameable() {
+    fn from_sdk(descriptor: &PythonHarnessSdkDescriptorV1) -> CellDescriptor {
+        CellDescriptor::from(descriptor)
+    }
+    fn compile_sdk(
+        registry: plakous::tools::FrozenToolRegistry,
+        target: plakous::tools::ProviderModelProjectionIdentityV2,
+    ) -> Result<PythonHarnessSdkDescriptorV1, Box<dyn std::error::Error>> {
+        Ok(PythonHarnessSdkV1::compile(
+            plakous::tools::JobConfig::default(),
+            registry,
+            target,
+        )?)
+    }
+    fn register_sdk(
+        registry: &mut ToolRegistryBuilder,
+        process: Arc<plakous::tools::ProcessSessionTools>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(PythonHarnessSdkV1::register_into(registry, process)?)
+    }
     fn select_cell_profile(
         descriptor: &CellDescriptor,
     ) -> Result<LocalCompositionProfile, AgentError> {
@@ -83,6 +103,9 @@ fn composition_surface_is_nameable() {
     hold(&std::any::type_name::<CellDescriptor>());
     hold(&select_cell_profile);
     hold(&from_python);
+    hold(&from_sdk);
+    hold(&compile_sdk);
+    hold(&register_sdk);
     hold(&from_javascript);
     hold(&verify_host);
     hold(&verify_python_host);

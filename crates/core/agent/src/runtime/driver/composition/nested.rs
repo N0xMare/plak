@@ -34,18 +34,28 @@ impl Driver {
             return Ok(());
         };
         let runtime_call_id = pending.call.runtime_call_id.clone();
+        let want_value = state.integration().consumes_values() && pending.responder.wants_value();
         let result = Box::pin(self.execute_local_composition_nested(
             command,
             attempt_id,
             state,
             pending.call,
-            pending.request_digest,
-            pending.request_sequence,
+            (pending.request_digest, pending.request_sequence, want_value),
         ))
         .await;
+        let (result, value) = match result {
+            Ok((result, value)) => (Ok(result), value),
+            Err(error) => (Err(error), None),
+        };
         state.finish_serial(&runtime_call_id, &result)?;
         let waiters = take_local_composition_nested_waiters(state, &runtime_call_id);
-        queue_local_composition_nested_results(state, pending.responder, waiters, result)
+        crate::runtime::composition::nested::queue_local_composition_nested_values(
+            state,
+            pending.responder,
+            waiters,
+            result,
+            value,
+        )
     }
 
     async fn execute_local_composition_nested(
@@ -54,9 +64,8 @@ impl Driver {
         attempt_id: AttemptId,
         state: &mut CompositionOwner,
         nested: crate::local_composition::LocalCompositionNestedCall,
-        request_digest: Digest,
-        request_sequence: u32,
-    ) -> Result<serde_json::Value, AgentError> {
+        (request_digest, request_sequence, want_value): (Digest, u32, bool),
+    ) -> Result<(serde_json::Value, Option<plakous_tools::ExecutionValue>), AgentError> {
         const MAX_LOCAL_COMPOSITION_DEPTH: u16 = 1;
         if state.cell() != Some(nested.cell_id.as_str()) {
             return Err(AgentError::new(
@@ -206,7 +215,7 @@ impl Driver {
                 command,
                 attempt_id,
                 &call,
-                presentation,
+                (presentation, want_value),
                 ToolDispatchOrigin::NestedComposition,
                 state.exec_call_id(),
             )
@@ -249,6 +258,7 @@ impl Driver {
         let mut operations = Vec::new();
         let mut dispatched = 0;
         let mut edge_dispatched = false;
+        let mut execution_value = None;
         match admission {
             ToolAdmission::Admitted { execution, .. } => {
                 self.transition_operation_as(
@@ -265,7 +275,7 @@ impl Driver {
                 let outer_presentation =
                     std::mem::replace(&mut self.tool_presentation, nested_presentation);
                 let parent_call_id = state.exec_call_id();
-                let execution_result = Box::pin(self.execute_restored_admitted(
+                let mut execution_result = Box::pin(self.execute_restored_admitted(
                     command,
                     attempt_id,
                     0,
@@ -280,6 +290,9 @@ impl Driver {
                 ))
                 .await;
                 self.tool_presentation = outer_presentation;
+                if let Ok(value) = &mut execution_result {
+                    execution_value = value.take();
+                }
                 if let Err(error) = execution_result {
                     let evidence = runtime_component(
                         RuntimeComponentKind::Operation,
@@ -443,6 +456,6 @@ impl Driver {
                 }
             },
         );
-        value
+        value.map(|value| (value, execution_value))
     }
 }

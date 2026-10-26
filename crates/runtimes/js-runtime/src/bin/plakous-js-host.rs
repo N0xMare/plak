@@ -156,11 +156,11 @@ fn configure(stdin: &mut impl io::Read) -> Result<(), String> {
     let frame = read_frame_blocking(stdin, MAX_FRAME_BYTES)?
         .ok_or_else(|| "parent closed before configure".to_owned())?;
     match serde_json::from_slice::<HostFrame>(&frame) {
-        Ok(HostFrame::Configure { revision, engine })
-            if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::QUICKJS =>
-        {
-            Ok(())
-        }
+        Ok(HostFrame::Configure {
+            revision,
+            engine,
+            sdk_stubs: None,
+        }) if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::QUICKJS => Ok(()),
         Ok(HostFrame::Configure { .. }) => Err("configure names another revision or limits".into()),
         _ => Err("first parent frame is not configure".into()),
     }
@@ -215,7 +215,7 @@ async fn command(
             window.unwrap_or(DEFAULT_YIELD_TIME_MS),
         )?,
         HostFrame::StartCell {
-            prelude: CellPrelude::Monty { .. },
+            prelude: CellPrelude::Monty { .. } | CellPrelude::MontySdk { .. },
             ..
         } => {
             write(
@@ -237,6 +237,7 @@ async fn command(
         }
         HostFrame::Resume { cell, window } => host.resume(cell, window)?,
         HostFrame::Cancel { .. } => host.interrupt(),
+        HostFrame::Reset => return Err("QuickJS does not accept Python Reset".into()),
         HostFrame::Shutdown => {
             write(
                 stdout,

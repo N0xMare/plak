@@ -6435,7 +6435,7 @@ presentation, and semantic revisions are all frozen before dispatch.
 `LocalCompositionProfile::cell(&CellDescriptor)` is the sole profile
 constructor. The crate-root `plakous-compose::CellDescriptor` (also exposed as
 `plakous::tools::CellDescriptor`) holds an exact native/minimal Codex,
-JavaScript or Python compiler output. Converting a typed compiler descriptor
+JavaScript, Python PTC or Python SDK compiler output. Converting a typed compiler descriptor
 into it preserves the v3 identity and both projections; it does not admit a
 different engine. The selected variant determines the required worker contract.
 The enum is exhaustive: adding a variant is a deliberate breaking API change,
@@ -6460,13 +6460,15 @@ recommended choice among them. Local programmatic runtimes (Codex Code Mode,
 `js-ptc`, `py-ptc`) share the coordinator below; provider-hosted PTC keeps its
 own replay and recovery rules.
 
-There are exactly three local PTC deployments plus `direct` (no PTC):
+Product selection enrolls three local PTC deployments plus `direct` (no PTC).
+The SDK is an explicit embedding presentation, not a product selector:
 
 | Selector | Owner | Outer tools | Engine |
 | --- | --- | --- | --- |
 | `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the cell client that `composition` links |
 | `js-ptc` | Product | `exec_js`, `wait_js`, JSON field `source` | rquickjs in the sidecar `plakous-js-host`, one process per agent |
 | `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.2.0` in the cell worker `plakous-py-host`, one worker per agent incarnation |
+| Embedding SDK (no selector) | Consumer | `run_py`, JSON field `code`; no wait tool | Same Monty worker; fresh globals per cell, named session state |
 | `direct` | — | none | — |
 
 The host identity carries the deployment — `rquickjs-host/<digest>` or
@@ -6843,7 +6845,8 @@ joined.
 
 For a structured local-composition entry point the provider projection remains
 `Direct`: the outer `exec_js`/`wait_js` pair, or the `exec_py`/`wait_py` pair,
-is an ordinary function-tool surface on the wire. Harness-local composition identity
+and the SDK's single structured `run_py` is an ordinary function-tool surface
+on the wire. Harness-local composition identity
 and lifecycle belong to the separate Plakous attachment. Native Codex freeform
 Code Mode remains `LocalCompositionOnly`. **These axes are never conflated.**
 
@@ -6992,9 +6995,81 @@ lists saved keys and their sizes, plus running promoted job numbers. Values
 themselves are not included in that note. Compaction may drop a state-only note
 because the next boundary re-emits it.
 
-No shipped presentation issues state operations. Export documents do not carry
+The Python SDK presentation issues these state operations. Export documents do not carry
 named state; an imported session, including one carried by `/reload` across
 builds, starts with empty named state.
+
+### 9.9 Typed Python SDK cells
+
+`PythonHarnessSdkV1::compile` uses the same cell compiler and v3 identity
+recipe as the other presentations. Its exhaustive `CellDescriptor` variant
+is `PythonHarnessSdkV1`; `LocalCompositionProfile::cell` selects the Monty
+worker contract. The SDK has one ordinary structured outer tool, `run_py`,
+with exactly one `code` string (nonempty, at most 256 KiB UTF-8). It has no
+wait tool, no result channel and no topology tools. Its runtime contract has
+`supports_yield = false`, lifecycle `AgentIncarnationPersistent` and result
+projection `BytesRunPyV1`. It is an explicit root embedding API; it is not
+selected by `plakous-default` or exposed as a product composition selector.
+
+The descriptor's `HostApi` is the sole SDK catalog. It generates the typing
+module, runtime wrappers, plain-data record definitions and host argument
+validators. The namespaces are `ctx.read/list/grep`, `fs.apply` and its pure
+`Patch/Replace/Write/Delete/Move` dictionary constructors,
+`proc.run/shell/start/poll/stdin/cancel/join`, `state.get/put/list/drop` and
+`plan.update`. `fs.apply` takes an ordered list of operations; optional
+`expect` is a revision returned by `ctx.read`, or `"absent"`. `plan.Step`
+holds text and a `pending`/`in_progress`/`completed` status. Core record types
+are `Ref`, `Omission`, `File`, `Entry`, `Listing`, `Hit`, `Hits`, `Image`,
+`Job`, `ProcResult` and `Slot`. Records are plain data, not host-backed objects.
+There are no optional retrieval, image-generation, MCP or helper namespaces.
+
+`PythonHarnessSdkV1::register_into` explicitly enrolls `edit_files`,
+`process_session_exec`, `list_entries` and the SDK's driver-only marker.
+The ordinary coding packs are registered first with the same process-session
+service. No Direct, Code Mode, JavaScript or Python PTC menu enrolls those
+extensions implicitly. SDK functions map to these canonical nested tools
+through the sole driver; state operations use §9.8 instead. Every child is
+authorized, journaled and committed before its result is handed to the SDK.
+Only value-consuming SDK child calls request ephemeral `ExecutionValue`s;
+other presentations and non-value-consuming writes request none. Values are
+moved into `CellValue` records, not cloned into delivery or replay caches.
+Replay and duplicate delivery retain text only. Arguments must be finite
+JSON values; arbitrary Python objects are not coerced through `repr()`.
+
+The warm worker is configured with SDK stubs and type checking enabled.
+Before each SDK cell the host sends `Reset`, the worker reinstalls its exact
+configuration, and the host-generated bootstrap installs fresh namespaces.
+Type diagnostics end the cell with `type errors; nothing ran` before any
+host call. Python PTC keeps its original persistent globals and type checking
+disabled. Only successful, presented SDK terminals publish named-state writes
+(§9.8); failed, stopped or abandoned cells publish none. Invalid keys,
+non-JSON/inexact values raise `ValueError`; state and encoded-value capacity
+refusals raise `OverflowError`; driver/lifecycle failures raise `RuntimeError`.
+Exception classes come from typed host refusals, not diagnostic-string parsing.
+
+The SDK foreground budget is 300 seconds across computation and host waits,
+enforced by `CellSession`. Expiry stops and joins the worker, emits the typed
+`CellOutcome::Stopped { ForegroundBudget }` terminal, and loses the generation.
+The outer observation allows that budget plus five seconds for stop/join;
+the model-request timeout cannot shorten it.
+A Python-raised `MemoryError("memory limit exceeded")` remains an ordinary
+cell failure, never a typed stop. In-engine memory remains bounded at 256 MiB.
+`proc.start` is for long work; `proc.run` and `proc.shell` join within their
+`timeout_s` bound (0–300 s) and stop a job that exceeds it. `proc.stdin` writes
+and optionally closes stdin. Processes have the user's full authority and
+are not sandboxed. Both process-enabled occupancy tiers admit literal argv
+under the same fence as shell start; file edits remain denied on those tiers.
+
+One nested result may encode to at most 1 MiB as `CellValue`, and all results
+of a cell to at most 16 MiB. These quotas count encoded values, not tool text
+or Rust allocation estimates; refused results do not spend capacity. Output
+observations contain at most 16 KiB of UTF-8 text. Larger output gets an
+unpredictable 128-bit `Ref`; `ctx.read(ref, lines=(first,last))` reads a bounded
+page. The session retains at most 64 references and 16 MiB of full text.
+Capacity refusal is explicit. `Omission` retains canonical counts for omitted
+lines, clipped lines, hits and entries; incomplete walks and truncated process
+output are marked without inventing counts of unseen data. No media attachment
+is produced by this core SDK surface.
 
 ## 10. Compaction
 

@@ -34,6 +34,8 @@ pub(crate) enum CatalogStyle {
     ProductJavaScript,
     /// Product-owned Python coroutine cells.
     Python,
+    /// Typed Python SDK with fresh globals and named session state.
+    PythonSdk,
 }
 
 /// Where a running cell yields its observation window.
@@ -43,6 +45,8 @@ pub(crate) enum YieldMode {
     EngineParked,
     /// The host returns while the Python interpreter keeps running.
     HostWindow,
+    /// A foreground cell runs to a terminal and never yields.
+    Never,
 }
 
 /// Interpreter state ownership across root turns.
@@ -70,6 +74,14 @@ pub(crate) enum CellLimits {
     },
     /// Exact Python PTC engine and output bounds.
     Python(PythonPtcLimitsV1),
+    /// SDK foreground, encoded-value and observation bounds.
+    PythonSdk {
+        source_bytes: u32,
+        foreground_ms: u64,
+        result_bytes: usize,
+        cell_bytes: usize,
+        consumes_values: bool,
+    },
 }
 
 pub(super) enum OuterInput {

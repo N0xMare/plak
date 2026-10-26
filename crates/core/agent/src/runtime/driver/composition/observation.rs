@@ -91,8 +91,13 @@ impl Driver {
         nested_executions: &mut FuturesUnordered<LocalCompositionNestedFuture>,
         observation: &mut LocalCompositionObservation<'_>,
     ) -> Result<LocalCompositionResponse, AgentError> {
-        let response_deadline =
-            tokio::time::sleep(observation.timeout(self.config.model_operation_timeout, false));
+        let operation_timeout = state
+            .integration()
+            .foreground_budget()
+            .map_or(self.config.model_operation_timeout, |budget| {
+                budget.saturating_add(Duration::from_secs(5))
+            });
+        let response_deadline = tokio::time::sleep(observation.timeout(operation_timeout, false));
         tokio::pin!(response_deadline);
         let mut steer_settlement_started = false;
         let mut nested_was_settled = true;
@@ -115,7 +120,7 @@ impl Driver {
             {
                 response_deadline.as_mut().reset(
                     tokio::time::Instant::now()
-                        + observation.timeout(self.config.model_operation_timeout, steer_pending),
+                        + observation.timeout(operation_timeout, steer_pending),
                 );
                 steer_settlement_started = steer_pending;
             }

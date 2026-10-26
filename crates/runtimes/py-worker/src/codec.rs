@@ -42,6 +42,20 @@ pub(crate) fn call_to_json(argument: ObjectRef<'_>) -> Result<Value, String> {
     monty_to_json(argument, 0, &mut budget)
 }
 
+/// SDK host arguments are JSON, never a repr-based coercion of arbitrary objects.
+pub(crate) fn sdk_call_to_json(argument: ObjectRef<'_>) -> Result<Value, String> {
+    let owned = argument.to_owned();
+    let (graph, _) = unstable::graph_parts(&owned);
+    for node in graph.nodes() {
+        match node {
+            MontyNode::None|MontyNode::Bool(_)|MontyNode::Int(_)|MontyNode::String(_)|MontyNode::List(_)|MontyNode::Tuple(_)|MontyNode::Dict(_)=>{},
+            MontyNode::Float(value) if value.is_finite()=>{},
+            _=>return Err("SDK arguments must be finite JSON values; objects and oversized integers are refused".into()),
+        }
+    }
+    call_to_json(argument)
+}
+
 fn charge(budget: &mut usize, cost: usize) -> Result<(), String> {
     *budget = budget
         .checked_sub(cost)

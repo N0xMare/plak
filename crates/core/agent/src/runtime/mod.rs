@@ -780,6 +780,8 @@ mod execution_value_tests {
         let plain = ToolExecutionResult::new(result.clone(), true);
         let typed = ToolExecutionResult::new(result, true).with_value(Some(
             plakous_tools::ExecutionValue::Process(plakous_tools::ProcessValue {
+                job_id: 1,
+                omitted_bytes: 0,
                 status: "exited".into(),
                 exit_code: Some(0),
                 session_id: None,

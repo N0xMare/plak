@@ -148,6 +148,71 @@ product evidence and coding presentation kind, and pass it to
 `attach_local_composition(builder, Some(attachment))`. Native Codex profiles
 use that same builder and attach path but forbid product evidence.
 
+## Typed Python SDK
+
+The SDK is an explicit embedding choice through `composition`. It uses the
+same `plakous-py-host` sidecar, but exposes only `run_py` and starts each cell
+with fresh globals. It is not a product selector yet.
+
+Register the coding packs and SDK extensions with the same process service:
+
+```rust,ignore
+use std::sync::Arc;
+use plakous::tools::{
+    InMemoryPlanState, ProcessSessionTools, PythonHarnessSdkV1,
+    ToolRegistryBuilder, register_packs, standard_coding_packs,
+};
+
+let process = Arc::new(ProcessSessionTools::posix_sh()?);
+let mut registry = ToolRegistryBuilder::default();
+register_packs(
+    &standard_coding_packs(Arc::new(InMemoryPlanState::new()), process.clone()),
+    &mut registry,
+)?;
+PythonHarnessSdkV1::register_into(&mut registry, process)?;
+let registry = registry.freeze();
+let sdk = PythonHarnessSdkV1::compile(job_config, registry.clone(), target)?;
+let profile = LocalCompositionProfile::cell(&(&sdk).into())?;
+let artifact = LocalCompositionEngineArtifact::monty_worker_v1(&worker_path)?;
+let receipt = ProductExtensionEvidence::cell(
+    &profile, &artifact, issuer, qualification, &configuration,
+)?;
+let attachment = LocalCompositionAttachment::builder(profile)
+    .engine_artifact(artifact)
+    .product_extension_evidence(receipt)
+    .build()?;
+let builder = attach_local_composition(builder, Some(attachment))?;
+```
+
+Here `target` is the exact projection identity for your compiled provider
+configuration; expose the `run_py` marker as a local ordinary function. Attach
+the matching SDK outer projection, not a Direct coding menu. The SDK needs no
+coding-presentation kind. Mutations require an explicitly permitting tool
+policy and a required-durability backend, such as `SessionBackend::sqlite`.
+
+SDK code awaits `ctx.read/list/grep`, `fs.apply([fs.Write(...), ...])`,
+`proc.run/shell/start/poll/stdin/cancel/join`, `plan.update` and
+`state.get/put/list/drop`. For example:
+
+```python
+files = await asyncio.gather(ctx.read("a.txt"), ctx.read("b.txt"))
+await fs.apply([fs.Write("combined.txt", files[0].text + files[1].text,
+                        expect="absent")])
+await state.put("last_files", [file.path for file in files])
+print(await state.get("last_files"))
+```
+
+Cells are type-checked before I/O. Named state survives exact reopen and
+publishes only with a successful presented terminal; globals do not survive.
+Invalid state keys/values raise `ValueError`, capacity refusals raise
+`OverflowError`, and host failures raise `RuntimeError`. Values are bounded
+by their encoded representation (1 MiB per result, 16 MiB per cell); the
+foreground budget is 300 seconds. There is no wait tool: use `proc.start` for
+long jobs. Processes have the user's full authority, including on
+process-enabled read-only and execute tiers. File edits remain denied on those
+tiers. Output over 16 KiB carries a `Ref` that `ctx.read` can page. Exports do
+not carry named state.
+
 ## Construction
 
 `plakous::construction` computes facts the library already owns:
