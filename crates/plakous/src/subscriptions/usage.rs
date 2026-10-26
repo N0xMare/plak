@@ -1,196 +1,176 @@
 //! Subscription usage reads.
 
 use super::{
-    NativeAuthStatus, NativeProvider, NativeSubscriptionError, NativeSubscriptionStatus,
-    NativeSubscriptions, SubscriptionUsageCredentialState, SubscriptionUsageRead,
-    SubscriptionUsageUnavailable, Timestamp,
+    Future, NativeAuthStatus, NativeProvider, NativeSubscriptionError, NativeSubscriptionStatus,
+    NativeSubscriptions, PrivateFilesystemLock, SubscriptionUsageCredentialState,
+    SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp, run_blocking,
 };
 
-fn is_usage_rejection(read: &SubscriptionUsageRead) -> bool {
-    matches!(
-        read,
-        SubscriptionUsageRead::Unavailable {
-            reason: SubscriptionUsageUnavailable::Unauthorized,
-            ..
+enum UsageReader {
+    Codex(std::sync::Arc<plakous_openai::CodexSubscriptionCredentialManager>),
+    Xai(std::sync::Arc<plakous_xai::XaiNativeAuthManager>),
+    Claude(std::sync::Arc<plakous_anthropic::ClaudeNativeAuthManager>),
+}
+
+impl UsageReader {
+    async fn read(self) -> SubscriptionUsageRead {
+        match self {
+            Self::Codex(manager) => Box::pin(manager.subscription_usage()).await,
+            Self::Xai(manager) => Box::pin(manager.subscription_usage()).await,
+            Self::Claude(manager) => Box::pin(manager.subscription_usage()).await,
         }
-    )
+    }
 }
 
 impl NativeSubscriptions {
-    /// Performs one explicit, observational subscription allowance read.
-    ///
-    /// Codex, Grok, and Claude each use their reviewed provider-owned
-    /// control-plane transport. No inferred request or inference dispatch
-    /// occurs.
+    /// Performs one observational subscription allowance read, with one claimed
+    /// refresh and retry if the endpoint rejects the access token. Provider
+    /// credential leases protect the network read; the compatibility guard is
+    /// held only while preparing and checking its local consent snapshot.
     pub async fn subscription_usage(&self, provider: NativeProvider) -> SubscriptionUsageRead {
-        let unavailable = |reason| SubscriptionUsageRead::Unavailable {
+        let observation = Box::pin(self.read_usage_once(provider, false)).await;
+        if matches!(
+            observation,
+            SubscriptionUsageRead::Unavailable {
+                reason: SubscriptionUsageUnavailable::Unauthorized,
+                ..
+            }
+        ) {
+            Box::pin(self.read_usage_once(provider, true)).await
+        } else {
+            observation
+        }
+    }
+
+    fn usage_unavailable(&self, reason: SubscriptionUsageUnavailable) -> SubscriptionUsageRead {
+        SubscriptionUsageRead::Unavailable {
             observed_at: Timestamp::new(self.state.now().unwrap_or(0), 0)
                 .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
             reason,
-        };
-        // The compatibility lock is an `flock` whose parent-directory guard is
-        // shared by every provider, so a concurrent dispatch validation, another
-        // Plak process, or a sibling provider's read makes this non-blocking
-        // attempt miss. That is contention, never a transport failure.
-        let lock = match self.try_acquire_compatibility_lock(provider).await {
-            Ok(Some(lock)) => lock,
-            Ok(None) => return unavailable(SubscriptionUsageUnavailable::Busy),
-            Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
-        };
-        // Opening the provider manager performs no network I/O: every failure
-        // here is local state, and a fenced credential is named by its exact
-        // lifecycle rather than reported as absent or as a transport fault.
-        let observation = match provider {
-            NativeProvider::Codex => match self.codex_online().await {
-                Ok(online) => online.manager.subscription_usage().await,
-                Err(NativeSubscriptionError::CredentialUnavailable) => {
-                    return unavailable(self.fenced_credential_reason(provider).await);
-                }
-                // A record this build refuses needs a new login.
-                Err(NativeSubscriptionError::CredentialProfileChanged) => {
-                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
-                        SubscriptionUsageCredentialState::LoginRequired,
-                    ));
-                }
-                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild) => {
-                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
-                        SubscriptionUsageCredentialState::WrittenByNewerBuild,
-                    ));
-                }
-                Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
-            },
-            NativeProvider::Xai => match self.xai_online().await {
-                Ok(online) => online.manager.subscription_usage().await,
-                Err(NativeSubscriptionError::CredentialUnavailable) => {
-                    return unavailable(self.fenced_credential_reason(provider).await);
-                }
-                // A record this build refuses needs a new login.
-                Err(NativeSubscriptionError::CredentialProfileChanged) => {
-                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
-                        SubscriptionUsageCredentialState::LoginRequired,
-                    ));
-                }
-                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild) => {
-                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
-                        SubscriptionUsageCredentialState::WrittenByNewerBuild,
-                    ));
-                }
-                Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
-            },
-            NativeProvider::Claude => match self.claude_online().await {
-                Ok(online) => online.manager.subscription_usage().await,
-                Err(NativeSubscriptionError::CredentialUnavailable) => {
-                    return unavailable(self.fenced_credential_reason(provider).await);
-                }
-                // A record this build refuses needs a new login.
-                Err(NativeSubscriptionError::CredentialProfileChanged) => {
-                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
-                        SubscriptionUsageCredentialState::LoginRequired,
-                    ));
-                }
-                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild) => {
-                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
-                        SubscriptionUsageCredentialState::WrittenByNewerBuild,
-                    ));
-                }
-                Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
-            },
-        };
-        let observation = if is_usage_rejection(&observation) {
-            self.recover_rejected_usage(provider, observation).await
-        } else {
-            observation
-        };
-        if lock.verify().is_err() {
-            return unavailable(SubscriptionUsageUnavailable::AccountChanged);
         }
-        observation
     }
 
-    /// A usage endpoint that rejected the access token gets one forced
-    /// refresh grant through the same claimed single-flight ladder model
-    /// dispatch uses, then exactly one more read. A failed grant reports the
-    /// credential's resulting state; the refresh failure itself is in
-    /// telemetry for the display layer to name.
-    async fn recover_rejected_usage(
+    async fn read_usage_once(
         &self,
         provider: NativeProvider,
-        rejected: SubscriptionUsageRead,
+        refresh: bool,
     ) -> SubscriptionUsageRead {
-        match self.refresh_locked(provider, true).await {
-            Ok(NativeAuthStatus::Ready) => self.read_usage_once(provider).await.unwrap_or(rejected),
-            Ok(_) | Err(_) => match self.fenced_credential_reason(provider).await {
-                SubscriptionUsageUnavailable::LocalState => rejected,
-                reason => SubscriptionUsageRead::Unavailable {
-                    observed_at: Timestamp::new(self.state.now().unwrap_or(0), 0)
-                        .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
-                    reason,
-                },
-            },
+        // Blocking acquisition is confined to local snapshot work. Sibling
+        // providers queue briefly rather than misreporting one another as Busy.
+        let Ok(lock) = self.acquire_compatibility_lock(provider).await else {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
+        if refresh
+            && !matches!(
+                self.refresh_locked(provider, true).await,
+                Ok(NativeAuthStatus::Ready)
+            )
+        {
+            return self.usage_unavailable(self.fenced_credential_reason(provider).await);
         }
+        let reader = match self.usage_reader(provider).await {
+            Ok(reader) => reader,
+            Err(error) => {
+                let reason = match error {
+                    NativeSubscriptionError::CredentialUnavailable => {
+                        self.fenced_credential_reason(provider).await
+                    }
+                    NativeSubscriptionError::CredentialProfileChanged => {
+                        SubscriptionUsageUnavailable::CredentialState(
+                            SubscriptionUsageCredentialState::LoginRequired,
+                        )
+                    }
+                    NativeSubscriptionError::CredentialWrittenByNewerBuild => {
+                        SubscriptionUsageUnavailable::CredentialState(
+                            SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                        )
+                    }
+                    _ => SubscriptionUsageUnavailable::LocalState,
+                };
+                return self.usage_unavailable(reason);
+            }
+        };
+        Box::pin(self.observe_usage_unlocked(provider, lock, reader.read())).await
     }
 
-    async fn read_usage_once(&self, provider: NativeProvider) -> Option<SubscriptionUsageRead> {
-        Some(match provider {
-            NativeProvider::Codex => {
-                self.codex_online()
-                    .await
-                    .ok()?
-                    .manager
-                    .subscription_usage()
-                    .await
-            }
-            NativeProvider::Xai => {
-                self.xai_online()
-                    .await
-                    .ok()?
-                    .manager
-                    .subscription_usage()
-                    .await
-            }
-            NativeProvider::Claude => {
-                self.claude_online()
-                    .await
-                    .ok()?
-                    .manager
-                    .subscription_usage()
-                    .await
-            }
+    async fn usage_reader(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<UsageReader, NativeSubscriptionError> {
+        Ok(match provider {
+            NativeProvider::Codex => UsageReader::Codex(self.codex_online().await?.manager),
+            NativeProvider::Xai => UsageReader::Xai(self.xai_online().await?.manager),
+            NativeProvider::Claude => UsageReader::Claude(self.claude_online().await?.manager),
         })
     }
 
-    /// Names why the selected credential was refused before any network I/O:
-    /// absent is `NotConnected`; a present record is its exact lifecycle; a
-    /// Ready record fenced by armed login recovery is local state.
+    async fn usage_snapshot(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<(Option<String>, Option<u64>), NativeSubscriptionError> {
+        let state = self.state.clone();
+        run_blocking(move || {
+            Ok((
+                state.stored_acceptance_generation(provider)?,
+                state.current_credential_generation(provider)?,
+            ))
+        })
+        .await?
+    }
+
+    async fn observe_usage_unlocked(
+        &self,
+        provider: NativeProvider,
+        lock: PrivateFilesystemLock,
+        read: impl Future<Output = SubscriptionUsageRead>,
+    ) -> SubscriptionUsageRead {
+        let before = match self.usage_snapshot(provider).await {
+            Ok(snapshot) if lock.verify().is_ok() => snapshot,
+            _ => return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState),
+        };
+        drop(lock);
+        let observation = read.await;
+        let Ok(lock) = self.acquire_compatibility_lock(provider).await else {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
+        };
+        match self.usage_snapshot(provider).await {
+            Ok(after) if before == after && lock.verify().is_ok() => observation,
+            _ => self.usage_unavailable(SubscriptionUsageUnavailable::AccountChanged),
+        }
+    }
+
+    /// Names the credential lifecycle rather than claiming a transport fault.
     async fn fenced_credential_reason(
         &self,
         provider: NativeProvider,
     ) -> SubscriptionUsageUnavailable {
+        use SubscriptionUsageCredentialState as C;
         match self
             .status_unlocked(provider)
             .await
             .map(NativeSubscriptionStatus::credential)
         {
             Ok(NativeAuthStatus::SignedOut) => SubscriptionUsageUnavailable::NotConnected,
-            Ok(NativeAuthStatus::RefreshRequired) => SubscriptionUsageUnavailable::CredentialState(
-                SubscriptionUsageCredentialState::RefreshRequired,
-            ),
-            Ok(NativeAuthStatus::Quarantined) => SubscriptionUsageUnavailable::CredentialState(
-                SubscriptionUsageCredentialState::Quarantined,
-            ),
+            Ok(NativeAuthStatus::RefreshRequired) => {
+                SubscriptionUsageUnavailable::CredentialState(C::RefreshRequired)
+            }
+            Ok(NativeAuthStatus::Quarantined) => {
+                SubscriptionUsageUnavailable::CredentialState(C::Quarantined)
+            }
             Ok(NativeAuthStatus::Refreshing) => SubscriptionUsageUnavailable::Busy,
-            Ok(NativeAuthStatus::Revoked) => SubscriptionUsageUnavailable::CredentialState(
-                SubscriptionUsageCredentialState::Revoked,
-            ),
-            Ok(NativeAuthStatus::LoginRequired) => SubscriptionUsageUnavailable::CredentialState(
-                SubscriptionUsageCredentialState::LoginRequired,
-            ),
+            Ok(NativeAuthStatus::Revoked) => {
+                SubscriptionUsageUnavailable::CredentialState(C::Revoked)
+            }
+            Ok(NativeAuthStatus::LoginRequired) => {
+                SubscriptionUsageUnavailable::CredentialState(C::LoginRequired)
+            }
             Ok(NativeAuthStatus::WrittenByNewerBuild) => {
-                SubscriptionUsageUnavailable::CredentialState(
-                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
-                )
+                SubscriptionUsageUnavailable::CredentialState(C::WrittenByNewerBuild)
             }
             Ok(NativeAuthStatus::Ready) | Err(_) => SubscriptionUsageUnavailable::LocalState,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

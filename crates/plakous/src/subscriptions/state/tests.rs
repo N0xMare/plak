@@ -1041,13 +1041,11 @@ async fn subscription_usage_dispatches_native_providers_without_unqualified_clau
     Ok(())
 }
 
-/// The compatibility lock guards its shared parent directory, so a lock
-/// held for one provider makes a sibling provider's non-blocking read miss.
-/// That miss is contention (`Busy`), never a transport failure, and clears
-/// as soon as the holder releases.
+/// Local preparation queues behind a peer's compatibility mutation, rather
+/// than returning Busy for a different provider.
 #[cfg(unix)]
 #[tokio::test]
-async fn subscription_usage_reports_busy_while_a_sibling_holds_the_compatibility_lock()
+async fn subscription_usage_waits_while_a_sibling_holds_the_compatibility_lock()
 -> Result<(), Box<dyn Error>> {
     let root = unique_test_root("usage-busy-sibling")?;
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
@@ -1057,16 +1055,16 @@ async fn subscription_usage_reports_busy_while_a_sibling_holds_the_compatibility
     let subscriptions = NativeSubscriptions::new(paths).with_clock(Arc::new(
         plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
     ));
-    assert!(matches!(
-        subscriptions.subscription_usage(NativeProvider::Xai).await,
-        SubscriptionUsageRead::Unavailable {
-            reason: SubscriptionUsageUnavailable::Busy,
-            ..
-        }
-    ));
+    let read = subscriptions.subscription_usage(NativeProvider::Xai);
+    tokio::pin!(read);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut read)
+            .await
+            .is_err()
+    );
     drop(held);
     assert!(matches!(
-        subscriptions.subscription_usage(NativeProvider::Xai).await,
+        read.await,
         SubscriptionUsageRead::Unavailable { reason, .. }
             if reason != SubscriptionUsageUnavailable::Busy
                 && reason != SubscriptionUsageUnavailable::Transport(None)

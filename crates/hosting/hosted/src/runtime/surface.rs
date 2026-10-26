@@ -57,11 +57,10 @@ pub struct SurfaceFacts<'a> {
 /// The host's queued and running subscription usage reads, as a surface waits
 /// on them.
 ///
-/// A usage read holds a provider's compatibility lock across its network
-/// exchange and only try-locks it, so a posture read of the same store from
-/// this process while it runs would make the read report `Busy`. A surface
-/// that reads subscription posture for a Usage intent does so off the action
-/// loop and waits here first.
+/// Usage reads retain provider Ready leases across their network exchanges,
+/// not the shared compatibility guard. A surface that reads subscription
+/// posture for a Usage intent still does so off the action loop and waits
+/// here first, so it reports the settled credential lifecycle.
 #[derive(Clone, Debug, Default)]
 pub struct UsageReads {
     pending: Arc<(Mutex<usize>, Condvar)>,

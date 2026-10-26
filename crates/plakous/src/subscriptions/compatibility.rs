@@ -15,6 +15,7 @@ impl NativeSubscriptions {
         self.state.acquire_compatibility_lock(provider).await
     }
 
+    #[cfg(test)]
     pub(super) async fn try_acquire_compatibility_lock(
         &self,
         provider: NativeProvider,

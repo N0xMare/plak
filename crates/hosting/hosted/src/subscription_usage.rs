@@ -58,9 +58,8 @@ pub const USAGE_PROJECTION_FRESHNESS: Duration = Duration::from_secs(60);
 pub const USAGE_RATE_LIMITED_REASON: &str = "provider rate-limited this read; it was not retried";
 
 /// Exact operator sentence for [`SubscriptionUsageUnavailable::Busy`]. Every
-/// provider's compatibility lock shares one guard, so the sentence names the
-/// shared lock rather than this vertical's.
-pub const USAGE_BUSY_REASON: &str = "another Plak process or a credential refresh holds the subscription lock; nothing was sent, retry in a moment";
+/// credential may be busy in this process or in a peer; neither is assumed.
+pub const USAGE_BUSY_REASON: &str = "the subscription credential is busy (usage read, login, or refresh); nothing was sent, retry in a moment";
 
 /// Returns whether `age` is still within [`USAGE_PROJECTION_FRESHNESS`].
 ///

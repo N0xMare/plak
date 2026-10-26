@@ -25,7 +25,9 @@ use super::{
 mod filesystem;
 mod locks;
 pub(super) use locks::PrivateFilesystemLock;
-use locks::{acquire_private_filesystem_lock, try_acquire_private_filesystem_lock};
+use locks::acquire_private_filesystem_lock;
+#[cfg(test)]
+use locks::try_acquire_private_filesystem_lock;
 mod quarantine;
 use quarantine::{
     LOGIN_RECOVERY_QUARANTINE, clear_quarantine, process_quarantine_key, quarantine, quarantined,
@@ -506,6 +508,7 @@ impl SubscriptionState {
         .await?
     }
 
+    #[cfg(test)]
     pub(in crate::subscriptions) async fn try_acquire_compatibility_lock(
         &self,
         provider: NativeProvider,

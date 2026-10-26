@@ -6370,11 +6370,16 @@ recorded refresh failure below. A still-expired Ready token
 is never provider staleness. Shared Ready leases do not block a credential-free fence read.
 `Busy` means local writer or refresh contention: a writer's brief record
 replacement, or a refresh claim still in flight in this or another process,
-which is not reported as a quarantine. Every provider's compatibility lock
-shares one directory guard, so a holder of any of them (another process binding
-a model, for example) makes every vertical's read `Busy`, and its line names
-that shared lock: `another Plak process or a credential refresh holds the
-subscription lock; nothing was sent, retry in a moment`. The hosted usage read
+which is not reported as a quarantine. Usage prepares its manager and snapshots
+the consent and credential generations under the compatibility lock, then
+releases that guard before network I/O. The provider's Ready lease still
+protects the credential across processes. After the read, Usage reacquires the
+compatibility lock and discards an observation whose consent or credential
+generation changed. Sibling providers' concurrent network reads do not make
+one another Busy. The line does not guess which process holds a credential:
+`the subscription credential is busy (usage read, login, or refresh); nothing
+was sent, retry in a moment`. A forced refresh still retains the compatibility
+guard through the claimed mutation. The hosted usage read
 retries `Busy`.
 Native allowance reads run concurrently with a separate five-second deadline
 for each provider, including that provider's busy-lock retries. The native
