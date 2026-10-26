@@ -421,9 +421,11 @@ async fn execute<H: ChatHttpHooks>(
                         operation,
                         hooks,
                         request_id,
-                        Arc::clone(&clock),
-                        Arc::clone(&ids),
-                        cancellation,
+                        StreamResources {
+                            clock: Arc::clone(&clock),
+                            ids: Arc::clone(&ids),
+                            cancellation: &cancellation,
+                        },
                         attempt,
                     )
                     .await
@@ -515,9 +517,11 @@ async fn execute<H: ChatHttpHooks>(
                     hard_deadline,
                     retry,
                     retryable,
-                    &mut waited,
-                    &mut long_stream_replays,
-                    &mut unreachable,
+                    RetryBudget {
+                        waited: &mut waited,
+                        long_stream_replays: &mut long_stream_replays,
+                        unreachable: &mut unreachable,
+                    },
                     physical_started.elapsed(),
                     &request_log,
                 )
@@ -591,6 +595,12 @@ const fn transport_fault(failure: HttpFailure) -> Option<ModelTransportFault> {
     }
 }
 
+struct RetryBudget<'a> {
+    waited: &'a mut Duration,
+    long_stream_replays: &'a mut plakous_attempt::LongStreamReplayBudget,
+    unreachable: &'a mut plakous_attempt::UnreachableRideOut,
+}
+
 /// Applies [`RetryPolicy::TURN`] to a failed generation: returns `true` after
 /// announcing the retry as a typed event and waiting its delay, and `false`
 /// when the attempt must end with the failure it has.
@@ -599,12 +609,15 @@ async fn wait_to_retry(
     hard_deadline: Option<Instant>,
     turn_retry: bool,
     failure: Retryable,
-    waited: &mut Duration,
-    long_stream_replays: &mut plakous_attempt::LongStreamReplayBudget,
-    unreachable: &mut plakous_attempt::UnreachableRideOut,
+    budget: RetryBudget<'_>,
     elapsed: Duration,
     request: &(String, String, usize),
 ) -> Result<bool, ChatAttemptError> {
+    let RetryBudget {
+        waited,
+        long_stream_replays,
+        unreachable,
+    } = budget;
     let facts = attempt.terminal_facts();
     let delay = unreachable.next_delay(
         facts,
@@ -730,18 +743,18 @@ const fn stream_refusal_fault(error: &ChatAttemptProtocolError) -> Option<ModelT
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "stream owner receives exact exchange state"
-)]
+struct StreamResources<'a> {
+    clock: Arc<dyn Clock>,
+    ids: Arc<dyn IdGenerator>,
+    cancellation: &'a HttpCancellationToken,
+}
+
 async fn stream_response<H: ChatHttpHooks>(
     mut body: ResponseBody,
     operation: &PreparedChatHttpOperation,
     hooks: &H,
     request_id: Option<ModelProviderRequestId>,
-    clock: Arc<dyn Clock>,
-    ids: Arc<dyn IdGenerator>,
-    cancellation: HttpCancellationToken,
+    resources: StreamResources<'_>,
     attempt: &mut ChatAttempt,
 ) -> StreamOutcome {
     let mut progress = StreamProgress::default();
@@ -750,9 +763,7 @@ async fn stream_response<H: ChatHttpHooks>(
         operation,
         hooks,
         request_id,
-        clock,
-        ids,
-        &cancellation,
+        resources,
         attempt,
         &mut progress,
     )
@@ -783,21 +794,20 @@ async fn stream_response<H: ChatHttpHooks>(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "stream owner receives exact exchange state"
-)]
 async fn stream_body<H: ChatHttpHooks>(
     body: &mut ResponseBody,
     operation: &PreparedChatHttpOperation,
     hooks: &H,
     request_id: Option<ModelProviderRequestId>,
-    clock: Arc<dyn Clock>,
-    ids: Arc<dyn IdGenerator>,
-    cancellation: &HttpCancellationToken,
+    resources: StreamResources<'_>,
     attempt: &mut ChatAttempt,
     progress: &mut StreamProgress,
 ) -> Result<ChatAttemptResponse, StreamBreak> {
+    let StreamResources {
+        clock,
+        ids,
+        cancellation,
+    } = resources;
     let mut projector =
         ChatStreamProjector::new(operation.stream().clone(), request_id.clone(), clock, ids);
     loop {

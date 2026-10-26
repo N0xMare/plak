@@ -171,10 +171,6 @@ impl ChatStreamLimits {
     /// Creates one exact limit set. `total_stream_bytes` bounds every wire byte,
     /// SSE comments included, so it also bounds the aggregate retained output and
     /// tool arguments across all calls.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "each bound is an independent exact limit"
-    )]
     pub const fn new(
         line: NonZeroUsize,
         event: NonZeroUsize,
@@ -244,6 +240,10 @@ pub struct PreparedChatStreamBinding {
 }
 impl PreparedChatStreamBinding {
     /// Creates an exact credential-free binding.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "exact stream replay and policy binding"
+    )]
     pub fn new(
         plan: Digest,
         protocol: ProtocolId,

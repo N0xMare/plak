@@ -868,10 +868,6 @@ fn raw(value: &str) -> TestResult<Box<RawValue>> {
     Ok(RawValue::from_string(value.to_owned())?)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "test mutates every closed envelope axis"
-)]
 fn rebound(
     source: &ReplayEnvelope,
     protocol: &str,

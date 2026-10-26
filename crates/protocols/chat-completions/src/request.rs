@@ -148,6 +148,10 @@ pub const OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS: &[ChatRequestPlugin] =
 
 impl ChatRequestPolicy {
     /// Creates a complete credential-free lowering policy.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "complete credential-free wire policy"
+    )]
     pub fn new(
         protocol: ProtocolId,
         requested_model: ModelId,
