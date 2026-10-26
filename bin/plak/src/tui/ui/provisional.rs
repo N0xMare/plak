@@ -1,5 +1,6 @@
 //! Provisional `sending…` rows (spec 02 §5.4): drafts the mailbox took that
-//! the host has not yet answered with its own row. They are drawn from the
+//! the host has not yet taken over with its own row, queue or steer chrome.
+//! They are drawn from the
 //! pending and accepted draft lists, never stored as transcript blocks, and
 //! carry no queue number: the queue panel's `#N` rows stay the host's.
 
@@ -13,8 +14,8 @@ pub(super) const SENDING: &str = "sending…";
 /// Rows of the transcript-tail shelf, at most.
 const MAX_SHELF_ROWS: usize = 3;
 
-/// A draft the host acknowledged, still drawn until the host's own row for
-/// it lands.
+/// A draft the host acknowledged, still drawn until its row, queue entry or
+/// steer acknowledgement takes over visibility.
 pub(super) struct AcceptedDraft {
     action: UserAction,
     /// The queue item the host admitted it as, once `PromptAdmitted` named it.
@@ -34,9 +35,9 @@ fn preview(draft: &Draft) -> String {
 }
 
 impl App {
-    /// The host acknowledged the draft durably. Its row stays provisional
-    /// until the host's own row lands, so a frame drawn between the two never
-    /// loses the text.
+    /// The host accepted the draft. Its row stays provisional
+    /// until the host's own row, queue entry or steer acknowledgement takes
+    /// over, so the draft does not disappear before its acknowledgement.
     pub(super) fn accept_pending_draft(&mut self, action: &UserAction) {
         if let Some(action) = self.remove_pending_draft(action) {
             self.accepted_drafts.push_back(AcceptedDraft {
@@ -47,7 +48,7 @@ impl App {
         }
     }
 
-    /// The host's live steer row landed for the oldest accepted steer.
+    /// The host acknowledged the oldest accepted steer in its own chrome.
     pub(super) fn retire_accepted_steer(&mut self) {
         if let Some(index) = self
             .accepted_drafts

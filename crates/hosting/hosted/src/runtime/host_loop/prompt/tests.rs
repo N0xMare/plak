@@ -590,8 +590,8 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
         .send(UserAction::Steer("direct steer is independent".into()))
         .unwrap();
     next(&|event| {
-        matches!(event, HostEvent::Row(TranscriptRow::Steer { text, .. })
-        if text == "direct steer is independent")
+        matches!(event, HostEvent::DraftAccepted(UserAction::Steer(draft))
+        if draft.text == "direct steer is independent")
     });
     next(&|event| {
         matches!(event, HostEvent::ToolLine { name, wait, .. }
@@ -678,14 +678,6 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
         })
         .unwrap();
     next(&|event| matches!(event, HostEvent::QueueEditRefused { id } if id == &item.id));
-    let submitted_at_ms = durable
-        .load(&id)
-        .unwrap()
-        .pending_queue
-        .iter()
-        .find(|queued| queued.id == edited.id)
-        .unwrap()
-        .submitted_at_ms;
     actions
         .send(UserAction::SendQueuedNow {
             id: edited.id,
@@ -701,14 +693,9 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
         _ => false,
     });
     assert!(
-        matches!(response, HostEvent::Row(TranscriptRow::Steer { text, sent_at_ms })
-            if text == "edited send-now" && sent_at_ms == Some(submitted_at_ms)),
-        "the live steer with its submit time must precede steering status"
+        matches!(response, HostEvent::Status { detail, .. } if detail.as_deref() == Some("steering...")),
+        "acceptance publishes chrome, not an unapplied transcript row"
     );
-    next(&|event| {
-        matches!(event, HostEvent::Status { detail, .. }
-        if detail.as_deref() == Some("steering..."))
-    });
     gate.release();
     let update = next(&|event| {
         let items = match event {
@@ -732,8 +719,13 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
         })
         .collect();
     assert_eq!(steers.len(), 1);
-    assert!(matches!(steers[0], TranscriptRow::Steer { sent_at_ms, .. }
-        if *sent_at_ms == Some(submitted_at_ms)));
+    assert!(matches!(
+        steers[0],
+        TranscriptRow::Steer {
+            sent_at_ms: None,
+            ..
+        }
+    ));
     actions.send(UserAction::Quit).unwrap();
     worker.join().unwrap().unwrap();
 }

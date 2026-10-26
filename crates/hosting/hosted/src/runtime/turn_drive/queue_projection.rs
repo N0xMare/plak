@@ -8,6 +8,52 @@ pub(super) struct QueueRefresh {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+    pub(super) async fn publish_applied_steering(&mut self) {
+        // SteeringApplied is an observation emitted before its commit. The
+        // following prepared request is past that commit and ahead of new
+        // model output, so settle the whole canonical prefix at this boundary.
+        super::flush_assistant_delta(
+            &mut self.delta_buf,
+            &mut self.last_flush,
+            self.host.events,
+            true,
+        );
+        let target = self.host.live_target.clone();
+        let pass = async {
+            match self.host.live_projector.as_mut() {
+                Some(live) => live.settle(target).await,
+                None => target.views(None).await.map(|projected| projected.views),
+            }
+        };
+        let Ok(Ok(views)) =
+            tokio::time::timeout(super::super::host_loop::FINAL_PROJECTION_BOUND, pass).await
+        else {
+            return;
+        };
+        let Ok(intents) = self.host.store.load_intents(&self.host.session.id) else {
+            return;
+        };
+        let mut transcript = sessions::ProductTranscript::stored(views.transcript(&intents));
+        for notice in self.host.session.transcript.pending_notice_items() {
+            transcript.record_notice_item(notice);
+        }
+        let mut items = transcript.items();
+        items.insert(
+            0,
+            plakous_host_protocol::views::transcript::TranscriptItem {
+                key: sessions::projector::RowKey::TRUNCATION,
+                row: super::super::logging::session_header(self.host.session),
+            },
+        );
+        if self
+            .host
+            .events
+            .publish_transcript(super::super::logging::project_keyed_snapshot(items))
+        {
+            self.steering_projection_due = false;
+        }
+    }
+
     pub(super) async fn poll_queue_projection(&mut self) {
         if self
             .queue_refresh

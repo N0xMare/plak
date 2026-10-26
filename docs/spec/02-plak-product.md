@@ -1583,8 +1583,8 @@ start and finish timestamps rather than time spent qualifying the operation.
 | --- | --- | --- |
 | user | text | (b) the turn's prompt item, through `feed_items` of the `HistoryAppended` that commits it |
 | user | `sent_at_ms` | (c) the `submitted_at_ms` of the submission whose command id the turn's `CommandAccepted` names, including source submissions inherited along fork/rebind ancestry on the same runtime session; clear/import stop that ancestry. Absent when no submission names it (a child, an imported row) |
-| steer | the row and its text | (a) `CommandAccepted` of the steer, (b) its command text through `feed_call` of the command operation id that fact names; derived at acceptance, so an accepted steer that never applied still has its row |
-| steer | `sent_at_ms` | (c) the matching submission's `submitted_at_ms` for a queued prompt sent now; otherwise (a) `committed_at_ms` of that `CommandAccepted` record |
+| steer | the row and its text | (b) operator-authored items of a committed `HistoryAppended` Steering segment, through `feed_items`; keyed at application after the preceding round, not at command acceptance. Accepted-but-unapplied steering remains in the queue/HUD and its terminal recovery notice, not a transcript row |
+| steer | `sent_at_ms` | absent: canonical Steering history does not bind an entry to the exact command submission's host timestamp. Identical text, acceptance order or a prior turn is not an identity join |
 | assistant | text | (b) the text blocks of the response `HistoryAppended` commits, through `feed_items`; a model round's prose and thinking are keyed at the record of the round's provider decision (`OperationAdvanced` of its provider attempt, `Completed`), ahead of the round's tool rows, as they streamed live |
 | assistant | the partial text an interrupted turn streamed | (e) live only; a rebuild shows only the interrupted marker, and no outcome record carries partial output |
 | thinking | location key and text | (b) reasoning parts with display text, through `feed_items` |
@@ -1846,6 +1846,11 @@ assertion in debug builds). Automatic gap repayment and explicit resync use
 the same retained live baseline, never a separate stale session snapshot.
 Reload rehearsal keeps the projector's keys through bounded presentation
 projection rather than manufacturing identities from window indices.
+After a steer applies, the host settles the canonical prefix at the following
+prepared-request boundary before consuming its model output. The earlier
+`SteeringApplied` observation alone is not commit evidence. This places the
+applied steer after the completed round's prose/tools, including during live
+viewing, and never adds a row for a steer accepted but not applied.
 The TUI keeps a keyed baseline and applies only exact-revision patches,
 updating only the indexed blocks named by changed keys. Tool and thinking UI
 state stays on its existing block; local approval rows, refusal messages and
@@ -3898,8 +3903,8 @@ stamps the time once and the live echo and the stored row carry the same
 value: a prompt's is the submit time of its queue item (when the operator's
 prompt entered the host queue, kept across edits and moves, stored with the
 item in `queue_items.submitted_at`), or the admission time for a prompt that
-never entered the queue; a steer's is the host's acceptance of it, and a
-queued prompt sent as a steer keeps its submit time. A queue carried in by
+never entered the queue. Applied steering has no send time because its
+canonical entry has no exact submission-time join (§2.6). A queue carried in by
 import is stamped at import. `steer_ack` is protocol chrome and MUST NOT add a second grey
 system row. Assistant text sits behind a
 two-space gutter and renders as markdown against theme tokens. Fenced and
@@ -4369,7 +4374,9 @@ or persisted. A `DraftRejected` removes the row and restores the draft to the
 composer as before. A `DraftAccepted` keeps the row until the host's own row
 is present, so a frame drawn between the acknowledgement and that row never
 loses the text. An idle prompt retires on its `UserMessage` (the one after the
-`PromptStarted` naming its item); a steer on the live steer row. A queued
+`PromptStarted` naming its item); a steer on its `SteerAck` queued or applied
+acknowledgement, when the host's sent/waiting chrome takes over. Its transcript
+row arrives later in the applied canonical patch, not as a live acceptance row. A queued
 prompt retires on the queue snapshot that shows the item its `PromptAdmitted`
 named: at once when the queue already shows it, or else on the next snapshot
 applied, even one the item has left again. The host publishes the snapshot

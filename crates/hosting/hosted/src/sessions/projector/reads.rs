@@ -236,9 +236,8 @@ pub fn record_checkpoint(record: &FeedRecord) -> Option<CheckpointId> {
     }
 }
 
-/// Whether a history segment derives transcript rows: a steering segment's
-/// row derives from its `CommandAccepted` and a compaction's from its
-/// workflow facts. A reasoning replay unit derives rows: a response whose
+/// Whether a history segment derives transcript rows. Applied steering is
+/// history; compaction rows derive from workflow facts. A response whose
 /// reasoning must replay is committed whole as one, prose included.
 #[must_use]
 pub const fn derives_rows(segment: plakous::model::HistorySegmentKind) -> bool {
@@ -248,6 +247,7 @@ pub const fn derives_rows(segment: plakous::model::HistorySegmentKind) -> bool {
             | plakous::model::HistorySegmentKind::RecentIntent
             | plakous::model::HistorySegmentKind::ToolExchange
             | plakous::model::HistorySegmentKind::ReasoningReplay
+            | plakous::model::HistorySegmentKind::Steering
     )
 }
 
@@ -323,11 +323,6 @@ pub fn plan_reads(record: &FeedRecord) -> Vec<ReadRequest> {
     let mut reads = Vec::new();
     for fact in record.facts() {
         match fact {
-            FeedFact::CommandAccepted {
-                kind: plakous::sessions::feed::FeedCommandKind::Steer,
-                operation_id: Some(operation_id),
-                ..
-            } => reads.push(call(CallTarget::Operation(*operation_id))),
             FeedFact::HistoryAppended {
                 segment,
                 first_ordinal,

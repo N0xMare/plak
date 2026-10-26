@@ -526,9 +526,11 @@ impl Applier<'_> {
                 command_id,
                 kind,
                 turn_id,
-                operation_id,
                 ..
-            } => self.command_accepted(command_id.as_str(), *kind, *turn_id, *operation_id),
+            } => {
+                self.command_accepted(command_id.as_str(), *kind, *turn_id);
+                Ok(())
+            }
             FeedFact::CommandRejected {
                 command_id,
                 kind,
@@ -595,7 +597,12 @@ impl Applier<'_> {
                             items
                         });
                     }
-                    self.items(turn_id.map(|turn| turn.to_string()), *first_ordinal, items);
+                    self.items(
+                        turn_id.map(|turn| turn.to_string()),
+                        *first_ordinal,
+                        items,
+                        *segment,
+                    );
                 }
                 for call_id in tool_results {
                     self.tool_result(*call_id, turn_id.map(|turn| turn.to_string()))?;
@@ -678,8 +685,7 @@ impl Applier<'_> {
         command_id: &str,
         kind: FeedCommandKind,
         turn_id: Option<plakous::model::TurnId>,
-        operation_id: Option<u64>,
-    ) -> Result<(), ProjectError> {
+    ) {
         self.views
             .state
             .deliveries
@@ -711,25 +717,6 @@ impl Applier<'_> {
                     });
                 }
             }
-            FeedCommandKind::Steer => {
-                let text = match operation_id {
-                    Some(operation_id) => {
-                        match self.call_read(CallTarget::Operation(operation_id))? {
-                            CallRead::Steer(text) => Some(text),
-                            _ => None,
-                        }
-                    }
-                    None => None,
-                };
-                if let Some(text) = text {
-                    let sent_at_ms = Some(
-                        self.intents
-                            .submission(command_id)
-                            .map_or_else(|| self.committed_at(), |item| item.submitted_at_ms),
-                    );
-                    self.push(TranscriptRow::Steer { text, sent_at_ms });
-                }
-            }
             FeedCommandKind::Cancel => {
                 let open =
                     turn_id.and_then(|turn| self.views.state.open_turns.get_mut(&turn.to_string()));
@@ -746,10 +733,15 @@ impl Applier<'_> {
             }
             _ => {}
         }
-        Ok(())
     }
 
-    fn items(&mut self, turn_id: Option<String>, first_ordinal: u64, items: Option<Vec<ReadItem>>) {
+    fn items(
+        &mut self,
+        turn_id: Option<String>,
+        first_ordinal: u64,
+        items: Option<Vec<ReadItem>>,
+        segment: plakous::model::HistorySegmentKind,
+    ) {
         let Some(items) = items else {
             self.push(TranscriptRow::info(NoticeScope::Session, NOT_RETAINED_ROW));
             return;
@@ -772,13 +764,18 @@ impl Applier<'_> {
             let ordinal = first_ordinal.saturating_add(index as u64);
             for derived in item_rows(item, ordinal, sent_at_ms) {
                 match derived {
-                    Derived::Row(row) => match round_anchor {
-                        Some(anchor) if item.actor == ReadActor::Assistant => {
+                    Derived::Row(row) => match (*row, round_anchor) {
+                        (TranscriptRow::User { text, .. }, _) if segment == plakous::model::HistorySegmentKind::Steering => {
+                            // Canonical history proves application, not which
+                            // identically worded submission supplied a timestamp.
+                            self.push(TranscriptRow::Steer { text, sent_at_ms: None });
+                        }
+                        (row, Some(anchor)) if item.actor == ReadActor::Assistant => {
                             let key = RowKey::new(anchor, Lane::Runtime, prose);
                             prose = prose.saturating_add(1);
-                            self.replace(key, *row);
+                            self.replace(key, row);
                         }
-                        _ => self.push(*row),
+                        (row, _) => self.push(row),
                     },
                     Derived::Call(ReadPart::Call {
                         call_id,

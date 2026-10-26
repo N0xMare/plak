@@ -574,11 +574,6 @@ fn turn(
     feed.advance(facts, reads);
     if steer {
         let operation = feed.fresh();
-        let mut reads = Reads::default();
-        reads.calls.push((
-            CallTarget::Operation(operation),
-            CallRead::Steer(format!("steer {n}")),
-        ));
         feed.advance(
             vec![FeedFact::CommandAccepted {
                 command_id: CommandId::new(format!("steer-{n}")).unwrap(),
@@ -587,7 +582,7 @@ fn turn(
                 sequence: n + 1,
                 operation_id: Some(operation),
             }],
-            reads,
+            Reads::default(),
         );
     }
     let finishes_tools = matches!(end, End::Completed | End::Failed);
@@ -653,6 +648,16 @@ fn turn(
         }
     }
     if matches!(end, End::Completed) {
+        if steer {
+            let (applied, items) = feed.history(
+                Some(turn_id),
+                HistorySegmentKind::Steering,
+                vec![text_item(ReadActor::User, &format!("steer {n}"))],
+                Vec::new(),
+            );
+            reads.items.push((facts.len(), items));
+            facts.push(applied);
+        }
         let (answer, items) = feed.history(
             Some(turn_id),
             HistorySegmentKind::Conversation,
@@ -1142,8 +1147,8 @@ fn the_user_row_takes_its_send_time_from_the_submission_only() {
 }
 
 #[test]
-fn the_steer_row_reads_its_text_and_stamps_its_acceptance() {
-    let (feed, views) = single_turn(End::Completed, true, true);
+fn a_steer_row_is_keyed_at_its_committed_application_not_acceptance() {
+    let (mut feed, views) = single_turn(End::Completed, true, true);
     let accepted = feed
         .records
         .iter()
@@ -1160,20 +1165,49 @@ fn the_steer_row_reads_its_text_and_stamps_its_acceptance() {
         })
         .unwrap()
         .header()
-        .committed_at_ms;
-    let steer = rows(&views)
-        .into_iter()
-        .find_map(|row| match row {
-            TranscriptRow::Steer { text, sent_at_ms } => Some((text.clone(), *sent_at_ms)),
+        .seq
+        .get();
+    let applied = feed
+        .records
+        .iter()
+        .find(|record| {
+            record.facts().iter().any(|fact| {
+                matches!(
+                    fact,
+                    FeedFact::HistoryAppended {
+                        segment: HistorySegmentKind::Steering,
+                        ..
+                    }
+                )
+            })
+        })
+        .unwrap()
+        .header()
+        .seq
+        .get();
+    let steer = views
+        .rows
+        .iter()
+        .find_map(|(key, row)| match row {
+            TranscriptRow::Steer { text, sent_at_ms } => Some((*key, text.clone(), *sent_at_ms)),
             _ => None,
         })
         .unwrap();
-    assert!(steer.0.starts_with("steer "));
-    assert_eq!(steer.1, Some(accepted));
+    assert!(steer.1.starts_with("steer "));
+    assert_eq!(steer.0.anchor, applied);
+    assert!(applied > accepted);
+    assert_eq!(steer.2, None);
+    feed.records
+        .retain(|record| record.header().seq.get() <= accepted);
+    assert!(
+        !rows(&project_all(&feed).views)
+            .iter()
+            .any(|row| matches!(row, TranscriptRow::Steer { .. }))
+    );
 }
 
 #[test]
-fn a_send_now_steer_keeps_its_submission_time_on_rebuild() {
+fn an_applied_steer_does_not_guess_a_submission_timestamp() {
     let (mut feed, _) = single_turn(End::Completed, true, true);
     let command_id = feed
         .records
@@ -1206,10 +1240,62 @@ fn a_send_now_steer_keeps_its_submission_time_on_rebuild() {
     assert!(matches!(
         steers[0],
         TranscriptRow::Steer {
-            sent_at_ms: Some(17),
+            sent_at_ms: None,
             ..
         }
     ));
+}
+
+#[test]
+fn duplicate_applied_steers_keep_distinct_positions_and_identical_unapplied_text_adds_no_row() {
+    let (mut feed, _) = single_turn(End::Completed, true, true);
+    let existing = rows(&project_all(&feed).views)
+        .into_iter()
+        .find_map(|row| match row {
+            TranscriptRow::Steer { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap();
+    for index in 0..2 {
+        feed.advance(
+            vec![FeedFact::CommandAccepted {
+                command_id: CommandId::new(format!("duplicate-{index}")).unwrap(),
+                kind: FeedCommandKind::Steer,
+                turn_id: Some(id(999)),
+                sequence: 20 + index,
+                operation_id: None,
+            }],
+            Reads::default(),
+        );
+        if index == 0 {
+            let (fact, items) = feed.history(
+                Some(id(999)),
+                HistorySegmentKind::Steering,
+                vec![text_item(ReadActor::User, &existing)],
+                Vec::new(),
+            );
+            feed.advance(
+                vec![fact],
+                Reads {
+                    items: vec![(0, items)],
+                    ..Reads::default()
+                },
+            );
+        }
+    }
+    let views = project_all(&feed).views;
+    let steers: Vec<_> = views
+        .rows
+        .iter()
+        .filter(|(_, row)| matches!(row, TranscriptRow::Steer { .. }))
+        .collect();
+    assert_eq!(
+        steers.len(),
+        2,
+        "the third identical steer was never applied"
+    );
+    assert_ne!(steers[0].0, steers[1].0);
+    assert_eq!(steers[0].1, steers[1].1);
 }
 
 #[test]

@@ -118,6 +118,7 @@ struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
     queue_refresh: Option<queue_projection::QueueRefresh>,
     /// A model round started since the last running-turn tree pass.
     root_tree_pass_due: bool,
+    steering_projection_due: bool,
     /// The last running-turn tree debt this turn logged.
     tree_debt_logged: Option<String>,
     queue_wait_noted: bool,
@@ -178,6 +179,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             queue_refresh_at: Instant::now(),
             queue_refresh: None,
             root_tree_pass_due: false,
+            steering_projection_due: false,
             tree_debt_logged: None,
             queue_wait_noted: false,
             mail_batch_notified: false,
@@ -266,6 +268,12 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 ev = event_stream.recv(), if !self.events_done => {
                     match ev {
                         Ok(event) => {
+                            if matches!(event.kind(), AgentEventKind::SteeringApplied) {
+                                self.steering_projection_due = true;
+                            }
+                            if self.steering_projection_due && matches!(event.kind(), AgentEventKind::RequestPrepared { .. }) {
+                                self.publish_applied_steering().await;
+                            }
                             let refresh_at_boundary = match event.kind() {
                                 AgentEventKind::RequestPrepared { input_parts, occupied_tokens, prepared_input_upper_bound, tool_names } => {
                                     self.host.context_projection = self.host.context_projection.with_prepared_request(*input_parts, *occupied_tokens, *prepared_input_upper_bound);

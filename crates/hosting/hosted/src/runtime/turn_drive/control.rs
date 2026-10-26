@@ -20,16 +20,6 @@ const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
 const QUIT_RESULT_JOIN: Duration = Duration::from_millis(100);
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
-    pub(super) fn publish_live_steer_row(&mut self, text: String, sent_at_ms: u64) {
-        // Live only: the projector derives the stored row from its acceptance fact.
-        let row = TranscriptRow::Steer {
-            text,
-            sent_at_ms: Some(sent_at_ms),
-        };
-        self.host.session.append_transcript(row.clone());
-        let _ = self.host.events.notice(row);
-    }
-
     async fn request_cancel(&self) -> Result<CancellationStatus, plakous::agent::ControlError> {
         #[cfg(test)]
         if let Some(error) = super::quit_trace::take_cancel_refusal(&self.host.session.id) {
@@ -247,20 +237,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         _ => unreachable!(),
                     };
                     let input = queue::user_input(&text, images);
-                    let row_text = crate::sessions::with_image_chips(
-                        &text,
-                        images.iter().map(crate::sessions::draft_image_chip),
-                    );
                     if text.is_empty() && images.is_empty() {
                         reject_draft(self.host.events, action);
                     } else {
                         match self.control.steer(input).await {
                             Ok(_) => {
                                 accept_draft(self.host.events, action);
-                                self.publish_live_steer_row(
-                                    row_text,
-                                    plakous::model::now_unix_millis(),
-                                );
                                 let _ = self.host.events.send(HostEvent::Status {
                                     phase: "running".into(),
                                     queue_len: self.host.session.pending_queue.len(),

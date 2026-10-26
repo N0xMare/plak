@@ -1,11 +1,13 @@
 //! Provisional `sending…` rows: drawn from the drafts the mailbox took,
-//! replaced by the host's own rows, removed with a refusal.
+//! replaced by host rows or steer chrome, removed with a refusal.
 
 use super::App;
 use super::terminal::dispatch_action;
 use super::test_support::{launch_basic, pin_clock, queue_item, serialize_frame};
 use crate::tui::{HostEvent, QueueDrainState, UserAction, user_action_channel};
-use plakous_host_protocol::views::transcript::TranscriptRow;
+use plakous_host_protocol::views::transcript::{
+    Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptRow, TranscriptScope,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -312,11 +314,13 @@ fn a_rejected_follow_up_leaves_no_queue_row() {
     assert!(app.queue_area.is_none(), "an empty queue draws no panel");
 }
 
-/// A steer is a provisional `steer ·` row until the host's live steer row.
+/// A queued acknowledgement replaces the sending shelf with host chrome;
+/// only the applied canonical patch contributes a transcript row.
 #[test]
 fn a_steer_is_provisional_until_its_steer_row_lands() {
     let (sender, _receiver) = user_action_channel();
     let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(super::test_support::restore_snapshot(1, Vec::new()));
     app.apply_host_event(HostEvent::SetBusy(true));
     app.set_input("look at the logs".into());
     let action = app.submit_line(true).expect("steer");
@@ -329,7 +333,34 @@ fn a_steer_is_provisional_until_its_steer_row_lands() {
     );
     app.apply_host_event(HostEvent::DraftAccepted(action));
     assert_eq!(showing(&mut app, "sending…").len(), 1);
-    app.apply_host_event(HostEvent::Row(TranscriptRow::steer("look at the logs")));
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "queued".into(),
+        position: Some(1),
+    });
+    assert_eq!(showing(&mut app, "sending…"), Vec::<String>::new());
+    assert_eq!(
+        showing(&mut app, "sent · waiting for the current reply").len(),
+        1
+    );
+    app.apply_host_event(HostEvent::SteerAck {
+        state: "applied".into(),
+        position: None,
+    });
+    assert_eq!(showing(&mut app, "sending…"), Vec::<String>::new());
+    assert_eq!(
+        showing(&mut app, "sent · waiting for the current reply"),
+        Vec::<String>::new()
+    );
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+        scope: TranscriptScope::Root,
+        from_revision: 1,
+        to_revision: 2,
+        upserts: vec![TranscriptItem {
+            key: RowKey::new(2, Lane::Runtime, 0),
+            row: TranscriptRow::steer("look at the logs"),
+        }],
+        deletes: Vec::new(),
+    }));
     let landed = showing(&mut app, "look at the logs");
     assert!(
         landed.len() == 1 && !landed[0].contains("sending…"),

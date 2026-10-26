@@ -1,7 +1,4 @@
-//! The direct steer row is live only (spec 02 §2.6, row provenance (e) for
-//! the host's copy): accepting a steer commits no product revision, and the
-//! projector derives the stored steer row from its `CommandAccepted`, so a
-//! rebuild from empty shows it too.
+//! Accepted steering stays in chrome until committed history proves application.
 
 use super::*;
 use crate::runtime::recover_tests::{script, scripted_host_with};
@@ -9,7 +6,7 @@ use crate::runtime::recover_tests::{script, scripted_host_with};
 const STEER: &str = "steer toward the fixture answer";
 
 #[test]
-fn an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance() {
+fn an_accepted_steer_commits_no_revision_and_rebuilds_only_after_application() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = scripted_host_with(
         root.path(),
@@ -32,7 +29,7 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance() {
             .recv_timeout(Duration::from_secs(30))
             .unwrap_or_else(|_| panic!("waiting for {what}"));
         let hit = matches(&event);
-        seen.push(format!("{event:?}"));
+        seen.push(event.clone());
         if hit {
             return;
         }
@@ -44,8 +41,8 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance() {
     let before = store.load(&id).unwrap().store_revision;
     send_attached_action(&actions, UserAction::Steer(STEER.to_owned().into()));
     next(
-        "the live steer row",
-        &|event| matches!(event, HostEvent::Row(TranscriptRow::Steer { text, .. }) if text == STEER),
+        "queued steering chrome",
+        &|event| matches!(event, HostEvent::SteerAck { state, .. } if state == "queued"),
     );
     assert_eq!(
         store.load(&id).unwrap().store_revision,
@@ -56,6 +53,42 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance() {
         matches!(event, HostEvent::TurnLifecycle(lifecycle)
             if lifecycle.phase != plakous_host_protocol::TurnPhase::Admitted)
     });
+    assert!(
+        !seen
+            .iter()
+            .any(|event| matches!(event, HostEvent::Row(TranscriptRow::Steer { .. })))
+    );
+    let applied = seen
+        .iter()
+        .position(|event| match event {
+            HostEvent::TranscriptPatch(patch) => patch.upserts.iter().any(
+                |item| matches!(&item.row, TranscriptRow::Steer { text, .. } if text == STEER),
+            ),
+            _ => false,
+        })
+        .unwrap();
+    let following = seen.iter().position(|event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("the steered answer"))).unwrap();
+    assert!(
+        applied < following,
+        "publish applied history before following model output"
+    );
+    let HostEvent::TranscriptPatch(patch) = &seen[applied] else {
+        unreachable!()
+    };
+    let preceding = patch
+        .upserts
+        .iter()
+        .find(|item| item.row.text() == Some("the steered round"))
+        .unwrap();
+    let steer = patch
+        .upserts
+        .iter()
+        .find(|item| matches!(item.row, TranscriptRow::Steer { .. }))
+        .unwrap();
+    assert!(
+        preceding.key < steer.key,
+        "preceding prose must not move after the steer"
+    );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
 

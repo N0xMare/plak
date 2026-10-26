@@ -1666,9 +1666,11 @@ fn queue_chords_select_reorder_edit_steer_and_drop_follow_ups() {
     terminal.wait_absent("❯ queued alpha");
     // Ctrl+S while busy steers.
     terminal.send(b"steer this way\x13");
-    terminal.wait_where("the steer landed", |frame| {
-        frame.contains("steer this way") && !frame.contains("◇ steer")
-    });
+    let accepted = terminal.wait_screen("sent · waiting for the current reply");
+    assert!(
+        !accepted.contains("steer this way"),
+        "acknowledged steering stays in chrome until application:\n{accepted}"
+    );
     // Ctrl+D drops the selected row of the focused queue, and nothing else.
     terminal.send(b"\t");
     terminal.wait_screen("queue · focused");
@@ -1719,25 +1721,29 @@ fn assert_queued_send_now_shows_live_steer(chord: &[u8]) {
     terminal.send(b"\t");
     terminal.wait_screen("queue · focused");
     terminal.send(chord);
-    let live = terminal.wait_where("the live send-now steer row", |frame| {
-        frame
-            .lines()
-            .any(|line| line.contains("queued alpha") && line.contains("steer"))
-            && !frame.contains("#1 queued alpha")
+    let live = terminal.wait_where("accepted send-now remains visible in chrome", |frame| {
+        frame.contains("sent · waiting for the current reply") && !frame.contains("#1 queued alpha")
     });
     assert!(
         live.contains("waiting for model")
             && !live.contains("the stalled answer")
             && !live.contains("the answer after the stall"),
-        "the steer must be visible before the running turn answers:\n{live}"
+        "accepted steering remains in chrome before it applies:\n{live}"
+    );
+    assert!(
+        !live
+            .lines()
+            .any(|line| line.contains("queued alpha") && line.contains("steer")),
+        "an unapplied steer has no transcript row:\n{live}"
     );
     let settled = terminal.wait_where("the steered turn settled", |frame| {
         frame.contains("the answer after the stall") && !frame.contains("waiting for model")
     });
     assert_eq!(settled.matches("queued alpha").count(), 1, "{settled}");
     assert!(
-        row_of(&settled, "queued alpha") < row_of(&settled, "the answer after the stall"),
-        "the single steer row must precede its answer:\n{settled}"
+        row_of(&settled, "the stalled answer") < row_of(&settled, "queued alpha")
+            && row_of(&settled, "queued alpha") < row_of(&settled, "the answer after the stall"),
+        "the applied steer follows the preceding round and precedes its answer:\n{settled}"
     );
     terminal.quit();
 }

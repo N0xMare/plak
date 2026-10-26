@@ -1193,8 +1193,12 @@ impl App {
             }
             HostEvent::SteerAck { state, .. } => {
                 match state.as_str() {
-                    "queued" => self.composer_chrome.sent_steers += 1,
+                    "queued" => {
+                        self.retire_accepted_steer();
+                        self.composer_chrome.sent_steers += 1;
+                    }
                     "applied" => {
+                        self.retire_accepted_steer();
                         self.composer_chrome.sent_steers =
                             self.composer_chrome.sent_steers.saturating_sub(1);
                     }
