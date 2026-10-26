@@ -432,6 +432,8 @@ impl Row for CandidateRecord {
             "conflict_paths",
             "resolves",
             "adopted_via",
+            "reverted_at",
+            "reverted_by",
         ],
     };
 
@@ -477,6 +479,8 @@ impl Row for CandidateRecord {
                     .map_err(|_| "candidate conflicts could not be encoded".to_owned())?,
                 candidate.resolves.as_ref().map(CandidateId::as_str),
                 candidate.adopted_via.as_ref().map(CandidateId::as_str),
+                candidate.reverted_at,
+                candidate.reverted_by,
             ],
         ))
     }

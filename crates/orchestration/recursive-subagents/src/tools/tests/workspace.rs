@@ -631,6 +631,7 @@ async fn adopt_tool_lands_outside_the_lock_and_records_the_receipt() {
     let tree = Arc::clone(&driver.tree);
     let tool = adopt_tool(driver.clone());
     let request = serde_json::to_value(AdoptCandidateRequest {
+        revert: false,
         accept_conflicts: false,
         candidate_id: candidate_id.clone(),
         expected_target: None,
@@ -655,6 +656,7 @@ async fn adopt_tool_lands_outside_the_lock_and_records_the_receipt() {
         .adopt_with(
             "op-adopt-unknown",
             &serde_json::to_value(AdoptCandidateRequest {
+                revert: false,
                 accept_conflicts: false,
                 candidate_id: CandidateId::from_persisted("cand-nope".to_owned()),
                 expected_target: None,

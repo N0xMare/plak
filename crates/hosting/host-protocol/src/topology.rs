@@ -1294,6 +1294,9 @@ pub struct ConflictPath {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdoptCandidateRequest {
+    /// Undo this adoption's delta, preserving later target edits.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub revert: bool,
     /// Explicitly allow conflict markers in the receiving checkout.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub accept_conflicts: bool,
@@ -1311,6 +1314,9 @@ pub struct AdoptCandidateRequest {
 /// Successful adoption receipt.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AdoptOutcome {
+    /// This receipt reversed an adoption rather than landing new work.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverted: bool,
     /// The candidate that was landed.
     pub candidate_id: CandidateId,
     /// The target snapshot before the landing.

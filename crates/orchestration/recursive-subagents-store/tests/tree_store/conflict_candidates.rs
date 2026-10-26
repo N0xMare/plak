@@ -136,6 +136,7 @@ impl Fixture {
 
 fn request(id: &CandidateId, accept: bool) -> AdoptCandidateRequest {
     AdoptCandidateRequest {
+        revert: false,
         candidate_id: id.clone(),
         accept_conflicts: accept,
         expected_target: None,
@@ -627,6 +628,84 @@ fn jj_conflicts_remain_plain_and_accept_conflicts_is_explicitly_unavailable() {
     f.tree
         .adopt_candidate("root", &request(&f.source, true), None)
         .unwrap();
+}
+
+#[test]
+fn reverting_a_conflict_or_resolver_restores_source_readoptability_and_both_bases() {
+    for resolver in [false, true] {
+        let mut f = Fixture::new(false);
+        let conflict = f.conflict();
+        let accepted = if resolver {
+            f.resolver(&conflict, true)
+        } else {
+            conflict.clone()
+        };
+        f.tree
+            .adopt_candidate("root", &request(&accepted, !resolver), None)
+            .unwrap();
+        std::fs::write(f.repo.path().join("LATER.txt"), "later edit\n").unwrap();
+        let mut revert = request(&accepted, false);
+        revert.revert = true;
+        f.tree.adopt_candidate("root", &revert, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(f.repo.path().join("SEED.txt")).unwrap(),
+            "parent\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.repo.path().join("LATER.txt")).unwrap(),
+            "later edit\n"
+        );
+        for id in [&f.source, &accepted, &conflict] {
+            let row = &f.tree.candidates()[id];
+            assert!(row.adopted_by.is_none());
+            assert!(row.adopted_via.is_none());
+        }
+        let source = &f.tree.candidates()[&f.source];
+        assert_eq!(
+            f.tree
+                .workspace(&source.workspace_id)
+                .unwrap()
+                .base_commit
+                .as_ref(),
+            Some(&source.base_commit)
+        );
+        let accepted_row = &f.tree.candidates()[&accepted];
+        if resolver {
+            assert_eq!(
+                f.tree
+                    .workspace(&accepted_row.workspace_id)
+                    .unwrap()
+                    .base_commit
+                    .as_ref(),
+                Some(&accepted_row.base_commit)
+            );
+        }
+        f.tree
+            .adopt_candidate("root", &request(&accepted, !resolver), None)
+            .unwrap();
+        assert_eq!(
+            f.tree.candidates()[&f.source].adopted_via.as_ref(),
+            Some(&accepted)
+        );
+    }
+}
+
+#[test]
+fn jj_revert_is_not_applicable_before_an_adopting_hold_and_on_retry() {
+    assert!(jj_available(), "real jj is required for this law");
+    let mut f = Fixture::new(true);
+    std::fs::write(f.repo.path().join("SEED.txt"), "seed\n").unwrap();
+    f.tree
+        .adopt_candidate("root", &request(&f.source, false), None)
+        .unwrap();
+    let mut revert = request(&f.source, false);
+    revert.revert = true;
+    for _ in 0..2 {
+        let error = f.tree.adopt_candidate("root", &revert, None).unwrap_err();
+        assert_eq!(error.code, TopologyErrorCode::AdoptNotApplicable);
+        assert!(error.message.contains("revert is not yet available for jj"));
+        assert!(f.tree.take_effects().is_empty());
+    }
 }
 
 #[test]

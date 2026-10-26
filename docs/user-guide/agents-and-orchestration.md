@@ -351,6 +351,12 @@ checkout only. Successful resolution accepts the source once; `adopted_via`
 names the conflict or resolver used. Non-textual Git conflicts and all JJ
 conflicts keep the plain refusal listing paths and kinds.
 
+To undo an adoption, call `adopt_candidate` with the same `candidate_id` and
+`revert:true`. Git removes that landing's delta while preserving later unrelated
+edits. A conflicting reversal changes nothing. Revert later adopted candidates
+from the same copy first; the refusal names them. The candidate stays available
+for re-adoption even after its copy is reclaimed. JJ does not yet support revert.
+
 Workspace rows carry a status you will see in the Agents inspector: `active`, `adopting`,
 `adopted`, `discarding`, `clean_removed`, `discarded`. (`blocked` is an *attempt* status, not
 a workspace one.)

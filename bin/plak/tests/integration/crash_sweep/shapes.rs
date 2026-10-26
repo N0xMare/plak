@@ -250,6 +250,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: assert_tree_conflict_resolver,
     },
     Shape {
+        name: "tree_revert",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: tree_revert,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: assert_tree_revert,
+    },
+    Shape {
         name: "non_stop_finish_length",
         subset: false,
         terminal: ExpectedTerminal::Answer,
@@ -527,6 +537,53 @@ fn tree_conflict_accept() -> Value {
         }),
     );
     script
+}
+
+fn tree_revert() -> Value {
+    let mut script = tree_child_submit_adopt();
+    script["steps"].as_array_mut().unwrap().insert(
+        3,
+        json!({
+            "output": {"tool": {"name": "adopt_candidate", "arguments": {
+                "candidate_id": "cand-c1-a1", "revert": true
+            }}}, "finish": "tool_calls"
+        }),
+    );
+    script
+}
+
+fn assert_tree_revert(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    assert_live(fixture, outcome, state, 4, 5);
+    let id = state
+        .tree_nodes
+        .iter()
+        .find(|row| row["agent"] == "c1")
+        .unwrap()["tree"]
+        .as_str()
+        .unwrap();
+    let plakous_recursive_subagents_store::TreeInspection::Tree(tree) =
+        plakous_recursive_subagents_store::SqliteTreeStore::inspect(
+            &summary::paths(fixture).subagents_database(),
+            id,
+        )
+        .unwrap()
+    else {
+        panic!("pilot must persist reversed tree")
+    };
+    let record = &tree.rows().candidates()[&CandidateId::from_persisted("cand-c1-a1".into())];
+    assert!(record.adopted_by.is_none());
+    assert!(record.adopted_via.is_none());
+    assert!(record.reverted_at.is_some());
+    assert_eq!(record.reverted_by.as_deref(), Some("root"));
+    assert!(record.target_before.is_some());
+    assert!(record.merged_at.is_some());
+}
+
+#[test]
+fn tree_revert_pilot_proves_persisted_reversal() {
+    let shape = "tree_revert";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
 }
 
 fn assert_tree_conflict_accept(

@@ -527,6 +527,10 @@ pub enum CandidateKind {
 /// Retained work or a pinned conflicted merge, with immutable resolution lineage.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateRecord {
+    /// Exact target snapshot after the last successful reversal.
+    pub reverted_at: Option<String>,
+    /// Node which performed that reversal.
+    pub reverted_by: Option<String>,
     /// Ordinary work or a conflicted merge.
     pub kind: CandidateKind,
     /// Original work from which this conflict was produced.
@@ -946,6 +950,7 @@ fn diverged_from_base(snapshot: &VcsSnapshot, base_content: &str) -> bool {
 pub struct AdoptTicket {
     resolution_refusal: Option<String>,
     resolver_paths: Vec<String>,
+    revert: Option<revert::RevertPlan>,
     accept_conflicts: bool,
     conflict_pin: Option<plakous_workspace::occupancy_vcs::ConflictPin>,
     source: Option<CandidateRecord>,
@@ -969,16 +974,19 @@ impl AdoptTicket {
     pub fn land(&self, vcs: &dyn VcsOps) -> Result<AdoptLanding, AdoptFailure> {
         vcs.adopt(&AdoptRequest {
             resolution_refusal: self.resolution_refusal.as_deref(),
+            revert: self.revert.as_ref().map(|plan| &plan.range),
             accept_conflicts: self.accept_conflicts,
             conflict_pin: self.conflict_pin.as_ref(),
             resolver_paths: &self.resolver_paths,
-            resolved_source: self.source.as_ref().map(|source| {
-                plakous_workspace::occupancy_vcs::ResolvedSource {
+            resolved_source: self
+                .source
+                .as_ref()
+                .filter(|_| self.revert.is_none())
+                .map(|source| plakous_workspace::occupancy_vcs::ResolvedSource {
                     candidate_id: source.candidate_id.as_str(),
                     agent_id: self.source_copy_agent.as_deref(),
                     commit: &source.commit,
-                }
-            }),
+                }),
             target_path: &self.target_path,
             child_path: &self.child_path,
             base_commit: &self.candidate.base_commit,
@@ -1609,6 +1617,7 @@ mod projection;
 mod projector;
 mod recovery;
 mod retention;
+mod revert;
 mod runtime_error;
 pub mod text;
 mod tree_store;

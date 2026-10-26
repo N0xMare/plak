@@ -212,6 +212,7 @@ mod round_trip_tests {
         );
         round_trip(
             &AdoptCandidateRequest {
+                revert: false,
                 accept_conflicts: false,
                 candidate_id: CandidateId::from_persisted("c1".to_owned()),
                 expected_target: Some("deadbeef".into()),
@@ -229,6 +230,7 @@ mod round_trip_tests {
     fn adopt_outcome_round_trips_without_its_empty_file_list() {
         round_trip(
             &AdoptOutcome {
+                reverted: false,
                 candidate_id: CandidateId::from_persisted("c1".to_owned()),
                 target_before: "deadbeef".into(),
                 target_after: "cafebabe".into(),

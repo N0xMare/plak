@@ -58,7 +58,7 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "agent_candidates",
-        "CREATE TABLE agent_candidates(tree_id TEXT NOT NULL,candidate_id TEXT NOT NULL,workspace_id TEXT NOT NULL,producing_agent_id TEXT NOT NULL,producing_attempt_id TEXT NOT NULL,base_commit TEXT NOT NULL,base_content TEXT NOT NULL,base_change_id TEXT,commit_id TEXT NOT NULL,content TEXT NOT NULL,change_id TEXT,sealed_at INTEGER NOT NULL CHECK(sealed_at>=0),adopted_by TEXT,adopted_evidence TEXT NOT NULL,merged_at TEXT,target_before TEXT,kind TEXT NOT NULL CHECK(kind IN('work','conflict')),source_candidate_id TEXT,conflict_target TEXT,conflict_paths TEXT NOT NULL,resolves TEXT,adopted_via TEXT,PRIMARY KEY(tree_id,candidate_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+        "CREATE TABLE agent_candidates(tree_id TEXT NOT NULL,candidate_id TEXT NOT NULL,workspace_id TEXT NOT NULL,producing_agent_id TEXT NOT NULL,producing_attempt_id TEXT NOT NULL,base_commit TEXT NOT NULL,base_content TEXT NOT NULL,base_change_id TEXT,commit_id TEXT NOT NULL,content TEXT NOT NULL,change_id TEXT,sealed_at INTEGER NOT NULL CHECK(sealed_at>=0),adopted_by TEXT,adopted_evidence TEXT NOT NULL,merged_at TEXT,target_before TEXT,kind TEXT NOT NULL CHECK(kind IN('work','conflict')),source_candidate_id TEXT,conflict_target TEXT,conflict_paths TEXT NOT NULL,resolves TEXT,adopted_via TEXT,reverted_at TEXT,reverted_by TEXT,PRIMARY KEY(tree_id,candidate_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
     ),
     (
         "agent_workspaces",
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(SCHEMA_VERSION, 9);
         assert_eq!(
             expected_schema_fingerprint(),
-            "64556904e308c8a32d6820b79bbe5f1a1a9d6ca5a297e68d0db1d907b21b37ef"
+            "2ac9e68f09089d3188fe3d5231396bf5262c8c5e1ebbe146cb35b4e39d0be4e7"
         );
     }
 

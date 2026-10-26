@@ -213,6 +213,9 @@ one cross-build carrier (a build imports its own and the previous version).
   becoming work; ordinary stacked copies and accepted resolver follow-ups
   keep sealing after their input records are collected. Resolver copies retain
   their mint-time conflict base independently of those records.
+  The same schema records reversal provenance: `adopt_candidate {revert:true}`
+  undoes one adopted delta while preserving later edits; conflicting reversals
+  change nothing. Reverted Git candidates remain re-adoptable after copy removal.
 
 - Conversations carry across builds and configuration changes: `/reload` and
   `session import` move the full neutral conversation through export

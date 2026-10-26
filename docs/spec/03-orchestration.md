@@ -1062,11 +1062,12 @@ refused calls; a differing retry of the same operation id requires recovery.
 
 ### 4.7 `adopt_candidate`
 
-`{ candidate_id, expected_target?, evidence?: [attempt_id], accept_conflicts?: bool }`.
+`{ candidate_id, expected_target?, evidence?: [attempt_id], accept_conflicts?: bool, revert?: bool }`.
 `accept_conflicts` defaults false. It explicitly allows text markers into the
 caller's checkout, including the root's launch checkout. Receipt:
 `{ candidate_id, target_before, target_after, files_changed, files?,
-files_truncated? }`. `files` names at most 64 paths as `"M src/lib.rs"` or
+files_truncated?, reverted? }`. `reverted:true` identifies a reversal (§7.6).
+`files` names at most 64 paths as `"M src/lib.rs"` or
 `"R old.rs -> new.rs"`; `files_changed` is the full count and
 `files_truncated` is set when the list was cut. A receipt from an older build
 omits both. Non-UTF-8 file names use replacement characters in the receipt;
@@ -1810,7 +1811,7 @@ up through the same idempotent rule.
 
 ## 7. Adoption
 
-`adopt_candidate { candidate_id, expected_target?, evidence?, accept_conflicts? }` lands a sealed
+`adopt_candidate { candidate_id, expected_target?, evidence?, accept_conflicts?, revert? }` lands a sealed
 candidate into the **caller's own copy**, which is canonical for its subtree;
 the root lands into the launch checkout. Integration is three-way, with the
 candidate's recorded base as the merge base, against the *current* target
@@ -2043,6 +2044,45 @@ adopt MUST pass `evidence` naming an attempt **in the caller's subtree whose
 and dropped would lose what stood behind a landing. Because each review node's
 `output_json` links the candidate commit it reviewed, `list_agents` can show
 "candidate X, reviewed by Y: reject" with no new state.
+
+### 7.6 Reverting an adoption
+
+`adopt_candidate {candidate_id, revert:true}` removes exactly one adoption's
+delta from the caller's current checkout, preserving later unrelated edits.
+Only the original adopter may revert it. The accepting candidate and its
+before/after provenance pins must still be retained and match the recorded
+objects; missing or changed pins refuse `adopt_not_applicable`. A later-sealed,
+still-adopted candidate from any participating copy must be reverted first;
+the refusal names that candidate. `revert` cannot combine with `accept_conflicts`.
+JJ refuses `adopt_not_applicable` until backend parity.
+
+Git snapshots the current target and computes a three-way merge with the pinned
+adopted-after commit as base and adopted-before commit as the incoming side.
+A conflict refuses `merge_conflict`, lists paths and changes nothing; reversals
+never mint conflict candidates. A clean result uses the same atomic worktree-only
+patch and exact-result receipt as adoption. No commit enters the receiving branch,
+and the original before/after pins are not overwritten.
+
+Success clears adoption ownership and `adopted_via` on the accepting candidate
+and its adopted source/conflict aliases, recording `reverted_at` (the resulting
+target snapshot) and `reverted_by` on those rows. Superseded, unadopted alternatives
+stay superseded. If their accepting candidate has since been reverted,
+adoption and spawn refuse with `superseded by <id>, since reverted; adopt
+<source> again or let a new conflict pin a fresh candidate`, rather than claiming
+that resolution remains accepted. A second revert by the original caller
+refuses `already reverted at <snapshot>; adopt it again to restore it`.
+A successful non-revert adoption clears reversal stamps on the candidate and
+its adopted aliases. Reversal conflicts retain their path/kind list and say
+`reversal conflicts with later edits; nothing was reverted`.
+Copy bases and their pins return to the candidate's original
+base only when still equal to that candidate's accepted commit. The original
+candidate pins remain until record collection; Git can re-adopt through the
+launch repository even if the producing copy has been reclaimed. A reverted
+resolver whose accepted source record was collected uses its own retained
+candidate and workspace lineage; it does not recreate retired source records.
+`adopting`
+holds every participating copy through reversal; an interrupted reversal reopens
+as `recovery_required` and is never automatically retried.
 
 ## 8. Wait and pushed completion
 
@@ -2893,7 +2933,7 @@ operator must not repair it by guessing a new tree locator.
 | `agent_operations` | `(tree_id, operation_id)` | the canonical request, its digest, the terminal code and response for replay, and paired nullable INTEGER `fold_anchor` / `fold_order` for host fold intents |
 | `agent_messages` | `(tree_id, message_id)` | body, `purpose` (including `followup` and the host-authored `result`), priority, reply link, disposition, durable state |
 | `agent_attempts` | `(tree_id, attempt_id)` | `AttemptStatus`, turn token and plain turn id, the 0–2 harness nudge count, `candidate_id`, `retry_of`, `request_key`, start and end stamps, the blocked reason, the failure `{kind, message}`, and the five usage counters; submitted output is derived from its intent |
-| `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, target-before snapshot commit, evidence, `kind` (`work\|conflict`), source candidate, conflict target and JSON path/kind array, `resolves`, `adopted_via` |
+| `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, target-before snapshot commit, evidence, `kind` (`work\|conflict`), source candidate, conflict target and JSON path/kind array, `resolves`, `adopted_via`, reversed target snapshot `reverted_at` and `reverted_by` |
 | `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, nullable `input_candidate_id`, immutable resolver `resolves` / `conflict_base` / `conflict_target` / JSON `conflict_paths`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
 | `agent_commands` | `(tree_id, command_id)` | every runtime command the tree prepares — a root admission's result-mail batch, a child Start, wake, mail Start, followup or corrective round — with its recipient, attempt, kind, exact canonical text and message ids, all immutable; the tree's withdrawal of a command no fact settled; and, as a view, the fact the recipient's feed recorded for it (`accepted`, `rejected`, or `returned` by a withheld terminal) with the plain turn id it bound and nullable INTEGER `accepted_seq` |
 | `agent_feed_cursors` | `(tree_id, runtime_session_id)` | the last feed sequence the tree projector applied for that session, root or child |

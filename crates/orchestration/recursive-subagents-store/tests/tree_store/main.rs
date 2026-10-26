@@ -4,5 +4,6 @@
 mod adoption_pin_cuts;
 mod commit_cut_matrix;
 mod conflict_candidates;
+mod revert;
 mod row_writes;
 mod view_deletion;

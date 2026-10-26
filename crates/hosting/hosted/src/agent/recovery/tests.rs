@@ -2366,6 +2366,7 @@ async fn interrupted_adopt(fixture: &Fixture) -> String {
             tree.begin_adopt(
                 "root",
                 &AdoptCandidateRequest {
+                    revert: false,
                     accept_conflicts: false,
                     candidate_id: candidate,
                     expected_target: None,

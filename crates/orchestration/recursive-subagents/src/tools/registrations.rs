@@ -125,6 +125,7 @@ pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Valu
         ),
         TopologyKind::Adopt => object_schema(
             json!({
+                "revert": { "type": "boolean", "description": "Undo this adoption's delta, preserving later edits." },
                 "candidate_id": { "type": "string" },
                 "accept_conflicts": {
                     "type": "boolean",

@@ -161,6 +161,7 @@ pub(super) fn mint_req() -> SpawnAgentRequest {
 
 pub(super) fn adopt_req(candidate_id: &CandidateId) -> AdoptCandidateRequest {
     AdoptCandidateRequest {
+        revert: false,
         accept_conflicts: false,
         candidate_id: candidate_id.clone(),
         expected_target: None,

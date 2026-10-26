@@ -39,6 +39,12 @@ fn candidate_details(candidate: &CandidateRecord) -> serde_json::Value {
     if let Some(target) = &candidate.conflict_target {
         value["conflict_target"] = serde_json::json!(target);
     }
+    if let Some(snapshot) = &candidate.reverted_at
+        && candidate.adopted_by.is_none()
+    {
+        value["reverted_at"] = serde_json::json!(snapshot);
+        value["reverted_by"] = serde_json::json!(candidate.reverted_by);
+    }
     if !candidate.conflict_paths.is_empty() {
         value["conflict_paths"] =
             serde_json::json!(candidate.conflict_paths.iter().take(16).collect::<Vec<_>>());

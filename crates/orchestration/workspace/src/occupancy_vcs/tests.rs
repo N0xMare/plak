@@ -174,6 +174,7 @@ fn assert_adoption_pin_failure(already_present: bool) {
     let failure = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -297,6 +298,7 @@ fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
     let landing = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -355,6 +357,7 @@ fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
     let no_op = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -434,6 +437,7 @@ fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
     SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -852,6 +856,7 @@ fn adopted_child_with_uncommitted_work_reports_zero_ahead() {
     SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -1165,6 +1170,7 @@ fn git_fork_seals_after_launch_colocation() {
     let refused = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -1234,6 +1240,7 @@ fn colocated_launch_keeps_all_copy_queries_and_maintenance_on_git() {
     let refused = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -1300,6 +1307,7 @@ fn jj_adoption_omits_file_listing_even_when_files_changed_is_nonzero() {
     let landing = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -1661,6 +1669,7 @@ fn binary_and_modify_delete_conflicts_name_their_kinds() {
     let failure = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -1885,6 +1894,7 @@ fn repository_hooks_never_run_in_plak_git_steps() {
     SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -1950,6 +1960,7 @@ fn adopt_ignores_external_diff_and_textconv() {
     let landing = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -2032,6 +2043,7 @@ fn adopt_receipt_lists_changed_files_with_status_and_bounds_at_64() {
     let landing = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],
@@ -2108,6 +2120,7 @@ fn adopt_receipt_uses_lossy_names_without_losing_non_utf8_files() {
     let landing = SystemVcs
         .adopt(&AdoptRequest {
             resolution_refusal: None,
+            revert: None,
             accept_conflicts: false,
             conflict_pin: None,
             resolver_paths: &[],

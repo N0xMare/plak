@@ -80,7 +80,7 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "topology.topology_adopt_description_template",
         PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE,
-        "4416af5b3ccc4a89ec2fac03ab7111fa7b28d10b965a523daec75a7bc037e8e1",
+        "7721bcb7c9c92e38ccd495871c9c27c9266b59b7756e9c558dc9398b5e08e199",
     ),
     PromptPin::new(
         "topology.topology_discard_description",
@@ -158,7 +158,7 @@ pub const PLAK_TOPOLOGY_RECOVER_DESCRIPTION: &str = "Recover a child whose list_
 
 /// `adopt_candidate` tool description on nodes granted `may_adopt`; `{await}`
 /// is the presented await tool.
-pub const PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE: &str = "Integrate a sealed candidate from your subtree into your own workspace by candidate_id, as working-tree changes with no commit. A forked child's edits are not in your checkout until this succeeds. A textual Git merge_conflict pins a conflict candidate without changing your checkout: spawn a resolver with workspace=fork and inputs=[conflict candidate], or explicitly pass accept_conflicts=true to land its markers. Every merge_conflict is a failed result that keeps the child copy; conflict candidates and resolvers belong only to the original adopter, and success accepts the source once. target_changed means your copy moved since expected_target. A {await} or list_agents row names the candidate once the child has sealed. The receipt lists the changed files.";
+pub const PLAK_TOPOLOGY_ADOPT_DESCRIPTION_TEMPLATE: &str = "Integrate a sealed candidate from your subtree into your own workspace by candidate_id, as working-tree changes with no commit. A forked child's edits are not in your checkout until this succeeds. A textual Git merge_conflict pins a conflict candidate without changing your checkout: spawn a resolver with workspace=fork and inputs=[conflict candidate], or explicitly pass accept_conflicts=true to land its markers. Every merge_conflict is a failed result that keeps the child copy; conflict candidates and resolvers belong only to the original adopter, and success accepts the source once. target_changed means your copy moved since expected_target. A {await} or list_agents row names the candidate once the child has sealed. Pass revert=true to undo this adoption's delta while preserving later edits. The receipt lists the changed files.";
 
 /// `discard_workspace` tool description on spawn-capable owners.
 pub const PLAK_TOPOLOGY_DISCARD_DESCRIPTION: &str = "Drop a child fork by workspace_id, giving up its unadopted candidates and their pins without adopting anything from it.";

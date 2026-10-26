@@ -376,7 +376,13 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
         expected_target,
         ..
     } = *request;
-    let candidate_commit = &candidate.commit;
+    let (base_commit, candidate_commit) = match request.revert {
+        Some(range) => {
+            check_revert_pins(request, range)?;
+            (range.after.as_str(), range.before.as_str())
+        }
+        None => (base_commit, candidate.commit.as_str()),
+    };
     let target = git_snapshot(target_path, "adopt-target")
         .map_err(|error| AdoptFailure::Unavailable(error.detail))?;
     if let Some(expected) = expected_target
@@ -384,7 +390,9 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
     {
         return Err(AdoptFailure::TargetChanged(target.token()));
     }
-    super::conflicts::check_resolver(request)?;
+    if request.revert.is_none() {
+        super::conflicts::check_resolver(request)?;
+    }
     if let Some(reason) = request.resolution_refusal {
         return Err(AdoptFailure::NotApplicable(reason.to_owned()));
     }
@@ -544,7 +552,21 @@ pub(super) fn commit_tree(
 }
 
 fn pin_adoption(request: &AdoptRequest<'_>, before: &str, after: &str) -> Result<(), VcsError> {
-    let refs = super::pins::adoption(request, before, after);
+    let refs = request.revert.map_or_else(
+        || super::pins::adoption(request, before, after),
+        |range| {
+            range
+                .restore_bases
+                .iter()
+                .map(|(agent, base)| {
+                    (
+                        super::pins::reference(request.namespace, "bases", agent),
+                        base.clone(),
+                    )
+                })
+                .collect()
+        },
+    );
     super::pins::update(
         request.target_path,
         request.namespace,
@@ -554,6 +576,27 @@ fn pin_adoption(request: &AdoptRequest<'_>, before: &str, after: &str) -> Result
             .collect::<Vec<_>>(),
         false,
     )
+}
+
+fn check_revert_pins(
+    request: &AdoptRequest<'_>,
+    range: &super::RevertRange,
+) -> Result<(), AdoptFailure> {
+    for (suffix, expected) in [("before", &range.before), ("after", &range.after)] {
+        let reference = super::pins::reference(
+            request.namespace,
+            "adopted",
+            &format!("{}-{suffix}", request.candidate_id),
+        );
+        let output = git_query(request.target_path, &["rev-parse", "--verify", &reference])
+            .map_err(|error| AdoptFailure::Unavailable(error.to_string()))?;
+        if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() != expected {
+            return Err(AdoptFailure::NotApplicable(
+                "adoption provenance pins are missing or changed; nothing was reverted".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// `git diff --name-status -z -M`: one record is `<status> NUL <path> NUL`,

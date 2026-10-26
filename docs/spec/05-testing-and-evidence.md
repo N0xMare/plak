@@ -1731,6 +1731,9 @@ The opt-in `tree_conflict_resolver` shape instead spawns a resolver over that
 conflict candidate and adopts its sealed resolution. Its pilot verifies both
 the resolver and source acceptance; indexed cuts exercise the two-workspace
 adopting hold and its interrupted recovery.
+The opt-in `tree_revert` shape adopts and then reverses one candidate. Its pilot
+verifies cleared acceptance, retained original provenance and durable reversal
+stamps; indexed cuts cover the reversal's adopting hold and publication.
 The process pilots prove a real shell job was promoted and quit settled it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.

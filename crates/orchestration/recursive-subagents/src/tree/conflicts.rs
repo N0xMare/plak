@@ -58,6 +58,13 @@ impl ProductAgentTree {
         if self.resolution_accepted_via(candidate).is_some() {
             return Ok(None);
         }
+        if !self.candidates.contains_key(id)
+            && candidate.resolves.is_some()
+            && candidate.reverted_by.as_deref() == Some(caller)
+            && candidate.reverted_at.is_some()
+        {
+            return Ok(None);
+        }
         let source = self.candidates.get(id).ok_or_else(|| {
             TopologyError::new(
                 TopologyErrorCode::NotSealed,
@@ -141,6 +148,8 @@ impl ProductAgentTree {
         record.content = merge.snapshot.content;
         record.change_id = merge.snapshot.change_id;
         record.sealed_at = now_unix_millis();
+        record.reverted_at = None;
+        record.reverted_by = None;
         self.candidates.insert(id.clone(), record);
         Some(id)
     }
@@ -214,6 +223,27 @@ impl ProductAgentTree {
         })
     }
 
+    pub(super) fn resolution_refusal(&self, candidate: &CandidateRecord) -> Option<String> {
+        let via = self.resolution_accepted_via(candidate)?;
+        if self
+            .candidates
+            .get(&via)
+            .is_some_and(|row| row.adopted_by.is_none() && row.reverted_at.is_some())
+        {
+            let source = candidate
+                .source_candidate_id
+                .as_ref()
+                .or(candidate.resolves.as_ref())
+                .unwrap_or(&candidate.candidate_id);
+            return Some(format!(
+                "superseded by {via}, since reverted; adopt {source} again or let a new conflict pin a fresh candidate"
+            ));
+        }
+        Some(format!(
+            "resolution already accepted via {via}; nothing was adopted"
+        ))
+    }
+
     pub(super) fn finish_resolution(
         &mut self,
         ticket: &AdoptTicket,
@@ -224,6 +254,8 @@ impl ProductAgentTree {
         };
         if let Some(record) = self.candidates.get_mut(&source.candidate_id) {
             record.adopted_by = Some(ticket.caller_id.clone());
+            record.reverted_at = None;
+            record.reverted_by = None;
             record.adopted_via = Some(ticket.candidate.candidate_id.clone());
             record.target_before = Some(
                 landing
@@ -256,6 +288,8 @@ impl ProductAgentTree {
             })
         {
             conflict.adopted_by = Some(ticket.caller_id.clone());
+            conflict.reverted_at = None;
+            conflict.reverted_by = None;
             conflict.adopted_via = Some(ticket.candidate.candidate_id.clone());
         }
         let reclaimed = self.reclaimed(&source.workspace_id);

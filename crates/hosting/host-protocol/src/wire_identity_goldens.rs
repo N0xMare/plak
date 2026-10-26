@@ -160,6 +160,10 @@ const TOPOLOGY_PAYLOAD_PINS: &[(&str, &str)] = &[
     ),
     ("adopt_candidate/minimal", r#"{"candidate_id":"cand-a2-1"}"#),
     (
+        "adopt_candidate/revert",
+        r#"{"revert":true,"candidate_id":"cand-a2-1"}"#,
+    ),
+    (
         "adopt_outcome",
         r#"{"candidate_id":"cand-a2-1","target_before":"0000000000000000000000000000000000000000","target_after":"1111111111111111111111111111111111111111","files_changed":3}"#,
     ),
@@ -497,6 +501,7 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "adopt_candidate/full",
         &encoded(&AdoptCandidateRequest {
+            revert: false,
             accept_conflicts: true,
             candidate_id: CandidateId::from_persisted("cand-a2-1".to_owned()),
             expected_target: Some("0".repeat(40)),
@@ -509,6 +514,20 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "adopt_candidate/minimal",
         &encoded(&AdoptCandidateRequest {
+            revert: false,
+            accept_conflicts: false,
+            candidate_id: CandidateId::from_persisted("cand-a2-1".to_owned()),
+            expected_target: None,
+            evidence: None,
+        }),
+    );
+    check(
+        &mut failures,
+        &mut rows,
+        TOPOLOGY_PAYLOAD_PINS,
+        "adopt_candidate/revert",
+        &encoded(&AdoptCandidateRequest {
+            revert: true,
             accept_conflicts: false,
             candidate_id: CandidateId::from_persisted("cand-a2-1".to_owned()),
             expected_target: None,
@@ -521,6 +540,7 @@ fn wire_identity_topology_payloads_are_pinned() {
         TOPOLOGY_PAYLOAD_PINS,
         "adopt_outcome",
         &encoded(&AdoptOutcome {
+            reverted: false,
             candidate_id: CandidateId::from_persisted("cand-a2-1".to_owned()),
             target_before: "0".repeat(40),
             target_after: "1".repeat(40),

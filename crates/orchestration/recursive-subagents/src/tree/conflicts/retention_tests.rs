@@ -322,3 +322,107 @@ fn accepted_resolver_rehydrates_after_its_source_and_conflict_are_collected_then
         "ordinary delta\n"
     );
 }
+
+#[test]
+fn superseded_resolutions_explain_that_the_accepting_candidate_was_reverted() {
+    let mut f = Fixture::new();
+    let first = f.resolver();
+    let second = f.resolver();
+    let accepted = f.finish(&first, true);
+    let losing = f.finish(&second, true);
+    assert!(
+        f.tree
+            .adopt_candidate("root", &adopt_req(&f.source), None)
+            .is_err()
+    );
+    let other = f
+        .tree
+        .candidates
+        .values()
+        .find(|row| {
+            row.source_candidate_id.as_ref() == Some(&f.source) && row.candidate_id != f.conflict
+        })
+        .unwrap()
+        .candidate_id
+        .clone();
+    f.tree
+        .adopt_candidate("root", &adopt_req(&accepted), None)
+        .unwrap();
+    let mut reverse = adopt_req(&accepted);
+    reverse.revert = true;
+    f.tree.adopt_candidate("root", &reverse, None).unwrap();
+    let expected = format!(
+        "superseded by {accepted}, since reverted; adopt {} again or let a new conflict pin a fresh candidate",
+        f.source
+    );
+    let error = f
+        .tree
+        .adopt_candidate("root", &adopt_req(&losing), None)
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        crate::protocol::TopologyErrorCode::AdoptNotApplicable
+    );
+    assert_eq!(error.message, expected);
+    let mut spawn = mint_req();
+    spawn.inputs = Some(vec![other.to_string()]);
+    assert_eq!(
+        f.tree
+            .spawn_agent("root", &spawn, None)
+            .unwrap_err()
+            .message,
+        expected
+    );
+    assert_eq!(
+        f.tree.candidates[&losing].adopted_via.as_ref(),
+        Some(&accepted)
+    );
+    f.tree
+        .adopt_candidate("root", &adopt_req(&accepted), None)
+        .unwrap();
+    for id in [&accepted, &f.source, &f.conflict] {
+        assert!(f.tree.candidates[id].reverted_at.is_none());
+        assert!(f.tree.candidates[id].reverted_by.is_none());
+    }
+}
+
+#[test]
+fn reverted_resolver_readopts_after_its_source_is_collected_and_its_copy_reclaimed() {
+    let mut f = Fixture::new();
+    let resolver = f.resolver();
+    let accepted = f.finish(&resolver, true);
+    f.tree
+        .adopt_candidate("root", &adopt_req(&accepted), None)
+        .unwrap();
+    let source_agent = f.tree.candidates[&f.source].producing_agent_id.clone();
+    acknowledge(&mut f.tree, &source_agent);
+    acknowledge(&mut f.tree, &resolver);
+    f.tree
+        .close_agent("root", &close_req(&source_agent), None)
+        .unwrap();
+    f.tree.settle_for_test();
+    f.tree
+        .reclaim_dormant(u64::MAX, &std::collections::BTreeMap::new())
+        .unwrap();
+    f.tree.settle_for_test();
+    for ticket in f
+        .tree
+        .prepare_child_retention(super::super::now_unix_millis())
+        .unwrap()
+    {
+        assert_eq!(ticket.agent_id, source_agent);
+        f.tree.finish_child_retention(&ticket).unwrap();
+    }
+    assert!(!f.tree.candidates.contains_key(&f.source));
+    let mut reverse = adopt_req(&accepted);
+    reverse.revert = true;
+    f.tree.adopt_candidate("root", &reverse, None).unwrap();
+    assert!(!f.repo.path().join(format!("{resolver}.txt")).exists());
+    f.tree
+        .adopt_candidate("root", &adopt_req(&accepted), None)
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(f.repo.path().join(format!("{resolver}.txt"))).unwrap(),
+        "resolver work\n"
+    );
+}

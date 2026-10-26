@@ -238,6 +238,8 @@ impl ProductAgentTree {
             self.candidates.insert(
                 candidate_id.clone(),
                 CandidateRecord {
+                    reverted_at: None,
+                    reverted_by: None,
                     kind: super::CandidateKind::Work,
                     source_candidate_id: None,
                     conflict_target: resolver.as_ref().map(|input| input.target.clone()),
@@ -625,6 +627,16 @@ impl ProductAgentTree {
     /// Walk immutable carriers, not just one adopter hop. Inherit nodes land
     /// directly in their resolved checkout; a later seal of that checkout or
     /// of the source copy can carry the input onward. Fold orders avoid clocks.
+    pub(super) fn candidate_seal_order(&self, candidate: &CandidateId) -> Option<u64> {
+        self.operations
+            .values()
+            .filter(|op| op.tool_name == SEAL_OUTCOME_KIND)
+            .filter_map(|op| serde_json::from_str::<SealOutcome>(&op.canonical_request).ok())
+            .filter(|outcome| outcome.candidate_id.as_ref() == Some(candidate))
+            .map(|outcome| outcome.reserved_at.order)
+            .max()
+    }
+
     fn caller_has_input(&self, caller_id: &str, input: &CandidateRecord) -> bool {
         let Some(caller) = self.nodes.get(caller_id) else {
             return false;
@@ -716,6 +728,9 @@ impl ProductAgentTree {
                 "that candidate has no sealed commit; nothing was adopted",
             ));
         }
+        if request.revert {
+            return self.begin_revert(caller_id, request, &candidate);
+        }
         let target = &self.node(caller_id)?.path;
         if (candidate.kind == super::CandidateKind::Conflict || candidate.resolves.is_some())
             && (jj_layout_copy(target) || target.join(".jj").exists())
@@ -732,7 +747,8 @@ impl ProductAgentTree {
         {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
-                format!("that candidate was already adopted via {via}"),
+                self.resolution_refusal(&candidate)
+                    .unwrap_or_else(|| format!("that candidate was already adopted via {via}")),
             ));
         }
         if let Some(adopter) = &candidate.adopted_by {
@@ -742,9 +758,7 @@ impl ProductAgentTree {
             ));
         }
         let source = self.resolution_source(caller_id, &candidate)?;
-        let resolution_refusal = self
-            .resolution_accepted_via(&candidate)
-            .map(|via| format!("resolution already accepted via {via}; nothing was adopted"));
+        let resolution_refusal = self.resolution_refusal(&candidate);
         let resolver_paths = if candidate.resolves.is_some() {
             let workspace = self
                 .workspaces
@@ -859,6 +873,7 @@ impl ProductAgentTree {
             ));
         }
         if source.is_none()
+            && resolution_refusal.is_none()
             && let Some(blocked) = self.stacked_input_blocker(caller_id, &candidate)
         {
             return Err(blocked);
@@ -1014,6 +1029,7 @@ impl ProductAgentTree {
         self.effects.adopts.push(AdoptTicket {
             resolution_refusal,
             resolver_paths,
+            revert: None,
             accept_conflicts: request.accept_conflicts,
             conflict_pin,
             source,
@@ -1054,6 +1070,9 @@ impl ProductAgentTree {
         let reclaimed = self.reclaimed(&workspace_id);
         match landed {
             Ok(landing) => {
+                if ticket.revert.is_some() {
+                    return self.finish_revert(ticket, landing);
+                }
                 self.finish_resolution(ticket, &landing)?;
                 self.supersede_resolutions(ticket);
                 let accepted_base = if ticket.candidate.kind == super::CandidateKind::Conflict {
@@ -1092,6 +1111,8 @@ impl ProductAgentTree {
                 }
                 if let Some(record) = self.candidates.get_mut(&ticket.candidate.candidate_id) {
                     record.adopted_by = Some(ticket.caller_id.clone());
+                    record.reverted_at = None;
+                    record.reverted_by = None;
                     record.target_before = Some(
                         landing
                             .target_before
@@ -1122,6 +1143,7 @@ impl ProductAgentTree {
                 self.prune_closed_copies();
                 let (files, files_truncated) = landing.receipt_files();
                 Ok(AdoptOutcome {
+                    reverted: false,
                     candidate_id: ticket.candidate.candidate_id.clone(),
                     target_before: landing.target_before,
                     target_after: landing.target_after,
@@ -1169,7 +1191,19 @@ impl ProductAgentTree {
                             "; conflict candidate {id} pins the merge onto your current state. Spawn a resolver with workspace=fork and inputs=[\"{id}\"], or adopt with accept_conflicts=true"));
                         let error = TopologyError::new(
                             TopologyErrorCode::MergeConflict,
-                            merge_conflict_message_extra(&conflicts, &ticket.child_path, &notice),
+                            if ticket.revert.is_some() {
+                                merge_conflict_message_tail(
+                                    &conflicts,
+                                    "",
+                                    "; reversal conflicts with later edits; nothing was reverted",
+                                )
+                            } else {
+                                merge_conflict_message_extra(
+                                    &conflicts,
+                                    &ticket.child_path,
+                                    &notice,
+                                )
+                            },
                         );
                         self.record_adopt_conflict(
                             ticket.candidate.candidate_id.as_str(),
@@ -1225,6 +1259,18 @@ pub fn merge_conflict_message(paths: &[ConflictPath], child_path: &Path) -> Stri
 }
 
 fn merge_conflict_message_extra(paths: &[ConflictPath], child_path: &Path, notice: &str) -> String {
+    let count = paths
+        .iter()
+        .map(|path| (&path.path, &path.kind))
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    let head = format!("merge_conflict in {count}{CONFLICT_PATHS_LEAD}");
+    let marker_room = format!("+{count} more").len();
+    let child = capped_child_path(&head, child_path, marker_room + notice.len());
+    merge_conflict_message_tail(paths, &child, &format!("{CONFLICT_TAIL}{notice}"))
+}
+
+fn merge_conflict_message_tail(paths: &[ConflictPath], child: &str, tail: &str) -> String {
     let mut seen = std::collections::HashSet::new();
     let entries: Vec<String> = paths
         .iter()
@@ -1234,9 +1280,7 @@ fn merge_conflict_message_extra(paths: &[ConflictPath], child_path: &Path, notic
         })
         .collect();
     let head = format!("merge_conflict in {}{CONFLICT_PATHS_LEAD}", entries.len());
-    let marker_room = format!("+{} more", entries.len()).len();
-    let child = capped_child_path(&head, child_path, marker_room + notice.len());
-    let suffix = format!("{CONFLICT_PATHS_END}{child}{CONFLICT_TAIL}{notice}");
+    let suffix = format!("{CONFLICT_PATHS_END}{child}{tail}");
     let budget = CONFLICT_MESSAGE_CAP.saturating_sub(head.len() + suffix.len());
     let take = entries_that_fit(&entries, budget);
     let omitted = entries.len() - take;
@@ -2311,6 +2355,7 @@ mod tests {
         let (_tmp, mut tree) = tree();
         let spawned = tree.spawn_agent("root", &spawn_req(), None).unwrap();
         let request = AdoptCandidateRequest {
+            revert: false,
             accept_conflicts: false,
             candidate_id: CandidateId::from_persisted("cand-c1-1".to_owned()),
             expected_target: None,

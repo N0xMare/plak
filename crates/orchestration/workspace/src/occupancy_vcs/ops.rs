@@ -27,6 +27,8 @@ pub struct MintRequest<'a> {
 pub struct AdoptRequest<'a> {
     /// A spent resolution may be inspected for markers, but must never apply.
     pub resolution_refusal: Option<&'a str>,
+    /// Reverse the pinned adoption rather than landing the candidate.
+    pub revert: Option<&'a RevertRange>,
     /// Explicit permission to land marker-bearing work.
     pub accept_conflicts: bool,
     /// Reserved id for a new textual conflict, absent on resolution retries.
@@ -53,6 +55,17 @@ pub struct AdoptRequest<'a> {
     pub candidate_id: &'a str,
     /// Base pin to advance for a retained producing copy; absent after reclamation.
     pub source_agent_id: Option<&'a str>,
+}
+
+/// Immutable adoption provenance and conditional copy-base restorations.
+#[derive(Clone, Debug)]
+pub struct RevertRange {
+    /// Pinned target snapshot before adoption.
+    pub before: String,
+    /// Pinned exact result of adoption, used as the reverse merge base.
+    pub after: String,
+    /// Producing agent and original base, only for copies still at the adopted base.
+    pub restore_bases: Vec<(String, String)>,
 }
 
 /// The VCS port the tree drives. Every method is a

@@ -593,6 +593,8 @@ impl ProductAgentTree {
                     self.candidates.insert(
                         candidate_id.clone(),
                         CandidateRecord {
+                            reverted_at: None,
+                            reverted_by: None,
                             kind: super::CandidateKind::Work,
                             source_candidate_id: None,
                             conflict_target: resolver.as_ref().map(|input| input.target.clone()),

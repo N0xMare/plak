@@ -51,7 +51,7 @@ pub use mint::run_mint_hook;
 use mint::run_mint_hook_bounded;
 use mint::{mint_git_worktree, mint_jj_workspace};
 pub use names::{CopyNames, branch_of_copy_dir, copy_names};
-pub use ops::{AdoptRequest, MintRequest, SystemVcs, VcsOps};
+pub use ops::{AdoptRequest, MintRequest, RevertRange, SystemVcs, VcsOps};
 
 use plakous_host_protocol::topology::WorkspaceMode;
 
@@ -572,6 +572,9 @@ pub(crate) fn adopt_candidate(request: &AdoptRequest<'_>) -> Result<AdoptLanding
         Ok(SessionVcs::Jj) if request.resolution_refusal.is_some() => Err(
             AdoptFailure::NotApplicable(request.resolution_refusal.unwrap_or_default().to_owned()),
         ),
+        Ok(SessionVcs::Jj) if request.revert.is_some() => Err(AdoptFailure::NotApplicable(
+            "revert is not yet available for jj".to_owned(),
+        )),
         Ok(SessionVcs::Jj) if request.resolved_source.is_some() => {
             Err(AdoptFailure::NotApplicable(
                 "conflict candidates are not yet available for jj".to_owned(),

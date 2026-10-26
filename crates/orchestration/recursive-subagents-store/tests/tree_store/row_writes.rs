@@ -301,6 +301,8 @@ impl Model {
                 self.candidates.insert(
                     id.clone(),
                     CandidateRecord {
+                        reverted_at: None,
+                        reverted_by: None,
                         kind: plakous_recursive_subagents::tree::CandidateKind::Work,
                         source_candidate_id: None,
                         conflict_target: None,

@@ -570,11 +570,11 @@ impl ProductAgentTree {
             )
         })?;
         if candidate.kind == super::CandidateKind::Conflict
-            && let Some(via) = self.resolution_accepted_via(candidate)
+            && let Some(reason) = self.resolution_refusal(candidate)
         {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
-                format!("resolution already accepted via {via}"),
+                reason,
             ));
         }
         // Adopted records retain their pins after copy removal. Only an

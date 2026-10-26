@@ -1357,6 +1357,7 @@ async fn no_vcs_subprocess_runs_under_the_tree_mutex() {
         .adopt_with(
             "op-adopt",
             &serde_json::to_value(AdoptCandidateRequest {
+                revert: false,
                 accept_conflicts: false,
                 candidate_id,
                 expected_target: None,
