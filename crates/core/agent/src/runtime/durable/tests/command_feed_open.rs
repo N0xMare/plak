@@ -1,6 +1,57 @@
 //! Opening a session recovers command admission sequences in feed pages.
 use super::*;
 
+#[tokio::test]
+async fn delayed_model_start_observation_retains_its_committed_prefix() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            0x0fee_e000,
+            false,
+        )
+        .with_tool_first(),
+    );
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions
+        .create(
+            "create:delayed-round-observer",
+            session_update_builder(workspace, model, one_tool_registry()?)?,
+        )
+        .await?;
+    let mut turn = agent.prompt("finish before observing").await?;
+    let mut events = turn.take_events()?;
+    let result = turn.result().await?;
+    let terminal = result.feed_seq().ok_or("terminal sequence")?;
+    let mut starts = Vec::new();
+    loop {
+        let event = events.recv().await?;
+        if matches!(event.kind(), AgentEventKind::ModelStarted) {
+            starts.push(event.feed_seq().ok_or("round prefix")?);
+        }
+        if matches!(
+            event.kind(),
+            AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
+        ) {
+            break;
+        }
+    }
+    assert_eq!(result.model_rounds(), 2);
+    assert_eq!(starts.len(), 2);
+    assert!(starts[0] < starts[1]);
+    assert!(starts[1] < terminal);
+    agent.shutdown().await?;
+    Ok(())
+}
+
 /// Every retained command's admission sequence comes from a bounded number of
 /// feed pages, not from one receipt and one feed read per ancestor commit, so
 /// opening a long session costs the same few store calls as a short one.

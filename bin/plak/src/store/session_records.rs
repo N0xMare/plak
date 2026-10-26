@@ -287,6 +287,13 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load_views(id))
     }
 
+    fn load_queue_commands(
+        &self,
+        id: &str,
+    ) -> Result<plakous_hosted::sessions::QueueCommands, String> {
+        self.with_store(|store| store.load_queue_commands(id))
+    }
+
     fn commit_projection_views(
         &self,
         id: &str,

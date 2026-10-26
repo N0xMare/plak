@@ -169,8 +169,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// pass applies it.
     ///
     /// A session the product has not stored yet still gets its task: the
-    /// first prompt stores it mid-turn, and the passes before that refuse
-    /// on the missing session row and change nothing.
+    /// first prompt stores it mid-turn. No pass is requested before that:
+    /// an unstored view read cannot warm the attachment's persistent cache.
     fn project(&mut self) {
         if self.config.store.storage_unavailable() {
             self.storage_interrupted |= self.config.store.storage_wait_cancelled();
@@ -194,11 +194,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .block_on(async { super::projection::live::LiveProjector::spawn() })
                 .ok();
         }
-        if let Some(live) = self.live.as_mut() {
+        if self.config.session.store_revision != 0
+            && let Some(live) = self.live.as_mut()
+        {
             live.tick(target.clone());
-            if let Some(error) = live.take_refusal()
-                && self.config.session.store_revision != 0
-            {
+            if let Some(error) = live.take_refusal() {
                 self.log_projector_debt(&error);
             }
         }
@@ -213,13 +213,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             let joined = self
                 .config
                 .store
-                .load_intents(&self.config.session.id)
-                .and_then(|intents| {
-                    self.config
-                        .store
-                        .load_views(&self.config.session.id)
-                        .map(|views| sessions::QueueCommands::from_join(&intents, views.as_ref()))
-                });
+                .load_queue_commands(&self.config.session.id);
             if let Ok(commands) = joined {
                 let changed = self.config.session.queue_commands != commands;
                 self.config.session.queue_commands = commands;

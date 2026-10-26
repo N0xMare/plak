@@ -184,6 +184,7 @@ fn lifecycle(
 ) -> AgentOutcome {
     let _orphans = Orphans(fixture);
     (shapes::get(shape).configure)(fixture);
+    let mut round_gates = super::round_gates::RoundGates::new(fixture, shape);
     let mut command = fixture.command();
     command
         .args(["agent", "--session", session])
@@ -209,6 +210,9 @@ fn lifecycle(
     loop {
         if agent.child.try_wait().unwrap().is_some() {
             break;
+        }
+        if let Some(gates) = round_gates.as_mut() {
+            gates.poll();
         }
         let lines = agent.snapshot();
         let records = lines

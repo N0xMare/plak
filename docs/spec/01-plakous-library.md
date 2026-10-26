@@ -2562,8 +2562,13 @@ if retention removed it between the reads.
 
 `CommandAck::feed_seq()`, `TurnResult::feed_seq()` and the compact, fork and
 rebind outcomes name the sequence of the record that made them durable, so a
-live consumer knows how far to read before it reports the outcome. Reopen
-rebuilds command acknowledgements before admitting commands: it recovers the
+live consumer knows how far to read before it reports the outcome.
+`AgentEvent::feed_seq()` on `ModelStarted` names the committed prefix at the
+start of that round, not a new publication. A delayed host observation must
+not substitute the runtime's later feed tail for that boundary. Ephemeral
+agents have no durable sequence.
+
+Reopen rebuilds command acknowledgements before admitting commands: it recovers the
 original admission sequence by walking the exact head's ancestry through the
 retained feed's exact checkpoint links in bounded pages of at most 256 records,
 backwards from the head's commit receipt (from the feed tail when the head has

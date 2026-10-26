@@ -380,6 +380,30 @@ fn cached_projector_passes_reload_views_only_after_a_cursor_race() {
     assert_eq!(store.load_views(&id).unwrap(), Some(actual));
 }
 
+#[test]
+fn queue_refresh_does_not_cold_load_transcript_views() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let id = config.session.id.clone();
+    run_prompts(config, &["publish one command"]);
+    let expected = store.load(&id).unwrap().queue_commands;
+    let reads = store.view_read_count();
+    let records: Arc<dyn SessionRecordStore> = store.clone();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let joined = executor
+        .block_on(super::queue_join(&records, &id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(joined, expected);
+    assert_eq!(
+        store.view_read_count(),
+        reads,
+        "queue refresh must not parse cached transcript views again"
+    );
+}
+
 /// Spec 02 §2.6: the open and live passes write the views, and deleting
 /// them and reopening through the real host rebuilds the same views: rows,
 /// keys, counters and head.

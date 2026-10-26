@@ -507,6 +507,21 @@ impl ProductStore {
         views_of(&self.connection, session_id)
     }
 
+    /// The queue join reads submissions and delivery state in one snapshot,
+    /// without decoding transcript rows.
+    pub fn load_queue_commands(
+        &mut self,
+        session_id: &str,
+    ) -> Result<plakous_hosted::sessions::QueueCommands, String> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(unavailable)?;
+        let commands = queue_commands_of(&transaction, &mut self.verified_submissions, session_id)?;
+        transaction.commit().map_err(unavailable)?;
+        Ok(commands)
+    }
+
     /// Commits one projector run: CAS-advances the cursor from the value the
     /// run read and writes the changed rows and the view state in the same
     /// transaction, under `synchronous=NORMAL`.
@@ -1497,6 +1512,24 @@ mod tests {
         let mut session = SessionRecord::new(PathBuf::from("/work"));
         store.commit(&mut session).unwrap();
         (store, session.id)
+    }
+
+    #[test]
+    fn queue_command_join_does_not_decode_transcript_rows() {
+        let root = tempdir().unwrap();
+        let (mut store, id) = store_with_session(root.path());
+        let views = views_at(1, &[]);
+        store
+            .commit_projection_views(
+                &id,
+                &ViewWrites::between(&SessionViews::empty(), &views),
+                &views.state,
+            )
+            .unwrap();
+        let expected = store.load_queue_commands(&id).unwrap();
+        store.connection.execute("INSERT INTO transcript_rows(session_id,anchor,lane,ordinal,row) VALUES(?1,1,0,0,'{\"kind\":\"invalid\"}')", [&id]).unwrap();
+        assert!(store.load_views(&id).is_err());
+        assert_eq!(store.load_queue_commands(&id).unwrap(), expected);
     }
 
     #[test]

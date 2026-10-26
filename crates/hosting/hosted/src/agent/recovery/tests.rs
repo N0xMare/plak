@@ -627,14 +627,6 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
 
     let fixture = Fixture::new("exit-live-leases");
     let sessions = fixture.sessions();
-    let script = Arc::new(
-        serde_json::from_value::<ScriptPlan>(json!({
-            "version": 1,
-            "stall_ignores_cancellation": true,
-            "steps": [{"stall_ms": 2000, "output": {"text": "late actor result"}}]
-        }))
-        .unwrap(),
-    );
     let root = sessions
         .create(CreateSessionRequest::new(
             SessionOperationId::new("exit-root").unwrap(),
@@ -649,7 +641,17 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
     let locator = root.locator();
     let mut actors = vec![root_agent];
     let mut results = Vec::new();
+    let mut gates = Vec::new();
     for _ in 0..2 {
+        let gate = plakous_offline_crash_harness::gate::GateHandle::new();
+        let script = Arc::new(
+            serde_json::from_value::<ScriptPlan>(json!({
+                "version": 1,
+                "stall_ignores_cancellation": true,
+                "steps": [{"stream": [{"gate": gate.script()}], "output": {"text": "late actor result"}}]
+            }))
+            .unwrap(),
+        );
         let id = fixture.spawn();
         let evidence = fixture.root.path().join(format!("{id}.evidence.jsonl"));
         let controller =
@@ -698,15 +700,20 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
                 .await
                 .is_ok()
         );
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while !std::fs::read(&evidence).is_ok_and(|bytes| !bytes.is_empty()) {
-                tokio::time::sleep(Duration::from_millis(2)).await;
-            }
-        })
-        .await
-        .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), gate.entered())
+            .await
+            .unwrap();
         actors.push(agent);
         results.push(result);
+        gates.push(gate);
+    }
+    for result in &results {
+        assert!(
+            tokio::time::timeout(Duration::ZERO, result.clone().result())
+                .await
+                .is_err(),
+            "each dispatched child must still be held at its gate"
+        );
     }
     // Abort recovery before any child grant can be reacquired.
     fixture
@@ -762,6 +769,9 @@ async fn interactive_exit_batches_real_root_and_child_leases_without_settling() 
                 .await
                 .is_err()
         );
+    }
+    for gate in gates {
+        gate.release();
     }
     for result in results {
         let _ = tokio::time::timeout(Duration::from_secs(10), result.result())

@@ -839,7 +839,7 @@ impl crate::runtime::fault_store::StoreFaults for SubmissionFailure {
                     return Err(self.reason.into());
                 }
             }
-            StoreCall::LoadIntents
+            StoreCall::LoadIntents | StoreCall::LoadQueueCommands
                 if self
                     .hold_join
                     .as_ref()

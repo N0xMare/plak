@@ -95,14 +95,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
     /// tree's own writes and follow the feed deterministically. The round
     /// starts after the previous round's tool results committed, so a wait
     /// that history now holds retires its receipt (spec 03 §4.4). The pass
-    /// costs one feed read past the cursor and, for a round that committed
+    /// stops at the prefix captured by `ModelStarted`, not a later tail the
+    /// runtime reached before this host observed the event. The pass costs
+    /// one feed read past the cursor and, for a round that committed
     /// anything, one tree save, concurrent with the model stream; it never
     /// refolds (see [`TreePass::RunningTurn`]). A refused or deferred pass is
     /// projection debt the next round or the next prompt's admission pass
     /// applies, logged once per distinct cause in a turn.
     ///
     /// [`TreePass::RunningTurn`]: super::super::projection::TreePass::RunningTurn
-    pub(super) async fn project_running_root_tree(&mut self) {
+    pub(super) async fn project_running_root_tree(&mut self, through: u64) {
         if self.host.session.store_revision == 0 {
             return;
         }
@@ -112,7 +114,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             self.host.rows,
             &target.tree_id,
             target.followed.session_id(),
-            super::super::projection::TreePass::RunningTurn,
+            super::super::projection::TreePass::RunningTurn { through },
         )
         .await
         {

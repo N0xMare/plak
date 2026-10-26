@@ -9,6 +9,7 @@ mod coverage;
 mod driver;
 mod invariants;
 mod publication;
+mod round_gates;
 mod shapes;
 mod summary;
 mod table;

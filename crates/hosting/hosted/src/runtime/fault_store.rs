@@ -18,6 +18,7 @@ pub(crate) enum StoreCall {
     LoadIntents,
     LoadInheritedSubmissions,
     LoadViews,
+    LoadQueueCommands,
     CommitProjectionViews,
 }
 
@@ -210,6 +211,11 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
     fn load_views(&self, id: &str) -> Result<Option<sessions::projector::SessionViews>, String> {
         self.faults.before(StoreCall::LoadViews, None)?;
         self.inner.load_views(id)
+    }
+
+    fn load_queue_commands(&self, id: &str) -> Result<sessions::QueueCommands, String> {
+        self.faults.before(StoreCall::LoadQueueCommands, None)?;
+        self.inner.load_queue_commands(id)
     }
 
     fn commit_projection_views(

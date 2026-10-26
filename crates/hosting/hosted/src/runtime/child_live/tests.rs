@@ -672,8 +672,12 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     use plakous_offline_crash_harness::gate::GateHandle;
     let release_burst = GateHandle::new();
     let finish = GateHandle::new();
+    let batches: Vec<_> = (0..16).map(|_| GateHandle::new()).collect();
     let mut stream = vec![serde_json::json!({"gate":release_burst.script()})];
-    stream.extend((0..256).map(|_| serde_json::json!({"text":"burst"})));
+    for batch in &batches {
+        stream.extend((0..16).map(|_| serde_json::json!({"text":"burst"})));
+        stream.push(serde_json::json!({"gate":batch.script()}));
+    }
     stream.push(serde_json::json!({"gate":finish.script()}));
     let (_root, sessions, attached, turn, live) = fixture_with(serde_json::json!([
         {"output":{"text":"prefix"}}, {"stream":stream, "output":{"text":"committed end"}}
@@ -723,6 +727,20 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     }
     let before = live.owner.observation.snapshot().cursor;
     release_burst.release();
+    // Lag the face's 128-update buffer, not the core event feed that the
+    // shared reducer itself follows. Every batch must be reduced before
+    // another is emitted, even when that reducer is descheduled under load.
+    for (index, batch) in batches.iter().enumerate() {
+        batch.entered().await;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while live.owner.observation.snapshot().cursor < before + ((index + 1) * 16) as u64 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        batch.release();
+    }
     finish.entered().await;
     tokio::time::timeout(Duration::from_secs(10), async {
         while live.owner.observation.snapshot().cursor < before + 256 {

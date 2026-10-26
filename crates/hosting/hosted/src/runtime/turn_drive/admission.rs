@@ -386,11 +386,17 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             HostWorkflow::RootDelivery,
             HostBoundary::ProductPublished,
         );
-        if let Err(error) = super::super::projection::project_tree(
+        let through = submission
+            .as_ref()
+            .and_then(|submission| submission.acknowledgement().feed_seq())
+            .map(plakous::sessions::feed::FeedSeq::get)
+            .unwrap_or(0);
+        if let Err(error) = super::super::projection::project_tree_as(
             runtime,
             rows,
             &super::super::rebind::durable_tree_id(rows, session),
             runtime_session,
+            super::super::projection::TreePass::RunningTurn { through },
         )
         .await
         {

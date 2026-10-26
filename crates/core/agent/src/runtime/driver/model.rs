@@ -378,7 +378,8 @@ impl Driver {
             }
             RoundRequest::Admitted(admitted) => {
                 let _ = command.shared.events.publish(
-                    EventContext::attempt(command.turn_id, attempt_id),
+                    EventContext::attempt(command.turn_id, attempt_id)
+                        .with_feed_seq(self.authority.head_feed_seq()),
                     AgentEventKind::ModelStarted,
                 );
                 if let Some(fields) = self.artifact_prefix_drift(
@@ -860,7 +861,8 @@ impl Driver {
     ) -> Result<(ValidatedRequestPlan, PreparedModelCall, Timestamp), AgentError> {
         let plan = self.validate_round_request(descriptor, request)?;
         let _ = command.shared.events.publish(
-            EventContext::attempt(command.turn_id, attempt_id),
+            EventContext::attempt(command.turn_id, attempt_id)
+                .with_feed_seq(self.authority.head_feed_seq()),
             AgentEventKind::ModelStarted,
         );
         let prepared_at = self.clock.now();

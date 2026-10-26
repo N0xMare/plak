@@ -426,31 +426,104 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     let next_progress_snapshot = &mut push.next_progress_snapshot;
     let notified_results = &mut push.notified_results;
     let announced_abandoned = &mut push.announced_abandoned_turns;
-    let milestones = runtime.read(|tree| {
-        let mut rows = Vec::new();
-        for node in tree.nodes().values() {
-            if node.agent_id == tree.root_agent_id {
-                continue;
+    let (milestones, results) = runtime
+        .read(|tree| {
+            let mut rows = Vec::new();
+            for node in tree.nodes().values() {
+                if node.agent_id == tree.root_agent_id {
+                    continue;
+                }
+                rows.extend(
+                    child_milestones(tree, node)
+                        .into_iter()
+                        .map(|(id, milestone)| (id, TranscriptRow::Milestone(milestone))),
+                );
             }
-            rows.extend(
-                child_milestones(tree, node)
-                    .into_iter()
-                    .map(|(id, milestone)| (id, TranscriptRow::Milestone(milestone))),
-            );
-        }
-        for question in root_questions(tree) {
-            rows.push((
-                format!("tree:{}:question:{}", tree.tree_id, question.message_id),
-                TranscriptRow::Milestone(ask_milestone(tree, question)),
-            ));
-        }
-        rows.extend(adoption_notices(tree));
-        rows
-    });
+            for question in root_questions(tree) {
+                rows.push((
+                    format!("tree:{}:question:{}", tree.tree_id, question.message_id),
+                    TranscriptRow::Milestone(ask_milestone(tree, question)),
+                ));
+            }
+            rows.extend(adoption_notices(tree));
+            let results = tree
+                .messages()
+                .values()
+                .filter(|mail| {
+                    mail.to == tree.root_agent_id
+                        && mail.purpose == crate::agent_tree_protocol::MessagePurpose::Result
+                })
+                .map(|mail| {
+                    (
+                        format!("tree:{}:result:{}", tree.tree_id, mail.message_id),
+                        mail.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            (rows, results)
+        })
+        .unwrap_or_default();
     // No session feed fact implies a tree milestone, so each is an operator
     // notice intent (spec 02 §2.6) and a restore shows what the live face did.
-    for (id, row) in milestones.unwrap_or_default() {
+    for (id, row) in milestones {
         let _ = publish_notice_once(store, home, session, events, &mut notice_ids, &id, row);
+    }
+    notified_results.retain(|id| results.iter().any(|(_, mail)| &mail.message_id == id));
+    for (notice_id, mail) in results {
+        if notified_results.contains(&mail.message_id) {
+            continue;
+        }
+        let call_id = format!("child-result:{}", mail.message_id);
+        let subject = crate::sessions::bound_subject(&child_result_available_subject(
+            &mail.message_id,
+            &mail.body,
+        ));
+        // A tree row is a product notice intent (spec 02 §2.6), recorded
+        // once per mail: a restored transcript already holds it.
+        let row = crate::sessions::ToolItem {
+            call_id: call_id.clone(),
+            name: "child_result".into(),
+            exposed_name: None,
+            kind: crate::activity::tool_activity_kind("child_result"),
+            state: "done".into(),
+            subject: Some(subject.clone()),
+            detail: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            parent_call_id: None,
+            cell_id: None,
+            wait: None,
+        };
+        let recorded = notice_ids.contains(&notice_id);
+        if !recorded {
+            let committed =
+                super::admission::commit_session_update(store, home, session, |candidate| {
+                    candidate
+                        .transcript
+                        .record_named_notice(notice_id.clone(), TranscriptRow::Tool(row));
+                    true
+                });
+            if committed != Ok(true) {
+                continue;
+            }
+            notice_ids.insert(notice_id);
+        }
+        if events.send(ContentEvent::ToolLine {
+            call_id: Some(call_id),
+            parent_call_id: None,
+            cell_id: None,
+            kind: plakous_host_protocol::views::presentation::ActivityKind::Agent,
+            name: "child_result".into(),
+            state: "done".into(),
+            subject: Some(subject),
+            detail: None,
+            duration_ms: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            wait: None,
+        }) {
+            notified_results.insert(mail.message_id);
+        }
     }
     let _ = runtime.read(|tree| {
         let revision = tree.revision;
@@ -469,65 +542,6 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
         *next_progress_snapshot = Some(now + std::time::Duration::from_secs(1));
         let first = last_revision.is_none();
         *last_revision = Some(revision);
-        let pending = tree.pending_result_mail(&tree.root_agent_id);
-        notified_results.retain(|id| pending.iter().any(|mail| &mail.message_id == id));
-        for mail in pending {
-            if notified_results.contains(&mail.message_id) {
-                continue;
-            }
-            let call_id = format!("child-result:{}", mail.message_id);
-            let subject = crate::sessions::bound_subject(&child_result_available_subject(
-                &mail.message_id,
-                &mail.body,
-            ));
-            // A tree row is a product notice intent (spec 02 §2.6), recorded
-            // once per mail: a restored transcript already holds it.
-            let row = crate::sessions::ToolItem {
-                call_id: call_id.clone(),
-                name: "child_result".into(),
-                exposed_name: None,
-                kind: crate::activity::tool_activity_kind("child_result"),
-                state: "done".into(),
-                subject: Some(subject.clone()),
-                detail: None,
-                started_at_ms: None,
-                finished_at_ms: None,
-                parent_call_id: None,
-                cell_id: None,
-                wait: None,
-            };
-            let notice_id = format!("tree:{}:result:{}", tree.tree_id, mail.message_id);
-            let recorded = notice_ids.contains(&notice_id);
-            if !recorded {
-                let committed =
-                    super::admission::commit_session_update(store, home, session, |candidate| {
-                        candidate
-                            .transcript
-                            .record_named_notice(notice_id.clone(), TranscriptRow::Tool(row));
-                        true
-                    });
-                if committed != Ok(true) {
-                    continue;
-                }
-                notice_ids.insert(notice_id);
-            }
-            if events.send(ContentEvent::ToolLine {
-                call_id: Some(call_id),
-                parent_call_id: None,
-                cell_id: None,
-                kind: plakous_host_protocol::views::presentation::ActivityKind::Agent,
-                name: "child_result".into(),
-                state: "done".into(),
-                subject: Some(subject),
-                detail: None,
-                duration_ms: None,
-                started_at_ms: None,
-                finished_at_ms: None,
-                wait: None,
-            }) {
-                notified_results.insert(mail.message_id);
-            }
-        }
         // A child session is reopened inside the caller's tool work, where no
         // face is listening, so a reopen that abandoned an unfinished model
         // request left the fact on the node. This is the caller's face reading

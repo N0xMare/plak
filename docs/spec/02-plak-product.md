@@ -4270,7 +4270,7 @@ The same operation and subject are persisted and rendered live and after restore
 
 Close, interrupt, recover, discard, stop-all and result submission retain their
 own action labels, never an invented finished-agent count. Adoption actions
-name their candidate. Unread child-result activity is a durable product
+name their candidate. Retained child-result activity is a durable product
 projection and restores like live activity; it is not canonical conversation.
 An unavailable agent navigator is Agents-view state, never a transcript notice.
 Subjects are single-line, with embedded newlines shown as `↵`, bounded to 240
@@ -4629,11 +4629,25 @@ system note containing prepared-input accounting. A quiet
 provider is the short system note that context is unchanged and `/compact`
 retries; the raw `deadline elapsed` dump stays in the session log.
 
-An unread child result is a typed agent activity row (`child_result`, `done`),
+A retained child result is a typed agent activity row (`child_result`, `done`),
 with a bounded subject naming the message id, child, and terminal status; its
 payload is not printed in the transcript. It is not a completed tool execution
 despite sharing the activity-line projection. The JSONL surface carries the
 same synthetic activity line rather than an English system note.
+The notice is keyed by the durable result message, whether or not the root
+consumed it before the host's first observation. The host captures lifecycle
+milestones and retained result messages in one tree read and publishes the
+start and finished milestones before the result activity. Observation cadence
+and unread-mail transitions cannot suppress the notice or create another one.
+
+Queue refresh reads the submission/delivery join through
+`SessionRecordStore::load_queue_commands`, in one store snapshot without
+hydrating transcript rows or per-call views. A queue refresh while an attached
+projector is busy cannot cause another cold transcript load; the attachment
+keeps its cached views across turns.
+An unstored attachment may own a projector task, but requests no background
+pass until its product session is stored. A pre-storage read cannot warm the
+persistent cache and must not race the first stored cold load.
 
 The context meter and HUD share the composer's upper-left border. During a
 turn the meter reads the newest provider input count the turn has seen plus

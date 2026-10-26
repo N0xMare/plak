@@ -249,6 +249,13 @@ pub trait SessionRecordStore: Send + Sync {
     /// A message when the store cannot be read or a row is invalid.
     fn load_views(&self, id: &str) -> Result<Option<SessionViews>, String>;
 
+    /// Joins stored submissions with delivery state without hydrating transcript
+    /// rows or per-call views.
+    ///
+    /// # Errors
+    /// A store refusal or invalid submission/delivery state.
+    fn load_queue_commands(&self, id: &str) -> Result<crate::sessions::QueueCommands, String>;
+
     /// Commits one projector run under the cursor CAS: when the stored cursor
     /// is still `writes.expected_cursor`, writes `writes` and the supplied state
     /// and advances the cursor; otherwise changes nothing.
@@ -1122,6 +1129,18 @@ mod memory {
                 .views
                 .get(id)
                 .cloned())
+        }
+
+        fn load_queue_commands(&self, id: &str) -> Result<crate::sessions::QueueCommands, String> {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let empty = ProductIntents::default();
+            Ok(crate::sessions::QueueCommands::from_join(
+                state.intents.get(id).unwrap_or(&empty),
+                state.views.get(id),
+            ))
         }
 
         fn load_inherited_submissions(&self, id: &str) -> Result<Vec<Submission>, String> {

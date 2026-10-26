@@ -126,6 +126,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load_views(id)
     }
 
+    fn load_queue_commands(&self, id: &str) -> Result<crate::sessions::QueueCommands, String> {
+        self.inner.load_queue_commands(id)
+    }
+
     fn commit_projection_views(
         &self,
         id: &str,

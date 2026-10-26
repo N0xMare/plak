@@ -476,6 +476,54 @@ impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
         }
         .unwrap_or_else(|| "00000000-0000-4000-8000-0000000000c1/00000000-0000-4000-8000-00000000000b/00000000-0000-4000-8000-000000003001".to_owned());
         Box::pin(async move {
+            if publish && hold_ms == 0 {
+                let failure = |error: plakous_hosted::agent_tree_protocol::TopologyError| {
+                    plakous_hosted::agent_tree_tools::SpawnBindError::RecoveryRequired {
+                        stage: plakous_hosted::topology_runtime::ChildStartupStage::Registering,
+                        message: error.message,
+                    }
+                };
+                let session: plakous::sessions::SessionLocator = locator.parse().map_err(|_| {
+                    plakous_hosted::agent_tree_tools::SpawnBindError::Refused(
+                        "scripted child locator is invalid".into(),
+                    )
+                })?;
+                let (completed, effects) = driver
+                    .mutate(|tree| {
+                        tree.record_child_session(&agent_id, &locator)?;
+                        driver.save(tree)?;
+                        tree.project_feed(
+                            &agent_id,
+                            &session.session_id().to_string(),
+                            &[],
+                            &plakous_hosted::agent_tree::TreeFeedReads::default(),
+                        )
+                        .map_err(plakous_hosted::agent_tree_protocol::TopologyError::from)?;
+                        driver.save(tree)?;
+                        if let Ok(node) = tree.node(&agent_id) {
+                            std::fs::write(node.path.join("child.txt"), "child\n").ok();
+                        }
+                        tree.submit_result(
+                            &agent_id,
+                            &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
+                                turn_token: start.turn_token,
+                                output_json: "{\"summary\":\"offline scripted child done\"}".into(),
+                            },
+                            None,
+                        )?;
+                        tree.record_turn_completed(&agent_id)?;
+                        tree.settle_for_test();
+                        driver.save(tree)
+                    })
+                    .map_err(failure)?;
+                completed.map_err(failure)?;
+                driver.settle(effects).map_err(failure)?;
+                return Ok(plakous_hosted::agent_tree_tools::SpawnBound {
+                    durably_registered: true,
+                    session_locator: locator,
+                    turn_id: None,
+                });
+            }
             tokio::spawn(async move {
                 for _ in 0..600 {
                     let ready = {

@@ -2166,8 +2166,9 @@ impl AgentEvent {
     }
 
     /// Returns the sequence of the change-feed record of the commit this
-    /// event reports (a turn terminal, a committed compaction), when a
-    /// durable store committed it. Observation only: the feed is authority.
+    /// event reports (a turn terminal, a committed compaction), or the
+    /// committed prefix at `ModelStarted`, when using a durable store.
+    /// Observation only: the feed is authority.
     #[must_use]
     pub const fn feed_seq(&self) -> Option<crate::feed::FeedSeq> {
         self.feed_seq

@@ -33,12 +33,7 @@ pub(in crate::runtime) async fn queue_join(
     product_id: &str,
 ) -> Result<crate::sessions::QueueCommands, String> {
     blocking(store, product_id, |store, id| {
-        let intents = store.load_intents(id)?;
-        let views = store.load_views(id)?;
-        Ok(crate::sessions::QueueCommands::from_join(
-            &intents,
-            views.as_ref(),
-        ))
+        store.load_queue_commands(id).map_err(ReadFailure::from)
     })
     .await
     .map_err(String::from)
@@ -740,7 +735,7 @@ pub(crate) enum TreePass {
     BetweenTurns,
     /// Inside a running root turn, once per model round: only the in-process
     /// tree, only the records past the cursor, and never a refold.
-    RunningTurn,
+    RunningTurn { through: u64 },
 }
 
 /// What one tree pass did.
@@ -787,7 +782,7 @@ pub(crate) async fn project_tree_as(
     };
     let (root, cursor) = match (&runtime, pass) {
         (Some(runtime), _) => runtime.read(read).map_err(|error| error.message)?,
-        (None, TreePass::RunningTurn) => return Ok(TreePassOutcome::Idle),
+        (None, TreePass::RunningTurn { .. }) => return Ok(TreePassOutcome::Idle),
         (None, TreePass::BetweenTurns) => match rows.tree(tree_id)? {
             Some(tree) => read(&tree),
             None => return Ok(TreePassOutcome::Idle),
@@ -795,8 +790,8 @@ pub(crate) async fn project_tree_as(
     };
     let feed = crate::agent::read_tree_feed(sessions, runtime_session, cursor).await?;
     if let Some(runtime) = runtime {
-        if pass == TreePass::RunningTurn {
-            return Ok(apply_running_root_feed(&runtime, &feed, &root)?);
+        if let TreePass::RunningTurn { through } = pass {
+            return Ok(apply_running_root_feed(&runtime, &feed, &root, through)?);
         }
         crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
             crate::agent::feed_projection::apply_on_runtime(&runtime, feed, &root)
@@ -832,12 +827,21 @@ pub(crate) fn apply_running_root_feed(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     feed: &crate::agent_tree::TreeFeed,
     root: &str,
+    through: u64,
 ) -> Result<TreePassOutcome, String> {
+    if feed.below_retained.is_some() {
+        return Ok(TreePassOutcome::Deferred(
+            "running tree prefix is behind feed retention".to_owned(),
+        ));
+    }
+    let mut feed = feed.clone();
+    feed.records
+        .retain(|record| record.header().seq.get() <= through);
     if feed.records.is_empty() {
         return Ok(TreePassOutcome::Idle);
     }
     running_pass_outcome(crate::agent::feed_projection::apply_on_runtime(
-        runtime, feed, root,
+        runtime, &feed, root,
     ))
 }
 

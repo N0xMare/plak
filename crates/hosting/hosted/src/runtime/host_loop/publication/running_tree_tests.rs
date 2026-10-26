@@ -82,8 +82,12 @@ fn a_committed_wait_retires_its_receipt_and_advances_the_cursor() {
         wait_outside_history(host, runtime);
         let call = receipt(runtime);
         let (cursor, _) = cursor_and_revision(host, runtime);
-        let outcome =
-            apply_running_root_feed(runtime, &history_page(host, cursor + 1, &call), "root");
+        let outcome = apply_running_root_feed(
+            runtime,
+            &history_page(host, cursor + 1, &call),
+            "root",
+            cursor + 1,
+        );
         assert_eq!(outcome, Ok(TreePassOutcome::Applied));
         assert_eq!(receipts_and_unread(runtime).0, 0);
         assert_eq!(cursor_and_revision(host, runtime).0, cursor + 1);
@@ -95,7 +99,7 @@ fn nothing_past_the_cursor_publishes_nothing() {
     with_unread_result(|host, runtime| {
         wait_outside_history(host, runtime);
         let before = cursor_and_revision(host, runtime);
-        let outcome = apply_running_root_feed(runtime, &page(host, Vec::new()), "root");
+        let outcome = apply_running_root_feed(runtime, &page(host, Vec::new()), "root", u64::MAX);
         assert_eq!(outcome, Ok(TreePassOutcome::Idle));
         assert_eq!(cursor_and_revision(host, runtime), before);
         assert_eq!(receipts_and_unread(runtime).0, 1);
@@ -118,7 +122,7 @@ fn a_refused_read_leaves_the_receipt_and_the_next_pass_retires_it_once() {
                 &rows,
                 &tree_id,
                 host.opened.locator().session_id(),
-                TreePass::RunningTurn,
+                TreePass::RunningTurn { through: u64::MAX },
             ))
             .unwrap();
         assert!(refused.is_err(), "the injected read refusal must surface");
@@ -127,14 +131,14 @@ fn a_refused_read_leaves_the_receipt_and_the_next_pass_retires_it_once() {
 
         let committed = history_page(host, before.0 + 1, &call);
         assert_eq!(
-            apply_running_root_feed(runtime, &committed, "root"),
+            apply_running_root_feed(runtime, &committed, "root", before.0 + 1),
             Ok(TreePassOutcome::Applied)
         );
         let after = cursor_and_revision(host, runtime);
         assert_eq!(after.0, before.0 + 1);
         assert_eq!(receipts_and_unread(runtime).0, 0);
         // The same record again is behind the cursor: the pass is inert.
-        apply_running_root_feed(runtime, &committed, "root").unwrap();
+        apply_running_root_feed(runtime, &committed, "root", before.0 + 1).unwrap();
         assert_eq!(cursor_and_revision(host, runtime).0, after.0);
         assert_eq!(receipts_and_unread(runtime).0, 0);
     });
@@ -152,13 +156,56 @@ fn a_page_that_needs_a_refold_is_deferred_not_refolded() {
         let before = cursor_and_revision(host, runtime);
         // A page that skips a record after the cursor needs a reread from
         // the feed's start; the running pass takes no session to reread with.
-        let outcome =
-            apply_running_root_feed(runtime, &history_page(host, before.0 + 2, &call), "root");
+        let outcome = apply_running_root_feed(
+            runtime,
+            &history_page(host, before.0 + 2, &call),
+            "root",
+            u64::MAX,
+        );
         assert!(
             matches!(outcome, Ok(TreePassOutcome::Deferred(_))),
             "{outcome:?}"
         );
         assert_eq!(cursor_and_revision(host, runtime), before);
         assert_eq!(receipt(runtime), call);
+    });
+}
+
+#[test]
+fn a_delayed_round_observation_cannot_absorb_a_later_rounds_feed() {
+    with_unread_result(|host, runtime| {
+        wait_outside_history(host, runtime);
+        let call = receipt(runtime);
+        let (cursor, _) = cursor_and_revision(host, runtime);
+        let mut feed = history_page(host, cursor + 1, &call);
+        feed.records
+            .extend(history_page(host, cursor + 2, &call).records);
+        assert_eq!(
+            apply_running_root_feed(runtime, &feed, "root", cursor + 1),
+            Ok(TreePassOutcome::Applied)
+        );
+        assert_eq!(cursor_and_revision(host, runtime).0, cursor + 1);
+        assert_eq!(receipts_and_unread(runtime).0, 0);
+        assert_eq!(
+            apply_running_root_feed(runtime, &feed, "root", cursor + 2),
+            Ok(TreePassOutcome::Applied)
+        );
+        assert_eq!(cursor_and_revision(host, runtime).0, cursor + 2);
+    });
+}
+
+#[test]
+fn a_running_prefix_behind_retention_is_deferred_without_a_newer_head_seed() {
+    with_unread_result(|host, runtime| {
+        wait_outside_history(host, runtime);
+        let before = cursor_and_revision(host, runtime);
+        let mut feed = page(host, Vec::new());
+        feed.below_retained = Some(before.0 + 2);
+        assert!(matches!(
+            apply_running_root_feed(runtime, &feed, "root", before.0 + 1),
+            Ok(TreePassOutcome::Deferred(_))
+        ));
+        assert_eq!(cursor_and_revision(host, runtime), before);
+        assert_eq!(receipts_and_unread(runtime).0, 1);
     });
 }
