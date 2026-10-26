@@ -9,6 +9,10 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plak
 
+- Fast children retain their start and finished transcript milestones even
+  when they complete before the host's first tree observation. Durable notice
+  identities prevent duplicates after reattachment or transcript truncation.
+
 - Source builds can omit the TUI, clipboard paste, image decoding, Python
   composition, or MCP with Cargo features. Defaults retain the shipped shape.
   Omitted capabilities refuse explicitly (exit 2), never select another route;
@@ -118,6 +122,10 @@ one cross-build carrier (a build imports its own and the previous version).
   protocol is `plakous-cell-protocol.v2` (Reset, SDK configuration and typed
   stopped outcomes), refusing stale workers at hello. Both revisions ride
   this unreleased epoch. Existing non-SDK model-visible text is unchanged.
+  Unreleased t9 maintainer sessions whose older notices have UUID or
+  `imported-N` ids and still resolve to their tree may re-publish their child
+  milestones once on the first new host. New durable milestone ids prevent
+  repetition thereafter; no migration is applied to those prototype notices.
   The Codex reference measurement revision also rotates the descriptor's
   semantic binding: same-epoch sessions need an explicit rebind. This rides
   unreleased epoch 33; installed epoch-32 sessions are not reopened by this

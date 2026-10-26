@@ -5,7 +5,6 @@ use super::compose::{
     observe_compose_subject, observe_settled_compose_marker,
 };
 use super::{EventApplier, event_timestamp_ms, timestamp_ms};
-use crate::runtime::admission::commit_session_update;
 use crate::runtime::logging::log_event;
 use crate::runtime::tool_facts::{wait_settled, wait_started};
 use crate::runtime::tree::{
@@ -18,7 +17,7 @@ use crate::session_log::{
     SessionEvent, redact_text_preview, tool_rejected_reason, tool_rejected_record,
 };
 use crate::sessions;
-use crate::sessions::{SessionRecord, TranscriptRow, live_tool_subject};
+use crate::sessions::{SessionRecord, live_tool_subject};
 use crate::surface_protocol::ContentEvent;
 use plakous::agent::{AgentEventKind, ToolCallObservation};
 use std::collections::HashMap;
@@ -868,10 +867,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         } else {
             let _ = events.send(line);
         }
-        if let Some(candidate) = call_id_str
-            .as_ref()
-            .and_then(|id| projection.adopt_candidates.remove(id))
-            && let Some(facts) = call_facts
+        if let Some(call_id) = call_id_str.as_ref().filter(|id| !id.is_empty())
+            && let Some(candidate) = projection.adopt_candidates.remove(call_id)
+            && let Some(
+                facts @ plakous_recursive_subagents::call_facts::TopologyCallFacts::AdoptConflict {
+                    ..
+                },
+            ) = call_facts
             && let Some(milestone) =
                 crate::runtime::tool_facts::adopt_milestone(&candidate, facts, |candidate| {
                     last_tree_revision
@@ -894,12 +896,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                         .flatten()
                 })
         {
-            let row = TranscriptRow::Milestone(milestone);
-            let _ = commit_session_update(store, home, session, |candidate| {
-                candidate.record_notice(row.clone());
-                true
-            });
-            let _ = events.send(ContentEvent::Row(row));
+            if let Ok(mut ids) = crate::runtime::tree::known_notice_ids(store, session) {
+                let id = format!("adopt-conflict:{candidate}:{call_id}");
+                let _ = crate::runtime::tree::publish_milestone_once(
+                    store, home, session, events, &mut ids, &id, milestone,
+                );
+            }
         }
         // A `wait*` terminal that closed the last child re-terminalises the
         // marker's persisted row, so the `Completed` sweep never rewrites a

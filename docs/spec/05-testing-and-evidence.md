@@ -1749,6 +1749,20 @@ still owns the old row base or a settled intent records its advanced base.
 Its scripted followup finishes before send returns, and the root consumes the
 child's wait result before its final step, so root and child publications do
 not race the indexed pilot at high sweep concurrency.
+Hosted milestone laws finish a child before the host's first lifecycle read,
+then verify one start, one finished, one child-result and one adopted notice.
+A fresh host and a truncated visible transcript must not duplicate their
+retained notice intents. Twin and cut comparisons remain exact per-store
+indexed sequences; cross-store interleaving remains informational.
+The same hosted laws cover an early question, named notices pending in an
+unsaved session, and distinct adoptions with reused or absent presentation
+call ids. Their identities come from durable message and merge operations.
+The bounded result-mail observation law requires start and finished milestones
+before its result row even on the first read. The spawn/wait/adopt parity
+fixture uses a standalone tool driver, not a hub-visible tree: its three faces
+compare tool observations and the landed receipt, without inventing adoption
+notices from presentation call facts. The hosted laws above require adoption
+notices from the root's durable tree operations instead.
 The process pilots prove a real shell job was promoted and quit settled it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.

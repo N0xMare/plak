@@ -104,8 +104,6 @@ impl TreeSnapshotPush {
             self.tree_id = None;
             self.last_revision = None;
             self.notified_results.clear();
-            self.child_lifecycles = None;
-            self.announced_questions.clear();
         }
         let cached = self
             .tree_id
@@ -135,14 +133,6 @@ fn snapshot_due(
     now: std::time::Instant,
 ) -> bool {
     last_revision != Some(revision) || (changed && next.is_none_or(|next| now >= next))
-}
-
-/// What a milestone compares between two tree reads.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct ChildLifecycle {
-    status: plakous_host_protocol::topology::NodeStatus,
-    attempt: Option<String>,
-    running_since: Option<std::time::Instant>,
 }
 
 /// Text a failed or needs-recovery milestone keeps: the row shows its first
@@ -188,84 +178,147 @@ pub(crate) fn bounded_text(text: &str, bound: usize) -> Option<String> {
     Some(format!("{}{cut}", text[..end].trim_end()))
 }
 
-/// The milestone rows one child's transition earns, oldest first. A finished
-/// child carries its submitted result, a failed one its failure message, and
-/// one that needs recovery the tree's fault reason (or its failure message).
+/// Derive every retained attempt's milestones, even if it finished before
+/// the host first observed it. The notice id, not a process-local status
+/// sample or the bounded transcript, owns exactly-once publication.
 fn child_milestones(
     tree: &plakous_recursive_subagents::tree::ProductAgentTree,
     node: &plakous_recursive_subagents::tree::NodeRecord,
-    previous: Option<&ChildLifecycle>,
-    now: std::time::Instant,
-) -> (ChildLifecycle, Vec<AgentMilestone>) {
-    use plakous_host_protocol::topology::NodeStatus;
-
-    let attempt = node.attempt_id.as_ref().map(ToString::to_string);
-    let running = matches!(node.status, NodeStatus::Running);
-    let running_since = match previous {
-        Some(previous) if previous.attempt == attempt => previous.running_since,
-        _ => None,
-    }
-    .or_else(|| running.then_some(now));
-    let current = ChildLifecycle {
-        status: node.status,
-        attempt,
-        running_since,
-    };
-    let milestone = |event, text: Option<String>| AgentMilestone {
-        agent_id: node.agent_id.clone(),
-        event,
-        template: node.template.as_ref().map(ToString::to_string),
-        text,
-        duration_ms: None,
-        candidate: None,
-        files: None,
-        paths: Vec::new(),
-    };
-    let brief = Some(node.description.clone()).filter(|text| !text.is_empty());
+) -> Vec<(String, AgentMilestone)> {
+    use plakous_host_protocol::topology::AttemptStatus;
+    let mut attempts: Vec<_> = tree
+        .attempts()
+        .values()
+        .filter(|attempt| attempt.agent_id == node.agent_id)
+        .collect();
+    attempts.sort_by_key(|attempt| attempt.turn_token);
     let mut rows = Vec::new();
-    match previous {
-        None => rows.push(milestone(MilestoneEvent::Spawned, brief)),
-        Some(previous) if previous.attempt.is_some() && previous.attempt != current.attempt => {
-            rows.push(milestone(MilestoneEvent::Retasked, brief));
-        }
-        Some(_) => {}
-    }
-    if previous.is_some_and(|previous| previous.status == current.status) {
-        return (current, rows);
-    }
-    let attempt = tree.attempt(&node.agent_id);
-    let failure = attempt
-        .and_then(|attempt| attempt.failure.as_ref())
-        .map(|failure| failure.message.as_str());
-    match node.status {
-        NodeStatus::Completed => rows.push(AgentMilestone {
-            duration_ms: running_since.map(|since| {
-                u64::try_from(now.duration_since(since).as_millis()).unwrap_or(u64::MAX)
-            }),
-            template: None,
-            ..milestone(
-                MilestoneEvent::Finished,
-                attempt
-                    .and_then(|attempt| attempt.output_json.as_deref())
-                    .and_then(result_text),
+    for attempt in attempts {
+        let milestone = |event, text, template, duration_ms| AgentMilestone {
+            agent_id: node.agent_id.clone(),
+            event,
+            template,
+            text,
+            duration_ms,
+            candidate: None,
+            files: None,
+            paths: Vec::new(),
+        };
+        let id = |kind| {
+            format!(
+                "tree:{}:attempt:{}:{kind}",
+                tree.tree_id, attempt.attempt_id
             )
-        }),
-        NodeStatus::Failed => rows.push(AgentMilestone {
-            template: None,
-            ..milestone(MilestoneEvent::Failed, failure.and_then(milestone_text))
-        }),
-        NodeStatus::RecoveryRequired => rows.push(AgentMilestone {
-            template: None,
-            ..milestone(
+        };
+        let (start, kind) = if attempt.retry_of.is_some() {
+            (MilestoneEvent::Retasked, "retasked")
+        } else {
+            (MilestoneEvent::Spawned, "spawned")
+        };
+        rows.push((
+            id(kind),
+            milestone(
+                start,
+                Some(node.description.clone()).filter(|text| !text.is_empty()),
+                node.template.as_ref().map(ToString::to_string),
+                None,
+            ),
+        ));
+        let failure = attempt
+            .failure
+            .as_ref()
+            .map(|failure| failure.message.as_str());
+        let terminal = match attempt.status {
+            AttemptStatus::Completed
+            | AttemptStatus::CompletedWithoutSubmission
+            | AttemptStatus::Adopted => Some((
+                MilestoneEvent::Finished,
+                "finished",
+                attempt.output_json.as_deref().and_then(result_text),
+            )),
+            AttemptStatus::Failed | AttemptStatus::Blocked => Some((
+                MilestoneEvent::Failed,
+                "failed",
+                failure.and_then(milestone_text),
+            )),
+            AttemptStatus::RecoveryRequired => Some((
                 MilestoneEvent::NeedsRecovery,
+                "needs_recovery",
                 tree.fault_reason(&node.agent_id)
                     .or(failure)
                     .and_then(milestone_text),
-            )
-        }),
-        _ => {}
+            )),
+            _ => None,
+        };
+        if let Some((event, kind, text)) = terminal {
+            let duration = (event == MilestoneEvent::Finished)
+                .then(|| {
+                    attempt
+                        .ended_at
+                        .map(|ended| ended.saturating_sub(attempt.started_at))
+                })
+                .flatten();
+            rows.push((id(kind), milestone(event, text, None, duration)));
+        }
+        if node.attempt_id.as_ref() == Some(&attempt.attempt_id)
+            && node.status == plakous_host_protocol::topology::NodeStatus::RecoveryRequired
+            && attempt.status != AttemptStatus::RecoveryRequired
+        {
+            // A checkout fault can require recovery after the attempt ended.
+            rows.push((
+                id("needs_recovery"),
+                milestone(
+                    MilestoneEvent::NeedsRecovery,
+                    tree.fault_reason(&node.agent_id)
+                        .or(failure)
+                        .and_then(milestone_text),
+                    None,
+                    None,
+                ),
+            ));
+        }
     }
-    (current, rows)
+    rows
+}
+
+fn adoption_milestones(
+    tree: &plakous_recursive_subagents::tree::ProductAgentTree,
+) -> Vec<(String, AgentMilestone)> {
+    tree.operations()
+        .values()
+        .filter(|operation| {
+            operation.caller_agent_id == tree.root_agent_id
+                && operation.tool_name == "adopt_candidate"
+                && operation.terminal_code.is_none()
+        })
+        .filter_map(|operation| {
+            let receipt: plakous_host_protocol::topology::AdoptOutcome =
+                serde_json::from_str(operation.terminal_response.as_deref()?).ok()?;
+            let source = tree.candidates().get(&receipt.candidate_id)?;
+            let milestone = super::tool_facts::adopt_milestone(
+                receipt.candidate_id.as_str(),
+                plakous_recursive_subagents::call_facts::TopologyCallFacts::Adopted {
+                    files_changed: receipt.files_changed,
+                },
+                |_| {
+                    Some((
+                        source.producing_agent_id.clone(),
+                        tree.nodes()
+                            .get(&source.producing_agent_id)
+                            .and_then(|node| node.template.as_ref())
+                            .map(ToString::to_string),
+                    ))
+                },
+            )?;
+            Some((
+                format!(
+                    "tree:{}:adopt:{}:{}",
+                    tree.tree_id, receipt.candidate_id, operation.operation_id
+                ),
+                milestone,
+            ))
+        })
+        .collect()
 }
 
 /// Questions children addressed to the root, in mailbox order.
@@ -318,44 +371,43 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     if tokio::runtime::Handle::try_current().is_ok() {
         push.child_live.sync(&runtime);
     }
+    let Ok(mut notice_ids) = known_notice_ids(store, session) else {
+        return;
+    };
     let child_live = &mut push.child_live;
     let last_revision = &mut push.last_revision;
     let next_progress_snapshot = &mut push.next_progress_snapshot;
     let notified_results = &mut push.notified_results;
     let announced_abandoned = &mut push.announced_abandoned_turns;
-    let child_lifecycles = &mut push.child_lifecycles;
-    let announced_questions = &mut push.announced_questions;
     let milestones = runtime.read(|tree| {
-        let now = std::time::Instant::now();
-        let seeded = child_lifecycles.is_some();
-        let known = child_lifecycles.get_or_insert_with(Default::default);
         let mut rows = Vec::new();
         for node in tree.nodes().values() {
             if node.agent_id == tree.root_agent_id {
                 continue;
             }
-            let (current, earned) = child_milestones(tree, node, known.get(&node.agent_id), now);
-            if seeded {
-                rows.extend(earned);
-            }
-            known.insert(node.agent_id.clone(), current);
+            rows.extend(child_milestones(tree, node));
         }
         for question in root_questions(tree) {
-            if announced_questions.insert(question.message_id.clone()) && seeded {
-                rows.push(ask_milestone(tree, question));
-            }
+            rows.push((
+                format!("tree:{}:question:{}", tree.tree_id, question.message_id),
+                ask_milestone(tree, question),
+            ));
         }
+        rows.extend(adoption_milestones(tree));
         rows
     });
     // No session feed fact implies a tree milestone, so each is an operator
     // notice intent (spec 02 §2.6) and a restore shows what the live face did.
-    for milestone in milestones.unwrap_or_default() {
-        let row = TranscriptRow::Milestone(milestone);
-        let _ = super::admission::commit_session_update(store, home, session, |candidate| {
-            candidate.record_notice(row.clone());
-            true
-        });
-        let _ = events.send(ContentEvent::Row(row));
+    for (id, milestone) in milestones.unwrap_or_default() {
+        let _ = publish_milestone_once(
+            store,
+            home,
+            session,
+            events,
+            &mut notice_ids,
+            &id,
+            milestone,
+        );
     }
     let _ = runtime.read(|tree| {
         let revision = tree.revision;
@@ -401,12 +453,20 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
                 cell_id: None,
                 wait: None,
             };
-            if session.transcript.tool_activity(&call_id).is_none() {
-                let _ =
+            let notice_id = format!("tree:{}:result:{}", tree.tree_id, mail.message_id);
+            let recorded = notice_ids.contains(&notice_id);
+            if !recorded {
+                let committed =
                     super::admission::commit_session_update(store, home, session, |candidate| {
-                        candidate.record_notice(TranscriptRow::Tool(row));
+                        candidate
+                            .transcript
+                            .record_named_notice(notice_id.clone(), TranscriptRow::Tool(row));
                         true
                     });
+                if committed != Ok(true) {
+                    continue;
+                }
+                notice_ids.insert(notice_id);
             }
             if events.send(ContentEvent::ToolLine {
                 call_id: Some(call_id),
@@ -459,6 +519,60 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
         crate::topology_navigator::apply_session_root_binding(&mut snapshot, session);
         let _ = events.send(ContentEvent::TopologyNavigatorSnapshot(snapshot));
     });
+}
+
+pub(super) fn publish_milestone_once<P: plakous_host_protocol::ProtocolExtension>(
+    store: &dyn crate::session_store::SessionRecordStore,
+    home: &crate::session_home::SessionHome,
+    session: &mut SessionRecord,
+    events: &Sender<P>,
+    notice_ids: &mut std::collections::HashSet<String>,
+    id: &str,
+    milestone: AgentMilestone,
+) -> Result<bool, String> {
+    if notice_ids.contains(id)
+        || session
+            .transcript
+            .pending_notice_entries()
+            .any(|(pending, _)| pending == Some(id))
+    {
+        notice_ids.insert(id.into());
+        return Ok(false);
+    }
+    let row = TranscriptRow::Milestone(milestone);
+    let committed = super::admission::commit_session_update(store, home, session, |candidate| {
+        candidate
+            .transcript
+            .record_named_notice(id.into(), row.clone());
+        true
+    })?;
+    if committed {
+        notice_ids.insert(id.into());
+        let _ = events.send(ContentEvent::Row(row));
+    }
+    Ok(committed)
+}
+
+pub(super) fn known_notice_ids(
+    store: &dyn crate::session_store::SessionRecordStore,
+    session: &SessionRecord,
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut ids: std::collections::HashSet<_> = match store.load_intents(&session.id) {
+        Ok(intents) => intents
+            .notices
+            .into_iter()
+            .map(|notice| notice.notice_id)
+            .collect(),
+        Err(_) if session.store_revision == 0 => std::collections::HashSet::new(),
+        Err(error) => return Err(error),
+    };
+    ids.extend(
+        session
+            .transcript
+            .pending_notice_entries()
+            .filter_map(|(id, _)| id.map(str::to_owned)),
+    );
+    Ok(ids)
 }
 
 pub(super) fn emit_child_progress_on_refresh<P: plakous_host_protocol::ProtocolExtension>(

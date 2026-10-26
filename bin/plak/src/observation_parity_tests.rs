@@ -2058,6 +2058,9 @@ fn a_cancelled_tool_terminalises_once_before_the_interrupted_status() {
 /// bound child session would have done. The tree's own behaviour under that
 /// seam — the mint, the seal, the wait row, the adopt receipt — is the crate's
 /// to test; this pins that the three drivers observe it identically.
+/// This standalone driver is not attached to the host hub, so its presentation
+/// call facts cannot earn receipt-derived lifecycle or adoption notices. The
+/// hosted tree laws cover those notices against a hub-visible durable tree.
 #[test]
 fn parity_spawn_wait_adopt() {
     run_parity(

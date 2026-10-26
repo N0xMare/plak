@@ -35,8 +35,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             return;
         };
         let mut transcript = sessions::ProductTranscript::stored(views.transcript(&intents));
-        for notice in self.host.session.transcript.pending_notice_items() {
-            transcript.record_notice_item(notice);
+        for (notice, id) in self.host.session.transcript.pending_notice_items() {
+            transcript.record_notice_item(notice, id);
         }
         let mut items = transcript.items();
         items.insert(

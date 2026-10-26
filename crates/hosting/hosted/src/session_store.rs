@@ -482,12 +482,16 @@ mod memory {
     /// Records `session`'s operator notices as intents at the cursor the store
     /// applied, as the SQLite store does in the record's transaction; a
     /// carried-forward session's first commit records its imported rows.
-    fn persist_notices(state: &mut State, session: &SessionRecord, first_commit: bool) {
+    fn persist_notices(
+        state: &mut State,
+        session: &SessionRecord,
+        first_commit: bool,
+    ) -> Result<(), RecordStoreError> {
         let anchor = state
             .views
             .get(&session.id)
             .map_or(0, |views| views.cursor.get());
-        let intents = state.intents.entry(session.id.clone()).or_default();
+        let mut intents = state.intents.get(&session.id).cloned().unwrap_or_default();
         if first_commit && session.carried_forward_from().is_some() {
             intents.imported = session
                 .transcript
@@ -495,7 +499,8 @@ mod memory {
                 .filter(|row| !matches!(row, crate::sessions::TranscriptRow::Truncated))
                 .cloned()
                 .collect();
-            return;
+            state.intents.insert(session.id.clone(), intents);
+            return Ok(());
         }
         let mut ordinal = intents
             .notices
@@ -504,17 +509,30 @@ mod memory {
             .map(|notice| notice.ordinal.saturating_add(1))
             .max()
             .unwrap_or(0);
-        for row in session.transcript.pending_notices() {
+        for (id, row) in session.transcript.pending_notice_entries() {
+            if let Some(prior) =
+                id.and_then(|id| intents.notices.iter().find(|notice| notice.notice_id == id))
+            {
+                if prior.row != *row {
+                    return Err("operator notice identity changed".to_owned().into());
+                }
+                continue;
+            }
             intents
                 .notices
                 .push(crate::sessions::projector::OperatorNotice {
-                    notice_id: format!("memory-notice-{}", intents.notices.len()),
+                    notice_id: id.map_or_else(
+                        || format!("memory-notice-{}", intents.notices.len()),
+                        str::to_owned,
+                    ),
                     anchor,
                     ordinal,
                     row: row.clone(),
                 });
             ordinal = ordinal.saturating_add(1);
         }
+        state.intents.insert(session.id.clone(), intents);
+        Ok(())
     }
 
     fn inherited_submissions(state: &State, id: &str) -> Result<Vec<Submission>, String> {
@@ -620,7 +638,7 @@ mod memory {
             )?;
         }
         sync_queue(&mut bindings, current, session)?;
-        persist_notices(state, session, expected == 0);
+        persist_notices(state, session, expected == 0)?;
         session.transcript.mark_committed();
         let mut stored = session.clone();
         stored.store_revision = next;

@@ -135,6 +135,7 @@ pub struct ProductTranscript {
     /// persists from this projection, as notice intents (spec 02 §2.6).
     notices: Vec<TranscriptRow>,
     notice_keys: Vec<RowKey>,
+    notice_ids: HashMap<RowKey, String>,
 }
 
 impl PartialEq for ProductTranscript {
@@ -282,6 +283,7 @@ impl ProductTranscript {
     pub fn mark_committed(&mut self) {
         self.notices.clear();
         self.notice_keys.clear();
+        self.notice_ids.clear();
     }
 
     /// The operator notices recorded since the last commit, oldest first.
@@ -293,25 +295,55 @@ impl ProductTranscript {
     /// Shows `row` and records it as an operator notice the next commit
     /// writes as an intent at the cursor the store has applied.
     pub fn record_notice(&mut self, row: TranscriptRow) {
-        self.record_notice_item(TranscriptItem {
-            key: provisional_key(),
-            row,
-        });
+        self.record_notice_item(
+            TranscriptItem {
+                key: provisional_key(),
+                row,
+            },
+            None,
+        );
     }
 
-    pub(crate) fn pending_notice_items(&self) -> Vec<TranscriptItem> {
+    pub(crate) fn record_named_notice(&mut self, id: String, row: TranscriptRow) {
+        self.record_notice_item(
+            TranscriptItem {
+                key: provisional_key(),
+                row,
+            },
+            Some(id),
+        );
+    }
+
+    /// Pending operator intents, with a stable identity when their producer
+    /// derives one from durable state. Stores must deduplicate those identities.
+    pub fn pending_notice_entries(&self) -> impl Iterator<Item = (Option<&str>, &TranscriptRow)> {
         self.notice_keys
             .iter()
             .zip(&self.notices)
-            .map(|(key, row)| TranscriptItem {
-                key: *key,
-                row: row.clone(),
+            .map(|(key, row)| (self.notice_ids.get(key).map(String::as_str), row))
+    }
+
+    pub(crate) fn pending_notice_items(&self) -> Vec<(TranscriptItem, Option<String>)> {
+        self.notice_keys
+            .iter()
+            .zip(&self.notices)
+            .map(|(key, row)| {
+                (
+                    TranscriptItem {
+                        key: *key,
+                        row: row.clone(),
+                    },
+                    self.notice_ids.get(key).cloned(),
+                )
             })
             .collect()
     }
 
-    pub(crate) fn record_notice_item(&mut self, item: TranscriptItem) {
+    pub(crate) fn record_notice_item(&mut self, item: TranscriptItem, id: Option<String>) {
         let TranscriptItem { key, row } = item;
+        if let Some(id) = id {
+            self.notice_ids.insert(key, id);
+        }
         self.notices.push(row.clone());
         self.notice_keys.push(key);
         if let Some(sequence) = self.insert(row, bound_row) {

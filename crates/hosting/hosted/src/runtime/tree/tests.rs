@@ -11,6 +11,387 @@ use crate::runtime::test_kit::MemoryRows;
 use crate::runtime::test_support::*;
 use crate::sessions::SessionRecord;
 
+#[tokio::test]
+async fn a_child_finished_before_the_first_observation_keeps_its_notices_once() {
+    use crate::agent_tree::{FakeVcs, ProductAgentTree};
+    use crate::agent_tree_protocol::{
+        AdoptCandidateRequest, SpawnAgentRequest, SpawnWorkspace, SubmitResultRequest, Tier,
+        WriterMode,
+    };
+    use crate::session_store::SessionRecordStore;
+    let root = tempfile::tempdir().unwrap();
+    let paths = MemoryRows::new();
+    let mut session = SessionRecord::new(root.path().to_path_buf());
+    let tree_id = durable_tree_id(&paths, &session);
+    let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
+        Arc::new(FakeVcs::new()),
+        &tree_id,
+        "root",
+        "owner",
+        root.path().to_path_buf(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut request =
+        SpawnAgentRequest::test_named("implement", Tier::Mutate, "fast child", "finish now");
+    request.workspace = SpawnWorkspace::Fork;
+    let child = tree.spawn_agent("root", &request, None).unwrap();
+    tree.submit_result(
+        &child.agent_id,
+        &SubmitResultRequest {
+            turn_token: tree.attempt(&child.agent_id).unwrap().turn_token,
+            output_json: "{\"ok\":true}".into(),
+        },
+        None,
+    )
+    .unwrap();
+    tree.record_turn_completed(&child.agent_id).unwrap();
+    tree.settle_for_test();
+    let candidate = tree
+        .attempt(&child.agent_id)
+        .unwrap()
+        .candidate_id
+        .clone()
+        .unwrap();
+    tree.adopt_candidate(
+        "root",
+        &AdoptCandidateRequest {
+            candidate_id: candidate,
+            revert: false,
+            accept_conflicts: false,
+            expected_target: None,
+            evidence: None,
+        },
+        Some("adopt-operation-1"),
+    )
+    .unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(sender);
+    let home = SessionHome::new(root.path().join("sessions"));
+    let mut push = TreeSnapshotPush::default();
+    emit_tree_snapshot_if_revision_advanced(
+        &paths,
+        paths.records(),
+        &home,
+        &mut session,
+        &mut push,
+        &events,
+        true,
+    );
+    let recorded = paths.records().load_intents(&session.id).unwrap();
+    let count = |event| {
+        recorded
+            .notices
+            .iter()
+            .filter(
+                |notice| matches!(&notice.row, TranscriptRow::Milestone(row) if row.event == event),
+            )
+            .count()
+    };
+    assert_eq!(count(MilestoneEvent::Spawned), 1);
+    assert_eq!(count(MilestoneEvent::Finished), 1);
+    assert_eq!(count(MilestoneEvent::Adopted), 1);
+    assert_eq!(recorded.notices.iter().filter(|notice| matches!(&notice.row, TranscriptRow::Tool(row) if row.name == "child_result")).count(), 1);
+    session = paths.records().load(&session.id).unwrap();
+    assert!(events.publish_transcript(logging::project_session_snapshot(&session)));
+    let keyed = received
+        .try_iter()
+        .find_map(|event| match event {
+            HostEvent::PresentationSnapshot(snapshot) => Some(snapshot),
+            _ => None,
+        })
+        .unwrap();
+    keyed.validate().unwrap();
+    for event in [
+        MilestoneEvent::Spawned,
+        MilestoneEvent::Finished,
+        MilestoneEvent::Adopted,
+    ] {
+        assert_eq!(
+            keyed
+                .items
+                .iter()
+                .filter(|item| matches!(&item.row,
+            TranscriptRow::Milestone(row) if row.event == event))
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        keyed
+            .items
+            .iter()
+            .filter(|item| matches!(&item.row,
+        TranscriptRow::Tool(row) if row.name == "child_result"))
+            .count(),
+        1
+    );
+    // A fresh host and a transcript with all visible rows truncated still
+    // consult the retained notice intents, not process-local observations.
+    session = paths.records().load(&session.id).unwrap();
+    session.transcript = sessions::ProductTranscript::default();
+    push = TreeSnapshotPush::default();
+    emit_tree_snapshot_if_revision_advanced(
+        &paths,
+        paths.records(),
+        &home,
+        &mut session,
+        &mut push,
+        &events,
+        true,
+    );
+    let again = paths.records().load_intents(&session.id).unwrap();
+    assert_eq!(again.notices.len(), recorded.notices.len());
+    assert!(
+        !received
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::Row(TranscriptRow::Milestone(_))))
+    );
+    crate::topology_runtime::force_release(&tree_id).await;
+}
+
+#[test]
+fn a_pending_named_notice_in_an_unsaved_session_is_not_published_twice() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = MemoryRows::new();
+    let mut session = SessionRecord::new(root.path().to_owned());
+    let milestone = AgentMilestone {
+        agent_id: "c1".into(),
+        event: MilestoneEvent::Spawned,
+        template: None,
+        text: None,
+        duration_ms: None,
+        candidate: None,
+        files: None,
+        paths: Vec::new(),
+    };
+    let row = TranscriptRow::Milestone(milestone.clone());
+    session
+        .transcript
+        .record_named_notice("pending-start".into(), row.clone());
+    let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(sender);
+    assert!(events.send(ContentEvent::Row(row)));
+    let home = SessionHome::new(root.path().join("sessions"));
+    for _ in 0..2 {
+        let mut ids = known_notice_ids(paths.records(), &session).unwrap();
+        assert!(
+            !publish_milestone_once(
+                paths.records(),
+                &home,
+                &mut session,
+                &events,
+                &mut ids,
+                "pending-start",
+                milestone.clone()
+            )
+            .unwrap()
+        );
+    }
+    assert_eq!(session.store_revision, 0);
+    assert_eq!(
+        received
+            .try_iter()
+            .filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Milestone(_))))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_question_before_the_first_tree_observation_is_announced_once() {
+    use crate::agent_tree_protocol::{
+        MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest, WriterMode,
+    };
+    use crate::session_store::SessionRecordStore;
+    let root = tempfile::tempdir().unwrap();
+    let paths = MemoryRows::new();
+    let mut session = SessionRecord::new(root.path().to_owned());
+    let tree_id = durable_tree_id(&paths, &session);
+    let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+        &tree_id,
+        "root",
+        "owner",
+        root.path().to_owned(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap();
+    let sent = tree
+        .send_agent_message(
+            &child.agent_id,
+            &SendAgentMessageRequest {
+                agent_id: "root".into(),
+                message: "which branch?".into(),
+                purpose: Some(MessagePurpose::Question),
+                priority: None,
+                in_reply_to: None,
+                output_schema_json: None,
+                refresh: None,
+            },
+            None,
+        )
+        .unwrap();
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(sender);
+    let home = SessionHome::new(root.path().join("sessions"));
+    for _ in 0..2 {
+        emit_tree_snapshot_if_revision_advanced(
+            &paths,
+            paths.records(),
+            &home,
+            &mut session,
+            &mut TreeSnapshotPush::default(),
+            &events,
+            true,
+        );
+    }
+    let notices = paths.records().load_intents(&session.id).unwrap().notices;
+    let asks: Vec<_> = notices
+        .iter()
+        .filter(|notice| {
+            matches!(&notice.row,
+        TranscriptRow::Milestone(row) if row.event == MilestoneEvent::Asks)
+        })
+        .collect();
+    assert_eq!(asks.len(), 1);
+    assert!(
+        asks[0]
+            .notice_id
+            .ends_with(&format!(":question:{}", sent.message_id))
+    );
+    assert_eq!(
+        received
+            .try_iter()
+            .filter(|event| matches!(event,
+        HostEvent::Row(TranscriptRow::Milestone(row)) if row.event == MilestoneEvent::Asks))
+            .count(),
+        1
+    );
+    crate::topology_runtime::force_release(&tree_id).await;
+}
+
+#[tokio::test]
+async fn adoption_notices_use_merge_operations_not_reused_or_absent_call_ids() {
+    use crate::agent_tree::{FakeVcs, ProductAgentTree};
+    use crate::agent_tree_protocol::{
+        AdoptCandidateRequest, SpawnAgentRequest, SpawnWorkspace, SubmitResultRequest, Tier,
+        WriterMode,
+    };
+    use crate::session_store::SessionRecordStore;
+    let root = tempfile::tempdir().unwrap();
+    let paths = MemoryRows::new();
+    let mut session = SessionRecord::new(root.path().to_owned());
+    let tree_id = durable_tree_id(&paths, &session);
+    let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
+        Arc::new(FakeVcs::new()),
+        &tree_id,
+        "root",
+        "owner",
+        root.path().to_owned(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let (sender, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(sender);
+    for (index, call) in [Some("reused-call"), Some("reused-call"), None]
+        .into_iter()
+        .enumerate()
+    {
+        let mut request =
+            SpawnAgentRequest::test_named("implement", Tier::Mutate, "worker", "finish now");
+        request.workspace = SpawnWorkspace::Fork;
+        let child = tree.spawn_agent("root", &request, None).unwrap();
+        tree.submit_result(
+            &child.agent_id,
+            &SubmitResultRequest {
+                turn_token: tree.attempt(&child.agent_id).unwrap().turn_token,
+                output_json: "{\"ok\":true}".into(),
+            },
+            None,
+        )
+        .unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        let candidate = tree
+            .attempt(&child.agent_id)
+            .unwrap()
+            .candidate_id
+            .clone()
+            .unwrap();
+        tree.adopt_candidate(
+            "root",
+            &AdoptCandidateRequest {
+                candidate_id: candidate,
+                revert: false,
+                accept_conflicts: false,
+                expected_target: None,
+                evidence: None,
+            },
+            Some(&format!("merge-operation-{index}")),
+        )
+        .unwrap();
+        assert!(events.send(ContentEvent::ToolLine {
+            call_id: call.map(str::to_owned),
+            parent_call_id: None,
+            cell_id: None,
+            kind: plakous_host_protocol::views::presentation::ActivityKind::Agent,
+            name: "adopt_candidate".into(),
+            state: "done".into(),
+            subject: None,
+            detail: None,
+            duration_ms: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            wait: None,
+        }));
+    }
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).unwrap();
+    let home = SessionHome::new(root.path().join("sessions"));
+    for _ in 0..2 {
+        emit_tree_snapshot_if_revision_advanced(
+            &paths,
+            paths.records(),
+            &home,
+            &mut session,
+            &mut TreeSnapshotPush::default(),
+            &events,
+            true,
+        );
+    }
+    let notices = paths.records().load_intents(&session.id).unwrap().notices;
+    let adopted: Vec<_> = notices
+        .iter()
+        .filter(|notice| {
+            matches!(&notice.row,
+        TranscriptRow::Milestone(row) if row.event == MilestoneEvent::Adopted)
+        })
+        .collect();
+    assert_eq!(adopted.len(), 3);
+    assert!(
+        adopted
+            .iter()
+            .all(|notice| notice.notice_id.contains(":adopt:")
+                && notice.notice_id.contains(":merge-operation-"))
+    );
+    assert_eq!(
+        received
+            .try_iter()
+            .filter(|event| matches!(event,
+        HostEvent::Row(TranscriptRow::Milestone(row)) if row.event == MilestoneEvent::Adopted))
+            .count(),
+        3
+    );
+    crate::topology_runtime::force_release(&tree_id).await;
+}
+
 #[test]
 fn closing_an_agent_without_a_hub_retires_its_cached_notice_scope() {
     use plakous_host_protocol::views::transcript::TranscriptScope;
@@ -590,9 +971,15 @@ async fn a_session_switch_re_resolves_the_tree_and_pushes_keep_arriving() {
         false,
     );
     let observed: Vec<HostEvent> = rx.try_iter().collect();
-    let [HostEvent::TopologyNavigatorSnapshot(snapshot)] = observed.as_slice() else {
+    let [
+        HostEvent::Row(TranscriptRow::Milestone(spawned)),
+        HostEvent::TopologyNavigatorSnapshot(snapshot),
+    ] = observed.as_slice()
+    else {
         panic!("a session switch must not silence the canvas: {observed:?}");
     };
+    assert_eq!(spawned.event, MilestoneEvent::Spawned);
+    assert_eq!(spawned.agent_id, "c1");
     assert_eq!(snapshot.tree_id, second_tree);
     assert_eq!(snapshot.nodes.len(), 2);
     crate::topology_runtime::force_release(&first_tree).await;

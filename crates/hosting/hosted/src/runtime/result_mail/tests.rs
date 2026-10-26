@@ -850,6 +850,7 @@ async fn result_observation_is_bounded_and_deduplicated_before_admission() {
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::{Sender, TreeSnapshotPush};
     use crate::surface_protocol::HostEvent;
+    use plakous_host_protocol::views::transcript::{MilestoneEvent, TranscriptRow};
     let dir = tempfile::tempdir().unwrap();
     let rows = MemoryRows::new();
     let mut session = SessionRecord::new(dir.path().to_owned());
@@ -869,8 +870,11 @@ async fn result_observation_is_bounded_and_deduplicated_before_admission() {
         false,
     );
     let observed: Vec<_> = receiver.try_iter().collect();
+    // First observation replays both durable lifecycle milestones, even
+    // though this child completed before the host ever saw it running.
     assert!(
-        matches!(observed.as_slice(), [HostEvent::ToolLine { kind: plakous_host_protocol::views::presentation::ActivityKind::Agent, name, state, subject: Some(subject), .. }, HostEvent::TopologyNavigatorSnapshot(_)] if name == "child_result" && state == "done" && subject.contains("completed") && subject.len() < 4096)
+        matches!(observed.as_slice(), [HostEvent::Row(TranscriptRow::Milestone(start)), HostEvent::Row(TranscriptRow::Milestone(finish)), HostEvent::ToolLine { kind: plakous_host_protocol::views::presentation::ActivityKind::Agent, name, state, subject: Some(subject), .. }, HostEvent::TopologyNavigatorSnapshot(_)] if start.event == MilestoneEvent::Spawned && finish.event == MilestoneEvent::Finished && start.agent_id == finish.agent_id && name == "child_result" && state == "done" && subject.contains("completed") && subject.len() < 4096),
+        "{observed:#?}"
     );
     assert!(
         session.transcript.iter().any(|line| line
@@ -888,7 +892,7 @@ async fn result_observation_is_bounded_and_deduplicated_before_admission() {
         .items
         .iter()
         .map(|item| &item.row)
-        .filter_map(plakous_host_protocol::views::transcript::TranscriptRow::as_tool)
+        .filter_map(TranscriptRow::as_tool)
         .collect();
     assert_eq!(tools.len(), 1);
     let HostEvent::ToolLine {
@@ -898,7 +902,7 @@ async fn result_observation_is_bounded_and_deduplicated_before_admission() {
         name,
         state,
         ..
-    } = &observed[0]
+    } = &observed[2]
     else {
         panic!("tool line")
     };

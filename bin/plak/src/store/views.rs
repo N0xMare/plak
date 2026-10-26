@@ -1228,12 +1228,33 @@ pub(super) fn write_notices(
             |row| row.get(0),
         )
         .map_err(|error| super::write_error(error, "product store write failed"))?;
-    for row in session.transcript.pending_notices() {
+    for (id, row) in session.transcript.pending_notice_entries() {
+        if let Some(id) = id {
+            let prior: Option<String> = connection
+                .query_row(
+                    "SELECT row FROM operator_notices WHERE session_id=?1 AND notice_id=?2",
+                    params![session.id, id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|error| {
+                    super::write_error(error, "could not read operator notice identity")
+                })?;
+            if let Some(prior) = prior {
+                let prior: TranscriptRow = serde_json::from_str(&prior).map_err(|error| {
+                    super::write_error(error, "operator notice is not decodable")
+                })?;
+                if prior != *row {
+                    return Err("operator notice identity changed".to_owned().into());
+                }
+                continue;
+            }
+        }
         insert_notice(
             connection,
             &session.id,
             &OperatorNotice {
-                notice_id: uuid::Uuid::new_v4().to_string(),
+                notice_id: id.map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_owned),
                 anchor: from_i64(anchor).map_err(invalid)?,
                 ordinal: next,
                 row: row.clone(),

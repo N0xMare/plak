@@ -1136,13 +1136,6 @@ struct TreeSnapshotPush {
     /// stops the line repeating on every snapshot, the same way
     /// `notified_results` does for child results.
     announced_abandoned_turns: std::collections::BTreeSet<String>,
-    /// Last observed lifecycle of each child, keyed by agent id: what the
-    /// next tree read compares against to emit milestone rows. `None` until
-    /// the first read of this session seeds it without emitting.
-    child_lifecycles: Option<std::collections::BTreeMap<String, tree::ChildLifecycle>>,
-    /// Questions to the root already shown as `asks` milestones; seeded with
-    /// the first read like `child_lifecycles`.
-    announced_questions: std::collections::BTreeSet<String>,
 }
 
 enum TurnHostOutcome {

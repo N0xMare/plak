@@ -1611,7 +1611,7 @@ start and finish timestamps rather than time spent qualifying the operation.
 | process | job id, outcome, duration | (a) the process session's `OperationAdvanced` facts and their `committed_at_ms`; (b) the exit status from its committed job terminal |
 | process | subject | (b) the starting call's command through `feed_call`, redacted and bounded as a tool subject |
 | retry | every field | (d) a notice intent: a transport retry is not a commit |
-| milestone | every field | (d) a notice intent the host writes when it observes the tree transition; an `adopted` milestone's file count is read from the root's committed `adopt_candidate` result through `feed_call`, and an `adopt conflict` milestone's paths (not in the result) from the call's tool-boundary facts |
+| milestone | every field | (d) a notice intent derived from durable tree attempts, questions and root adoption receipts; an `adopted` milestone's file count and identity come from the successful tree operation receipt, and an `adopt conflict` milestone's paths (not in the result) from the call's tool-boundary facts |
 | notice, recovery and turn scope | the line and its tone | (a) the `TurnTerminal` (claim, cause, whether a model round and a tool round completed, steering clause) and (b) the terminal record through `feed_terminal`; a recovered turn that completed uses the live completion wording. Abandoning a root whose `RecoveryRequired` terminal was already committed derives no further notice: that `TurnTerminal` already derived its row |
 | error row of a failed turn | the rendered text | (b) the failure kind and message of the terminal record through `feed_terminal`, rendered by a pure function whose only classifier is the typed model error kind; a message without a kind, or with a kind the renderer does not frame, is shown raw and its words are never read for a category |
 | notice, compaction scope | the not-applied and outcome lines | (a) `WorkflowSettled` |
@@ -3838,10 +3838,15 @@ truncation cannot drop it. The projection itself enforces its row rules for
 every write, live or imported: a header row is never appended, the truncation
 marker exists only as the first row, a tool or process row's subject is
 bounded to 240 bytes on one line, a tool row's detail to 2 KiB, and a thinking row to 64 KiB.
-Child lifecycle transitions observed on the agent
-tree (spawned, re-tasked on a new attempt, finished with the observed
-duration, failed, needs recovery) persist as milestone rows, host-authored
-notice intents written when the host observes the transition (§2.6), and the
+Child lifecycle milestones derive from retained tree attempts, not from the
+host having sampled an intermediate running state. Each attempt's start
+(spawned, or re-tasked for a followup) and terminal milestone (finished,
+failed, needs recovery) is a host-authored notice intent keyed by tree,
+attempt and event (§2.6). A child already finished on the first observation
+still earns its start and terminal notices. Finished duration uses the
+attempt's durable start/end stamps. Retained notice identities prevent
+duplicates after reattachment or bounded-transcript truncation; a failed
+notice write is retried rather than counted as published. The
 terminal transition of a root-owned background process persists as a process
 row derived from its process session's facts, including one started on the
 root's own fork or rebind lineage. A child-owned process shows in Activity >
@@ -3851,10 +3856,13 @@ its failure message, and a needs recovery one the tree's fault reason (or the
 failure message), each bounded to 2 KiB. A text over its bound keeps its head
 (cut at a line end when it has several lines) and ends with a line that says so,
 `… cut at 16 KiB of 40 KiB`. A question a child addresses
-to the root is an `asks` milestone (said once per message; the first tree read
-of an attach seeds what was already there). The root's own `adopt_candidate`
-call earns an `adopted` milestone with the landed file count, read from the
-committed result's `files_changed` through `feed_call`, or an `adopt conflict`
+to the root is an `asks` milestone keyed by tree and message id, including a
+question already present at the first observation. A snapshot loads recorded
+notice identities once, also recognizes named pending notices, and adds ids
+only after successful commits. The root's own `adopt_candidate` operation
+earns an `adopted` milestone keyed by tree, candidate and durable operation id,
+with the landed file count from its receipt; reused or absent presentation
+call ids do not merge distinct adoptions. A call may instead earn an `adopt conflict`
 milestone with the conflicting paths (at most 16, each whole as the VCS named
 it), which the committed result does not carry and the host takes from the
 call's tool-boundary facts; the producing child is the candidate's sealer, and

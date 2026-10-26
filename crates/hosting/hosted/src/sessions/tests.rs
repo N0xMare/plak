@@ -23,12 +23,12 @@ fn skipped_stored_rows_do_not_leak_keys_and_pending_notice_identity_survives_rel
     let mut transcript = ProductTranscript::stored(input);
     transcript.record_notice(TranscriptRow::info(NoticeScope::Tree, "pending"));
     let pending = transcript.pending_notice_items();
-    let key = pending[0].key;
+    let key = pending[0].0.key;
     assert_ne!(key, RowKey::new(9, Lane::Runtime, 0));
     assert_eq!(transcript.items().last().unwrap().key, key);
     let mut reloaded = ProductTranscript::stored(retained);
-    for item in pending {
-        reloaded.record_notice_item(item);
+    for (item, id) in pending {
+        reloaded.record_notice_item(item, id);
     }
     assert_eq!(transcript.items(), reloaded.items());
 }
@@ -101,6 +101,35 @@ fn project_delivery(
 }
 
 use super::*;
+
+#[test]
+fn named_notice_retries_are_idempotent_and_identity_collisions_are_atomic() {
+    use crate::session_store::{MemoryStore, SessionRecordStore};
+    let root = tempfile::tempdir().unwrap();
+    let store = MemoryStore::new();
+    let mut record = SessionRecord::new(root.path().to_owned());
+    let row = TranscriptRow::info(NoticeScope::Tree, "durable start");
+    record
+        .transcript
+        .record_named_notice("attempt:start".into(), row.clone());
+    store.save(&mut record).unwrap();
+    record = store.load(&record.id).unwrap();
+    record
+        .transcript
+        .record_named_notice("attempt:start".into(), row);
+    store.save(&mut record).unwrap();
+    assert_eq!(store.load_intents(&record.id).unwrap().notices.len(), 1);
+    record.transcript.record_named_notice(
+        "new-but-uncommitted".into(),
+        TranscriptRow::info(NoticeScope::Tree, "not committed"),
+    );
+    record.transcript.record_named_notice(
+        "attempt:start".into(),
+        TranscriptRow::info(NoticeScope::Tree, "different identity payload"),
+    );
+    assert!(store.save(&mut record).is_err());
+    assert_eq!(store.load_intents(&record.id).unwrap().notices.len(), 1);
+}
 use plakous_host_protocol::views::presentation::row_bytes;
 
 #[test]
