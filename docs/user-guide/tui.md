@@ -248,6 +248,8 @@ build applies the changed settings. Unchanged settings keep exact reopen.
 Bind hints or digest/rendering changes alone do not create another session.
 Changed template text or other effective template/orchestration values do,
 including changed built-in defaults, just like an explicit edit.
+Both `/rebind` and the changed-settings reload carry keep committed session-owned
+named JSON state; transient program variables are not carried.
 If the config or tree cannot be inspected, it skips apply with a notice and
 continues normal reload. Ordinary prompts do not silently replace the epoch.
 Before closing the old session, `/reload` checks the destination route.

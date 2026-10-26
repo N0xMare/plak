@@ -1339,7 +1339,7 @@ pub(crate) fn handle_tui_handoff(
 ) -> CliResult<()> {
     match handoff {
         tui::TuiHandoff::Rebind { cause } => {
-            match carry::rebind_session(services, record, &cause) {
+            match carry::rebind::rebind_session(services, record, &cause) {
                 Ok((next, note)) => {
                     *record = next;
                     *reload_note = Some(note);

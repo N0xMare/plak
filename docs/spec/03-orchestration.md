@@ -148,7 +148,8 @@ root's tool descriptions. The transcript says `orchestration settings changed;
 carried into a new session to apply them` and links `carried forward from <id>`.
 Only roster and bounds are refrozen: the source account, model, effort,
 composition and target selection stay selected, revalidated under the current
-login. The carry keeps replay with validation when its binding is unchanged.
+login. The carry preserves committed session-owned named JSON state and keeps
+replay with validation when its binding is unchanged.
 Persisted non-terminal children refuse carry even with no root attachment.
 The installed build performs the comparison after the normal reload handoff;
 a comparison reads effective bounds, occupancy/reclamation/evidence controls,

@@ -2342,6 +2342,90 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
     }
 }
 
+#[test]
+fn rebind_and_epoch_reload_preserve_committed_named_state() {
+    for epoch_reload in [false, true] {
+        let mut script = tool_then_answer("state source answer");
+        script["tree"] = json!(true);
+        script["durable_tree"] = json!(true);
+        let fixture = Fixture::new(&script);
+        let config_path = fixture.home().join("config.toml");
+        let config = std::fs::read_to_string(&config_path).unwrap();
+        write_private(
+            &config_path,
+            &config.replace("subagents = false", "subagents = true"),
+        );
+        let original = fixture.session_with_one_turn("source prompt", "state source answer");
+        let path = fixture.export(&original, "named-source.json");
+        let mut document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let named = json!({"progress": {"done": ["read"], "next": "verify"}, "counter": 7});
+        document["named_state"] = named.clone();
+        write_private(&path, &serde_json::to_string(&document).unwrap());
+        let imported = fixture.cli(&["session", "import", path.to_str().unwrap()]);
+        assert!(
+            imported.status.success(),
+            "{}",
+            String::from_utf8_lossy(&imported.stderr)
+        );
+        let seed = String::from_utf8(imported.stdout)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("resume with: plak --resume "))
+            .expect("imported session id")
+            .to_owned();
+        let mut terminal = Terminal::spawn(&fixture, Launch::Resume(&seed));
+        terminal.wait_ready();
+        if epoch_reload {
+            let path = fixture.home().join("config.toml");
+            let config = std::fs::read_to_string(&path).unwrap();
+            write_private(
+                &path,
+                &config.replace("[orchestration]", "[orchestration]\nmax_children = 31"),
+            );
+        }
+        terminal.send(if epoch_reload {
+            b"/reload\r"
+        } else {
+            b"/rebind\r"
+        });
+        let deadline = Instant::now() + WAIT;
+        let successor = loop {
+            let ids = fixture.session_ids();
+            if let Some(id) = ids.into_iter().find(|id| id != &original && id != &seed) {
+                break id;
+            }
+            assert!(
+                terminal.is_alive() && Instant::now() < deadline,
+                "carry did not create its successor: {}",
+                terminal.screen()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        terminal.wait_where("the carried successor's ready shell", |frame| {
+            frame.contains(&format!("session {}", &successor[..8]))
+                && frame.contains("%/")
+                && frame.contains("/ commands")
+        });
+        terminal.quit();
+        // `session list` also names source UUIDs in lineage columns.
+        let sessions: std::collections::BTreeSet<_> = fixture.session_ids().into_iter().collect();
+        assert_eq!(
+            sessions,
+            std::collections::BTreeSet::from([original, seed.clone(), successor.clone()]),
+            "one carry per request (epoch_reload={epoch_reload})"
+        );
+        for (session, name) in [
+            (&seed, "source-state.json"),
+            (&successor, "successor-state.json"),
+        ] {
+            let path = fixture.export(session, name);
+            let exported: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(exported["version"], 9);
+            assert_eq!(exported["named_state"], named);
+        }
+    }
+}
+
 fn assert_same_key_reload_starts_installed_build(changed_orchestration: bool) {
     let fixture = Fixture::new(&tool_then_answer("same-key answer"));
     let key = Command::new(env!("CARGO_BIN_EXE_plak"))

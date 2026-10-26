@@ -22,14 +22,14 @@ pub(crate) fn apply_on_reload(
         if !orchestration_changed(&paths, record).map_err(crate::CliFailure::new)? {
             return Ok(None);
         }
-        super::ensure_carry_quiescence(&paths, record)?;
+        super::rebind::ensure_carry_quiescence(&paths, record)?;
         let document = super::export_session(&paths, record)
             .map_err(|error| crate::CliFailure::new(error.to_string()))?;
-        crate::commands::session::rebind_document(
+        crate::commands::session::rebind::rebind_document(
             services,
             document,
             ORCHESTRATION_CARRY_CAUSE,
-            super::ReboundMode::Orchestration,
+            super::rebind::ReboundMode::Orchestration,
         )
         .map(Some)
     };
@@ -288,14 +288,14 @@ mod tests {
         .unwrap();
         crate::store::tree::save_tree(&paths, &mut tree).unwrap();
         assert!(
-            super::super::ensure_carry_quiescence(&paths, &record)
+            super::super::rebind::ensure_carry_quiescence(&paths, &record)
                 .unwrap_err()
                 .message()
                 .contains("not quiescent")
         );
         let services = crate::shell::services::Services::for_home(paths);
         assert!(
-            crate::carry::rebind_session(&services, &record, "test rebind")
+            crate::carry::rebind::rebind_session(&services, &record, "test rebind")
                 .unwrap_err()
                 .message()
                 .contains("not quiescent")

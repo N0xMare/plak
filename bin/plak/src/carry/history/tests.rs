@@ -33,9 +33,12 @@ fn rebind_keeps_full_history_and_source_lineage_without_an_attachment() {
     let mut document = crate::carry::document::sample_document();
     document.version = crate::carry::VERSION;
     document.workspace_root = root.path().to_path_buf();
-    document.checkpoint = None;
-    document.archive = None;
-    document.history = Some(History::export(&history).unwrap());
+    document.history = History::export(&history).unwrap();
+    document.named_state.insert(
+        "progress".into(),
+        serde_json::json!({"step": 3, "done": ["read"]}),
+    );
+    let named_state = document.named_state.clone();
     let source_id = document.source.session_id.clone();
     document.binding.account = Some("grok".into());
     document.binding.model = Some("grok-4.20".into());
@@ -47,6 +50,7 @@ fn rebind_keeps_full_history_and_source_lineage_without_an_attachment() {
         .unwrap();
     assert_eq!(carried.history.segments(), history.segments());
     assert_eq!(carried.history.replay_account(), "source-account");
+    assert_eq!(carried.history.named_state().unwrap(), named_state);
     assert!(carried.record.plakous_locator.is_none());
     assert_ne!(carried.record.id, source_id);
     assert_eq!(carried.record.account.as_deref(), Some("grok"));

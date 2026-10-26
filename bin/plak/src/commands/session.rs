@@ -6,6 +6,8 @@ mod delete;
 mod import_export;
 mod lookup;
 mod read_only;
+#[cfg(any(test, feature = "tui"))]
+pub(crate) mod rebind;
 mod recovery;
 
 pub(crate) use attached::{probe_carry_capacity, probe_prepared_capacity, run_attached_action};
@@ -18,7 +20,6 @@ pub(crate) use delete::{delete_session, gc_sessions};
 
 pub(crate) use import_export::{
     PreparedImport, export_session, import_document, import_prepared, import_session,
-    rebind_document,
 };
 
 pub use lookup::load_exact_product_session;

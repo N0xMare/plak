@@ -79,27 +79,6 @@ pub(crate) fn import_document(
     import_prepared(services, PreparedImport::new(document, local_handoff)?)
 }
 
-pub(crate) fn rebind_document(
-    services: &crate::shell::services::Services,
-    document: crate::carry::CarryDocument,
-    cause: &str,
-    mode: crate::carry::ReboundMode,
-) -> CliResult<(product_sessions::SessionRecord, String)> {
-    let estimated_tokens = document.estimated_tokens();
-    let messages = document.message_count();
-    let config = product_config::ProductConfig::load(services.paths()?).map_err(CliFailure::new)?;
-    let carried = document.into_rebound_import(cause)?;
-    import_prepared_with_fallback(
-        services,
-        PreparedImport {
-            carried,
-            estimated_tokens,
-            messages,
-        },
-        (mode != crate::carry::ReboundMode::Orchestration).then_some(&config),
-    )
-}
-
 pub(crate) fn import_prepared(
     services: &crate::shell::services::Services,
     prepared: PreparedImport,
@@ -107,7 +86,7 @@ pub(crate) fn import_prepared(
     import_prepared_with_fallback(services, prepared, None)
 }
 
-fn import_prepared_with_fallback(
+pub(super) fn import_prepared_with_fallback(
     services: &crate::shell::services::Services,
     prepared: PreparedImport,
     root_fallback: Option<&product_config::ProductConfig>,

@@ -583,7 +583,9 @@ same genesis bound clamping. Only `digest`, `templates_digest` and `bind_hints`
 are excluded; reached tool tables compare as TOML values, not rendering bytes.
 Changed descriptions, cost tiers, model visibility, template names and root
 template selection count, including values supplied by built-ins or defaults
-when not overridden by the user. Hints or digest/render-recipe changes alone
+when not overridden by the user. Adding an always-rendered tool-option key
+also counts as a changed default and carries each affected idle session once.
+Hints or digest/render-recipe changes alone
 keep exact reopen, even through multiple build reloads. `/rebind` explicitly performs the same carry even when
 exact reopen cannot attach the root. Neither path relabels provider replay for
 another account; no prompt is automatically submitted. A profile's

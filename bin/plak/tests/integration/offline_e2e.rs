@@ -6685,8 +6685,9 @@ fn carry_probe_and_attached_recovery_work_without_a_ready_picker_catalog() {
     assert!(source.status.success(), "{}", source.stderr);
     let session = source.session_id();
     let (path, _) = export_session(&fixture, &session, "unready-picker.json");
-    // The injected runtime binds its own model; its picker catalog is empty.
-    // These faces must resolve that binding, not classify a /rebind fallback.
+    // Loopback returns before catalog classification, so this covers the two
+    // CLI faces, not catalog scope. The real non-Ready scope coverage is
+    // exact_actions_and_carry_probes_do_not_require_a_ready_picker.
     let probe = run_cli(&fixture, &["version", "--carry-probe", &path]);
     assert!(probe.status.success(), "{}", probe.stderr);
     let recovered = run_cli(&fixture, &["session", "recover", &session]);

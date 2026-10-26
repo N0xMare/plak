@@ -13,27 +13,6 @@ use std::io::IsTerminal as _;
 use std::path::Path;
 
 impl CarryDocument {
-    pub(crate) fn into_rebound_import(self, cause: &str) -> CliResult<CarriedImport> {
-        let mut carried = self
-            .into_import_with_replay(true)
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        let record = &mut carried.record;
-        let source = record
-            .carried_forward_from()
-            .map(|(id, _)| id)
-            .unwrap_or("unknown");
-        let notice = format!(
-            "carried forward from {source}: {}",
-            plakous::model::SafeDiagnostic::new(cause)
-        );
-        record.record_notice(TranscriptRow::info(
-            crate::store::sessions::NoticeScope::Session,
-            &notice,
-        ));
-        carried.note.push_str(&format!("; {notice}"));
-        Ok(carried)
-    }
-
     /// The new record this document becomes, the conversation its runtime is
     /// created with, and the note that tells the operator so. The record has a
     /// new id and links back to the source session and its state key.

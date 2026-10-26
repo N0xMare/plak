@@ -360,7 +360,7 @@ compression, not classification by prose or a change to recovery authority.
 | `runtime.sqlite3` | Plakous | checkpoints, canonical history and the change feed (chapter 01 §5.11) — the only recovery authority, and the source every view below is derived from |
 | `product.sqlite3` | Plak | product intents (sessions, queue and submissions, prompt history, workflow requests, operator notices) and the views the projector derives from the feed (§2.6); never recovery authority |
 | `subagents.sqlite3` | `plakous-recursive-subagents-store` (schema), Plak (location) | the agent tree: intents keyed to runtime command and call ids, views derived from the tree's sessions' feeds, and external-effect records (seals, adoptions, copies), reopened under the reopen law (chapter 03 §14) |
-| `telemetry/telemetry-v<schema>.sqlite3` | Plak | numbers only, disposable, never recovery authority |
+| `telemetry/telemetry-v<schema>.sqlite3` | Plak | numbers and the bounded OAuth refresh diagnostic only (§7.1), disposable, never recovery authority |
 
 `runtime.sqlite3`, `product.sqlite3`, and `subagents.sqlite3` are a
 **triple**. They are admitted together, and none is opened without the other
@@ -3302,7 +3302,8 @@ answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl
 is not paused it changes nothing and says `agent tree is not paused; nothing to
 resume`. Bare `/tree` opens the Agents list. Other tree arguments are refused.
 
-`/rebind` carries the full neutral conversation and typed transcript into a new
+`/rebind` carries the full neutral conversation, committed session-owned named
+JSON state and typed transcript into a new
 session at genesis, resolving the source account, model, effort, composition
 and target selection under the current login. Only an account removed from
 the product or a model/tuple missing from a Ready catalog permits fallback to
@@ -3343,7 +3344,9 @@ them`, linked to the source. The new tree freezes current bounds and roster
 and recompiles root tool descriptions at genesis. The source account, model,
 effort, composition and target selection are preserved and revalidated under
 the current login, never replaced by config defaults; replay is validated as
-for a local reload handoff. The source tree is not mutated. Unchanged settings
+for a local reload handoff. The source tree is not mutated. Committed named
+state survives both `/rebind` and the orchestration carry;
+neither path treats transient program variables as portable state. Unchanged settings
 keep the exact reopen path. An unreadable config or tree skips orchestration
 apply with a notice (`settings apply to new sessions`) and continues the normal
 reload. A cross-state import already freezes the destination's current roster
