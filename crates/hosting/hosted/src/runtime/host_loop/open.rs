@@ -586,7 +586,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             last_tree_revision,
             job_events: super::super::job_events::JobEvents::default(),
             last_tree_observed_at,
-            child_wake: super::wake::ChildWake::default(),
+            child_wake: super::wake::RootWake::default(),
             storage_interrupted: false,
             pending_track: super::pending::PendingTrack::default(),
             recovery_blocked,

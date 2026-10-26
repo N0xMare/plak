@@ -2,3 +2,4 @@
 
 pub(crate) mod ledger;
 pub(crate) mod transient;
+pub(crate) mod wake;

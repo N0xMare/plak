@@ -6,10 +6,9 @@
 //! processes need it); [`park_until_wake`] watches its own processes, its
 //! children and its mail, and [`start_wake_turn`] admits the wake as an
 //! ordinary host instruction on the same attempt and turn token.
-use crate::driver::ledger::CommandLedger as _;
-
-use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind};
+use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger, LedgerError};
 use crate::driver::transient::{self, ResumeGate, ResumeOwner, ResumePlan};
+use crate::driver::wake::{WakeCoalescer, WakeDecision, WakeIdentity, WakePolicy, WakeSources};
 
 use std::future::Future;
 use std::sync::Arc;
@@ -21,14 +20,32 @@ use super::children::{ChildTurnIdentity, mutate_child, persist_or_fault, settle_
 use crate::agent_tree_tools::TreeDriver;
 use crate::topology_runtime::LiveChildTable;
 
-/// Prefix of every wake command; the result-context journal reads it to admit
-/// mail of every purpose into the wake batch.
-pub(super) const WAKE_COMMAND_PREFIX: &str = "plak:park-wake:";
-
-/// Near-simultaneous arrivals ride one wake.
-const COALESCE: Duration = Duration::from_secs(1);
 /// Safety tick behind the tree and process notifications, as `wait_agent` has.
 const SAFETY_TICK: Duration = Duration::from_secs(1);
+
+/// A role classifies its transport's response; only this mapping changes the
+/// journal. Uncertainty, including reconciliation, never withdraws an intent.
+enum WakeSubmission {
+    Recorded,
+    Consumed,
+    Refused,
+    Uncertain,
+}
+
+fn settle_wake(
+    ledger: &mut dyn CommandLedger,
+    command_id: &str,
+    outcome: WakeSubmission,
+) -> Result<(), LedgerError> {
+    use crate::driver::ledger::Settlement;
+    let settlement = match outcome {
+        WakeSubmission::Recorded => Settlement::Recorded,
+        WakeSubmission::Consumed => Settlement::Consumed,
+        WakeSubmission::Refused => Settlement::Refused { pause: None },
+        WakeSubmission::Uncertain => return Ok(()),
+    };
+    ledger.settle(command_id, settlement)
+}
 
 /// What an unsubmitted child turn end means.
 pub(super) enum TurnEnd {
@@ -62,30 +79,7 @@ pub(super) enum ParkEnd {
 }
 
 /// Unread mail ids and unconsumed process notices (`p<N>`) a wake carried.
-pub(super) type Arrivals = std::collections::BTreeSet<String>;
-
-struct ParkFacts {
-    running: Vec<String>,
-    arrivals: Arrivals,
-    children: Vec<String>,
-    /// Unread mail a live delivery still holds: it lands as an arrival (or
-    /// is delivered) once that delivery returns.
-    claimed: Vec<String>,
-}
-
-impl ParkFacts {
-    fn live_work(&self) -> bool {
-        !self.running.is_empty() || !self.children.is_empty()
-    }
-
-    /// Arrivals the last wake did not already carry. A wake consumes its
-    /// batch and its notices; whatever it could not consume (past the prompt
-    /// bound) must not wake the child again by itself, or a turn end would
-    /// wake forever.
-    fn arrived_beyond(&self, carried: &Arrivals) -> bool {
-        self.arrivals.iter().any(|id| !carried.contains(id))
-    }
-}
+pub(super) use crate::driver::wake::Arrivals;
 
 /// Reads the facts after the turn result: the actor has finished that turn,
 /// so a process that ends now is either still `running` here (its terminal
@@ -94,7 +88,7 @@ async fn read_facts(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<LiveChildTable>>,
     agent_id: &str,
-) -> Option<ParkFacts> {
+) -> Option<WakeSources> {
     let agent = live.lock().await.get(agent_id)?.agent()?;
     let jobs = agent.jobs();
     let running = jobs
@@ -118,7 +112,7 @@ async fn read_facts(
             )
         })
         .ok()?;
-    Some(ParkFacts {
+    Some(WakeSources {
         running,
         arrivals: notices.chain(mail).collect(),
         children,
@@ -227,6 +221,8 @@ pub(super) async fn park_until_wake(
     if parked != Some(true) {
         return end_park(driver, live, agent_id, identity).await;
     }
+    let mut coalescer = WakeCoalescer::new(WakePolicy::Child);
+    coalescer.carried(carried.clone());
     loop {
         // Subscribe before reading, so an edge during the read still wakes
         // the next wait instead of waiting out the tick.
@@ -246,22 +242,21 @@ pub(super) async fn park_until_wake(
         // else) also wakes: nothing else would. Mail whose delivery is still
         // in flight holds the wake until that delivery returns, so the wake
         // carries it if the delivery found the turn ended.
-        if facts.claimed.is_empty() && (facts.arrived_beyond(carried) || !facts.live_work()) {
-            tokio::time::sleep(COALESCE).await;
-            if !still_parked(driver, live, agent_id, identity).await {
-                return end_park(driver, live, agent_id, identity).await;
+        match coalescer.observe(&facts, std::time::Instant::now()) {
+            WakeDecision::Wait { until } => {
+                tokio::time::sleep_until(until.into()).await;
+                continue;
             }
-            let arrivals = read_facts(driver, live, agent_id)
-                .await
-                .map(|facts| facts.arrivals)
-                .unwrap_or_default();
-            return match start_wake_turn(driver, live, agent_id, identity).await {
-                Ok(handle) => ParkEnd::Woken(handle, arrivals),
-                Err(WakeRefusal::ParkEnded) => end_park(driver, live, agent_id, identity).await,
-                // The child stays parked: the turn waiter marks it ending
-                // while it ends the attempt (or hands it to an interrupt).
-                Err(WakeRefusal::Failed(error)) => ParkEnd::WakeFailed(error),
-            };
+            WakeDecision::Fire(arrivals) => {
+                return match start_wake_turn(driver, live, agent_id, identity).await {
+                    Ok(handle) => ParkEnd::Woken(handle, arrivals),
+                    Err(WakeRefusal::ParkEnded) => end_park(driver, live, agent_id, identity).await,
+                    // The child stays parked: the turn waiter marks it ending
+                    // while it ends the attempt (or hands it to an interrupt).
+                    Err(WakeRefusal::Failed(error)) => ParkEnd::WakeFailed(error),
+                };
+            }
+            WakeDecision::Idle => {}
         }
         mutate_child(driver, agent_id, |tree| {
             tree.refresh_parked(agent_id, facts.running);
@@ -346,33 +341,7 @@ pub(super) fn wake_command(
     tree: &crate::agent_tree::ProductAgentTree,
     agent_id: &str,
 ) -> Result<String, String> {
-    let attempt = tree
-        .attempt(agent_id)
-        .ok_or_else(|| "attempt is missing".to_owned())?;
-    if attempt.output_json.is_some() || attempt.status.is_stopped() {
-        return Err("attempt is already submitted or terminal".into());
-    }
-    if tree.attempt_turns_spent(agent_id) {
-        return Err("attempt has spent its template max_turns; no wake turn is admitted".into());
-    }
-    let mut count = attempt.usage.turns;
-    loop {
-        let id = format!(
-            "{WAKE_COMMAND_PREFIX}{agent_id}:{}:{}:{count}",
-            tree.host_generation, attempt.attempt_id
-        );
-        // Consumption did not spend a turn, but its identity is no longer
-        // available to a fresh wake on this attachment.
-        if !tree.command(&id).is_some_and(|command| {
-            command.fact == Some(crate::agent_tree::CommandFact::Accepted)
-                && command.turn_id.is_none()
-        }) {
-            return Ok(id);
-        }
-        count = count
-            .checked_add(1)
-            .ok_or_else(|| "wake command identities are exhausted".to_owned())?;
-    }
+    WakeIdentity::next_child(tree, agent_id).map_err(|error| error.to_string())
 }
 
 /// Why a wake did not start.
@@ -423,13 +392,13 @@ async fn start_wake_turn(
     let Ok((mut live_map, delivery)) =
         super::live::lock_for_transition(live, agent_id, identity.turn).await
     else {
-        crate::agent::ledger::ChildLedger::settlement_only(driver)
-            .settle(
-                &command_text,
-                crate::driver::ledger::Settlement::Refused { pause: None },
-            )
-            .map_err(String::from)
-            .map_err(WakeRefusal::Failed)?;
+        settle_wake(
+            &mut crate::agent::ledger::ChildLedger::settlement_only(driver),
+            &command_text,
+            WakeSubmission::Refused,
+        )
+        .map_err(String::from)
+        .map_err(WakeRefusal::Failed)?;
         return Err(WakeRefusal::ParkEnded);
     };
     // Re-checked under the live lock: an interrupt's cancel needs this lock,
@@ -442,13 +411,13 @@ async fn start_wake_turn(
         .filter(|child| admissible && child.turn_id() == identity.turn);
     let Some(child) = child else {
         drop(live_map);
-        crate::agent::ledger::ChildLedger::settlement_only(driver)
-            .settle(
-                &command_text,
-                crate::driver::ledger::Settlement::Refused { pause: None },
-            )
-            .map_err(String::from)
-            .map_err(WakeRefusal::Failed)?;
+        settle_wake(
+            &mut crate::agent::ledger::ChildLedger::settlement_only(driver),
+            &command_text,
+            WakeSubmission::Refused,
+        )
+        .map_err(String::from)
+        .map_err(WakeRefusal::Failed)?;
         return Err(WakeRefusal::ParkEnded);
     };
     let result = match child
@@ -474,17 +443,18 @@ async fn start_wake_turn(
                 // refusal withdraws it with the mail unread. Other failures
                 // retain the intent for reconciliation.
                 let settlement = if error == super::children::CHILD_COMMAND_CONSUMED {
-                    Some(crate::driver::ledger::Settlement::Consumed)
+                    WakeSubmission::Consumed
                 } else if error.starts_with(super::live::RESTART_REJECTED) {
-                    Some(crate::driver::ledger::Settlement::Refused { pause: None })
+                    WakeSubmission::Refused
                 } else {
-                    None
+                    WakeSubmission::Uncertain
                 };
-                if let Some(settlement) = settlement {
-                    crate::agent::ledger::ChildLedger::new(driver, agent_id)
-                        .settle(&command_text, settlement)
-                        .map_err(|settle| WakeRefusal::Failed(format!("{error}; {settle}")))?;
-                }
+                settle_wake(
+                    &mut crate::agent::ledger::ChildLedger::new(driver, agent_id),
+                    &command_text,
+                    settlement,
+                )
+                .map_err(|settle| WakeRefusal::Failed(format!("{error}; {settle}")))?;
             }
             return Err(WakeRefusal::Failed(error));
         }
@@ -510,9 +480,12 @@ async fn start_wake_turn(
         .unwrap_or_else(|error| (Err(error.message), crate::agent_tree::Effects::default()));
     settle_or_fault(driver, effects, agent_id);
     let acknowledged = published.and_then(|()| {
-        crate::agent::ledger::ChildLedger::settlement_only(driver)
-            .settle(&command_text, crate::driver::ledger::Settlement::Recorded)
-            .map_err(String::from)
+        settle_wake(
+            &mut crate::agent::ledger::ChildLedger::settlement_only(driver),
+            &command_text,
+            WakeSubmission::Recorded,
+        )
+        .map_err(String::from)
     });
     if let Err(error) = acknowledged {
         // The wake was admitted (and possibly bound) but its batch could not

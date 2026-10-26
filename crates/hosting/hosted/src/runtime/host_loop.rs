@@ -103,7 +103,7 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     last_tree_revision: TreeSnapshotPush,
     job_events: super::job_events::JobEvents,
     last_tree_observed_at: Instant,
-    child_wake: wake::ChildWake,
+    child_wake: wake::RootWake,
     storage_interrupted: bool,
     pending_track: pending::PendingTrack,
     recovery_blocked: bool,

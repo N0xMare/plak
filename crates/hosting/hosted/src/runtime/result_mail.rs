@@ -250,6 +250,12 @@ pub(super) fn prepare_instruction(
     batch: Option<ResultMailBatch>,
     trigger_ids: &[String],
 ) -> Result<SessionRecord, crate::session_store::RecordStoreError> {
+    let command_id = crate::driver::wake::WakeIdentity::Root {
+        item: &item.id,
+        revision: item.revision,
+        triggers: trigger_ids,
+    }
+    .command_id();
     prepare_with_command(
         rows,
         store,
@@ -257,18 +263,7 @@ pub(super) fn prepare_instruction(
         item,
         command,
         batch,
-        &format!(
-            "{}{}.{}:{}",
-            super::host_loop::wake::WAKE_COMMAND_PREFIX,
-            item.id,
-            item.revision,
-            trigger_ids
-                .iter()
-                .filter(|id| id.starts_with('p'))
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("-")
-        ),
+        &command_id,
         crate::driver::ledger::CommandKind::HostWake,
     )
 }

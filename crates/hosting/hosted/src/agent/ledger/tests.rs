@@ -222,7 +222,10 @@ fn child_ledger_prechange_bytes() {
         tree.vcs_port(),
         None,
     );
-    let id = format!("plak:park-wake:{child}:1:attempt:2");
+    let id = format!(
+        "{}{child}:1:attempt:2",
+        crate::driver::wake::WakeIdentity::CHILD_PREFIX
+    );
     let prepared = ChildLedger::new(&driver, &child)
         .prepare(CommandIntent {
             command_id: &id,
@@ -325,7 +328,10 @@ fn interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable() {
         tree.vcs_port(),
         None,
     );
-    let command = format!("plak:park-wake:{child}:1:c1-a1:1");
+    let command = format!(
+        "{}{child}:1:c1-a1:1",
+        crate::driver::wake::WakeIdentity::CHILD_PREFIX
+    );
     let mut ledger = ChildLedger::new(&driver, &child);
     let prepare = |ledger: &mut ChildLedger<'_>| {
         ledger.prepare(CommandIntent {
@@ -802,7 +808,10 @@ async fn another_attempts_prepared_wake_does_not_block_a_new_command() {
         .unwrap();
     let attempt = tree.attempt(&child).unwrap().attempt_id.as_str().to_owned();
     let runtime = crate::topology_runtime::insert_root(id.clone(), tree, None).unwrap();
-    let stale = format!("{}{child}:1:{child}-a9:3", "plak:park-wake:");
+    let stale = format!(
+        "{}{child}:1:{child}-a9:3",
+        crate::driver::wake::WakeIdentity::CHILD_PREFIX
+    );
     assert_eq!(
         command_attempt(&stale),
         Some(format!("{child}-a9").as_str())
@@ -825,7 +834,10 @@ async fn another_attempts_prepared_wake_does_not_block_a_new_command() {
             batch: BatchRule::Results,
         })
         .unwrap();
-    let current = format!("{}{child}:1:{attempt}:3", "plak:park-wake:");
+    let current = format!(
+        "{}{child}:1:{attempt}:3",
+        crate::driver::wake::WakeIdentity::CHILD_PREFIX
+    );
     assert_eq!(command_attempt(&current), Some(attempt.as_str()));
     let blocking = ChildLedger::new(runtime.driver(), &child)
         .prepare(CommandIntent {

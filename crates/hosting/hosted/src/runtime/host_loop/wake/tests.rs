@@ -1742,7 +1742,7 @@ fn idle_results_coalesce_and_admit_one_harness_turn_with_exact_journal() {
         );
         // Reloading the committed record and reconciling cannot re-select this batch.
         host.config.session = host.config.store.load(&host.config.session.id).unwrap();
-        host.child_wake = ChildWake::default();
+        host.child_wake = RootWake::default();
         assert!(matches!(
             host.child_wake_prompt(now + QUIET_WINDOW * 2).unwrap(),
             HostStep::Continue
@@ -2024,7 +2024,6 @@ fn wake_store_failure_emits_error_and_stays_attached_even_when_suppression_save_
             HostStep::Continue
         ));
         assert!(host.config.session.child_wake_suppressed);
-        assert_eq!(host.child_wake.message_ids, [] as [String; 0]);
         assert_eq!(
             host.config.session.pending_queue,
             [] as [crate::sessions::queue::QueueItem; 0]
@@ -2570,7 +2569,7 @@ fn a_permanent_read_refusal_still_pauses_until_the_next_prompt() {
 #[test]
 fn staggered_results_reset_the_quiet_window_and_coalesce() {
     let now = Instant::now();
-    let mut wake = ChildWake::default();
+    let mut wake = RootWake::default();
     assert!(!wake.observe("session", vec!["m1".into()], now));
     let later = now + Duration::from_secs(1);
     let batch = vec!["m1".into(), "m2".into()];
@@ -2968,7 +2967,7 @@ fn disabled_interrupt_recovery_paused_queue_and_user_ingress_prevent_wake() {
                 .last()
                 .unwrap()
                 .command_id
-                .starts_with(WAKE_COMMAND_PREFIX)
+                .starts_with(crate::driver::wake::WakeIdentity::ROOT_PREFIX)
         );
         assert_eq!(
             root_batch(host, &submissions(host)[0])

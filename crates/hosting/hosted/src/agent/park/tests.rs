@@ -734,6 +734,28 @@ async fn a_live_job_parks_the_child_and_its_terminal_wakes_it_to_submit() {
     fixture.until("the wake turn", turns(2)).await;
     let wakes = fixture.wake_prompts();
     assert_eq!(wakes, [crate::child_prompts::PLAK_CHILD_WAKE_PROMPT]);
+    fixture
+        .runtime
+        .read(|tree| {
+            let command = tree
+                .commands()
+                .values()
+                .find(|row| row.kind == crate::agent_tree::AgentCommandKind::Wake)
+                .unwrap();
+            let bytes = serde_json::to_string(&json!({
+                "command_id": command.command_id, "recipient": command.recipient,
+                "attempt_id": command.attempt_id, "kind": command.kind,
+                "text": command.text, "message_ids": command.message_ids,
+            }))
+            .unwrap();
+            assert_eq!(
+                bytes.as_bytes(),
+                include_str!("fixtures/child-wake.json")
+                    .trim_end()
+                    .as_bytes()
+            );
+        })
+        .unwrap();
     fixture.submit();
     fixture.until("the attempt to settle", settled).await;
     fixture
@@ -1690,6 +1712,40 @@ async fn a_reopen_with_max_turns_spent_ends_the_attempt_blocked() {
 
 /// Mail that is unread when a turn ends wakes the child although nothing
 /// it started still runs: an arrival is not a nudge.
+#[tokio::test]
+async fn child_deadline_fire_is_admitted_by_the_park_adapter() {
+    let fixture = fixture(json!([held("thinking"), held("woke")]), leaf).await;
+    parent_mail(&fixture, "wake at the coalescing deadline");
+    let facts = read_facts(
+        fixture.runtime.driver(),
+        &fixture.runtime.live,
+        &fixture.child,
+    )
+    .await
+    .unwrap();
+    let mut coalescer = WakeCoalescer::new(WakePolicy::Child);
+    let now = std::time::Instant::now();
+    let WakeDecision::Wait { until } = coalescer.observe(&facts, now) else {
+        panic!("an arrival starts the coalescing window");
+    };
+    assert_eq!(
+        coalescer.observe(&facts, until),
+        WakeDecision::Fire(facts.arrivals.clone())
+    );
+    assert_eq!(
+        coalescer.observe(&facts, until + Duration::from_secs(1)),
+        WakeDecision::Fire(facts.arrivals)
+    );
+    fixture.provider_gates[0].release();
+    fixture
+        .until("the deadline fire's wake acceptance", turns(2))
+        .await;
+    assert_eq!(fixture.wake_prompts().len(), 1);
+    assert!(fixture.wake_prompts()[0].contains("wake at the coalescing deadline"));
+    fixture.submit();
+    fixture.until("the awakened child to settle", settled).await;
+}
+
 #[tokio::test]
 async fn an_arrival_without_live_work_wakes_instead_of_nudging() {
     let fixture = fixture(json!([held("thinking"), held("woke")]), leaf).await;

@@ -1666,12 +1666,22 @@ submission without saving it.
 drives the host prompt/run loop with a non-cancelling full tree store, retains
 the queued input and unread mail, and admits one retry after storage recovers.
 
+`root_wake_prechange_bytes` and the child live-job wake fixture pin the root
+submission and tree intent, child intent, both wake prefixes and model-visible
+prompt bytes against original-code captures. The shared coalescer's pure and
+property tests pin the resetting 2 s root quiet window, fixed 1 s child
+coalesce, claimed-mail hold, disappearing-work trigger, and no re-fire on
+carried arrivals while live work remains. Existing wake/park integration tests
+retain interruption, exact reopen retry, retention consumption and turn budgets.
+
 `root_transient_ready_enqueues_one_instruction_without_user_history_or_mail`
 and `transient_failure_continues_same_attempt_after_exact_route_probe` pin the
 root and child transient-resume identities, instruction kinds and prompt bytes.
 The root transient matrix checks task budgets, cancellation and reload; child
 park and reopen tests check durable rounds, exact retry, retained mail and
 ownership loss while the shared continuation gate waits.
+The child deadline regression pins Fire at and beyond the coalescing deadline
+and observes one admitted wake through the production park adapter.
 The matrix also checks non-cancelling product capacity refusal cancels a root
 continuation before retaining a live, paused host with no submission or retry,
 reopen at the exact spent budget, and startup cancellation as the probe resolves

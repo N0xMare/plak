@@ -118,7 +118,7 @@ const SUBMIT_HARNESS_PREFIX: &str = "plak:submit-harness:";
 /// identities end `{attempt}:{count}`. Other commands do not name theirs.
 pub(super) fn command_attempt(command_id: &str) -> Option<&str> {
     let rest = command_id
-        .strip_prefix("plak:park-wake:")
+        .strip_prefix(crate::driver::wake::WakeIdentity::CHILD_PREFIX)
         .or_else(|| command_id.strip_prefix(SUBMIT_HARNESS_PREFIX))
         .or_else(|| {
             command_id

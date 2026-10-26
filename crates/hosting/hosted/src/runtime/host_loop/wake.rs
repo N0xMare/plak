@@ -1,10 +1,12 @@
 //! Idle interactive continuation uses ordinary root admission and its journal.
 
 use super::{CliFailure, CliResult, HostLoop, HostStep, Instant, SessionQueueItem};
+use crate::driver::wake::{WakeCoalescer, WakeDecision, WakeSources};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use std::time::Duration;
 
-const QUIET_WINDOW: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const QUIET_WINDOW: Duration = crate::driver::wake::WakePolicy::Root.window();
 /// Consecutive transient store refusals a wake retries on a doubling delay,
 /// starting at [`TRANSIENT_FIRST_DELAY`], before it reports itself paused.
 const TRANSIENT_RETRIES: u32 = 5;
@@ -12,14 +14,12 @@ const TRANSIENT_FIRST_DELAY: Duration = Duration::from_secs(1);
 /// A wake paused by transient refusals is retried at this interval, so the
 /// pause ends on its own once the store answers again.
 const TRANSIENT_REARM: Duration = Duration::from_secs(60);
-pub(in crate::runtime) const WAKE_COMMAND_PREFIX: &str = "plak:child-wake:";
 pub(in crate::runtime) const WAKE_PROMPT: &str = "Background processes finished or sub-agent results arrived while you were idle; continue the current task, or reply briefly if nothing remains.";
 
 #[derive(Default)]
-pub(super) struct ChildWake {
+pub(super) struct RootWake {
     session_id: String,
-    message_ids: Vec<String>,
-    quiet_since: Option<Instant>,
+    coalescer: WakeCoalescer,
     suppression_pending: bool,
     pause_pending: Option<String>,
     retry: Option<TransientRetry>,
@@ -35,7 +35,7 @@ struct TransientRetry {
     next_at: Instant,
 }
 
-impl ChildWake {
+impl RootWake {
     fn observe(&mut self, session_id: &str, ids: Vec<String>, now: Instant) -> bool {
         if self.session_id != session_id {
             *self = Self {
@@ -43,19 +43,22 @@ impl ChildWake {
                 ..Self::default()
             };
         }
-        if self.message_ids != ids {
-            self.message_ids = ids;
-            self.quiet_since = Some(now);
-        }
-        !self.message_ids.is_empty()
-            && self
-                .quiet_since
-                .is_some_and(|since| now.duration_since(since) >= QUIET_WINDOW)
+        matches!(
+            self.coalescer.observe(
+                &WakeSources {
+                    running: Vec::new(),
+                    arrivals: ids.into_iter().collect(),
+                    children: Vec::new(),
+                    claimed: Vec::new(),
+                },
+                now
+            ),
+            WakeDecision::Fire(_)
+        )
     }
 
     fn park(&mut self) {
-        self.message_ids.clear();
-        self.quiet_since = None;
+        self.coalescer.park();
     }
 
     fn retry_waiting(&self, session_id: &str, now: Instant) -> bool {

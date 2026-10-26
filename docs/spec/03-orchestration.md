@@ -1228,6 +1228,17 @@ interrupted one (§9): the bound turn is released and nothing parks. A Code Mode
 still running at turn end is ended by turn cleanup as before; a cell is never
 a wake source.
 
+Root and child idle wakes use one hosted coalescer with role policies. A root
+fires only for process notices and Result or Question mail after a 2 s quiet
+window, restarted when its arrivals change. A child coalesces for a fixed 1 s
+after its trigger, with a separate 1 s safety tick behind source notifications;
+claimed mail delays that trigger. Source reads, ownership guards and product
+suppression remain role-owned. Shared identity formatters preserve both command
+prefixes and the exact prompt bytes. Root preparation reuses the ordinary queue
+command preparation; its admission and settlement remain on that queue. Child
+admission and wake settlement remain in the child adapter. A child sleeps on
+Wait, re-observes its sources and admits the wake only on Fire.
+
 The tree host wakes a parked child on the work it tracks for it: a terminal
 notice of its own process, unread mail addressed to it (its children's
 results, questions and other mail, and its parent's mail of either priority),

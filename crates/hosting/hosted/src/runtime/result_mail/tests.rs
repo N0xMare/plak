@@ -31,6 +31,55 @@ fn prepare(
 }
 
 #[test]
+fn root_wake_prechange_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = MemoryRows::new();
+    let mut session = SessionRecord::new(dir.path().to_owned());
+    rows.records().save(&mut session).unwrap();
+    let mut tree = completed_tree(&session);
+    rows.save_tree(&mut tree).unwrap();
+    let mut item = QueueItem::new(crate::runtime::host_loop::wake::WAKE_PROMPT);
+    item.id = "00000000-0000-4000-8000-000000000001".into();
+    item.submitted_at_ms = 42;
+    let (command, batch) = select(&rows, &session, &item.text).unwrap();
+    let prepared = prepare_instruction(
+        &rows,
+        rows.records(),
+        &session,
+        &item,
+        &command,
+        batch,
+        &["mail-1".into(), "p10".into(), "p2".into()],
+    )
+    .unwrap();
+    let intents = rows.records().load_intents(&session.id).unwrap();
+    let submission = intents.submissions.last().unwrap();
+    let tree = rows.tree(&session.id).unwrap().unwrap();
+    let row = tree.command(&submission.command_id).unwrap();
+    let bytes = serde_json::to_string(&serde_json::json!({
+        "submission": {
+            "command_id": submission.command_id, "kind": submission.kind.as_str(),
+            "queue_item_id": submission.queue_item_id, "queue_item_revision": submission.queue_item_revision,
+            "target_turn_id": submission.target_turn_id, "canonical_command": submission.canonical_command,
+            "submitted_at_ms": submission.submitted_at_ms,
+        },
+        "tree": {
+            "command_id": row.command_id, "recipient": row.recipient,
+            "attempt_id": row.attempt_id, "kind": row.kind, "text": row.text,
+            "message_ids": row.message_ids, "withdrawn": row.withdrawn,
+            "fact": row.fact, "turn_id": row.turn_id, "accepted_seq": row.accepted_seq,
+        },
+    })).unwrap();
+    assert!(prepared.updated_at_unix >= session.updated_at_unix);
+    assert_eq!(
+        bytes.as_bytes(),
+        include_str!("fixtures/root-wake.json")
+            .trim_end()
+            .as_bytes()
+    );
+}
+
+#[test]
 fn root_batched_command_bytes() {
     for wake in [false, true] {
         let dir = tempfile::tempdir().unwrap();

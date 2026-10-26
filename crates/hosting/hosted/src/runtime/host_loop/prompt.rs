@@ -185,7 +185,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if !host_authored {
             self.cancel_transient_resume();
             self.transient_resumes_used = 0;
-            self.child_wake = super::wake::ChildWake::default();
+            self.child_wake = super::wake::RootWake::default();
         }
         if !user_echoed && !host_authored {
             let _ = self.events.send(HostEvent::PromptStarted(
