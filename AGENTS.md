@@ -73,8 +73,8 @@ cache inputs, the workspace and feature structure checkers, clippy -D warnings
 on the workspace and on each supported package alone),
 `builds` (default-feature, each supported package alone in its own default
 resolution, and maintainer-feature builds, rustc warnings denied),
-`variants` (four distinct reduced product builds, clippy with warnings denied,
-and feature-admission/read-only-store contracts; full only),
+`variants` (named headless/API/minimal builds and an admission fixture, clippy
+with warnings denied, and feature-admission/read-only-store contracts; full only),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
 (public compile contracts), `tooling` (Python self-tests) and `package` (the
 publish dry run: `scripts/publish.sh --gate` prefetches archive verification
@@ -130,14 +130,17 @@ confer accessibility, not support.
 Packages declare the dependency features their Rust targets use rather than
 relying on another workspace member's feature unification. Native routes
 (`codex`, `grok`, `claude`), API exports, evaluators,
-MCP and local page fetch independent at the facade boundary. Persisted route
+MCP and local page fetch are independent at the facade boundary. Persisted route
 and tool vocabulary stays readable even when its runtime is omitted.
-The feature checker
+The feature checker compiles the facade and hosted libraries with no defaults
+and with each public feature alone, without workspace feature unification. It
 requires locally declared UUID generation features, including for test code.
 It validates 2n+3 feature closures per package (none, each singleton, full
 minus each feature, default and full), with a reviewed cap of 24 public
 optional features. Reduced products compile only in the full-only `variants`
 group, not in `check`.
+`check_features.py` owns the sole named-variant table. Only the default product
+is shipped and supported; headless, API and minimal are built and tested only.
 The root workspace excludes `.plak` operator state and fork worktrees; the
 workspace checker requires this exclusion without permitting unreviewed ones.
 The workspace checker also ratchets, per package, item-level allows of

@@ -10,12 +10,12 @@
 //! without following a symlink.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::binding::PlatformProvider;
 
+use super::ApiModelLists;
 use super::PlatformCredentials;
 use super::catalog::{ApiCatalogSource, ApiModelCatalog, bundled_catalog};
 
@@ -25,25 +25,15 @@ const API_MODEL_LIST_TTL_SECONDS: u64 = 6 * 60 * 60;
 const FAILED_LIST_RETRY_SECONDS: u64 = 5 * 60;
 const CACHE_VERSION: u32 = 2;
 
-/// Whether session construction and `plak models` may fetch live lists.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ApiModelLists {
-    /// Cache, then the bundled table; never the network. Tests and doubles.
-    #[default]
-    Offline,
-    /// Fetch when the cache is missing or older than the TTL.
-    Live,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "provider", content = "models")]
 pub(crate) enum CachedRows {
     #[serde(rename = "anthropic")]
-    Anthropic(Vec<plakous::anthropic::AnthropicListedModel>),
+    Anthropic(Vec<super::anthropic::ListedModel>),
     #[serde(rename = "openai")]
-    OpenAi(Vec<plakous::openai::OpenAiListedModel>),
+    OpenAi(Vec<super::openai::ListedModel>),
     #[serde(rename = "xai")]
-    Xai(Vec<plakous::xai::XaiListedModel>),
+    Xai(Vec<super::xai::ListedModel>),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -100,14 +90,10 @@ fn read_owned_file(path: &Path) -> Option<Vec<u8>> {
 fn rows_valid(provider: PlatformProvider, rows: &CachedRows) -> bool {
     match (provider, rows) {
         (PlatformProvider::Anthropic, CachedRows::Anthropic(models)) => {
-            plakous::anthropic::accept_anthropic_listed_models(models).is_ok()
+            super::anthropic::rows_valid(models)
         }
-        (PlatformProvider::OpenAi, CachedRows::OpenAi(models)) => {
-            plakous::openai::accept_openai_listed_models(models).is_ok()
-        }
-        (PlatformProvider::Xai, CachedRows::Xai(models)) => {
-            plakous::xai::accept_xai_listed_models(models).is_ok()
-        }
+        (PlatformProvider::OpenAi, CachedRows::OpenAi(models)) => super::openai::rows_valid(models),
+        (PlatformProvider::Xai, CachedRows::Xai(models)) => super::xai::rows_valid(models),
         _ => false,
     }
 }
@@ -227,8 +213,9 @@ pub async fn api_model_catalog(
     product_home: Option<&Path>,
     lists: ApiModelLists,
     now: u64,
-) -> ApiModelCatalog {
-    api_model_catalog_observed(provider, credentials, product_home, lists, now, None).await
+) -> crate::CliResult<ApiModelCatalog> {
+    crate::capabilities::require(provider.account())?;
+    Ok(api_model_catalog_observed(provider, credentials, product_home, lists, now, None).await)
 }
 
 /// [`api_model_catalog`] with the session's exchange observer, which sees the
@@ -239,101 +226,24 @@ pub(crate) async fn api_model_catalog_observed(
     product_home: Option<&Path>,
     lists: ApiModelLists,
     now: u64,
-    observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
+    observer: crate::exchange_observation::Observer,
 ) -> ApiModelCatalog {
     match provider {
         PlatformProvider::Anthropic => {
-            let source = match credentials.anthropic() {
-                Ok(source) => source,
-                Err(error) => return bundled_catalog(provider, error.message()),
-            };
-            let fingerprint = match source.current_key() {
-                Ok(key) => key.fingerprint(),
-                Err(error) => return bundled_catalog(provider, &error.to_string()),
-            };
-            let lookup = Lookup::new(provider, product_home, &fingerprint, lists, now);
-            lookup
-                .run(
-                    async {
-                        plakous::anthropic::list_anthropic_api_models(source.as_ref(), observer)
-                            .await
-                            .map_err(|error| error.to_string())
-                    },
-                    CachedRows::Anthropic,
-                    |rows| match rows {
-                        CachedRows::Anthropic(models) => Some(models.clone()),
-                        CachedRows::OpenAi(_) | CachedRows::Xai(_) => None,
-                    },
-                    |models, source| super::catalog::anthropic_catalog(models, source, now),
-                )
+            super::anthropic::listing(provider, credentials, product_home, lists, now, observer)
                 .await
         }
         PlatformProvider::OpenAi => {
-            let source = match credentials.openai() {
-                Ok(source) => source,
-                Err(error) => return bundled_catalog(provider, error.message()),
-            };
-            let reference = match super::openai_credential_reference() {
-                Ok(reference) => reference,
-                Err(error) => return bundled_catalog(provider, error.message()),
-            };
-            let fingerprint =
-                match plakous::openai::openai_api_key_fingerprint(&reference, source.as_ref()) {
-                    Ok(fingerprint) => fingerprint,
-                    Err(error) => return bundled_catalog(provider, &error.to_string()),
-                };
-            let lookup = Lookup::new(provider, product_home, &fingerprint, lists, now);
-            lookup
-                .run(
-                    async {
-                        plakous::openai::list_openai_api_models(
-                            &reference,
-                            source.as_ref(),
-                            observer,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())
-                    },
-                    CachedRows::OpenAi,
-                    |rows| match rows {
-                        CachedRows::OpenAi(models) => Some(models.clone()),
-                        CachedRows::Anthropic(_) | CachedRows::Xai(_) => None,
-                    },
-                    super::catalog::openai_catalog,
-                )
-                .await
+            super::openai::listing(provider, credentials, product_home, lists, now, observer).await
         }
         PlatformProvider::Xai => {
-            let source = match credentials.xai() {
-                Ok(source) => source,
-                Err(error) => return bundled_catalog(provider, error.message()),
-            };
-            let fingerprint = match plakous::xai::xai_api_key_fingerprint(source.as_ref()) {
-                Ok(fingerprint) => fingerprint,
-                Err(error) => return bundled_catalog(provider, &error.to_string()),
-            };
-            let lookup = Lookup::new(provider, product_home, &fingerprint, lists, now);
-            lookup
-                .run(
-                    async {
-                        plakous::xai::list_xai_api_models(source.as_ref(), observer)
-                            .await
-                            .map_err(|error| error.to_string())
-                    },
-                    CachedRows::Xai,
-                    |rows| match rows {
-                        CachedRows::Xai(models) => Some(models.clone()),
-                        CachedRows::Anthropic(_) | CachedRows::OpenAi(_) => None,
-                    },
-                    super::catalog::xai_catalog,
-                )
-                .await
+            super::xai::listing(provider, credentials, product_home, lists, now, observer).await
         }
     }
 }
 
 /// One route's cache decision for one key.
-struct Lookup {
+pub(super) struct Lookup {
     provider: PlatformProvider,
     fingerprint: String,
     path: Option<PathBuf>,
@@ -343,7 +253,7 @@ struct Lookup {
 }
 
 impl Lookup {
-    fn new(
+    pub(super) fn new(
         provider: PlatformProvider,
         product_home: Option<&Path>,
         fingerprint: &str,
@@ -364,7 +274,7 @@ impl Lookup {
         }
     }
 
-    async fn run<T: Clone>(
+    pub(super) async fn run<T: Clone>(
         self,
         fetch: impl Future<Output = Result<Vec<T>, String>>,
         wrap: fn(Vec<T>) -> CachedRows,
@@ -432,7 +342,7 @@ pub(crate) fn cached_for_test(
     provider: PlatformProvider,
     fingerprint: &str,
     fetched_at: u64,
-    models: Vec<plakous::anthropic::AnthropicListedModel>,
+    models: Vec<super::anthropic::ListedModel>,
 ) -> CachedList {
     CachedList {
         version: CACHE_VERSION,

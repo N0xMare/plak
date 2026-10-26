@@ -33,9 +33,9 @@ default = []
 anthropic = ["dep:plakous-anthropic", "dep:plakous-http", "plakous-tool-web/image-gen"]
 auth = ["dep:plakous-auth"]
 web-fetch = ["plakous-tool-web/fetch", "dep:plakous-http"]
-# Code Mode, JavaScript and Python through the engine-free cell client.
-# This is the whole evaluator capability a Custom-model embedder needs; it
-# carries no credential, subscription, or HTTP machinery.
+# Code Mode and JavaScript through the engine-free cell client; Python is
+# selected explicitly by composition-python. Neither carries credential,
+# subscription, or HTTP machinery.
 composition = [
     "dep:thiserror",
     "dep:uuid",
@@ -61,7 +61,7 @@ full = [
 ]
 # Model Context Protocol client: the server pool, frozen listings and the MCP
 # tool pack. Configuration, secrets and views stay with the embedding product.
-mcp = ["plakous-mcp/client", "plakous-tool-web/image-gen"]
+mcp = ["plakous-mcp/client"]
 codex = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-openai", "plakous-openai/native-auth"]
 grok = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-xai", "plakous-xai/native-auth", "dep:plakous-responses-dialect"]
 claude = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-anthropic", "plakous-anthropic/native-auth"]
@@ -69,6 +69,9 @@ openai = ["dep:plakous-openai", "dep:plakous-http", "plakous-tool-web/image-gen"
 openrouter = ["dep:plakous-http", "dep:plakous-openrouter", "plakous-tool-web/image-gen"]
 sessions-sqlite = ["plakous-store/sqlite"]
 xai = ["dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/image-gen"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 thiserror = { workspace = true, optional = true }

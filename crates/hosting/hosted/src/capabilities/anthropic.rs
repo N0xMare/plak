@@ -13,6 +13,7 @@ pub static ANTHROPIC: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "anthropic",
     review_deadline: compiled::review_deadline,
+    hosted_retrieval: compiled::hosted_retrieval,
     account: "anthropic",
     aliases: &["anthropic"],
     kind: RouteKind::Platform(PlatformProvider::Anthropic),

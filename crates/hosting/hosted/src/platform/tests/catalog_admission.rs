@@ -224,13 +224,17 @@ impl plakous::anthropic::AnthropicApiKeySource for CountingCredentials {
         plakous::anthropic::AnthropicApiKey::new("fixture-key-one")
     }
 }
-impl PlatformCredentials for CountingCredentials {
+impl OpenAiCredentials for CountingCredentials {
     fn openai(&self) -> CliResult<Arc<dyn plakous::openai::PlatformCredentialSource>> {
         Credentials("fixture-key-one").openai()
     }
+}
+impl AnthropicCredentials for CountingCredentials {
     fn anthropic(&self) -> CliResult<Arc<dyn plakous::anthropic::AnthropicApiKeySource>> {
         Ok(Arc::new(CountingCredentials(Arc::clone(&self.0))))
     }
+}
+impl XaiCredentials for CountingCredentials {
     fn xai(&self) -> CliResult<Arc<dyn plakous::xai::XaiPlatformApiKeySource>> {
         Credentials("fixture-key-one").xai()
     }

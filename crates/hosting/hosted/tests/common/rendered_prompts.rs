@@ -1152,7 +1152,7 @@ pub(crate) mod suite {
         root: &Path,
         cwd: &Path,
     ) -> (HarnessProfileSpec, Vec<ResolvedContextSourceFact>) {
-        let profile = crate::api_runtime::api_product_profile(
+        let profile = crate::agent::build::api::api_product_profile(
             provider.account(),
             spec.composition,
             Some(API_EFFORT),
@@ -1222,7 +1222,7 @@ pub(crate) mod suite {
                 // does: Codex OAuth order, every surface tool but `inspect_image`.
                 let nested = match spec.provider {
                     ProviderKind::Platform(_) => {
-                        crate::api_runtime::code_mode_nested_names(&surface)
+                        crate::agent::build::api::code_mode_nested_names(&surface)
                     }
                     _ => surface.exposed_names().to_vec(),
                 };

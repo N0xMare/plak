@@ -18,13 +18,13 @@ use plakous::tools::{
     ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1,
 };
 
-use crate::agent::build::attach_codex_minimal;
-use crate::agent::{
+use super::policy::{
     NATIVE_RUN_MODEL_CLEANUP_TIMEOUT, NATIVE_RUN_MODEL_OPERATION_TIMEOUT, SessionToolFence,
-    enroll_product_instructions, product_javascript_candidate_attachment,
-    product_python_attachment, projection_target, session_tool_policy, stamped_workspace_policy,
-    subagent_catalog_profile_id,
+    attach_codex_minimal, product_javascript_candidate_attachment, product_python_attachment,
+    session_tool_policy, stamped_workspace_policy,
 };
+use super::profile::{enroll_product_instructions, subagent_catalog_profile_id};
+use super::tools::projection_target;
 use crate::binding::{CompositionSelection, ResolvedProtocol};
 use crate::error::{CliFailure, CliResult};
 use crate::tools::product_surface_with_fence;
@@ -174,7 +174,7 @@ pub(crate) fn runtime_binding(
                 presentation,
             )
             .ok_or_else(|| CliFailure::new("JavaScript artifact is unavailable"))?;
-            builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
+            builder = super::policy::attach_local_composition(builder, Some(attachment)).map_err(
                 |error| CliFailure::new(format!("JavaScript artifact is unavailable: {error}")),
             )?;
         }
@@ -195,7 +195,7 @@ pub(crate) fn runtime_binding(
             })?;
             let attachment =
                 product_python_attachment(&descriptor, &host, &configuration, presentation)?;
-            builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
+            builder = super::policy::attach_local_composition(builder, Some(attachment)).map_err(
                 |error| CliFailure::new(format!("Python attachment is invalid: {error}")),
             )?;
         }
@@ -214,8 +214,8 @@ pub(crate) fn runtime_binding(
                 ))
             })?;
             let attachment =
-                crate::agent::build::product_sdk_attachment(&descriptor, &host, &configuration)?;
-            builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
+                super::policy::product_sdk_attachment(&descriptor, &host, &configuration)?;
+            builder = super::policy::attach_local_composition(builder, Some(attachment)).map_err(
                 |error| CliFailure::new(format!("Python SDK attachment is invalid: {error}")),
             )?;
         }
@@ -374,7 +374,7 @@ fn api_base_instructions(
     composition: CompositionSelection,
     surface: &CompiledSurface,
 ) -> CliResult<String> {
-    let variant = crate::agent::product_prompt_variant();
+    let variant = super::profile::product_prompt_variant();
     let presentation = crate::binding::PlatformProvider::for_account(account)
         .map(crate::coding_routes::platform_presentation);
     let pack = match (presentation, composition) {
@@ -479,7 +479,7 @@ pub(crate) fn configured_tools(
                 .ok_or_else(|| {
                     CliFailure::new("API coding capability is not registered exactly")
                 })?;
-            crate::agent::direct_extension_tool(definition.clone(), owner)
+            super::tools::direct_extension_tool(definition.clone(), owner)
         })
         .collect::<CliResult<Vec<_>>>()?;
     if tools.len() != selected_names.len() {

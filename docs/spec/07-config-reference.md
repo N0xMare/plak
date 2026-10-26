@@ -298,6 +298,13 @@ an uncompiled account or evaluator. Execution admission returns the typed
 session show/log/export does not require its route to be compiled. Stored
 binding validation checks the frozen vocabulary, not today's model enrollment;
 attach, resume and rebind separately require the compiled route before writes.
+The route feature uses the account spelling: `codex`, `grok`, `claude`,
+`openai`, `anthropic`, `xai-api` or `openrouter`. Codex and OpenAI additionally
+select JS; Python is an explicit independent selection requiring JS. A build
+without a route omits it from login/model menus, presets and catalog refresh;
+an explicit command selecting it still returns the typed refusal. The named
+headless, API and minimal build variants are qualified in the full-only gate,
+not alternative configuration profiles or distributed artifacts.
 
 A set `allowed_domains`, `blocked_domains` or `allowed_x_handles` replaces
 the list the model passes on a call. Each option travels in the route

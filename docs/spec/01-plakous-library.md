@@ -8881,7 +8881,7 @@ sessions, model, tools, profiles, `VERSION` — is always on. `openai`, `xai`,
 `anthropic`, and `openrouter` re-export those provider crates as `plakous::*`
 and are provider internals rather than a presentation surface. `auth` adds the
 secret, credential-store, OAuth, pin, and account-binding foundations without
-enabling either provider.
+enabling any provider.
 
 The default facade closure includes `plakous-compose` and its reviewed
 vendored Codex protocol dependency for the pinned description and grammar
@@ -8946,7 +8946,7 @@ categories describe pure predicates, not successful runtime reconstruction.
 `abandon_compaction` reports the recovery verdict's typed integrity failure
 (scope, decoding, source reduction, workflow debt no row admits) and classifies
 only a valid mixed settled/open pair as RecoveryRequired.
-The public feature power-set remains unchanged. Only Plak's
+The inspector adds no public feature. Only Plak's
 `src/commands/reload_rehearsal.rs` is approved to name the inspector's
 `rehearsal`, `inspect_sqlite`, and `OfflineReopenOutcome` facade symbols.
 Phase eligibility is the verdict's `Restore(phase)`, with unknown restorable
@@ -8978,9 +8978,24 @@ which the next round is refused.
 provider, subscription and MCP features do not imply local web fetch.
 `FetchUrlLimits` and its bound constants remain available without the fetch
 implementation, so a smaller build can still read a frozen tool selection.
-Provider and MCP closures retain `plakous-tool-web/image-gen` and the
-`plakous::tools::web::ImageGenPack` interface. Composition-only closures reach
-neither `plakous-http` nor `htmd`.
+Image-generation port vocabulary remains available independently of provider
+implementations. Provider routes select their own HTTP-backed execution;
+MCP vocabulary alone selects neither a provider nor page fetching.
+Composition-only closures reach neither `plakous-http` nor `htmd`.
+
+Native routes are independent `codex`, `grok` and `claude` facade features;
+there is no aggregate native feature. Each links only its own provider's
+native-auth implementation privately, without exposing that provider's API
+module or enabling an evaluator. `auth` enables provider-neutral credential
+and OAuth foundations only. Subscription identifiers, statuses, notices and
+frozen model vocabulary remain nameable with no route compiled. Operations
+on an omitted route return `NativeSubscriptionError::NotCompiled` before
+private-state locks, credential reads or transport work. No operation selects
+another vertical. The hosted registry maps omitted route admission to typed
+`CapabilityUnavailable`; API credentials, live lists and runtime construction
+are selected by the same per-route feature. Cached listings retain their
+existing provider-tagged encoding; no smaller build rewrites another route's
+records merely because it cannot execute that route.
 
 Evaluator deployment, subscription authentication, and durability are therefore
 independent choices. `tools/checks/check_features.py` pins this over the

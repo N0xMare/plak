@@ -1011,9 +1011,8 @@ class RepositoryPolicyTests(unittest.TestCase):
             with self.subTest(validator=validator.__name__):
                 self.assertEqual(validator(workspace), [])
 
-    def test_product_explicit_api_features_cannot_be_borrowed_from_hosted(self) -> None:
-        expected = {"codex", "grok", "claude", "openai", "anthropic", "xai",
-                    "openrouter", "sessions-sqlite"}
+    def test_product_does_not_hard_enable_provider_facade_features(self) -> None:
+        expected = {"sessions-sqlite"}
         self.assertEqual(set(self.workspace.policy.facade_features["plak"]), expected)
         self.assertEqual(workspace_policy.validate_facade_features(self.workspace), [])
         product = self.workspace.packages["plak"]
@@ -1022,7 +1021,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 metadata = copy.deepcopy(product.metadata)
                 edge = next(dependency for dependency in metadata["dependencies"]
                             if dependency["name"] == "plakous" and dependency.get("kind") is None)
-                edge["features"].remove(provider)
+                edge["features"].append(provider)
                 packages = dict(self.workspace.packages)
                 packages["plak"] = replace(product, metadata=metadata)
                 errors = workspace_policy.validate_facade_features(
@@ -2300,7 +2299,7 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plak"], 2 * 20 + 3)
         self.assertEqual(profile_counts["plakous-hosted"], 2 * 17 + 3)
         self.assertNotIn("plakous-cell", profile_counts)
-        self.assertEqual(profile_counts["plakous-js-runtime"], 3)
+        self.assertEqual(profile_counts["plakous-js-runtime"], 2 * 1 + 3)
         for count in profile_counts.values():
             self.assertLessEqual(count, 2 * feature_policy.MAX_OPTIONAL_FEATURES + 3)
 

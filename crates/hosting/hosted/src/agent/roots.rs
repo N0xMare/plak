@@ -10,6 +10,14 @@ use plakous::sessions::{AgentSessions, SessionBackend};
 use crate::agent_tree::TreeStore;
 use crate::{CliFailure, CliResult};
 
+#[cfg(feature = "js")]
+mod recorded_sidecar;
+#[cfg(not(feature = "js"))]
+#[path = "roots/recorded_sidecar_unavailable.rs"]
+mod recorded_sidecar;
+#[cfg(all(test, feature = "js"))]
+use recorded_sidecar::RecordedSidecar;
+
 type StorageShutdownProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// Where a hosted session's agent tree is persisted: the product opens its
@@ -130,12 +138,18 @@ pub enum TelemetryHealth {
     },
 }
 
+#[cfg(any(feature = "openai", feature = "anthropic", feature = "xai-api"))]
+mod api;
+#[cfg(not(any(feature = "openai", feature = "anthropic", feature = "xai-api")))]
+#[path = "roots/api_unavailable.rs"]
+mod api;
+
 #[derive(Clone)]
 pub struct ProductStateRoots {
     child_runtime: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
     job_registry: Arc<crate::jobs::JobRegistry>,
     job_config: plakous::tools::JobConfig,
-    exchange_observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
+    exchange_observer: crate::exchange_observation::Observer,
     session_records: Arc<dyn crate::session_store::SessionRecordStore>,
     product: PathBuf,
     /// The runtime database the product bound at construction. It is an
@@ -161,13 +175,11 @@ pub struct ProductStateRoots {
     /// hosted binder asks for a key source, never for the secret store under a
     /// product home.
     openrouter_credentials: Arc<dyn crate::openrouter::OpenRouterCredentials>,
-    platform_credentials: Arc<dyn crate::platform::PlatformCredentials>,
+    api: api::ApiState,
     /// The named secrets MCP server definitions refer to.
     named_secrets: Arc<dyn crate::mcp_binding::NamedSecrets>,
     /// Whether API model lists are fetched live, and the window selection a
     /// new API session binds (product `[api] full_window`).
-    api_model_lists: crate::platform::ApiModelLists,
-    api_window: crate::platform::ApiWindow,
     /// The semantic evidence an exact reopen was created with; `None` for a
     /// new session.
     created_semantic_evidence: Option<Arc<[u8]>>,
@@ -246,10 +258,8 @@ impl ProductStateRoots {
             tree_store_factory: tree_store,
             roster_source: roster,
             openrouter_credentials,
-            platform_credentials,
+            api: api::ApiState::new(platform_credentials),
             named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
-            api_model_lists: crate::platform::ApiModelLists::Offline,
-            api_window: crate::platform::ApiWindow::Working,
             created_semantic_evidence: None,
             sidecars,
             reopen_sidecars: None,
@@ -276,15 +286,15 @@ impl ProductStateRoots {
         lists: crate::platform::ApiModelLists,
         window: crate::platform::ApiWindow,
     ) -> Self {
-        self.api_model_lists = lists;
-        self.api_window = window;
+        self.api.lists = lists;
+        self.api.window = window;
         self
     }
 
     pub(crate) fn platform_admission(&self) -> crate::platform::PlatformAdmission {
         crate::platform::PlatformAdmission {
-            lists: self.api_model_lists,
-            window: self.api_window,
+            lists: self.api.lists,
+            window: self.api.window,
             created_evidence: self
                 .created_semantic_evidence
                 .as_deref()
@@ -322,15 +332,13 @@ impl ProductStateRoots {
     #[must_use]
     pub fn with_exchange_observer(
         mut self,
-        observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
+        observer: crate::exchange_observation::Observer,
     ) -> Self {
         self.exchange_observer = observer;
         self
     }
 
-    pub(crate) fn exchange_observer(
-        &self,
-    ) -> Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>> {
+    pub(crate) fn exchange_observer(&self) -> crate::exchange_observation::Observer {
         self.exchange_observer.clone()
     }
 
@@ -363,8 +371,10 @@ impl ProductStateRoots {
         let paths =
             plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(self.state_home.clone())
                 .map_err(|_| CliFailure::new("native subscription storage is unavailable"))?;
-        Ok(plakous::subscriptions::NativeSubscriptions::new(paths)
-            .with_exchange_observer(self.exchange_observer()))
+        Ok(crate::exchange_observation::observe(
+            plakous::subscriptions::NativeSubscriptions::new(paths),
+            self.exchange_observer(),
+        ))
     }
 
     pub(super) fn paths(&self) -> [PathBuf; 2] {
@@ -472,9 +482,7 @@ impl ProductStateRoots {
                 .await?
                 .into(),
         );
-        self.reopen_sidecars = Some(Arc::new(RecordedSidecar {
-            artifact: sessions.created_composition_artifact(locator).await?,
-        }));
+        self.reopen_sidecars = recorded_sidecar::recorded_sidecars(sessions, locator).await?;
         Ok(self)
     }
 
@@ -496,10 +504,6 @@ impl ProductStateRoots {
 
     pub(crate) fn named_secrets(&self) -> Arc<dyn crate::mcp_binding::NamedSecrets> {
         Arc::clone(&self.named_secrets)
-    }
-
-    pub(crate) fn platform_credentials(&self) -> &dyn crate::platform::PlatformCredentials {
-        self.platform_credentials.as_ref()
     }
 
     /// The OpenRouter credential this product bound.
@@ -537,10 +541,8 @@ impl ProductStateRoots {
             tree_store_factory: Arc::new(doubles::MemoryTreeStoreFactory),
             roster_source: Arc::new(doubles::UnpinnedRosterSource),
             openrouter_credentials: Arc::new(doubles::NoOpenRouterCredential),
-            platform_credentials: Arc::new(crate::platform::UnavailableCredentials),
+            api: api::ApiState::new(Arc::new(crate::platform::UnavailableCredentials)),
             named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
-            api_model_lists: crate::platform::ApiModelLists::Offline,
-            api_window: crate::platform::ApiWindow::Working,
             created_semantic_evidence: None,
             sidecars: Arc::new(doubles::NoSidecars),
             reopen_sidecars: None,
@@ -549,16 +551,6 @@ impl ProductStateRoots {
             telemetry_unavailable_logged: Arc::new(Mutex::new(false)),
             extra_telemetry_sink: Arc::new(Mutex::new(None)),
         }
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn with_test_platform_credentials(
-        mut self,
-        credentials: Arc<dyn crate::platform::PlatformCredentials>,
-    ) -> Self {
-        self.platform_credentials = credentials;
-        self
     }
 
     fn open_telemetry_cache(&self) -> Arc<dyn ProductTelemetry> {
@@ -620,44 +612,6 @@ impl ProductStateRoots {
         }
         self.telemetry_factory.log_unavailable(session_id, &reason);
         *logged = true;
-    }
-}
-
-struct RecordedSidecar {
-    artifact: Option<plakous::agent::LocalCompositionEngineArtifact>,
-}
-
-impl plakous::tools::SidecarLocator for RecordedSidecar {
-    fn javascript_host(&self) -> Result<PathBuf, String> {
-        self.host(plakous::agent::LocalCompositionEngineArtifact::quickjs_worker_v1)
-    }
-
-    fn python_host(&self) -> Result<PathBuf, String> {
-        self.host(plakous::agent::LocalCompositionEngineArtifact::monty_worker_v1)
-    }
-}
-
-impl RecordedSidecar {
-    fn host(
-        &self,
-        verify: impl FnOnce(
-            PathBuf,
-        ) -> Result<
-            plakous::agent::LocalCompositionEngineArtifact,
-            plakous::agent::AgentError,
-        >,
-    ) -> Result<PathBuf, String> {
-        let artifact = self
-            .artifact
-            .as_ref()
-            .ok_or_else(|| "stored session has no evaluator attachment".to_owned())?;
-        let live = verify(artifact.path().to_path_buf()).map_err(|error| error.to_string())?;
-        if live.identity() != artifact.identity()
-            || live.engine_contract_identity() != artifact.engine_contract_identity()
-        {
-            return Err("recorded evaluator engine or bytes disagree".to_owned());
-        }
-        Ok(artifact.path().to_path_buf())
     }
 }
 
@@ -956,114 +910,4 @@ mod tests {
 
 /// In-process doubles of the product ports, for hosted tests.
 #[cfg(any(test, feature = "test-support"))]
-pub mod doubles {
-    use std::sync::Arc;
-
-    use super::{
-        ProductTelemetry, RosterSource, TelemetryHealth, TelemetrySinkFactory, TreeStoreFactory,
-    };
-    use crate::CliResult;
-    use crate::agent_tree::{MemoryTreeStore, TopologyObserver, TreeStore};
-
-    /// The conformance-tested in-memory tree store, opened once per factory.
-    pub struct MemoryTreeStoreFactory;
-
-    impl TreeStoreFactory for MemoryTreeStoreFactory {
-        fn open(&self) -> CliResult<Arc<dyn TreeStore>> {
-            Ok(Arc::new(MemoryTreeStore::default()))
-        }
-    }
-
-    /// A roster that freezes the tuple it is handed and reads no configuration.
-    pub struct UnpinnedRosterSource;
-
-    impl RosterSource for UnpinnedRosterSource {
-        fn roster(
-            &self,
-            root_account: &str,
-            root_tuple: &str,
-            root_effort: Option<&str>,
-        ) -> CliResult<crate::orchestration::RosterInput> {
-            let mut input = crate::orchestration::RosterInput::unpinned(root_tuple);
-            input.root.account = root_account.to_owned();
-            input.root.effort = root_effort.map(str::to_owned);
-            Ok(input)
-        }
-
-        fn account_name(&self, provider: plakous::subscriptions::NativeProvider) -> &'static str {
-            match provider {
-                plakous::subscriptions::NativeProvider::Codex => "codex",
-                plakous::subscriptions::NativeProvider::Claude => "claude",
-                _ => "grok",
-            }
-        }
-
-        fn topology_admitted(&self) -> CliResult<bool> {
-            Ok(true)
-        }
-    }
-
-    /// Telemetry that records nothing and is never unavailable.
-    pub struct NoTelemetry;
-
-    impl TelemetrySinkFactory for NoTelemetry {
-        fn open(
-            &self,
-            _extra_sink: Option<Arc<dyn super::ExtraTelemetrySink>>,
-        ) -> Arc<dyn ProductTelemetry> {
-            Arc::new(Self)
-        }
-
-        fn log_unavailable(&self, _session_id: &str, _reason: &str) {}
-    }
-
-    impl ProductTelemetry for NoTelemetry {
-        fn agent_emitter(&self) -> Option<Arc<plakous::agent::TelemetryEmitter>> {
-            None
-        }
-
-        fn topology_observer(&self) -> Option<Arc<dyn TopologyObserver>> {
-            None
-        }
-
-        fn emit(&self, _observation: crate::product_observation::ProductObservation) {}
-
-        fn health(&self) -> TelemetryHealth {
-            TelemetryHealth::Missing
-        }
-
-        fn unavailable_reason(&self) -> Option<String> {
-            None
-        }
-    }
-
-    /// No evaluator workers are installed.
-    pub struct NoSidecars;
-
-    impl plakous::tools::SidecarLocator for NoSidecars {
-        fn javascript_host(&self) -> Result<std::path::PathBuf, String> {
-            Err("no JavaScript evaluator worker is installed in this test".to_owned())
-        }
-
-        fn python_host(&self) -> Result<std::path::PathBuf, String> {
-            Err("no Python evaluator worker is installed in this test".to_owned())
-        }
-    }
-
-    /// No OpenRouter key is configured.
-    pub struct NoOpenRouterCredential;
-
-    impl crate::openrouter::OpenRouterCredentials for NoOpenRouterCredential {
-        fn key_label(&self) -> CliResult<String> {
-            Err(crate::CliFailure::new("OpenRouter API key is unavailable"))
-        }
-
-        fn preflight(&self) -> CliResult<()> {
-            Err(crate::CliFailure::new("OpenRouter API key is unavailable"))
-        }
-
-        fn source(&self) -> CliResult<Arc<dyn plakous::openrouter::OpenRouterApiKeySource>> {
-            Err(crate::CliFailure::new("OpenRouter API key is unavailable"))
-        }
-    }
-}
+pub mod doubles;

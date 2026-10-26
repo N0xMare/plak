@@ -38,7 +38,7 @@ async fn runtime_with_source(
         spec.effort.unwrap_or(ReasoningEffort::Low),
         &row,
         native_ptc,
-        crate::api_runtime::configured_tools(
+        crate::agent::build::api::configured_tools(
             crate::coding_routes::platform_presentation(provider),
             spec.composition,
             spec.wire,
@@ -120,8 +120,13 @@ async fn runtime_with_source(
         .binding_digest()
         .unwrap();
     (
-        crate::api_runtime::runtime_binding(spec, configured, registry, review_clock_for(provider))
-            .unwrap(),
+        crate::agent::build::api::runtime_binding(
+            spec,
+            configured,
+            registry,
+            review_clock_for(provider),
+        )
+        .unwrap(),
         descriptor,
     )
 }

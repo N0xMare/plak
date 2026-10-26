@@ -131,6 +131,43 @@ def check(full_binary: str, reduced_binary: str, server_binary: str, maintainer:
     return errors
 
 
+def check_route(full_binary: str, reduced_binary: str) -> list[str]:
+    """Read a genuine canonical native session; refuse attach without touching it."""
+    errors = []
+    with tempfile.TemporaryDirectory(prefix="plak-feature-route-") as directory:
+        root = Path(directory)
+        home = root / "home"
+        home.mkdir(mode=0o700)
+        script = root / "script.json"
+        script.write_text(json.dumps({"version": 1, "steps": [{"output": {"text": "route fixture"}}]}))
+        environment = dict(os.environ, PLAK_HOME=str(home), PLAK_TEST_MODEL="offline-loopback-v1", PLAK_TEST_SCRIPT=str(script))
+        for name in ("OPENAI_API_KEY", "XAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+            environment.pop(name, None)
+        def run(binary, arguments):
+            return subprocess.run([binary, *arguments], cwd=root, env=environment, input="", text=True, capture_output=True, check=False, timeout=30)
+        created = run(full_binary, ["run", "--account", "codex", "--model", "offline-loopback-v1", "--composition", "direct", "--effort", "medium", "--print-session-id", "--", "create route fixture"])
+        session = next((line.removeprefix("session_id=") for line in created.stdout.splitlines() if line.startswith("session_id=")), None)
+        if created.returncode or session is None:
+            return [f"uncompiled route fixture creation: {created.stdout}{created.stderr}"]
+        exported = root / "session.json"
+        cases = [(["session", "show", session], 0), (["session", "log", session], 0),
+                 (["session", "export", session, "--out", str(exported)], 0),
+                 (["agent", "--session", session], 2), (["run", "--session", session, "--", "must refuse"], 2)]
+        with ExitStack() as readers:
+            for database in (home / "state").rglob("*.sqlite3"):
+                connection = readers.enter_context(closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)))
+                connection.execute("BEGIN")
+                connection.execute("PRAGMA user_version").fetchone()
+            for arguments, code in cases:
+                before = store_bytes(home)
+                result = run(reduced_binary, arguments)
+                if result.returncode != code or (code == 2 and "feature `codex`" not in result.stderr):
+                    errors.append(f"uncompiled route {arguments}: expected {code}; got {result.returncode}: {result.stdout}{result.stderr}")
+                if store_bytes(home) != before:
+                    errors.append(f"uncompiled route {arguments}: changed canonical store bytes")
+    return errors
+
+
 def image_diagnostic(binary: str) -> list[str]:
     """Refuse an image during a real held turn, then finish that same turn and keep serving."""
     with tempfile.TemporaryDirectory(prefix="plak-feature-jsonl-") as directory:
@@ -171,7 +208,7 @@ def image_diagnostic(binary: str) -> list[str]:
 
         try:
             hello = until(lambda row: row.get("kind") == "hello")
-            expected = ["anthropic", "claude", "codex", "grok", "openai", "openrouter", "xai-api"]
+            expected = ["anthropic", "claude", "codex", "grok", "js", "openai", "openrouter", "web-fetch", "xai-api"]
             if hello.get("capabilities") != expected or "python_host" in hello or "python_host_target" in hello:
                 raise RuntimeError(f"reduced hello vocabulary/worker status: {hello}")
             until(lambda row: row.get("kind") == "ready")

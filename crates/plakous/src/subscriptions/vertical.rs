@@ -22,6 +22,8 @@ pub(super) trait NativeVertical: Sync {
         &'static str,
     );
     fn notice(&self) -> CompatibilityNotice;
+    fn hosted_retrieval(&self) -> plakous_model::HostedRetrievalTable;
+    fn maximum_output_tokens(&self, model: &str) -> Option<u32>;
     fn offline_status<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,

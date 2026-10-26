@@ -1318,6 +1318,65 @@ mod tests {
         assert!(required_stdout_kind(&bye_line(None)));
     }
 
+    #[cfg(all(
+        feature = "anthropic",
+        feature = "claude",
+        feature = "clipboard",
+        feature = "codex",
+        feature = "grok",
+        feature = "images",
+        feature = "js",
+        feature = "mcp",
+        feature = "openai",
+        feature = "openrouter",
+        feature = "python",
+        feature = "tui",
+        feature = "web-fetch",
+        feature = "xai-api"
+    ))]
+    mod default_build {
+        use super::*;
+
+        #[test]
+        fn hello_capabilities_pin_the_exact_default_wire_vocabulary() {
+            let hello = hello_line(
+                None,
+                "session",
+                "tree",
+                None,
+                None,
+                None,
+                "direct",
+                "live",
+                None,
+                None,
+                None,
+                None,
+                Some(&crate::build_features::compiled_features()),
+                None,
+            );
+            assert_eq!(
+                object_from_line(&hello)["capabilities"],
+                serde_json::json!([
+                    "anthropic",
+                    "claude",
+                    "clipboard",
+                    "codex",
+                    "grok",
+                    "images",
+                    "js",
+                    "mcp",
+                    "openai",
+                    "openrouter",
+                    "python",
+                    "tui",
+                    "web-fetch",
+                    "xai-api",
+                ])
+            );
+        }
+    }
+
     #[test]
     fn hello_ready_elapsed_ms_serializes_when_some() {
         let hello = hello_line(

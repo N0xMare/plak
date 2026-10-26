@@ -809,7 +809,7 @@ fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
 
 pub(super) fn openrouter_cached_evidence<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
-) -> Option<plakous::openrouter::OpenRouterChatModelEvidence> {
+) -> Option<crate::openrouter::OpenRouterChatModelEvidence> {
     let TargetSelection::OpenRouter { wire, .. } = &config.session.target_selection else {
         return None;
     };
@@ -878,10 +878,10 @@ pub(super) fn api_compaction_runtime_binding<P: plakous_host_protocol::ProtocolE
     let literal_model = config.model_id.clone();
     let effort = effort_from_record(config.session.effort.as_deref())?;
     let cached_evidence = match &config.target {
-        HostTargetAuthority::OpenRouter {
-            evidence: Some(cached),
-            ..
-        } if cached.matches(&literal_model, target.protocol()) => Some(cached.evidence.clone()),
+        HostTargetAuthority::OpenRouter { evidence, .. } => evidence
+            .as_ref()
+            .filter(|cached| cached.matches(&literal_model, target.protocol()))
+            .map(|cached| cached.evidence.clone()),
         _ => None,
     };
     let mut parent = api_topology_parent(

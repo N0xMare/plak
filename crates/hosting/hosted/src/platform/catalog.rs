@@ -84,7 +84,7 @@ pub struct PlatformModel {
     /// The provider crate's digest of its own facts for this id.
     pub provider_facts: String,
     /// The Anthropic crate's admitted model, which its builder takes.
-    pub(crate) anthropic: Option<plakous::anthropic::AnthropicApiModel>,
+    pub(super) anthropic: Option<super::runtime::AdmittedModel>,
 }
 
 const BINDING_MARKER: &str = ";plak.api-model-binding.v2=";
@@ -357,127 +357,6 @@ fn edit_distance(left: &str, right: &str) -> usize {
     previous[right.len()]
 }
 
-/// The Anthropic catalog over one listing, classified by the provider
-/// crate's bundled table and family rules.
-pub(crate) fn anthropic_catalog(
-    listed: &[plakous::anthropic::AnthropicListedModel],
-    source: ApiCatalogSource,
-    now_unix_seconds: u64,
-) -> Result<ApiModelCatalog, String> {
-    use plakous::anthropic::AnthropicApiModelStatus as Status;
-    let models = plakous::anthropic::anthropic_api_models(listed, now_unix_seconds)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|model| PlatformModel {
-            model: model.id().to_owned(),
-            status: match model.status() {
-                Status::Usable => ApiModelStatus::Usable,
-                Status::NeedsReview(reason) => ApiModelStatus::NeedsReview(reason.clone()),
-                Status::NotCodingModel(reason) => ApiModelStatus::NotCodingModel(reason.clone()),
-                Status::Retired(reason) => ApiModelStatus::Retired(reason.clone()),
-                _ => ApiModelStatus::NeedsReview("unknown provider status".to_owned()),
-            },
-            efforts: model.efforts().to_vec(),
-            full_window: model.max_input_tokens(),
-            price_threshold: model.price_threshold_input_tokens(),
-            max_output_tokens: model.max_tokens(),
-            tool_mode: ApiToolMode::Direct,
-            deprecation: model.deprecation().map(str::to_owned),
-            provider_facts: model.facts_digest(),
-            anthropic: Some(model),
-        })
-        .collect();
-    Ok(ApiModelCatalog {
-        provider: PlatformProvider::Anthropic,
-        source,
-        models,
-    })
-}
-
-/// The OpenAI catalog over one id list, classified by the provider crate's
-/// bundled table and family rules. The live list publishes ids only.
-pub(crate) fn openai_catalog(
-    listed: &[plakous::openai::OpenAiListedModel],
-    source: ApiCatalogSource,
-) -> Result<ApiModelCatalog, String> {
-    use plakous::openai::OpenAiApiModelStatus as Status;
-    // Cached rows take the same id checks as a fetched page. The live payload
-    // has no window, so it cannot raise a reviewed limit; facts stay the table's.
-    let listed =
-        plakous::openai::accept_openai_listed_models(listed).map_err(|error| error.to_string())?;
-    let models = plakous::openai::openai_api_models(&listed)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|model| PlatformModel {
-            model: model.id().to_owned(),
-            status: match model.status() {
-                Status::Usable => ApiModelStatus::Usable,
-                Status::NeedsReview(reason) => ApiModelStatus::NeedsReview(reason.clone()),
-                Status::NotCodingModel(reason) => ApiModelStatus::NotCodingModel(reason.clone()),
-                _ => ApiModelStatus::NeedsReview("unknown provider status".to_owned()),
-            },
-            efforts: model.efforts().to_vec(),
-            full_window: model.max_input_tokens(),
-            price_threshold: model.price_threshold_input_tokens(),
-            max_output_tokens: model.max_tokens(),
-            tool_mode: super::openai_api_tool_mode(model.id()),
-            deprecation: None,
-            provider_facts: model.facts_digest(),
-            anthropic: None,
-        })
-        .collect();
-    Ok(ApiModelCatalog {
-        provider: PlatformProvider::OpenAi,
-        source,
-        models,
-    })
-}
-
-/// The xAI catalog over one model list, classified by the provider crate's
-/// bundled table and family rules. A live window or effort above the reviewed
-/// row is `NeedsReview`; a lower one narrows the row. The full input window is
-/// the context less the reserved output bound.
-pub(crate) fn xai_catalog(
-    listed: &[plakous::xai::XaiListedModel],
-    source: ApiCatalogSource,
-) -> Result<ApiModelCatalog, String> {
-    use plakous::xai::XaiApiModelStatus as Status;
-    let listed =
-        plakous::xai::accept_xai_listed_models(listed).map_err(|error| error.to_string())?;
-    let models = plakous::xai::xai_api_models(&listed)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|model| PlatformModel {
-            model: model.id().to_owned(),
-            status: match model.status() {
-                Status::Usable => ApiModelStatus::Usable,
-                Status::NeedsReview(reason) => ApiModelStatus::NeedsReview(reason.clone()),
-                Status::NotCodingModel(reason) => ApiModelStatus::NotCodingModel(reason.clone()),
-                _ => ApiModelStatus::NeedsReview("unknown provider status".to_owned()),
-            },
-            efforts: model.efforts().to_vec(),
-            full_window: model.max_input_tokens(),
-            price_threshold: model.price_threshold_input_tokens(),
-            max_output_tokens: model.max_tokens(),
-            tool_mode: ApiToolMode::Direct,
-            deprecation: None,
-            provider_facts: model.facts_digest(),
-            anthropic: None,
-        })
-        .collect();
-    Ok(ApiModelCatalog {
-        provider: PlatformProvider::Xai,
-        source,
-        models,
-    })
-}
-
-pub(crate) fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs())
-}
-
 /// The catalog a route has without its live list: the bundled reviewed table,
 /// classified at the current time.
 #[must_use]
@@ -485,33 +364,11 @@ pub fn bundled_catalog(provider: PlatformProvider, reason: &str) -> ApiModelCata
     let source = ApiCatalogSource::Bundled {
         reason: reason.to_owned(),
     };
-    match provider {
-        PlatformProvider::Anthropic => plakous::anthropic::anthropic_api_bundled_listing()
-            .map_err(|error| error.to_string())
-            .and_then(|listed| anthropic_catalog(&listed, source.clone(), unix_now()))
-            .unwrap_or(ApiModelCatalog {
-                provider,
-                source,
-                models: Vec::new(),
-            }),
-        PlatformProvider::OpenAi => plakous::openai::openai_api_bundled_listing()
-            .map_err(|error| error.to_string())
-            .and_then(|listed| openai_catalog(&listed, source.clone()))
-            .unwrap_or(ApiModelCatalog {
-                provider,
-                source,
-                models: Vec::new(),
-            }),
-        PlatformProvider::Xai => plakous::xai::xai_api_bundled_listing()
-            .map_err(|error| error.to_string())
-            .and_then(|listed| xai_catalog(&listed, source.clone()))
-            .unwrap_or(ApiModelCatalog {
-                provider,
-                source,
-                models: Vec::new(),
-            }),
-    }
+    super::runtime::bundled(provider, source)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "openai", feature = "anthropic", feature = "xai-api"))]
 mod tests;
+
+#[cfg(all(test, feature = "openai", feature = "anthropic", feature = "xai-api"))]
+use super::runtime::{anthropic::catalog as anthropic_catalog, openai::catalog as openai_catalog};

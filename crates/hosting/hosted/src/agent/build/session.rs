@@ -527,7 +527,7 @@ pub(super) enum SessionSource<'a> {
     Api {
         parent: Box<ApiTopologyParent>,
         topology_attach: crate::topology_runtime::TopologyHubAttach,
-        cached_evidence: Option<Box<plakous::openrouter::OpenRouterChatModelEvidence>>,
+        cached_evidence: Option<Box<crate::openrouter::OpenRouterChatModelEvidence>>,
         tool_fence: SessionToolFence,
     },
     /// A runtime binding the caller already sealed.
@@ -788,7 +788,7 @@ async fn attach_native_source(
 pub async fn build_api_root_coding_session(
     parent: ApiTopologyParent,
     create_operation_id: &str,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
 ) -> CliResult<AttachedCodingSession> {
     Box::pin(build_api_coding_session(
         parent,
@@ -805,7 +805,7 @@ pub(crate) async fn build_api_coding_session(
     create_operation_id: &str,
     seed: Option<PortableSessionHistory>,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
 ) -> CliResult<AttachedCodingSession> {
     build_api_coding_session_seed(
         parent,
@@ -822,7 +822,7 @@ pub(crate) async fn build_api_coding_session_seed(
     create_operation_id: &str,
     seed: Option<SeededHistory>,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
 ) -> CliResult<AttachedCodingSession> {
     let operation_id = SessionOperationId::new(create_operation_id)
         .map_err(|_| CliFailure::new("plak create operation identity is invalid"))?;
@@ -844,7 +844,7 @@ pub(crate) async fn build_api_coding_session_seed(
 pub async fn open_api_root_coding_session(
     parent: ApiTopologyParent,
     locator: SessionLocator,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     Box::pin(open_api_coding_session(
         parent,
@@ -859,7 +859,7 @@ pub(crate) async fn open_api_coding_session(
     parent: ApiTopologyParent,
     locator: SessionLocator,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     Box::pin(open_api_coding_session_with_fence(
         parent,
@@ -875,7 +875,7 @@ pub(crate) async fn open_api_coding_session_with_fence(
     parent: ApiTopologyParent,
     locator: SessionLocator,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
     tool_fence: SessionToolFence,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     let operation_id = SessionOperationId::new(format!("plak:open:{}", uuid::Uuid::new_v4()))
@@ -900,7 +900,7 @@ async fn attach_api_source(
     seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
     tool_fence: SessionToolFence,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
     let tree_id = parent

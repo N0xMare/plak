@@ -294,6 +294,8 @@ impl AgentTemplate {
         }
         if let Some(provider) =
             plakous_hosted::binding::PlatformProvider::for_account(&self.account)
+            && plakous_hosted::capabilities::for_account(&self.account)
+                .is_some_and(|route| route.compiled)
         {
             plakous_hosted::platform::bundled_catalog(provider, "offline")
                 .admit(

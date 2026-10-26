@@ -14,6 +14,8 @@ pub(super) trait NativeVertical {
         &'static str,
     );
     fn notice(&self) -> CompatibilityNotice;
+    fn hosted_retrieval(&self) -> plakous_model::HostedRetrievalTable;
+    fn maximum_output_tokens(&self, model: &str) -> Option<u32>;
 }
 pub(super) fn vertical(_provider: NativeProvider) -> Option<&'static dyn NativeVertical> {
     None

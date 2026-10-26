@@ -10,7 +10,7 @@ accepting the current profile with `plak models codex`:
 ```sh
 PLAK_CAPTURE_STATE_HOME="$HOME/.local/state" \
 PLAK_CAPTURE_OUTPUT="$PWD/crates/hosting/hosted/src/agent/fixtures/codex-authenticated-catalog.json" \
-cargo test --locked -p plakous --features native-subscriptions capture_codex_authenticated_catalog -- --ignored
+cargo test --locked -p plakous --features codex capture_codex_authenticated_catalog -- --ignored
 ```
 
 Use the configured state home if it differs. The writer allowlists typed model

@@ -4,13 +4,15 @@
     clippy::panic,
     reason = "offline regression assertions"
 )]
+use super::retention::exact_route_retention;
 use super::*;
 use crate::binding::CompositionSelection;
 use crate::platform::ApiWindow;
+use crate::platform::{platform_model, platform_models};
 use plakous::agent::ReasoningEffort;
 
 struct Credentials(&'static str);
-impl PlatformCredentials for Credentials {
+impl OpenAiCredentials for Credentials {
     fn openai(&self) -> CliResult<Arc<dyn plakous::openai::PlatformCredentialSource>> {
         use plakous::openai::{
             CredentialAuthorityId, CredentialReference, OpenAiApiKey,
@@ -22,11 +24,15 @@ impl PlatformCredentials for Credentials {
             CredentialAuthorityId::new("fixture/openai").map_err(api_error)?,
         )))
     }
+}
+impl AnthropicCredentials for Credentials {
     fn anthropic(&self) -> CliResult<Arc<dyn plakous::anthropic::AnthropicApiKeySource>> {
         Ok(Arc::new(
             plakous::anthropic::AnthropicApiKey::new(self.0).map_err(api_error)?,
         ))
     }
+}
+impl XaiCredentials for Credentials {
     fn xai(&self) -> CliResult<Arc<dyn plakous::xai::XaiPlatformApiKeySource>> {
         Ok(Arc::new(XaiKey(self.0)))
     }
@@ -301,8 +307,10 @@ async fn api_compositions_create_and_reopen_required_durable_sessions_without_di
 }
 
 #[cfg(test)]
+#[path = "tests/catalog_admission.rs"]
 mod catalog_admission;
 #[cfg(test)]
+#[path = "tests/compaction.rs"]
 pub(crate) mod compaction;
 
 #[test]
@@ -319,7 +327,7 @@ fn openai_api_code_mode_table_matches_the_codex_reference_catalog() {
         Some(plakous_openai::OPENAI_CODEX_REFERENCE_CLIENT_VERSION),
         "the table is reviewed against the pinned reference client's catalog"
     );
-    for model in OPENAI_API_CODE_MODE_ONLY {
+    for model in openai::OPENAI_API_CODE_MODE_ONLY {
         assert!(
             platform_model(PlatformProvider::OpenAi, model).is_some(),
             "{model} is marked CodeModeOnly but is not an enrolled OpenAI API row"
@@ -386,7 +394,7 @@ fn api_routes_configure_their_oauth_pack_tools() {
                 &crate::tools::ProductToolExtensions::default(),
             )
             .unwrap();
-            let mut api = crate::api_runtime::configured_tools(
+            let mut api = crate::agent::build::api::configured_tools(
                 crate::coding_routes::platform_presentation(provider),
                 composition,
                 provider.protocol(),
@@ -633,7 +641,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         ReasoningEffort::Low,
         &row,
         false,
-        crate::api_runtime::configured_tools(
+        crate::agent::build::api::configured_tools(
             other,
             CompositionSelection::Direct,
             spec.wire,
@@ -752,7 +760,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
     )
     .unwrap();
     let limits =
-        crate::api_runtime::behavior_generation_limits(configuration.effective().behavior())
+        crate::agent::build::api::behavior_generation_limits(configuration.effective().behavior())
             .unwrap();
     let request = AgentRequestPolicy::new(
         limits,
@@ -915,7 +923,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         ReasoningEffort::Low,
         &row,
         false,
-        crate::api_runtime::configured_tools(
+        crate::agent::build::api::configured_tools(
             presentation,
             CompositionSelection::Direct,
             spec.wire,
@@ -1047,7 +1055,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
     )
     .unwrap();
     let limits =
-        crate::api_runtime::behavior_generation_limits(configuration.effective().behavior())
+        crate::agent::build::api::behavior_generation_limits(configuration.effective().behavior())
             .unwrap();
     let request = AgentRequestPolicy::new(
         limits,

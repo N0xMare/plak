@@ -52,6 +52,7 @@ pub struct RouteCapability {
     pub compiled: bool,
     pub feature: &'static str,
     pub(crate) review_deadline: fn() -> Option<u64>,
+    pub(crate) hosted_retrieval: fn() -> Option<plakous::model::HostedRetrievalTable>,
     pub account: &'static str,
     pub(crate) aliases: &'static [&'static str],
     pub kind: RouteKind,

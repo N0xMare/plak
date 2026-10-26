@@ -15,6 +15,10 @@ one cross-build carrier (a build imports its own and the previous version).
   Reversals use an ordinary tree notice rather than a second adopted milestone;
   conflicts deduplicate by topology operation, even without a display call id.
 
+- All seven native/API routes are independently selectable. Session
+  show/log/export still reads an omitted route; attach/resume refuses before
+  writes. Full builds qualify headless, API and minimal variants; releases
+  continue to ship the default artifact only.
 - Source builds can omit the TUI, clipboard paste, image decoding, Python
   composition, or MCP with Cargo features. Defaults retain the shipped shape.
   Omitted capabilities refuse explicitly (exit 2), never select another route;

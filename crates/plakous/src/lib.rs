@@ -1261,7 +1261,6 @@ pub mod xai {
     pub use crate::responses_images::XaiImagePort;
     pub use crate::responses_retrieval::XaiRetrievalPort;
     pub use plakous_xai::XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS;
-    pub use plakous_xai::XaiRetrieval;
     pub use plakous_xai::{
         GrokCodingProfile, SUPERGROK_RESPONSES_ORIGIN, SUPERGROK_RESPONSES_PATH,
         SuperGrokResponsesDialect, XAI_PLATFORM_GROK_46_CONTEXT_TOKENS, XAI_PLATFORM_GROK_46_MODEL,
@@ -1275,6 +1274,7 @@ pub mod xai {
     };
     pub use plakous_xai::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
     pub use plakous_xai::{XAI_IMAGE_MODEL, XaiImages};
+    pub use plakous_xai::{XaiRetrieval, lowest_responses_effort};
 
     #[cfg(feature = "grok")]
     pub use plakous_xai::{

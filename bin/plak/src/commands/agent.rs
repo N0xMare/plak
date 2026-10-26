@@ -168,6 +168,7 @@ pub(crate) fn new_agent_record(
         record.effort = None;
     }
     if let (Some(account), Some(model)) = (record.account.as_deref(), record.model.as_deref()) {
+        crate::build_features::require_account(account)?;
         super::support::admit_account_model(account, model)
             .map_err(|refusal| CliFailure::classified(CliFailureKind::Usage, refusal))?;
     }
@@ -193,6 +194,15 @@ fn run_agent_after_admission(
     composition: Option<product_config::ProductCompositionSelection>,
     resume_tree: bool,
 ) -> CliResult<AdmittedAgent> {
+    if let Some(provider) = provider {
+        plakous_hosted::capabilities::require_native(provider)?;
+    }
+    if let Some(provider) = platform {
+        crate::build_features::require_account(provider.account())?;
+    }
+    if wire.is_some() {
+        crate::build_features::require_account("openrouter")?;
+    }
     if let Some(composition) = composition {
         crate::build_features::require_composition(composition)?;
     }

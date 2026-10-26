@@ -13,6 +13,7 @@ pub static OPENAI: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "openai",
     review_deadline: compiled::review_deadline,
+    hosted_retrieval: compiled::hosted_retrieval,
     account: "openai",
     aliases: &["openai"],
     kind: RouteKind::Platform(PlatformProvider::OpenAi),

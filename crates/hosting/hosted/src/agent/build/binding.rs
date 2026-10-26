@@ -12,8 +12,8 @@ use super::policy::{
 };
 use super::profile::{enroll_product_instructions, selected_harness_profile};
 use super::tools::{
-    NodeSession, bind_node_tool_plan, coding_tool_registry, coding_tool_registry_with_extensions,
-    direct_composition_capable, exact_process_presentation_candidate, is_codex_code_mode_candidate,
+    NodeSession, bind_node_tool_plan, coding_tool_registry, direct_composition_capable,
+    exact_process_presentation_candidate, is_codex_code_mode_candidate,
     is_exact_code_mode_attachment, node_session, projection_target,
 };
 use super::topology::{
@@ -215,7 +215,8 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
                 ReplayDisposition::StrictEncrypted,
                 ParallelToolDisposition::Disabled,
                 OutputBoundDisposition::Enforced(
-                    plakous::xai::grok_max_output_tokens(model.as_str())
+                    NativeProvider::Xai
+                        .maximum_output_tokens(model.as_str())
                         .map(|ceiling| ceiling.min(RESPONSE_OUTPUT_CEILING))
                         .and_then(NonZeroU32::new)
                         .ok_or(CliFailure::new("Grok model has no enrolled output ceiling"))?,
@@ -228,7 +229,9 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
                 ReplayDisposition::StrictEncrypted,
                 ParallelToolDisposition::Enabled,
                 OutputBoundDisposition::Enforced(
-                    NonZeroU32::new(plakous::anthropic::claude_max_output_tokens(model.as_str()))
+                    NativeProvider::Claude
+                        .maximum_output_tokens(model.as_str())
+                        .and_then(NonZeroU32::new)
                         .ok_or(CliFailure::new("Claude output limit is invalid"))?,
                 ),
                 ProviderStorageDisposition::OmittedRouteContract,
@@ -283,7 +286,7 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
 
 pub(crate) struct PreparedApiRuntime {
     pub runtime: SessionRuntimeBinding,
-    pub evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    pub evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
     /// Set when this reopen kept a budget the route has since moved.
     pub output_bound_rederived: Option<crate::openrouter::OutputBoundRederived>,
 }
@@ -293,7 +296,7 @@ pub(crate) async fn api_session_runtime_binding(
     parent: &ApiTopologyParent,
     opening_durable_session: bool,
     tool_fence: SessionToolFence,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
 ) -> CliResult<PreparedApiRuntime> {
     api_session_runtime_binding_with_owner(
         parent,
@@ -330,7 +333,7 @@ pub(super) async fn api_session_runtime_binding_with_owner(
     opening_durable_session: bool,
     tool_fence: SessionToolFence,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
-    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+    cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<PreparedApiRuntime> {
     crate::capabilities::require_composition(parent.composition)?;
@@ -408,35 +411,13 @@ pub(super) async fn api_session_runtime_binding_with_owner(
             })
         }
         crate::binding::ApiTarget::Platform { provider } => {
-            let telemetry = parent.state_roots.telemetry_emitter();
-            let admission = parent.state_roots.platform_admission();
-            let runtime = Box::pin(crate::platform::construct_platform_runtime_with(
+            let runtime = crate::platform::build_runtime(
                 provider,
-                parent.state_roots.platform_credentials(),
-                &crate::api_runtime::ApiRuntimeSpec {
-                    job_config: parent.state_roots.job_config(),
-                    account: provider.account(),
-                    sidecars: parent.state_roots.sidecars().as_ref(),
-                    product_home: parent.product_home.as_deref(),
-                    literal_model: &parent.model,
-                    effort: parent.effort,
-                    composition: parent.composition,
-                    wire: provider.protocol(),
-                    workspace_root: &parent.workspace_root,
-                    cwd: &parent.cwd,
-                    plan_state_authority: &parent.plan_state_authority,
-                    opening_durable_session,
-                    tool_fence,
-                    scheduled_compaction: parent.scheduled_compaction,
-                    max_model_rounds: parent.max_model_rounds,
-                    topology_extensions: &topology_extensions,
-                    telemetry: telemetry.as_ref(),
-                    spawned_child: parent.topology_caller_id.is_some(),
-                },
-                parent.state_roots.exchange_observer(),
-                &admission,
-                Arc::new(plakous::model::SystemClock),
-            ))
+                parent,
+                opening_durable_session,
+                tool_fence,
+                &topology_extensions,
+            )
             .await?;
             Ok(PreparedApiRuntime {
                 output_bound_rederived: None,
@@ -656,7 +637,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
     install_occupancy_fence(&cwd)?;
     product_extensions.connect_retrieval(resolved.retrieval_port())?;
     product_extensions.connect_image_gen(resolved.image_gen_port())?;
-    let frozen_tools = coding_tool_registry_with_extensions(
+    let frozen_tools = super::coding_tool_registry_with_extensions(
         &plan_state_authority,
         composition,
         code_mode_candidate,
@@ -837,9 +818,10 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         })?;
         let attachment =
             super::policy::product_sdk_attachment(&descriptor, &host, resolved.configuration())?;
-        builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
-            |error| CliFailure::new(format!("Python SDK attachment is invalid: {error}")),
-        )?;
+        builder = crate::agent::build::policy::attach_local_composition(builder, Some(attachment))
+            .map_err(|error| {
+                CliFailure::new(format!("Python SDK attachment is invalid: {error}"))
+            })?;
     } else if product_javascript {
         let target = projection_target(resolved.configuration(), "product JavaScript target")?;
         let descriptor = ProductJavaScriptCompositionV1::compile_for_kind(
@@ -868,7 +850,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
                 "product JavaScript artifact or evidence is unavailable; no inference was dispatched",
             )
         })?;
-        builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
+        builder = crate::agent::build::policy::attach_local_composition(builder, Some(attachment)).map_err(
             |error| {
                 CliFailure::new(format!(
                     "product JavaScript artifact or evidence is unavailable: {error}; no inference was dispatched"
@@ -901,7 +883,7 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
             resolved.configuration(),
             presentation_kind,
         )?;
-        builder = plakous::agent::attach_local_composition(builder, Some(attachment)).map_err(
+        builder = crate::agent::build::policy::attach_local_composition(builder, Some(attachment)).map_err(
             |error| {
                 CliFailure::new(format!(
                     "product Python artifact or evidence is unavailable: {error}; no inference was dispatched"

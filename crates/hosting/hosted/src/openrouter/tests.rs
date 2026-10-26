@@ -10,6 +10,7 @@ fn chat_review_clock() -> Arc<dyn plakous::model::Clock> {
 }
 
 use super::*;
+use std::path::PathBuf;
 
 #[test]
 fn key_usage_rejection_names_status_source_and_remedy_only() {
@@ -1540,7 +1541,7 @@ async fn the_session_request_policy_follows_the_route_bound_not_the_constant() {
         .unwrap();
         assert_eq!(reopened.output_bound, disposition);
         assert_eq!(
-            crate::api_runtime::behavior_generation_limits(&reopened)
+            crate::agent::build::api::behavior_generation_limits(&reopened)
                 .unwrap()
                 .max_output_tokens(),
             Some(created),
@@ -1549,7 +1550,7 @@ async fn the_session_request_policy_follows_the_route_bound_not_the_constant() {
     }
     // This is the figure the agent will compare against, and it is the
     // route's, not the product constant that used to be read here.
-    let limits = crate::api_runtime::behavior_generation_limits(&behavior).unwrap();
+    let limits = crate::agent::build::api::behavior_generation_limits(&behavior).unwrap();
     assert_eq!(limits.max_output_tokens(), Some(bound));
     assert_ne!(bound.get(), NATIVE_RUN_MAX_OUTPUT_TOKENS);
 }

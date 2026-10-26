@@ -19,16 +19,22 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
+use crate::openrouter::OpenRouterKeyUsage;
 use plakous::model::{
     SUBSCRIPTION_BALANCE_PAY_AS_YOU_GO, SUBSCRIPTION_BALANCE_PREPAID_CREDITS,
     SubscriptionUsageBalance, SubscriptionUsageCredentialState, SubscriptionUsagePeriod,
     SubscriptionUsageRead, SubscriptionUsageSnapshot, SubscriptionUsageUnavailable,
 };
-use plakous::openrouter::OpenRouterKeyUsage;
+#[cfg(feature = "openrouter")]
+#[path = "subscription_usage/openrouter.rs"]
+mod openrouter_usage;
+#[cfg(not(feature = "openrouter"))]
+#[path = "subscription_usage/openrouter_unavailable.rs"]
+mod openrouter_usage;
 use plakous::subscriptions::NativeProvider;
 use plakous_host_protocol::views::presentation::{
-    SessionLedgerView, UsageAmountView, UsageBalanceView, UsageCostView, UsageLimitsView,
-    UsageMeterReading, UsageMeterView, UsageVertical, VerticalUsageState, VerticalUsageView,
+    SessionLedgerView, UsageBalanceView, UsageCostView, UsageLimitsView, UsageMeterReading,
+    UsageMeterView, UsageVertical, VerticalUsageState, VerticalUsageView,
 };
 
 /// Width of the Limits bar, in cells. The fill is the floored percent *left*,
@@ -294,16 +300,9 @@ fn project_vertical(
                     .collect(),
             }
         }
-        VerticalObservation::OpenRouterKey(usage, label) => VerticalUsageView {
-            vertical,
-            account_email: None,
-            plan_label: Some(openrouter_plan_label(usage, label)),
-            observed_at: Some(format_unix_seconds(usage.observed_at().seconds())),
-            state: VerticalUsageState::Ready {
-                meters: openrouter_meters(usage),
-            },
-            balances: Vec::new(),
-        },
+        VerticalObservation::OpenRouterKey(usage, label) => {
+            openrouter_usage::project(vertical, usage, label)
+        }
     }
 }
 
@@ -477,78 +476,6 @@ fn meter_identity(
     }
     let feature = meter_name.unwrap_or(meter_id);
     (Some(format!("{feature} limit")), window)
-}
-
-/// Provider labels can contain masked key material. Only the product's safe
-/// source label and an explicitly reported free tier reach the account line.
-fn openrouter_plan_label(usage: &OpenRouterKeyUsage, label: &str) -> String {
-    if usage.is_free_tier() == Some(true) {
-        format!("{label} · free tier")
-    } else {
-        label.to_owned()
-    }
-}
-
-fn openrouter_meters(usage: &OpenRouterKeyUsage) -> Vec<UsageMeterView> {
-    let mut meters = Vec::new();
-    // A `null` limit is "no cap"; it is never drawn as an unbounded bar and
-    // never inferred from spend.
-    let mut limit = vec![UsageAmountView {
-        label: "cap".to_owned(),
-        value: usage
-            .limit()
-            .map_or_else(|| "no cap".to_owned(), format_credits),
-    }];
-    if let Some(remaining) = usage.limit_remaining() {
-        limit.push(UsageAmountView {
-            label: "remaining".to_owned(),
-            value: format_credits(remaining),
-        });
-    }
-    limit.push(UsageAmountView {
-        label: "resets".to_owned(),
-        value: usage.limit_reset().unwrap_or("never").to_owned(),
-    });
-    if let Some(include_byok) = usage.include_byok_in_limit() {
-        limit.push(UsageAmountView {
-            label: "BYOK spend".to_owned(),
-            value: if include_byok {
-                "counted".to_owned()
-            } else {
-                "excluded".to_owned()
-            },
-        });
-    }
-    meters.push(UsageMeterView {
-        label: "Key limit".to_owned(),
-        group: None,
-        reading: UsageMeterReading::Amounts { entries: limit },
-        resets_at: None,
-    });
-    let spend = [
-        ("all time", usage.usage()),
-        ("today", usage.usage_daily()),
-        ("this week", usage.usage_weekly()),
-        ("this month", usage.usage_monthly()),
-    ];
-    let entries: Vec<_> = spend
-        .into_iter()
-        .filter_map(|(label, value)| {
-            value.map(|value| UsageAmountView {
-                label: label.to_owned(),
-                value: format_credits(value),
-            })
-        })
-        .collect();
-    if !entries.is_empty() {
-        meters.push(UsageMeterView {
-            label: "Key usage".to_owned(),
-            group: None,
-            reading: UsageMeterReading::Amounts { entries },
-            resets_at: None,
-        });
-    }
-    meters
 }
 
 /// Builds the session ledger the Usage surfaces report.
@@ -814,10 +741,6 @@ fn format_percent(value: f64) -> String {
     } else {
         trimmed.to_owned()
     }
-}
-
-fn format_credits(value: f64) -> String {
-    format!("${value:.2}")
 }
 
 fn format_duration(value: Duration) -> String {

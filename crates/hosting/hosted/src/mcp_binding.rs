@@ -5,7 +5,11 @@ mod available;
 #[cfg(not(feature = "mcp"))]
 #[path = "mcp_binding/unavailable.rs"]
 mod available;
-pub use available::*;
+pub(crate) use available::{BoundMcpTools, bind_mcp_tools};
+#[cfg(feature = "mcp")]
+pub use available::{
+    McpProbe, get_mcp_prompt, list_mcp_prompts, mcp_login_status, mcp_oauth_spec, probe_mcp_server,
+};
 
 #[cfg(feature = "mcp")]
 mod secret_value;

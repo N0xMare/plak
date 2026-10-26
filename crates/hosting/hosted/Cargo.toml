@@ -26,7 +26,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 
 [dependencies]
 plakous-host-protocol.workspace = true
-plakous = { workspace = true, features = ["codex", "grok", "claude", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
+plakous = { workspace = true, features = ["sessions-sqlite"] }
 plakous-recursive-subagents.workspace = true
 plakous-workspace.workspace = true
 nix.workspace = true

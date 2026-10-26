@@ -784,16 +784,21 @@ impl ToolRoute {
     }
 
     /// The provider crate's release-owned table for this route.
-    const fn hosted_retrieval(self) -> HostedRetrievalTable {
-        match self {
-            Self::Codex => plakous::openai::CODEX_HOSTED_RETRIEVAL,
-            Self::OpenAi => plakous::openai::OPENAI_API_HOSTED_RETRIEVAL,
-            Self::Grok => plakous::xai::SUPERGROK_HOSTED_RETRIEVAL,
-            Self::XaiApi => plakous::xai::XAI_API_HOSTED_RETRIEVAL,
-            Self::Claude => plakous::anthropic::CLAUDE_OAUTH_HOSTED_RETRIEVAL,
-            Self::Anthropic => plakous::anthropic::ANTHROPIC_API_HOSTED_RETRIEVAL,
-            Self::OpenRouter => plakous::openrouter::OPENROUTER_HOSTED_RETRIEVAL,
-        }
+    fn hosted_retrieval(self) -> HostedRetrievalTable {
+        let route = match self {
+            Self::Codex => &crate::capabilities::CODEX,
+            Self::OpenAi => &crate::capabilities::OPENAI,
+            Self::Grok => &crate::capabilities::GROK,
+            Self::XaiApi => &crate::capabilities::XAI,
+            Self::Claude => &crate::capabilities::CLAUDE,
+            Self::Anthropic => &crate::capabilities::ANTHROPIC,
+            Self::OpenRouter => &crate::capabilities::OPENROUTER,
+        };
+        (route.hosted_retrieval)().unwrap_or(HostedRetrievalTable::new(
+            HostedRetrievalSupport::NOT_OFFERED,
+            HostedRetrievalSupport::NOT_OFFERED,
+            HostedRetrievalSupport::NOT_OFFERED,
+        ))
     }
 }
 

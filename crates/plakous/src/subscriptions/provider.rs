@@ -19,6 +19,18 @@ pub enum NativeProvider {
 }
 
 impl NativeProvider {
+    /// Release-owned hosted retrieval facts for this compiled native route.
+    #[must_use]
+    pub fn hosted_retrieval(self) -> Option<plakous_model::HostedRetrievalTable> {
+        super::vertical::vertical(self).map(super::vertical::NativeVertical::hosted_retrieval)
+    }
+
+    /// The provider's model-specific output ceiling, when this route has one.
+    #[must_use]
+    pub fn maximum_output_tokens(self, model: &str) -> Option<u32> {
+        super::vertical::vertical(self).and_then(|vertical| vertical.maximum_output_tokens(model))
+    }
+
     /// Whether this exact native route was compiled into the facade.
     #[must_use]
     pub fn is_compiled(self) -> bool {

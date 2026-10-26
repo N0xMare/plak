@@ -13,6 +13,7 @@ pub static CLAUDE: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "claude",
     review_deadline: compiled::review_deadline,
+    hosted_retrieval: compiled::hosted_retrieval,
     account: "claude",
     aliases: &["claude"],
     kind: RouteKind::Native(NativeProvider::Claude),

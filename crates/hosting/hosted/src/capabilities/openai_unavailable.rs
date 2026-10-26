@@ -1,1 +1,1 @@
-pub(super) use super::super::route_unavailable::{COMPILED, review_deadline};
+pub(super) use super::super::route_unavailable::{COMPILED, hosted_retrieval, review_deadline};

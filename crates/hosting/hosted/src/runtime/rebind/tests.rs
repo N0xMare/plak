@@ -158,7 +158,7 @@ impl plakous::openai::PlatformCredentialSource for NoInferenceSource {
         self.0.generation_grant(reference, origin)
     }
 }
-impl crate::platform::PlatformCredentials for TopologyApiCredentials {
+impl crate::platform::OpenAiCredentials for TopologyApiCredentials {
     fn openai(&self) -> CliResult<Arc<dyn plakous::openai::PlatformCredentialSource>> {
         use plakous::openai::*;
         Ok(Arc::new(NoInferenceSource(
@@ -169,9 +169,13 @@ impl crate::platform::PlatformCredentials for TopologyApiCredentials {
             ),
         )))
     }
+}
+impl crate::platform::AnthropicCredentials for TopologyApiCredentials {
     fn anthropic(&self) -> CliResult<Arc<dyn plakous::anthropic::AnthropicApiKeySource>> {
         Err(CliFailure::new("unselected provider"))
     }
+}
+impl crate::platform::XaiCredentials for TopologyApiCredentials {
     fn xai(&self) -> CliResult<Arc<dyn plakous::xai::XaiPlatformApiKeySource>> {
         Err(CliFailure::new("unselected provider"))
     }

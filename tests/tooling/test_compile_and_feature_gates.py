@@ -129,6 +129,7 @@ class FeatureClosureCacheTests(unittest.TestCase):
                  mock.patch.object(feature_gate, "validate_excluded_closures", return_value=[]), \
                  mock.patch.object(feature_gate, "validate_test_only_dependency_features", return_value=[]), \
                  mock.patch.object(feature_gate, "check_facade_profiles", return_value=[]) as facade, \
+                 mock.patch.object(feature_gate, "check_hosted_profiles", return_value=[]) as hosted, \
                  mock.patch.object(feature_gate.sys, "stdout", new_callable=io.StringIO) as output:
                 self.assertEqual(feature_gate.main(), 0)
                 cache.assert_not_called()
@@ -136,6 +137,7 @@ class FeatureClosureCacheTests(unittest.TestCase):
                 self.assertIn("bypass", output.getvalue())
                 # --build checks every facade subset itself.
                 self.assertEqual(facade.called, flag == "--no-cache")
+                self.assertEqual(hosted.called, flag == "--no-cache")
 
     def test_failed_query_is_not_cached(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -189,6 +191,19 @@ class FacadeProfileTests(unittest.TestCase):
     def test_missing_facade_is_an_error(self):
         self.assertEqual(feature_gate.check_facade_profiles({}, ROOT),
                          ["plakous: package missing from workspace metadata"])
+
+    def test_hosted_singletons_do_not_borrow_workspace_unification(self):
+        clean = subprocess.CompletedProcess([], 0, "", "")
+        manifests = {"plakous-hosted": self.MANIFESTS["plakous"]}
+        with mock.patch.object(feature_gate.subprocess, "run", return_value=clean) as run:
+            self.assertEqual(feature_gate.check_hosted_profiles(manifests, ROOT), [])
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(commands), 3)
+        for command in commands:
+            self.assertEqual(command[command.index("-p") + 1], "plakous-hosted")
+            self.assertIn("--no-default-features", command)
+        self.assertNotIn("--features", commands[0])
+        self.assertEqual([command[command.index("--features") + 1] for command in commands[1:]], ["a", "b"])
 
 class PublicCompileGateTests(unittest.TestCase):
     def setUp(self):

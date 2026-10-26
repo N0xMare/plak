@@ -13,6 +13,7 @@ pub static GROK: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "grok",
     review_deadline: compiled::review_deadline,
+    hosted_retrieval: compiled::hosted_retrieval,
     account: "grok",
     aliases: &["grok", "supergrok", "xai-oauth"],
     kind: RouteKind::Native(NativeProvider::Xai),

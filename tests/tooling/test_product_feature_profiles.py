@@ -20,16 +20,15 @@ class ProductFeatureProfilesTests(unittest.TestCase):
     def manifest(self):
         return {"features": {"default": ["git-cli", *gate.PRODUCT_FEATURES]}}
 
-    def test_six_off_witnesses_do_not_reenable_an_omitted_feature(self):
-        profiles = gate.product_off_profiles(self.manifest())
-        self.assertEqual(len(profiles), 6)
-        for feature, (name, selected, default) in zip(gate.PRODUCT_FEATURES, profiles):
-            self.assertEqual(name, f"without-{feature}")
-            self.assertNotIn(feature, selected)
-            self.assertFalse(default)
-            if feature in {"tui", "images"}:
-                self.assertNotIn("clipboard", selected)
-        self.assertEqual(profiles[-1][1], ("git-cli",))
+    def test_named_variants_pin_route_and_surface_omissions(self):
+        profiles = {name: (set(selected), default) for name, selected, default in gate.named_variants(self.manifest())}
+        self.assertEqual(set(profiles), {"default", "headless", "api", "minimal"})
+        self.assertTrue(profiles["default"][1])
+        self.assertFalse({"tui", "clipboard"} & profiles["headless"][0])
+        self.assertTrue({"codex", "grok", "claude", "python", "mcp"} <= profiles["headless"][0])
+        self.assertFalse({"codex", "grok", "claude"} & profiles["api"][0])
+        self.assertTrue({"openai", "anthropic", "xai-api", "openrouter", "tui", "python"} <= profiles["api"][0])
+        self.assertEqual(profiles["minimal"], ({"git-cli", "openrouter", "tui"}, False))
 
     def test_compile_covers_bin_and_lib_and_warning_failure_is_not_cached(self):
         warning = json.dumps({"reason": "compiler-message", "message": {
@@ -39,7 +38,7 @@ class ProductFeatureProfilesTests(unittest.TestCase):
         with mock.patch.object(gate.subprocess, "run", side_effect=results) as run:
             errors = gate.check_product_profiles({"plak": self.manifest()}, operation="check", target="reviewed-triple")
         self.assertEqual(len(errors), 1)
-        self.assertIn("without-tui", errors[0])
+        self.assertIn("headless", errors[0])
         self.assertEqual(run.call_count, 8)
         for call in run.call_args_list:
             command = call.args[0]
@@ -56,9 +55,9 @@ class ProductFeatureProfilesTests(unittest.TestCase):
     def test_complete_external_closure_pins_catch_a_planted_headless_ratatui_edge(self):
         with mock.patch.object(gate, "full_closure", return_value={"ratatui"}):
             errors = gate.validate_excluded_closures()
-        self.assertEqual(len(errors), 1)
-        self.assertIn("ratatui", errors[0])
-        self.assertIn("git-cli+images+python+mcp", errors[0])
+        self.assertTrue(errors)
+        self.assertTrue(all("ratatui" in error for error in errors))
+        self.assertTrue(any("git-cli+images+python+mcp" in error for error in errors))
 
 
 if __name__ == "__main__":

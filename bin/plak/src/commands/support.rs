@@ -110,7 +110,7 @@ pub fn product_state_roots_from(
     let paths_for_roster = paths.clone();
     let named_secret_paths = paths.clone();
     let credentials = crate::openrouter_product::ProductOpenRouterCredentials::shared(&paths);
-    let platform_credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths)?;
+    let platform_credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths);
     let runtime_database = paths.runtime_database();
     let job_outputs = paths.job_outputs();
     let tree_store = crate::store::tree::ProductTreeStoreFactory::new(paths);

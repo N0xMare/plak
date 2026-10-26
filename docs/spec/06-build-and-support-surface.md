@@ -325,10 +325,10 @@ tracked Rust file of the package, tests included:
 `plakous-hosted::capabilities` owns the complete current route metadata in
 per-route modules and one ordered registry. Plak's private product registry
 adds its labels, recommendation aliases, doctor probe and bundled preset for
-each hosted identity. No new Cargo features or feature implications are
-introduced by that registry; the default and maintainer closures and the
-speed-focused release profile are unchanged. Runtime construction and its
-test-support seams remain separate from this metadata registry. Serialized
+each hosted identity. Every route stays registered, with its feature name and
+compiled flag; runtime construction and credential/catalog work live behind
+the route's module gate. The default behavior and speed-focused release profile
+are unchanged. Serialized
 binding enums, the complete template-account vocabulary and credential-store
 directory names remain ungated; they describe records, not enabled menus.
 
@@ -345,6 +345,8 @@ called out explicitly.
 
 | Crate | Feature | Effect |
 | --- | --- | --- |
+| `plak`, `plakous-hosted` | `codex`, `grok`, `claude` | Independently forward the corresponding native facade route; `codex` additionally requires `js` |
+| `plak`, `plakous-hosted` | `openai`, `anthropic`, `xai-api`, `openrouter` | Independently forward the API route (`xai-api` forwards facade `xai`); `openai` additionally requires `js` |
 | `plak`, `plakous-hosted` | `tui` | Default on; Plak's optional terminal presentation stack and interactive helpers. Hosted carries capability identity only, without a TUI dependency |
 | `plak`, `plakous-hosted` | `clipboard` | Default on; requires `tui` and `images`; Plak's optional clipboard libraries and image paste. Hosted carries capability identity |
 | `plak`, `plakous-hosted` | `images` | Default on; hosted image normalization and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
@@ -381,10 +383,12 @@ not supported embedder authority. Plak's maintainer feature enables its `jj` fea
 `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, and
 `plakous-host-protocol` in production, and on no other package in the tree —
 `plakous-workspace` in particular is reached only through the tree crate. The
-product declares its required facade features explicitly in `bin/plak`:
-default features off, `codex`, `grok`, `claude`, `openai`, `anthropic`, `xai`,
-`openrouter`, and `sessions-sqlite` on. Hosted libraries also declare the facade
-features their own implementations require; Cargo unifies these requirements.
+product and hosted crate declare only `sessions-sqlite` unconditionally on
+their default-disabled facade edges. Their own route and evaluator features
+forward to the facade where each implementation lives; neither package can
+borrow those declarations from the other's feature unification. Product
+defaults include all seven routes, JS, Python, MCP, local web fetch, images,
+TUI, clipboard and Git. Hosted defaults additionally include the JJ backend.
 Every package must declare the dependency features its own Rust targets use;
 features enabled only by another workspace member are not evidence that the
 package builds on its own. The gate's `builds` group therefore also builds each
@@ -427,21 +431,30 @@ cost; they do not claim an exhaustive power-set proof. Named external-closure
 exclusions are checked independently. Hidden repository-only `test-clock` is
 not public, is excluded from these witnesses, and never enters `full` or the
 product default/maintainer release closures.
-Only the `variants` group (full only) compiles reduced
-products: without TUI, clipboard, images, and all five product features.
-Python-only and MCP-only omissions have the default dependency closure, so
-they add no independent compile profile; their admission is covered by unit
-tests and the all-product-off fixture. Each distinct resolution builds its
+The one named-variant table is `NAMED_VARIANTS` in `check_features.py`:
+`headless` is default minus `tui` and `clipboard`; `api` is default minus
+`codex`, `grok` and `claude`; `minimal` is exactly `tui,openrouter,git-cli`.
+The supported and shipped Plak is **default only**. Named variants are built
+and contract-tested in full, not shipped. Other combinations may compile;
+compilation does not establish support. Named variants also get closure
+witnesses in the static checker, without adding reduced compilation to check.
+Only the `variants` group (full only) builds the three reduced named products,
+plus an admission fixture that omits TUI, clipboard, images, Python and MCP.
+Each distinct resolution builds its
 library and binary and runs clippy with warnings denied, then checks version,
 doctor, CLI/JSONL refusals and canonical-store read/refusal byte preservation.
 The group also builds a full test-hooks fixture writer and a reduced
 test-hooks/maintainer reader to exercise real canonical stores, genesis
 import rebind, attached maintainer actions and an image diagnostic during an
-in-flight JSONL turn. These harness builds are not product compile profiles.
-The static checker checks closures, including external exclusions: without
-TUI must omit ratatui, crossterm, syntect, arboard and pulldown-cmark;
-without images must omit image. The workspace checker pins forwarding,
-dependency optionality and defaults.
+in-flight JSONL turn. Full-created canonical native sessions remain readable
+through show/log/export in the API and minimal binaries, while attach/resume
+returns typed `CapabilityUnavailable` (exit 2) without changing store bytes.
+These harness builds are not shipped variants. Complete external-closure pins
+exclude terminal/clipboard libraries from headless and JWT from API; minimal
+also excludes MCP, Python, evaluator clients, image decoding, HTML conversion
+and JWT. Default minus Python excludes Monty and WebSockets. The default,
+facade-full and native-auth closures exclude aws-lc and rsa. The workspace
+checker pins forwarding, dependency optionality and defaults.
 
 The checker reports hits/misses and atomically caches Cargo tree/metadata
 outputs in `${CARGO_TARGET_DIR:-$ROOT/target}/feature-closure-cache.json` by a
@@ -455,11 +468,14 @@ directly; no cache is read or written.
 
 Closures prove dependency edges, not that the code compiles. Without
 `--build`, the checker therefore also runs `cargo check --lib` on `plakous`
-with no features and with each public feature alone (ten profiles); a
+and `plakous-hosted` with no features and with each public feature alone
+(fourteen facade profiles and eighteen hosted profiles); a
 rustc warning or error in any workspace crate of that profile fails it. Cargo's
-fingerprints are its cache: an unchanged profile is a no-op (about 1 s for
-all ten), and a facade or dependency source change rechecks only the
-affected crates. `--build` checks every subset and skips this step.
+fingerprints are its cache: an unchanged profile is a no-op, and a facade or
+dependency source change rechecks only the affected crates. Hosted profiles
+must compile without borrowing facade features from another workspace package.
+`--build` checks
+every witness and skips this step.
 
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no

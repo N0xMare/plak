@@ -404,6 +404,12 @@ impl NativeVertical for Vertical {
             plakous_xai::XAI_GROK_BUILD_SOURCE_REVISION,
         )
     }
+    fn hosted_retrieval(&self) -> plakous_model::HostedRetrievalTable {
+        plakous_xai::SUPERGROK_HOSTED_RETRIEVAL
+    }
+    fn maximum_output_tokens(&self, model: &str) -> Option<u32> {
+        plakous_xai::grok_max_output_tokens(model)
+    }
     fn notice(&self) -> CompatibilityNotice {
         let provider = NativeProvider::Xai;
         {

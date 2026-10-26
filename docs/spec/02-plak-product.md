@@ -3147,13 +3147,14 @@ closes. This does not change the v1 command or event encoding.
 | `bye` | — |
 
 `hello.capabilities` is additive in v1: a sorted, duplicate-free array with
-one canonical id per route (`anthropic`, `claude`, `codex`, `grok`, `openai`,
-`openrouter`, `xai-api`) plus the compiled `BUILD_CAPABILITIES` feature names
-(`clipboard`, `images`, `mcp`, `python`, `tui`). This is the closed current
+one canonical id per compiled route (`anthropic`, `claude`, `codex`, `grok`,
+`openai`, `openrouter`, `xai-api`) plus the compiled `BUILD_CAPABILITIES`
+feature names (`clipboard`, `images`, `js`, `mcp`, `python`, `tui`, `web-fetch`). This is the closed current
 vocabulary, also used by capability refusals' `available:` list. Account
-aliases (`chatgpt`, `supergrok`, `xai-oauth`), composition names (`py-ptc`)
-and an inferred `js` entry are not capabilities. Route entries are all present
-in the current product closure; product feature entries may be omitted.
+aliases (`chatgpt`, `supergrok`, `xai-oauth`) and composition names (`py-ptc`,
+`py-sdk`) are not entries. `js` and `web-fetch` are explicit build capabilities,
+not inferred from a chosen composition or route. The default product reports
+all fourteen ids; reduced products omit every route or feature not compiled.
 When Python is omitted, `python_host` and `python_host_target` are absent.
 
 `hello`, `ready`, `tool`, `error`, `turn`, `turn_lifecycle`, `tree`, `bye`, `model_refusal`, and `recovered` MUST NOT be dropped

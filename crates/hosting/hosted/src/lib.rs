@@ -63,6 +63,7 @@ pub mod capabilities;
 pub mod context;
 /// The closed reasoning-effort vocabulary.
 pub mod effort;
+mod exchange_observation;
 /// Where a hosted session writes its event log.
 pub mod session_home;
 /// The session event log.
@@ -108,7 +109,6 @@ pub use plakous_workspace::workspace;
 
 pub use error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 
-mod api_runtime;
 mod call_detail;
 mod frozen_tables;
 pub mod mcp_binding;

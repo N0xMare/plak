@@ -11,6 +11,7 @@ pub static OPENROUTER: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "openrouter",
     review_deadline: compiled::review_deadline,
+    hosted_retrieval: compiled::hosted_retrieval,
     account: "openrouter",
     aliases: &["openrouter"],
     kind: RouteKind::OpenRouter,

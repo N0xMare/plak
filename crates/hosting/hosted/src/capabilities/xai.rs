@@ -13,6 +13,7 @@ pub static XAI: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "xai-api",
     review_deadline: compiled::review_deadline,
+    hosted_retrieval: compiled::hosted_retrieval,
     account: "xai-api",
     aliases: &["xai-api"],
     kind: RouteKind::Platform(PlatformProvider::Xai),

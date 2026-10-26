@@ -157,7 +157,8 @@ class ResponsibilityReportTests(unittest.TestCase):
                     self.assertNotIn("\npub fn ", text, path)
                 else:
                     # `tests.rs` must be declared by `#[cfg(test)] mod tests;`
-                    # or `#[cfg(all(test, unix))] mod tests;` (unix-only bodies).
+                    # or `#[cfg(all(test, ...))] mod tests;` (test-only bodies
+                    # further restricted by platform or compiled features).
                     parent = path.parent
                     # A crate root declares `mod tests;` too (e.g. a crate
                     # whose whole body is one module).
@@ -176,7 +177,7 @@ class ResponsibilityReportTests(unittest.TestCase):
                     declared = any(
                         candidate.is_file()
                         and re.search(
-                            r"#\[cfg\((?:test|all\(test,\s*unix\))\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod tests;",
+                            r"#\[cfg\((?:test|all\(test,[^()]*\))\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod tests;",
                             candidate.read_text(encoding="utf-8"),
                         )
                         for candidate in declarers

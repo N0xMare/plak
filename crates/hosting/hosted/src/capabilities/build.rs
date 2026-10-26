@@ -141,7 +141,10 @@ pub fn require_composition(
     composition: crate::binding::CompositionSelection,
 ) -> Result<(), CapabilityUnavailable> {
     use crate::binding::CompositionSelection;
-    if matches!(composition, CompositionSelection::JsPtc | CompositionSelection::NativePtc) {
+    if matches!(
+        composition,
+        CompositionSelection::JsPtc | CompositionSelection::NativePtc
+    ) {
         require_feature("js")?;
     }
     if composition.requires_python_worker() {

@@ -1355,7 +1355,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # A Direct extension's registry owner names its MCP server.
     ("plakous-hosted", "src/agent/build/tools.rs"): {"tools": {"ToolOwnerClass"}},
-    ("plakous-hosted", "src/api_runtime.rs"): {"tools": {"RegisteredToolIdentity"}},
+    ("plakous-hosted", "src/agent/build/api.rs"): {"tools": {"RegisteredToolIdentity"}},
     # MCP binding: the facade's MCP client, a host environment for the pool's
     # service processes, and the named-secret value type.
     ("plakous-hosted", "src/mcp_binding/available.rs"): {
@@ -1406,10 +1406,6 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "HostedRetrievalSupport", "HostedRetrievalTable", "HostedRetrievalTool",
             "HostedRetrievalUnsupported",
         },
-        "openai": {"CODEX_HOSTED_RETRIEVAL", "OPENAI_API_HOSTED_RETRIEVAL"},
-        "anthropic": {"ANTHROPIC_API_HOSTED_RETRIEVAL", "CLAUDE_OAUTH_HOSTED_RETRIEVAL"},
-        "xai": {"SUPERGROK_HOSTED_RETRIEVAL", "XAI_API_HOSTED_RETRIEVAL"},
-        "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
         # The MCP records a root's frozen selection carries to its bind.
         "mcp": {"McpToolRecord"},
         # The deferred ports the session's executor connects to, the bounds
@@ -1424,13 +1420,17 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # The Anthropic, OpenAI and xAI API executors connect their side-request
     # and image ports.
-    ("plakous-hosted", "src/platform.rs"): {
+    ("plakous-hosted", "src/platform/anthropic.rs"): {
         "anthropic": {"AnthropicRetrievalPort"},
+    },
+    ("plakous-hosted", "src/platform/openai.rs"): {
         "openai": {"OpenAiImagePort", "OpenAiRetrievalPort", "lowest_responses_effort"},
-        "xai": {"XaiImagePort", "XaiRetrievalPort"},
+    },
+    ("plakous-hosted", "src/platform/xai.rs"): {
+        "xai": {"XaiImagePort", "XaiRetrievalPort", "lowest_responses_effort"},
     },
     # The OpenRouter executor connects its side-request port.
-    ("plakous-hosted", "src/openrouter.rs"): {
+    ("plakous-hosted", "src/openrouter/available.rs"): {
         "openrouter": {"OpenRouterRetrieval", "OpenRouterRetrievalPort"},
     },
     # The frozen [tools.fetch_url], [tools.web_search] and [tools.x_search]
@@ -1443,7 +1443,39 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plak", "src/commands/reload_rehearsal.rs"): {
         "sessions": {"rehearsal", "inspect_sqlite", "OfflineReopenOutcome"},
     },
+    ("plakous-hosted", "src/capabilities.rs"): {
+        "model": {"HostedRetrievalTable"},
+    },
+    ("plakous-hosted", "src/capabilities/anthropic_available.rs"): {
+        "model": {"HostedRetrievalTable"},
+        "anthropic": {"ANTHROPIC_API_HOSTED_RETRIEVAL"},
+    },
+    ("plakous-hosted", "src/capabilities/claude_available.rs"): {
+        "model": {"HostedRetrievalTable"},
+    },
+    ("plakous-hosted", "src/capabilities/codex_available.rs"): {
+        "model": {"HostedRetrievalTable"},
+    },
+    ("plakous-hosted", "src/capabilities/grok_available.rs"): {
+        "model": {"HostedRetrievalTable"},
+    },
+    ("plakous-hosted", "src/capabilities/openai_available.rs"): {
+        "model": {"HostedRetrievalTable"},
+        "openai": {"OPENAI_API_HOSTED_RETRIEVAL"},
+    },
+    ("plakous-hosted", "src/capabilities/openrouter_available.rs"): {
+        "model": {"HostedRetrievalTable"},
+        "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
+    },
+    ("plakous-hosted", "src/capabilities/xai_available.rs"): {
+        "model": {"HostedRetrievalTable"},
+        "xai": {"XAI_API_HOSTED_RETRIEVAL"},
+    },
+    ("plakous-hosted", "src/capabilities/route_unavailable.rs"): {
+        "model": {"HostedRetrievalTable"},
+    },
 }
+
 PROVIDER_NAMES = {"anthropic", "gemini", "openai", "openrouter", "xai"}
 # Plak's own account spellings. They are not transport identities the way
 # `openai` is, but a neutral package that names one carries a closed roster of

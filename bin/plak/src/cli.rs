@@ -1616,20 +1616,22 @@ fn finish_agent(
                 .as_deref()
                 .map(crate::product_config::ProductCompositionSelection::parse)
                 .transpose()?;
-            if model
-                .as_deref()
-                .is_some_and(|model| !crate::platform_catalog::enrolled(platform, model))
-            {
-                return Err("API model is not enrolled for the selected account".into());
-            }
-            if let (Some(model), Some(composition)) = (model.as_deref(), composition) {
-                plakous_hosted::platform::api_composition(platform, model, composition)
-                    .map_err(str::to_owned)?;
-            }
-            if let (Some(model), Some(effort)) = (model.as_deref(), effort) {
-                plakous_hosted::platform::bundled_catalog(platform, "offline")
-                    .admit(model, Some(effort))
-                    .map_err(|error| error.to_string())?;
+            if plakous_hosted::capabilities::require(account).is_ok() {
+                if model
+                    .as_deref()
+                    .is_some_and(|model| !crate::platform_catalog::enrolled(platform, model))
+                {
+                    return Err("API model is not enrolled for the selected account".into());
+                }
+                if let (Some(model), Some(composition)) = (model.as_deref(), composition) {
+                    plakous_hosted::platform::api_composition(platform, model, composition)
+                        .map_err(str::to_owned)?;
+                }
+                if let (Some(model), Some(effort)) = (model.as_deref(), effort) {
+                    plakous_hosted::platform::bundled_catalog(platform, "offline")
+                        .admit(model, Some(effort))
+                        .map_err(|error| error.to_string())?;
+                }
             }
             return Ok(Command::Agent {
                 session_id: None,

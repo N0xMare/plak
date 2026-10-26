@@ -13,6 +13,7 @@ pub static CODEX: RouteCapability = RouteCapability {
     compiled: compiled::COMPILED,
     feature: "codex",
     review_deadline: compiled::review_deadline,
+    hosted_retrieval: compiled::hosted_retrieval,
     account: "codex",
     aliases: &["codex", "chatgpt"],
     kind: RouteKind::Native(NativeProvider::Codex),

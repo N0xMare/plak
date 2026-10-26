@@ -322,9 +322,9 @@ plakous-hosted = [
 ]
 
 [workspace.metadata.plakous.facade-features]
-plak = ["codex", "grok", "claude", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+plak = ["sessions-sqlite"]
 plakous-recursive-subagents = []
-plakous-hosted = ["codex", "grok", "claude", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+plakous-hosted = ["sessions-sqlite"]
 
 [workspace.metadata.plakous.modules.plak.tui]
 forbid-crates = ["plakous", "plakous-*"]
@@ -456,7 +456,7 @@ reason = "Existing placement debt; ratchet down as composition-root ports and mo
 [workspace.metadata.plakous.cfg.plakous-hosted]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 feature-ceiling = 27
-test-seam-ceiling = 30
+test-seam-ceiling = 29
 reason = "Capability registry; feature-off capability markers live behind module gates. Existing placement debt must fall as module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-http]

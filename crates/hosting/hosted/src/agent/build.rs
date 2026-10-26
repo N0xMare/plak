@@ -2,6 +2,13 @@
 //! registries and harness profiles, the build/open/resume entry points, and
 //! the session runtime bindings the product composes.
 
+#[cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter"
+))]
+pub(crate) mod api;
 mod binding;
 #[cfg(any(test, feature = "test-support"))]
 mod injected;
@@ -35,15 +42,14 @@ pub use policy::{
 };
 #[cfg(test)]
 pub(super) use policy::{NATIVE_RUN_ROUND_INPUT_LIABILITY_CEILING, PROCESS_SESSION_TOOLS};
-pub(crate) use policy::{
-    SessionToolFence, attach_codex_minimal, occupancy_read_only_allows, occupancy_session_fence,
-    product_javascript_candidate_attachment, product_python_attachment, product_sdk_attachment,
-    session_tool_policy, stamped_workspace_policy,
-};
+pub(crate) use policy::{SessionToolFence, occupancy_read_only_allows, occupancy_session_fence};
+#[cfg(test)]
+pub(crate) use policy::{session_tool_policy, stamped_workspace_policy};
 #[cfg(test)]
 pub(super) use profile::product_identity_profile;
 #[cfg(test)]
 pub(crate) use profile::selected_harness_profile;
+#[cfg(test)]
 pub(crate) use profile::{
     enroll_product_instructions, product_prompt_variant, subagent_catalog_profile_id,
 };
@@ -60,14 +66,14 @@ pub(crate) use session::{
 };
 #[cfg(test)]
 pub(crate) use tools::coding_tool_registry;
+pub(crate) use tools::coding_tool_registry_with_extensions;
 #[cfg(test)]
 pub(super) use tools::{
     bind_node_tool_plan, is_codex_code_mode_candidate, is_exact_code_mode_attachment, node_session,
 };
-pub(crate) use tools::{
-    coding_tool_registry_with_extensions, direct_extension_tool, projection_target,
-};
 pub use tools::{direct_composition_capable, spawn_child_composition};
+#[cfg(test)]
+pub(crate) use tools::{direct_extension_tool, projection_target};
 pub(super) use tools::{spawn_roster_composition, spawn_roster_processing_tier};
 #[cfg(test)]
 pub(crate) use topology::topology_extensions_if_enabled;

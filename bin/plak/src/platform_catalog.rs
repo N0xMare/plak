@@ -37,6 +37,8 @@ pub(crate) fn validate(
     effort: Option<ReasoningEffort>,
     composition: ProductCompositionSelection,
 ) -> Result<(), String> {
+    crate::build_features::require_account(provider.account())
+        .map_err(|error| error.to_string())?;
     plakous_hosted::platform::bundled_catalog(provider, "offline")
         .admit(model, effort)
         .map_err(|error| error.to_string())?;

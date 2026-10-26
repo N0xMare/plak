@@ -550,7 +550,7 @@ impl HostTargetAuthority {
 pub struct OpenRouterHostEvidence {
     literal_model: String,
     wire: crate::binding::ResolvedProtocol,
-    evidence: plakous::openrouter::OpenRouterChatModelEvidence,
+    evidence: crate::openrouter::OpenRouterChatModelEvidence,
 }
 
 impl OpenRouterHostEvidence {

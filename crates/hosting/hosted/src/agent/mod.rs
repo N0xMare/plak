@@ -78,6 +78,8 @@ mod product_gate_tests;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use build::coding_tool_registry_with_extensions;
 pub use build::direct_composition_capable;
 pub use build::{
     ApiTopologyParent, AttachedCodingSession, AttachedReleaseError, CodingSessionOpenFailure,
@@ -96,11 +98,8 @@ pub use build::{
 pub(crate) use build::{
     SessionToolFence, api_session_runtime_binding, build_api_coding_session_seed,
     build_coding_session_seed, coding_session_runtime_binding_with_attach,
-    coding_tool_registry_with_extensions, direct_extension_tool, enroll_product_instructions,
     invoke_topology_tool_on_hub, node_coding_presentation, occupancy_session_fence,
-    open_api_coding_session_with_fence, product_javascript_candidate_attachment,
-    product_prompt_variant, product_python_attachment, projection_target, session_tool_policy,
-    stamped_workspace_policy, subagent_catalog_profile_id, vocabulary_for_presentation,
+    open_api_coding_session_with_fence, vocabulary_for_presentation,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use build::{build_or_open_bound_session, injected_root_tool_registrations};
@@ -108,6 +107,11 @@ use build::{
     coding_session_runtime_binding_for, require_reconstructed_coding_projection,
     spawn_child_composition, spawn_parent_tree_id, spawn_roster_composition,
     spawn_roster_processing_tier,
+};
+#[cfg(test)]
+pub(crate) use build::{
+    direct_extension_tool, enroll_product_instructions, product_prompt_variant, projection_target,
+    session_tool_policy, stamped_workspace_policy, subagent_catalog_profile_id,
 };
 use children::{
     ProductChildSessionBinder, ProductLiveCanceller, ProductMailDeliverer,

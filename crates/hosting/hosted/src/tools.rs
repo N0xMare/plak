@@ -13,6 +13,28 @@ mod fetch_url;
 #[path = "tools/fetch_url_unavailable.rs"]
 mod fetch_url;
 
+#[cfg(any(
+    feature = "codex",
+    feature = "grok",
+    feature = "claude",
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter"
+))]
+mod image_gen;
+#[cfg(not(any(
+    feature = "codex",
+    feature = "grok",
+    feature = "claude",
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter"
+)))]
+#[path = "tools/image_gen_unavailable.rs"]
+mod image_gen;
+
 use plakous::model::ToolName;
 use plakous::tools::{
     CodingPresentation, CompiledSurface, Earned, FrozenToolRegistry, MenuEntry, PassthroughPack,
@@ -175,11 +197,7 @@ impl ProductToolExtensions {
                 .image_gen()
                 .ok_or_else(|| CliFailure::new("planned image_gen has no image port"))?;
             image_slot = binding.slot();
-            appended.extend(
-                plakous::tools::web::ImageGenPack::new(binding.port())
-                    .registrations()
-                    .map_err(|error| CliFailure::new(format!("image_gen: {error}")))?,
-            );
+            appended.extend(image_gen::registrations(binding.port())?);
         }
         let earning = mcp.first().map(|registration| registration.name().clone());
         appended.extend(mcp);

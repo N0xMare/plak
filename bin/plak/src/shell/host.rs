@@ -184,8 +184,7 @@ pub fn product_state_roots(paths: &PlakPaths) -> plakous_hosted::agent::ProductS
         ))),
         Arc::new(crate::sidecars::ProductSidecarLocator),
         crate::openrouter_product::ProductOpenRouterCredentials::shared(paths),
-        crate::platform_product::ProductPlatformCredentials::shared(paths)
-            .expect("valid API sources"),
+        crate::platform_product::ProductPlatformCredentials::shared(paths),
         Arc::new(crate::store::session_records::SqliteSessionStore::new(
             paths.clone(),
         )),

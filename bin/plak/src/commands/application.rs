@@ -736,7 +736,7 @@ impl AccountOps for PlakousApplication {
         provider: plakous_hosted::binding::PlatformProvider,
     ) -> CliResult<plakous_hosted::platform::ApiModelCatalog> {
         let paths = self.product_paths()?.clone();
-        let credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths)?;
+        let credentials = crate::platform_product::ProductPlatformCredentials::shared(&paths);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());
@@ -751,7 +751,7 @@ impl AccountOps for PlakousApplication {
                 )
                 .await
             })
-            .map_err(application_execution_failure)
+            .map_err(application_execution_failure)?
     }
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {

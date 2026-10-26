@@ -216,27 +216,32 @@ pub(crate) fn platform_route_presentation(
 }
 
 fn build_routes() -> Result<PresentationRoutes, ()> {
-    Ok(PresentationRoutes::new([
-        native_route(
+    let mut routes = Vec::new();
+    for (provider, presentation, family, models) in [
+        (
             NativeProvider::Codex,
             CodingPresentation::Codex,
             Some(PROCESS_PROJECTION_FAMILY),
-            |model| NativeProvider::Codex.enrolls(model),
-        )?,
-        native_route(
+            (|model: &str| NativeProvider::Codex.enrolls(model)) as fn(&str) -> bool,
+        ),
+        (
             NativeProvider::Xai,
             CodingPresentation::Grok,
             Some(PROCESS_PROJECTION_FAMILY),
-            |model| NativeProvider::Xai.enrolls(model),
-        )?,
-        // Claude OAuth admits every family its catalog resolves; the model
-        // list is the enrolled candidate set.
-        native_route(
+            (|model: &str| NativeProvider::Xai.enrolls(model)) as fn(&str) -> bool,
+        ),
+        (
             NativeProvider::Claude,
             CodingPresentation::Claude,
             None,
-            |model| NativeProvider::Claude.enrolls(model),
-        )?,
+            (|model: &str| NativeProvider::Claude.enrolls(model)) as fn(&str) -> bool,
+        ),
+    ] {
+        if provider.is_compiled() {
+            routes.push(native_route(provider, presentation, family, models)?);
+        }
+    }
+    routes.extend([
         // The API routes wear their OAuth vertical's pack, without its costume.
         PresentationRoute::standard(
             OPENAI_PLATFORM.0,
@@ -273,7 +278,8 @@ fn build_routes() -> Result<PresentationRoutes, ()> {
         // OpenRouter and every other custom integration: the product attached
         // the route itself, so it wears the generic pi pack.
         PresentationRoute::custom_integrations(CodingPresentation::Pi),
-    ]))
+    ]);
+    Ok(PresentationRoutes::new(routes))
 }
 
 /// The pack an API route presents: the `openai` API wears the Codex pack, the
@@ -289,8 +295,7 @@ pub(crate) const fn platform_presentation(provider: PlatformProvider) -> CodingP
 
 /// The reviewed OpenAI Platform profile an enrolled literal runs under.
 fn openai_platform_profile(model: &str) -> Option<&'static str> {
-    plakous::openai::OpenAiPlatformModelFacts::from_model_id(model)
-        .map(plakous::openai::OpenAiPlatformModelFacts::profile_id)
+    crate::platform::openai_profile(model)
 }
 
 fn native_route(

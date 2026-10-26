@@ -501,6 +501,12 @@ impl NativeVertical for Vertical {
             plakous_openai::OPENAI_CODEX_SOURCE_REVISION,
         )
     }
+    fn hosted_retrieval(&self) -> plakous_model::HostedRetrievalTable {
+        plakous_openai::CODEX_HOSTED_RETRIEVAL
+    }
+    fn maximum_output_tokens(&self, _model: &str) -> Option<u32> {
+        None
+    }
     fn notice(&self) -> CompatibilityNotice {
         let provider = NativeProvider::Codex;
         {

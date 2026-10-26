@@ -3,6 +3,7 @@
 mod atomic;
 mod keys;
 mod load;
+#[cfg(feature = "mcp")]
 pub(crate) mod mcp_edit;
 mod policy;
 mod readiness;
