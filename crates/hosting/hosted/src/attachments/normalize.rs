@@ -5,7 +5,6 @@
 //! shrinking further only while the encoding is still over the byte bound.
 
 use std::borrow::Cow;
-use std::fmt;
 use std::io::Cursor;
 
 use image::codecs::jpeg::JpegEncoder;
@@ -14,10 +13,7 @@ use image::imageops::FilterType;
 use image::{DynamicImage, ImageDecoder as _, ImageFormat, Limits, RgbImage, RgbaImage};
 use plakous_host_protocol::DraftImage;
 
-use super::MAX_IMAGE_BYTES;
-
-/// Longest edge, in pixels, of an image Plak re-encodes.
-pub const MAX_IMAGE_EDGE: u32 = 2048;
+use super::{MAX_IMAGE_BYTES, MAX_IMAGE_EDGE, NormalizeError};
 
 const JPEG_QUALITY: u8 = 90;
 
@@ -28,52 +24,6 @@ const MIN_EDGE: u32 = 64;
 /// edge may exceed [`MAX_SOURCE_EDGE`].
 const MAX_DECODE_ALLOC: u64 = 256 * 1024 * 1024;
 const MAX_SOURCE_EDGE: u32 = 16_384;
-
-/// Why an image could not be brought within the bounds.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum NormalizeError {
-    /// The bytes are not a png, jpeg, gif or webp image.
-    NotAnImage(plakous::tools::ImageSniffError),
-    /// The image could not be decoded, or its decoded size exceeds what Plak
-    /// decodes.
-    Undecodable(Box<dyn std::error::Error + Send + Sync>),
-    /// Raw pixels whose length does not match their dimensions.
-    Malformed {
-        /// Stated width.
-        width: u32,
-        /// Stated height.
-        height: u32,
-    },
-    /// Even a small JPEG exceeds the byte bound.
-    Unfit,
-}
-
-impl fmt::Display for NormalizeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotAnImage(source) => write!(formatter, "{source}"),
-            Self::Undecodable(source) => write!(formatter, "cannot be decoded: {source}"),
-            Self::Malformed { width, height } => {
-                write!(formatter, "image data is malformed ({width}x{height})")
-            }
-            Self::Unfit => write!(
-                formatter,
-                "does not fit {MAX_IMAGE_BYTES} bytes (3.75 MiB) even downscaled"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for NormalizeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::NotAnImage(source) => Some(source),
-            Self::Undecodable(source) => Some(source.as_ref()),
-            Self::Malformed { .. } | Self::Unfit => None,
-        }
-    }
-}
 
 /// Normalizes encoded image bytes attached under `name`.
 ///

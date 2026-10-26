@@ -2,6 +2,7 @@
 //! beside the host loop rather than inside it.
 
 pub mod binding_document;
+#[cfg(feature = "tui")]
 pub mod catalog_refresh;
 pub mod home;
 pub mod host;

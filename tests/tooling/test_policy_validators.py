@@ -2255,7 +2255,9 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertNotIn("plakous-model", packages)
         profile_counts = {
             package: len(
-                feature_policy.feature_sets(
+                feature_policy.product_feature_sets(self.manifests[package])
+                if package in {"plak", "plakous-hosted"}
+                else feature_policy.feature_sets(
                     feature_policy.optional_features(self.manifests[package]),
                     "full" in self.manifests[package]["features"],
                 )
@@ -2265,8 +2267,9 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plakous"], 2**9 + 2)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2**3 + 1)
-        # git-cli, jj, maintainer, otel, test-hooks, test-support.
-        self.assertEqual(profile_counts["plak"], 2**6 + 1)
+        # Minimal/default/all, each public feature alone, and the six off witnesses.
+        self.assertEqual(profile_counts["plak"], 20)
+        self.assertEqual(profile_counts["plakous-hosted"], 17)
         self.assertNotIn("plakous-cell", profile_counts)
         self.assertNotIn("plakous-js-runtime", profile_counts)
         for count in profile_counts.values():

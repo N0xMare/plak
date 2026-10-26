@@ -21,10 +21,24 @@ pub(crate) const FLAVOR: &str = match (cfg!(feature = "maintainer"), cfg!(debug_
 struct Launch {
     /// `argv[0]` as a command name searched on `PATH`, or as a path made
     /// absolute against the launch directory.
+    #[cfg_attr(
+        not(feature = "tui"),
+        allow(
+            dead_code,
+            reason = "launch identity records invocation even without interactive reload"
+        )
+    )]
     invocation: Invocation,
     executable: Option<FileIdentity>,
 }
 
+#[cfg_attr(
+    not(feature = "tui"),
+    allow(
+        dead_code,
+        reason = "launch identity records invocation even without interactive reload"
+    )
+)]
 enum Invocation {
     Name(OsString),
     Path(PathBuf),
@@ -71,7 +85,7 @@ pub(crate) fn prepare_binary_id(startup_command: Option<&'static str>) {
                 let _gate = BACKGROUND_IDENTITY_TEST_GATE.lock().ok();
                 let binary = binary_id();
                 // The banner shows the identity once it is ready.
-                crate::tui::wake::wake();
+                crate::ui_wake::wake();
                 if let Some(command) = startup_command {
                     crate::log_start(binary, command);
                 }
@@ -127,6 +141,7 @@ fn launch() -> &'static Launch {
 
 /// `argv[0]` to hand a re-exec, so the successor records the same invocation
 /// (a `PATH` name stays a name) and keeps detecting newer installs.
+#[cfg(feature = "tui")]
 pub(crate) fn invocation_argv0() -> OsString {
     match &launch().invocation {
         Invocation::Name(name) => name.clone(),
@@ -146,6 +161,7 @@ pub(crate) fn running_executable() -> Option<&'static Path> {
 
 /// The executable the same invocation would start now: `argv[0]` resolved on
 /// `PATH` (or as recorded), with symlinks followed to the installed file.
+#[cfg(any(test, feature = "tui"))]
 pub(crate) fn installed_executable() -> Option<PathBuf> {
     let candidate = match &launch().invocation {
         Invocation::Path(path) => path.clone(),
@@ -156,6 +172,7 @@ pub(crate) fn installed_executable() -> Option<PathBuf> {
     std::fs::canonicalize(candidate).ok()
 }
 
+#[cfg(any(test, feature = "tui"))]
 fn is_executable_file(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
@@ -171,6 +188,7 @@ fn is_executable_file(path: &Path) -> bool {
 
 /// Whether the invocation now resolves to a different file than the one this
 /// process is running: a new snapshot, or a rebuild in place.
+#[cfg(any(test, feature = "tui"))]
 pub(crate) fn newer_build_installed() -> bool {
     let Some(running) = &launch().executable else {
         return false;
@@ -467,9 +485,10 @@ pub(crate) fn version_label() -> String {
         ""
     };
     format!(
-        "{} ({FLAVOR}; binary {}{hooks})",
+        "{} ({FLAVOR}; binary {}{hooks}{})",
         plakous::VERSION,
-        binary_id()
+        binary_id(),
+        crate::build_features::version_suffix(),
     )
 }
 

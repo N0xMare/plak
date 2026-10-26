@@ -338,7 +338,7 @@ fn watch_interactive(force_restore: fn(), registered: &std::sync::mpsc::SyncSend
         if let Ok(mut resized) = signal(SignalKind::window_change()) {
             tokio::spawn(async move {
                 while resized.recv().await.is_some() {
-                    crate::tui::wake::wake();
+                    crate::ui_wake::wake();
                 }
             });
         }
@@ -348,7 +348,7 @@ fn watch_interactive(force_restore: fn(), registered: &std::sync::mpsc::SyncSend
             _ = hangup.recv() => STOPPED_BY.store(STOPPED_BY_HANGUP, Ordering::Release),
         }
         SIGNALLED_STOPS.fetch_add(1, Ordering::Release);
-        crate::tui::wake::wake();
+        crate::ui_wake::wake();
         crate::tui_timing::quit_requested();
         let _ = tokio::time::timeout(INTERACTIVE_FORCED_EXIT_DEADLINE, async {
             tokio::select! {

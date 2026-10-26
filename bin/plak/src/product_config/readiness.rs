@@ -22,6 +22,7 @@ pub enum TemplateReadiness {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TemplateNotReady {
+    NotInBuild,
     NotLoggedIn,
     CredentialExpired,
     NoApiKey,
@@ -34,6 +35,7 @@ impl TemplateNotReady {
     #[must_use]
     pub const fn reason(self) -> &'static str {
         match self {
+            Self::NotInBuild => "not in this build",
             Self::NotLoggedIn => "not logged in",
             Self::CredentialExpired => "credential expired",
             Self::NoApiKey => "no API key",
@@ -76,6 +78,13 @@ pub fn template_readiness(
     credential: CredentialReadiness,
     catalog: &[plakous_host_protocol::views::ProviderSection],
 ) -> TemplateReadiness {
+    if (template.composition == Some(super::ProductCompositionSelection::PyPtc)
+        && crate::build_features::require_feature("python").is_err())
+        || (template.tools.mcp_servers().next().is_some()
+            && crate::build_features::require_feature("mcp").is_err())
+    {
+        return TemplateReadiness::NotReady(TemplateNotReady::NotInBuild);
+    }
     match credential {
         CredentialReadiness::NotLoggedIn => {
             return TemplateReadiness::NotReady(TemplateNotReady::NotLoggedIn);

@@ -431,6 +431,7 @@ enum TopCommand {
 
 impl TopCommand {
     fn into_command(self) -> Result<Command, String> {
+        admit_arguments(&self)?;
         match self {
             Self::Login { account: None, .. } => Ok(Command::CommandHelp {
                 command: "login".to_owned(),
@@ -1389,6 +1390,16 @@ impl SessionAction {
             }
         }
     }
+}
+
+fn admit_arguments(command: &TopCommand) -> Result<(), String> {
+    if let TopCommand::Run { image, .. } = command
+        && !image.is_empty()
+    {
+        crate::build_features::require_feature("images")
+            .map_err(|error| crate::CliFailure::from(error).message().to_owned())?;
+    }
+    Ok(())
 }
 
 /// The prompt words after `--` and the `--image` paths of one `plak run`.
@@ -3095,7 +3106,7 @@ mod tests {
     /// refusal.
     #[test]
     fn every_tui_remedy_names_a_command_this_build_has() {
-        for remedy in crate::tui::remedy_catalog() {
+        for remedy in crate::product_config::settings::remedy_catalog() {
             let mut tokens = remedy.split_whitespace();
             assert_eq!(
                 tokens.next(),

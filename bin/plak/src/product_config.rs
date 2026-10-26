@@ -6,6 +6,8 @@ mod load;
 pub(crate) mod mcp_edit;
 mod policy;
 mod readiness;
+#[cfg(any(test, feature = "tui"))]
+pub(crate) mod settings;
 mod templates;
 mod toml_file;
 mod tool_sections;

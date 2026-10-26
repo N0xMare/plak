@@ -36,7 +36,7 @@ toml.workspace = true
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 # Every attached image is decoded and, when over the bounds, downscaled and
 # re-encoded (png, jpeg, gif first frame, webp).
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true
 uuid = { workspace = true, features = ["v4"] }
@@ -68,7 +68,12 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-th
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [features]
-default = ["git-cli", "jj-lib"]
+default = ["git-cli", "jj-lib", "tui", "clipboard", "images", "python", "mcp"]
+tui = []
+clipboard = ["tui", "images"]
+images = ["dep:image"]
+python = []
+mcp = []
 git-cli = ["plakous-workspace/git-cli", "plakous-recursive-subagents/git-cli"]
 jj-lib = ["plakous-workspace/jj-lib", "plakous-recursive-subagents/jj-lib"]
 test-support = [

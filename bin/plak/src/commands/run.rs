@@ -1,7 +1,7 @@
 //! One-shot CLI preparation and presentation over the hosted session.
 
 use super::application::{PlakousApplication, catalog_summaries};
-use super::session::load_exact_product_session;
+use super::session::load_admitted_product_session;
 use super::support::{
     application_execution_failure, cli_provider_name, native_processing_tier,
     product_subscription_request_limits, require_ready, run_composition,
@@ -37,6 +37,12 @@ impl PlakousApplication {
         }
         let configured = config.default_binding();
         let composition = run_composition(composition, &configured, provider, model);
+        crate::build_features::admit_selected(
+            config,
+            Some(cli_provider_name(provider)),
+            Some(model),
+            composition,
+        )?;
         // The repository gate's offline model; see `crate::test_hooks`. A
         // scripted lifecycle binds the requested tuple without a credential
         // refresh or a catalog row, because there is no provider to admit.
@@ -284,7 +290,7 @@ impl PlakousApplication {
         if run_expired(limits) {
             return run_timeout(stderr);
         }
-        let session = load_exact_product_session(
+        let session = load_admitted_product_session(
             self.product_paths()?,
             self.session_records()?.as_ref(),
             session_id,
@@ -458,6 +464,15 @@ impl PlakousApplication {
         stderr: &mut dyn io::Write,
         limits: product_host::RunBounds,
     ) -> CliResult<ProcessOutcome> {
+        crate::build_features::admit_session(&session)?;
+        if session.plakous_locator.is_none() {
+            crate::build_features::admit_selected(
+                admitted,
+                session.account.as_deref(),
+                session.model.as_deref(),
+                session.composition,
+            )?;
+        }
         let paths = self.product_paths()?;
         paths.ensure_layout().map_err(CliFailure::new)?;
         let roots = self.state_roots()?;

@@ -44,6 +44,26 @@ The launch banner distinguishes `maintainer release`, `maintainer debug`,
 digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
 `plak version` and global help carry the same build identity alongside the
 package version. `0.0.2` alone is package metadata, not proof of build recency.
+The default build's version label is unchanged. A build omitting product
+features appends `; features -clipboard,-tui` (the omitted names, sorted) inside
+the build-identity parentheses. `plak doctor` reports a `build_features` row:
+`default` or `omitted <sorted names>`. An omitted Python worker has no doctor
+worker row and is never resolved as an installed sidecar.
+
+Source builds can omit `tui`, `clipboard`, `images`, `python`, or `mcp`
+(chapter 06). A requested omitted capability returns typed
+`CapabilityUnavailable { id, kind, feature }`, rendered with the feature and
+the available build capabilities, and exits **2**. It never falls back to a
+different account, route, composition, or tool pack. Bare `plak` and the resume
+picker refuse without `tui`; CLI verbs, `run`, and JSONL remain available.
+Without `clipboard`, Ctrl+V reports `clipboard image paste is not in this build`;
+file attachments still work with `images`. Without `images`, `--image`, path
+attachments and JSONL image inputs refuse; canonical image history still
+replays without a decoder. Without `python`, composition options omit `py-ptc`
+and Python config/session bindings refuse before session writes. Without `mcp`,
+`plak mcp` commands refuse, `/mcp` is omitted, and MCP-selecting templates
+refuse session admission (server definitions alone enable nothing). Read-only session
+show/log/export and carry export do not require the bound evaluator.
 The binary ID is read from the snapshot's install-time `binary-id` manifest
 when its device, inode, size and nanosecond modification time all match the
 running executable. Manifests are considered only beside executables in the
@@ -1005,6 +1025,11 @@ exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
 state key and producer build provenance (verified binary id, or explicitly
 unavailable), workspace, title and selected binding accompany the history.
+When the stored projector cursor already equals the canonical feed tail,
+export inspects that projection and history without opening a writable runtime,
+so even SQLite maintenance cannot change the settled source's store bytes.
+Otherwise the common lease-free projector first catches the views up to the
+feed tail; any required writes remain derived product-view writes, not attach.
 
 `history` contains `replay_account` (source account reference), `replay_model`
 (model identifier string), and ordered `groups`. Each group contains its
@@ -1050,6 +1075,14 @@ and `PortableSessionHistory::new`, then seeds the existing
 model-visible contents, roles, grouping, tool correlations, image bytes and
 summarized turn counts survive. Presentation subjects survive unchanged for read-only host presentation;
 typed transcript rows still carry independently.
+An imported session is created at genesis under the importing build's
+configuration, not attached to the source runtime. Frozen tool selections are
+not exported; an MCP-frozen local session's document therefore binds the
+destination's tools (none in an MCP-off build), rather than carrying MCP
+authority or requiring an MCP capability refusal. Local attach/resume still
+refuses an MCP-frozen record before writes. The document does carry its
+composition: importing `py-ptc` into a Python-off build refuses with
+`CapabilityUnavailable` (exit 2) before creating a successor.
 The document's replay account/model are declared, not authenticated. Ordinary
 `session import <file>` strips all provider-opaque replay by default, including
 reasoning envelopes, native compaction ciphertext and opaque result parts; only
@@ -2921,7 +2954,9 @@ client never has to track busy state to stay correct — it just gets told.
 Every rejection is a typed diagnostic with a repairable message: a prompt with
 no text, an over-long prompt, a node action with no `agent_id`, an
 `invoke_tool` whose `name` is not a topology tool or whose `arguments` are not
-an object. None of them close the
+an object, or image input in a build without `images`. A capability refusal
+is an `error` diagnostic correlated with that prompt's `id`; it neither
+admits a turn nor changes an in-flight turn. None of them close the
 connection.
 
 #### 4.3.2 Events
@@ -2953,7 +2988,7 @@ closes. This does not change the v1 command or event encoding.
 
 | `kind` | Carries |
 | --- | --- |
-| `hello` | `session_id`, `tree_id`, `composition`, `tree_state`, and where known `account`, `model`, `effort`, the JavaScript and Python host status and targets, and `elapsed_ms` |
+| `hello` | `session_id`, `tree_id`, `composition`, `tree_state`, `capabilities` (sorted compiled product capability names), and where known `account`, `model`, `effort`, the JavaScript and Python host status and targets, and `elapsed_ms` |
 | `ready` | optional `elapsed_ms` |
 | `status` | `phase`, `queue_len`, optional `detail`; also the `note` phase for a system note |
 | `busy` | `busy` |
@@ -2975,6 +3010,16 @@ closes. This does not change the v1 command or event encoding.
 | `tree` | `tree_id`, `revision`, `state`, `restored_paused`, `nodes[]` |
 | `error` | `message` |
 | `bye` | — |
+
+`hello.capabilities` is additive in v1: a sorted, duplicate-free array with
+one canonical id per route (`anthropic`, `claude`, `codex`, `grok`, `openai`,
+`openrouter`, `xai-api`) plus the compiled `BUILD_CAPABILITIES` feature names
+(`clipboard`, `images`, `mcp`, `python`, `tui`). This is the closed current
+vocabulary, also used by capability refusals' `available:` list. Account
+aliases (`chatgpt`, `supergrok`, `xai-oauth`), composition names (`py-ptc`)
+and an inferred `js` entry are not capabilities. Route entries are all present
+in the current product closure; product feature entries may be omitted.
+When Python is omitted, `python_host` and `python_host_target` are absent.
 
 `hello`, `ready`, `tool`, `error`, `turn`, `turn_lifecycle`, `tree`, `bye`, `model_refusal`, and `recovered` MUST NOT be dropped
 on the sink: they are the lines a client's own state machine depends on.

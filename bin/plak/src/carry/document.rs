@@ -301,6 +301,7 @@ impl CarryDocument {
         )
     }
 
+    #[cfg(any(test, feature = "tui"))]
     pub(crate) fn carry_summary(&self) -> String {
         self.history.as_ref().map_or_else(
             || "version 7 restart checkpoint (conversation unavailable)".to_owned(),

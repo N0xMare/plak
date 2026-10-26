@@ -4176,6 +4176,19 @@ def main() -> int:
         if len(libraries) != 1 or libraries[0]["name"] != "plak":
             errors.append("plak must expose exactly one library named plak")
         app_features = app.metadata.get("features", {})
+        for section in ("dependencies", "dev-dependencies"):
+            hosted = app.manifest.get(section, {}).get("plakous-hosted", {})
+            if not isinstance(hosted, dict) or hosted.get("default-features") is not False:
+                errors.append(f"plak {section}: hosted defaults must be disabled for product selection")
+        for feature in ("tui", "clipboard", "images", "python", "mcp"):
+            if f"plakous-hosted/{feature}" not in app_features.get(feature, []):
+                errors.append(f"plak/{feature} must forward the matching hosted capability")
+        if not {"tui", "images"} <= set(app_features.get("clipboard", [])):
+            errors.append("plak/clipboard requires tui and images")
+        for dependency in ("ratatui", "crossterm", "pulldown-cmark", "syntect", "arboard"):
+            declared = app.manifest.get("dependencies", {}).get(dependency, {})
+            if not isinstance(declared, dict) or not declared.get("optional"):
+                errors.append(f"plak: {dependency} must remain a feature-selected dependency")
         if set(app_features) != {
             "default",
             "maintainer",
@@ -4184,13 +4197,14 @@ def main() -> int:
             "test-support",
             "git-cli",
             "jj",
+            "tui", "clipboard", "images", "python", "mcp",
         }:
             errors.append(
                 "plak may expose only default, maintainer, otel, test-hooks, test-support "
-                "and workspace backend features"
+                "workspace backend features and product build capabilities"
             )
-        elif app_features.get("default") != ["git-cli"]:
-            errors.append("plak default must enable only the git workspace backend")
+        elif set(app_features.get("default", [])) != {"git-cli", "tui", "clipboard", "images", "python", "mcp"}:
+            errors.append("plak default must enable git-cli and all five product capabilities")
         elif app_features.get("maintainer") != ["jj"]:
             errors.append(
                 "plak maintainer feature must enable jj"
@@ -4221,10 +4235,10 @@ def main() -> int:
         if len(libraries) != 1 or libraries[0]["name"] != "plakous_hosted":
             errors.append("plakous-hosted must expose exactly one library named plakous_hosted")
         host_features = host.metadata.get("features", {})
-        if set(host_features) != {"default", "test-support", "git-cli", "jj-lib"}:
-            errors.append("plakous-hosted may expose only default, test-support and workspace backend features")
-        elif host_features.get("default") != ["git-cli", "jj-lib"]:
-            errors.append("plakous-hosted default must enable both workspace backends")
+        if set(host_features) != {"default", "test-support", "git-cli", "jj-lib", "tui", "clipboard", "images", "python", "mcp"}:
+            errors.append("plakous-hosted must expose exactly the workspace backends, test-support and product capabilities")
+        elif set(host_features.get("default", [])) != {"git-cli", "jj-lib", "tui", "clipboard", "images", "python", "mcp"}:
+            errors.append("plakous-hosted default must enable both workspace backends and all product capabilities")
         elif host_features.get("test-support") != [
             "dep:tempfile",
             "plakous-recursive-subagents/test-support",

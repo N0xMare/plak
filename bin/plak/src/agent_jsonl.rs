@@ -285,6 +285,29 @@ mod background_tests {
     use super::*;
 
     #[test]
+    fn unavailable_images_are_a_correlated_diagnostic_not_an_action_or_host_failure() {
+        let prompt = serde_json::json!({"text":"not admitted", "images":[{"path":"missing.png"}]});
+        let refusal = plakous_hosted::capabilities::CapabilityUnavailable {
+            id: "images",
+            kind: plakous_hosted::capabilities::CapabilityKind::Surface,
+            feature: "images",
+        };
+        let ParseOutcome::Diagnostic { id, message } = parse_prompt_with_image_capability(
+            "image-1".to_owned(),
+            prompt.as_object().unwrap(),
+            Err(refusal),
+        ) else {
+            panic!("capability refusal must leave the connection and active turn alone")
+        };
+        assert_eq!(id.as_deref(), Some("image-1"));
+        assert!(message.contains("feature `images`"));
+        assert!(matches!(
+            parse_command_line(r#"{"v":1,"kind":"prompt","id":"text-2","text":"still connected"}"#),
+            ParseOutcome::Command(AgentCommand::Prompt { .. })
+        ));
+    }
+
+    #[test]
     fn background_is_an_additive_v1_command() {
         let parsed = parse_command_line(r#"{"v":1,"kind":"background","id":"b1"}"#);
         let ParseOutcome::Command(command) = parsed else {
@@ -296,6 +319,25 @@ mod background_tests {
 }
 
 fn parse_prompt(id: String, value: &Map<String, Value>) -> ParseOutcome {
+    parse_prompt_with_image_capability(id, value, crate::build_features::require_feature("images"))
+}
+
+fn parse_prompt_with_image_capability(
+    id: String,
+    value: &Map<String, Value>,
+    images_available: Result<(), plakous_hosted::capabilities::CapabilityUnavailable>,
+) -> ParseOutcome {
+    if value
+        .get("images")
+        .and_then(Value::as_array)
+        .is_some_and(|images| !images.is_empty())
+        && let Err(error) = images_available
+    {
+        return ParseOutcome::Diagnostic {
+            id: Some(id),
+            message: crate::CliFailure::from(error).message().to_owned(),
+        };
+    }
     let images = match prompt_images(value.get("images")) {
         Ok(images) => images,
         Err(message) => {
@@ -1252,11 +1294,16 @@ mod tests {
             Some("aarch64-apple-darwin"),
             Some("bundled"),
             Some("aarch64-apple-darwin"),
+            Some(&crate::build_features::compiled_features()),
             None,
         );
         let object = object_from_line(&hello);
         assert_eq!(object["v"], 1);
         assert_eq!(object["kind"], "hello");
+        assert_eq!(
+            object["capabilities"],
+            serde_json::json!(crate::build_features::compiled_features())
+        );
         assert_eq!(object["session_id"], "sess");
         assert_eq!(object["tree_id"], "tree");
         assert_eq!(object["composition"], "native-ptc");
@@ -1282,6 +1329,7 @@ mod tests {
             None,
             "native-ptc",
             "live",
+            None,
             None,
             None,
             None,

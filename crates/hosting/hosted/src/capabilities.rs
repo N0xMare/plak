@@ -7,6 +7,12 @@ use plakous::subscriptions::NativeProvider;
 
 use crate::binding::{PlatformProvider, ResolvedProtocol};
 
+mod build;
+pub use build::{
+    BUILD_CAPABILITIES, BuildCapability, CapabilityKind, CapabilityUnavailable, compiled_features,
+    omitted_features, require_feature,
+};
+
 mod anthropic;
 mod claude;
 mod codex;

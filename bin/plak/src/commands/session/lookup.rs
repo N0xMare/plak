@@ -9,6 +9,28 @@ pub fn load_exact_product_session(
     store: &dyn crate::store::session_records::SessionRecordStore,
     session_id: &str,
 ) -> CliResult<product_sessions::SessionRecord> {
+    load_product_session(paths, store, session_id, |_| Ok(()))
+}
+
+pub(crate) fn load_admitted_product_session(
+    paths: &crate::home::paths::PlakPaths,
+    store: &dyn crate::store::session_records::SessionRecordStore,
+    session_id: &str,
+) -> CliResult<product_sessions::SessionRecord> {
+    load_product_session(
+        paths,
+        store,
+        session_id,
+        crate::build_features::admit_session,
+    )
+}
+
+fn load_product_session(
+    paths: &crate::home::paths::PlakPaths,
+    store: &dyn crate::store::session_records::SessionRecordStore,
+    session_id: &str,
+    admit: impl FnOnce(&product_sessions::SessionRecord) -> CliResult<()>,
+) -> CliResult<product_sessions::SessionRecord> {
     let cwd = std::env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
     let record = (|| {
         let resolved = resolve_workspace_session_id(store, session_id)?;
@@ -22,6 +44,7 @@ pub fn load_exact_product_session(
             error
         }
     })?;
+    admit(&record)?;
     let requested = std::fs::canonicalize(&cwd).unwrap_or(cwd);
     let recorded = std::fs::canonicalize(&record.workspace_root)
         .unwrap_or_else(|_| record.workspace_root.clone());

@@ -90,14 +90,72 @@ fn json_string_bytes(text: &str) -> usize {
     })
 }
 
+#[cfg(feature = "images")]
+mod normalize;
+#[cfg(not(feature = "images"))]
+#[path = "attachments/unavailable.rs"]
 mod normalize;
 
-pub use normalize::{MAX_IMAGE_EDGE, NormalizeError, normalize, normalize_rgba};
+pub use normalize::{normalize, normalize_rgba};
+
+/// Longest edge, in pixels, of an image Plak re-encodes.
+pub const MAX_IMAGE_EDGE: u32 = 2048;
+
+/// Why an image could not be brought within the bounds.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum NormalizeError {
+    /// Image decoding was omitted from this build.
+    Unavailable(crate::capabilities::CapabilityUnavailable),
+    /// The bytes are not a png, jpeg, gif or webp image.
+    NotAnImage(plakous::tools::ImageSniffError),
+    /// The image could not be decoded, or its decoded size exceeds what Plak
+    /// decodes.
+    Undecodable(Box<dyn std::error::Error + Send + Sync>),
+    /// Raw pixels whose length does not match their dimensions.
+    Malformed {
+        /// Stated width.
+        width: u32,
+        /// Stated height.
+        height: u32,
+    },
+    /// Even a small JPEG exceeds the byte bound.
+    Unfit,
+}
+
+impl fmt::Display for NormalizeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unavailable(source) => write!(formatter, "{source}"),
+            Self::NotAnImage(source) => write!(formatter, "{source}"),
+            Self::Undecodable(source) => write!(formatter, "cannot be decoded: {source}"),
+            Self::Malformed { width, height } => {
+                write!(formatter, "image data is malformed ({width}x{height})")
+            }
+            Self::Unfit => write!(
+                formatter,
+                "does not fit {MAX_IMAGE_BYTES} bytes (3.75 MiB) even downscaled"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NormalizeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Unavailable(source) => Some(source),
+            Self::NotAnImage(source) => Some(source),
+            Self::Undecodable(source) => Some(source.as_ref()),
+            Self::Malformed { .. } | Self::Unfit => None,
+        }
+    }
+}
 
 /// Why an image file could not be attached. Every message names the file.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ImageFileError {
+    Unavailable(crate::capabilities::CapabilityUnavailable),
     Unreadable {
         path: PathBuf,
         source: io::Error,
@@ -118,6 +176,7 @@ pub enum ImageFileError {
 impl fmt::Display for ImageFileError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Unavailable(error) => write!(formatter, "{error}"),
             Self::Unreadable { path, source } => {
                 write!(
                     formatter,
@@ -142,6 +201,7 @@ impl fmt::Display for ImageFileError {
 impl std::error::Error for ImageFileError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Unavailable(error) => Some(error),
             Self::Unreadable { source, .. } => Some(source),
             Self::Unusable { source, .. } => Some(source),
             Self::NotAFile { .. } | Self::TooLarge { .. } => None,
@@ -158,6 +218,7 @@ impl std::error::Error for ImageFileError {
 /// a file, exceeds [`MAX_SOURCE_BYTES`], or is not an image within reach of
 /// the bounds.
 pub fn read_image(path: &Path) -> Result<DraftImage, ImageFileError> {
+    crate::capabilities::require_feature("images").map_err(ImageFileError::Unavailable)?;
     let unreadable = |source| ImageFileError::Unreadable {
         path: path.to_owned(),
         source,

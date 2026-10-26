@@ -18,15 +18,16 @@ pub(crate) use document::{
     CarryDocument, IMPORTABLE_VERSIONS, VERSION, read_document, write_document,
 };
 
-pub(crate) use export::{carry_out, export_session, new_carry_file};
-pub(crate) use reload::{
-    CarryCapacityProbe, ReloadPlan, ReloadProbe, ReloadTarget, reload_plan, reload_probe,
-    reload_target_for_session,
-};
+#[cfg(feature = "tui")]
+pub(crate) use export::carry_out;
+pub(crate) use export::{export_session, new_carry_file};
+pub(crate) use reload::{CarryCapacityProbe, ReloadProbe, reload_probe};
+#[cfg(feature = "tui")]
+pub(crate) use reload::{ReloadPlan, ReloadTarget, reload_plan, reload_target_for_session};
 
-pub(crate) use import::{
-    CarriedImport, already_carried, carried_forward_label, carry_foreign_session, import_and_resume,
-};
+#[cfg(feature = "tui")]
+pub(crate) use import::carry_foreign_session;
+pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
 
 pub(crate) use reference::{
     read_retained_archive, remove_retained_archive, write_retained_archive,

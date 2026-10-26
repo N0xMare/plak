@@ -132,9 +132,8 @@ impl ProductStore {
         })
     }
 
-    /// A rehearsal's construction fields, intents and views from one read-only
+    /// Construction fields, intents and views from one read-only
     /// snapshot. No legacy delivery, workflow or head-adoption state is read.
-    #[cfg(feature = "maintainer")]
     pub(crate) fn inspect_projection_read_only(
         paths: &crate::home::paths::PlakPaths,
         session_id: &str,

@@ -328,12 +328,23 @@ test-support seams remain separate from this metadata registry. Serialized
 binding enums, the complete template-account vocabulary and credential-store
 directory names remain ungated; they describe records, not enabled menus.
 
+Reduced builds gate their TUI-only carry/reload/identity and lookup helpers,
+imports and re-exports explicitly, rather than hiding entire modules behind
+dead-code allowances. These reviewed item-level predicates and the five
+disabled capability aliases are included in the placement inventory: Plak's
+feature ceiling is 180 and hosted's is 32. The ceilings remain exact ratchets.
+
 `plakous` facade features are listed in chapter 00. The host and product
 features and the evaluator selection are summarized here; backend defaults are
 called out explicitly.
 
 | Crate | Feature | Effect |
 | --- | --- | --- |
+| `plak`, `plakous-hosted` | `tui` | Default on; Plak's optional terminal presentation stack and interactive helpers. Hosted carries capability identity only, without a TUI dependency |
+| `plak`, `plakous-hosted` | `clipboard` | Default on; requires `tui` and `images`; Plak's optional clipboard libraries and image paste. Hosted carries capability identity |
+| `plak`, `plakous-hosted` | `images` | Default on; hosted image normalization and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
+| `plak`, `plakous-hosted` | `python` | Default on; admission of Python composition and Python worker resolution. Does not unlink the facade evaluator client |
+| `plak`, `plakous-hosted` | `mcp` | Default on; MCP command and selected-tool admission. Does not unlink the facade MCP closure |
 | `plak` | `maintainer` | Empty feature gating only Plak's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (§6.2) |
 | `plak` | `otel` | OTLP export and the typed telemetry bridge. Default builds carry no `opentelemetry` dependency |
 | `plak` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
@@ -346,7 +357,7 @@ called out explicitly.
 | `plakous-openai` | `test-support` | Implies `native-auth`; exposes the doc-hidden builder for ephemeral Codex browser-login callbacks and an explicit catalog fixture origin. A dev-dependency of `plakous`, never a production edge |
 | `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, and scripted `RuntimeFactory` registrations; the construction port itself is always available. A dev-dependency of `plak`, never a production edge |
 | `plakous-host-protocol` | `test-support` | Test-only view constructors; a dev-dependency of `plakous-hosted` and `plak`, never a production edge |
-| `plak` | `git-cli`, `jj` | Defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plak.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |
+| `plak` | `git-cli`, `jj` | Of the VCS features, defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plak.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |
 | `plakous-hosted`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-workspace` | `git-cli`, `jj-lib` | Explicit backend forwarding; library defaults include both. With defaults disabled, either or neither backend may be selected. Without JJ, colocated repositories use Git when enabled; JJ-only repositories refuse. |
 | `plakous-workspace` | `test-support` | `FakeVcs` and the real-`git`/`jj` repository fixtures; a dev-dependency of `plakous-recursive-subagents`, never a production edge |
 | `plakous-recursive-subagents` | `test-support` | `MemoryTreeStore`, the tree's bootstrap and mutation fixtures, and the hub's; forwards `plakous-host-protocol/test-support` and `plakous-workspace/test-support`, never a production edge |
@@ -399,6 +410,27 @@ facade's own run is 1026 closures. Any eleventh public feature needs its own
 reviewed amendment here. Hidden repository-only `test-clock` is not public,
 is excluded from this subset enumeration, and never enters `full` or the
 product default/maintainer release closures.
+Product feature closures use a linear witness set for `plak` and
+`plakous-hosted`: minimal, default, all, each public feature alone, then each of
+the five product features omitted from defaults and all five omitted. The
+facade's subset checks remain unchanged. The reviewed linear product cap is
+**20 public optional features per package**; growth beyond it requires an
+amendment here. Only the `variants` group (full only) compiles reduced
+products: without TUI, clipboard, images, and all five product features.
+Python-only and MCP-only omissions have the default dependency closure, so
+they add no independent compile profile; their admission is covered by unit
+tests and the all-product-off fixture. Each distinct resolution builds its
+library and binary and runs clippy with warnings denied, then checks version,
+doctor, CLI/JSONL refusals and canonical-store read/refusal byte preservation.
+The group also builds a full test-hooks fixture writer and a reduced
+test-hooks/maintainer reader to exercise real canonical stores, genesis
+import rebind, attached maintainer actions and an image diagnostic during an
+in-flight JSONL turn. These harness builds are not product compile profiles.
+The static checker checks closures, including external exclusions: without
+TUI must omit ratatui, crossterm, syntect, arboard and pulldown-cmark;
+without images must omit image. The workspace checker pins forwarding,
+dependency optionality and defaults.
+
 The checker reports hits/misses and atomically caches Cargo tree/metadata
 outputs in `${CARGO_TARGET_DIR:-$ROOT/target}/feature-closure-cache.json` by a
 SHA-256 of `cargo --version`, Cargo.lock, tracked Cargo.toml files,
@@ -456,17 +488,28 @@ platforms: the Rust v0-mangled crate names are platform-independent, and the
 engine's C entry points are listed in both the Mach-O underscored and the ELF
 bare spelling.
 
-The
-presentation stack (`ratatui`, `crossterm`, `pulldown-cmark`, `syntect`) is an
-unconditional dependency of `bin/plak`. Its `tui` module is private to the
-product library. There is no separate presentation package or `ui` feature.
+Plak forwards five product features to `plakous-hosted`: `tui`, `clipboard`,
+`images`, `python`, and `mcp`. All five plus `git-cli` are on by default;
+the default artifact exposes the complete product tool/prompt catalogs. Clipboard requires
+both `tui` and `images`; disabling either therefore also omits clipboard.
+The supported Plak artifact is the default feature set. These reduced
+resolutions are build/contract evidence, not additional supported artifacts.
+This is product selection only: hosted and Plak request the complete
+facade provider, auth, evaluator and MCP closure. Route construction is not
+feature-gated, and Python/MCP product omission does not unlink their
+facade implementation. Persisted account and composition vocabularies stay
+complete, including when their runtime capability is omitted.
+
+The presentation stack (`ratatui`, `crossterm`, `pulldown-cmark`, `syntect`) is
+selected by `tui`; its module is private to the product library. There is no
+separate presentation package or `ui` feature.
 Clipboard image paste (`Ctrl+V`) uses `arboard` (image data only: AppKit on
 macOS, the pure-Rust X11 client `x11rb` on Linux, no Wayland feature), an
-unconditional `bin/plak` dependency; on macOS `bin/plak` also depends on
+optional `bin/plak` dependency selected by `clipboard`; on macOS this feature also selects
 `objc2`, `objc2-app-kit` (`NSPasteboard` only) and `objc2-foundation` to read
 a screenshot's PNG flavour without the TIFF decode. Attached images are normalized in
 `plakous-hosted` with the pure-Rust `image` crate (features `png`, `jpeg`,
-`gif`, `webp` only). Both build for both supported targets, musl static
+`gif`, `webp` only), selected by `images`. Defaults build for both supported targets, musl static
 included.
 `ratatui` does not appear anywhere in the `plakous-hosted` closure. The hosted
 crate depends on the tree store port through `plakous-recursive-subagents`;

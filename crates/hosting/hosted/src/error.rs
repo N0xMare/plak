@@ -162,11 +162,13 @@ impl From<crate::session_store::RecordStoreError> for CliFailure {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LookupFailure {
     Recovery(plakous::sessions::AgentSessionsError),
+    Capability(crate::capabilities::CapabilityUnavailable),
 }
 impl std::error::Error for CliFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self.source.as_deref()? {
             LookupFailure::Recovery(error) => Some(error),
+            LookupFailure::Capability(error) => Some(error),
         }
     }
 }
@@ -179,6 +181,20 @@ impl From<plakous::sessions::AgentSessionsError> for CliFailure {
     fn from(error: plakous::sessions::AgentSessionsError) -> Self {
         let mut failure = Self::new(error.to_string());
         failure.source = Some(Box::new(LookupFailure::Recovery(error)));
+        failure
+    }
+}
+
+impl From<crate::capabilities::CapabilityUnavailable> for CliFailure {
+    fn from(error: crate::capabilities::CapabilityUnavailable) -> Self {
+        let mut failure = Self::classified(
+            CliFailureKind::Usage,
+            format!(
+                "{error}; available: {}",
+                crate::capabilities::compiled_features().join(", ")
+            ),
+        );
+        failure.source = Some(Box::new(LookupFailure::Capability(error)));
         failure
     }
 }

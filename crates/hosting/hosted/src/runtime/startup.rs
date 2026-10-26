@@ -668,6 +668,7 @@ fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
     );
     let tools = frozen.selection();
     if tools.selection.mcp_servers().next().is_some() {
+        crate::capabilities::require_feature("mcp")?;
         let bound = crate::mcp_binding::bind_mcp_tools(
             &tools.selection,
             &tools.tool_sections,

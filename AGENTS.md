@@ -39,7 +39,7 @@ just fast [PKG...]        # static checks, then the parallel lane for the diff's
 just steps GROUPS         # exactly those comma-separated groups, in canonical order
 just check                # pre-commit: fmt, clippy, structure, builds, parallel+serial, contracts, tooling
 just platform             # per install: fmt, clippy, builds, parallel, serial, durability
-just full                 # every group: check, plus rustdoc, durability and the publish dry run
+just full                 # every group: check, plus variants, rustdoc, durability and the publish dry run
 just fmt                  # cargo fmt --all
 just clippy               # clippy -D warnings on all targets
 just publish [--execute]  # crates.io cohort dry run; --execute uploads
@@ -65,13 +65,16 @@ runtime. Vendor comparator arms upload pinned Linux CLI prefixes matching
 they do not nvm/`@latest`/`curl | bash` per trial. When a Claude native-home
 arm exists, compare interactive subscription OAuth, not `claude --print`.
 
-All tiers are `scripts/dev-check.sh` and build the whole workspace with all
-features, so they share one artifact set. The groups, in canonical order, are
+All tiers use `scripts/dev-check.sh`; Rust test lanes build the whole workspace
+with all features and share that artifact set. Default and reduced product
+resolutions have separate compile evidence. The groups, in canonical order, are
 `static` (fmt, locked dependency fetch, offline first, online only for missing
 cache inputs, the workspace and feature structure checkers, clippy -D warnings
 on the workspace and on each supported package alone),
 `builds` (default-feature, each supported package alone in its own default
 resolution, and maintainer-feature builds, rustc warnings denied),
+`variants` (four distinct reduced product builds, clippy with warnings denied,
+and feature-admission/read-only-store contracts; full only),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
 (public compile contracts), `tooling` (Python self-tests) and `package` (the
 publish dry run: `scripts/publish.sh --gate` prefetches archive verification
@@ -79,7 +82,7 @@ inputs offline first, refreshing a stale index entry a version requirement
 names and retrying offline once, online only for missing cache inputs, then
 packages and verifies the cohort strictly offline; compiled review time is informational
 here, while publication dry runs and uploads require more than a third of each
-review window remaining). Check runs all but rustdoc, durability and package; platform runs
+review window remaining). Check runs all but variants, rustdoc, durability and package; platform runs
 static without the platform-independent structure checkers, builds and the
 three lanes; full runs every group, and a full pass on a clean tree records that
 tree as the evidence `just publish` requires. Later commits that change only

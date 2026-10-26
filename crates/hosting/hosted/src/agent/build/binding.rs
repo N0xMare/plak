@@ -75,6 +75,9 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     composition: CompositionSelection,
     processing_tier: ProcessingTierDisposition,
 ) -> CliResult<SelectedProviderConfiguration> {
+    if composition == CompositionSelection::PyPtc {
+        crate::capabilities::require_feature("python")?;
+    }
     if provider == NativeProvider::Codex && effort == Some(ReasoningEffort::Ultra) {
         return Err(CliFailure::new(
             "Codex Ultra is a multi-agent orchestration mode, not a single-agent reasoning effort",
@@ -328,6 +331,9 @@ pub(super) async fn api_session_runtime_binding_with_owner(
     cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<PreparedApiRuntime> {
+    if parent.composition == CompositionSelection::PyPtc {
+        crate::capabilities::require_feature("python")?;
+    }
     let tool_plan = bind_node_tool_plan(
         &parent.tool_selection,
         Some(crate::tool_plan::ToolRoute::api(parent.target)),

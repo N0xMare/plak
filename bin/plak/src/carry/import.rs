@@ -1,9 +1,13 @@
+#[cfg(any(test, feature = "tui"))]
+use super::document::IMPORTABLE_VERSIONS;
 use super::document::privately_owned;
 use super::document::{
-    CarryArchive, CarryBinding, CarryDocument, CarrySource, IMPORTABLE_VERSIONS, ImportError,
-    ProducerBuild, read_document,
+    CarryArchive, CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild,
+    read_document,
 };
+#[cfg(any(test, feature = "tui"))]
 use super::export::new_carry_file;
+#[cfg(any(test, feature = "tui"))]
 use super::reload::{export_with_snapshot, snapshot_export_version, snapshot_for_key};
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
@@ -188,6 +192,7 @@ fn consume_handoff_receipt(path: &Path, home: &Path, digest: Option<&str>) -> bo
 /// maintainer snapshot of that build exists, it exports the session and this
 /// build imports it as a new session; the new id and its note are returned.
 /// Without one the caller's refusal stands.
+#[cfg(any(test, feature = "tui"))]
 pub(crate) fn carry_foreign_session(
     services: &Services,
     paths: &PlakPaths,

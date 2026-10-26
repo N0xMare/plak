@@ -427,6 +427,7 @@ mod round_trip_tests {
                 None,
                 None,
                 None,
+                None,
                 Some(12),
             ),
             ready_line(Some("c1"), Some(13)),

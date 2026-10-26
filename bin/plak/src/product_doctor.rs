@@ -4,8 +4,10 @@
 //! host owners can supply statuses where opening the owned resource would
 //! create, migrate, publish, or extract state.
 
+mod composition;
 pub mod jj_cli;
 mod storage_space;
+use composition::composition_checks;
 
 use std::fs;
 use std::io::IsTerminal as _;
@@ -22,6 +24,7 @@ use serde::Deserialize;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CheckKind {
     Version,
+    BuildFeatures,
     JjCli,
     Home,
     HomeFreeSpace,
@@ -50,6 +53,7 @@ impl CheckKind {
     pub const fn key(self) -> &'static str {
         match self {
             Self::Version => "version",
+            Self::BuildFeatures => "build_features",
             Self::JjCli => "jj_cli",
             Self::Home => "home",
             Self::HomeFreeSpace => "home_free_space",
@@ -876,6 +880,19 @@ fn telemetry_check(kind: CheckKind, path: &Path, health: TelemetryHealth) -> Doc
 pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     let mut checks = Vec::new();
     checks.push(DoctorCheck::new(
+        CheckKind::BuildFeatures,
+        "product",
+        Severity::Ok,
+        if crate::build_features::omitted_features().is_empty() {
+            "default"
+        } else {
+            "reduced"
+        }
+        .to_owned(),
+        crate::build_features::description(),
+        None,
+    ));
+    checks.push(DoctorCheck::new(
         CheckKind::Version,
         "product",
         Severity::Ok,
@@ -941,12 +958,16 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         CheckKind::StdoutTerminal,
         input.terminals.stdout,
     ));
-    checks.extend(composition_checks(
-        input.composition_requirement,
-        input.composition_host,
-        input.python_containment_required,
-        input.runtime_directory.as_deref(),
-    ));
+    if !input.python_containment_required
+        || crate::build_features::require_feature("python").is_ok()
+    {
+        checks.extend(composition_checks(
+            input.composition_requirement,
+            input.composition_host,
+            input.python_containment_required,
+            input.runtime_directory.as_deref(),
+        ));
+    }
     if crate::capabilities::ROUTES.iter().any(|capability| {
         matches!(
             capability.doctor,
@@ -1527,58 +1548,6 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
 fn native_provider(provider: &str) -> Option<NativeProvider> {
     plakous_hosted::capabilities::native_providers()
         .find(|candidate| candidate.as_str() == provider)
-}
-
-fn composition_checks(
-    requirement: Requirement,
-    host: CompositionHostStatus,
-    python_containment_required: bool,
-    #[cfg_attr(
-        not(all(target_os = "linux", target_arch = "x86_64")),
-        allow(
-            unused_variables,
-            reason = "XDG_RUNTIME_DIR is a Linux containment probe only"
-        )
-    )]
-    runtime_directory: Option<&Path>,
-) -> Vec<DoctorCheck> {
-    let missing_severity = match requirement {
-        Requirement::Optional => Severity::Warning,
-        Requirement::Required => Severity::Error,
-    };
-    let mut checks = Vec::new();
-    checks.push(match host {
-        CompositionHostStatus::Included { identity } => DoctorCheck::new(
-            CheckKind::CompositionHost,
-            "composition",
-            Severity::Ok,
-            "included",
-            identity,
-            None,
-        ),
-        CompositionHostStatus::Unavailable(error) => DoctorCheck::new(
-            CheckKind::CompositionHost,
-            "composition",
-            missing_severity,
-            "unavailable",
-            error,
-            Some(if python_containment_required {
-                composition_host_unavailable_remediation()
-            } else {
-                javascript_host_unavailable_remediation()
-            }),
-        ),
-    });
-    let _ = (python_containment_required, runtime_directory);
-    checks
-}
-
-fn composition_host_unavailable_remediation() -> &'static str {
-    "set PLAK_PY_HOST to the plakous-py-host worker or place plakous-py-host beside plak"
-}
-
-fn javascript_host_unavailable_remediation() -> &'static str {
-    "set PLAK_JS_HOST to plakous-js-host or place plakous-js-host beside plak"
 }
 
 #[cfg(test)]

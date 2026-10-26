@@ -9,6 +9,10 @@ use std::path::PathBuf;
 /// The JavaScript evaluator worker's install layout.
 pub mod js_host;
 /// The Python evaluator worker's install layout.
+#[cfg(feature = "python")]
+pub mod python_bundle;
+#[cfg(not(feature = "python"))]
+#[path = "sidecars/python_unavailable.rs"]
 pub mod python_bundle;
 
 /// Plak's locator: `PLAK_JS_HOST` / `PLAK_PY_HOST`, else a sibling.

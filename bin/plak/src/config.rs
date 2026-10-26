@@ -2,14 +2,14 @@
 //! boundary. Hosted sessions carry these opaque extension payloads without
 //! owning settings, themes, or product intents.
 
-pub(crate) use crate::capabilities::{oauth_accounts, usage_verticals};
+pub(crate) use crate::capabilities::usage_verticals;
 pub(crate) use crate::product_config::{DEFAULT_SCROLL_LINES, MAX_SCROLL_LINES, MIN_SCROLL_LINES};
 pub(crate) use crate::surface_protocol::{
     AgentAcknowledgement, HostEvent, HostEventReceiver, ProfileOutcome, ProfileRole, ProfileRow,
     ProfilesView, SettingsSnapshot, SettingsTheme, SurfaceIntent, SurfaceObservation, UserAction,
     UserActionSendError, UserActionSender,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "tui"))]
 pub(crate) use crate::surface_protocol::{host_event_channel, user_action_channel};
 /// Reading, sniffing and chips of the image files a draft attaches.
 pub(crate) use plakous_hosted::attachments as image_attachments;

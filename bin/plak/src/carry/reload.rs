@@ -1,17 +1,26 @@
 //! Reload probes and snapshot handoff for a carry across builds.
 
-use super::document::{IMPORTABLE_VERSIONS, VERSION, write_document};
+use super::document::IMPORTABLE_VERSIONS;
+#[cfg(any(test, feature = "tui"))]
+use super::document::{VERSION, write_document};
+#[cfg(any(test, feature = "tui"))]
 use super::export::{export_session, new_carry_file};
+#[cfg(any(test, feature = "tui"))]
 use crate::cli_output::safe_terminal_block;
 use crate::home::paths::PlakPaths;
+#[cfg(any(test, feature = "tui"))]
 use crate::shell::services::Services;
 use serde::{Deserialize, Serialize};
+#[cfg(any(test, feature = "tui"))]
 use std::fs;
+#[cfg(any(test, feature = "tui"))]
 use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "tui"))]
 use std::time::{Duration, Instant};
 
 /// What `/reload` does for the session it is leaving.
 #[derive(Debug, Eq, PartialEq)]
+#[cfg(any(test, feature = "tui"))]
 pub(crate) enum ReloadPlan {
     /// The shell never committed a session: start the new build fresh.
     Fresh,
@@ -24,6 +33,7 @@ pub(crate) enum ReloadPlan {
 }
 
 /// Chooses the reload path from facts alone, so it is testable without exec.
+#[cfg(any(test, feature = "tui"))]
 pub(crate) fn reload_plan(
     resumable: bool,
     running_key: &str,
@@ -61,6 +71,7 @@ impl CarryCapacityProbe {
 
 /// The installed `plak` a reload would start, and the state key it answered.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg(any(test, feature = "tui"))]
 pub(crate) struct ReloadTarget {
     pub(crate) executable: PathBuf,
     pub(crate) capacity: Option<Box<CarryCapacityProbe>>,
@@ -85,6 +96,7 @@ pub(crate) fn reload_probe(paths: &PlakPaths) -> ReloadProbe {
     }
 }
 
+#[cfg(any(test, feature = "tui"))]
 impl ReloadTarget {
     pub(crate) fn refusal(&self, running_key: &str) -> Option<String> {
         if let Some(error) = &self.capacity_error {
@@ -107,15 +119,18 @@ impl ReloadTarget {
 
 /// Resolves the installed `plak` and asks its state key; `None` when nothing
 /// is installed on `PATH`.
+#[cfg(any(test, feature = "tui"))]
 fn reload_target(workspace: &Path) -> Option<ReloadTarget> {
     let executable = crate::build_identity::installed_executable()?;
     Some(probe_reload_target(executable, workspace))
 }
 
+#[cfg(any(test, feature = "tui"))]
 fn probe_reload_target(executable: PathBuf, workspace: &Path) -> ReloadTarget {
     probe_reload_target_with_timeout(executable, workspace, STATE_KEY_TIMEOUT)
 }
 
+#[cfg(any(test, feature = "tui"))]
 fn probe_reload_target_with_timeout(
     executable: PathBuf,
     workspace: &Path,
@@ -154,6 +169,7 @@ fn probe_reload_target_with_timeout(
 }
 
 /// Resolves carry capacity while the old session is still attached.
+#[cfg(any(test, feature = "tui"))]
 pub(crate) fn reload_target_for_session(
     workspace: &Path,
     session_id: Option<&str>,
@@ -219,14 +235,17 @@ pub(crate) fn reload_target_for_session(
 }
 
 /// How long an installed build gets to answer `version --state-key`.
+#[cfg(any(test, feature = "tui"))]
 const STATE_KEY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long a kept snapshot gets to export one session.
+#[cfg(any(test, feature = "tui"))]
 const SNAPSHOT_EXPORT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Asks `executable` for its state key with the hidden `version --state-key`.
 /// A build that predates the question, answers late, or answers with anything
 /// but one key reads as unknown.
+#[cfg(any(test, feature = "tui"))]
 fn installed_state_key(executable: &Path) -> Option<String> {
     let mut command = std::process::Command::new(executable);
     command.arg("version").arg("--state-key");
@@ -241,6 +260,7 @@ fn installed_state_key(executable: &Path) -> Option<String> {
 
 /// Runs `command` with no stdin and captured output, killing it once
 /// `timeout` passes. `Ok(None)` means it was killed.
+#[cfg(any(test, feature = "tui"))]
 fn run_bounded(
     command: &mut std::process::Command,
     timeout: Duration,
@@ -293,6 +313,7 @@ fn run_bounded(
     }))
 }
 
+#[cfg(any(test, feature = "tui"))]
 fn is_state_key(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -306,6 +327,7 @@ fn is_state_key(value: &str) -> bool {
 /// snapshot directories count (a 64-digit hex name, not a staging copy), and
 /// only when this user owns them and their executable and nobody else can
 /// write either.
+#[cfg(any(test, feature = "tui"))]
 pub(super) fn snapshot_for_key(roots: &[PathBuf], key: &str) -> Option<PathBuf> {
     roots
         .iter()
@@ -344,6 +366,7 @@ pub(super) fn snapshot_for_key(roots: &[PathBuf], key: &str) -> Option<PathBuf> 
 /// Runs `snapshot session export <id> --out <out>` in `workspace`, so the
 /// build that owns the session writes its export. A snapshot that does not
 /// finish in time is killed and the export fails.
+#[cfg(any(test, feature = "tui"))]
 pub(super) fn export_with_snapshot(
     snapshot: &Path,
     session_id: &str,
@@ -357,6 +380,7 @@ pub(super) fn export_with_snapshot(
     result
 }
 
+#[cfg(any(test, feature = "tui"))]
 fn export_with_snapshot_inner(
     snapshot: &Path,
     session_id: &str,
@@ -391,6 +415,7 @@ fn export_with_snapshot_inner(
     ))
 }
 
+#[cfg(any(test, feature = "tui"))]
 pub(super) fn snapshot_export_version(snapshot: &Path) -> Result<Option<u32>, String> {
     let Some(parent) = snapshot.parent() else {
         return Ok(None);

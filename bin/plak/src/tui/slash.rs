@@ -127,16 +127,31 @@ pub fn parse_slash(line: &str) -> Option<ParsedSlash> {
 pub fn fuzzy_list(query: &str) -> Vec<(&'static str, &'static str)> {
     let q = query.trim().trim_start_matches('/').to_ascii_lowercase();
     if q.is_empty() {
-        return COMMANDS.to_vec();
+        return COMMANDS
+            .iter()
+            .copied()
+            .filter(|(name, _)| offered(name))
+            .collect();
     }
     let mut scored: Vec<(usize, &str, &str)> = Vec::new();
     for &(name, help) in COMMANDS {
+        if !offered(name) {
+            continue;
+        }
         if let Some(score) = fuzzy_score(name, &q) {
             scored.push((score, name, help));
         }
     }
     scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
     scored.into_iter().map(|(_, n, h)| (n, h)).collect()
+}
+
+fn offered(name: &str) -> bool {
+    match name {
+        "mcp" => super::settings_registry::build_feature_available("mcp"),
+        "image" => super::settings_registry::build_feature_available("images"),
+        _ => true,
+    }
 }
 
 /// Lower score is better. Prefix match beats subsequence.
@@ -304,6 +319,9 @@ fn resolve_agents(args: &str) -> SlashEffect {
 fn help_text() -> String {
     let mut lines = vec!["commands:".to_owned()];
     for (name, help) in COMMANDS {
+        if !offered(name) {
+            continue;
+        }
         lines.push(format!("  /{name:<18} {help}"));
     }
     // Deferred capabilities are named in prose, never advertised as commands

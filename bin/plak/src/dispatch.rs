@@ -7,7 +7,7 @@ use plakous::subscriptions::NativeProvider;
 
 use crate::commands;
 use crate::commands::application::AccountOps;
-use crate::commands::session::{load_exact_product_session, run_attached_action};
+use crate::commands::session::{load_admitted_product_session, run_attached_action};
 use crate::commands::support::{
     api_key_status_failure_cell, api_provider_label, config_set_failure, profile_acceptance_label,
     status_credential_cell, subscription_provider_label,
@@ -402,7 +402,7 @@ pub(super) fn execute_usage(
     session_id: Option<String>,
 ) -> CliResult<ProcessOutcome> {
     if let Some(session_id) = session_id {
-        let record = load_exact_product_session(
+        let record = load_admitted_product_session(
             services.paths()?,
             services.session_records()?.as_ref(),
             &session_id,

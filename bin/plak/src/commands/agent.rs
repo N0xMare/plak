@@ -9,7 +9,7 @@ use plakous::subscriptions::NativeProvider;
 
 use super::host_config::build_host_config;
 use super::session::{
-    load_exact_product_session, resolve_api_composition, seed_new_session_binding,
+    load_admitted_product_session, resolve_api_composition, seed_new_session_binding,
 };
 use super::support::cli_provider_name;
 use crate::presentation::tui_presentation_bundle;
@@ -187,6 +187,9 @@ fn run_agent_after_admission(
     composition: Option<product_config::ProductCompositionSelection>,
     resume_tree: bool,
 ) -> CliResult<AdmittedAgent> {
+    if composition == Some(product_config::ProductCompositionSelection::PyPtc) {
+        crate::build_features::require_feature("python")?;
+    }
     let paths = services.paths()?;
     let cfg = super::support::admit_product_config(paths, &mut io::stderr().lock())?;
     let store = services.session_records()?;
@@ -195,7 +198,7 @@ fn run_agent_after_admission(
     let cwd = env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
     let (record, resume_tree) = if let Some(session_id) = session_id {
         (
-            load_exact_product_session(paths, store.as_ref(), &session_id)?,
+            load_admitted_product_session(paths, store.as_ref(), &session_id)?,
             resume_tree,
         )
     } else {
@@ -210,6 +213,13 @@ fn run_agent_after_admission(
             effort_explicit,
             composition,
         )?;
+        crate::build_features::admit_selected(
+            &cfg,
+            record.account.as_deref(),
+            record.model.as_deref(),
+            record.composition,
+        )?;
+        crate::build_features::admit_session(&record)?;
         store.save(&mut record).map_err(CliFailure::new)?;
         (record, false)
     };

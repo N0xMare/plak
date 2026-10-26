@@ -328,6 +328,7 @@ forbid-crates = ["plakous", "plakous-*"]
 allow-crates = ["plakous-host-protocol"]
 may-use = [
     "crate::tui",
+    "crate::product_config::settings",
     "crate::config::AgentAcknowledgement",
     "crate::config::HostEvent",
     "crate::config::HostEventReceiver",
@@ -421,10 +422,10 @@ lto = false
 [workspace.metadata.plakous.cfg.plak]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs"]
-feature-ceiling = 132
+feature-ceiling = 180
 test-seam-ceiling = 76
 env-ceiling = 29
-reason = "Capability registry entry sites and the explicit capacity-probe test hook; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
+reason = "Capability registry, explicitly gated TUI-only identity/carry/lookup helpers and re-exports, and the capacity-probe test hook; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous]
 feature-ceiling = 66
@@ -451,9 +452,9 @@ reason = "Existing placement debt; ratchet down as composition-root ports and mo
 
 [workspace.metadata.plakous.cfg.plakous-hosted]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
-feature-ceiling = 27
+feature-ceiling = 32
 test-seam-ceiling = 30
-reason = "Capability registry entry sites; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
+reason = "Capability registry and five feature-off aliases of the shared disabled module; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-http]
 feature-ceiling = 17

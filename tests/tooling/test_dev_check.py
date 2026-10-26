@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-GROUPS = ('static', 'builds', 'rustdoc', 'tests-parallel', 'tests-serial',
+GROUPS = ('static', 'builds', 'variants', 'rustdoc', 'tests-parallel', 'tests-serial',
           'tests-durability', 'contracts', 'tooling', 'package')
 CHECK_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'contracts', 'tooling')
 PLATFORM_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'tests-durability')
@@ -51,8 +51,10 @@ class DevCheckWorkerTests(unittest.TestCase):
                                   if line.startswith('== group:')],
                                  [f'== group: {group} ==' for group in groups])
                 for checker in ('check_workspace.py', 'check_features.py', 'check_public_compile.py'):
-                    self.assertEqual(any(s[0].endswith(checker) for s in scripts),
+                    self.assertEqual(any(s[0].endswith(checker) and '--product-builds' not in s
+                                         for s in scripts),
                                      tier != ('--platform',))
+                self.assertEqual(sum('--product-builds' in s for s in scripts), int('variants' in groups))
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -122,6 +124,8 @@ if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
+                              rustflags=os.environ.get('RUSTFLAGS'),
+                              target_rustflags=os.environ.get('CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'),
                               git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
 failure = json.loads(os.environ.get('GATE_PYTHON_FAILURES', '{}')).get(
     os.path.basename(sys.argv[1]), 0)
@@ -165,6 +169,17 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def publish_calls(self):
         lines = self.log.read_text().splitlines() if self.log.exists() else []
         return [call for call in map(json.loads, lines) if 'publish' in call]
+
+    def test_variants_forward_the_target_and_warning_flags_without_running_other_groups(self):
+        self.env['RUSTFLAGS'] = 'unused-base-flags'
+        self.env['CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'] = '-C target-feature=+crt-static'
+        result, calls, scripts = self.run_gate('--steps', 'variants')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([call['args'] for call in calls], [['nextest', '--version']])
+        self.assertIn(['tools/checks/check_features.py', '--product-builds', '--target', 'host-triple'], scripts)
+        call = next(call for call in self.python_calls if '--product-builds' in call['python'])
+        self.assertEqual(call['target_rustflags'], '-C target-feature=+crt-static -D warnings')
+        self.assertEqual(call['rustflags'], 'unused-base-flags')
 
     @property
     def evidence(self):
@@ -368,7 +383,9 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(checks, BUILDS)
         for checker in ('check_public_compile.py', 'check_workspace.py', 'check_features.py',
                         'run_tooling_tests.py'):
-            self.assertFalse(any(s[0].endswith(checker) for s in scripts))
+            self.assertFalse(any(s[0].endswith(checker) and '--product-builds' not in s
+                                 for s in scripts))
+        self.assertEqual(sum('--product-builds' in s for s in scripts), 0)
         for call in calls:
             if call['args'][0] in {'clippy', 'build', 'test'} or call['args'][:2] == ['nextest', 'run']:
                 self.assertIn('--target', call['args'])

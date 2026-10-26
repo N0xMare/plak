@@ -8,6 +8,7 @@ use std::sync::{
 static STATUS: Mutex<Option<String>> = Mutex::new(None);
 static TUI_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+#[cfg(feature = "tui")]
 pub(crate) fn tui_active(active: bool) {
     TUI_ACTIVE.store(active, Ordering::Relaxed);
 }
@@ -28,6 +29,7 @@ pub(crate) fn finished() {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }
 
+#[cfg(feature = "tui")]
 pub(crate) fn current() -> Option<String> {
     STATUS
         .lock()

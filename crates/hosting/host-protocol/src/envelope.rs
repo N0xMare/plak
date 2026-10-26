@@ -79,6 +79,7 @@ pub fn hello_line(
     javascript_host_target: Option<&str>,
     python_host: Option<&str>,
     python_host_target: Option<&str>,
+    capabilities: Option<&[&str]>,
     elapsed_ms: Option<u64>,
 ) -> String {
     let mut fields = Map::new();
@@ -116,6 +117,9 @@ pub fn hello_line(
             "python_host_target".to_owned(),
             Value::from(python_host_target),
         );
+    }
+    if let Some(capabilities) = capabilities {
+        fields.insert("capabilities".to_owned(), Value::from(capabilities));
     }
     if let Some(elapsed_ms) = elapsed_ms {
         fields.insert("elapsed_ms".to_owned(), Value::from(elapsed_ms));

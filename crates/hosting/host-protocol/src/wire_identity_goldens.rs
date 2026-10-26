@@ -33,7 +33,7 @@ use crate::topology::{
 const HANDSHAKE_LINE_PINS: &[(&str, &str)] = &[
     (
         "hello/full",
-        r#"{"account":"codex","composition":"direct","effort":"low","elapsed_ms":12,"id":"c1","javascript_host":"sidecar","javascript_host_target":"plakous-js-host","kind":"hello","model":"gpt-5.6-sol","python_host":"sidecar","python_host_target":"plak-py-host","session_id":"00000000-0000-4000-8000-000000000001","tree_id":"tree-1","tree_state":"live","v":1}"#,
+        r#"{"account":"codex","capabilities":["codex","images"],"composition":"direct","effort":"low","elapsed_ms":12,"id":"c1","javascript_host":"sidecar","javascript_host_target":"plakous-js-host","kind":"hello","model":"gpt-5.6-sol","python_host":"sidecar","python_host_target":"plak-py-host","session_id":"00000000-0000-4000-8000-000000000001","tree_id":"tree-1","tree_state":"live","v":1}"#,
     ),
     (
         "hello/minimal",
@@ -264,6 +264,7 @@ fn wire_identity_handshake_lines_are_pinned() {
             Some("plakous-js-host"),
             Some("sidecar"),
             Some("plak-py-host"),
+            Some(&["codex", "images"]),
             Some(12),
         ),
     );
@@ -281,6 +282,7 @@ fn wire_identity_handshake_lines_are_pinned() {
             None,
             "plakous-default",
             "live",
+            None,
             None,
             None,
             None,

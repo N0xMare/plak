@@ -7,6 +7,13 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ## Unreleased
 
+### Plak
+
+- Source builds can omit the TUI, clipboard paste, image decoding, Python
+  composition, or MCP with Cargo features. Defaults retain the shipped shape.
+  Omitted capabilities refuse explicitly (exit 2), never select another route;
+  doctor, non-default version labels and JSONL hello report build capabilities.
+
 ### Plakous
 
 - All local cell profiles use `LocalCompositionProfile::cell(&CellDescriptor)`.

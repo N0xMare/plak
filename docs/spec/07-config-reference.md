@@ -13,6 +13,15 @@ Operator-facing instructions live in
 
 ## 1. Files and discovery
 
+Build capabilities are not configuration keys. The persisted account,
+composition and tool-selection vocabulary is unchanged in a feature-reduced
+binary, so read-only session operations still decode it. Session admission
+refuses only the selected Python-bound template/default/session when `python`
+is omitted, or the selected template's MCP tools when `mcp` is omitted
+(server definitions alone enable nothing), naming the unavailable feature
+(exit 2). Unused templates never block a session. It never silently drops tools or
+substitutes a composition. Doctor scans all templates for its config verdict.
+
 A Plak home holds one `config.toml` plus one file per agent template:
 
 ```

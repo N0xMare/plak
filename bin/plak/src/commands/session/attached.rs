@@ -64,6 +64,7 @@ pub(super) fn attached_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
 ) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
+    crate::build_features::admit_session(&record)?;
     let paths = &crate::home::paths::PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
         &record.workspace_root,

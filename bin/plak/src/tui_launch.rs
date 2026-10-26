@@ -530,6 +530,9 @@ fn prepare_tui_launch(
     } else {
         product_sessions::SessionRecord::new(cwd.clone())
     };
+    if resume {
+        crate::build_features::admit_session(&record)?;
+    }
 
     let mut initial_cfg = product_config::ProductConfig::load(&paths)
         .map_err(|error| CliFailure::new(format!("invalid product config: {error}")))?;
@@ -538,6 +541,12 @@ fn prepare_tui_launch(
     }
     if !resume {
         seed_new_session_binding(&mut record, &initial_cfg)?;
+        crate::build_features::admit_selected(
+            &initial_cfg,
+            record.account.as_deref(),
+            record.model.as_deref(),
+            record.composition,
+        )?;
         // Never attach with a partial cross-provider tuple. Repair the complete
         // model-dependent default set in one save so later launches are stable.
         if repair_invalid_new_session_binding(&mut record, &mut initial_cfg) {
@@ -647,6 +656,7 @@ fn run_tui_rounds(
             // delivery intent after an attach/retry boundary.
             state.record = updated;
         }
+        crate::build_features::admit_session(&state.record)?;
         if !state.resume_pending && state.record.store_revision != 0 {
             store.save(&mut state.record).map_err(CliFailure::new)?;
         }

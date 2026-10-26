@@ -555,6 +555,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | --- | --- |
 | `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings |
 | `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build. All deny rustc warnings |
+| `variants` | Four distinct reduced Plak resolutions (`without-tui`, `without-clipboard`, `without-images`, `without-product-features`), built and clippy-linted with warnings denied using the gate's target and rustflags; feature-admission and JSONL contracts, plus canonical Python/MCP store read/refusal and byte-preservation fixtures. Selected by full only, never check, fast or platform |
 | `rustdoc` | Workspace all-features rustdoc, denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
@@ -575,7 +576,7 @@ checkers, feature builds, the parallel and serial lanes, contracts and tooling,
 but no durability lane. Platform is the per-install, per-platform gate:
 fmt/clippy, feature builds and all three lanes, without the
 platform-independent structure checkers and contracts. Full is their union
-plus rustdoc and the package dry run; a passing full run that started and ended
+plus variants, rustdoc and the package dry run; a passing full run that started and ended
 on the same clean git tree writes that tree id to
 `$CARGO_TARGET_DIR/gate-evidence/full` (default `target/`), the evidence
 `scripts/publish.sh` requires. Any passing run that includes the package group

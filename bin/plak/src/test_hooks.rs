@@ -37,7 +37,8 @@ use plakous_offline_crash_harness::{
     scripted_runtime_binding_with_extensions, scripted_topology_runtime_binding,
 };
 
-use crate::{product_agent, product_config, product_host, product_paths, product_sessions};
+use crate::store::sessions as product_sessions;
+use crate::{product_agent, product_config, product_host, product_paths};
 
 /// The exact model id this hook answers to.
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
@@ -710,6 +711,7 @@ fn selector() -> Option<std::ffi::OsString> {
     std::env::var_os("PLAK_TEST_MODEL")
 }
 
+#[cfg(feature = "tui")]
 pub(crate) fn tui_pilot_root() -> Option<std::ffi::OsString> {
     std::env::var_os("PLAK_TEST_TUI_PILOT")
 }

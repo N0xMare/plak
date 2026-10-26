@@ -149,11 +149,11 @@ impl ProviderRowPresentation for ProviderDef {
 
 /// Independent oracle for the OAuth command contract tests.
 #[cfg(test)]
-pub const OAUTH_ACCOUNTS: [&str; 3] = ["codex", "grok", "claude"];
+pub(crate) use crate::capabilities::OAUTH_ACCOUNTS;
 
 /// The API-key accounts `plak key set` / `plak key clear` accept.
 #[cfg(test)]
-pub const API_KEY_ACCOUNTS: [&str; 4] = ["openai", "xai-api", "anthropic", "openrouter"];
+pub(crate) use crate::capabilities::API_KEY_ACCOUNTS;
 
 /// The Limits projection before any host read: every vertical of
 /// the capability registry listed, none painted as connected.
@@ -176,67 +176,12 @@ pub fn unread_usage_limits() -> crate::tui::presentation::UsageLimitsView {
         ..UsageLimitsView::default()
     }
 }
-
-/// Placeholder for the OAuth account argument, as help text spells it.
-pub const OAUTH_ACCOUNT_PLACEHOLDER: &str = "<codex|grok|claude>";
-
-/// Placeholder for the API-key account argument, as help text spells it.
-pub const API_KEY_ACCOUNT_PLACEHOLDER: &str = "<openai|xai-api|anthropic|openrouter>";
-
-/// The canonical command that connects one OAuth subscription account.
-///
-/// `plak auth login` still parses as a legacy alias, but no product surface
-/// names it: an operator reading a remedy gets the command the help pages and
-/// the docs use.
-#[must_use]
-pub fn oauth_login_remedy(account: &str) -> String {
-    format!("plak login {account}")
-}
-
-/// The canonical command that stores one provider API key.
-///
-/// API-key accounts never take `plak login`: the two auth routes do not cross,
-/// and pointing an `openrouter` operator at an OAuth verb sends them to a
-/// refusal.
-#[must_use]
-pub fn api_key_remedy(account: &str) -> String {
-    format!("plak key set {account}")
-}
-
-/// The remedy for `account`, chosen by which auth route the account belongs to.
-///
-/// An account the product does not know is treated as an API key: the four
-/// OAuth verticals are a closed set, and inventing an OAuth login for an
-/// unknown name is the exact defect this dispatch exists to prevent.
-#[must_use]
-pub fn account_remedy(account: &str) -> String {
-    if crate::config::oauth_accounts().any(|known| known == account) {
-        oauth_login_remedy(account)
-    } else {
-        api_key_remedy(account)
-    }
-}
-
-/// Every concrete remedy command any product surface can print.
-///
-/// The CLI-facing regression test parses each of these with the real argument
-/// parser, so a remedy that names a command `plak` does not have fails the
-/// build rather than reaching an operator.
-#[must_use]
 #[cfg(test)]
-pub fn remedy_catalog() -> Vec<String> {
-    let mut catalog = Vec::new();
-    for account in OAUTH_ACCOUNTS {
-        catalog.push(oauth_login_remedy(account));
-        catalog.push(format!("plak logout {account}"));
-    }
-    for account in API_KEY_ACCOUNTS {
-        catalog.push(api_key_remedy(account));
-        catalog.push(format!("plak key clear {account}"));
-    }
-    catalog
-}
-
+pub(crate) use crate::product_config::settings::remedy_catalog;
+pub(crate) use crate::product_config::settings::{
+    API_KEY_ACCOUNT_PLACEHOLDER, OAUTH_ACCOUNT_PLACEHOLDER, account_remedy, api_key_remedy,
+    oauth_login_remedy,
+};
 #[cfg(test)]
 mod tests {
     use super::{

@@ -23,7 +23,9 @@ pub(crate) fn run_doctor(
     let doctor_paths = product_doctor::DoctorPaths::under(paths.home().to_path_buf());
     let loaded = product_config::ProductConfig::load(paths);
     let config = product_doctor::inspect_config(&paths.config_file(), |_| {
-        loaded.as_ref().map(|_| ()).map_err(Clone::clone)
+        loaded.as_ref().map_err(Clone::clone).and_then(|config| {
+            crate::build_features::admit_config(config).map_err(|error| error.to_string())
+        })
     });
     let config = match (&loaded, config) {
         (Err(error), product_doctor::ConfigStatus::Missing) => {

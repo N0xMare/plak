@@ -1104,6 +1104,10 @@ mod agent_view_tests;
 mod agents_tab;
 mod attachments;
 mod call_detail;
+#[cfg(feature = "clipboard")]
+mod clipboard;
+#[cfg(not(feature = "clipboard"))]
+#[path = "clipboard_unavailable.rs"]
 mod clipboard;
 mod composer;
 mod composer_chrome;

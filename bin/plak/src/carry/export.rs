@@ -1,8 +1,9 @@
 //! Export a session into a carry document.
 
+#[cfg(any(test, feature = "tui"))]
+use super::document::write_document;
 use super::document::{
     CarryBinding, CarryDocument, CarrySource, FORMAT, PendingWorkEntry, ProducerBuild, VERSION,
-    write_document,
 };
 use super::history;
 use crate::home::paths::PlakPaths;
@@ -13,6 +14,7 @@ use plakous_host_protocol::topology::{
 };
 use plakous_recursive_subagents_store::TreeInspection;
 use std::fmt;
+#[cfg(any(test, feature = "tui"))]
 use std::fs;
 use std::path::PathBuf;
 
@@ -82,6 +84,9 @@ pub(crate) fn export_session(
     if record.plakous_locator.is_none() {
         return Err(ExportRefusal::NoRuntime);
     }
+    if let Some(projected) = current_projection(paths, record)? {
+        return export_projected(paths, record, &projected);
+    }
     let runtime = |error: String| ExportRefusal::Runtime(error);
     let records: std::sync::Arc<dyn crate::store::session_records::SessionRecordStore> =
         std::sync::Arc::new(crate::store::session_records::SqliteSessionStore::new(
@@ -101,6 +106,41 @@ pub(crate) fn export_session(
         .ok_or(ExportRefusal::NoRuntime)?;
     let record = records.load(&record.id).map_err(runtime)?;
     export_projected(paths, &record, &projected)
+}
+
+/// A settled projection needs no writable runtime (whose maintenance can
+/// change SQLite bytes even when export has no feed records to apply).
+fn current_projection(
+    paths: &PlakPaths,
+    record: &SessionRecord,
+) -> Result<Option<plakous_hosted::runtime::ProjectedSession>, ExportRefusal> {
+    use plakous::sessions::feed::{FeedCursor, FeedPage, FeedPageRequest};
+    use plakous_hosted::sessions::projector::{
+        pending_command_ids, pending_workflow_operation_ids,
+    };
+
+    let (_, recorded, intents, views) =
+        crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)
+            .map_err(ExportRefusal::Runtime)?;
+    let (Some(recorded), Some(views)) = (recorded, views) else {
+        return Ok(None);
+    };
+    let cursor = FeedCursor::new(recorded.session_id(), views.cursor);
+    match AgentSessions::inspect_feed_sqlite(
+        paths.runtime_database(),
+        FeedPageRequest::after(cursor),
+    )
+    .map_err(|error| ExportRefusal::Runtime(error.to_string()))?
+    {
+        FeedPage::Records { records, tail, .. } if records.is_empty() && tail == views.cursor => {
+            Ok(Some(plakous_hosted::runtime::ProjectedSession {
+                head: plakous_hosted::runtime::projected_head(recorded, &views),
+                pending_commands: pending_command_ids(&views, &intents),
+                pending_workflows: pending_workflow_operation_ids(&views, &intents),
+            }))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Exports `record`, whose views a projector pass just brought to `projected`.
@@ -338,6 +378,7 @@ pub(crate) fn new_carry_file(paths: &PlakPaths, session_id: &str) -> Result<Path
 }
 
 /// Exports `record` into a fresh private carry file and returns its path.
+#[cfg(any(test, feature = "tui"))]
 pub(crate) fn carry_out(
     paths: &PlakPaths,
     record: &SessionRecord,

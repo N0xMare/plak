@@ -44,6 +44,7 @@ pub mod agent_jsonl;
 pub mod agent_stdio;
 #[doc(hidden)]
 pub mod agents_projection;
+mod build_features;
 mod build_identity;
 mod capabilities;
 mod carry;
@@ -55,6 +56,7 @@ mod command;
 pub mod commands;
 #[cfg(test)]
 mod composition_tests;
+#[cfg(feature = "tui")]
 mod config;
 mod diagnostics;
 mod dispatch;
@@ -109,6 +111,7 @@ mod product_compaction_terminal_e2e_tests;
 mod product_crash_tests;
 #[doc(hidden)]
 pub mod product_doctor;
+#[cfg(feature = "tui")]
 mod product_onboarding;
 mod product_subscription_usage;
 mod product_telemetry;
@@ -128,12 +131,29 @@ mod test_support;
 pub mod topology_product;
 #[cfg(test)]
 mod topology_resources_projection;
+#[cfg(feature = "tui")]
 mod tui;
+#[cfg(feature = "tui")]
 mod tui_launch;
+#[cfg(not(feature = "tui"))]
+#[path = "tui_unavailable.rs"]
+mod tui_launch;
+#[cfg(feature = "tui")]
 mod tui_timing;
+#[cfg(not(feature = "tui"))]
+#[path = "tui_timing_unavailable.rs"]
+mod tui_timing;
+#[cfg(feature = "tui")]
+mod ui_wake {
+    pub(super) use crate::tui::wake::wake;
+}
+#[cfg(not(feature = "tui"))]
+mod ui_wake {
+    pub(super) fn wake() {}
+}
 
 /// Runs the repository-only TUI rendering benchmark.
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", feature = "tui"))]
 #[doc(hidden)]
 pub fn benchmark_tui_render() -> String {
     tui::benchmark::run()
@@ -154,10 +174,13 @@ pub(crate) use crate::home::paths as product_paths;
 pub(crate) use crate::home::secrets as product_secrets;
 #[cfg(test)]
 pub(crate) use crate::presentation::CompatibilityState;
+pub(crate) use crate::presentation::CredentialState;
 #[cfg(test)]
 pub(crate) use crate::presentation::PresentationBackend;
-pub(crate) use crate::presentation::{CredentialState, TuiPresentationBundle};
-pub(crate) use crate::store::sessions as product_sessions;
+#[cfg(feature = "tui")]
+use crate::presentation::TuiPresentationBundle;
+#[cfg(feature = "tui")]
+use crate::store::sessions as product_sessions;
 pub(crate) use plakous_hosted::agent as product_agent;
 pub(crate) use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 pub(crate) use plakous_hosted::runtime as product_host;
@@ -188,7 +211,7 @@ use crate::commands::login::{
     key_status, print_compatibility_notice,
 };
 use crate::commands::session::{
-    confirm_session_mutation, load_exact_product_session, run_attached_action,
+    confirm_session_mutation, load_admitted_product_session, run_attached_action,
     show_child_recovery_status, show_recovery_status,
 };
 use crate::commands::support::edit_config_file;
@@ -289,8 +312,10 @@ fn log_command_start(command: &Command) {
 }
 
 fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
+    let arguments: Vec<_> = arguments.into_iter().collect();
     let command = parse(arguments)
         .map_err(|message| CliFailure::classified(CliFailureKind::Usage, message))?;
+    build_features::admit_command(&command)?;
 
     if let Command::WriteBinaryManifest { directory } = &command {
         build_identity::write_binary_manifest(directory).map_err(|error| {
@@ -971,7 +996,7 @@ fn execute_command(
         Command::SessionList => dispatch::execute_session_list(services, stdout),
         Command::SessionShow { id } => show_session_read_only(services.paths()?, &id, stdout),
         Command::SessionRecover { id } => {
-            let record = load_exact_product_session(
+            let record = load_admitted_product_session(
                 services.paths()?,
                 services.session_records()?.as_ref(),
                 &id,
@@ -1033,7 +1058,7 @@ fn execute_command(
             confirmed,
         } => {
             confirm_session_mutation("fork", &session_id, confirmed, stdin, stderr)?;
-            let record = load_exact_product_session(
+            let record = load_admitted_product_session(
                 services.paths()?,
                 services.session_records()?.as_ref(),
                 &session_id,
@@ -1054,7 +1079,7 @@ fn execute_command(
             confirmed,
         } => {
             confirm_session_mutation("compact", &session_id, confirmed, stdin, stderr)?;
-            let record = load_exact_product_session(
+            let record = load_admitted_product_session(
                 services.paths()?,
                 services.session_records()?.as_ref(),
                 &session_id,

@@ -337,6 +337,10 @@ pub fn settings_snapshot(config: &ProductConfig) -> crate::surface_protocol::Set
             plakous_hosted::binding::CompositionSelection::PyPtc,
         ]
         .into_iter()
+        .filter(|composition| {
+            *composition != plakous_hosted::binding::CompositionSelection::PyPtc
+                || crate::build_features::require_feature("python").is_ok()
+        })
         .map(
             |composition| crate::surface_protocol::SettingsCompositionOption {
                 composition: composition.into(),

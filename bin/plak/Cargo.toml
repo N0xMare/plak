@@ -31,7 +31,7 @@ doc = false
 
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
-plakous-hosted.workspace = true
+plakous-hosted = { workspace = true, default-features = false }
 plakous-recursive-subagents.workspace = true
 plakous-recursive-subagents-store.workspace = true
 plakous-host-protocol.workspace = true
@@ -45,13 +45,13 @@ rusqlite.workspace = true
 rustix = { workspace = true, features = ["event", "fs", "process", "termios", "time"] }
 # The TUI module's terminal stack: match Ratatui's current Crossterm backend so
 # the product carries one terminal stack.
-crossterm = { version = "0.29", default-features = false, features = ["events"] }
-ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"] }
-pulldown-cmark = { version = "0.13", default-features = false }
+crossterm = { version = "0.29", default-features = false, features = ["events"], optional = true }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"], optional = true }
+pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 # Ctrl+V attaches the system clipboard's image (AppKit on macOS, X11 on
 # Linux); plakous-hosted normalizes its pixels.
-arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
-syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
+arboard = { version = "3.6.1", default-features = false, features = ["image-data"], optional = true }
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"], optional = true }
 base64 = { workspace = true }
 url.workspace = true
 tracing = { workspace = true }
@@ -81,14 +81,14 @@ tracing-opentelemetry = { workspace = true, optional = true }
 # Ctrl+V reads a macOS screenshot's PNG flavour directly instead of
 # arboard's TIFF decode.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSString"] }
+objc2 = { version = "0.6.5", default-features = false, features = ["std"], optional = true }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard"], optional = true }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSString"], optional = true }
 
 [dev-dependencies]
 plakous = { workspace = true, features = ["test-clock"] }
 rustix = { workspace = true, features = ["pty", "termios"] }
-plakous-hosted = { workspace = true, features = ["test-support"] }
+plakous-hosted = { workspace = true, default-features = false, features = ["test-support"] }
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash" }
 plakous-recursive-subagents = { workspace = true, features = ["test-support"] }
 portable-pty.workspace = true
@@ -102,7 +102,7 @@ vt100.workspace = true
 [[bench]]
 name = "tui_render"
 harness = false
-required-features = ["test-support"]
+required-features = ["test-support", "tui"]
 
 [[bench]]
 name = "product_store"
@@ -110,7 +110,12 @@ harness = false
 required-features = ["test-support"]
 
 [features]
-default = ["git-cli"]
+default = ["git-cli", "tui", "clipboard", "images", "python", "mcp"]
+tui = ["plakous-hosted/tui", "dep:ratatui", "dep:crossterm", "dep:pulldown-cmark", "dep:syntect"]
+clipboard = ["tui", "images", "plakous-hosted/clipboard", "dep:arboard", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation"]
+images = ["plakous-hosted/images"]
+python = ["plakous-hosted/python"]
+mcp = ["plakous-hosted/mcp"]
 git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
 jj = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
 maintainer = ["jj"]

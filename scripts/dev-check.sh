@@ -8,7 +8,7 @@ root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
 
 # Canonical group order; every tier runs its groups in this order.
-all_groups=(static builds rustdoc tests-parallel tests-serial tests-durability contracts tooling package)
+all_groups=(static builds variants rustdoc tests-parallel tests-serial tests-durability contracts tooling package)
 check_groups=static,builds,tests-parallel,tests-serial,contracts,tooling
 platform_groups=static,builds,tests-parallel,tests-serial,tests-durability
 
@@ -217,6 +217,9 @@ run_group() {
       echo "== maintainer features =="
       run_build_denying_warnings cargo build --locked -p plak --features maintainer --bins ${target_args[@]+"${target_args[@]}"}
       python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;
+    variants)
+      echo "== product feature-off builds and clippy: warnings denied =="
+      run_build_denying_warnings python3 tools/checks/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
     rustdoc)
       echo "== rustdoc =="
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"} ;;

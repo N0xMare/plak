@@ -47,7 +47,9 @@ mod redraw;
 mod resume_pane;
 mod selection;
 mod settings;
-pub mod settings_registry;
+pub(crate) use crate::product_config::settings as settings_registry;
+#[cfg(test)]
+mod settings_tests;
 mod slash;
 #[cfg(test)]
 mod stability;
@@ -84,8 +86,6 @@ use blocks::{RenderPrefs, TranscriptChange, format_tool_plain, layout_anchor, wr
 #[cfg(test)]
 use providers::ProviderRowPresentation;
 pub(crate) use providers::StatusTone;
-#[cfg(test)]
-pub(crate) use providers::remedy_catalog;
 /// The transcript line the round after a declined launch resume picker opens
 /// with, so the operator is never left to discover `/attach` on their own.
 pub const DECLINED_RESUME_NOTE: &str =

@@ -16,6 +16,11 @@ mod xai;
 
 pub(crate) const RECOMMENDED_CODEX_MODEL: &str = codex::RECOMMENDED_MODEL;
 
+#[cfg(test)]
+pub(crate) const OAUTH_ACCOUNTS: [&str; 3] = ["codex", "grok", "claude"];
+#[cfg(test)]
+pub(crate) const API_KEY_ACCOUNTS: [&str; 4] = ["openai", "xai-api", "anthropic", "openrouter"];
+
 pub(crate) struct Recommendation {
     pub accounts: &'static [&'static str],
     pub model: &'static str,
@@ -58,6 +63,7 @@ pub(crate) const ROUTES: &[&ProductCapability] = &[
     &openrouter::OPENROUTER,
 ];
 
+#[cfg(feature = "tui")]
 pub(crate) fn oauth_accounts() -> impl Iterator<Item = &'static str> {
     ROUTES
         .iter()
@@ -65,6 +71,7 @@ pub(crate) fn oauth_accounts() -> impl Iterator<Item = &'static str> {
         .map(|capability| capability.route.account)
 }
 
+#[cfg(feature = "tui")]
 pub(crate) fn usage_verticals() -> impl Iterator<Item = (&'static str, &'static str)> {
     ROUTES.iter().filter_map(|capability| {
         capability
@@ -97,6 +104,7 @@ pub(crate) fn presets() -> impl Iterator<Item = &'static Builtin> {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "tui")]
     #[test]
     fn product_registry_is_the_hosted_registry_in_the_same_order() {
         assert_eq!(ROUTES.len(), plakous_hosted::capabilities::ROUTES.len());

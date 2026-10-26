@@ -228,6 +228,7 @@ pub(crate) fn product_python_attachment(
     configuration: &CompiledProviderConfiguration,
     presentation_kind: CodingPresentation,
 ) -> CliResult<plakous::agent::LocalCompositionAttachment> {
+    crate::capabilities::require_feature("python")?;
     let artifact = plakous::agent::LocalCompositionEngineArtifact::monty_worker_v1(host_path)
         .map_err(|error| CliFailure::new(format!("Python host identity is invalid: {error}")))?;
     let profile = plakous::agent::LocalCompositionProfile::cell(&descriptor.into())

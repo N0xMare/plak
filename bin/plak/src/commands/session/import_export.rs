@@ -62,6 +62,7 @@ impl PreparedImport {
         let carried = document
             .into_import_with_replay(local_handoff)
             .map_err(|e| CliFailure::new(e.to_string()))?;
+        crate::build_features::admit_session(&carried.record)?;
         Ok(Self {
             carried,
             estimated_tokens,

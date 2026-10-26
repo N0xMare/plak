@@ -10,7 +10,9 @@ L0 side and each higher crate's run covers its side.
 
 The expected closure is walked from the package's own feature table over the
 workspace's normal dependency edges (from `cargo metadata`, no hardcoded edge
-map) and compared to `cargo tree`. The manifest security-surface digests are
+map) and compared to `cargo tree`. Plak and hosted use linear product profiles:
+minimal, default, all, each singleton and six feature-off resolutions. The
+manifest security-surface digests are
 reviewed pins over the library layers (core, common, engine, protocol,
 provider, store, harness, facade) and stay hardcoded below.
 
@@ -34,6 +36,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -57,6 +60,182 @@ ROOT = Path(__file__).resolve().parents[2]
 DIGEST_LAYERS = L0_LAYERS + BELOW_FACADE_LAYERS
 MAX_OPTIONAL_FEATURES = 10
 FACADE = "plakous"
+PRODUCT_FEATURES = ("tui", "clipboard", "images", "python", "mcp")
+MAX_PRODUCT_FEATURES = 20
+
+
+def product_off_profiles(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ...], bool]]:
+    """The five feature-off resolutions and the all-off product, never 2^n."""
+    defaults = set((manifest.get("features") or {}).get("default", []))
+    profiles = []
+    for feature in PRODUCT_FEATURES:
+        selected = defaults - {feature}
+        if feature in {"tui", "images"}:
+            selected.discard("clipboard")
+        profiles.append((f"without-{feature}", tuple(sorted(selected)), False))
+    profiles.append(("without-product-features", tuple(sorted(defaults - set(PRODUCT_FEATURES))), False))
+    return profiles
+
+
+def product_feature_sets(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ...], bool]]:
+    """Product closures are a linear witness set, not a feature power set."""
+    features = optional_features(manifest)
+    return [("minimal", (), False), ("default", (), True),
+            ("all", tuple(features), False)] + [
+                (feature, (feature,), False) for feature in features
+            ] + product_off_profiles(manifest)
+
+
+def check_product_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT, operation: str = "build", target: str | None = None, fixture_binary: str | None = None, fixture_server: str | None = None) -> list[str]:
+    """Compile each independent feature-off resolution; warnings fail this gate."""
+    if "plak" not in manifests:
+        return []
+    errors = []
+    profiles = [profile for profile in product_off_profiles(manifests["plak"])
+                if profile[0] not in {"without-python", "without-mcp"}]
+    for name, selected, default in profiles:
+        print(f"product {operation}: {name}", flush=True)
+        command = cargo_command(operation, selected, default, "plak") + ["--lib", "--bins", "--message-format=json"]
+        if target:
+            command.extend(["--target", target])
+        result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
+        diagnostics = compiler_diagnostics(result.stdout)
+        for diagnostic in diagnostics:
+            sys.stderr.write(diagnostic)
+        if result.returncode or diagnostics:
+            if not diagnostics:
+                sys.stderr.write(result.stderr)
+            errors.append(f"plak [{name}]: feature-off compilation failed or emitted warnings")
+        elif operation == "build":
+            executable = None
+            for line in result.stdout.splitlines():
+                try:
+                    artifact = json.loads(line)
+                except ValueError:
+                    continue
+                if artifact.get("reason") == "compiler-artifact" and artifact.get("target", {}).get("name") == "plak" and artifact.get("executable"):
+                    executable = artifact["executable"]
+            if executable is None:
+                errors.append(f"plak [{name}]: build reported no executable")
+            else:
+                errors.extend(product_smoke(executable, selected, name))
+                if name == "without-product-features" and fixture_binary and fixture_server:
+                    import product_feature_fixture
+                    errors.extend(product_feature_fixture.check(fixture_binary, executable, fixture_server))
+        command = cargo_command("clippy", selected, default, "plak") + ["--lib", "--bins"]
+        if target:
+            command.extend(["--target", target])
+        result = subprocess.run(command + ["--", "-D", "warnings"], cwd=root, check=False)
+        if result.returncode:
+            errors.append(f"plak [{name}]: feature-off clippy failed")
+    print(f"checked {len(profiles)} product feature-off profiles", flush=True)
+    return errors
+
+
+def product_builds(manifest: dict[str, object], target: str | None) -> list[str]:
+    """Keep the full test-hooks writer separate from the reduced binaries opening its stores."""
+    command = cargo_command("build", ("test-hooks",), True, "plak") + ["--bin", "plak", "--message-format=json"]
+    if target:
+        command.extend(["--target", target])
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+    diagnostics = compiler_diagnostics(result.stdout)
+    if result.returncode or diagnostics:
+        sys.stderr.write("".join(diagnostics) or result.stderr)
+        return ["full test-hooks feature fixture writer failed to build"]
+    binaries = [row["executable"] for line in result.stdout.splitlines()
+                if (row := json.loads(line)).get("reason") == "compiler-artifact"
+                and row.get("target", {}).get("name") == "plak" and row.get("executable")]
+    if not binaries:
+        return ["full test-hooks fixture writer reported no executable"]
+    writer_binary = binaries[-1]
+    command = cargo_command("build", (), True, "plakous-mcp-fake-server") + ["--bin", "mcp-fake-server", "--message-format=json"]
+    if target:
+        command.extend(["--target", target])
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+    diagnostics = compiler_diagnostics(result.stdout)
+    if result.returncode or diagnostics:
+        sys.stderr.write("".join(diagnostics) or result.stderr)
+        return ["MCP fixture server failed to build"]
+    binaries = [row["executable"] for line in result.stdout.splitlines()
+                if (row := json.loads(line)).get("reason") == "compiler-artifact"
+                and row.get("target", {}).get("name") == "mcp-fake-server" and row.get("executable")]
+    if not binaries:
+        return ["MCP fixture server reported no executable"]
+    server_binary = binaries[-1]
+    with tempfile.TemporaryDirectory(prefix="plak-feature-writer-") as directory:
+        writer = str(Path(directory) / "plak")
+        shutil.copy2(writer_binary, writer)
+        errors = check_product_profiles({"plak": manifest}, operation="build", target=target, fixture_binary=writer, fixture_server=server_binary)
+        command = cargo_command("build", ("git-cli", "maintainer", "test-hooks"), False, "plak") + ["--bin", "plak", "--message-format=json"]
+        if target:
+            command.extend(["--target", target])
+        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+        diagnostics = compiler_diagnostics(result.stdout)
+        if result.returncode or diagnostics:
+            sys.stderr.write("".join(diagnostics) or result.stderr)
+            return errors + ["reduced test-hooks/maintainer fixture build failed"]
+        binaries = [row["executable"] for line in result.stdout.splitlines()
+                    if (row := json.loads(line)).get("reason") == "compiler-artifact"
+                    and row.get("target", {}).get("name") == "plak" and row.get("executable")]
+        if not binaries:
+            return errors + ["reduced test-hooks fixture reported no executable"]
+        import product_feature_fixture
+        errors.extend(product_feature_fixture.check(writer, binaries[-1], server_binary, maintainer=True))
+        errors.extend(product_feature_fixture.image_diagnostic(binaries[-1]))
+        return errors
+
+
+def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> list[str]:
+    """Real reduced binaries refuse before credentials, providers or session writes."""
+    errors = []
+    with tempfile.TemporaryDirectory(prefix="plak-feature-smoke-") as directory:
+        environment = dict(os.environ, PLAK_HOME=directory)
+        cases = [("version", ["version"], 0, "; features -"), ("help", ["help"], 0, "plak")]
+        if "tui" not in selected:
+            cases.append(("tui", [], 2, "feature `tui`"))
+        if "mcp" not in selected:
+            cases.append(("mcp", ["mcp", "list"], 2, "feature `mcp`"))
+        if "python" not in selected:
+            cases.append(("python", ["run", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-ptc", "--", "hello"], 2, "feature `python`"))
+            cases.append(("python-jsonl", ["agent", "--account", "codex", "--model", "gpt-6-astra", "--composition", "py-ptc"], 2, "feature `python`"))
+        if "images" not in selected:
+            cases.append(("images", ["run", "--account", "codex", "--model", "gpt-6-astra", "--image", "missing.png", "--", "hello"], 2, "feature `images`"))
+        for kind, arguments, code, expected in cases:
+            completed = subprocess.run([executable, *arguments], cwd=directory, env=environment,
+                                       text=True, capture_output=True, check=False, timeout=30)
+            if completed.returncode != code or expected not in completed.stdout + completed.stderr:
+                errors.append(f"plak [{profile}] {kind}: expected exit {code} and {expected!r}; got {completed.returncode}: {completed.stdout}{completed.stderr}")
+            if kind == "python-jsonl":
+                records = [json.loads(line) for line in completed.stdout.splitlines()]
+                if [record.get("kind") for record in records] != ["error", "bye"]:
+                    errors.append(f"plak [{profile}] Python JSONL refusal must terminate with error/bye")
+        doctor = subprocess.run([executable, "doctor"], cwd=directory, env=environment,
+                                text=True, capture_output=True, check=False, timeout=30)
+        omitted = sorted(set(PRODUCT_FEATURES) - set(selected))
+        expected = f"omitted {', '.join(omitted)}"
+        if not any("Build features" in line and expected in line for line in doctor.stdout.splitlines()):
+            errors.append(f"plak [{profile}] doctor: missing build_features {expected!r}: {doctor.stdout}{doctor.stderr}")
+        for feature in ("python", "mcp"):
+            if feature in selected:
+                continue
+            home = Path(directory) / feature
+            home.mkdir(mode=0o700)
+            (home / "agents").mkdir(mode=0o700)
+            config = '[root]\nagent = "root-agent"\n'
+            template = 'account = "codex"\nmodel = "gpt-6-astra"\n'
+            if feature == "python":
+                template += 'composition = "py-ptc"\n'
+            else:
+                config += '[mcp_servers.example]\ntransport = "stdio"\ncommand = "/bin/false"\n'
+                template += 'tools = ["mcp:example"]\n'
+            (home / "config.toml").write_text(config)
+            (home / "agents/root-agent.toml").write_text(template)
+            completed = subprocess.run([executable, "agent"], cwd=directory,
+                                       env=dict(environment, PLAK_HOME=str(home)), input="",
+                                       text=True, capture_output=True, check=False, timeout=30)
+            if completed.returncode != 2 or f"feature `{feature}`" not in completed.stderr:
+                errors.append(f"plak [{profile}] configured {feature}: expected typed exit 2; got {completed.returncode}: {completed.stdout}{completed.stderr}")
+    return errors
 
 
 def cache_path(root: Path = ROOT) -> Path:
@@ -158,6 +337,11 @@ def cached_workspace(root: Path = ROOT) -> Workspace:
 
 
 REQUIRED_DEPENDENCY_FEATURE_EDGES = {
+    ("plak", "tui", "plakous-hosted/tui"),
+    ("plak", "clipboard", "plakous-hosted/clipboard"),
+    ("plak", "images", "plakous-hosted/images"),
+    ("plak", "python", "plakous-hosted/python"),
+    ("plak", "mcp", "plakous-hosted/mcp"),
     ("plakous", "test-clock", "plakous-openai?/test-clock"),
     ("plakous", "test-clock", "plakous-openrouter?/test-clock"),
     ("plak", "test-hooks", "plakous/test-clock"),
@@ -264,6 +448,10 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 # `composition` is the cell client on its own: no credential, HTTP,
 # subscription or interpreter machinery for either source language.
 EXCLUDED_CLOSURE_PACKAGES = {
+    ("plak", ("git-cli", "images", "python", "mcp")): (
+        "ratatui", "crossterm", "syntect", "arboard", "pulldown-cmark",
+    ),
+    ("plak", ("git-cli", "tui", "python", "mcp")): ("image",),
     ("plak", ("default",)): ("jj-lib", "gix", "pollster"),
     ("plak", ("git-cli",)): ("jj-lib", "gix", "pollster"),
     ("plakous", ("composition",)): (
@@ -873,7 +1061,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", action="store_true", help="cargo-check every profile")
     parser.add_argument("--no-cache", action="store_true", help="query Cargo without reading or writing the cache")
+    parser.add_argument("--product-builds", action="store_true", help="build and lint four distinct feature-off product resolutions")
+    parser.add_argument("--target", help="Cargo build target for product variants")
     args = parser.parse_args()
+
+    if args.product_builds:
+        import tomllib
+        manifest = tomllib.loads((ROOT / "bin/plak/Cargo.toml").read_text())
+        errors = product_builds(manifest, args.target)
+        for error in errors:
+            print(error, file=sys.stderr)
+        return int(bool(errors))
 
     global CARGO_OUTPUTS
     CARGO_OUTPUTS = None
@@ -897,6 +1095,12 @@ def main() -> int:
     profiles: dict[str, list[tuple[str, tuple[str, ...], bool]]] = {}
     for package in closure_packages(manifests):
         features = optional_features(manifests[package])
+        if package in {"plak", "plakous-hosted"}:
+            if len(features) > MAX_PRODUCT_FEATURES:
+                errors.append(f"{package}: {len(features)} public features exceed the reviewed linear product cap of {MAX_PRODUCT_FEATURES}; amend spec 06 with a reviewed limit")
+                continue
+            profiles[package] = product_feature_sets(manifests[package])
+            continue
         if len(features) > MAX_OPTIONAL_FEATURES:
             errors.append(
                 f"{package}: {len(features)} public features exceed the closure cap of "

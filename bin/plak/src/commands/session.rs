@@ -21,8 +21,10 @@ pub(crate) use import_export::{
 };
 
 pub use lookup::load_exact_product_session;
+#[cfg(feature = "tui")]
+pub(crate) use lookup::match_session_id_prefix;
 pub(crate) use lookup::{
-    MIN_SESSION_ID_PREFIX, match_session_id_prefix, resolve_read_only_session_id,
+    MIN_SESSION_ID_PREFIX, load_admitted_product_session, resolve_read_only_session_id,
 };
 
 pub(crate) use read_only::{log_child_read_only, parse_read_address, show_selected_child};

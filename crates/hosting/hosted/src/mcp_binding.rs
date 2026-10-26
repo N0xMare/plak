@@ -98,6 +98,7 @@ pub(crate) struct BoundMcpTools {
 /// own outlives them all.
 fn pool() -> Result<(&'static McpPool, &'static tokio::runtime::Runtime), String> {
     static POOL: OnceLock<Result<(McpPool, tokio::runtime::Runtime), String>> = OnceLock::new();
+    crate::capabilities::require_feature("mcp").map_err(|error| error.to_string())?;
     let pool = POOL.get_or_init(|| {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -411,6 +412,7 @@ fn on_probe_lease<T>(
     workspace_root: &std::path::Path,
     work: impl AsyncFnOnce(&McpLease) -> Result<T, String>,
 ) -> Result<T, String> {
+    crate::capabilities::require_feature("mcp").map_err(|error| error.to_string())?;
     let environment = Arc::new(service_environment(workspace_root)?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
