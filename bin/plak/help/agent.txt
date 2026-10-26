@@ -22,7 +22,7 @@ OPTIONS:
                        (alias: --provider)
   --model <exact-id> Exact catalog model id
   --effort <level>   none | low | medium | high | xhigh | max | ultra
-  --composition <c>  plakous-default | direct | native-ptc | js-ptc | py-ptc
+  --composition <c>  plakous-default | direct | native-ptc | js-ptc | py-ptc | py-sdk
                      (default: plakous-default, which follows the catalog)
   --protocol <p>     auto | chat | responses | messages (OpenRouter only;
                      default auto→chat; other accounts reject it at parse time)
@@ -47,5 +47,6 @@ NOTES:
   `--composition js-ptc|py-ptc` is one engine per agent; exec_js uses source
   (async module; text(...)), exec_py uses code. Same overlay as `plak run` on
   new sessions. native-ptc and js-ptc locate PLAK_JS_HOST or a sibling
-  plakous-js-host; py-ptc locates PLAK_PY_HOST or a sibling plakous-py-host.
+  plakous-js-host; py-ptc and root-only py-sdk locate PLAK_PY_HOST or a sibling
+  plakous-py-host.
   A missing Code Mode sidecar fails closed.

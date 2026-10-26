@@ -18,7 +18,7 @@ OPTIONS:
   --effort <level>     none | low | medium | high | xhigh | max | ultra
                        Required for a reasoning model, refused for the rest.
                        There is no default: the catalog row decides.
-  --composition <c>    plakous-default | direct | native-ptc | js-ptc | py-ptc
+  --composition <c>    plakous-default | direct | native-ptc | js-ptc | py-ptc | py-sdk
                        plakous-default (when omitted) follows the catalog: Codex
                        CodeModeOnly and OpenAI API models→native-ptc; Grok, Claude,
                        OpenRouter, anthropic and xai-api→direct.
@@ -53,11 +53,12 @@ NOTES:
   engine per agent. exec_js requires JSON field source (async module; emit with
   text(...)); exec_py requires code. Neither is Codex-native Code Mode, and
   unsupported tuples fail before inference.
+  py-sdk selects the root-only typed Python SDK on the Python worker.
 
 PROCESS-TOOL AUTHORITY:
   Model-launched process tools run with your full host authority on Linux and
   macOS; there is no OS sandbox. native-ptc and js-ptc use PLAK_JS_HOST or a
-  sibling plakous-js-host; py-ptc uses PLAK_PY_HOST or a sibling
+  sibling plakous-js-host; py-ptc and py-sdk use PLAK_PY_HOST or a sibling
   plakous-py-host. That is worker isolation, not workspace isolation, and it does not
   isolate the Plak product itself: use a container or VM for that boundary.
   Unsupported process-tool targets, including Intel macOS, fail closed.

@@ -1889,6 +1889,20 @@ mod tests {
     }
 
     #[test]
+    fn run_and_agent_help_list_python_sdk_composition() {
+        for verb in ["run", "agent"] {
+            let mut page = Vec::new();
+            render::command_help(verb, &mut page).unwrap();
+            let page = String::from_utf8(page).unwrap();
+            let composition = page
+                .lines()
+                .find(|line| line.contains("--composition <c>"))
+                .unwrap();
+            assert!(composition.contains("py-sdk"), "{verb}: {composition}");
+        }
+    }
+
+    #[test]
     fn run_accepts_turn_and_wall_clock_bounds() {
         let args = [
             "run",
