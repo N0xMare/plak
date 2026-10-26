@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{RowKey, ToolItem, TranscriptRow};
+use super::{RowKey, ToolItem, TranscriptRevision, TranscriptRow};
 
 /// Uncommitted appends between keyed publication boundaries. These are not
 /// revisions: a snapshot contains their accumulated resync baseline.
@@ -174,10 +174,8 @@ pub(in crate::views) fn validate_items(items: &[TranscriptItem]) -> Result<(), P
 /// keys and validates the resulting bounds before mutating anything.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TranscriptState {
-    scope: TranscriptScope,
-    revision: u64,
+    version: TranscriptRevision,
     items: BTreeMap<RowKey, TranscriptRow>,
-    bytes: usize,
 }
 
 impl TranscriptState {
@@ -186,28 +184,25 @@ impl TranscriptState {
     /// # Errors
     /// Returns the snapshot's schema, ordering or bound violation.
     pub fn replace(&mut self, snapshot: PresentationSnapshot) -> Result<(), PresentationError> {
-        snapshot.validate()?;
-        self.bytes = snapshot.items.iter().map(|item| row_bytes(&item.row)).sum();
+        self.version.replace(&snapshot)?;
         self.items = snapshot
             .items
             .into_iter()
             .map(|item| (item.key, item.row))
             .collect();
-        self.scope = snapshot.scope;
-        self.revision = snapshot.revision;
         Ok(())
     }
 
     /// The current scope.
     #[must_use]
     pub const fn scope(&self) -> &TranscriptScope {
-        &self.scope
+        self.version.scope()
     }
 
     /// The exact revision the next patch must name.
     #[must_use]
     pub const fn revision(&self) -> u64 {
-        self.revision
+        self.version.revision()
     }
 
     /// Rows in immutable key order; UI state belongs beside these values,
@@ -223,46 +218,13 @@ impl TranscriptState {
     /// Returns a scope/revision mismatch, malformed patch or resulting bound
     /// violation. The consumer must resync rather than fold a later patch.
     pub fn apply(&mut self, patch: TranscriptPatch) -> Result<(), PresentationError> {
-        if patch.scope != self.scope {
-            return Err(PresentationError::ScopeMismatch);
-        }
-        if patch.from_revision != self.revision {
-            return Err(PresentationError::RevisionMismatch {
-                expected: self.revision,
-                actual: patch.from_revision,
-            });
-        }
-        patch.validate()?;
-        let mut count = self.items.len();
-        let mut bytes = self.bytes;
-        for key in &patch.deletes {
-            if let Some(row) = self.items.get(key) {
-                count -= 1;
-                bytes -= row_bytes(row);
-            }
-        }
-        for item in &patch.upserts {
-            if let Some(row) = self.items.get(&item.key) {
-                bytes -= row_bytes(row);
-            } else {
-                count += 1;
-            }
-            bytes = bytes.saturating_add(row_bytes(&item.row));
-        }
-        if count > MAX_SNAPSHOT_ROWS {
-            return Err(PresentationError::ItemLimit);
-        }
-        if bytes > MAX_PRESENTATION_BYTES {
-            return Err(PresentationError::ByteLimit);
-        }
+        self.version.apply(&patch)?;
         for key in patch.deletes {
             self.items.remove(&key);
         }
         for item in patch.upserts {
             self.items.insert(item.key, item.row);
         }
-        self.bytes = bytes;
-        self.revision = patch.to_revision;
         Ok(())
     }
 }

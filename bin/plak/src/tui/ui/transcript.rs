@@ -6,14 +6,14 @@ use crate::tui::blocks::RowTarget;
 impl App {
     /// A restored call still in flight keeps the host's start stamp as its
     /// tip clock, so a tip after `/reload` shows the same elapsed as live.
-    pub(super) fn restore_tip_clocks(
+    pub(super) fn restore_tip_clocks<'a>(
         &mut self,
-        rows: &[plakous_host_protocol::views::transcript::TranscriptRow],
+        rows: impl IntoIterator<Item = &'a plakous_host_protocol::views::transcript::TranscriptRow>,
     ) {
         let now_ms = self.unix_now_ms();
         let now = self.now();
         for tool in rows
-            .iter()
+            .into_iter()
             .filter_map(plakous_host_protocol::views::transcript::TranscriptRow::as_tool)
         {
             let Some(started) = tool.started_at_ms else {

@@ -17,11 +17,13 @@ use super::presentation::ActivityState;
 
 mod key;
 mod patch;
+mod revision;
 pub use key::{Lane, RowKey};
 pub(super) use patch::validate_items;
 pub use patch::{
     TranscriptItem, TranscriptPatch, TranscriptScope, TranscriptState, TranscriptStreamDelta,
 };
+pub use revision::TranscriptRevision;
 
 /// One transcript row.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

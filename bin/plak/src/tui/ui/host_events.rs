@@ -88,7 +88,12 @@ impl App {
         self.with_root_pane(|app| app.apply_root_host_event(event));
     }
 
-    fn install_keyed_transcript(&mut self, resume_stream: bool, keep_local: bool) {
+    fn install_keyed_transcript(
+        &mut self,
+        rows: Vec<plakous_host_protocol::views::transcript::TranscriptItem>,
+        resume_stream: bool,
+        keep_local: bool,
+    ) {
         #[cfg(test)]
         {
             self.pane.keyed_rebuilds += 1;
@@ -104,16 +109,16 @@ impl App {
         } else {
             Vec::new()
         };
-        let rows = self
-            .pane
-            .presentation
-            .items()
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        self.restore_tip_clocks(&rows);
+        self.restore_tip_clocks(rows.iter().map(|item| &item.row));
         let full_window = rows.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
-        let mut blocks = self.keyed_snapshot_blocks();
+        let live_assistant = rows.last().is_some_and(|item| {
+            item.key.anchor >= 1_u64 << 63
+                && matches!(
+                    &item.row,
+                    crate::store::sessions::TranscriptRow::Assistant { .. }
+                )
+        });
+        let mut blocks = self.keyed_snapshot_blocks(rows);
         let live_tools: std::collections::BTreeSet<_> = blocks
             .iter()
             .filter_map(|block| match block {
@@ -170,16 +175,7 @@ impl App {
         let old = std::mem::replace(&mut self.pane.blocks, blocks);
         self.carry_item_state(&old);
         self.refresh_keyed_item_details(&old);
-        self.pane.assistant_stream_active = streaming
-            && self
-                .pane
-                .presentation
-                .items()
-                .last_key_value()
-                .is_some_and(|(key, row)| {
-                    key.anchor >= 1_u64 << 63
-                        && matches!(row, crate::store::sessions::TranscriptRow::Assistant { .. })
-                });
+        self.pane.assistant_stream_active = streaming && live_assistant;
         self.mark_transcript_replaced();
         self.warm_transcript_projection();
     }
@@ -233,7 +229,7 @@ impl App {
                     && self.pane.presentation_ready
                     && self.pane.presentation.scope() == &snapshot.scope;
                 let scope = snapshot.scope.clone();
-                if let Err(error) = self.pane.presentation.replace(snapshot) {
+                if let Err(error) = self.pane.presentation.replace(&snapshot) {
                     self.pane.blocks.push(ScrollBlock::Error(format!(
                         "invalid presentation snapshot refused: {error:?}"
                     )));
@@ -242,7 +238,7 @@ impl App {
                     return;
                 }
                 self.presentation_replaced();
-                self.install_keyed_transcript(true, keep_local);
+                self.install_keyed_transcript(snapshot.items, true, keep_local);
             }
             HostEvent::TranscriptPatch(patch) => {
                 if self.pane.resync.is_some() {
@@ -251,14 +247,12 @@ impl App {
                 }
                 let scope = patch.scope.clone();
                 let from_revision = patch.from_revision;
-                let upserts = patch.upserts.iter().map(|item| item.key).collect();
-                let deletes = patch.deletes.clone();
-                if !self.pane.presentation_ready || self.pane.presentation.apply(patch).is_err() {
+                if !self.pane.presentation_ready || self.pane.presentation.apply(&patch).is_err() {
                     self.pane.resync = Some(scope);
                     self.rearm_transcript_resync(from_revision);
                     return;
                 }
-                self.patch_keyed_blocks(upserts, deletes);
+                self.patch_keyed_blocks(patch.upserts, patch.deletes);
             }
             _ => {}
         }

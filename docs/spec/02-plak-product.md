@@ -1863,6 +1863,10 @@ Live tool observations and keyed/restored tool rows use one TUI tool presenter
 and lifecycle-label function. All terminal outcomes retain their elapsed time,
 including rejection, cancellation and overflow; host start/finish stamps take
 precedence over duration-only reports and the local monotonic fallback.
+The retained indexed blocks own their consumed row payloads once. Revision
+validation retains only key sizes and the canonical tail's boundary kind, not
+a second map of row content. Snapshot clock restoration borrows incoming rows
+before their payloads move into those blocks, and patches move only upserts.
 The TUI keeps a keyed baseline and applies only exact-revision patches,
 updating only the indexed blocks named by changed keys. Tool and thinking UI
 state stays on its existing block; local approval rows, refusal messages and

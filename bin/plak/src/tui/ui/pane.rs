@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use super::App;
 use crate::tui::{UserAction, UserActionSender};
-use plakous_host_protocol::views::transcript::{TranscriptScope, TranscriptState};
+use plakous_host_protocol::views::transcript::{TranscriptRevision, TranscriptScope};
 
 use crate::tui::blocks::{self, ScrollBlock, TranscriptChange, TranscriptRenderCache};
 
@@ -19,7 +19,7 @@ pub(crate) struct TranscriptPane {
     pub(super) keyed_block_work: usize,
     pub(super) keyed: super::keyed::BlockIndex,
     pub(crate) blocks: Vec<ScrollBlock>,
-    pub(super) presentation: TranscriptState,
+    pub(super) presentation: TranscriptRevision,
     pub(super) presentation_ready: bool,
     pub(super) resync: Option<TranscriptScope>,
     resync_sent: Option<(u64, Instant)>,
@@ -75,7 +75,7 @@ impl TranscriptPane {
         let transcript_bytes = blocks.iter().map(ScrollBlock::retained_bytes).sum();
         Self {
             blocks,
-            presentation: TranscriptState::default(),
+            presentation: TranscriptRevision::default(),
             presentation_ready: false,
             resync: None,
             #[cfg(test)]
@@ -428,7 +428,7 @@ impl App {
 
     pub(super) fn clear_presentation(&mut self) {
         self.pane.keyed = super::keyed::BlockIndex::default();
-        self.pane.presentation = TranscriptState::default();
+        self.pane.presentation = TranscriptRevision::default();
         self.pane.presentation_ready = false;
         self.pane.resync = None;
         self.pane.resync_sent = None;

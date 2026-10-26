@@ -32,6 +32,57 @@ fn paint(app: &mut App) -> String {
 }
 
 #[test]
+fn keyed_payloads_move_into_root_and_child_blocks_without_a_second_content_copy() {
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        let mut app = App::new(launch_basic(), true);
+        if matches!(scope, TranscriptScope::Agent(_)) {
+            app.open_agent_view("c1".into(), "child".into());
+        }
+        let key = RowKey::new(9, Lane::Runtime, 0);
+        let original = "snapshot payload ".repeat(256);
+        let original_allocation = original.as_ptr();
+        app.apply_host_event(HostEvent::PresentationSnapshot(PresentationSnapshot {
+            scope: scope.clone(),
+            revision: 1,
+            items: vec![TranscriptItem {
+                key,
+                row: TranscriptRow::assistant(original),
+            }],
+            ..PresentationSnapshot::default()
+        }));
+        let at = app.pane.keyed.get(key).unwrap();
+        let super::ScrollBlock::Assistant(text) = &app.pane.blocks[at] else {
+            panic!("assistant block");
+        };
+        assert!(
+            std::ptr::eq(text.as_ptr(), original_allocation),
+            "snapshot payload was cloned"
+        );
+        let updated = "patch payload ".repeat(256);
+        let updated_allocation = updated.as_ptr();
+        app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+            scope,
+            from_revision: 1,
+            to_revision: 2,
+            upserts: vec![TranscriptItem {
+                key,
+                row: TranscriptRow::assistant(updated),
+            }],
+            deletes: Vec::new(),
+        }));
+        let at = app.pane.keyed.get(key).unwrap();
+        let super::ScrollBlock::Assistant(text) = &app.pane.blocks[at] else {
+            panic!("assistant block");
+        };
+        assert!(
+            std::ptr::eq(text.as_ptr(), updated_allocation),
+            "patch payload was cloned"
+        );
+        assert_eq!(app.pane.presentation.revision(), 2);
+    }
+}
+
+#[test]
 fn a_mid_turn_patch_keeps_pending_approval_and_local_notices_in_place() {
     let mut app = App::new(launch_basic(), true);
     pin_clock(&mut app);
@@ -568,7 +619,13 @@ fn agent_reasoning_keeps_its_live_clock_across_resync_and_seals_on_patch() {
         app.pane.blocks.as_slice(),
         [ScrollBlock::Thinking { sealed: false, .. }]
     ));
-    let mut baseline = snapshot(3, app.pane.presentation.items());
+    let mut baseline = snapshot(
+        3,
+        &BTreeMap::from([(
+            RowKey::new((1_u64 << 63) + 20, Lane::Runtime, 0),
+            row.clone(),
+        )]),
+    );
     baseline.scope = TranscriptScope::Agent("c1".into());
     app.apply_host_event(HostEvent::PresentationSnapshot(baseline));
     assert_eq!(app.pane.thinking_started["thought"], started);

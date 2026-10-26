@@ -1,6 +1,6 @@
 //! Changed-key block reconciliation; local chrome is not keyed transcript content.
 
-use plakous_host_protocol::views::transcript::{RowKey, TranscriptRow};
+use plakous_host_protocol::views::transcript::{RowKey, TranscriptItem};
 
 use super::{App, ScrollBlock, tool_is_running};
 
@@ -43,11 +43,11 @@ impl App {
         }
     }
 
-    pub(super) fn keyed_snapshot_blocks(&mut self) -> Vec<ScrollBlock> {
+    pub(super) fn keyed_snapshot_blocks(&mut self, items: Vec<TranscriptItem>) -> Vec<ScrollBlock> {
         self.pane.keyed = BlockIndex::default();
         let mut blocks = Vec::new();
-        for (key, row) in self.pane.presentation.items() {
-            if let Some(mut block) = ScrollBlock::from_row(row.clone()) {
+        for TranscriptItem { key, row } in items {
+            if let Some(mut block) = ScrollBlock::from_row(row) {
                 if key.anchor >= 1_u64 << 63
                     && let ScrollBlock::Thinking {
                         sealed,
@@ -57,25 +57,26 @@ impl App {
                 {
                     *sealed = false;
                 }
-                self.pane.keyed.bind(*key, blocks.len(), &block);
+                self.pane.keyed.bind(key, blocks.len(), &block);
                 blocks.push(block);
             }
         }
         blocks
     }
 
-    pub(super) fn patch_keyed_blocks(&mut self, upserts: Vec<RowKey>, deletes: Vec<RowKey>) {
+    pub(super) fn patch_keyed_blocks(
+        &mut self,
+        upserts: Vec<TranscriptItem>,
+        deletes: Vec<RowKey>,
+    ) {
         // Bind replacements first: a settled call can change its key while
         // retaining its block, focus, selection, and following local notices.
-        for key in upserts {
-            let Some(row) = self.pane.presentation.items().get(&key) else {
-                continue;
-            };
+        for TranscriptItem { key, row } in upserts {
             #[cfg(test)]
             {
                 self.pane.keyed_block_work += 1;
             }
-            let Some(mut block) = ScrollBlock::from_row(row.clone()) else {
+            let Some(mut block) = ScrollBlock::from_row(row) else {
                 if let Some(at) = self.pane.keyed.get(key) {
                     self.remove_keyed_block(at);
                 }
@@ -143,14 +144,7 @@ impl App {
         for at in self.pane.keyed.pending().into_iter().rev() {
             self.remove_keyed_block(at);
         }
-        if let Some(row) = self
-            .pane
-            .presentation
-            .items()
-            .last_key_value()
-            .map(|(_, row)| row)
-            && !matches!(row, TranscriptRow::Assistant { .. })
-        {
+        if self.pane.presentation.last_row_is_assistant() == Some(false) {
             self.pane.assistant_stream_active = false;
         }
     }
