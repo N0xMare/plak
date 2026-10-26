@@ -646,6 +646,27 @@ pub(in crate::runtime) struct LiveFixture {
     admission: plakous::agent::EventSubscription,
 }
 
+pub(in crate::runtime) fn start_attach_probe(
+    sessions: Arc<AgentSessions>,
+    session: &plakous::sessions::OpenedSession,
+    turn: TurnId,
+    observation: Arc<ChildObservation>,
+) -> (ChildObservers, crate::surface_protocol::HostEventReceiver) {
+    let (wire, received) = crate::surface_protocol::host_event_channel();
+    let sender: Sender = Sender::over(wire);
+    let mut observers = ChildObservers::default();
+    observers.start_agent_view(
+        false,
+        "s1",
+        "attach-order",
+        session.locator(),
+        sessions,
+        Some((turn, session.agent().clone(), observation)),
+        &sender,
+    );
+    (observers, received)
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     use plakous_offline_crash_harness::gate::GateHandle;
@@ -862,7 +883,9 @@ async fn child_observer_selection_keeps_existing_children() {
     attached.release().await.unwrap();
 }
 
-async fn next_event(received: &crate::surface_protocol::HostEventReceiver) -> HostEvent {
+pub(in crate::runtime) async fn next_event(
+    received: &crate::surface_protocol::HostEventReceiver,
+) -> HostEvent {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if let Ok(event) = received.try_recv() {

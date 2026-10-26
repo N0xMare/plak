@@ -249,7 +249,7 @@ async fn structural_source_lag_reattaches_without_closing_the_observation() {
     let (_root, _sessions, attached, turn, _live) = fixture_with(serde_json::json!([
         {"output":{"text":"prefix"}},
         {"stream":[{"gate":gate.script()}],"output":{"tool":{"name":"loopback_effect","arguments":{}}},"finish":"tool_calls"},
-        {"stream":[{"text":"before-resume"},{"gate":next.script()},{"text":"after"},{"gate":after.script()}]}
+        {"stream":[{"text":"before-resume"},{"gate":next.script()},{"text":"after"},{"text":"later"},{"gate":after.script()}]}
     ])).await;
     gate.entered().await;
     // Structural debt exceeds this subscription before the owner begins polling.
@@ -285,7 +285,7 @@ async fn structural_source_lag_reattaches_without_closing_the_observation() {
             .updates
             .iter()
             .flat_map(|update| update.ops.iter())
-            .any(|op| matches!(op, HostEvent::AssistantDelta(text) if text == "after"))
+            .any(|op| matches!(op, HostEvent::AssistantDelta(text) if text == "later"))
     })
     .await;
     assert!(!owner.observation.snapshot().terminal);
@@ -300,6 +300,21 @@ async fn structural_source_lag_reattaches_without_closing_the_observation() {
     );
     let gaps = owner.observation.lock().updates.iter().flat_map(|update| update.ops.iter()).filter(|op| matches!(op, HostEvent::Row(row) if row.text() == Some(super::super::child_live::GAP))).count();
     assert_eq!(gaps, 1);
+    let later = owner
+        .observation
+        .lock()
+        .updates
+        .iter()
+        .find(|update| {
+            update
+                .ops
+                .iter()
+                .any(|op| matches!(op, HostEvent::AssistantDelta(text) if text == "later"))
+        })
+        .unwrap()
+        .ops
+        .clone();
+    assert_eq!(later.as_ref(), &[HostEvent::AssistantDelta("later".into())]);
     after.release();
     turn.result().await.unwrap();
     attached.release().await.unwrap();
@@ -317,6 +332,119 @@ async fn recovered_terminal_turn_closes_without_waiting_for_another_event() {
     let owner = ChildTurnProjection::recovered(Some(attached.agent().clone()), id);
     observed(&owner.observation, |state| state.closed).await;
     assert!(owner.observation.snapshot().terminal);
+    attached.release().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_reduced_commit_between_the_two_attaches_is_delivered_once_without_a_gap() {
+    use crate::runtime::child_live::{
+        hooks,
+        tests::{fixture_with, next_event, start_attach_probe},
+    };
+    use plakous_offline_crash_harness::gate::GateHandle;
+    let commit = Arc::new(GateHandle::new());
+    let finish = Arc::new(GateHandle::new());
+    let (_root, sessions, attached, turn, _live) = fixture_with(serde_json::json!([
+        {"output":{"text":"prefix"}},
+        {"stream":[{"gate":commit.script()}],"output":{"tool":{"name":"loopback_effect","arguments":{}}},"finish":"tool_calls"},
+        {"stream":[{"gate":finish.script()}]}
+    ])).await;
+    commit.entered().await;
+    // Isolate the attach seam: report the committed exchange through the reducer,
+    // without unrelated model/tool activity that already warrants a gap. Its
+    // actual canonical rows still come from the live agent's history attachment.
+    let (sender, receiver) = tokio::sync::mpsc::channel(1);
+    let owner = ChildTurnProjection::start(
+        turn.id(),
+        None,
+        std::future::ready(Some(Source::Fixture(receiver))),
+    );
+    publish(
+        &sender,
+        &owner.observation,
+        event(turn.id(), AgentEventKind::TurnStarted),
+    )
+    .await;
+    let observation = owner.observation.clone();
+    let updates = sender.clone();
+    let completed = finish.clone();
+    let committed = event(
+        turn.id(),
+        AgentEventKind::ConversationCommitted {
+            item_count: 2,
+            items: None,
+        },
+    );
+    hooks::set_before_attach(
+        "attach-order",
+        Arc::new(move || {
+            let observation = observation.clone();
+            let updates = updates.clone();
+            let commit = commit.clone();
+            let completed = completed.clone();
+            let committed = committed.clone();
+            Box::pin(async move {
+                commit.release();
+                completed.entered().await;
+                publish(&updates, &observation, committed).await;
+            })
+        }),
+    );
+    let following = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    let entered = following.clone();
+    let resumed = resume.clone();
+    hooks::set_before_follow(
+        "attach-order",
+        Arc::new(move || {
+            let entered = entered.clone();
+            let resumed = resumed.clone();
+            Box::pin(async move {
+                entered.notify_one();
+                resumed.notified().await;
+            })
+        }),
+    );
+    let (observers, face_events) =
+        start_attach_probe(sessions, &attached, turn.id(), owner.observation.clone());
+    tokio::time::timeout(Duration::from_secs(10), following.notified())
+        .await
+        .unwrap();
+    let first = next_event(&face_events).await;
+    let HostEvent::PresentationSnapshot(snapshot) = first else {
+        panic!("expected committed baseline, got {first:?}")
+    };
+    assert_eq!(
+        snapshot
+            .items
+            .iter()
+            .filter(|item| item
+                .row
+                .as_tool()
+                .is_some_and(|tool| tool.name == "loopback_effect"))
+            .count(),
+        1
+    );
+    assert!(
+        !snapshot
+            .items
+            .iter()
+            .any(|item| item.row.text() == Some(super::super::child_live::GAP))
+    );
+    sender.send(Received::Closed).await.unwrap();
+    observed(&owner.observation, |state| state.closed).await;
+    resume.notify_one();
+    // The next publication is the converged canonical refresh, not a duplicate
+    // tool row or a gap notice from the between-attaches commit.
+    let last = next_event(&face_events).await;
+    let HostEvent::TranscriptPatch(patch) = last else {
+        panic!("expected canonical refresh, got {last:?}")
+    };
+    assert!(patch.upserts.is_empty(), "{patch:?}");
+    assert!(face_events.try_iter().next().is_none());
+    finish.release();
+    turn.result().await.unwrap();
+    drop(observers);
     attached.release().await.unwrap();
 }
 
@@ -343,18 +471,38 @@ async fn explicit_droppable_loss_marks_one_gap_without_retiring_the_child() {
         ),
     )
     .await;
+    {
+        let state = owner.observation.lock();
+        assert!(!state.closed);
+        assert!(state.projection.as_ref().unwrap().gap_observed);
+        assert_eq!(
+            state.updates.back().unwrap().ops.as_ref(),
+            &[
+                HostEvent::Row(crate::sessions::TranscriptRow::info(
+                    crate::sessions::NoticeScope::Tree,
+                    super::super::child_live::GAP
+                )),
+                HostEvent::AssistantDelta("after loss".into()),
+            ]
+        );
+    }
+    publish(
+        &sender,
+        &owner.observation,
+        event(
+            turn,
+            AgentEventKind::model(ModelEvent::TextDelta(TextDelta::new(
+                OutputLocation::new(0, 0),
+                b"later".to_vec(),
+            ))),
+        ),
+    )
+    .await;
     let state = owner.observation.lock();
-    assert!(!state.closed);
-    assert!(state.projection.as_ref().unwrap().gap_observed);
+    assert_eq!(state.updates.iter().flat_map(|update| update.ops.iter()).filter(|op| matches!(op, HostEvent::Row(row) if row.text() == Some(super::super::child_live::GAP))).count(), 1);
     assert_eq!(
         state.updates.back().unwrap().ops.as_ref(),
-        &[
-            HostEvent::Row(crate::sessions::TranscriptRow::info(
-                crate::sessions::NoticeScope::Tree,
-                super::super::child_live::GAP
-            )),
-            HostEvent::AssistantDelta("after loss".into()),
-        ]
+        &[HostEvent::AssistantDelta("later".into())]
     );
 }
 

@@ -557,9 +557,9 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
         context.send_transcript(rows, replace);
         return;
     };
+    let (live, tail) = observation.attach();
     #[cfg(test)]
     hooks::before_attach(&context.agent_id).await;
-    let (live, tail) = observation.attach();
     let Ok((attachment, source)) = SessionTranscriptSource::attach(&agent, ViewRequest::content())
     else {
         let rows = context.stored_rows().await;
