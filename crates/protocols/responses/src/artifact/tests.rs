@@ -652,7 +652,7 @@ fn reusable_target_ignores_descriptor_observation_freshness() {
     let request = request(ConversationView::default(), 2, 3);
     let (_, original_binding) = admitted(&original, &request, b"account-a");
     let (_, refreshed_binding) = admitted(&refreshed, &request, b"account-a");
-    assert!(original_binding.same_reuse_target(&refreshed_binding));
+    assert!(original_binding.same_reuse_target(&refreshed_binding, &request));
 }
 
 #[test]

@@ -97,7 +97,7 @@ impl Driver {
                 .measure_compaction_projection(
                     runtime,
                     probe,
-                    CompactionFitBasis::PaidFoldInput,
+                    CompactionFitBasis::NativeFoldInput,
                     Some(measured.cache_affinity.clone()),
                     runtime.clock.now(),
                 )
@@ -355,23 +355,13 @@ impl Driver {
                 &descriptor,
                 &validated,
                 measured.cache_affinity.clone(),
+                measured.native,
             )
             .await?;
-        // A compaction carries cache affinity and closed-history proof. Its
-        // input is the sealed cut, a strict subset of the live turn's active family
-        // artifact covers, so attaching that artifact asks the route to reuse
-        // state that does not match this request's canonical coverage. On the
-        // Responses wire `from_active_artifact` refuses that outright on a
-        // coverage mismatch, which is how the live Grok and Codex growth turns
-        // of 2026-09-18 lost every compaction they attempted; all five
-        // Responses routes now prepare fresh on that condition.
-        //
-        // The previous-response continuation is a second, separate attachment.
-        // Only the two Anthropic Messages routes read it, so it was never what
-        // Grok or Codex hit, but a compaction must not continue the live turn's
-        // response there either, for the same coverage reason. Neither is
-        // attached here, and `the_prepared_compaction_attaches_no_artifact_and_no_continuation`
-        // pins that so a future caller cannot re-attach either one.
+        // Native compaction keeps the whole active head: its artifact preserves
+        // exact replay and the anchored wire-item identities. A harness cut or
+        // portable retry has different coverage and prepares without it. No
+        // compaction attaches a previous-response continuation.
         let mut prepared =
             Arc::clone(&runtime.model).prepare_call(validated.clone(), preparation.clone());
         let native_protected_history = measured.native
@@ -445,6 +435,7 @@ impl Driver {
         descriptor: &plakous_model::ResolvedModelDescriptor,
         validated: &ValidatedRequestPlan,
         cache_affinity: ModelCacheAffinity,
+        native: bool,
     ) -> Result<(ModelPreparationContext, ModelPreparationContext), AgentSessionEndpointError> {
         descriptor
             .preflight_context_admission_requirement(
@@ -475,7 +466,15 @@ impl Driver {
             .with_request_anchor(self.request_anchor.clone())
             .with_cache_affinity(cache_affinity);
         let portable_preparation = preparation.clone();
-        let preparation = self.with_completed_history_prefix(validated, preparation);
+        let mut preparation = self.with_completed_history_prefix(validated, preparation);
+        if native {
+            let (artifact, _) = self
+                .active_model_preparation_state()
+                .map_err(|error| compact_runtime_endpoint_error(&error))?;
+            if let Some(artifact) = artifact {
+                preparation = preparation.with_active_family_artifact(artifact);
+            }
+        }
         Ok((preparation, portable_preparation))
     }
 

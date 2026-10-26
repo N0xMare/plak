@@ -1945,7 +1945,17 @@ mod tests {
             Some(requested),
             None,
             ModelAdapterProfileId::new(OPENAI_CODEX_COMPATIBILITY_PROFILE_ID)?,
-            CapabilitySet::new(capabilities, BTreeMap::new()),
+            CapabilitySet::new(
+                capabilities,
+                BTreeMap::from([(
+                    plakous_model::NamespaceId::new("plakous.compaction")?,
+                    FeatureSupport::new(
+                        Support::Native,
+                        CapabilityConstraints::default(),
+                        FactProvenance::new(FactSource::TestFixture, observed, None),
+                    ),
+                )]),
+            ),
         ))
     }
 
@@ -2259,6 +2269,151 @@ mod tests {
                 bridge.map(plakous_responses_dialect::ResponsesArtifactReplayBridge::context),
             ),
         )?)
+    }
+
+    fn native_request(source: &ModelRequest) -> TestResult<ModelRequest> {
+        let mut native = BTreeMap::new();
+        native.insert(
+            plakous_model::NamespaceId::new("plakous.compaction")?,
+            serde_json::json!("native_responses_trigger_v1"),
+        );
+        Ok(ModelRequest::builder(
+            source.selected_provider_configuration_id(),
+            source.effective_provider_configuration_id(),
+            source.input().clone(),
+            RequestMetadata::for_session_workflow(
+                source.metadata().run_id(),
+                plakous_model::SessionWorkflowRootId::new([0x35; 32])?,
+                "00000000-0000-7000-8000-000000000351".parse()?,
+                now()?,
+            ),
+        )
+        .instructions(source.instructions().to_vec())
+        .native(plakous_model::NativeOptions::new(native))
+        .resolved_harness_plan_identity(harness_plan_identity()?)
+        .build()?)
+    }
+
+    fn encrypted_transition_fixture() -> TestResult<TransitionFixture> {
+        let mut fixture = transition_fixture()?;
+        let replay = ReplayEnvelope::new(
+            ProtocolId::new("openai.responses")?,
+            None,
+            ReplayScope::ExactAccountModel {
+                model: plakous_model::ModelId::new("gpt-codex-artifact-test")?,
+                account: account_binding(OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID)?,
+            },
+            ReplayKindId::new("responses.output_item")?,
+            1,
+            DataClassification::Sensitive,
+            RawValue::from_string(
+                serde_json::json!({
+                    "id":"encrypted-reasoning", "type":"reasoning", "summary":[],
+                    "encrypted_content":"A".repeat(228_168)
+                })
+                .to_string(),
+            )?,
+        )?;
+        let reasoning = ConversationItem::new(
+            "00000000-0000-7000-8000-000000000352".parse()?,
+            Actor::Assistant,
+            vec![ContentBlock::Reasoning(plakous_model::ReasoningBlock::new(
+                plakous_model::ReasoningVisibility::OpaqueReplay,
+                None,
+                Some(replay),
+            )?)],
+            Provenance::ModelOutput,
+        )?;
+        let mut segments = fixture.first.input().history().segments().to_vec();
+        segments.push(HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![reasoning],
+        )?);
+        fixture.first = request(segments.clone(), "00000000-0000-7000-8000-000000000353")?;
+        let replay = output_replay("large-answer", &"x".repeat(62_000))?;
+        fixture.first_output = assistant(
+            "00000000-0000-7000-8000-000000000354",
+            replay.clone(),
+            &"x".repeat(62_000),
+        )?;
+        segments.push(HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![fixture.first_output.clone()],
+        )?);
+        fixture.second = request(segments, "00000000-0000-7000-8000-000000000355")?;
+        fixture.candidate = candidate(&artifact(
+            &fixture.first,
+            &fixture.second,
+            replay,
+            b"encrypted",
+        )?)?;
+        fixture.active = active(&fixture.candidate)?;
+        Ok(fixture)
+    }
+
+    #[test]
+    fn native_compaction_keeps_the_anchored_encrypted_replay_items_exact() -> TestResult {
+        let fixture = encrypted_transition_fixture()?;
+        let bridge = |request: &ModelRequest| -> TestResult<
+            Option<plakous_responses_dialect::ResponsesArtifactReplayBridge>,
+        > {
+            codex_artifact_replay_bridge(
+                Some(&fixture.active),
+                request,
+                authority(request, OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID)?,
+                now()?,
+            )
+            .map_err(Into::into)
+        };
+        let ordinary = bridge(&fixture.second)?.ok_or("ordinary replay")?;
+        let ordinary_wire = lower(&fixture.second, Some(&ordinary))?;
+        let native = native_request(&fixture.second)?;
+        let native_bridge =
+            bridge(&native)?.ok_or("native replay must retain its source artifact")?;
+        let native_wire = lower(&native, Some(&native_bridge))?;
+        let mut expected = ordinary_wire.body()["input"]
+            .as_array()
+            .ok_or("input")?
+            .clone();
+        assert!(expected.iter().any(|item| item["type"] == "reasoning"));
+        expected.push(serde_json::json!({"type":"compaction_trigger"}));
+        assert_eq!(native_wire.body()["input"], serde_json::json!(expected));
+        assert!(native_wire.body().get("previous_response_id").is_none());
+        assert_ne!(
+            lower(&native, None)?.body()["input"],
+            native_wire.body()["input"]
+        );
+
+        // The closed refinement does not authorize changed canonical coverage.
+        let changed = native_request(&fixture.first)?;
+        assert!(bridge(&changed)?.is_none());
+        let changed_prefix = ModelRequest::builder(
+            fixture.second.selected_provider_configuration_id(),
+            fixture.second.effective_provider_configuration_id(),
+            fixture.second.input().clone(),
+            fixture.second.metadata(),
+        )
+        .instructions(vec![plakous_model::InstructionBlock::new(
+            plakous_model::InstructionSource::System,
+            "changed instructions",
+        )?])
+        .resolved_harness_plan_identity(harness_plan_identity()?)
+        .build()?;
+        assert!(bridge(&native_request(&changed_prefix)?)?.is_none());
+        assert!(matches!(
+            codex_artifact_replay_bridge(
+                Some(&fixture.active),
+                &native,
+                authority(&native, "foreign.route")?,
+                now()?,
+            ),
+            Err(plakous_responses_dialect::ResponsesRequestError::Replay(
+                plakous_responses_dialect::ResponsesReplayError::ArtifactTargetMismatch {
+                    axis: "route"
+                }
+            ))
+        ));
+        Ok(())
     }
 
     /// A compaction beside a live artifact prepares fresh instead of failing.

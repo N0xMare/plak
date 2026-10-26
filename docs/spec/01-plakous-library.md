@@ -7164,11 +7164,16 @@ same live head:
    preparation, before any dispatch capability or operation exists, tries the
    harness summary over the same sealed head, then the offline rungs. A native
    operation that dispatched never falls back to a second paid summary.
-   Fresh preparation attaches neither the live
-   family artifact nor continuation. A ProtectedHistory/unbound-replay refusal
+   Preparation over the unchanged active head carries its validated family
+   artifact, preserving byte-exact replay and anchored wire-item identities.
+   The sole native-trigger option is a workflow-only replay-prefix refinement:
+   removing exactly that option must reproduce the artifact's stable prefix;
+   route, account, model, tool plan, expiry and complete canonical coverage
+   still validate independently. No continuation is attached. A ProtectedHistory/unbound-replay refusal
    retries preparation once on a portable projection: opaque envelopes and
    reasoning replay are omitted, while portable text, tool calls and results
-   remain paired. This is a lowering retry, not a second paid dispatch.
+   remain paired. That portable retry carries neither the artifact nor a
+   continuation. This is a lowering retry, not a second paid dispatch.
 2. **The fold**, when the closed protection policy selects at least one whole
    older intent group or a sealed middle inside the active turn. This is the
    paid semantic summary described below; it is what lets one long turn keep

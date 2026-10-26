@@ -1112,9 +1112,9 @@ async fn the_fold_still_wins_when_an_older_intent_group_is_eligible() -> TestRes
     Ok(())
 }
 
-/// The compaction prepares fresh: no artifact, no response continuation.
+/// The harness summary prepares fresh: no artifact, no response continuation.
 ///
-/// A compaction's input is the sealed cut, a strict subset of the history the
+/// A harness summary's input is the sealed cut, a strict subset of the history the
 /// live turn's response and its active family artifact cover. Attaching either
 /// asks the route to reuse state that does not match this request's canonical
 /// coverage. On the Responses wire `from_active_artifact` refuses that outright
@@ -1123,7 +1123,7 @@ async fn the_fold_still_wins_when_an_older_intent_group_is_eligible() -> TestRes
 /// continuation is a second, separate attachment with only Messages readers; it
 /// is pinned here too so neither can be re-attached by a future caller.
 #[tokio::test]
-async fn the_prepared_compaction_attaches_no_artifact_and_no_continuation() -> TestResult {
+async fn the_prepared_harness_summary_attaches_no_artifact_and_no_continuation() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let (builder, model) = placeholder_fixture_producing_artifacts(
@@ -1158,7 +1158,7 @@ async fn the_prepared_compaction_attaches_no_artifact_and_no_continuation() -> T
     for context in &compaction_contexts {
         assert!(
             context.active_family_artifact().is_none(),
-            "a compaction must prepare fresh, never against the live turn's artifact"
+            "a harness summary must prepare fresh, never against the live turn's artifact"
         );
         assert!(
             context.previous_response_metadata().is_none(),

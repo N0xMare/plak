@@ -42,6 +42,7 @@ pub(super) mod jobs_carry_fixture;
 #[path = "../landed_round_abandonment_tests.rs"]
 pub(super) mod landed_round_abandonment;
 mod long_turn_compaction;
+mod native_anchor_tests;
 mod native_capacity_tests;
 mod native_prefix_compaction;
 mod native_tail_tests;

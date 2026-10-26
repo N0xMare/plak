@@ -177,6 +177,7 @@ fn has_zero_headroom(status: &ContextStatus) -> bool {
 pub(super) enum CompactionFitBasis {
     ActiveHead,
     PaidFoldInput,
+    NativeFoldInput,
     OfflineSuccessor,
 }
 

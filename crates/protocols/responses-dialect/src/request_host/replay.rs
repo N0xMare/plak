@@ -367,7 +367,7 @@ impl ResponsesArtifactReplayBridge {
         ) {
             return Err(ResponsesReplayError::ArtifactTargetMismatch { axis }.into());
         }
-        if authority.artifact_binding().stable_prefix() != artifact.binding().stable_prefix() {
+        if !artifact.binding().matches_replay_prefix(request) {
             return Err(ResponsesReplayError::ArtifactStablePrefixMismatch.into());
         }
         validate_replay_kind(output_item)?;

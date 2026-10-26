@@ -46,7 +46,15 @@ async fn abandon_and_release_stops_admission_without_a_receipt_or_flush() -> Tes
 }
 
 #[tokio::test]
-async fn fresh_native_compaction_projects_opaque_local_tool_history() -> TestResult {
+async fn native_compaction_preserves_bound_opaque_history_and_projects_only_on_refusal()
+-> TestResult {
+    for protected in [false, true] {
+        native_opaque_history_case(protected).await?;
+    }
+    Ok(())
+}
+
+async fn native_opaque_history_case(protected: bool) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let (builder, model) = placeholder_fixture_producing_artifacts(
@@ -60,6 +68,9 @@ async fn fresh_native_compaction_projects_opaque_local_tool_history() -> TestRes
         20,
     )?;
     model.opaque_tool_history.store(true, Ordering::Release);
+    model
+        .native_protected_prepare
+        .store(protected, Ordering::Release);
     model.item_context.store(true, Ordering::Release);
     model
         .item_provider_input_tokens
@@ -92,16 +103,21 @@ async fn fresh_native_compaction_projects_opaque_local_tool_history() -> TestRes
     assert!(provenance.after_audit().input_tokens() < provenance.before_audit().input_tokens());
     assert_eq!(
         model.observed_compaction_contexts().len(),
-        2,
-        "one ProtectedHistory refusal and one portable retry"
+        if protected { 2 } else { 1 },
+        "bound replay prepares directly; a ProtectedHistory refusal gets one portable retry"
     );
-    assert!(
+    assert_eq!(
         model
             .native_protected_history_refusals
-            .load(Ordering::Acquire)
-            == 1,
-        "first native lowering must refuse ProtectedHistory"
+            .load(Ordering::Acquire),
+        usize::from(protected),
+        "bound opaque history does not itself authorize portable projection"
     );
+    let contexts = model.observed_compaction_contexts();
+    assert!(contexts[0].active_family_artifact().is_some());
+    if protected {
+        assert!(contexts[1].active_family_artifact().is_none());
+    }
     assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 1);
     agent.shutdown().await?;
     Ok(())

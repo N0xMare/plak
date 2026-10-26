@@ -17,6 +17,7 @@ use plakous_model::{
 
 mod codec;
 mod error;
+mod native_compaction;
 mod view;
 
 pub use codec::ResponsesArtifactCodec;
@@ -430,7 +431,17 @@ impl ResponsesArtifactBinding {
         self.identity
     }
 
-    fn same_reuse_target(&self, current: &Self) -> bool {
+    /// Checks the request's replay prefix, including the closed native-trigger refinement.
+    ///
+    /// This check alone grants no replay authority: target, expiry and canonical
+    /// coverage must also pass [`ResponsesArtifact::validate_for_reuse`].
+    #[must_use]
+    pub fn matches_replay_prefix(&self, request: &ModelRequest) -> bool {
+        self.stable_prefix == request.stable_prefix().reuse_identity()
+            || native_compaction::source_prefix(request) == Some(self.stable_prefix)
+    }
+
+    fn same_reuse_target(&self, current: &Self, request: &ModelRequest) -> bool {
         self.dialect == current.dialect
             && self.route == current.route
             && self.account == current.account
@@ -440,7 +451,7 @@ impl ResponsesArtifactBinding {
             && self.semantic_model == current.semantic_model
             && self.revisions == current.revisions
             && self.cache_affinity == current.cache_affinity
-            && self.stable_prefix == current.stable_prefix
+            && self.matches_replay_prefix(request)
             && self.tool_plan == current.tool_plan
     }
 
@@ -1049,7 +1060,7 @@ impl ResponsesArtifact {
         now: Timestamp,
     ) -> Result<ResponsesArtifactReuse<'a>, ResponsesArtifactError> {
         self.validate_active(now)?;
-        if !current.names_request(request) || !self.binding.same_reuse_target(current) {
+        if !current.names_request(request) || !self.binding.same_reuse_target(current, request) {
             return Err(ResponsesArtifactError::BindingMismatch);
         }
         let replay = self.validate_canonical_coverage(request)?;

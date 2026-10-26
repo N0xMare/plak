@@ -180,6 +180,40 @@ fn incident_regime_native_refuses_but_depth_one_portable_summary_admits() {
 }
 
 #[test]
+fn native_trigger_over_unchanged_replay_is_covered_by_the_provider_anchor() {
+    let descriptor = reference_descriptor();
+    let ceiling = 47_500;
+    let provider_input = ceiling * 92 / 100;
+    let reference_tokens = provider_input * 166 / 100;
+    let source = serde_json::json!({"input":[
+        {"type":"reasoning", "encrypted_content":"A".repeat(228_168)},
+        {"role":"assistant", "content":"x".repeat(62_000)}
+    ]});
+    let anchor = ContextRequestAnchor::new(
+        descriptor.semantic_binding_digest().expect("binding"),
+        descriptor.route().clone(),
+        descriptor.requested_model().clone(),
+        crate::Usage::new(provider_input, 0, 0, 0, 0),
+        wire_input(&source),
+    )
+    .expect("successful response");
+    let mut native = source;
+    native["input"]
+        .as_array_mut()
+        .expect("items")
+        .push(serde_json::json!({"type":"compaction_trigger"}));
+    let native = wire_input(&native);
+    assert!(reference_tokens > ceiling);
+    assert!(!matches!(
+        summary_status(&descriptor, &native, reference_tokens, None).kind(),
+        ContextStatusKind::Fits { .. }
+    ));
+    let status = summary_status(&descriptor, &native, reference_tokens, Some(&anchor));
+    assert!(matches!(status.kind(), ContextStatusKind::Fits { .. }));
+    assert!(!status.uses_unanchored_estimate());
+}
+
+#[test]
 fn reference_envelope_does_not_replace_the_dialects_image_token_ceiling() {
     let descriptor = reference_descriptor();
     let input = ContextWireInput::measure_wire(

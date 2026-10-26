@@ -316,8 +316,17 @@ impl Driver {
                 context = context.with_active_family_artifact(artifact);
             }
         } else {
-            if basis == CompactionFitBasis::PaidFoldInput {
+            if matches!(
+                basis,
+                CompactionFitBasis::PaidFoldInput | CompactionFitBasis::NativeFoldInput
+            ) {
                 context = context.with_required_input_bound();
+            }
+            if basis == CompactionFitBasis::NativeFoldInput {
+                let (artifact, _) = self.active_model_preparation_state()?;
+                if let Some(artifact) = artifact {
+                    context = context.with_active_family_artifact(artifact);
+                }
             }
             if let Some(affinity) = explicit_affinity {
                 context = context.with_cache_affinity(affinity);
