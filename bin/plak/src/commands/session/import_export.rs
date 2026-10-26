@@ -147,27 +147,33 @@ fn import_prepared_with_fallback(
     record.validate_for_store().map_err(CliFailure::new)?;
     let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
     config.seed_history = Some(history);
-    let (record, notes) =
-        product_host::create_seeded_session_with_preflight(config, move |window| {
-            let capacity =
-                super::attached::carry_capacity_from_window(window, estimated_tokens, messages);
-            let message = capacity.warning().unwrap_or_else(|| {
-                if capacity.admitted_input.is_none() {
-                    "destination window unknown; carry will be checked at first prompt".to_owned()
-                } else {
-                    String::new()
-                }
-            });
-            if !message.is_empty() {
-                writeln!(
-                    io::stderr(),
-                    "warning: {}",
-                    crate::cli_output::safe_terminal_block(&message)
-                )
-                .map_err(|_| CliFailure::new("stderr failed"))?;
+    let created = product_host::create_seeded_session_with_preflight(config, move |window| {
+        let capacity =
+            super::attached::carry_capacity_from_window(window, estimated_tokens, messages);
+        let message = capacity.warning().unwrap_or_else(|| {
+            if capacity.admitted_input.is_none() {
+                "destination window unknown; carry will be checked at first prompt".to_owned()
+            } else {
+                String::new()
             }
-            Ok(())
-        })?;
+        });
+        if !message.is_empty() {
+            writeln!(
+                io::stderr(),
+                "warning: {}",
+                crate::cli_output::safe_terminal_block(&message)
+            )
+            .map_err(|_| CliFailure::new("stderr failed"))?;
+        }
+        Ok(())
+    })?;
+    if let Some(error) = &created.completion_error {
+        note.push_str(&format!(
+            "; session {} was created but completion failed: {}; resuming the committed successor {}",
+            created.session.id, error.message(), created.session.id
+        ));
+    }
+    let (record, notes) = created.into_session();
     let projected = (|| -> CliResult<()> {
         let executor = plakous::application::ApplicationExecutor::new()
             .map_err(|_| CliFailure::new("application executor failed"))?;
@@ -203,7 +209,8 @@ fn import_host_config(
 ) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
     let source_error = match super::attached::attached_host_config(services, record.clone()) {
         Ok(config) => return Ok(config),
-        Err(error) => error,
+        Err(super::attached::AttachedConfigError::Unresolvable(error)) => error,
+        Err(super::attached::AttachedConfigError::Other(error)) => return Err(error),
     };
     let Some(root) = root_fallback else {
         return Err(source_error);
@@ -231,5 +238,63 @@ fn import_host_config(
         &notice,
     ));
     note.push_str(&format!("; {notice}"));
-    super::attached::attached_host_config(services, fallback)
+    super::attached::attached_host_config(services, fallback).map_err(Into::into)
+}
+
+#[cfg(test)]
+mod rebind_tests {
+    use super::*;
+
+    #[test]
+    fn rebind_root_fallback_is_limited_to_an_unresolvable_source_selection() {
+        for invalid_policy in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let paths =
+                crate::home::paths::PlakPaths::for_workspace(root.path().join("home"), root.path());
+            paths.ensure_layout().unwrap();
+            if invalid_policy {
+                std::fs::write(
+                    paths.config_file(),
+                    "[orchestration]\nmax_children = 'not a number'\n",
+                )
+                .unwrap();
+            }
+            let services = crate::shell::services::Services::for_home(paths);
+            let mut source = product_sessions::SessionRecord::new(root.path().to_path_buf());
+            source.account = Some("removed-account".into());
+            source.model = Some("removed-model".into());
+            source.effort = Some("medium".into());
+            let mut history = plakous::sessions::PortableSessionHistory::new(
+                Vec::new(),
+                "source-replay".into(),
+                plakous::model::ModelId::new("removed-model").unwrap(),
+            );
+            let mut note = "source selected".to_owned();
+            let fallback = product_config::ProductConfig::default_product();
+            let result = import_host_config(
+                &services,
+                source.clone(),
+                Some(&fallback),
+                &mut history,
+                &mut note,
+            );
+            let error = result
+                .err()
+                .expect("unconfigured root or invalid policy refuses before creation");
+            if invalid_policy {
+                assert!(!note.contains("using the configured root"), "{note}");
+                assert_eq!(history.replay_account(), "source-replay");
+                assert!(!error.message().contains("removed-account"), "{error}");
+            } else {
+                assert!(
+                    note.contains("account `removed-account` is no longer available"),
+                    "{note}"
+                );
+                assert!(note.contains("using the configured root binding"), "{note}");
+                assert_eq!(history.replay_account(), "");
+            }
+            assert_eq!(source.account.as_deref(), Some("removed-account"));
+            assert_eq!(services.product_store_opens(), 0);
+        }
+    }
 }

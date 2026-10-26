@@ -3304,9 +3304,11 @@ resume`. Bare `/tree` opens the Agents list. Other tree arguments are refused.
 
 `/rebind` carries the full neutral conversation and typed transcript into a new
 session at genesis, resolving the source account, model, effort, composition
-and target selection under the current login. Only when that binding cannot
-be resolved does it fall back to the configured root binding, with an explicit
-notice. It works
+and target selection under the current login. Only an account removed from
+the product or a model/tuple missing from a Ready catalog permits fallback to
+the configured root binding, with an explicit notice. A policy, presentation,
+feature-admission or non-Ready catalog failure keeps the source selected and
+reports the cause, never substitutes the config root. It works
 when the root is unattached: export reads canonical history without exact
 runtime reopen. The source is unchanged, the new session is linked as
 `carried forward from <id>`, and a transcript notice names the cause. Provider
@@ -3326,8 +3328,14 @@ is not a binding mismatch and is repaired with the named login command.
 
 `/reload` restarts on the installed build before applying changed epoch-scoped
 orchestration/roster settings. On a same-state resume, the destination process
-compares its current settings with the session's frozen epoch. A changed
-digest on an idle session with no live children or background processes takes
+compares the effective orchestration values and template selection fields
+stored in the source snapshot with the current effective values. It does not
+compare rendered epoch digests: build-owned bind hints, card/prompt text and
+freeze/render recipe changes alone keep exact resume, including across
+successive builds that still reopen the original snapshot. Changed effective
+bounds, roster or template selections carry whether the change came from an
+explicit config edit or a changed default. A changed value on an idle session
+with no live children or background processes takes
 the same carry and
 records `orchestration settings changed; carried into a new session to apply
 them`, linked to the source. The new tree freezes current bounds and roster
@@ -3339,6 +3347,10 @@ keep the exact reopen path. An unreadable config or tree skips orchestration
 apply with a notice (`settings apply to new sessions`) and continues the normal
 reload. A cross-state import already freezes the destination's current roster
 and bounds at genesis and never creates a second carry for the same reload.
+If canonical creation commits but release or product persistence fails, the
+carry returns the committed successor and its locator with that failure. The
+TUI selects that successor and names it in a repair notice, rather than
+remaining on the source and creating another successor at the next reload.
 
 The normal reload handoff carries the session forward when
 that build has another state key (§2.5.1). It is refused while a turn runs,

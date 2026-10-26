@@ -6,6 +6,44 @@ type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
 #[test]
+fn seeded_save_failure_retains_the_committed_successor_and_its_locator() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
+    let id = config.session.id.clone();
+    let database = config.product_home.join("runtime.sqlite3");
+    let mut competing = config.session.clone();
+    let store = config.store.clone();
+    config.seed_history = Some(plakous::sessions::PortableSessionHistory::new(
+        Vec::new(),
+        "no-replay".into(),
+        plakous::model::ModelId::new("offline-loopback-v1").unwrap(),
+    ));
+    let created = create_seeded_session_with_preflight(config, move |_| {
+        // Advance only the product revision, so canonical creation succeeds
+        // and its final product save deterministically refuses stale CAS.
+        store.save(&mut competing).map_err(CliFailure::new)
+    })
+    .unwrap();
+    assert_eq!(created.session.id, id);
+    assert!(created.completion_error.is_some());
+    let locator = created.session.plakous_locator.unwrap();
+    plakous::sessions::AgentSessions::export_history_sqlite(&database, locator).unwrap();
+    let (record, notice) = created.into_session();
+    assert_eq!(record.id, id);
+    assert_eq!(record.plakous_locator, Some(locator));
+    assert!(notice.contains(&id), "{notice}");
+    assert!(
+        notice.contains("committed successor, not its source"),
+        "{notice}"
+    );
+    assert!(
+        record.transcript.pending_notices().iter().any(|row| {
+            matches!(row, TranscriptRow::Notice(notice) if notice.text.contains(&id))
+        })
+    );
+}
+
+#[test]
 fn replay_fallback_authors_one_persistable_notice_only_when_needed() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = test_support::fresh_injected_attached_host(root.path());

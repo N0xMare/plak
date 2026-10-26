@@ -12,6 +12,26 @@ use plakous_hosted::sessions::{NoticePlacement, NoticeTone, TranscriptRow};
 use std::io;
 use std::path::Path;
 
+#[derive(Debug)]
+pub(super) enum AttachedConfigError {
+    Unresolvable(CliFailure),
+    Other(CliFailure),
+}
+
+impl From<CliFailure> for AttachedConfigError {
+    fn from(error: CliFailure) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl From<AttachedConfigError> for CliFailure {
+    fn from(error: AttachedConfigError) -> Self {
+        match error {
+            AttachedConfigError::Unresolvable(error) | AttachedConfigError::Other(error) => error,
+        }
+    }
+}
+
 /// The one-shot attach uses the composition root's record service and sinks.
 pub(crate) fn run_attached_action(
     services: &crate::shell::services::Services,
@@ -63,7 +83,7 @@ pub(crate) fn probe_prepared_capacity(
 pub(super) fn attached_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
-) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
+) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
     crate::build_features::admit_session(&record)?;
     let paths = &crate::home::paths::PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
@@ -90,7 +110,7 @@ pub(super) fn attached_host_config(
                     None,
                 )
             })
-            .map_err(CliFailure::new);
+            .map_err(|error| AttachedConfigError::Other(CliFailure::new(error)));
     }
     let account = record
         .account
@@ -100,8 +120,20 @@ pub(super) fn attached_host_config(
         .model
         .clone()
         .ok_or_else(|| CliFailure::new("session has no exact model binding"))?;
+    if plakous_hosted::capabilities::for_account(&account).is_none() {
+        return Err(AttachedConfigError::Unresolvable(CliFailure::new(format!(
+            "account `{account}` is no longer available"
+        ))));
+    }
     let presentation = tui_presentation_bundle(paths)?;
     let ready_catalog = &presentation.sections;
+    require_catalog_binding(
+        &record.target_selection,
+        ready_catalog,
+        &presentation.native_models,
+        &account,
+        &model,
+    )?;
     let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
     if !attached_target_accepts_effort(
         &record.target_selection,
@@ -110,7 +142,7 @@ pub(super) fn attached_host_config(
         &model,
         explicit,
     ) {
-        return Err(CliFailure::new("session has no exact effort binding"));
+        return Err(CliFailure::new("session has no exact effort binding").into());
     }
     let state_roots = services.state_roots()?;
     build_host_config(
@@ -126,7 +158,45 @@ pub(super) fn attached_host_config(
         None,
         &presentation.native_models,
     )
-    .map_err(CliFailure::new)
+    .map_err(|error| AttachedConfigError::Other(CliFailure::new(error)))
+}
+
+fn require_catalog_binding(
+    target: &product_config::ProductTargetSelection,
+    catalog: &plakous_host_protocol::views::ReadyCatalog,
+    native_models: &[crate::presentation::TuiNativeModelFact],
+    account: &str,
+    model: &str,
+) -> Result<(), AttachedConfigError> {
+    let route = target
+        .route(account)
+        .map_err(|error| CliFailure::new(error.message(account)))?;
+    if matches!(
+        route,
+        plakous_hosted::binding::AttachRoute::OpenRouter { .. }
+    ) {
+        return Ok(());
+    }
+    let section = catalog
+        .accounts
+        .iter()
+        .find(|section| section.account == account);
+    let Some(section) = section.filter(|section| section.ready) else {
+        return Err(CliFailure::new(format!(
+            "the `{account}` catalog is not Ready; restore the login or key before /rebind"
+        ))
+        .into());
+    };
+    let catalog_present = section.entries.iter().any(|entry| entry.id == model)
+        || native_models
+            .iter()
+            .any(|fact| fact.account == account && fact.exact_id == model);
+    if !catalog_present {
+        return Err(AttachedConfigError::Unresolvable(CliFailure::new(format!(
+            "model `{model}` is no longer in the Ready `{account}` catalog"
+        ))));
+    }
+    Ok(())
 }
 
 fn run_attached_config(
@@ -191,4 +261,72 @@ fn run_attached_config(
         }
     }
     failure.map_or(Ok(()), |message| Err(CliFailure::new(message)))
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+
+    #[test]
+    fn absent_model_is_unresolvable_only_in_a_ready_catalog() {
+        for ready in [false, true] {
+            let catalog = plakous_host_protocol::views::ReadyCatalog::new(vec![
+                plakous_host_protocol::views::ProviderSection {
+                    account: "claude".into(),
+                    label: "Claude".into(),
+                    ready,
+                    entries: Vec::new(),
+                },
+            ]);
+            let error = require_catalog_binding(
+                &product_config::ProductTargetSelection::Native,
+                &catalog,
+                &[],
+                "claude",
+                "removed-model",
+            )
+            .unwrap_err();
+            assert_eq!(matches!(error, AttachedConfigError::Unresolvable(_)), ready);
+            let cause = CliFailure::from(error);
+            assert!(cause.message().contains(if ready {
+                "no longer in the Ready"
+            } else {
+                "not Ready"
+            }));
+        }
+    }
+
+    #[test]
+    fn picker_filters_are_not_evidence_that_the_catalog_removed_a_model() {
+        let catalog = plakous_host_protocol::views::ReadyCatalog::new(vec![
+            plakous_host_protocol::views::ProviderSection {
+                account: "codex".into(),
+                label: "Codex".into(),
+                ready: true,
+                entries: Vec::new(),
+            },
+        ]);
+        let facts = [crate::presentation::TuiNativeModelFact {
+            account: "codex".into(),
+            exact_id: "filtered-model".into(),
+            native_tool_mode: None,
+            reasoning_efforts: Vec::new(),
+            service_tiers: Vec::new(),
+        }];
+        require_catalog_binding(
+            &product_config::ProductTargetSelection::Native,
+            &catalog,
+            &facts,
+            "codex",
+            "filtered-model",
+        )
+        .unwrap();
+        assert!(!attached_target_accepts_effort(
+            &product_config::ProductTargetSelection::Native,
+            &catalog,
+            "codex",
+            "filtered-model",
+            true
+        ));
+    }
 }

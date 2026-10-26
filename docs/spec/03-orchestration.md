@@ -151,9 +151,20 @@ composition and target selection stay selected, revalidated under the current
 login. The carry keeps replay with validation when its binding is unchanged.
 Persisted non-terminal children refuse carry even with no root attachment.
 The installed build performs the comparison after the normal reload handoff;
-a cross-state import already creates the desired genesis and is not carried
+a comparison reads effective bounds, occupancy/reclamation/evidence controls,
+working set, tool tables and template selection/authority fields from the
+source snapshot and compares them with the current effective values, not the
+rendered digest. A changed effective knob or template selection applies even
+when it came from a changed default rather than a file edit. Build-owned bind
+hints, template descriptions, card/prompt text and freeze/render recipe changes
+alone keep exact resume. This holds through successive builds: each compares
+against the source's stored values, never against a build-local render recipe.
+A cross-state import already creates the desired genesis and is not carried
 again. An unreadable config or tree skips apply with a notice and continues
 normal reload; settings then apply to new sessions.
+Once canonical carry creation commits, any completion failure retains and
+selects its successor identity with a repair notice; it is not a refusal that
+allows a later reload to carry the source again.
 The source keeps its tree and frozen bounds; no config edit silently changes
 an existing tree. Unchanged settings keep exact reopen. A successor epoch may
 also install on a quiescent tree during a model rebind that stays on it. A

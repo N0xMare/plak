@@ -277,18 +277,49 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
 pub fn create_seeded_session<P: plakous_host_protocol::ProtocolExtension>(
     config: HostConfig<P>,
 ) -> CliResult<(SessionRecord, String)> {
-    create_seeded_session_with_preflight(config, |_| Ok(()))
+    Ok(create_seeded_session_with_preflight(config, |_| Ok(()))?.into_session())
+}
+
+/// A canonical seed was committed, even when its release or product save failed.
+pub struct SeededSessionCreation {
+    /// The committed successor, with its exact runtime locator.
+    pub session: SessionRecord,
+    /// Advisory construction output.
+    pub notes: String,
+    /// Post-commit failure; never permission to create another successor.
+    pub completion_error: Option<CliFailure>,
+}
+
+impl SeededSessionCreation {
+    /// Keeps the committed successor and records any completion failure as a
+    /// repair notice rather than discarding its identity.
+    #[must_use]
+    pub fn into_session(mut self) -> (SessionRecord, String) {
+        if let Some(error) = self.completion_error {
+            let notice = format!(
+                "session {} was created but completion failed: {}; continue with this committed successor, not its source",
+                self.session.id,
+                error.message()
+            );
+            self.session
+                .record_notice(TranscriptRow::warning(NoticeScope::Session, &notice));
+            self.notes.push_str(&format!("\n{notice}"));
+        }
+        (self.session, self.notes)
+    }
 }
 
 /// Creates a seed after a host-owned advisory capacity callback, reusing the
 /// exact runtime binding that will be created. No inference is dispatched.
 ///
 /// # Errors
-/// Returns construction, callback, create, release or persistence failures.
+/// Returns failures before canonical create commits. A subsequent release or
+/// persistence failure is returned with the committed successor, never as a
+/// refusal that would authorize creating another one.
 pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolExtension>(
     mut config: HostConfig<P>,
     preflight: impl FnOnce(plakous::sessions::SessionInputWindow) -> CliResult<()> + Send + 'static,
-) -> CliResult<(SessionRecord, String)> {
+) -> CliResult<SeededSessionCreation> {
     if config.session.plakous_locator.is_some() {
         return Err(CliFailure::new(
             "a carried history seeds only a session that has no runtime yet",
@@ -309,21 +340,31 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
         &mut config.session,
         opened.replay_validation_error(),
     );
-    let locator = executor
-        .block_on(opened.release())
-        .map_err(|e| CliFailure::new(e.to_string()))?
-        .map_err(|e| CliFailure::new(e.to_string()))?;
     let notes = String::from_utf8_lossy(&stderr_buf).into_owned();
-    config
-        .session
-        .bind_plakous_locator(locator)
-        .map_err(CliFailure::new)?;
-    config.session.touch();
-    config
-        .store
-        .save(&mut config.session)
-        .map_err(CliFailure::new)?;
-    Ok((config.session, notes))
+    let completion = (|| -> CliResult<()> {
+        config
+            .session
+            .bind_plakous_locator(opened.locator())
+            .map_err(CliFailure::new)?;
+        let locator = executor
+            .block_on(opened.release())
+            .map_err(|e| CliFailure::new(e.to_string()))?
+            .map_err(|e| CliFailure::new(e.to_string()))?;
+        config
+            .session
+            .bind_plakous_locator(locator)
+            .map_err(CliFailure::new)?;
+        config.session.touch();
+        config
+            .store
+            .save(&mut config.session)
+            .map_err(CliFailure::new)
+    })();
+    Ok(SeededSessionCreation {
+        session: config.session,
+        notes,
+        completion_error: completion.err(),
+    })
 }
 
 fn record_replay_fallback(

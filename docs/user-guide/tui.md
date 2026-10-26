@@ -227,8 +227,10 @@ with the full conversation and typed transcript. The handoff reports
 
 `/rebind` carries the full history into a new session under the current login,
 keeping the source account, model, effort, composition and target selection
-when they can still be resolved. Otherwise it uses the configured root binding
-and says so. It works even if the old root cannot attach. The new transcript
+when they can still be resolved. A removed account or a model missing from a
+Ready catalog permits fallback to the configured root binding, with a notice.
+Other failures, including a signed-out catalog or invalid policy, keep the
+source selected. It works even if the old root cannot attach. The new transcript
 links `carried forward from <id>` and names the cause; the old session stays
 unchanged. It refuses while a turn, child or background process is live. A
 different-account or model/route/adapter binding refusal also makes `/reload`
@@ -243,6 +245,8 @@ session's spawn cap, not the old tree's cap. It preserves the source binding
 rather than selecting the config's default account or model, and validates
 retained provider replay. `/reload` starts the installed build first; that
 build applies the changed settings. Unchanged settings keep exact reopen.
+New card text, bind hints or rendering alone do not create another session;
+a changed effective orchestration default does, just like an explicit edit.
 If the config or tree cannot be inspected, it skips apply with a notice and
 continues normal reload. Ordinary prompts do not silently replace the epoch.
 Before closing the old session, `/reload` checks the destination route.

@@ -187,7 +187,9 @@ pub use startup::HostWorker;
 pub use startup::spawn_deferred_tui_host;
 pub use startup::spawn_deferred_tui_host_with_clear_publication;
 pub use startup::spawn_host_worker;
-pub use startup::{create_seeded_session, create_seeded_session_with_preflight};
+pub use startup::{
+    SeededSessionCreation, create_seeded_session, create_seeded_session_with_preflight,
+};
 pub use surface::{
     ProfileForkOutcome, ReadinessRead, Surface, SurfaceEffect, SurfaceFacts, SurfaceHandler,
     SurfaceMcp, SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
