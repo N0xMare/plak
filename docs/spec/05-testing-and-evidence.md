@@ -2650,6 +2650,15 @@ is still active when start returns.
 An actual interactive host test injects failed completion publication and paused-state
 writes, restores storage, and proves both a manual prompt and queue drain remain
 refused while settings, explicit clear into a fresh conversation, and quit work.
+The busy-follow-up ENOSPC regression additionally fails the root definitively,
+retains the exact previously committed queue identity, rejects only the unwritten
+draft, delivers a new prompt separately, and explicitly resumes the old item.
+It checks exact delivered texts, an empty durable queue and the final empty
+queue snapshot, excluding both prompt merging and stale queued presentation.
+Additional definite-failure and outcome-unknown variants keep ENOSPC armed
+through terminal publication, assert the refused projection fences admission,
+then recover on a distinct new prompt. Both the durable queue and its snapshot
+retain the same item identity until explicit resume delivers that item alone.
 
 The same hosted entrypoints run with extension-free `Core` and an independent
 extension whose marker is neither `Copy` nor `Default`. Real one-shot and

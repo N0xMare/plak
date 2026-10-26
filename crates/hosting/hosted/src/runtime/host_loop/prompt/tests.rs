@@ -1,5 +1,8 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
+#[cfg(test)]
+mod terminal_storage_tests;
+
 #[test]
 fn live_host_counts_provider_hosted_calls_from_the_projected_views() {
     assert_hosted_calls_projected(false);
@@ -191,13 +194,26 @@ impl crate::runtime::fault_store::StoreFaults for CapacityWriteFault {
 
 #[test]
 fn enospc_during_busy_follow_up_preserves_the_committed_queue_and_rejects_only_the_new_draft() {
+    assert_busy_follow_up_storage_full(false);
+}
+
+#[test]
+fn enospc_then_failed_root_never_merges_the_retained_queue_with_the_next_prompt() {
+    assert_busy_follow_up_storage_full(true);
+}
+
+fn assert_busy_follow_up_storage_full(failed_root: bool) {
     use crate::surface_protocol::UserAction;
     use std::sync::atomic::{AtomicBool, Ordering};
     let root = tempfile::tempdir().unwrap();
     let gate = plakous_offline_crash_harness::gate::GateHandle::new();
+    let first = if failed_root {
+        serde_json::json!({"gate": gate.script(), "fault": {"at": "pre_stream", "kind": "protocol", "retryability": "Permanent", "message": "injected definite root failure"}})
+    } else {
+        serde_json::json!({"gate": gate.script(), "output": {"text": "root response"}})
+    };
     let plan = crate::runtime::recover_tests::script(serde_json::json!([
-        {"stream": [{"gate": gate.script()}], "output": {"text": "root response"}},
-        {"output": {"text": "queued response"}}
+        first, {"output": {"text": "next response"}}, {"output": {"text": "queued response"}}
     ]));
     let (mut config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
     let durable = config.store.clone();
@@ -248,6 +264,11 @@ fn enospc_during_busy_follow_up_preserves_the_committed_queue_and_rejects_only_t
     );
     armed.store(false, Ordering::SeqCst);
     gate.release();
+    if failed_root {
+        assert_failed_root_keeps_queue_distinct(
+            &actions, &events, &mut seen, &*durable, &id, &queued,
+        );
+    }
     crate::runtime::recover_tests::wait_for(&events, &mut seen, "queued delivery", |event| {
         matches!(event,
         HostEvent::UserMessage { text, .. } if text == "committed follow-up")
@@ -255,10 +276,84 @@ fn enospc_during_busy_follow_up_preserves_the_committed_queue_and_rejects_only_t
     crate::runtime::recover_tests::wait_for(&events, &mut seen, "queued terminal", |event| {
         matches!(event, HostEvent::SetBusy(false))
     });
-    assert!(!seen.iter().any(|event| matches!(event,
-        HostEvent::UserMessage { text, .. } if text.contains("refused follow-up"))));
+    assert_busy_follow_up_delivered(&seen, failed_root);
+    assert_eq!(
+        durable.load(&id).unwrap().pending_queue,
+        [] as [queue::QueueItem; 0]
+    );
     actions.send(UserAction::Quit).unwrap();
     worker.join().unwrap().unwrap();
+}
+
+fn assert_busy_follow_up_delivered(seen: &[HostEvent<TestExtension>], failed_root: bool) {
+    assert!(!seen.iter().any(|event| matches!(event,
+        HostEvent::UserMessage { text, .. } if text.contains("refused follow-up"))));
+    let delivered: Vec<_> = seen
+        .iter()
+        .filter_map(|event| match event {
+            HostEvent::UserMessage { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let expected = if failed_root {
+        vec!["root prompt", "distinct next prompt", "committed follow-up"]
+    } else {
+        vec!["root prompt", "committed follow-up"]
+    };
+    assert_eq!(delivered, expected, "never merge or redeliver queue text");
+    let last_snapshot = seen
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            HostEvent::QueueSnapshot { items, .. } => Some(items),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        last_snapshot.is_empty(),
+        "the TUI must not show a consumed item as queued"
+    );
+}
+
+fn assert_failed_root_keeps_queue_distinct(
+    actions: &crate::surface_protocol::UserActionSender<TestExtension>,
+    events: &crate::surface_protocol::HostEventReceiver<TestExtension>,
+    seen: &mut Vec<HostEvent<TestExtension>>,
+    durable: &dyn crate::session_store::SessionRecordStore,
+    id: &str,
+    queued: &queue::QueueItem,
+) {
+    use crate::surface_protocol::UserAction;
+    crate::runtime::recover_tests::wait_for(
+        events,
+        seen,
+        "failed root queue committed paused",
+        |event| matches!(event, HostEvent::QueueSnapshot { items, drain } if *drain == plakous_host_protocol::QueueDrainState::RestoredPaused && items.len() == 1 && items[0].id == queued.id),
+    );
+    assert!(seen.iter().any(|event| matches!(event, HostEvent::TurnLifecycle(turn) if turn.phase == plakous_host_protocol::TurnPhase::Failed)));
+    let retained = durable.load(id).unwrap();
+    assert_eq!(retained.pending_queue, std::slice::from_ref(queued));
+    assert_eq!(
+        retained.queue_drain_state,
+        SessionQueueDrainState::RestoredPaused
+    );
+    actions
+        .send(UserAction::Prompt("distinct next prompt".into()))
+        .unwrap();
+    crate::runtime::recover_tests::wait_for(
+        events,
+        seen,
+        "new distinct prompt",
+        |event| matches!(event, HostEvent::UserMessage { text, .. } if text == "distinct next prompt"),
+    );
+    crate::runtime::recover_tests::wait_for(events, seen, "new prompt idle", |event| {
+        matches!(event, HostEvent::SetBusy(false))
+    });
+    assert_eq!(
+        durable.load(id).unwrap().pending_queue,
+        std::slice::from_ref(queued)
+    );
+    actions.send(UserAction::ResumeQueueDrain).unwrap();
 }
 
 #[test]
