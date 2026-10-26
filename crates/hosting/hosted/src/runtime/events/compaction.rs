@@ -8,11 +8,12 @@ use crate::runtime::turn::flush_assistant_delta;
 use crate::runtime::{
     COMPACT_COMMITTED_DETAIL, COMPACT_FAILED_DETAIL, COMPACT_NO_ELIGIBLE_RANGE_DETAIL,
     COMPACT_NOT_NEEDED_DETAIL, COMPACT_PROVIDER_QUIET_NOTE, COMPACT_RECOVERY_REQUIRED_DETAIL,
-    COMPACT_UNAVAILABLE_DETAIL, COMPACTING_ACTIVITY_LABEL, HostEvent, Sender,
+    COMPACT_UNAVAILABLE_DETAIL, COMPACTING_ACTIVITY_LABEL, Sender,
 };
 use crate::session_log::{SessionEvent, redact_text_preview};
 use crate::sessions;
 use crate::sessions::{NoticeScope, SessionRecord, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 use plakous::agent::{
     AgentEventKind, CompactionEventOutcome, CompactionEventReason, CompactionRung,
     CompactionSummary,
@@ -126,7 +127,7 @@ pub(in crate::runtime) fn publish_compact_activity<P: plakous_host_protocol::Pro
             wait: None,
         },
     );
-    let _ = events.send(HostEvent::ToolLine {
+    let _ = events.send(ContentEvent::ToolLine {
         call_id: Some(call_id.to_owned()),
         parent_call_id: None,
         cell_id: None,
@@ -365,7 +366,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         // fence publishes its start and end as turn events, and logging
         // them alone made an automatic compaction a silent no-op on screen.
         flush_assistant_delta(delta_buf, last_flush, events, true);
-        let _ = events.send(HostEvent::Activity {
+        let _ = events.send(ContentEvent::Activity {
             label: COMPACTING_ACTIVITY_LABEL.into(),
             active: true,
         });
@@ -407,7 +408,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             *compacted_mid_turn = true;
         }
         flush_assistant_delta(delta_buf, last_flush, events, true);
-        let _ = events.send(HostEvent::Activity {
+        let _ = events.send(ContentEvent::Activity {
             label: COMPACTING_ACTIVITY_LABEL.into(),
             active: false,
         });

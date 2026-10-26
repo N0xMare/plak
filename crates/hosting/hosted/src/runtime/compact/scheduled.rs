@@ -7,9 +7,10 @@ use crate::context::ContextDisposition;
 use crate::interrupt::InterruptWatch;
 use crate::runtime::logging::log_compact_finished;
 use crate::runtime::usage::{emit_context_projection, last_enrolled_source_bytes, query_context};
-use crate::runtime::{HostConfig, HostEvent, Sender};
+use crate::runtime::{HostConfig, Sender};
 use crate::session_log::SessionLog;
 use crate::sessions::{NoticeScope, QueueDrainState as SessionQueueDrainState, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 use crate::{CliFailure, CliResult, sessions};
 use plakous::agent::UserInput;
 use plakous::application::ApplicationExecutor;
@@ -162,7 +163,7 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
                 };
                 let drop_mail = !fits(after);
                 if !drop_mail || bare(fits)?.is_some() {
-                    let _ = events.send(HostEvent::Row(TranscriptRow::info(
+                    let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                         NoticeScope::Compaction,
                         note,
                     )));
@@ -180,7 +181,7 @@ fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolEx
                     .store
                     .save(&mut config.session)
                     .map_err(CliFailure::new)?;
-                let _ = events.send(HostEvent::Row(TranscriptRow::info(
+                let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                     NoticeScope::Compaction,
                     note,
                 )));

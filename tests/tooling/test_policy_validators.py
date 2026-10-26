@@ -1726,6 +1726,31 @@ fn fixtures() {
             "plakous-hosted", {"src/agent/children/waiter.rs": cases[1][1]}
         ))
 
+    def test_observation_vocabulary_macro_is_source_specific(self) -> None:
+        vocabulary = """
+macro_rules! define_observations { () => { enum Event {} } }
+define_observations!();
+"""
+        consumer = "define_observations! { P; Done, }"
+        sources = {
+            "src/observation/vocabulary.rs": vocabulary,
+            "src/observation.rs": consumer,
+        }
+        self.assertEqual(workspace_policy.validate_cli_security_sources(
+            "plakous-host-protocol", sources
+        ), [])
+        for source in (vocabulary, consumer):
+            self.assertTrue(workspace_policy.validate_cli_security_sources(
+                "plakous-host-protocol", {"src/other.rs": source}
+            ))
+        self.assertTrue(workspace_policy.validate_cli_security_sources(
+            "plak", {"src/observation.rs": consumer}
+        ))
+        sources["src/observation/vocabulary.rs"] += "fn x() { std::env::vars(); }"
+        self.assertTrue(workspace_policy.validate_cli_security_sources(
+            "plakous-host-protocol", sources
+        ))
+
     def test_neutral_carry_codec_is_source_specific(self) -> None:
         codec = """
 macro_rules! tags { () => { stringify!(Actor); } }

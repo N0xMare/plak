@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::test_support::empty_transcript_call;
+use crate::surface_protocol::ContentEvent;
 use plakous::model::UsageUpdate;
 
 #[test]
@@ -624,7 +625,7 @@ async fn agent_view_marks_an_uncommitted_prefix_and_never_blocks_the_child() {
             .any(|op| matches!(op, HostEvent::AssistantDelta(text) if text == "live text"))
     );
     for _ in 0..1024 {
-        sender.send(HostEvent::AssistantDelta("x".repeat(8192)));
+        sender.send(ContentEvent::AssistantDelta("x".repeat(8192)));
     }
     turn.control().cancel().await.unwrap();
     tokio::time::timeout(Duration::from_secs(2), turn.result())

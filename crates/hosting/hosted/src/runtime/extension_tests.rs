@@ -7,6 +7,7 @@ use super::{
     HostConfig, HostEvent, OneShot, OneShotOutcome, ScriptedRuntimeFactory, Sender, SurfaceEffect,
     SurfaceFacts, SurfaceHandler, SurfacePhase, SurfaceRefusal, UserAction,
 };
+use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::views::ProviderSection;
 use plakous_host_protocol::{Core, ProtocolExtension};
 use std::sync::{Arc, Mutex};
@@ -27,7 +28,7 @@ impl SurfaceHandler<TestExtension> for ProbeSurface {
             .lock()
             .unwrap()
             .push((facts.phase, facts.attached_one_shot));
-        events.send(HostEvent::Extension(ProbeObservation::UsageObserved));
+        events.send(ContentEvent::Extension(ProbeObservation::UsageObserved));
         SurfaceEffect::default()
     }
     fn publish_template_readiness(&self, _: &[ProviderSection], _: &Sender<TestExtension>) {}
@@ -322,7 +323,7 @@ fn independent_extension_uses_the_interactive_host_and_bounded_observations() {
     let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let publisher = Sender::over(sender);
     for _ in 0..10_000 {
-        assert!(publisher.send(HostEvent::Extension(ProbeObservation::UsageObserved)));
+        assert!(publisher.send(ContentEvent::Extension(ProbeObservation::UsageObserved)));
     }
     assert_eq!(
         receiver.try_iter().collect::<Vec<_>>(),

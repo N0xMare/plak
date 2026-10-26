@@ -3,7 +3,7 @@
 use crate::home::paths::PlakPaths;
 use crate::product_config::ProductConfig;
 use crate::surface_protocol::{
-    AgentAcknowledgement, HostEvent, PlakExtension, ProfileOutcome, SurfaceIntent,
+    AgentAcknowledgement, ContentEvent, PlakExtension, ProfileOutcome, SurfaceIntent,
     SurfaceObservation,
 };
 use plakous_hosted::binding::ProtocolSelection;
@@ -25,7 +25,7 @@ fn send_profiles(paths: &PlakPaths, events: &Sender<PlakExtension>) {
             view
         }
     };
-    let _ = events.send(HostEvent::Extension(SurfaceObservation::Profiles(view)));
+    let _ = events.send(ContentEvent::Extension(SurfaceObservation::Profiles(view)));
 }
 
 fn session_profile(
@@ -148,7 +148,7 @@ fn send_session_profile(
 ) {
     let config = ProductConfig::load(paths).unwrap_or_else(|_| ProductConfig::default_product());
     let row = session_profile(&config, paths.home(), session);
-    let _ = events.send(HostEvent::Extension(SurfaceObservation::SessionProfile(
+    let _ = events.send(ContentEvent::Extension(SurfaceObservation::SessionProfile(
         row,
     )));
 }
@@ -166,19 +166,21 @@ fn publish_composer_chrome(
     if *current != expected {
         return;
     }
-    let _ = events.send(HostEvent::Extension(SurfaceObservation::SessionProfile(
+    let _ = events.send(ContentEvent::Extension(SurfaceObservation::SessionProfile(
         row,
     )));
-    let _ = events.send(HostEvent::Extension(SurfaceObservation::WorkspaceChrome(
-        label,
-    )));
+    let _ = events.send(ContentEvent::Extension(
+        SurfaceObservation::WorkspaceChrome(label),
+    ));
 }
 
 fn refuse_profile(name: &str, reason: String, events: &Sender<PlakExtension>) {
-    let _ = events.send(HostEvent::Extension(SurfaceObservation::ProfileRefused {
-        name: name.to_owned(),
-        reason,
-    }));
+    let _ = events.send(ContentEvent::Extension(
+        SurfaceObservation::ProfileRefused {
+            name: name.to_owned(),
+            reason,
+        },
+    ));
 }
 
 /// Saves the profile's pointers once it has landed, and reports it.
@@ -197,14 +199,13 @@ fn commit_profile(
         }
         // The session already moved; only the default for the next launch
         // could not be written.
-        let _ = events.send(HostEvent::Row(TranscriptRow::error(NoticeScope::Settings, format!(
+        let _ = events.send(ContentEvent::Row(TranscriptRow::error(NoticeScope::Settings, format!(
             "profile {id} is active in this session, but it could not be saved as the default: {reason}"
         ))));
     }
-    let _ = events.send(HostEvent::Extension(SurfaceObservation::ProfileApplied {
-        name: id,
-        outcome,
-    }));
+    let _ = events.send(ContentEvent::Extension(
+        SurfaceObservation::ProfileApplied { name: id, outcome },
+    ));
     send_profiles(paths, events);
 }
 
@@ -319,7 +320,7 @@ pub(super) fn emit_template_readiness(
     events: &Sender<PlakExtension>,
 ) {
     let rows = crate::agents_projection::template_rows(paths, ready_catalog);
-    let _ = events.send(HostEvent::TemplateReadiness(rows));
+    let _ = events.send(ContentEvent::TemplateReadiness(rows));
 }
 
 pub fn settings_snapshot(config: &ProductConfig) -> crate::surface_protocol::SettingsSnapshot {
@@ -447,16 +448,16 @@ fn native_ptc_conflict(account: &str, model: &str) -> Option<&'static str> {
 pub(super) fn emit_settings(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     match ProductConfig::load(paths) {
         Ok(config) => {
-            let _ = events.send(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-                settings_snapshot(&config),
-            )));
+            let _ = events.send(ContentEvent::Extension(
+                SurfaceObservation::SettingsSnapshot(settings_snapshot(&config)),
+            ));
         }
         Err(error) => {
             let message = format!("settings could not be loaded: {error}");
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::SettingsLoadFailed(message.clone()),
             ));
-            let _ = events.send(HostEvent::Row(TranscriptRow::error(
+            let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Settings,
                 message,
             )));
@@ -472,10 +473,10 @@ pub(super) fn save_settings(
 ) -> Option<ProductConfig> {
     if update.default_account.is_some() != update.default_model.is_some() {
         let message = "settings: default account and model must be selected together".to_owned();
-        let _ = events.send(HostEvent::Extension(
+        let _ = events.send(ContentEvent::Extension(
             SurfaceObservation::SettingsSaveFailed(message.clone()),
         ));
-        let _ = events.send(HostEvent::Row(TranscriptRow::error(
+        let _ = events.send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Settings,
             message,
         )));
@@ -485,10 +486,10 @@ pub(super) fn save_settings(
         Ok(current) => current,
         Err(error) => {
             let message = format!("settings: config load failed: {error}");
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::SettingsSaveFailed(message.clone()),
             ));
-            let _ = events.send(HostEvent::Row(TranscriptRow::error(
+            let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Settings,
                 message,
             )));
@@ -566,10 +567,10 @@ pub(super) fn save_settings(
         if !exact_selection {
             let message =
                 "settings: defaults are not admitted by the exact Ready catalog".to_owned();
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::SettingsSaveFailed(message.clone()),
             ));
-            let _ = events.send(HostEvent::Row(TranscriptRow::error(
+            let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Settings,
                 message,
             )));
@@ -582,10 +583,10 @@ pub(super) fn save_settings(
             update.default_effort.as_deref(),
         ) {
             let message = format!("settings: composition conflict: {conflict}");
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::SettingsSaveFailed(message.clone()),
             ));
-            let _ = events.send(HostEvent::Row(TranscriptRow::error(
+            let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Settings,
                 message,
             )));
@@ -635,10 +636,10 @@ pub(super) fn save_settings(
     {
         Ok(()) => {
             let note = settings_saved_note(&current, &config, changes_root_binding);
-            let _ = events.send(HostEvent::Extension(SurfaceObservation::SettingsApplied(
-                settings_snapshot(&config),
-            )));
-            let _ = events.send(HostEvent::Row(TranscriptRow::info(
+            let _ = events.send(ContentEvent::Extension(
+                SurfaceObservation::SettingsApplied(settings_snapshot(&config)),
+            ));
+            let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                 NoticeScope::Settings,
                 note,
             )));
@@ -646,10 +647,10 @@ pub(super) fn save_settings(
         }
         Err(error) => {
             let message = format!("settings could not be saved: {error}");
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::SettingsSaveFailed(message.clone()),
             ));
-            let _ = events.send(HostEvent::Row(TranscriptRow::error(
+            let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Settings,
                 message,
             )));
@@ -739,7 +740,7 @@ fn acknowledge_agent(
                 .map_err(String::from)
         });
     if let Err(error) = recorded {
-        let _ = events.send(HostEvent::Row(TranscriptRow::warning(
+        let _ = events.send(ContentEvent::Row(TranscriptRow::warning(
             NoticeScope::Tree,
             format!("agent acknowledgement was not saved: {error}"),
         )));
@@ -757,7 +758,7 @@ fn send_agent_acknowledgements(paths: &PlakPaths, tree_id: &str, events: &Sender
         .and_then(|mut store| store.agent_acknowledgements(tree_id));
     match attempts {
         Ok(attempts) => {
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::AgentAcknowledgements {
                     tree_id: tree_id.to_owned(),
                     attempts,
@@ -765,11 +766,11 @@ fn send_agent_acknowledgements(paths: &PlakPaths, tree_id: &str, events: &Sender
             ));
         }
         Err(error) => {
-            let _ = events.send(HostEvent::Row(TranscriptRow::warning(
+            let _ = events.send(ContentEvent::Row(TranscriptRow::warning(
                 NoticeScope::Tree,
                 format!("agent acknowledgements are unavailable: {error}"),
             )));
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::AgentAcknowledgementsUnavailable {
                     tree_id: tree_id.to_owned(),
                 },
@@ -808,7 +809,7 @@ fn publish_usage_refresh_accounts(
         return;
     };
     if *current == expected {
-        let _ = events.send(HostEvent::Extension(
+        let _ = events.send(ContentEvent::Extension(
             SurfaceObservation::UsageRefreshAccounts(accounts),
         ));
     }
@@ -862,7 +863,7 @@ impl ProductSurface {
 
     fn refresh_usage(&self, account: String, events: &Sender<PlakExtension>) {
         let Some(provider) = oauth_provider_for_account(&account) else {
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::UsageCredentialRefreshed {
                     account,
                     error: Some("Usage refresh requires a subscription account".to_owned()),
@@ -902,7 +903,7 @@ impl ProductSurface {
             if let Ok(mut running) = running.lock() {
                 *running = false;
             }
-            let _ = events.send(HostEvent::Extension(
+            let _ = events.send(ContentEvent::Extension(
                 SurfaceObservation::UsageCredentialRefreshed { account, error },
             ));
         });
@@ -961,11 +962,11 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             }
             SurfaceIntent::OpenConfigFile => {
                 let path = self.paths.config_file().display().to_string();
-                let _ = events.send(HostEvent::Row(TranscriptRow::info(
+                let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                     NoticeScope::Settings,
                     format!("config: {path}"),
                 )));
-                let _ = events.send(HostEvent::Status {
+                let _ = events.send(ContentEvent::Status {
                     phase: "idle".into(),
                     queue_len: facts.queue_len,
                     detail: Some(format!("config: {path}")),
@@ -975,7 +976,9 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             SurfaceIntent::ShowMcp => {
                 let body =
                     crate::commands::mcp::session_overview(&self.paths, facts.session.as_ref());
-                let _ = events.send(HostEvent::Extension(SurfaceObservation::McpOverview(body)));
+                let _ = events.send(ContentEvent::Extension(SurfaceObservation::McpOverview(
+                    body,
+                )));
             }
             SurfaceIntent::SaveSettings(update) => {
                 return SurfaceEffect {
@@ -998,7 +1001,9 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             SurfaceIntent::OpenUsage => {
                 self.send_usage_refresh_accounts(facts.usage_reads, events);
                 emit_settings(&self.paths, events);
-                let _ = events.send(HostEvent::Extension(SurfaceObservation::OpenUsageOverlay));
+                let _ = events.send(ContentEvent::Extension(
+                    SurfaceObservation::OpenUsageOverlay,
+                ));
             }
             SurfaceIntent::ListProfiles => {
                 send_profiles(&self.paths, events);
@@ -1077,6 +1082,7 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
+    use crate::surface_protocol::HostEvent;
     #[test]
     fn stale_composer_refresh_cannot_publish_profile_or_workspace() {
         let config = ProductConfig::default_product();

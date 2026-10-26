@@ -1,5 +1,6 @@
 //! `/fork` workflow.
 
+use crate::surface_protocol::ContentEvent;
 use plakous::application::ApplicationExecutor;
 use plakous::sessions::{AgentSessionsErrorKind, ForkSessionOutcome, SessionOperationId};
 
@@ -342,14 +343,14 @@ fn fork_progress<P: plakous_host_protocol::ProtocolExtension>(
     applied: plakous::sessions::feed::FeedSeq,
     tail: plakous::sessions::feed::FeedSeq,
 ) {
-    let _ = events.send(crate::surface_protocol::HostEvent::Activity {
+    let _ = events.send(ContentEvent::Activity {
         label: format!("preparing fork: {}/{}", applied.get(), tail.get()),
         active: applied < tail,
     });
 }
 
 fn end_fork_progress<P: plakous_host_protocol::ProtocolExtension>(events: &Sender<P>) {
-    let _ = events.send(crate::surface_protocol::HostEvent::Activity {
+    let _ = events.send(ContentEvent::Activity {
         label: "preparing fork".into(),
         active: false,
     });

@@ -5,6 +5,7 @@ use super::{PendingResume, ResumeGate, TransientFailure};
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::fresh_injected_attached_host;
 use crate::sessions::TranscriptRow;
+use crate::surface_protocol::HostEvent;
 use std::time::Duration;
 
 fn plan(gate: ResumeGate, message: &str) -> crate::driver::transient::ResumePlan {

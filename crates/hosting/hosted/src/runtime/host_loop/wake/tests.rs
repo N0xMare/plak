@@ -1,6 +1,5 @@
 #![allow(clippy::unwrap_used, reason = "offline host assertions")]
 
-use super::super::HostEvent;
 use super::*;
 use crate::agent_tree::{MailDurableState, ProductAgentTree};
 use crate::agent_tree_protocol::{
@@ -9,6 +8,7 @@ use crate::agent_tree_protocol::{
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::fresh_injected_attached_host;
 use crate::sessions::QueueDrainState;
+use crate::surface_protocol::HostEvent;
 use crate::surface_protocol::{HostEventReceiver, UserAction, UserActionSender};
 use std::sync::Arc;
 

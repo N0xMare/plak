@@ -1,10 +1,11 @@
 //! Compose cell rows and observed counts.
 
 use super::tools::observe_tool_activity;
-use crate::runtime::{ComposeProjection, HostEvent, Sender};
+use crate::runtime::{ComposeProjection, Sender};
 use crate::session_log::redact_text_preview;
 use crate::sessions;
 use crate::sessions::SessionRecord;
+use crate::surface_protocol::ContentEvent;
 
 impl ComposeProjection {
     /// The row state to re-emit with a new tally.
@@ -213,7 +214,7 @@ pub(super) fn emit_compose_update<P: plakous_host_protocol::ProtocolExtension>(
         .then(|| started_at_ms.zip(duration_ms))
         .flatten()
         .map(|(started, elapsed)| started.saturating_add(elapsed));
-    let _ = events.send(HostEvent::ToolLine {
+    let _ = events.send(ContentEvent::ToolLine {
         call_id: Some(call_id.to_owned()),
         parent_call_id: None,
         cell_id: compose.cell_id.clone(),

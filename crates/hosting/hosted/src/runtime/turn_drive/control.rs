@@ -2,8 +2,8 @@
 
 use super::HostBoundary;
 use super::{
-    CancelRefusal, CancelSettlement, CancellationStatus, HOST_CANCEL_SETTLE_TIMEOUT, HostEvent,
-    Instant, SessionQueueDrainState, TryRecvError, TurnDrive, UserAction, accept_draft,
+    CancelRefusal, CancelSettlement, CancellationStatus, HOST_CANCEL_SETTLE_TIMEOUT, Instant,
+    SessionQueueDrainState, TryRecvError, TurnDrive, UserAction, accept_draft,
     apply_cancel_settlement, commit_session_update, drop_last_mutable, edit_mutable,
     emit_prompt_history, emit_queue_snapshot, flush_assistant_delta, move_mutable, note_idle_only,
     queue, queue_edit_applied, queue_edit_refused, queue_refusal, record_emitted_tree_revision,
@@ -14,6 +14,7 @@ use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 use std::time::Duration;
 
 const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
@@ -203,9 +204,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                                 let _ = self
                                     .host
                                     .events
-                                    .send(HostEvent::PromptAdmitted(item.protocol(false)));
+                                    .send(ContentEvent::PromptAdmitted(item.protocol(false)));
                             }
-                            let _ = self.host.events.send(HostEvent::Status {
+                            let _ = self.host.events.send(ContentEvent::Status {
                                 phase: "running".into(),
                                 queue_len: self.host.session.pending_queue.len(),
                                 detail: Some("queued follow-up".into()),
@@ -243,7 +244,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         match self.control.steer(input).await {
                             Ok(_) => {
                                 accept_draft(self.host.events, action);
-                                let _ = self.host.events.send(HostEvent::Status {
+                                let _ = self.host.events.send(ContentEvent::Status {
                                     phase: "running".into(),
                                     queue_len: self.host.session.pending_queue.len(),
                                     detail: Some("steering…".into()),
@@ -251,7 +252,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             }
                             Err(err) => {
                                 reject_draft(self.host.events, action);
-                                let _ = self.host.events.send(HostEvent::Status {
+                                let _ = self.host.events.send(ContentEvent::Status {
                                     phase: "running".into(),
                                     queue_len: self.host.session.pending_queue.len(),
                                     detail: Some(format!("steer rejected: {err}")),
@@ -285,7 +286,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         .cancel_unsettled
                         .clone()
                         .unwrap_or_else(|| "interrupt requested".into());
-                    let _ = self.host.events.send(HostEvent::Status {
+                    let _ = self.host.events.send(ContentEvent::Status {
                         phase: "interrupting".into(),
                         queue_len: self.host.session.pending_queue.len(),
                         detail: Some(detail),
@@ -306,7 +307,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             self.cancel_settle_deadline =
                                 Some(Instant::now() + HOST_CANCEL_SETTLE_TIMEOUT);
                         }
-                        let _ = self.host.events.send(HostEvent::Status {
+                        let _ = self.host.events.send(ContentEvent::Status {
                             phase: "interrupting".into(),
                             queue_len: self.host.session.pending_queue.len(),
                             detail: Some("interrupt requested".into()),
@@ -508,7 +509,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         // Provider limits are independent of the running driver.
                         // Show held meters while the coalesced refresh runs.
                         if let Some(stale) = self.host.held_usage.stale() {
-                            let _ = self.host.events.send(HostEvent::UsageLimits(stale));
+                            let _ = self.host.events.send(ContentEvent::UsageLimits(stale));
                         }
                         if surface::fresh_usage(self.host.surface.as_deref(), &intent) {
                             self.host

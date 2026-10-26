@@ -99,8 +99,8 @@ pub use intent::{
     SessionIntent,
 };
 pub use observation::{
-    ContextCapacityRecovery, ModelRetryNotice, PendingContinuation, QueueDrainState, QueueItem,
-    SessionObservation, TurnLifecycle, TurnPhase,
+    ContentObservation, ContextCapacityRecovery, ModelRetryNotice, PendingContinuation,
+    QueueDrainState, QueueItem, SessionObservation, TurnLifecycle, TurnPhase,
 };
 pub use selection::{CompositionSelection, ProtocolSelection};
 

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::intent::{Core, Draft, ProtocolExtension, SessionIntent};
+use crate::intent::{Draft, SessionIntent};
 use crate::selection::{CompositionSelection, ProtocolSelection};
 use crate::views::transcript::TranscriptRow;
 use crate::views::{
@@ -10,17 +10,11 @@ use crate::views::{
     SessionInfoView, SubscriptionUsageView, TemplateRow, TreeView, UsageLimitsView,
 };
 
-/// Observations the hosted session publishes to its driver: transcript and
-/// activity deltas, immutable view snapshots, admission receipts, and the
-/// binding/usage projections.
-///
-/// The closed protocol is every variant but [`Self::Extension`].
-#[allow(
-    clippy::large_enum_variant,
-    reason = "the bounded in-process observation protocol keeps typed snapshots inline"
-)]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SessionObservation<P: ProtocolExtension = Core> {
+#[macro_use]
+mod vocabulary;
+
+define_observations! {
+    P;
     /// A process entered the session-owned job ledger.
     JobStarted {
         /// Vendor-independent process id (`p<N>`).

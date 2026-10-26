@@ -1,7 +1,7 @@
 //! Non-droppable job transitions, captured before canonical consumption.
 
 use plakous::tools::{JobStatus, JobStopReason, JobView};
-use plakous_host_protocol::SessionObservation;
+use plakous_host_protocol::ContentObservation;
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -13,17 +13,17 @@ pub(crate) struct JobEvents {
 pub(crate) fn transition<P: plakous_host_protocol::ProtocolExtension>(
     phase: u8,
     job: &JobView,
-) -> SessionObservation<P> {
+) -> ContentObservation<P> {
     let job_id = format!("p{}", job.number);
     if phase == 0 {
-        return SessionObservation::JobStarted {
+        return ContentObservation::JobStarted {
             job_id,
             owner: job.owner.clone(),
             command: job.command.clone(),
         };
     }
     if phase == 1 {
-        return SessionObservation::JobPromoted {
+        return ContentObservation::JobPromoted {
             job_id,
             owner: job.owner.clone(),
         };
@@ -47,7 +47,7 @@ pub(crate) fn transition<P: plakous_host_protocol::ProtocolExtension>(
             ),
         ),
     };
-    SessionObservation::JobTerminal {
+    ContentObservation::JobTerminal {
         job_id,
         owner: job.owner.clone(),
         status: status.into(),
@@ -86,7 +86,7 @@ impl JobEvents {
         &mut self,
         phase: u8,
         job: &JobView,
-        send: &mut impl FnMut(SessionObservation<P>) -> bool,
+        send: &mut impl FnMut(ContentObservation<P>) -> bool,
     ) -> bool {
         if self
             .reported
@@ -149,7 +149,7 @@ impl JobEvents {
     fn observe<P: plakous_host_protocol::ProtocolExtension>(
         &mut self,
         jobs: &[JobView],
-    ) -> Vec<SessionObservation<P>> {
+    ) -> Vec<ContentObservation<P>> {
         let mut events = Vec::new();
         for job in jobs {
             for phase in 0..=if job.status == JobStatus::Running {
@@ -194,7 +194,7 @@ mod tests {
         );
         assert_eq!(
             events.observe::<plakous_host_protocol::Core>(&[job.clone()]),
-            [] as [SessionObservation; 0]
+            [] as [ContentObservation; 0]
         );
         job.status = JobStatus::Exited(Some(0));
         assert_eq!(
@@ -205,7 +205,7 @@ mod tests {
         );
         assert_eq!(
             events.observe::<plakous_host_protocol::Core>(&[job]),
-            [] as [SessionObservation; 0]
+            [] as [ContentObservation; 0]
         );
     }
 

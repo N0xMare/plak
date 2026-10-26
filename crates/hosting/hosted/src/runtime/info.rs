@@ -1,5 +1,6 @@
 //! Binding and session-info projections.
 
+use crate::surface_protocol::ContentEvent;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeProvider;
 
@@ -8,7 +9,7 @@ use crate::binding::{OpenRouterRoutingSelection, ProtocolSelection, TargetSelect
 use crate::sessions::SessionRecord;
 
 use super::rebind::durable_tree_id;
-use super::{HostConfig, HostEvent, HostTargetAuthority, Sender, SessionInfoFacts, TopologyRows};
+use super::{HostConfig, HostTargetAuthority, Sender, SessionInfoFacts, TopologyRows};
 
 /// The resting phase a finished turn leaves on the status strip.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,7 +38,7 @@ pub(super) fn emit_terminal_status<P: plakous_host_protocol::ProtocolExtension>(
         // replace the `interrupted` phase before any consumer could read it.
         TerminalPhase::Interrupted => return,
     };
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::Status {
         phase: phase.into(),
         queue_len,
         detail: Some(detail.into()),
@@ -63,7 +64,7 @@ pub(super) fn send_last_user_prompt_at<P: plakous_host_protocol::ProtocolExtensi
     events: &Sender<P>,
     opened: &crate::agent::AttachedCodingSession,
 ) {
-    let _ = events.send(HostEvent::LastUserPromptAt(
+    let _ = events.send(ContentEvent::LastUserPromptAt(
         opened.last_operator_input_unix_ms(),
     ));
 }
@@ -72,7 +73,7 @@ pub(super) fn send_binding<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     config: &HostConfig<P>,
 ) {
-    let _ = events.send(HostEvent::Binding {
+    let _ = events.send(ContentEvent::Binding {
         session_id: Some(config.session.id.clone()),
         account: config.session.account.clone(),
         model: Some(config.model_id.clone()),
@@ -122,7 +123,7 @@ pub(super) fn send_session_info<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     config: &HostConfig<P>,
 ) {
-    let _ = events.send(HostEvent::SessionInfo(session_info_view(config)));
+    let _ = events.send(ContentEvent::SessionInfo(session_info_view(config)));
 }
 
 pub(super) fn send_session_info_with_storage<P: plakous_host_protocol::ProtocolExtension>(
@@ -130,7 +131,7 @@ pub(super) fn send_session_info_with_storage<P: plakous_host_protocol::ProtocolE
     config: &HostConfig<P>,
     storage: &crate::session_store::StorageAdmission,
 ) {
-    let _ = events.send(HostEvent::SessionInfo(session_info_view_with_storage(
+    let _ = events.send(ContentEvent::SessionInfo(session_info_view_with_storage(
         config, storage,
     )));
 }
@@ -466,7 +467,7 @@ pub(super) fn emit_agent_plan_notes<P: plakous_host_protocol::ProtocolExtension>
     }
     let text = String::from_utf8_lossy(stderr_buf);
     for line in text.lines() {
-        let _ = events.send(HostEvent::Status {
+        let _ = events.send(ContentEvent::Status {
             phase: "preparing".into(),
             queue_len: config.session.pending_queue.len(),
             detail: Some(line.to_owned()),

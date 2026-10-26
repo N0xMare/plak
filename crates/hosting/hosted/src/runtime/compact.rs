@@ -15,8 +15,8 @@ use super::usage::query_context;
 use super::{
     COMPACT_COMMITTED_DETAIL, COMPACT_FAILED_DETAIL, COMPACT_NO_ELIGIBLE_RANGE_DETAIL,
     COMPACT_NOT_NEEDED_DETAIL, COMPACT_RECOVERY_REQUIRED_DETAIL, COMPACT_UNAVAILABLE_DETAIL,
-    CONTEXT_CAPACITY_PROTECTED_GUIDANCE, HostBoundary, HostConfig, HostEvent, HostWorkflow,
-    RuntimeRole, Sender, queue,
+    CONTEXT_CAPACITY_PROTECTED_GUIDANCE, HostBoundary, HostConfig, HostWorkflow, RuntimeRole,
+    Sender, queue,
 };
 use crate::agent::AttachedCodingSession;
 use crate::context::ContextDisposition;
@@ -25,6 +25,7 @@ use crate::session_log::SessionLog;
 use crate::sessions::{
     NoticeScope, QueueDrainState as SessionQueueDrainState, SessionRecord, TranscriptRow,
 };
+use crate::surface_protocol::ContentEvent;
 use crate::{CliFailure, CliResult, sessions};
 use plakous::agent::UserInput;
 use plakous::application::ApplicationExecutor;
@@ -600,7 +601,7 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
             HostBoundary::ProductCommitted,
         );
     }
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::Status {
         phase: "idle".into(),
         queue_len: config.session.pending_queue.len(),
         detail: None,
@@ -618,7 +619,7 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
         if let TranscriptRow::Tool(tool) = &row {
             config.session.upsert_tool_activity(tool.clone());
         }
-        let _ = events.send(HostEvent::Row(row));
+        let _ = events.send(ContentEvent::Row(row));
     }
     // The structured Compact row is the successful outcome. Show explanatory
     // notes only for no-change/failure cases and quiet providers; repeating a
@@ -639,7 +640,7 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
             || detail.contains("provider went quiet"))
     {
         // Plain sentence for the operator. `detail` stays the session-log diagnostic.
-        let _ = events.send(HostEvent::Row(TranscriptRow::info(
+        let _ = events.send(ContentEvent::Row(TranscriptRow::info(
             NoticeScope::Compaction,
             manual_compact_operator_text(&detail),
         )));
@@ -658,7 +659,7 @@ fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
         Some(detail.as_str()),
     );
     if successor_fits || !compacted {
-        let _ = events.send(HostEvent::ContextCapacityRecovery(None));
+        let _ = events.send(ContentEvent::ContextCapacityRecovery(None));
     }
     emit_compact_meter(executor, opened, config, events);
     Ok(pass)

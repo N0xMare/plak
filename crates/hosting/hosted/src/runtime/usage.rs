@@ -21,16 +21,16 @@ use std::sync::Arc;
 use super::admission::emit_unavailable_context;
 use super::logging::log_event;
 use super::{
-    HeldUsage, HostEvent, NativeSubscriptionRefresh, SUBSCRIPTION_USAGE_JOIN_DEADLINE, Sender,
+    ContentEvent, HeldUsage, NativeSubscriptionRefresh, SUBSCRIPTION_USAGE_JOIN_DEADLINE, Sender,
     SessionLedger, SubscriptionUsageRefresh,
 };
 
 pub(super) fn project_turn_usage<P: plakous_host_protocol::ProtocolExtension>(
     usage: TurnUsage,
     peak_prepared_input_tokens: Option<u64>,
-) -> HostEvent<P> {
+) -> ContentEvent<P> {
     let model = usage.model();
-    HostEvent::TurnUsage {
+    ContentEvent::TurnUsage {
         input_tokens: model.input_tokens(),
         output_tokens: model.output_tokens(),
         reasoning_tokens: model.reasoning_tokens(),
@@ -174,7 +174,7 @@ pub(super) fn emit_context_projection<P: plakous_host_protocol::ProtocolExtensio
     counters: sessions::ContextCounters,
     enrolled_source_bytes: u64,
 ) {
-    let _ = events.send(HostEvent::Usage(context_usage(
+    let _ = events.send(ContentEvent::Usage(context_usage(
         projection,
         counters,
         enrolled_source_bytes,
@@ -405,7 +405,7 @@ pub(super) fn emit_live_context_projection<P: plakous_host_protocol::ProtocolExt
         }
         append_request_tool_names(breakdown, tool_names);
     }
-    let _ = events.send(HostEvent::Usage(usage));
+    let _ = events.send(ContentEvent::Usage(usage));
 }
 
 fn append_request_tool_names(
@@ -695,8 +695,8 @@ pub(super) fn request_subscription_usage_cached<P: plakous_host_protocol::Protoc
 ) {
     if let Some(mut fresh) = held.fresh() {
         fresh.session = ledger.project();
-        let _ = events.send(HostEvent::UsageLimits(fresh));
-        let _ = events.send(HostEvent::SubscriptionUsage(
+        let _ = events.send(ContentEvent::UsageLimits(fresh));
+        let _ = events.send(ContentEvent::SubscriptionUsage(
             plakous_host_protocol::views::presentation::SubscriptionUsageView::Read,
         ));
         return;
@@ -866,9 +866,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
                 // The read's guard settles it once its projection is published.
                 while let Ok((subscriptions, _read)) = receiver.recv() {
                     let (projected, limits) = project(subscriptions);
-                    let _ = worker_events.send(HostEvent::SubscriptionUsage(projected));
+                    let _ = worker_events.send(ContentEvent::SubscriptionUsage(projected));
                     if let Some(limits) = limits {
-                        let _ = worker_events.send(HostEvent::UsageLimits(limits));
+                        let _ = worker_events.send(ContentEvent::UsageLimits(limits));
                     }
                     worker_in_flight.store(false, std::sync::atomic::Ordering::Release);
                 }
@@ -917,7 +917,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
 
     fn request_inner(&self, subscriptions: Option<NativeSubscriptions>, fresh: bool) {
         let Some(requests) = &self.requests else {
-            let _ = self.events.send(HostEvent::SubscriptionUsage(
+            let _ = self.events.send(ContentEvent::SubscriptionUsage(
                 plakous_host_protocol::views::presentation::SubscriptionUsageView::Unavailable {
                     reason: "subscription usage worker could not start".to_owned(),
                 },
@@ -934,7 +934,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         if let Ok(mut last) = self.last_request.lock() {
             *last = Some(Instant::now());
         }
-        let _ = self.events.send(HostEvent::SubscriptionUsage(
+        let _ = self.events.send(ContentEvent::SubscriptionUsage(
             plakous_host_protocol::views::presentation::SubscriptionUsageView::Loading,
         ));
         // A refused send drops its guard; a queued read absorbs this request.
@@ -943,7 +943,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
                 self.in_flight
                     .store(false, std::sync::atomic::Ordering::Release);
-                let _ = self.events.send(HostEvent::SubscriptionUsage(
+                let _ = self.events.send(ContentEvent::SubscriptionUsage(
                     plakous_host_protocol::views::presentation::SubscriptionUsageView::Unavailable {
                         reason: "subscription usage worker stopped".to_owned(),
                     },
@@ -1175,10 +1175,9 @@ pub(super) fn emit_capacity_recovery<P: plakous_host_protocol::ProtocolExtension
     disposition: ContextDisposition,
     native_compact_facet: bool,
 ) {
-    let _ = events.send(HostEvent::ContextCapacityRecovery(live_capacity_recovery(
-        disposition,
-        native_compact_facet,
-    )));
+    let _ = events.send(ContentEvent::ContextCapacityRecovery(
+        live_capacity_recovery(disposition, native_compact_facet),
+    ));
 }
 
 pub(super) const fn live_capacity_recovery(

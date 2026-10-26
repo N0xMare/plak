@@ -2,14 +2,14 @@
 
 use super::super::admission::{QueuePersistAction, report_queue_persist_failed};
 use super::{
-    CommandId, HostEvent, TurnDrive, emit_queue_snapshot, queue, reject_stale_queue_action,
-    sessions,
+    CommandId, TurnDrive, emit_queue_snapshot, queue, reject_stale_queue_action, sessions,
 };
 use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger, Settlement};
 use crate::runtime::ledger::RootLedger;
 use crate::sessions::projector::{Submission, SubmissionKind};
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
     pub(super) async fn send_queued_now(&mut self, id: String, revision: u64) -> bool {
@@ -195,7 +195,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             {
                 Ok(()) => {
                     *self.host.session = candidate;
-                    let _ = self.host.events.send(HostEvent::Row(row));
+                    let _ = self.host.events.send(ContentEvent::Row(row));
                 }
                 Err(error) => report_queue_persist_failed(
                     self.host.events,
@@ -255,7 +255,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             let _ = self.host.events.notice(TranscriptRow::error(NoticeScope::Queue,
                 "send-now was rejected; the exact queue item was retained and automatic drain paused"));
         } else {
-            let _ = self.host.events.send(HostEvent::Status {
+            let _ = self.host.events.send(ContentEvent::Status {
                 phase: "running".into(),
                 queue_len: self.host.session.pending_queue.len(),
                 detail: Some("steering...".into()),

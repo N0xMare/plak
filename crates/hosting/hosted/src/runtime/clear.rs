@@ -1,5 +1,6 @@
 //! `/clear` rebuild, publication, and resume session switching.
 
+use crate::surface_protocol::ContentEvent;
 use std::time::Instant;
 
 use plakous::application::ApplicationExecutor;
@@ -19,7 +20,7 @@ use super::reconcile::persist;
 use super::source_release::{Settlement, release_source_attachment};
 use super::startup::{cached_api_runtime_for_record, observe_phase, open_session_for_host};
 use super::usage::report_context;
-use super::{HostConfig, HostEvent, HostLifecyclePhase, HostTargetAuthority, RuntimeRole, Sender};
+use super::{HostConfig, HostLifecyclePhase, HostTargetAuthority, RuntimeRole, Sender};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 /// New product session in the same workspace; rebuild agent for a clean slate.
@@ -125,7 +126,7 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     persist(&*config.store, &mut config.session);
     emit_agent_plan_notes(events, config, stderr_buf);
 
-    let _ = events.send(HostEvent::ClearView);
+    let _ = events.send(ContentEvent::ClearView);
     // The new session's header, as a restore of it would show.
     let _ = events.replace_transcript(project_session_snapshot(&config.session));
     send_binding(events, config);
@@ -143,7 +144,7 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     ) {
         emit_unavailable_context(events);
         // An unreadable context is state every switch re-announces.
-        let _ = events.send(HostEvent::Row(TranscriptRow::error(
+        let _ = events.send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Session,
             error.message().to_owned(),
         )));
@@ -158,8 +159,8 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         NoticeScope::Session,
         format!("new session {short}…"),
     ));
-    let _ = events.send(HostEvent::SetBusy(false));
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::SetBusy(false));
+    let _ = events.send(ContentEvent::Status {
         phase: "idle".into(),
         queue_len: 0,
         detail: Some(format!("ready · {}", config.model_id)),
@@ -303,8 +304,8 @@ pub(super) fn resume_session_switch<P: plakous_host_protocol::ProtocolExtension>
         &mut waited,
     );
     if switched.is_err() && waited {
-        let _ = events.send(HostEvent::SetBusy(false));
-        let _ = events.send(HostEvent::Status {
+        let _ = events.send(ContentEvent::SetBusy(false));
+        let _ = events.send(ContentEvent::Status {
             phase: "idle".into(),
             queue_len: config.session.pending_queue.len(),
             detail: Some(format!("ready · {}", config.model_id)),
@@ -324,8 +325,8 @@ fn load_settled_source<P: plakous_host_protocol::ProtocolExtension>(
     let queue_len = config.session.pending_queue.len();
     if config.source_releases.settle(session_id, || {
         *waited = true;
-        let _ = events.send(HostEvent::SetBusy(true));
-        let _ = events.send(HostEvent::Status {
+        let _ = events.send(ContentEvent::SetBusy(true));
+        let _ = events.send(ContentEvent::Status {
             phase: "resume".into(),
             queue_len,
             detail: Some("releasing the previous session attachment".into()),
@@ -419,13 +420,13 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     ) {
         emit_unavailable_context(events);
         // An unreadable context is state every switch re-announces.
-        let _ = events.send(HostEvent::Row(TranscriptRow::error(
+        let _ = events.send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Session,
             error.message().to_owned(),
         )));
     }
-    let _ = events.send(HostEvent::SetBusy(false));
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::SetBusy(false));
+    let _ = events.send(ContentEvent::Status {
         phase: "idle".into(),
         queue_len: config.session.pending_queue.len(),
         detail: Some(format!("ready · {}", config.model_id)),

@@ -1,7 +1,7 @@
 //! Root prompt preflight, dispatch, terminal publication and queue disposition.
 
 use super::{
-    CliFailure, CliResult, ContextQuery, HostEvent, HostLoop, HostStep, Instant, InterruptWatch,
+    CliFailure, CliResult, ContextQuery, HostLoop, HostStep, Instant, InterruptWatch,
     ScheduledPrompt, SessionEvent, SessionLog, SessionQueueDrainState, SessionQueueItem,
     TerminalPhase, TurnHostOutcome, commit_session_update, drive_one_turn, durable_tree_id,
     emit_context_projection, emit_queue_snapshot, emit_terminal_status, emit_unavailable_context,
@@ -12,6 +12,7 @@ use super::{
 use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::runtime::admission::{QueuePersistAction, log_queue_persist_failed};
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 
 struct PromptInput {
     user_text: String,
@@ -188,7 +189,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.child_wake = super::wake::RootWake::default();
         }
         if !user_echoed && !host_authored {
-            let _ = self.events.send(HostEvent::PromptStarted(
+            let _ = self.events.send(ContentEvent::PromptStarted(
                 queued_delivery.as_ref().map(|item| item.protocol(false)),
             ));
         }
@@ -538,8 +539,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             selected_mail,
             ..
         } = mail;
-        let _ = self.events.send(HostEvent::SetBusy(true));
-        let _ = self.events.send(HostEvent::Status {
+        let _ = self.events.send(ContentEvent::SetBusy(true));
+        let _ = self.events.send(ContentEvent::Status {
             phase: "running".into(),
             queue_len: self.config.session.pending_queue.len(),
             detail: None,
@@ -666,12 +667,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 // the wake prompt is the host's, not the operator's draft.
                 self.config.session.child_wake_suppressed = true;
             } else {
-                let _ =
-                    self.events
-                        .send(HostEvent::DraftRestored(plakous_host_protocol::Draft::new(
-                            user_text.clone(),
-                            images.to_vec(),
-                        )));
+                let _ = self.events.send(ContentEvent::DraftRestored(
+                    plakous_host_protocol::Draft::new(user_text.clone(), images.to_vec()),
+                ));
             }
         } else if matches!(&drive, Ok(TurnHostOutcome::AdmissionRejected { .. })) {
             if queued_delivery.is_some() {
@@ -735,7 +733,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.publish_projected_transcript(one_shot.is_some());
         self.update_background_process_count();
         self.publish_pending_continuation();
-        let _ = self.events.send(HostEvent::SetBusy(false));
+        let _ = self.events.send(ContentEvent::SetBusy(false));
         emit_terminal_status(
             &self.events,
             if self.recovery_blocked {

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;
+type ContentEvent = crate::surface_protocol::ContentEvent<TestExtension>;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type Sender = crate::runtime::Sender<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
@@ -72,7 +73,7 @@ fn turn_result_usage_projection_preserves_counts_and_coverage() {
     };
     assert_eq!(
         project_turn_usage(usage, None),
-        HostEvent::TurnUsage {
+        ContentEvent::TurnUsage {
             input_tokens: 21,
             output_tokens: 8,
             reasoning_tokens: 5,
@@ -124,13 +125,13 @@ fn the_terminal_usage_projection_carries_the_growth_facts() {
         Ok(usage) => usage,
         Err(error) => panic!("valid usage coverage rejected: {error}"),
     };
-    let HostEvent::TurnUsage {
+    let ContentEvent::TurnUsage {
         input_tokens,
         model_operations,
         peak_prepared_input_tokens,
         terminal,
         ..
-    }: HostEvent = project_turn_usage(usage, Some(31_500))
+    }: ContentEvent = project_turn_usage(usage, Some(31_500))
     else {
         panic!("expected a turn-usage observation");
     };

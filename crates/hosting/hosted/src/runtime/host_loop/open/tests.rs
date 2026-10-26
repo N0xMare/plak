@@ -1,4 +1,5 @@
 use super::*;
+use crate::surface_protocol::HostEvent;
 use plakous::agent::CommandId;
 
 fn unpublished_fixture(

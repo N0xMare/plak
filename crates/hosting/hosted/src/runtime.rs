@@ -280,19 +280,39 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             session_id: Some(Arc::from(session_id)),
         }
     }
-    /// Publish one observation; false when the driver has gone. This is
-    /// presentation only, including when the observation carries a row.
-    pub fn send(&self, value: HostEvent<P>) -> bool {
-        if matches!(
-            value,
-            HostEvent::PresentationSnapshot(_) | HostEvent::TranscriptPatch(_)
-        ) {
-            debug_assert!(
-                false,
-                "keyed transcript publication requires replace_transcript or publish_transcript"
-            );
-            return false;
-        }
+    /// Publish producer content; false when the driver has gone. Keyed
+    /// publication frames are owned by the presentation publisher, not callers.
+    ///
+    /// ```
+    /// use plakous_hosted::runtime::Sender;
+    /// use plakous_host_protocol::{ContentObservation, Core, observation_channel};
+    /// let (channel, _received) = observation_channel::<Core>();
+    /// let sender = Sender::over(channel);
+    /// assert!(sender.send(ContentObservation::AssistantDone));
+    /// ```
+    ///
+    /// ```compile_fail,E0308
+    /// use plakous_hosted::runtime::Sender;
+    /// use plakous_host_protocol::{Core, SessionObservation, observation_channel};
+    /// use plakous_host_protocol::views::PresentationSnapshot;
+    /// let (channel, _received) = observation_channel::<Core>();
+    /// let sender = Sender::over(channel);
+    /// sender.send(SessionObservation::PresentationSnapshot(PresentationSnapshot::default()));
+    /// ```
+    ///
+    /// ```compile_fail,E0308
+    /// use plakous_hosted::runtime::Sender;
+    /// use plakous_host_protocol::{Core, SessionObservation, observation_channel};
+    /// use plakous_host_protocol::views::transcript::{TranscriptPatch, TranscriptScope};
+    /// let (channel, _received) = observation_channel::<Core>();
+    /// let sender = Sender::over(channel);
+    /// sender.send(SessionObservation::TranscriptPatch(TranscriptPatch {
+    ///     scope: TranscriptScope::Root, from_revision: 1, to_revision: 2,
+    ///     upserts: Vec::new(), deletes: Vec::new(),
+    /// }));
+    /// ```
+    pub fn send(&self, value: ContentEvent<P>) -> bool {
+        let value: HostEvent<P> = value.into();
         if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations
                 .lock()
@@ -365,7 +385,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             _ => None,
         };
         if let Some(delta) = delta {
-            let _ = self.inner.send(HostEvent::TranscriptStream {
+            let _ = self.inner.send(ContentEvent::TranscriptStream {
                 scope: scope.clone(),
                 delta,
             });
@@ -376,7 +396,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .observe(scope, event, &self.inner);
         if matches!(event, HostEvent::AssistantDone) {
-            let _ = self.inner.send(HostEvent::TranscriptStream {
+            let _ = self.inner.send(ContentEvent::TranscriptStream {
                 scope: TranscriptScope::Agent(agent_id.to_owned()),
                 delta: TranscriptStreamDelta::AssistantDone,
             });
@@ -416,7 +436,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 row: row.clone(),
             });
         }
-        self.send(HostEvent::Row(row))
+        self.send(ContentEvent::Row(row))
     }
     /// Notice intents authored since the last call, oldest
     /// first.
@@ -435,7 +455,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
 }
 
 // Neutral observations and intents carry the driver's typed extension.
-pub use crate::surface_protocol::{HostEvent, UserAction};
+pub use crate::surface_protocol::{ContentEvent, HostEvent, UserAction};
 
 /// One Ready-catalog native model fact used to construct host target authority.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -951,10 +971,20 @@ pub struct TuiHostPreparation<
     pub providers: Vec<plakous_host_protocol::views::ProviderDef>,
     pub mode: TuiHostMode<P>,
     /// Product-owned background work started once the host is up (the live
-    /// catalog refresh); it receives the observation sender the host publishes
-    /// through. `None` runs nothing.
-    pub catalog_refresh:
-        Option<Box<dyn FnOnce(crate::surface_protocol::HostEventSender<P>) + Send>>,
+    /// catalog refresh); it receives the content-only Sender boundary, never
+    /// the raw received-observation mailbox. `None` runs nothing.
+    ///
+    /// ```compile_fail,E0308
+    /// use plakous_hosted::runtime::TuiHostPreparation;
+    /// use plakous_host_protocol::{Core, SessionObservation};
+    /// use plakous_host_protocol::views::PresentationSnapshot;
+    /// fn misroute(prepared: &mut TuiHostPreparation<Core>) {
+    ///     prepared.catalog_refresh = Some(Box::new(|events| {
+    ///         let _ = events.send(SessionObservation::PresentationSnapshot(PresentationSnapshot::default()));
+    ///     }));
+    /// }
+    /// ```
+    pub catalog_refresh: Option<Box<dyn FnOnce(Sender<P>) + Send>>,
     /// The product's shell host, for the fallback and the detached mode.
     pub shell_host: Box<dyn ShellHostRunner<P>>,
 }
@@ -1288,7 +1318,7 @@ struct TurnProjection<P: plakous_host_protocol::ProtocolExtension> {
     /// not the tool reported its own terminal in time. The lines are the ones
     /// the observed path built, so nothing the host actually saw — the tool's
     /// own message, the call's wall time — is thrown away.
-    cancel_window_terminals: Vec<HostEvent<P>>,
+    cancel_window_terminals: Vec<ContentEvent<P>>,
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> Default for TurnProjection<P> {

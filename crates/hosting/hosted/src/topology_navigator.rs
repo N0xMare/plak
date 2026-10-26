@@ -3,7 +3,7 @@
 //! The TUI never opens an Agent or store. This module snapshots `ProductAgentTree`
 //! in deterministic preorder. Missing hub fails closed.
 
-use crate::surface_protocol::{HostEvent, UserAction};
+use crate::surface_protocol::{ContentEvent, UserAction};
 use plakous::sessions::{
     SESSION_HISTORY_VISIBILITY_REVISION, SessionHistoryDirection, SessionHistoryPageRequest,
     SessionHistoryVisibility, SessionLocator,
@@ -24,10 +24,10 @@ const HISTORY_PAGE_MAX_BYTES: u32 = 4096;
 
 /// Shell loops with no attached hub: fail closed, never `load_tree`.
 pub(crate) fn emit_navigator_unavailable<P: plakous_host_protocol::ProtocolExtension>(
-    send: impl Fn(HostEvent<P>),
+    send: impl Fn(ContentEvent<P>),
     reason: &str,
 ) {
-    send(HostEvent::TopologyNavigatorUnavailable {
+    send(ContentEvent::TopologyNavigatorUnavailable {
         reason: reason.to_owned(),
     });
 }
@@ -138,7 +138,7 @@ const HUB_POISONED: &str = "agent tree navigator unavailable: hub lock is poison
 /// rather than blocking or panicking when the mutex is poisoned.
 fn read_tree<R, P: plakous_host_protocol::ProtocolExtension>(
     runtime: &ProductTopologyRuntime,
-    send: impl Fn(HostEvent<P>),
+    send: impl Fn(ContentEvent<P>),
     work: impl FnOnce(&ProductAgentTree) -> R,
 ) -> Option<R> {
     let Ok(result) = runtime.read(work) else {
@@ -153,14 +153,14 @@ fn read_tree<R, P: plakous_host_protocol::ProtocolExtension>(
 /// cannot strand an effect.
 fn mutate_tree<R, P: plakous_host_protocol::ProtocolExtension>(
     runtime: &ProductTopologyRuntime,
-    send: impl Fn(HostEvent<P>) + Copy,
+    send: impl Fn(ContentEvent<P>) + Copy,
     what: &str,
     work: impl FnOnce(&mut ProductAgentTree) -> Result<R, String>,
 ) -> Option<R> {
     match runtime.mutate_then_emit(false, work) {
         Ok(result) => Some(result),
         Err(error) => {
-            send(HostEvent::Row(TranscriptRow::error(
+            send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Tree,
                 format!("{what}: {error}"),
             )));
@@ -172,7 +172,7 @@ fn mutate_tree<R, P: plakous_host_protocol::ProtocolExtension>(
 fn emit_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     runtime: &ProductTopologyRuntime,
     session: &SessionRecord,
-    send: impl Fn(HostEvent<P>) + Copy,
+    send: impl Fn(ContentEvent<P>) + Copy,
     solicited: bool,
 ) {
     let Some(mut snapshot) = read_tree(runtime, send, project_snapshot) else {
@@ -180,13 +180,13 @@ fn emit_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     };
     apply_session_root_binding(&mut snapshot, session);
     snapshot.solicited = solicited;
-    send(HostEvent::TopologyNavigatorSnapshot(snapshot));
+    send(ContentEvent::TopologyNavigatorSnapshot(snapshot));
 }
 
 fn resume_tree<P: plakous_host_protocol::ProtocolExtension>(
     session: &SessionRecord,
     runtime: &ProductTopologyRuntime,
-    send: impl Fn(HostEvent<P>) + Copy,
+    send: impl Fn(ContentEvent<P>) + Copy,
 ) {
     // Only a reopened tree is paused. Resuming anything else would fault this
     // process's own in-flight seals, adopts and removals as if a lost process
@@ -197,7 +197,7 @@ fn resume_tree<P: plakous_host_protocol::ProtocolExtension>(
         return;
     };
     if !paused {
-        send(HostEvent::Row(TranscriptRow::info(
+        send(ContentEvent::Row(TranscriptRow::info(
             NoticeScope::Tree,
             "agent tree is not paused; nothing to resume",
         )));
@@ -323,7 +323,7 @@ fn short_agent(id: &str) -> String {
 async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
     session: &SessionRecord,
     runtime: &ProductTopologyRuntime,
-    send: impl Fn(HostEvent<P>) + Copy,
+    send: impl Fn(ContentEvent<P>) + Copy,
     agent_id: &str,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
@@ -345,7 +345,7 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
         return;
     }
     if let Err(message) = runtime.cancel_live(agent_id).await {
-        send(HostEvent::Row(TranscriptRow::error(
+        send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Tree,
             format!("node interrupted; live cancel failed: {message}"),
         )));
@@ -356,7 +356,7 @@ async fn interrupt_node<P: plakous_host_protocol::ProtocolExtension>(
 async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
     session: &SessionRecord,
     runtime: &ProductTopologyRuntime,
-    send: impl Fn(HostEvent<P>) + Copy,
+    send: impl Fn(ContentEvent<P>) + Copy,
     agent_id: &str,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
@@ -418,7 +418,7 @@ async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
         if !cancel.owner_failures.is_empty() {
             runtime.driver().request_retirement_recovery();
         }
-        send(HostEvent::Row(TranscriptRow::error(
+        send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Tree,
             format!(
                 "close applied; live cancel failed for {}: {message}",
@@ -438,7 +438,7 @@ async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
 async fn stop_all<P: plakous_host_protocol::ProtocolExtension>(
     session: &SessionRecord,
     runtime: &ProductTopologyRuntime,
-    send: impl Fn(HostEvent<P>) + Copy,
+    send: impl Fn(ContentEvent<P>) + Copy,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
     let writer = runtime.observer();
@@ -492,7 +492,7 @@ async fn stop_all<P: plakous_host_protocol::ProtocolExtension>(
         if !cancel.owner_failures.is_empty() {
             runtime.driver().request_retirement_recovery();
         }
-        send(HostEvent::Row(TranscriptRow::error(
+        send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Tree,
             format!(
                 "stop-all applied; live cancel failed for {}: {message}",

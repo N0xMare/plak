@@ -6,11 +6,11 @@ use crate::session_store::SessionRecordStore;
 use crate::sessions::{
     QueueDrainState as SessionQueueDrainState, QueueItem as SessionQueueItem, SessionRecord,
 };
+use crate::surface_protocol::ContentEvent;
 
 use super::rebind::durable_tree_id;
 use super::{
-    HostEvent, MAX_PENDING_PROMPTS, MAX_PROMPT_BYTES, Sender, TopologyRows, UserAction, queue,
-    topology_state,
+    MAX_PENDING_PROMPTS, MAX_PROMPT_BYTES, Sender, TopologyRows, UserAction, queue, topology_state,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -31,7 +31,7 @@ pub(super) fn emit_queue_snapshot<P: plakous_host_protocol::ProtocolExtension>(
             plakous_host_protocol::QueueDrainState::RestoredPaused
         }
     };
-    let _ = events.send(HostEvent::QueueSnapshot { items, drain });
+    let _ = events.send(ContentEvent::QueueSnapshot { items, drain });
 }
 
 /// A `restored_paused` tree used to be
@@ -97,7 +97,7 @@ pub(super) fn emit_restored_paused_note<P: plakous_host_protocol::ProtocolExtens
              then r to resume delivery or Enter to send one item now; in plak agent, send a resume_queue command",
         );
     }
-    let _ = events.send(HostEvent::Row(TranscriptRow::warning(
+    let _ = events.send(ContentEvent::Row(TranscriptRow::warning(
         NoticeScope::Queue,
         note,
     )));
@@ -107,7 +107,7 @@ pub(super) fn emit_prompt_history<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     current: &SessionRecord,
 ) {
-    let _ = events.send(HostEvent::PromptHistorySnapshot(
+    let _ = events.send(ContentEvent::PromptHistorySnapshot(
         current.prompt_history.clone(),
     ));
 }
@@ -128,10 +128,10 @@ pub(super) fn admit_idle_immediate_prompt<P: plakous_host_protocol::ProtocolExte
     emit_prompt_history(events, session);
     accept_draft(events, action);
     let identity = item.protocol(false);
-    let _ = events.send(HostEvent::PromptAdmitted(identity.clone()));
+    let _ = events.send(ContentEvent::PromptAdmitted(identity.clone()));
     if echo {
-        let _ = events.send(HostEvent::PromptStarted(Some(identity)));
-        let _ = events.send(HostEvent::UserMessage {
+        let _ = events.send(ContentEvent::PromptStarted(Some(identity)));
+        let _ = events.send(ContentEvent::UserMessage {
             text: crate::sessions::with_image_chips(
                 &item.text,
                 item.images.iter().map(crate::sessions::draft_image_chip),
@@ -341,14 +341,14 @@ pub(super) fn accept_draft<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     action: UserAction<P>,
 ) {
-    let _ = events.send(HostEvent::DraftAccepted(action));
+    let _ = events.send(ContentEvent::DraftAccepted(action));
 }
 
 pub(super) fn reject_draft<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     action: UserAction<P>,
 ) {
-    let _ = events.send(HostEvent::DraftRejected(action));
+    let _ = events.send(ContentEvent::DraftRejected(action));
 }
 
 pub(super) fn recovery_blocked_action<P: plakous_host_protocol::ProtocolExtension>(
@@ -413,21 +413,21 @@ pub(super) fn queue_edit_applied<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     id: String,
 ) {
-    let _ = events.send(HostEvent::QueueEditApplied { id });
+    let _ = events.send(ContentEvent::QueueEditApplied { id });
 }
 
 pub(super) fn queue_edit_refused<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     id: String,
 ) {
-    let _ = events.send(HostEvent::QueueEditRefused { id });
+    let _ = events.send(ContentEvent::QueueEditRefused { id });
 }
 
 /// Clear the presentation meter when no descriptor-bound Plakous status exists.
 pub(super) fn emit_unavailable_context<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
 ) {
-    let _ = events.send(HostEvent::Usage(
+    let _ = events.send(ContentEvent::Usage(
         plakous_host_protocol::views::presentation::ContextUsage {
             breakdown: None,
             prepared_input: None,

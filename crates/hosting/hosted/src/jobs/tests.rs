@@ -732,15 +732,15 @@ fn terminal_consumed_before_host_poll_still_emits_in_order() -> TestResult {
     assert_eq!(observed.len(), 3);
     assert!(matches!(
         observed[0],
-        plakous_host_protocol::SessionObservation::JobStarted { .. }
+        plakous_host_protocol::ContentObservation::JobStarted { .. }
     ));
     assert!(matches!(
         observed[1],
-        plakous_host_protocol::SessionObservation::JobPromoted { .. }
+        plakous_host_protocol::ContentObservation::JobPromoted { .. }
     ));
     assert!(matches!(
         observed[2],
-        plakous_host_protocol::SessionObservation::JobTerminal { .. }
+        plakous_host_protocol::ContentObservation::JobTerminal { .. }
     ));
     Ok(())
 }

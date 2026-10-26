@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;
+use crate::surface_protocol::ContentEvent;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
 
@@ -983,7 +984,7 @@ async fn navigator_joiner_expiry_does_not_refault_a_settled_release() {
             );
         })
         .unwrap();
-    assert!(events.lock().unwrap().iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("owner retained"))));
+    assert!(events.lock().unwrap().iter().any(|event| matches!(event, ContentEvent::<TestExtension>::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("owner retained"))));
 }
 
 #[tokio::test]
@@ -1101,5 +1102,5 @@ async fn interrupt_then_overlapping_close_and_stop_all_join_retirement_without_s
         })
         .unwrap();
     assert!(vcs.calls_of(FakeOp::Seal).is_empty());
-    assert!(events.lock().unwrap().iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("release refused"))));
+    assert!(events.lock().unwrap().iter().any(|event| matches!(event, ContentEvent::<TestExtension>::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("release refused"))));
 }

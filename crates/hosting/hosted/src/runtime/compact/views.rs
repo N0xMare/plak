@@ -9,11 +9,12 @@ use crate::runtime::{
     COMPACT_PROVIDER_QUIET_NOTE, CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE,
     CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE, CONTEXT_CAPACITY_PROTECTED_GUIDANCE,
     CONTEXT_CAPACITY_SEGMENT_LIMIT_GUIDANCE, CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE, HostConfig,
-    HostEvent, Sender,
+    Sender,
 };
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions;
 use crate::sessions::TranscriptRow;
+use crate::surface_protocol::ContentEvent;
 use plakous::application::ApplicationExecutor;
 use plakous::sessions::ContextQuery;
 
@@ -32,19 +33,19 @@ pub(in crate::runtime) fn observe_compact<P: plakous_host_protocol::ProtocolExte
     running: bool,
 ) {
     if running {
-        let _ = events.send(HostEvent::SetBusy(true));
-        let _ = events.send(HostEvent::Status {
+        let _ = events.send(ContentEvent::SetBusy(true));
+        let _ = events.send(ContentEvent::Status {
             phase: "compacting".into(),
             queue_len,
             detail: None,
         });
     } else {
-        let _ = events.send(HostEvent::Status {
+        let _ = events.send(ContentEvent::Status {
             phase: "idle".into(),
             queue_len,
             detail: None,
         });
-        let _ = events.send(HostEvent::SetBusy(false));
+        let _ = events.send(ContentEvent::SetBusy(false));
     }
 }
 

@@ -539,6 +539,10 @@ installed-build carry-capacity process probe are enrolled source-specifically;
 this grants no mutable runtime/store authority or general source-generation
 exception to the CLI. The facade inventory also pins the compaction replay
 binding accessors and advisory `SessionRuntimeBinding::input_window`.
+Host-protocol's private `observation/vocabulary.rs` macro and its invocation
+in `observation.rs` are likewise enrolled only at those sources. They generate
+the received and content-only observation enums from one closed variant list,
+not runtime code or authority; the CLI gains no general macro exception.
 Hosted usage also names the facade's existing `openrouter::OpenRouterKeyUsageError`
 to distinguish HTTP 401 and 403 and attach product-supplied safe key-source labels
 and remedies; the error is enrolled in the same inventory.

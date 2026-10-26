@@ -1,13 +1,13 @@
 //! Reconcile canonical completion or settled cancellation before publication.
 
 use super::{
-    AgentErrorKind, DriveTurnError, DrivenTurn, HostEvent, TurnDrive, TurnHostOutcome,
-    TurnResultOutcome, emit_turn_lifecycle, flush_assistant_delta,
-    flush_deferred_interrupted_status, observe_cancelled_tool_activity,
-    observe_terminal_tool_activity, operator_facing_agent_error, reconcile_authoritative_assistant,
-    settle_late_cancel, settle_live_thinking, terminal_turn_outcome, turn_lifecycle,
-    unresolved_turn_lifecycle,
+    AgentErrorKind, DriveTurnError, DrivenTurn, TurnDrive, TurnHostOutcome, TurnResultOutcome,
+    emit_turn_lifecycle, flush_assistant_delta, flush_deferred_interrupted_status,
+    observe_cancelled_tool_activity, observe_terminal_tool_activity, operator_facing_agent_error,
+    reconcile_authoritative_assistant, settle_late_cancel, settle_live_thinking,
+    terminal_turn_outcome, turn_lifecycle, unresolved_turn_lifecycle,
 };
+use crate::surface_protocol::ContentEvent;
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
     pub(super) async fn finish(mut self) -> Result<DrivenTurn, DriveTurnError> {
@@ -67,7 +67,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             &mut self.assistant,
                             response.output_text(),
                         ) {
-                            let _ = self.host.events.send(HostEvent::AssistantDelta(delta));
+                            let _ = self.host.events.send(ContentEvent::AssistantDelta(delta));
                         }
                         Ok(terminal_turn_outcome(&result))
                     }

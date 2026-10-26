@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
+use crate::surface_protocol::HostEvent;
+
 #[cfg(test)]
 mod terminal_storage_tests;
 

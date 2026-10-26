@@ -1,12 +1,13 @@
 //! Topology tree bridging: lineage, snapshots, and sync dispatch.
 
 use crate::session_log::SessionEvent;
+use crate::surface_protocol::ContentEvent;
 use plakous::application::ApplicationExecutor;
 
 use crate::sessions::SessionRecord;
 
 use super::rebind::durable_tree_id;
-use super::{HostEvent, Sender, TopologyRows, TreeSnapshotPush, TurnProjection, UserAction};
+use super::{Sender, TopologyRows, TreeSnapshotPush, TurnProjection, UserAction};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous_host_protocol::views::transcript::{AgentMilestone, MilestoneEvent};
 
@@ -354,7 +355,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
             candidate.record_notice(row.clone());
             true
         });
-        let _ = events.send(HostEvent::Row(row));
+        let _ = events.send(ContentEvent::Row(row));
     }
     let _ = runtime.read(|tree| {
         let revision = tree.revision;
@@ -407,7 +408,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
                         true
                     });
             }
-            if events.send(HostEvent::ToolLine {
+            if events.send(ContentEvent::ToolLine {
                 call_id: Some(call_id),
                 parent_call_id: None,
                 cell_id: None,
@@ -456,7 +457,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
             return;
         }
         crate::topology_navigator::apply_session_root_binding(&mut snapshot, session);
-        let _ = events.send(HostEvent::TopologyNavigatorSnapshot(snapshot));
+        let _ = events.send(ContentEvent::TopologyNavigatorSnapshot(snapshot));
     });
 }
 
@@ -483,7 +484,7 @@ pub(super) fn emit_child_progress_on_refresh<P: plakous_host_protocol::ProtocolE
             .iter()
             .any(|node| node.live_progress.is_some())
         {
-            let _ = events.send(HostEvent::TopologyNavigatorSnapshot(snapshot));
+            let _ = events.send(ContentEvent::TopologyNavigatorSnapshot(snapshot));
         }
     }
 }
@@ -525,7 +526,7 @@ pub(super) fn start_child_recovery<P: plakous_host_protocol::ProtocolExtension>(
         if explicit {
             finished.notice(row)
         } else {
-            finished.send(HostEvent::Row(row))
+            finished.send(ContentEvent::Row(row))
         }
     };
     let started = crate::agent::start_tree_recovery_pass(tree_id, move |report| {
@@ -649,13 +650,13 @@ pub(super) fn dispatch_invoke_tool_sync<P: plakous_host_protocol::ProtocolExtens
     )) {
         Ok(Ok(receipt)) => {
             if let Some(command_id) = correlation_id {
-                let _ = events.send(HostEvent::ToolInvocationOrigin {
+                let _ = events.send(ContentEvent::ToolInvocationOrigin {
                     call_id: receipt.call_id.clone(),
                     command_id: command_id.to_owned(),
                 });
             }
             let kind = crate::activity::tool_activity_kind(&receipt.name);
-            let _ = events.send(HostEvent::ToolLine {
+            let _ = events.send(ContentEvent::ToolLine {
                 call_id: Some(receipt.call_id.clone()),
                 parent_call_id: None,
                 cell_id: None,
@@ -671,7 +672,7 @@ pub(super) fn dispatch_invoke_tool_sync<P: plakous_host_protocol::ProtocolExtens
             });
             let state = if receipt.succeeded { "done" } else { "failed" };
             let detail = (!receipt.detail.is_empty()).then_some(receipt.detail);
-            let _ = events.send(HostEvent::ToolLine {
+            let _ = events.send(ContentEvent::ToolLine {
                 call_id: Some(receipt.call_id),
                 parent_call_id: None,
                 cell_id: None,

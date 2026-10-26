@@ -7,6 +7,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
         .unwrap()
 }
 use crate::runtime::test_kit::TestExtension;
+use crate::surface_protocol::ContentEvent;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type Sender = crate::runtime::Sender<TestExtension>;
 
@@ -257,15 +258,15 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
             format!("diagnostic-{index}")
         )));
     }
-    assert!(!events.send(HostEvent::AssistantDelta("incomplete".into())));
+    assert!(!events.send(ContentEvent::AssistantDelta("incomplete".into())));
 
     let mut session = SessionRecord::new(PathBuf::from("/workspace"));
     session.append_transcript(TranscriptRow::user("prompt"));
     session.append_transcript(TranscriptRow::assistant("authoritative TurnResult output"));
     let canonical = logging::project_session_snapshot(&session);
     assert!(events.publish_transcript(canonical));
-    assert!(events.send(HostEvent::SetBusy(false)));
-    assert!(events.send(HostEvent::Status {
+    assert!(events.send(ContentEvent::SetBusy(false)));
+    assert!(events.send(ContentEvent::Status {
         phase: "idle".into(),
         queue_len: 0,
         detail: Some("terminal".into()),

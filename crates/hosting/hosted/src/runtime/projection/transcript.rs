@@ -1,5 +1,6 @@
 //! One bounded, revisioned presentation publisher for root and agent scopes.
 
+use crate::surface_protocol::ContentEvent;
 use std::collections::BTreeMap;
 
 use plakous_host_protocol::ProtocolExtension;
@@ -105,7 +106,7 @@ impl Presentations {
         }
         if let Err(error) = snapshot.validate() {
             debug_assert!(false, "invalid transcript snapshot: {error:?}");
-            let _ = sink.send(HostEvent::Row(TranscriptRow::error(
+            let _ = sink.send(ContentEvent::Row(TranscriptRow::error(
                 crate::sessions::NoticeScope::Host,
                 "invalid transcript presentation; rebuilt a bounded view",
             )));
@@ -276,7 +277,7 @@ impl Presentations {
                     .and_then(|live| live.pending_tool(call_id.as_deref().unwrap_or(name)))
             {
                 if sink
-                    .send(HostEvent::TranscriptStream {
+                    .send(ContentEvent::TranscriptStream {
                         scope: scope.clone(),
                         delta:
                             plakous_host_protocol::views::transcript::TranscriptStreamDelta::Tool(

@@ -6,14 +6,14 @@
 //! §13.1). This does the same thing without quitting: the one reopen path the
 //! crash matrix already covers, taken in place.
 
+use crate::surface_protocol::ContentEvent;
 use plakous::agent::AbandonedTurnReport;
 use plakous::sessions::feed::FeedSeq;
 
 use super::{
-    CliFailure, CliResult, ContextQuery, HostEvent, HostLoop, SessionEvent,
-    build_session_from_config, durable_tree_id, emit_queue_snapshot, emit_restored_paused_note,
-    emit_unavailable_context, log_ev, native_compact_facet, query_context, report_context,
-    restored_paused_status_suffix,
+    CliFailure, CliResult, ContextQuery, HostLoop, SessionEvent, build_session_from_config,
+    durable_tree_id, emit_queue_snapshot, emit_restored_paused_note, emit_unavailable_context,
+    log_ev, native_compact_facet, query_context, report_context, restored_paused_status_suffix,
 };
 use crate::context::ContextDisposition;
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -39,14 +39,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// stays set, so the next action tries again; nothing is lost and nothing
     /// ends in `/clear`.
     pub(super) fn recover_session(&mut self, trigger: RecoveryTrigger) -> CliResult<()> {
-        let _ = self.events.send(HostEvent::SetBusy(true));
-        let _ = self.events.send(HostEvent::Status {
+        let _ = self.events.send(ContentEvent::SetBusy(true));
+        let _ = self.events.send(ContentEvent::Status {
             phase: "running".into(),
             queue_len: self.config.session.pending_queue.len(),
             detail: Some("recovering the interrupted turn".into()),
         });
         let recovered = self.reopen_in_place();
-        let _ = self.events.send(HostEvent::SetBusy(false));
+        let _ = self.events.send(ContentEvent::SetBusy(false));
         let ReopenedTurn {
             abandoned: report,
             terminal_published,
@@ -58,7 +58,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     &self.config,
                     SessionEvent::new("session.recover_failed").str("msg", failure.message()),
                 );
-                let _ = self.events.send(HostEvent::Status {
+                let _ = self.events.send(ContentEvent::Status {
                     phase: "error".into(),
                     queue_len: self.config.session.pending_queue.len(),
                     detail: Some("recovery did not complete; the next prompt retries it".into()),
@@ -95,14 +95,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if let Some(report) = &report {
             log_abandoned_report(self.log.as_ref(), &self.config, report);
             if !terminal_published {
-                let _ = self.events.send(HostEvent::Row(TranscriptRow::info(
+                let _ = self.events.send(ContentEvent::Row(TranscriptRow::info(
                     NoticeScope::Recovery,
                     super::super::events::abandoned_turn_operator_line(report),
                 )));
             }
         }
         if report.is_none() {
-            let _ = self.events.send(HostEvent::Row(TranscriptRow::info(NoticeScope::Recovery,
+            let _ = self.events.send(ContentEvent::Row(TranscriptRow::info(NoticeScope::Recovery,
                 if terminal_published {
                     "plak: reopened the session and published the saved turn's result; the conversation continues from its saved state".to_owned()
                 } else {
@@ -110,7 +110,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 },
             )));
         }
-        let _ = self.events.send(HostEvent::Recovered {
+        let _ = self.events.send(ContentEvent::Recovered {
             claim,
             cause,
             operations,
@@ -127,12 +127,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.session.context_counters(),
         ) {
             emit_unavailable_context(&self.events);
-            let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
+            let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Recovery,
                 error.message().to_owned(),
             )));
         }
-        let _ = self.events.send(HostEvent::AgentAttached(true));
+        let _ = self.events.send(ContentEvent::AgentAttached(true));
         self.spawn_tree_recovery();
         // What was queued behind the fenced turn was written for a turn whose
         // outcome nobody saw, so it stays paused (spec 02 §4.2); the note says
@@ -146,7 +146,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.interactive,
         );
         let ready = format!("ready · {}", self.config.model_id);
-        let _ = self.events.send(HostEvent::Status {
+        let _ = self.events.send(ContentEvent::Status {
             phase: "idle".into(),
             queue_len: self.config.session.pending_queue.len(),
             detail: Some(
@@ -356,6 +356,7 @@ mod tests {
     use crate::runtime::recover_tests::{script, scripted_host_with};
     use crate::runtime::test_kit::TestExtension;
     use crate::sessions;
+    use crate::surface_protocol::HostEvent;
 
     fn assert_one_jsonl_recovery_note(events: &[HostEvent<TestExtension>], with_submission: bool) {
         let jsonl: Vec<serde_json::Value> = events

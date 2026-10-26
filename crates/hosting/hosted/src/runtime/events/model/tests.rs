@@ -71,7 +71,7 @@ fn live_usage_projects_as_a_non_terminal_snapshot() {
     let update = plakous::model::UsageUpdate::new(plakous::model::Usage::new(11, 3, 2, 7, 0));
     assert_eq!(
         project_live_usage(&update),
-        HostEvent::TurnUsage {
+        crate::surface_protocol::ContentEvent::<TestExtension>::TurnUsage {
             input_tokens: 11,
             output_tokens: 3,
             reasoning_tokens: 2,

@@ -3,6 +3,7 @@
 use crate::session_home::SessionHome;
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::session_store::SessionRecordStore;
+use crate::surface_protocol::ContentEvent;
 use std::time::{Duration, Instant};
 
 use plakous::agent::{AgentError, TurnControl, TurnResult, TurnResultOutcome};
@@ -29,8 +30,7 @@ use super::reconcile::{
 };
 use super::{
     DriveTurnError, DrivenTurn, ExceptionalTerminalProjection, HOST_CANCEL_SETTLE_TIMEOUT,
-    HostEvent, PendingApproval, Sender, TopologyRows, TurnHostOutcome, TurnProjection,
-    topology_state,
+    PendingApproval, Sender, TopologyRows, TurnHostOutcome, TurnProjection, topology_state,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -231,7 +231,7 @@ pub(super) fn emit_turn_lifecycle<P: plakous_host_protocol::ProtocolExtension>(
             .str("turn_id", lifecycle.turn_id.clone())
             .str("phase", lifecycle.phase.as_str()),
     );
-    let _ = events.send(HostEvent::TurnLifecycle(lifecycle));
+    let _ = events.send(ContentEvent::TurnLifecycle(lifecycle));
 }
 
 /// The `Admitted` marker minted when the host takes ownership of a new turn.
@@ -264,7 +264,7 @@ pub(super) fn publish_recovered_turn_result<P: plakous_host_protocol::ProtocolEx
                 |candidate| store.save(candidate),
             );
             if saved.is_ok() {
-                let _ = events.send(HostEvent::Row(TranscriptRow::error(
+                let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                     NoticeScope::Turn,
                     error,
                 )));
@@ -303,7 +303,7 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
                 return true;
             }
             if finish_reason == plakous::model::FinishReason::Length {
-                let _ = events.send(HostEvent::Row(TranscriptRow::warning(
+                let _ = events.send(ContentEvent::Row(TranscriptRow::warning(
                     NoticeScope::Turn,
                     truncation_note(wire_output_limit),
                 )));
@@ -315,13 +315,13 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
                 ));
             }
             if !assistant.is_empty() {
-                let _ = events.send(HostEvent::AssistantDelta(assistant));
-                let _ = events.send(HostEvent::AssistantDone);
+                let _ = events.send(ContentEvent::AssistantDelta(assistant));
+                let _ = events.send(ContentEvent::AssistantDone);
             }
             if finish_reason == plakous::model::FinishReason::Refusal {
                 let snapshot = super::logging::project_session_snapshot(session);
                 let _ = events.publish_transcript(snapshot);
-                let _ = events.send(HostEvent::ModelRefusal {
+                let _ = events.send(ContentEvent::ModelRefusal {
                     detail: finish_detail,
                 });
             }
@@ -337,7 +337,7 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
             })
             .is_ok()
             {
-                let _ = events.send(HostEvent::Row(TranscriptRow::error(
+                let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                     NoticeScope::Turn,
                     error,
                 )));
@@ -353,7 +353,7 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
                 |candidate| store.save(candidate),
             );
             if saved.is_ok() {
-                let _ = events.send(HostEvent::Row(TranscriptRow::error(
+                let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                     NoticeScope::Turn,
                     error,
                 )));
@@ -367,7 +367,7 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
                 |candidate| store.save(candidate),
             );
             if saved.is_ok() {
-                let _ = events.send(HostEvent::Row(TranscriptRow::Interrupted));
+                let _ = events.send(ContentEvent::Row(TranscriptRow::Interrupted));
                 false
             } else {
                 true
@@ -622,7 +622,7 @@ pub(super) async fn apply_cancel_settlement<P: plakous_host_protocol::ProtocolEx
             publish_interrupted_status(events, session);
         }
         CancelSettlement::Unsettled(detail) => {
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::Status {
                 phase: "interrupting".into(),
                 queue_len: session.pending_queue.len(),
                 detail: Some(detail.clone()),
@@ -656,7 +656,7 @@ pub(super) fn publish_interrupted_status<P: plakous_host_protocol::ProtocolExten
     events: &Sender<P>,
     session: &SessionRecord,
 ) {
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::Status {
         phase: "interrupted".into(),
         queue_len: session.pending_queue.len(),
         detail: Some("interrupt requested".into()),
@@ -726,7 +726,7 @@ pub(super) fn flush_assistant_delta<P: plakous_host_protocol::ProtocolExtension>
         return;
     }
     if force || last_flush.elapsed() >= Duration::from_millis(20) {
-        let _ = events.send(HostEvent::AssistantDelta(std::mem::take(delta_buf)));
+        let _ = events.send(ContentEvent::AssistantDelta(std::mem::take(delta_buf)));
         *last_flush = Instant::now();
     }
 }

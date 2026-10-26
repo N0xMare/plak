@@ -1,6 +1,7 @@
 //! Detached shell host loop and its binding intents.
 
 use crate::sessions::queue::{drop_last_mutable, edit_mutable, move_mutable, remove_mutable};
+use crate::surface_protocol::ContentEvent;
 
 use std::sync::mpsc::RecvTimeoutError;
 
@@ -19,9 +20,9 @@ use super::models::oauth_provider_for_account;
 use super::resume::emit_resume_choices;
 use super::usage::{report_unavailable_context, request_subscription_usage_cached};
 use super::{
-    APPROVAL_REFUSED_NOTE, HeldUsage, HostConfig, HostEvent, IDLE_OBSERVE_POLL_INTERVAL,
-    ProductAuthHost, RootBindingSaveError, Sender, SessionLedger, ShellBindingOutcome,
-    ShellHostConfig, SubscriptionUsageRefresh, SurfaceHandler, UserAction, queue,
+    APPROVAL_REFUSED_NOTE, HeldUsage, HostConfig, IDLE_OBSERVE_POLL_INTERVAL, ProductAuthHost,
+    RootBindingSaveError, Sender, SessionLedger, ShellBindingOutcome, ShellHostConfig,
+    SubscriptionUsageRefresh, SurfaceHandler, UserAction, queue,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -111,7 +112,7 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
     // repaint with no demand behind it, and the dominant idle-CPU cost on any
     // host where attach cannot complete. Zero is truthful here: no session was
     // opened.
-    let _ = events.send(HostEvent::SessionOpened {
+    let _ = events.send(ContentEvent::SessionOpened {
         session_open_ms: None,
     });
     emit_shell_empty_state(events, config);
@@ -119,12 +120,12 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
     let _ = events.replace_transcript(project_session_snapshot(&config.session));
     emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::Status {
         phase: "not_ready".into(),
         queue_len: config.session.pending_queue.len(),
         detail: Some(format!("not ready · {}", config.reason)),
     });
-    let _ = events.send(HostEvent::SetBusy(false));
+    let _ = events.send(ContentEvent::SetBusy(false));
 }
 
 fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
@@ -181,14 +182,14 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             ));
         }
         UserAction::Interrupt | UserAction::StopProcesses { .. } => {
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::Status {
                 phase: "not_ready".into(),
                 queue_len: config.session.pending_queue.len(),
                 detail: Some("nothing to interrupt; no agent turn is attached".into()),
             });
         }
         UserAction::SendQueuedNow { .. } | UserAction::ResumeQueueDrain => {
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::Status {
                 phase: "not_ready".into(),
                 queue_len: config.session.pending_queue.len(),
                 detail: Some("queue delivery requires an attached canonical agent".into()),
@@ -206,7 +207,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
                 ));
                 return ShellStep::Continue;
             }
-            let _ = events.send(HostEvent::ClearView);
+            let _ = events.send(ContentEvent::ClearView);
             let _ = events.replace_transcript(project_session_snapshot(&config.session));
             emit_shell_empty_state(events, config);
             send_shell_binding(events, config);
@@ -225,7 +226,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
                 {
                     *published = Some(config.session.id.clone());
                 }
-                let _ = events.send(HostEvent::ReattachReady);
+                let _ = events.send(ContentEvent::ReattachReady);
                 return ShellStep::Quit;
             }
         }
@@ -267,7 +268,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             return handle_shell_extension(config, events, log, state, intent);
         }
         UserAction::RetryAttach => {
-            let _ = events.send(HostEvent::Activity {
+            let _ = events.send(ContentEvent::Activity {
                 label: "resolving account/model".into(),
                 active: true,
             });
@@ -311,7 +312,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             // Same rule as an attached host: a request for some other
             // session is not this shell's to answer.
             if session_id == config.session.id {
-                let _ = events.send(HostEvent::CallDetail(crate::call_detail::unavailable(
+                let _ = events.send(ContentEvent::CallDetail(crate::call_detail::unavailable(
                     call_id,
                     agent_id,
                     session_id,
@@ -510,7 +511,7 @@ fn handle_shell_extension<P: plakous_host_protocol::ProtocolExtension>(
     ) {
         ShellBindingOutcome::Committed => {
             (fork.finish)(super::surface::ProfileForkOutcome::Bound);
-            let _ = events.send(HostEvent::ReattachReady);
+            let _ = events.send(ContentEvent::ReattachReady);
             return ShellStep::Quit;
         }
         ShellBindingOutcome::RecoveryRequired => {
@@ -608,7 +609,7 @@ pub(super) fn send_shell_binding<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     config: &ShellHostConfig<P>,
 ) {
-    let _ = events.send(HostEvent::Binding {
+    let _ = events.send(ContentEvent::Binding {
         session_id: Some(config.session.id.clone()),
         account: config.session.account.clone(),
         model: config.session.model.clone(),
@@ -670,7 +671,7 @@ pub(super) fn refuse_not_ready<P: plakous_host_protocol::ProtocolExtension>(
         |refusal| format!("not ready — {refusal}; or choose another profile with /agents"),
     );
     let _ = events.notice(TranscriptRow::info(NoticeScope::Session, notice));
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::Status {
         phase: "not_ready".into(),
         queue_len: 0,
         detail: Some(format!("prompt refused · {}", config.reason)),
@@ -781,7 +782,7 @@ impl ReadinessRefresh {
                 host.replace_ready_catalog(plakous_host_protocol::views::ReadyCatalog::new(
                     model_sections,
                 ));
-                let _ = events.send(HostEvent::ProviderSnapshot { providers });
+                let _ = events.send(ContentEvent::ProviderSnapshot { providers });
             }
             Err(error) => {
                 let _ = events.notice(TranscriptRow::error(
@@ -1065,14 +1066,14 @@ pub(super) fn maybe_note_ready_hint<P: plakous_host_protocol::ProtocolExtension>
                 NoticeScope::Settings,
                 format!("binding ready (account={a} model={m} effort={effort}) — attaching agent…"),
             ));
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::Status {
                 phase: "not_ready".into(),
                 queue_len: 0,
                 detail: Some("reattach pending".into()),
             });
         }
         _ => {
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::Status {
                 phase: "not_ready".into(),
                 queue_len: 0,
                 detail: Some("choose a profile with /agents".into()),

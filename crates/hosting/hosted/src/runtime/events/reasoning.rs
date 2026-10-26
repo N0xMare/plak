@@ -1,9 +1,10 @@
 //! Reasoning block lifecycle.
 
 use crate::runtime::turn::flush_assistant_delta;
-use crate::runtime::{HostEvent, SealedReasoning, Sender, TurnProjection};
+use crate::runtime::{SealedReasoning, Sender, TurnProjection};
 use crate::sessions;
 use crate::sessions::SessionRecord;
+use crate::surface_protocol::ContentEvent;
 use std::time::Instant;
 
 pub(super) fn sealed_reasoning(
@@ -40,7 +41,7 @@ pub(super) fn seal_reasoning_block<P: plakous_host_protocol::ProtocolExtension>(
     if let Some(sealed) = projection.seal_reasoning(location) {
         let location_key = sealed.location_key.clone();
         projection.hold_thinking(sealed);
-        let _ = events.send(HostEvent::ReasoningSealed { location_key });
+        let _ = events.send(ContentEvent::ReasoningSealed { location_key });
     }
 }
 
@@ -58,7 +59,7 @@ pub(in crate::runtime) fn settle_live_thinking<P: plakous_host_protocol::Protoco
     }
     for sealed in projection.seal_all_reasoning() {
         observe_thinking_activity(session, &sealed);
-        let _ = events.send(HostEvent::ReasoningSealed {
+        let _ = events.send(ContentEvent::ReasoningSealed {
             location_key: sealed.location_key,
         });
     }
@@ -88,7 +89,7 @@ pub(super) fn discard_response_reasoning<P: plakous_host_protocol::ProtocolExten
     events: &Sender<P>,
 ) {
     for location_key in projection.discard_reasoning() {
-        let _ = events.send(HostEvent::ReasoningSealed { location_key });
+        let _ = events.send(ContentEvent::ReasoningSealed { location_key });
     }
 }
 

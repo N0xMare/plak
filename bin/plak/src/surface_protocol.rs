@@ -402,6 +402,8 @@ pub type UserAction = SessionIntent<PlakExtension>;
 /// The observation enum Plak's surfaces receive: the protocol plus
 /// [`SurfaceObservation`].
 pub type HostEvent = SessionObservation<PlakExtension>;
+/// Producer content that cannot carry keyed publication frames.
+pub type ContentEvent = plakous_host_protocol::ContentObservation<PlakExtension>;
 /// Producer half of Plak's intent mailbox.
 pub type UserActionSender = IntentSender<PlakExtension>;
 /// Consumer half of Plak's intent mailbox.

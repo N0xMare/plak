@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::*;
+use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::limits::OBSERVATION_QUEUE_CAPACITY;
 use plakous_host_protocol::views::transcript::{Lane, NoticeScope, RowKey, TranscriptRow};
 use plakous_host_protocol::{Core, observation_channel};
@@ -20,26 +21,9 @@ fn snapshot(scope: TranscriptScope, rows: &[(u64, &str)]) -> PresentationSnapsho
 }
 
 #[test]
-fn generic_send_refuses_keyed_frames_without_bypassing_the_publisher() {
+fn explicit_replacement_installs_a_keyed_baseline() {
     let (sink, receiver) = observation_channel::<Core>();
     let sender = crate::runtime::Sender::over(sink);
-    for event in [
-        HostEvent::PresentationSnapshot(snapshot(TranscriptScope::Root, &[(1, "row")])),
-        HostEvent::TranscriptPatch(TranscriptPatch {
-            scope: TranscriptScope::Root,
-            from_revision: 1,
-            to_revision: 2,
-            upserts: Vec::new(),
-            deletes: Vec::new(),
-        }),
-    ] {
-        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sender.send(event)));
-        if cfg!(debug_assertions) {
-            assert!(refused.is_err());
-        } else {
-            assert!(!refused.unwrap());
-        }
-    }
     assert!(receiver.try_recv().is_err());
     assert!(sender.replace_transcript(snapshot(TranscriptScope::Root, &[(1, "row")])));
     let HostEvent::PresentationSnapshot(baseline) = receiver.try_recv().unwrap() else {
@@ -68,10 +52,11 @@ fn streaming_cost_is_constant_in_history_rows_and_does_not_copy_accumulated_text
             let _ = receiver.try_iter().count();
             let revision = sender.presentations.lock().unwrap().states[&scope].revision();
             for _ in 0..2_000 {
-                let event = HostEvent::<Core>::AssistantDelta("x".repeat(40));
+                let delta = "x".repeat(40);
                 assert!(match &scope {
-                    TranscriptScope::Root => sender.send(event),
-                    TranscriptScope::Agent(id) => sender.observe_agent(id, &event),
+                    TranscriptScope::Root => sender.send(ContentEvent::AssistantDelta(delta)),
+                    TranscriptScope::Agent(id) =>
+                        sender.observe_agent(id, &HostEvent::<Core>::AssistantDelta(delta)),
                 });
             }
             let publisher = sender.presentations.lock().unwrap();
@@ -226,7 +211,7 @@ fn a_dropped_patch_is_recovered_by_a_full_overflow_snapshot() {
     assert!(publisher.publish(snapshot(scope.clone(), &[(1, "before")]), &sink));
     let _ = receiver.try_recv().unwrap();
     for index in 0..OBSERVATION_QUEUE_CAPACITY {
-        sink.send(HostEvent::Row(TranscriptRow::error(
+        sink.send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Host,
             format!("error {index}"),
         )))
@@ -592,7 +577,7 @@ fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
             match random % 12 {
                 0 => {
                     publisher.clear();
-                    let _ = sink.send(HostEvent::ClearView);
+                    let _ = sink.send(ContentEvent::ClearView);
                 }
                 1 => {
                     publisher.snapshot(snapshot(scope.clone(), &[(1, "attached")]), &sink);
@@ -608,7 +593,7 @@ fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
                 }
                 4..=6 => {
                     if matches!(scope, TranscriptScope::Agent(_)) {
-                        let _ = sink.send(HostEvent::TranscriptStream { scope: scope.clone(), delta: plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(format!("{step}")) });
+                        let _ = sink.send(ContentEvent::TranscriptStream { scope: scope.clone(), delta: plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(format!("{step}")) });
                     }
                     publisher.observe(
                         scope.clone(),
@@ -651,7 +636,7 @@ fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
                 }
                 _ => {
                     for index in 0..=OBSERVATION_QUEUE_CAPACITY {
-                        let _ = sink.send(HostEvent::JobStarted {
+                        let _ = sink.send(ContentEvent::JobStarted {
                             job_id: format!("p{index}"),
                             owner: "root".into(),
                             command: "fixture".into(),

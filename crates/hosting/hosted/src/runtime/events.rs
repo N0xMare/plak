@@ -11,11 +11,12 @@ mod tools;
 
 use super::admission::commit_session_update;
 use super::logging::log_event;
+use crate::surface_protocol::ContentEvent;
 // Row derivations the feed projector shares with the live path.
 pub(crate) use super::tool_facts::{wait_settled, wait_started};
 use super::turn::flush_assistant_delta;
 pub(crate) use super::turn::operator_facing_agent_error;
-use super::{HostEvent, Sender, ToolSubjectStash, TopologyRows, TreeSnapshotPush, TurnProjection};
+use super::{Sender, ToolSubjectStash, TopologyRows, TreeSnapshotPush, TurnProjection};
 use crate::session_home::SessionHome;
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::session_store::SessionRecordStore;
@@ -190,7 +191,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             return;
         };
         flush_assistant_delta(delta_buf, last_flush, events, true);
-        let _ = events.send(HostEvent::SteerAck {
+        let _ = events.send(ContentEvent::SteerAck {
             state: "queued".into(),
             position: Some(*position),
         });
@@ -205,7 +206,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             ..
         } = self;
         flush_assistant_delta(delta_buf, last_flush, events, true);
-        let _ = events.send(HostEvent::SteerAck {
+        let _ = events.send(ContentEvent::SteerAck {
             state: "applied".into(),
             position: None,
         });

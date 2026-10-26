@@ -1,6 +1,7 @@
 //! Refresh queue authority without waiting for a busy turn to end.
 
-use super::{Duration, HostEvent, Instant, TurnDrive, emit_queue_snapshot, sessions};
+use super::{Duration, Instant, TurnDrive, emit_queue_snapshot, sessions};
+use crate::surface_protocol::ContentEvent;
 
 pub(super) struct QueueRefresh {
     expected: sessions::QueueCommands,
@@ -201,7 +202,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         emit_queue_snapshot(self.host.events, self.host.session);
         if !self.queue_wait_noted {
             self.queue_wait_noted = true;
-            let _ = self.host.events.send(HostEvent::Status {
+            let _ = self.host.events.send(ContentEvent::Status {
                 phase: "running".into(),
                 queue_len: self.host.session.pending_queue.len(),
                 detail: Some("queue projection is catching up; prompt remains queued".into()),

@@ -296,9 +296,9 @@ impl<P: ProtocolExtension> IntentDelivery<P> {
     /// asked. `None` for the urgent lane (interrupt, quit), which answers
     /// within whatever is already running.
     #[must_use]
-    pub fn started(&self) -> Option<SessionObservation<P>> {
+    pub fn started(&self) -> Option<crate::ContentObservation<P>> {
         (!matches!(self.action, SessionIntent::Interrupt | SessionIntent::Quit))
-            .then(|| SessionObservation::IntentStarted(self.correlation.clone()))
+            .then(|| crate::ContentObservation::IntentStarted(self.correlation.clone()))
     }
 
     /// Split the action from its acknowledgement guard. Keep the guard alive
@@ -1110,7 +1110,11 @@ impl<P: ProtocolExtension> ObservationSender<P> {
         clippy::result_large_err,
         reason = "typed backpressure returns ownership of the exact refused observation"
     )]
-    pub fn send(&self, event: SessionObservation<P>) -> Result<(), SessionObservation<P>> {
+    pub fn send(
+        &self,
+        event: impl Into<SessionObservation<P>>,
+    ) -> Result<(), SessionObservation<P>> {
+        let event = event.into();
         let mut queue = self.0.queue.lock().map_err(|_| event.clone())?;
         let result = self.admit(event, &mut queue);
         let edge = (!queue.is_empty() || self.0.correlation_gap.load(Ordering::Acquire))

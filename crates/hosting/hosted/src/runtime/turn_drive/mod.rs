@@ -4,15 +4,15 @@ use super::usage::{LiveOccupancy, emit_live_context_projection};
 use super::{
     Agent, AgentError, AgentErrorKind, AgentEventKind, CancelRefusal, CancelSettlement,
     CancellationStatus, CommandAckDisposition, CommandId, DriveTurnError, DrivenTurn, Duration,
-    HOST_CANCEL_SETTLE_TIMEOUT, HeldUsage, HostEvent, Instant, InterruptWatchState,
-    NativeSubscriptions, RefCell, Sender, SessionHome, SessionLedger, SessionLog,
-    SessionQueueDrainState, SessionQueueItem, SessionRecord, SessionRecordStore,
-    SubscriptionUsageRefresh, Surface, ToolSubjectStash, TopologyRows, TreeSnapshotPush,
-    TryRecvError, TurnControl, TurnEventError, TurnHostOutcome, TurnProjection, TurnResult,
-    TurnResultOutcome, UserAction, accept_draft, admitted_turn_lifecycle, apply_cancel_settlement,
-    apply_event, commit_session_update, drop_last_mutable, edit_mutable, emit_prompt_history,
-    emit_queue_snapshot, emit_tree_snapshot_if_revision_advanced, emit_turn_lifecycle,
-    flush_assistant_delta, flush_deferred_interrupted_status, move_mutable, note_idle_only,
+    HOST_CANCEL_SETTLE_TIMEOUT, HeldUsage, Instant, InterruptWatchState, NativeSubscriptions,
+    RefCell, Sender, SessionHome, SessionLedger, SessionLog, SessionQueueDrainState,
+    SessionQueueItem, SessionRecord, SessionRecordStore, SubscriptionUsageRefresh, Surface,
+    ToolSubjectStash, TopologyRows, TreeSnapshotPush, TryRecvError, TurnControl, TurnEventError,
+    TurnHostOutcome, TurnProjection, TurnResult, TurnResultOutcome, UserAction, accept_draft,
+    admitted_turn_lifecycle, apply_cancel_settlement, apply_event, commit_session_update,
+    drop_last_mutable, edit_mutable, emit_prompt_history, emit_queue_snapshot,
+    emit_tree_snapshot_if_revision_advanced, emit_turn_lifecycle, flush_assistant_delta,
+    flush_deferred_interrupted_status, move_mutable, note_idle_only,
     observe_cancelled_tool_activity, observe_pending_cancel_settlement,
     observe_terminal_tool_activity, operator_facing_agent_error, queue, queue_edit_applied,
     queue_edit_refused, queue_refusal, reconcile_authoritative_assistant,
@@ -22,6 +22,7 @@ use super::{
     turn_finalization_ready, turn_lifecycle, unresolved_turn_lifecycle,
 };
 use super::{HostBoundary, HostWorkflow, RuntimeFactory, TurnObserver, observe_boundary};
+use crate::surface_protocol::ContentEvent;
 
 pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) job_agent: &'a Agent,
@@ -216,7 +217,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             {
                 // Live only: the projector derives the stored process row.
                 self.host.session.append_transcript(row.clone());
-                let _ = self.host.events.send(HostEvent::Row(row));
+                let _ = self.host.events.send(ContentEvent::Row(row));
             }
             self.cancel_pending = observe_pending_cancel_settlement(
                 &self.control,
@@ -291,7 +292,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                                 AgentEventKind::ModelDispatchStarted => {
                                     self.mail_batch_notified = false;
                                     self.mail_repeat_notified = false;
-                                    let _ = self.host.events.send(HostEvent::ModelRequestStarted);
+                                    let _ = self.host.events.send(ContentEvent::ModelRequestStarted);
                                     false
                                 }
                                 AgentEventKind::Model { event: Some(model_event), .. } => {

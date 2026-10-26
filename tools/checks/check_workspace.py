@@ -456,6 +456,8 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
     ],
 }
 EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
+    # The closed content/received vocabulary shares variant definitions only.
+    ("plakous-host-protocol", "src/observation/vocabulary.rs"): ("macro_rules",),
     # Export-v8's closed neutral tag mappings, never runtime code generation.
     ("plak", "src/carry/history.rs"): ("macro_rules",),
     # Compile-time repository location restricts the private capture root.
@@ -551,9 +553,10 @@ ALLOWED_CLI_MACROS = {
 }
 # Per-source additions to ALLOWED_CLI_MACROS.
 ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
+    ("plakous-host-protocol", "src/observation.rs"): {"define_observations"},
+    ("plakous-host-protocol", "src/observation/vocabulary.rs"): {"define_observations"},
     # Disposable transcript projection invariants, with release-mode resync.
     ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert"},
-    ("plakous-hosted", "src/runtime.rs"): {"debug_assert"},
     ("plakous-hosted", "src/sessions/transcript.rs"): {"debug_assert"},
     # Fold integrity refusals: fixed diagnostics and the affected agent id only.
     ("plakous-recursive-subagents", "src/tree/candidates.rs"): {"error"},

@@ -13,12 +13,13 @@ use crate::runtime::tree::{
     nested_parent_call_id,
 };
 use crate::runtime::turn::flush_assistant_delta;
-use crate::runtime::{HostEvent, Sender, TurnProjection};
+use crate::runtime::{Sender, TurnProjection};
 use crate::session_log::{
     SessionEvent, redact_text_preview, tool_rejected_reason, tool_rejected_record,
 };
 use crate::sessions;
 use crate::sessions::{SessionRecord, TranscriptRow, live_tool_subject};
+use crate::surface_protocol::ContentEvent;
 use plakous::agent::{AgentEventKind, ToolCallObservation};
 use std::collections::HashMap;
 
@@ -70,7 +71,7 @@ pub(in crate::runtime) fn observe_terminal_tool_activity<
             Some(compose) if state == "cancelled" => compose_cancelled_state(compose),
             _ => state.to_owned(),
         };
-        let _ = events.send(HostEvent::ToolLine {
+        let _ = events.send(ContentEvent::ToolLine {
             call_id: Some(activity.call_id),
             // Persisted lineage, so a gap-closed child still folds under its
             // cell instead of surfacing as a stray flat row.
@@ -467,7 +468,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         }
         // The start stamp the row persisted above, when it has a call id.
         let started_at_ms = call_id_str.as_ref().map(|_| event_timestamp_ms(event));
-        let _ = events.send(HostEvent::ToolLine {
+        let _ = events.send(ContentEvent::ToolLine {
             call_id: call_id_str,
             parent_call_id,
             cell_id,
@@ -519,7 +520,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             }
         });
         let kind = crate::activity::tool_activity_kind(&name);
-        let _ = events.send(HostEvent::ToolLine {
+        let _ = events.send(ContentEvent::ToolLine {
             call_id: call_id_str
                 .or_else(|| progress.as_ref().map(|p| p.call_id().as_uuid().to_string())),
             parent_call_id: lineage_parent_call_id(lineage),
@@ -845,7 +846,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         let duration_ms = call_id_str.as_deref().and_then(|call_id| {
             observed_call_duration_ms(session, call_id, event_timestamp_ms(event))
         });
-        let line = HostEvent::ToolLine {
+        let line = ContentEvent::ToolLine {
             call_id: call_id_str.clone(),
             parent_call_id: parent_call_id.clone(),
             cell_id,
@@ -898,7 +899,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                 candidate.record_notice(row.clone());
                 true
             });
-            let _ = events.send(HostEvent::Row(row));
+            let _ = events.send(ContentEvent::Row(row));
         }
         // A `wait*` terminal that closed the last child re-terminalises the
         // marker's persisted row, so the `Completed` sweep never rewrites a
@@ -1040,7 +1041,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             ),
         );
         let parent_call_id = lineage_parent_call_id(lineage);
-        let _ = events.send(HostEvent::ToolLine {
+        let _ = events.send(ContentEvent::ToolLine {
             call_id: Some(call_id.clone()),
             parent_call_id: parent_call_id.clone(),
             cell_id: lineage.cell_id().map(str::to_owned),

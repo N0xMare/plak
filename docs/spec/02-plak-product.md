@@ -1841,8 +1841,9 @@ the reducer's stream boundary, call index or reasoning clocks. Canonical
 settlement replaces provisional rows with the committed projector rows.
 Canonical projection returns keyed snapshot values, not generic observations.
 The host explicitly replaces, publishes or resyncs them through its scoped
-publisher; generic observation send refuses snapshots and patches (a programmer
-assertion in debug builds). Automatic gap repayment and explicit resync use
+publisher; `Sender::send` takes content-only observations, so snapshots and
+patches cannot be misrouted through it at compile time. Received observations
+still carry those publisher-owned frames. Automatic gap repayment and explicit resync use
 the same retained live baseline, never a separate stale session snapshot.
 Reload rehearsal keeps the projector's keys through bounded presentation
 projection rather than manufacturing identities from window indices.

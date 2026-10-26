@@ -8,9 +8,10 @@
 
 use crate::binding::TargetSelection;
 use crate::sessions::SessionRecord;
+use crate::surface_protocol::ContentEvent;
 
 use super::clear::exact_resume_target_matches;
-use super::{HostConfig, HostEvent, MAX_RESUME_CHOICES, Sender};
+use super::{HostConfig, MAX_RESUME_CHOICES, Sender};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(super) fn emit_resume_choices<P: plakous_host_protocol::ProtocolExtension>(
@@ -41,7 +42,7 @@ pub(super) fn emit_resume_choices<P: plakous_host_protocol::ProtocolExtension>(
             }
         })
         .collect();
-    let _ = events.send(HostEvent::ResumeSessions(choices));
+    let _ = events.send(ContentEvent::ResumeSessions(choices));
     if total > MAX_RESUME_CHOICES {
         let _ = events.notice(TranscriptRow::info(NoticeScope::Session, format!(
             "resume picker shows the {MAX_RESUME_CHOICES} most recent cwd sessions; `/resume <uuid>` accepts any exact id"

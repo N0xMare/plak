@@ -2,7 +2,7 @@
 
 use super::recover::RecoveryTrigger;
 use super::{
-    APPROVAL_REFUSED_NOTE, CliFailure, CliResult, ContextQuery, HostEvent, HostLoop, HostStep,
+    APPROVAL_REFUSED_NOTE, CliFailure, CliResult, ContextQuery, HostLoop, HostStep,
     IDLE_OBSERVE_POLL_INTERVAL, Instant, InterruptWatch, Rebound, RecvTimeoutError,
     SessionQueueDrainState, TREE_OBSERVE_INTERVAL, UserAction, admit_idle_immediate_prompt,
     clear_session_rebuild, commit_session_update, compact_may_resume_queue,
@@ -18,6 +18,7 @@ use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     pub(super) fn next_prompt(
@@ -252,7 +253,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     }
                 }
                 Ok(action @ UserAction::Steer(_)) => {
-                    let _ = self.events.send(HostEvent::Status {
+                    let _ = self.events.send(ContentEvent::Status {
                         phase: "idle".into(),
                         queue_len: self.config.session.pending_queue.len(),
                         detail: Some("no active turn".into()),
@@ -395,7 +396,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 Ok(UserAction::SendQueuedNow { id, revision }) => {
                     if self.config.session.queue_projection_debt {
                         emit_queue_snapshot(&self.events, &self.config.session);
-                        let _ = self.events.send(HostEvent::Status {
+                        let _ = self.events.send(ContentEvent::Status {
                             phase: "idle".into(),
                             queue_len: self.config.session.pending_queue.len(),
                             detail: Some(
@@ -452,8 +453,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 Ok(UserAction::ClearSession) => {
                     // A switch closes the agent view before its ClearView.
                     self.last_tree_revision.child_live.close_agent_view();
-                    let _ = self.events.send(HostEvent::SetBusy(true));
-                    let _ = self.events.send(HostEvent::Status {
+                    let _ = self.events.send(ContentEvent::SetBusy(true));
+                    let _ = self.events.send(ContentEvent::Status {
                         phase: "clear".into(),
                         queue_len: self.config.session.pending_queue.len(),
                         detail: Some(
@@ -479,8 +480,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                     err.message()
                                 ),
                             ));
-                            let _ = self.events.send(HostEvent::SetBusy(false));
-                            let _ = self.events.send(HostEvent::Status {
+                            let _ = self.events.send(ContentEvent::SetBusy(false));
+                            let _ = self.events.send(ContentEvent::Status {
                                 phase: "idle".into(),
                                 queue_len: self.config.session.pending_queue.len(),
                                 detail: Some(format!(
@@ -565,7 +566,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             .executor
                             .block_on(async move { request.spawn(sessions, events) })
                         {
-                            let _ = self.events.send(HostEvent::CallDetail(
+                            let _ = self.events.send(ContentEvent::CallDetail(
                                 crate::call_detail::unavailable(
                                     call_id,
                                     agent_id,
@@ -618,8 +619,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 }
                 Ok(UserAction::ForkSession { account, compact }) => {
                     self.last_tree_revision.child_live.close_agent_view();
-                    let _ = self.events.send(HostEvent::SetBusy(true));
-                    let _ = self.events.send(HostEvent::Status {
+                    let _ = self.events.send(ContentEvent::SetBusy(true));
+                    let _ = self.events.send(ContentEvent::Status {
                         phase: "fork".into(),
                         queue_len: self.config.session.pending_queue.len(),
                         detail: Some("forking session".into()),
@@ -633,8 +634,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         &self.events,
                         account.as_deref(),
                     );
-                    let _ = self.events.send(HostEvent::SetBusy(false));
-                    let _ = self.events.send(HostEvent::Status {
+                    let _ = self.events.send(ContentEvent::SetBusy(false));
+                    let _ = self.events.send(ContentEvent::Status {
                         phase: "idle".into(),
                         queue_len: self.config.session.pending_queue.len(),
                         detail: None,
@@ -757,8 +758,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     }
                     if let Some(fork) = effect.profile_fork {
                         self.last_tree_revision.child_live.close_agent_view();
-                        let _ = self.events.send(HostEvent::SetBusy(true));
-                        let _ = self.events.send(HostEvent::Status {
+                        let _ = self.events.send(ContentEvent::SetBusy(true));
+                        let _ = self.events.send(ContentEvent::Status {
                             phase: "rebind".into(),
                             queue_len: self.config.session.pending_queue.len(),
                             detail: Some(format!("forking onto profile root `{}`", fork.model)),
@@ -778,8 +779,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             fork.protocol,
                             &fork.roster,
                         );
-                        let _ = self.events.send(HostEvent::SetBusy(false));
-                        let _ = self.events.send(HostEvent::Status {
+                        let _ = self.events.send(ContentEvent::SetBusy(false));
+                        let _ = self.events.send(ContentEvent::Status {
                             phase: "idle".into(),
                             queue_len: self.config.session.pending_queue.len(),
                             detail: Some(format!("ready · {}", self.config.model_id)),
@@ -893,6 +894,7 @@ mod tests {
     use crate::runtime::test_kit::TestExtension;
     use crate::runtime::test_support::fresh_injected_attached_host;
     use crate::session_log;
+    use crate::surface_protocol::HostEvent;
     use std::sync::Arc;
 
     #[test]

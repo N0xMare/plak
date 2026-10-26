@@ -9,9 +9,10 @@
 //! Reads use the live hub tree when present; otherwise store observations
 //! are limited to the existing tree observation interval.
 
+use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::PendingContinuation;
 
-use super::{HostEvent, HostLoop, Instant, TREE_OBSERVE_INTERVAL, commit_session_update};
+use super::{HostLoop, Instant, TREE_OBSERVE_INTERVAL, commit_session_update};
 use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -131,7 +132,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             tree_paused: tree.paused,
         };
         if self.pending_track.last != Some(next) {
-            let sent = self.events.send(HostEvent::PendingContinuation {
+            let sent = self.events.send(ContentEvent::PendingContinuation {
                 results: next.results,
                 questions: next.questions,
                 process_exits: next.process_exits,
@@ -248,7 +249,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 true
             },
         );
-        let _ = self.events.send(HostEvent::Row(row));
+        let _ = self.events.send(ContentEvent::Row(row));
     }
 }
 

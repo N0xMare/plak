@@ -1,4 +1,5 @@
 //! Host startup: worker spawn, lifecycle phases, and session opening.
+use crate::surface_protocol::ContentEvent;
 use std::future::Future;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -25,8 +26,8 @@ use super::info::plan_state_authority;
 use super::models::effort_from_record;
 use super::rebind::durable_tree_id;
 use super::{
-    HostConfig, HostEvent, HostLifecyclePhase, HostTargetAuthority, OpenRouterHostEvidence,
-    RuntimeRole, Sender, ShellHostConfig, TuiHostMode, TuiHostPreparation,
+    HostConfig, HostLifecyclePhase, HostTargetAuthority, OpenRouterHostEvidence, RuntimeRole,
+    Sender, ShellHostConfig, TuiHostMode, TuiHostPreparation,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -68,7 +69,7 @@ pub(super) fn observe_phase<P: plakous_host_protocol::ProtocolExtension>(
     started: Instant,
     queue_len: usize,
 ) {
-    let _ = events.send(HostEvent::Status {
+    let _ = events.send(ContentEvent::Status {
         phase: phase.status().into(),
         queue_len,
         detail: Some(format!(
@@ -116,7 +117,7 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
                 NoticeScope::Host,
                 format!("host error: {}", err.message()),
             ));
-            let _ = event_tx.send(HostEvent::Status {
+            let _ = event_tx.send(ContentEvent::Status {
                 phase: "error".into(),
                 queue_len: 0,
                 detail: Some(err.message().to_owned()),
@@ -189,16 +190,16 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let event_tx = Sender::over(event_tx);
     let handle = thread::spawn(move || {
-        let _ = event_tx.send(HostEvent::Activity {
+        let _ = event_tx.send(ContentEvent::Activity {
             label: "discovering providers and preparing session".into(),
             active: true,
         });
         let prepared = prepare();
-        let _ = event_tx.send(HostEvent::ProviderSnapshot {
+        let _ = event_tx.send(ContentEvent::ProviderSnapshot {
             providers: prepared.providers.clone(),
         });
         if let Some(refresh) = prepared.catalog_refresh {
-            refresh(event_tx.inner.clone());
+            refresh(event_tx.clone());
         }
         let shell_host = prepared.shell_host;
         match prepared.mode {
@@ -232,7 +233,7 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
                     if let Ok(authoritative) = fallback.store.load(&fallback.session.id) {
                         fallback.session = authoritative;
                     }
-                    let _ = event_tx.send(HostEvent::AgentAttached(false));
+                    let _ = event_tx.send(ContentEvent::AgentAttached(false));
                     let _ = event_tx.notice(TranscriptRow::error(
                         NoticeScope::Host,
                         error.message().to_owned(),
@@ -247,8 +248,8 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
                 Ok(())
             }
             TuiHostMode::Shell(config) => {
-                let _ = event_tx.send(HostEvent::AgentAttached(false));
-                let _ = event_tx.send(HostEvent::Activity {
+                let _ = event_tx.send(ContentEvent::AgentAttached(false));
+                let _ = event_tx.send(ContentEvent::Activity {
                     label: "provider setup required".into(),
                     active: false,
                 });

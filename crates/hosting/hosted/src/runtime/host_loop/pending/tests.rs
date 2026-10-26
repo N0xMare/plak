@@ -8,6 +8,7 @@ use crate::agent_tree_protocol::{
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::fresh_injected_attached_host;
 use crate::sessions::{NoticeScope, NoticeTone, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 use crate::surface_protocol::{HostEventReceiver, UserAction, UserActionSender};
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 use std::sync::Arc;
@@ -339,7 +340,10 @@ fn pending_refused_zero_is_resent_when_facts_are_unchanged() {
             })
             .unwrap();
         // Terminal receipts cannot be evicted to admit the zero snapshot.
-        while host.events.send(HostEvent::ModelRefusal { detail: None }) {}
+        while host
+            .events
+            .send(ContentEvent::ModelRefusal { detail: None })
+        {}
         host.publish_pending_continuation();
         let _ = snapshots(observed);
         host.publish_pending_continuation();

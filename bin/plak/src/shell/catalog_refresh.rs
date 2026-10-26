@@ -8,12 +8,12 @@ use std::thread;
 use std::time::Instant;
 
 use crate::home::paths::PlakPaths;
-use crate::surface_protocol::{HostEvent, HostEventSender, PlakExtension};
+use crate::surface_protocol::{ContentEvent, PlakExtension};
 use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::{
     CompatibilityStatus, NativeAuthStatus, NativeProvider, NativeSubscriptions, SubscriptionPaths,
 };
-use plakous_hosted::runtime::{TuiHostMode, oauth_provider_for_account};
+use plakous_hosted::runtime::{Sender, TuiHostMode, oauth_provider_for_account};
 use plakous_hosted::session_log::{SessionEvent, SessionLog};
 
 /// The refresh hook for one prepared host mode: only an attached mode
@@ -21,7 +21,7 @@ use plakous_hosted::session_log::{SessionEvent, SessionLog};
 pub(crate) fn hook(
     paths: PlakPaths,
     mode: &TuiHostMode<PlakExtension>,
-) -> Box<dyn FnOnce(HostEventSender) + Send> {
+) -> Box<dyn FnOnce(Sender<PlakExtension>) + Send> {
     let (session_id, account) = refresh_context(mode);
     Box::new(move |events| spawn(paths, session_id, account, events))
 }
@@ -47,7 +47,7 @@ fn spawn(
     paths: PlakPaths,
     session_id: Option<String>,
     attached_account: Option<String>,
-    events: HostEventSender,
+    events: Sender<PlakExtension>,
 ) {
     thread::spawn(move || {
         let refresh_started = Instant::now();
@@ -87,7 +87,7 @@ fn spawn(
             let _ = log.append_for(session_id, event);
         }
         if let Ok((providers, _)) = crate::presentation::tui_presentation_values(&paths) {
-            let _ = events.send(HostEvent::ProviderSnapshot { providers });
+            let _ = events.send(ContentEvent::ProviderSnapshot { providers });
         }
     });
 }

@@ -3,9 +3,10 @@
 use super::{EventApplier, timestamp_ms};
 use crate::runtime::logging::log_event;
 use crate::runtime::turn::{flush_assistant_delta, take_pending_approval};
-use crate::runtime::{APPROVAL_REFUSED_NOTE, HostEvent, PendingApproval, Sender, TurnProjection};
+use crate::runtime::{APPROVAL_REFUSED_NOTE, PendingApproval, Sender, TurnProjection};
 use crate::session_log::{SessionEvent, redact_text_preview};
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 use plakous::agent::{AgentEventKind, EffectDecisionResolution, TurnControl};
 
 /// Maps one typed approval intent back onto the runtime decision handle.
@@ -108,7 +109,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                 .str("name", &tool_name)
                 .opt_str("call_id", call_id_str.as_deref()),
         );
-        let _ = events.send(HostEvent::ApprovalRequired {
+        let _ = events.send(ContentEvent::ApprovalRequired {
             approval_id,
             call_id: call_id_str,
             tool_name,
@@ -159,7 +160,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             observed_session_id,
             SessionEvent::new("effect.decision.resolved").str("resolution", resolution),
         );
-        let _ = events.send(HostEvent::ApprovalResolved {
+        let _ = events.send(ContentEvent::ApprovalResolved {
             approval_id,
             resolution: resolution.to_owned(),
         });

@@ -12,6 +12,7 @@
 //! waiting, is not started and gets no answer. A waiting read whose session
 //! is no longer attached is dropped without an answer. The surface asks again.
 
+use crate::surface_protocol::ContentEvent;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -25,7 +26,7 @@ use plakous_host_protocol::views::{
 };
 use tokio::sync::Semaphore;
 
-use crate::runtime::{HostEvent, Sender, TopologyRows};
+use crate::runtime::{Sender, TopologyRows};
 use crate::sessions::{SessionRecord, ToolItem};
 
 const NOT_IN_SESSION: &str = "this call is not part of the attached session";
@@ -168,7 +169,7 @@ impl CallDetailRequest {
         match gate.admit(&key) {
             Admit::Duplicate => {}
             Admit::Busy => {
-                let _ = events.send(HostEvent::CallDetail(CallDetail {
+                let _ = events.send(ContentEvent::CallDetail(CallDetail {
                     call_id: self.call_id,
                     agent_id: self.agent_id,
                     session_id: self.session_id,
@@ -189,7 +190,7 @@ impl CallDetailRequest {
                         return;
                     }
                     let answer = self.read(sessions.as_deref()).await;
-                    let _ = events.send(HostEvent::CallDetail(answer));
+                    let _ = events.send(ContentEvent::CallDetail(answer));
                 });
             }
         }

@@ -2,8 +2,8 @@
 
 use super::{
     ApplicationExecutor, CliFailure, CliResult, ContextDisposition, ContextQuery, Duration,
-    HeldUsage, HostConfig, HostEvent, HostLoop, Instant, InterruptWatchState, Ordering, RefCell,
-    Sender, SessionEvent, SessionLedger, SessionLog, SessionQueueDrainState, SessionQueueItem,
+    HeldUsage, HostConfig, HostLoop, Instant, InterruptWatchState, Ordering, RefCell, Sender,
+    SessionEvent, SessionLedger, SessionLog, SessionQueueDrainState, SessionQueueItem,
     SubscriptionUsageRefresh, TreeSnapshotPush, build_session_from_config, elapsed_ms_since,
     emit_agent_plan_notes, emit_prompt_history, emit_queue_snapshot, emit_restored_paused_note,
     emit_unavailable_context, log_ev, log_host_attached, log_host_ready, log_session_ready,
@@ -12,6 +12,7 @@ use super::{
 };
 use crate::sessions::projector::{ProductTreeJoin as _, SubmissionKind, pending_command_ids};
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
     pub(super) fn open(
@@ -60,7 +61,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         // The open below blocks this thread for seconds on a cold session. Tell
         // the TUI it started so the startup row can tick its own elapsed seconds
         // instead of showing an unqualified "starting…" (spec 02 §5.4).
-        let _ = events.send(HostEvent::SessionOpening);
+        let _ = events.send(ContentEvent::SessionOpening);
         // Creation freezes the root's tools; a wildcard MCP tool left out then
         // is a pending notice the operator must see (spec 07 §3.5).
         let freezing_tools = config.session.frozen_tools.is_none();
@@ -228,7 +229,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                     .store
                     .withdraw_unadmitted_workflows(&mut config.session)?;
                 for row in withdrawn {
-                    let _ = events.inner.send(HostEvent::Row(row));
+                    let _ = events.send(ContentEvent::Row(row));
                 }
                 let rows = config.topology_rows();
                 super::super::projection::project_tree(
@@ -326,12 +327,12 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         if let Some(report) = &abandoned_turn {
             super::recover::log_abandoned_report(log.as_ref(), &config, report);
             if !root_published {
-                let _ = events.send(HostEvent::Row(TranscriptRow::info(
+                let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                     NoticeScope::Recovery,
                     super::super::events::abandoned_turn_operator_line(report),
                 )));
             }
-            let _ = events.send(HostEvent::Recovered {
+            let _ = events.send(ContentEvent::Recovered {
                 claim: Some(report.claim().as_str().to_owned()),
                 cause: Some(report.cause().as_str().to_owned()),
                 operations: report.operations().to_vec(),
@@ -359,7 +360,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             session_open_ms,
             elapsed_ms_since(attach_started),
         );
-        let _ = events.send(HostEvent::SessionOpened {
+        let _ = events.send(ContentEvent::SessionOpened {
             session_open_ms: Some(session_open_ms),
         });
         // Spec 8.7: template readiness is host-computed at session open.
@@ -400,8 +401,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         emit_queue_snapshot(&events, &config.session);
         let mut restored_recovery_blocked = false;
         if opened.has_recovered_turn() {
-            let _ = events.send(HostEvent::SetBusy(true));
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::SetBusy(true));
+            let _ = events.send(ContentEvent::Status {
                 phase: "running".into(),
                 queue_len: config.session.pending_queue.len(),
                 detail: Some("restoring the original admitted turn".into()),
@@ -471,7 +472,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             config.session.context_counters(),
         ) {
             emit_unavailable_context(&events);
-            let _ = events.send(HostEvent::Row(TranscriptRow::error(
+            let _ = events.send(ContentEvent::Row(TranscriptRow::error(
                 NoticeScope::Recovery,
                 error.message().to_owned(),
             )));
@@ -488,7 +489,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             None => detail,
         };
         if restored_working {
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::Status {
                 phase: if restored_recovery_blocked {
                     "error"
                 } else {
@@ -506,15 +507,15 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                 )),
             });
         } else {
-            let _ = events.send(HostEvent::Status {
+            let _ = events.send(ContentEvent::Status {
                 phase: "idle".into(),
                 queue_len: config.session.pending_queue.len(),
                 detail: Some(with_pause(format!("ready · {}", config.model_id))),
             });
         }
-        let _ = events.send(HostEvent::SetBusy(false));
-        let _ = events.send(HostEvent::AgentAttached(true));
-        let _ = events.send(HostEvent::Activity {
+        let _ = events.send(ContentEvent::SetBusy(false));
+        let _ = events.send(ContentEvent::AgentAttached(true));
+        let _ = events.send(ContentEvent::Activity {
             label: if restored_recovery_blocked {
                 "agent recovery blocked"
             } else {
@@ -641,7 +642,7 @@ fn announce_omitted_tools<P: plakous_host_protocol::ProtocolExtension>(
             config,
             SessionEvent::new("tool.omitted").str("text", &notice.text),
         );
-        let _ = events.send(HostEvent::Row(row.clone()));
+        let _ = events.send(ContentEvent::Row(row.clone()));
     }
 }
 

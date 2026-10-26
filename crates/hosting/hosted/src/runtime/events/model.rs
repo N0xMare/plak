@@ -8,14 +8,15 @@ use super::reasoning::{
     discard_response_reasoning, reasoning_location_key, seal_reasoning_block, settle_live_thinking,
     settle_model_response,
 };
+use crate::runtime::Sender;
 use crate::runtime::admission::commit_session_update;
 use crate::runtime::logging::log_event;
 use crate::runtime::tools::{harvest_assistant_text, stash_tool_subjects_from_response};
 use crate::runtime::turn::flush_assistant_delta;
 use crate::runtime::usage::record_operation_prepared_input;
-use crate::runtime::{HostEvent, Sender};
 use crate::session_log::{SessionEvent, SessionLog};
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 use plakous::agent::AgentEventKind;
 use plakous::model::ModelEvent;
 
@@ -47,9 +48,9 @@ fn publish_model_diagnostic<P: plakous_host_protocol::ProtocolExtension>(
 
 fn project_live_usage<P: plakous_host_protocol::ProtocolExtension>(
     update: &plakous::model::UsageUpdate,
-) -> HostEvent<P> {
+) -> ContentEvent<P> {
     let usage = update.usage();
-    HostEvent::TurnUsage {
+    ContentEvent::TurnUsage {
         input_tokens: usage.input_tokens(),
         output_tokens: usage.output_tokens(),
         reasoning_tokens: usage.reasoning_tokens(),
@@ -130,7 +131,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             ModelEvent::ReasoningDelta(delta) => {
                 if let Some(text) = projection.observe_reasoning_delta(delta) {
                     flush_assistant_delta(delta_buf, last_flush, events, true);
-                    let _ = events.send(HostEvent::ReasoningDelta {
+                    let _ = events.send(ContentEvent::ReasoningDelta {
                         location_key: reasoning_location_key(delta.location()),
                         text,
                     });
@@ -139,7 +140,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             ModelEvent::ReasoningVisibilityBound(bound) => {
                 if let Some(text) = projection.bind_reasoning_visibility(*bound) {
                     flush_assistant_delta(delta_buf, last_flush, events, true);
-                    let _ = events.send(HostEvent::ReasoningDelta {
+                    let _ = events.send(ContentEvent::ReasoningDelta {
                         location_key: reasoning_location_key(bound.location()),
                         text,
                     });
@@ -161,8 +162,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                     let harvested = harvest_assistant_text(response);
                     if !harvested.is_empty() {
                         assistant.push_str(&harvested);
-                        let _ = events.send(HostEvent::AssistantDelta(harvested));
-                        let _ = events.send(HostEvent::AssistantDone);
+                        let _ = events.send(ContentEvent::AssistantDelta(harvested));
+                        let _ = events.send(ContentEvent::AssistantDone);
                     }
                 }
                 projection.settled_assistant_len = assistant.len();
@@ -199,12 +200,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
                         max_attempts: notice.max_attempts,
                         cause: notice.cause.clone(),
                     });
-                let _ = events.send(HostEvent::ModelRetry(notice));
+                let _ = events.send(ContentEvent::ModelRetry(notice));
                 let _ = commit_session_update(store, home, session, |candidate| {
                     candidate.record_notice(row.clone());
                     true
                 });
-                let _ = events.send(HostEvent::Row(row));
+                let _ = events.send(ContentEvent::Row(row));
             }
             // Diagnostics never authorize replay or change canonical history.
             ModelEvent::Diagnostic(diagnostic) => {
@@ -237,7 +238,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
             observed_session_id,
             SessionEvent::new("model.request_queued").str("account", slots),
         );
-        let _ = events.send(HostEvent::ModelRequestQueued {
+        let _ = events.send(ContentEvent::ModelRequestQueued {
             slots: slots.clone(),
         });
     }

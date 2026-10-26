@@ -1,13 +1,14 @@
 //! Submit an immutable root intent and settle its queue through the projector.
 
 use crate::runtime::ledger::RootLedger;
+use crate::surface_protocol::ContentEvent;
 
 use super::super::admission::{QueuePersistAction, log_queue_persist_failed};
 use super::{
     Agent, CommandAckDisposition, CommandId, DriveTurnError, DrivenTurn,
-    HOST_CANCEL_SETTLE_TIMEOUT, HostEvent, SessionQueueItem, TurnDrive, TurnHost,
-    admitted_turn_lifecycle, emit_prompt_history, emit_queue_snapshot, emit_turn_lifecycle,
-    operator_facing_agent_error, sessions, settle_cancel, terminal_turn_outcome, turn_lifecycle,
+    HOST_CANCEL_SETTLE_TIMEOUT, SessionQueueItem, TurnDrive, TurnHost, admitted_turn_lifecycle,
+    emit_prompt_history, emit_queue_snapshot, emit_turn_lifecycle, operator_facing_agent_error,
+    sessions, settle_cancel, terminal_turn_outcome, turn_lifecycle,
 };
 use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger, Settlement};
@@ -370,7 +371,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 })?;
             *session = candidate;
             emit_queue_snapshot(events, session);
-            let _ = events.send(HostEvent::Row(row));
+            let _ = events.send(ContentEvent::Row(row));
             return Ok(DrivenTurn::continuing(
                 super::TurnHostOutcome::ConsumedDelivery,
             ));
@@ -470,7 +471,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             _ => None,
         })
     {
-        let _ = events.send(HostEvent::UserMessage { text, sent_at_ms });
+        let _ = events.send(ContentEvent::UserMessage { text, sent_at_ms });
     }
     if turn.is_none() {
         let result = duplicate_result
@@ -551,7 +552,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
     )
     .await
     {
-        let _ = events.send(HostEvent::Row(TranscriptRow::error(
+        let _ = events.send(ContentEvent::Row(TranscriptRow::error(
             NoticeScope::Tree,
             format!("child mail projector deferred: {error}"),
         )));

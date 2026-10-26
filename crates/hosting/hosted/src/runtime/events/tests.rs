@@ -2,6 +2,7 @@
 
 use crate::session_store::SessionRecordStore;
 use crate::sessions::{NoticeScope, live_tool_subject};
+use crate::surface_protocol::ContentEvent;
 
 use crate::runtime::test_kit::TestExtension;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
@@ -265,11 +266,11 @@ fn notice_intents_commit_by_scope_and_session_not_by_observation() {
             "a child's row",
         )),
     );
-    events.send(HostEvent::Row(TranscriptRow::info(
+    events.send(ContentEvent::Row(TranscriptRow::info(
         NoticeScope::Turn,
         "stored by its producer",
     )));
-    events.send(HostEvent::Row(TranscriptRow::warning(
+    events.send(ContentEvent::Row(TranscriptRow::warning(
         NoticeScope::Queue,
         "re-announced on every open",
     )));
@@ -311,7 +312,7 @@ fn notice_intents_commit_by_scope_and_session_not_by_observation() {
 fn row_observations_never_author_notice_intents() {
     let (events, receiver) = host_event_sink();
     let row = TranscriptRow::warning(NoticeScope::Turn, "live observation only");
-    events.send(HostEvent::Row(row.clone()));
+    events.send(ContentEvent::Row(row.clone()));
     assert_eq!(
         receiver.try_iter().collect::<Vec<_>>(),
         [HostEvent::Row(row)]

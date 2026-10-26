@@ -1,6 +1,7 @@
 //! The attached host control loop.
 
 use crate::sessions::queue::{drop_last_mutable, edit_mutable, move_mutable, remove_mutable};
+use crate::surface_protocol::ContentEvent;
 
 use std::cell::RefCell;
 use std::sync::atomic::Ordering;
@@ -55,7 +56,7 @@ use super::usage::{
     query_context, report_context,
 };
 use super::{
-    APPROVAL_REFUSED_NOTE, ExceptionalTerminalProjection, HeldUsage, HostConfig, HostEvent,
+    APPROVAL_REFUSED_NOTE, ExceptionalTerminalProjection, HeldUsage, HostConfig,
     IDLE_OBSERVE_POLL_INTERVAL, Sender, SessionLedger, SubscriptionUsageRefresh,
     TREE_OBSERVE_INTERVAL, TreeSnapshotPush, TurnHostOutcome, UserAction, drive_one_turn, queue,
     topology_state,
@@ -157,7 +158,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             followed: self.opened.locator(),
             tree_id: durable_tree_id(&rows, &self.config.session),
             emit_settled: std::sync::Arc::new(move |row| {
-                let _ = events.send(HostEvent::Row(row));
+                let _ = events.send(ContentEvent::Row(row));
             }),
         }
     }
@@ -450,7 +451,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         {
             // Live only: the projector derives the stored process row.
             self.config.session.append_transcript(row.clone());
-            let _ = self.events.send(HostEvent::Row(row));
+            let _ = self.events.send(ContentEvent::Row(row));
         }
         self.actions
             .set_processes(self.config.state_roots.job_registry().snapshot());

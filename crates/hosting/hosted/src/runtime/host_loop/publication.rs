@@ -1,7 +1,7 @@
 //! Commit the terminal product projection before advertising completion.
 
 use super::{
-    ExceptionalTerminalProjection, HostEvent, HostLoop, Instant, InterruptWatch, SessionEvent,
+    ExceptionalTerminalProjection, HostLoop, Instant, InterruptWatch, SessionEvent,
     SessionQueueDrainState, TurnHostOutcome, commit_definite_failure_projection,
     commit_exceptional_terminal_projection, commit_session_update,
     context_capacity_recovery_guidance, elapsed_ms_since, emit_unavailable_context, handle_compact,
@@ -9,6 +9,7 @@ use super::{
 };
 use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::sessions::{NoticeScope, TranscriptRow};
+use crate::surface_protocol::ContentEvent;
 
 /// One-shot callers return terminal failures; interactive hosts publish them.
 #[derive(Clone, Copy)]
@@ -68,7 +69,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             );
                         }
                         if finish_reason == plakous::model::FinishReason::Length {
-                            let _ = self.events.send(HostEvent::Row(TranscriptRow::warning(
+                            let _ = self.events.send(ContentEvent::Row(TranscriptRow::warning(
                                 NoticeScope::Turn,
                                 super::super::turn::truncation_note(wire_output_limit),
                             )));
@@ -94,10 +95,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                     .str("text", &assistant)
                                     .u64("chars", assistant.len() as u64),
                             );
-                            let _ = self.events.send(HostEvent::AssistantDone);
+                            let _ = self.events.send(ContentEvent::AssistantDone);
                         }
                         if finish_reason == plakous::model::FinishReason::Refusal {
-                            let _ = self.events.send(HostEvent::ModelRefusal {
+                            let _ = self.events.send(ContentEvent::ModelRefusal {
                                 detail: finish_detail,
                             });
                         }
@@ -240,7 +241,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 segment_limit,
                             );
                             if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                                let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
+                                let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
                                     NoticeScope::Turn,
                                     error,
                                 )));
@@ -254,7 +255,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 .notice(TranscriptRow::info(NoticeScope::Turn, guidance));
                             let _ = self
                                 .events
-                                .send(HostEvent::ContextCapacityRecovery(Some(recovery)));
+                                .send(ContentEvent::ContextCapacityRecovery(Some(recovery)));
                         }
                     }
                 } else {
@@ -265,7 +266,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         segment_limit,
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
+                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
                             NoticeScope::Turn,
                             error,
                         )));
@@ -275,7 +276,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         .notice(TranscriptRow::info(NoticeScope::Turn, guidance));
                     let _ = self
                         .events
-                        .send(HostEvent::ContextCapacityRecovery(Some(recovery)));
+                        .send(ContentEvent::ContextCapacityRecovery(Some(recovery)));
                 }
             }
             Ok(TurnHostOutcome::AdmissionRejected { error, .. }) => {
@@ -302,7 +303,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
+                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
                             NoticeScope::Turn,
                             error.clone(),
                         )));
@@ -339,7 +340,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
+                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
                             NoticeScope::Turn,
                             error,
                         )));
@@ -367,7 +368,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         &self.config,
                         SessionEvent::new("control.interrupt"),
                     );
-                    let _ = self.events.send(HostEvent::Row(TranscriptRow::Interrupted));
+                    let _ = self
+                        .events
+                        .send(ContentEvent::Row(TranscriptRow::Interrupted));
                 } else {
                     self.recovery_blocked = true;
                     let _ = self.events.notice(TranscriptRow::error(NoticeScope::Host,
@@ -393,9 +396,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             .str("msg", &msg),
                     );
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
-                        let _ = self
-                            .events
-                            .send(HostEvent::Row(TranscriptRow::error(NoticeScope::Turn, msg)));
+                        let _ = self.events.send(ContentEvent::Row(TranscriptRow::error(
+                            NoticeScope::Turn,
+                            msg,
+                        )));
                     }
                     let _ = self.events.notice(TranscriptRow::info(
                         NoticeScope::Recovery,

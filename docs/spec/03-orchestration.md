@@ -4125,6 +4125,12 @@ settlement use `TranscriptPatch`. Settlement reads the canonical history anew
 and replaces provisional rows through one patch, not a full snapshot. When a
 new turn starts, a new atomic attachment patches its canonical baseline and
 follows its tail; it does not send a full snapshot to an already attached face.
+`Sender` is the content boundary for host and product producers, including
+background catalog-refresh hooks and opening recovery rows. Producers do not
+receive its raw observation mailbox. Keyed snapshot
+and patch variants exist only in the received vocabulary; the host's generic
+sender cannot accept them. Explicit presentation publication owns revisions
+and the conversion to those received frames.
 Reopening the open agent on the same live turn is a no-op. A failed later
 read keeps the last good rows beside a notice rather than empty rows; only
 a send that passes the generation check below replaces the last good rows. An

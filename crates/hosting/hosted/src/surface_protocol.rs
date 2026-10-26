@@ -6,6 +6,8 @@ use plakous_host_protocol::{Core, ProtocolExtension, intent_channel, observation
 pub type UserAction<P = Core> = plakous_host_protocol::SessionIntent<P>;
 /// Hosted HostEvent with an optional driver-owned extension.
 pub type HostEvent<P = Core> = plakous_host_protocol::SessionObservation<P>;
+/// Hosted producer content, excluding keyed transcript publications.
+pub type ContentEvent<P = Core> = plakous_host_protocol::ContentObservation<P>;
 /// Hosted UserActionSender with an optional driver-owned extension.
 pub type UserActionSender<P = Core> = plakous_host_protocol::IntentSender<P>;
 /// Hosted UserActionReceiver with an optional driver-owned extension.
