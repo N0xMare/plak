@@ -28,7 +28,7 @@ pub enum RefreshPreparation {
     Unchanged,
     /// The copy is temporarily ineligible or its backend lacks refresh.
     Skipped(String),
-    /// Either committed or whole-worktree merge conflicts; nothing changed.
+    /// The whole-worktree merge conflicts; nothing changed.
     Conflict(Vec<ConflictPath>),
     /// Exact inputs and results which must be published before application.
     Ready(Box<RefreshPlan>),
@@ -51,7 +51,7 @@ pub struct RefreshPlan {
     pub merged_content: String,
     /// Attached branch's old commit.
     pub head_old: String,
-    /// Committed-only merge, parented by old HEAD and the parent snapshot.
+    /// Parent-tree checkpoint, parented by old HEAD and the parent snapshot.
     pub merge_commit: String,
 }
 
@@ -142,19 +142,13 @@ pub(super) fn prepare(request: &RefreshRequest) -> Result<RefreshPreparation, Vc
     }
     let child = git::git_snapshot(&request.child, "refresh-child")?;
     let head = query(&request.child, &["rev-parse", "HEAD"])?;
-    let committed = merge(request, &parent.commit, &head)?;
-    let whole = merge(request, &parent.commit, &child.commit)?;
-    let (committed, merged_content) = match (committed, whole) {
-        (Ok(committed), Ok(whole)) => (committed, whole),
-        (Err(mut paths), Err(other)) => {
-            paths.extend(other);
-            paths.sort_by(|a, b| a.path.cmp(&b.path));
-            paths.dedup();
-            return Ok(RefreshPreparation::Conflict(paths));
-        }
-        (Err(paths), _) | (_, Err(paths)) => return Ok(RefreshPreparation::Conflict(paths)),
+    let merged_content = match merge(request, &parent.commit, &child.commit)? {
+        Ok(whole) => whole,
+        Err(paths) => return Ok(RefreshPreparation::Conflict(paths)),
     };
-    let merge_commit = merge_commit(&request.child, &committed, &head, &parent.commit)?;
+    // The logical base may include adopted uncommitted work absent from HEAD.
+    // Checkpoint P, not C: the child's remaining delta stays uncommitted.
+    let merge_commit = merge_commit(&request.child, &parent.content, &head, &parent.commit)?;
     Ok(RefreshPreparation::Ready(Box::new(RefreshPlan {
         request: request.clone(),
         parent: parent.commit,
@@ -241,12 +235,37 @@ fn recovery(plan: &RefreshPlan, reason: &str) -> VcsError {
 pub(super) fn apply(plan: &RefreshPlan, recover: bool) -> Result<RefreshApplied, VcsError> {
     let request = &plan.request;
     let _guard = namespace::reserve(&pins::common(&request.child)?, &request.namespace)?;
-    let attached = query(&request.child, &["symbolic-ref", "--quiet", "HEAD"])?;
-    if attached != format!("refs/heads/{}", request.branch) {
-        return Err(recovery(plan, "branch attachment changed"));
-    }
+    let attached = query(&request.child, &["symbolic-ref", "--quiet", "HEAD"]).ok();
     let head = query(&request.child, &["rev-parse", "HEAD"])?;
     let content = git::git_snapshot(&request.child, "refresh-recovery")?.content;
+    let reference = pins::reference(&request.namespace, "bases", &request.agent);
+    let base = query(&request.child, &["rev-parse", "--verify", &reference]).ok();
+    let invalid = if attached.as_deref() != Some(format!("refs/heads/{}", request.branch).as_str())
+    {
+        Some("branch attachment changed")
+    } else if (head != plan.head_old && head != plan.merge_commit)
+        || (content != plan.child_content && content != plan.merged_content)
+        || (head == plan.merge_commit && content != plan.merged_content)
+    {
+        Some("child content or branch diverged")
+    } else if base.as_deref() != Some(request.base.as_str())
+        && base.as_deref() != Some(plan.parent.as_str())
+    {
+        Some("base pin missing or diverged")
+    } else {
+        None
+    };
+    if let Some(reason) = invalid {
+        // A fresh dispatch has not written anything. Recovery can prove the
+        // same only when both original branch and content survived.
+        return if !recover || (head == plan.head_old && content == plan.child_content) {
+            Ok(RefreshApplied::Abandoned(format!(
+                "refresh precondition failed: {reason}; nothing applied"
+            )))
+        } else {
+            Err(recovery(plan, reason))
+        };
+    }
     if head == plan.head_old && content == plan.child_content && content != plan.merged_content {
         if recover {
             return Ok(RefreshApplied::Abandoned(
@@ -288,13 +307,7 @@ pub(super) fn apply(plan: &RefreshPlan, recover: bool) -> Result<RefreshApplied,
         )?;
     }
     write(plan, &["read-tree", &plan.merge_commit])?;
-    let reference = pins::reference(&request.namespace, "bases", &request.agent);
-    let base = query(&request.child, &["rev-parse", "--verify", &reference])
-        .map_err(|_| recovery(plan, "base pin missing"))?;
-    if base != plan.parent {
-        if base != request.base {
-            return Err(recovery(plan, "base pin diverged"));
-        }
+    if base.as_deref() != Some(plan.parent.as_str()) {
         write(
             plan,
             &["update-ref", &reference, &plan.parent, &request.base],

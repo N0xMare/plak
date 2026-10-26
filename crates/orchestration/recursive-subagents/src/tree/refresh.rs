@@ -9,6 +9,7 @@ use plakous_workspace::occupancy_vcs::{
 };
 
 const KIND: &str = "workspace_refresh";
+const MAX_START_LINE_BYTES: usize = 1024;
 
 #[cfg(test)]
 mod tests;
@@ -68,7 +69,7 @@ impl RefreshReport {
     }
 
     pub(super) fn start_line(&self) -> String {
-        match self.status {
+        let line = match self.status {
             RefreshStatus::Refreshed => format!(
                 "Your workspace was refreshed onto the parent's current state (base {}).",
                 self.base
@@ -95,7 +96,8 @@ impl RefreshReport {
                     768
                 )
             ),
-        }
+        };
+        bounded_text(&line, MAX_START_LINE_BYTES)
     }
 }
 
@@ -348,6 +350,15 @@ impl ProductAgentTree {
                 Ok(())
             };
         }
+        // Refuse predictable send failures before publishing a refresh intent
+        // or touching the copy, including the largest possible host Start line.
+        self.check_mailbox_budget(
+            &node.agent_id,
+            request
+                .message
+                .len()
+                .saturating_add(2 + MAX_START_LINE_BYTES),
+        )?;
         if jobs_running {
             return self.write_refresh(
                 &node.workspace_id,

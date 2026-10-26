@@ -448,10 +448,43 @@ fn read_tree_nodes(paths: &PlakPaths) -> Vec<Value> {
     if !paths.subagents_database().is_file() {
         return Vec::new();
     }
+    assert_refresh_intents(&open(&paths.subagents_database()));
     rows(
         &open(&paths.subagents_database()),
         "SELECT json_object('tree',tree_id,'agent',agent_id,'status',status,'locator',session_locator,'active',active_turn) FROM agent_nodes ORDER BY tree_id,agent_id",
     )
+}
+
+fn assert_refresh_intents(connection: &Connection) {
+    let mut stmt = connection.prepare(
+        "SELECT w.base_commit,o.canonical_request FROM agent_workspaces w JOIN agent_operations o ON o.tree_id=w.tree_id AND o.operation_id='plak:workspace_refresh:'||w.workspace_id WHERE o.tool_name='workspace_refresh'"
+    ).unwrap();
+    let intents = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .unwrap();
+    for intent in intents {
+        let (base, canonical) = intent.unwrap();
+        let payload: Value = serde_json::from_str(&canonical).unwrap();
+        let expected = match payload["phase"].as_str().unwrap() {
+            "preparing" => payload["request"]["base"].as_str(),
+            "applying" => payload["plan"]["request"]["base"].as_str(),
+            "done" if payload["report"]["status"] == "refreshed" => {
+                payload["report"]["base"].as_str()
+            }
+            "done" => None,
+            other => panic!("unknown refresh phase {other}"),
+        };
+        if let Some(expected) = expected {
+            assert_eq!(base, expected, "row base moved outside its refresh intent");
+        }
+    }
+    let orphaned: i64 = connection.query_row(
+        "SELECT count(*) FROM agent_workspaces w WHERE w.base_commit='refresh-parent' AND NOT EXISTS (SELECT 1 FROM agent_operations o WHERE o.tree_id=w.tree_id AND o.operation_id='plak:workspace_refresh:'||w.workspace_id)",
+        [], |r| r.get(0)).unwrap();
+    assert_eq!(
+        orphaned, 0,
+        "scripted refresh moved a base without its intent"
+    );
 }
 
 fn rows(connection: &Connection, sql: &str) -> Vec<Value> {

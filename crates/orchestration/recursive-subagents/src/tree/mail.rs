@@ -433,22 +433,6 @@ impl ProductAgentTree {
                 ));
             }
         }
-        if self.inbound.get(&request.agent_id).is_some_and(|inbound| {
-            inbound
-                .iter()
-                .filter(|id| {
-                    self.messages
-                        .get(*id)
-                        .is_some_and(|mail| mail.durable == MailDurableState::Accepted)
-                })
-                .count()
-                >= MAX_MAILBOX_RECORDS
-        }) {
-            return Err(TopologyError::new(
-                TopologyErrorCode::MailboxFull,
-                "recipient mailbox record budget is exhausted",
-            ));
-        }
         let refresh = (purpose == MessagePurpose::Followup)
             .then(|| {
                 self.nodes
@@ -460,18 +444,7 @@ impl ProductAgentTree {
             || request.message.clone(),
             |report| format!("{}\n\n{}", request.message, report.start_line()),
         );
-        let queued_bytes: usize = self
-            .messages
-            .values()
-            .filter(|mail| mail.durable == MailDurableState::Accepted)
-            .map(|mail| mail.body.len())
-            .sum();
-        if queued_bytes.saturating_add(body.len()) > MAX_QUEUED_MAIL_BYTES {
-            return Err(TopologyError::new(
-                TopologyErrorCode::MailboxFull,
-                "tree queued-mail byte budget is exhausted",
-            ));
-        }
+        self.check_mailbox_budget(&request.agent_id, body.len())?;
         let message_id = self.mint_message_id();
         if let Some((output_schema_json, schema_digest)) = followup_schema {
             self.open_followup_attempt(
@@ -1083,6 +1056,42 @@ impl ProductAgentTree {
             self.bump();
         }
         Ok(settled)
+    }
+
+    pub(super) fn check_mailbox_budget(
+        &self,
+        recipient: &str,
+        body_bytes: usize,
+    ) -> Result<(), TopologyError> {
+        if self.inbound.get(recipient).is_some_and(|inbound| {
+            inbound
+                .iter()
+                .filter(|id| {
+                    self.messages
+                        .get(*id)
+                        .is_some_and(|mail| mail.durable == MailDurableState::Accepted)
+                })
+                .count()
+                >= MAX_MAILBOX_RECORDS
+        }) {
+            return Err(TopologyError::new(
+                TopologyErrorCode::MailboxFull,
+                "recipient mailbox record budget is exhausted",
+            ));
+        }
+        let queued_bytes: usize = self
+            .messages
+            .values()
+            .filter(|mail| mail.durable == MailDurableState::Accepted)
+            .map(|mail| mail.body.len())
+            .sum();
+        if queued_bytes.saturating_add(body_bytes) > MAX_QUEUED_MAIL_BYTES {
+            return Err(TopologyError::new(
+                TopologyErrorCode::MailboxFull,
+                "tree queued-mail byte budget is exhausted",
+            ));
+        }
+        Ok(())
     }
 
     /// Unread host-authored results, in durable mailbox order. Reading does

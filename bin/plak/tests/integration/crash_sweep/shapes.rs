@@ -250,6 +250,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: assert_tree_conflict_resolver,
     },
     Shape {
+        name: "tree_refresh",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: tree_refresh,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: assert_tree_refresh,
+    },
+    Shape {
         name: "tree_revert",
         subset: false,
         terminal: ExpectedTerminal::Answer,
@@ -550,6 +560,71 @@ fn tree_revert() -> Value {
         }),
     );
     script
+}
+
+fn tree_refresh() -> Value {
+    let mut script = tree_child_submit_adopt();
+    script["tree_refresh"] = Value::Bool(true);
+    script["steps"].as_array_mut().unwrap().insert(
+        3,
+        json!({
+            "output": {"tool": {"name": "send_agent_message", "arguments": {
+                "agent_id": "c1", "purpose": "followup", "message": "continue on the refreshed base"
+            }}}, "finish": "tool_calls"
+        }),
+    );
+    script["steps"].as_array_mut().unwrap().insert(
+        4,
+        json!({
+            "output": {"tool": {"name": "wait_agent", "arguments": {"agent_ids": ["c1"]}}},
+            "finish": "tool_calls"
+        }),
+    );
+    script
+}
+
+fn assert_tree_refresh(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    assert_live(fixture, outcome, state, 5, 6);
+    assert!(
+        state
+            .tree_nodes
+            .iter()
+            .any(|node| node["agent"] == "c1" && node["status"] == "completed")
+    );
+    let id = state
+        .tree_nodes
+        .iter()
+        .find(|row| row["agent"] == "c1")
+        .unwrap()["tree"]
+        .as_str()
+        .unwrap();
+    let plakous_recursive_subagents_store::TreeInspection::Tree(tree) =
+        plakous_recursive_subagents_store::SqliteTreeStore::inspect(
+            &summary::paths(fixture).subagents_database(),
+            id,
+        )
+        .unwrap()
+    else {
+        panic!("pilot must persist refreshed tree")
+    };
+    let rows = tree.rows();
+    let workspace = &rows.workspaces()[&rows.nodes()["c1"].workspace_id];
+    assert_eq!(workspace.base_commit.as_deref(), Some("refresh-parent"));
+    let intent = rows
+        .operations()
+        .values()
+        .find(|op| op.tool_name == "workspace_refresh")
+        .unwrap();
+    let payload: Value = serde_json::from_str(&intent.canonical_request).unwrap();
+    assert_eq!(payload["phase"], "done");
+    assert_eq!(payload["report"]["status"], "refreshed");
+}
+
+#[test]
+fn tree_refresh_pilot_proves_persisted_catchup() {
+    let shape = "tree_refresh";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
 }
 
 fn assert_tree_revert(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {

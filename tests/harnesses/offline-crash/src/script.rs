@@ -166,6 +166,9 @@ pub struct ScriptPlan {
     /// Make the first scripted adopt return a pinned textual conflict.
     #[serde(default)]
     pub tree_conflict: bool,
+    /// Script a Ready/Refreshed VCS catch-up through the durable tree driver.
+    #[serde(default)]
+    pub tree_refresh: bool,
     /// At the first bound child locator publish and thereafter, the store
     /// returns the classified `disk_full` category and does not write.
     ///

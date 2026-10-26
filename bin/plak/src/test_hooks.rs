@@ -191,6 +191,10 @@ fn prepare_scripted_tree(
             .map_err(|error| format!("offline scripted tree could not attach: {error}"))?;
     let driver = runtime.driver().clone();
     let binder = Arc::new(ScriptedChildBinder {
+        services: plakous_hosted::agent_tree_tools::ChildServices {
+            mail: plan.tree_refresh,
+            ..plakous_hosted::agent_tree_tools::ChildServices::BIND
+        },
         driver: driver.clone(),
         sessions,
         session_id: tree_id.to_owned(),
@@ -211,6 +215,9 @@ fn scripted_tree_vcs(plan: &ScriptPlan) -> Arc<dyn plakous_hosted::occupancy_vcs
         AdoptFailure, ConflictCandidate, ConflictPath, VcsSnapshot, fake::FakeVcs,
     };
     let fake = Arc::new(FakeVcs::new());
+    if plan.tree_refresh {
+        fake.script_refresh();
+    }
     if plan.tree_conflict {
         fake.adopt_next_with(Err(AdoptFailure::Conflict {
             paths: vec![ConflictPath {
@@ -297,6 +304,7 @@ impl plakous_hosted::agent_tree::TreeStore for ChildLocatorDiskFullStore {
 /// earlier is undone by the bind itself, which reads as a child that ran and
 /// then un-ran.
 struct ScriptedChildBinder {
+    services: plakous_hosted::agent_tree_tools::ChildServices,
     driver: plakous_hosted::agent_tree_tools::TreeDriver,
     sessions: Arc<dyn plakous_hosted::session_store::SessionRecordStore>,
     session_id: String,
@@ -331,7 +339,79 @@ impl ScriptedChildBinder {
 
 impl plakous_hosted::agent_tree_tools::ChildController for ScriptedChildBinder {
     fn services(&self) -> plakous_hosted::agent_tree_tools::ChildServices {
-        plakous_hosted::agent_tree_tools::ChildServices::BIND
+        self.services
+    }
+
+    fn deliver(
+        &self,
+        request: plakous_hosted::agent_tree_tools::MailDeliveryRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        plakous_hosted::agent_tree_tools::MailDeliveryAck,
+                        plakous_hosted::agent_tree_tools::MailDeliveryFailure,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > {
+        use plakous_hosted::agent_tree_tools::{MailDeliveryAck, MailDeliveryFailure};
+        Box::pin(async move {
+            let failure = |error: plakous_hosted::agent_tree_protocol::TopologyError| {
+                MailDeliveryFailure::RecoveryRequired(error.message)
+            };
+            // Finish the scripted attempt before returning the root's send.
+            // No child commit can then race the root's next provider step.
+            let (result, effects) = self
+                .driver
+                .mutate(|tree| {
+                    self.driver.fold_and_commit(tree, |tree| {
+                        tree.acknowledge_mail(&request.message_id)?;
+                        tree.submit_result(
+                            &request.agent_id,
+                            &plakous_hosted::agent_tree_protocol::SubmitResultRequest {
+                                turn_token: request.turn_token,
+                                output_json: "{\"summary\":\"offline scripted followup done\"}"
+                                    .into(),
+                            },
+                            None,
+                        )?;
+                        tree.record_turn_completed(&request.agent_id)
+                    })
+                })
+                .map_err(failure)?;
+            result.map_err(failure)?;
+            let settled = self.driver.settle(effects).map_err(failure)?;
+            if let Some(error) = settled.cleanup_failures.into_iter().next() {
+                return Err(failure(error));
+            }
+            Ok(MailDeliveryAck { turn_id: None })
+        })
+    }
+
+    fn withdraw_followup(
+        &self,
+        _driver: plakous_hosted::agent_tree_tools::TreeDriver,
+        _agent_id: String,
+        _message_id: String,
+        _receipt: Option<(
+            String,
+            plakous_hosted::agent_tree_protocol::TopologyErrorCode,
+        )>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<(), plakous_hosted::agent_tree_protocol::TopologyError>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            Err(plakous_hosted::agent_tree_protocol::TopologyError::new(
+                plakous_hosted::agent_tree_protocol::TopologyErrorCode::OperationRecoveryRequired,
+                "scripted followup completion cannot be withdrawn",
+            ))
+        })
     }
 
     fn bind(

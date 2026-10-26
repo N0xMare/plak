@@ -13,6 +13,9 @@ use std::{
     process::{Command, Stdio},
 };
 
+#[cfg(test)]
+mod regressions;
+
 struct Fixture {
     repo: tempfile::TempDir,
     tree: ProductAgentTree,
@@ -67,6 +70,7 @@ impl Fixture {
             .unwrap()
             .unwrap();
         tree.acknowledge_wait_mail("root", &delivery);
+        tree.mark_wait_delivered("root", &delivery);
         if conflict {
             std::fs::write(repo.path().join("SEED.txt"), "parent\n").unwrap();
         } else {
@@ -422,7 +426,8 @@ fn a_followup_reconciles_a_failed_refresh_after_the_copy_is_restored_to_a_known_
         .unwrap();
     let prepared = f.tree.take_effects().run(f.tree.vcs());
     assert_eq!(f.tree.complete(prepared).cleanup_failures, Vec::new());
-    let ticket = f.tree.take_effects().refreshes.remove(0);
+    let mut ticket = f.tree.take_effects().refreshes.remove(0);
+    ticket.recover = true;
     std::fs::write(f.path.join("CHILD.txt"), "operator edit\n").unwrap();
     let answer = ticket.run(f.tree.vcs());
     let error = f.tree.complete_refresh(ticket, answer).unwrap_err();

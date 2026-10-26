@@ -165,26 +165,40 @@ impl DormancyTicket {
                 // copy to a runtime. Reuse it only after exact coverage proof.
                 if self.workspace.path.exists() {
                     vcs.check_reclaimable(&self.workspace.path, Some(&snapshot))?;
+                    self.restore_base(vcs)?;
                     return Ok(DormancyAnswer::Restored(MintedCopy {
                         path: self.workspace.path.clone(),
                         branch: vcs.label(&self.workspace.path),
                         base: snapshot,
                     }));
                 }
-                vcs.mint_from(&super::MintRequest {
+                let minted = vcs.mint_from(&super::MintRequest {
                     launch,
                     agent_id: &self.agent_id,
                     namespace: &self.namespace,
                     parent_cwd: launch,
                     mode: self.workspace.mode,
                     base: Some(&snapshot),
-                })
-                .map(DormancyAnswer::Restored)
+                })?;
+                self.restore_base(vcs)?;
+                Ok(DormancyAnswer::Restored(minted))
             }
             Phase::Reclaimed | Phase::Present => Err(VcsError::mint_unavailable(
                 "workspace reclamation has no pending effect",
             )),
         }
+    }
+
+    fn restore_base(&self, vcs: &dyn VcsOps) -> Result<(), VcsError> {
+        vcs.restore_copy_base(
+            &self.workspace.path,
+            &self.namespace,
+            &self.agent_id,
+            self.workspace
+                .base_commit
+                .as_deref()
+                .ok_or_else(|| VcsError::seal_failed("copy has no recorded logical base"))?,
+        )
     }
 }
 
@@ -352,6 +366,8 @@ impl ProductAgentTree {
     }
 
     pub(crate) fn checkout_size_probes(&self) -> Vec<(String, PathBuf, u64, u64, u64)> {
+        // Do not scan a copy while an unlocked refresh is writing it. Reclaim
+        // admission also fences the intent when sizes came from an older scan.
         self.workspaces
             .values()
             .filter(|row| {
@@ -411,6 +427,7 @@ impl ProductAgentTree {
             .values()
             .filter(|row| {
                 row.mode != WorkspaceMode::Inherit
+                    && !self.refresh_pending(&row.workspace_id)
                     && !self.rehydration_awaits_followup(&row.workspace_id)
                     && matches!(
                         row.status,

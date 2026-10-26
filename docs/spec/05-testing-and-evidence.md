@@ -1740,6 +1740,15 @@ of an older candidate without moving a refreshed base. The durability-lane
 `live_fork_refresh_crash_cuts_reconcile_only_exact_git_states` law cuts after
 intent publication, worktree application, branch CAS and base-pin CAS, then
 reopens the persisted tree against those real Git artifacts.
+Refresh laws also cover logical-base restoration after rehydration, adopted
+uncommitted inputs, pre-write rejection of every apply precondition, pending
+discard/reclaim/retention fences, stale prepared bases and mailbox reservation.
+The strict `tree_refresh` sweep scripts a Ready/Refreshed VCS pair through the
+real durable driver, and checks at every indexed cut that an applying intent
+still owns the old row base or a settled intent records its advanced base.
+Its scripted followup finishes before send returns, and the root consumes the
+child's wait result before its final step, so root and child publications do
+not race the indexed pilot at high sweep concurrency.
 The process pilots prove a real shell job was promoted and quit settled it;
 the sealed pilot additionally proves promotion of managed native family bytes.
 PID evidence is scoped to each fixture root, never a workspace shared by cuts.

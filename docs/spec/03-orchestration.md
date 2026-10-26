@@ -1360,9 +1360,9 @@ partial rather than a successful result. Adoption is explicit. Followup
 continues in the same child copy without adopting it first.
 
 Before opening the new attempt, a Git fork minted from its parent's live state
-merges the parent's current state into the copy when both its committed and
-whole-worktree merges are clean (§6.8). `refresh:false` opts out. Copies minted
-over a candidate, including reviewers and resolvers, keep their pinned base;
+merges the parent's current state into the copy when its whole-worktree merge
+is clean (§6.8). `refresh:false` opts out. Copies minted over a candidate,
+including reviewers and resolvers, keep their pinned base;
 snapshot and inherit copies are not refreshed. A conflicting catch-up is refused
 without applying anything: followup proceeds at the old base and both parent and
 child receive the paths. Running jobs, detached/wrong HEAD, independent staged
@@ -1866,15 +1866,18 @@ copies are not refreshed; explicit `refresh:true` on them is `schema_mismatch`.
 JJ copies report a skipped catch-up until backend parity.
 
 The unlocked preparation snapshots parent `P` and child `C` over the recorded
-base `B`. No new parent tree means no refresh. Both `merge-tree --merge-base=B P
-HEAD` (committed content) and `merge-tree --merge-base=B P C` (whole working tree)
-must be clean. Either conflict retains the exact old copy, branch, index and
-base; both parent receipt and child Start name the paths. Other preparation
+logical base `B`. No new parent tree means no refresh. Only the whole-worktree
+merge `merge-tree --merge-base=B P C` decides conflicts: `B` may contain adopted
+uncommitted work that is absent from HEAD. A conflict retains the exact old
+copy, branch, index and base; both parent receipt and child Start name the paths. Other preparation
 failures skip catch-up with a bounded reason and followup continues.
 
 A clean preparation creates a fixed-identity merge commit `Mc` whose tree is
-the committed result and whose parents are old HEAD and `P`. Before any copy
-write, the tree publishes a `workspace_refresh:<workspace>` operation containing
+`P`'s tree and whose parents are old HEAD and `P`. This checkpoints the new
+parent base without committing the child's delta, regardless of HEAD ancestry.
+Before preparing a refresh, admission checks the recipient's mailbox record
+and queued-byte budgets including a reserved maximum 1024-byte Start line.
+Before any copy write, the tree publishes a `workspace_refresh:<workspace>` operation containing
 the exact original base, parent and child snapshots, whole result, merge commit,
 old HEAD and branch. The operation also binds the original followup request
 digest, so a retry cannot change its brief or refresh policy. The unlocked apply
@@ -1885,14 +1888,24 @@ generation, settle the intent and open the new attempt. Existing uncommitted
 child work stays uncommitted. Pending refresh ownership blocks adoption, explicit
 discard, reclamation, retirement and another followup of that copy.
 
+Rehydration restores the copy's base pin to the row's logical base, not the
+reclamation snapshot used to remint its files. Before its first copy write,
+apply checks the attached branch, HEAD in `{old HEAD, Mc}`, content in `{C, M}`
+(HEAD `Mc` requires `M`), and the base pin in `{B, P}`. A failed fresh
+precondition abandons the intent without writing the copy; recovery can do the
+same when old HEAD and original content prove no write occurred. Thus an
+unreachable plan cannot create a partially applied refresh. Existing divergent
+post-write states retain their recovery intent until the operator restores one
+of the exact known states; no blind intent-clearing operation discards evidence.
+
 Attachment or the next followup reconciles a published apply intent before
 admitting further work. An effect still owned by this process cannot be retried
 concurrently:
 old HEAD plus original child content abandons it at the old base; old HEAD plus
 the exact merged content finishes the branch/index/pin updates; `Mc` plus the
 merged content finishes index and base pin. If original and merged content are
-identical, completing the branch/base update is safe. Any divergent branch or
-content is `workspace_recovery_required`, retaining the copy and intent for
+identical, completing the branch/base update is safe. Any post-write divergent
+branch or content is `workspace_recovery_required`, retaining the copy and intent for
 inspection. A refresh fault records the prior idle node status; once exact-state
 recovery settles that fault and no other VCS fault remains, projection restores
 that same status without changing the sealed attempt or its result.

@@ -35,6 +35,10 @@ pub enum FakeOp {
     Diverged,
     /// [`VcsOps::copy_is_over_candidate`].
     OverCandidate,
+    /// [`VcsOps::prepare_refresh`].
+    PrepareRefresh,
+    /// [`VcsOps::apply_refresh`].
+    ApplyRefresh,
 }
 
 impl FakeOp {
@@ -73,9 +77,15 @@ pub struct FakeVcs {
     next_unpin: Mutex<Option<Result<(), VcsError>>>,
     next_restore_base: Mutex<Option<Result<(), VcsError>>>,
     label: Mutex<Option<String>>,
+    scripted_refresh: std::sync::atomic::AtomicBool,
 }
 
 impl FakeVcs {
+    /// Enables a deterministic Ready/Refreshed pair for indexed refresh cuts.
+    pub fn script_refresh(&self) {
+        self.scripted_refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     /// A recorder with no answers pinned and a fixed presentation label.
     #[must_use]
     pub fn new() -> Self {
@@ -191,9 +201,43 @@ impl FakeVcs {
 impl VcsOps for FakeVcs {
     fn prepare_refresh(
         &self,
-        _request: &super::RefreshRequest,
+        request: &super::RefreshRequest,
     ) -> Result<super::RefreshPreparation, VcsError> {
+        self.record(FakeOp::PrepareRefresh, &request.child);
+        if self
+            .scripted_refresh
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(super::RefreshPreparation::Ready(Box::new(
+                super::RefreshPlan {
+                    request: request.clone(),
+                    parent: "refresh-parent".into(),
+                    parent_content: "refresh-parent-tree".into(),
+                    child: "refresh-child".into(),
+                    child_content: "refresh-child-tree".into(),
+                    merged_content: "refresh-merged-tree".into(),
+                    head_old: "refresh-old-head".into(),
+                    merge_commit: "refresh-merge".into(),
+                },
+            )));
+        }
         Ok(super::RefreshPreparation::Unchanged)
+    }
+
+    fn apply_refresh(
+        &self,
+        plan: &super::RefreshPlan,
+        _recover: bool,
+    ) -> Result<super::RefreshApplied, VcsError> {
+        self.record(FakeOp::ApplyRefresh, &plan.request.child);
+        if self
+            .scripted_refresh
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            Ok(super::RefreshApplied::Refreshed)
+        } else {
+            Err(VcsError::mint_unavailable("fake refresh was not scripted"))
+        }
     }
     fn restore_copy_base(
         &self,
