@@ -284,10 +284,11 @@ impl ProductAgentTree {
             if ticket.collected {
                 let protected = self.candidates.values().any(|candidate| {
                     candidate.producing_agent_id == ticket.agent_id
-                        && candidate.adopted_by.is_none()
-                        && candidate.adopted_via.is_none()
-                        && candidate.content != candidate.base_content
-                        && !self.input_was_relinquished(candidate)
+                        && (self.conflict_input_retained(candidate)
+                            || (candidate.adopted_by.is_none()
+                                && candidate.adopted_via.is_none()
+                                && candidate.content != candidate.base_content
+                                && !self.input_was_relinquished(candidate)))
                 });
                 if protected
                     || self
@@ -373,10 +374,11 @@ impl ProductAgentTree {
             .values()
             .filter(|candidate| {
                 candidate.producing_agent_id == ticket.agent_id
-                    && candidate.adopted_by.is_none()
-                    && candidate.adopted_via.is_none()
-                    && candidate.content != candidate.base_content
-                    && !self.input_was_relinquished(candidate)
+                    && (self.conflict_input_retained(candidate)
+                        || (candidate.adopted_by.is_none()
+                            && candidate.adopted_via.is_none()
+                            && candidate.content != candidate.base_content
+                            && !self.input_was_relinquished(candidate)))
             })
             .map(|candidate| candidate.candidate_id.clone())
             .collect();

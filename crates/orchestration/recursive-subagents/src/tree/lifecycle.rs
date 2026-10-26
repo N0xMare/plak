@@ -569,6 +569,14 @@ impl ProductAgentTree {
                 ),
             )
         })?;
+        if candidate.kind == super::CandidateKind::Conflict
+            && let Some(via) = self.resolution_accepted_via(candidate)
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::AdoptNotApplicable,
+                format!("resolution already accepted via {via}"),
+            ));
+        }
         // Adopted records retain their pins after copy removal. Only an
         // explicit discard of unadopted work relinquishes this input.
         if candidate.adopted_by.is_none()
@@ -3130,6 +3138,9 @@ mod tests {
         tree.workspaces.insert(
             "ws-c2".into(),
             WorkspaceRecord {
+                resolves: None,
+                conflict_target: None,
+                conflict_paths: Vec::new(),
                 input_candidate_id: None,
                 workspace_id: "ws-c2".into(),
                 owner_agent_id: "root".into(),

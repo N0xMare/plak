@@ -597,7 +597,7 @@ fn tree_artifacts(database: &rusqlite::Connection) -> Result<Vec<(String, Artifa
             }
         }
         let sql = if version >= 9 {
-            "SELECT candidate_id FROM agent_candidates WHERE tree_id=?1 AND adopted_by IS NULL AND adopted_via IS NULL"
+            "SELECT c.candidate_id FROM agent_candidates c WHERE c.tree_id=?1 AND ((c.adopted_by IS NULL AND c.adopted_via IS NULL) OR EXISTS (SELECT 1 FROM agent_workspaces w WHERE w.tree_id=c.tree_id AND w.status NOT IN ('discarded','clean_removed') AND ((c.kind='conflict' AND w.input_candidate_id=c.candidate_id) OR w.resolves=c.candidate_id)))"
         } else if has_adopted_by {
             "SELECT candidate_id FROM agent_candidates WHERE tree_id=?1 AND adopted_by IS NULL"
         } else {
@@ -835,7 +835,17 @@ pub(crate) fn remember_deleted_tree(paths: &PlakPaths, tree_id: &str) -> Result<
             &maintenance::digest_text(tree_id),
             candidate.candidate_id.as_str(),
         );
-        if candidate.adopted_by.is_none() && candidate.adopted_via.is_none() {
+        if (candidate.adopted_by.is_none() && candidate.adopted_via.is_none())
+            || rows.workspaces().values().any(|workspace| {
+                !matches!(
+                    workspace.status,
+                    plakous_host_protocol::topology::WorkspaceStatus::Discarded
+                        | plakous_host_protocol::topology::WorkspaceStatus::CleanRemoved
+                ) && ((candidate.source_candidate_id.is_some()
+                    && workspace.input_candidate_id.as_ref() == Some(&candidate.candidate_id))
+                    || workspace.resolves.as_ref() == Some(&candidate.candidate_id))
+            })
+        {
             artifact.unadopted.insert(reference.clone());
         }
         artifact.references.extend(maintenance::candidate_refs(
@@ -2120,12 +2130,12 @@ mod tests {
             let db = rusqlite::Connection::open_in_memory().unwrap();
             db.execute_batch(
                 "CREATE TABLE agent_trees(tree_id TEXT, launch_checkout TEXT);
-                 CREATE TABLE agent_workspaces(tree_id TEXT, workspace_id TEXT, path TEXT, mode TEXT);
+                 CREATE TABLE agent_workspaces(tree_id TEXT, workspace_id TEXT, path TEXT, mode TEXT, status TEXT, input_candidate_id TEXT, resolves TEXT);
                  CREATE TABLE agent_nodes(tree_id TEXT, agent_id TEXT, workspace_id TEXT, branch TEXT);
-                 CREATE TABLE agent_candidates(tree_id TEXT, candidate_id TEXT, adopted_by TEXT, adopted_via TEXT);
+                 CREATE TABLE agent_candidates(tree_id TEXT, candidate_id TEXT, adopted_by TEXT, adopted_via TEXT, kind TEXT);
                  CREATE TABLE agent_operations(tree_id TEXT, tool_name TEXT, canonical_request TEXT);
                  INSERT INTO agent_trees VALUES('tree','/checkout');
-                 INSERT INTO agent_workspaces VALUES('tree','ws-c1','/checkout/.plak/worktrees/1234abcd-c1','fork');
+                 INSERT INTO agent_workspaces VALUES('tree','ws-c1','/checkout/.plak/worktrees/1234abcd-c1','fork','active',NULL,NULL);
                  INSERT INTO agent_nodes VALUES('tree','c1','ws-c1','plak/1234abcd/c1');"
             ).unwrap();
             db.execute(
@@ -2136,8 +2146,8 @@ mod tests {
             db.pragma_update(None, "user_version", version).unwrap();
             if version == 9 {
                 db.execute_batch(
-                    "INSERT INTO agent_candidates VALUES('tree','superseded',NULL,'accepted');
-                                  INSERT INTO agent_candidates VALUES('tree','pending',NULL,NULL);",
+                    "INSERT INTO agent_candidates VALUES('tree','superseded',NULL,'accepted','conflict');
+                                  INSERT INTO agent_candidates VALUES('tree','pending',NULL,NULL,'work');",
                 )
                 .unwrap();
             }
@@ -2149,6 +2159,24 @@ mod tests {
                         &maintenance::digest_text("tree"),
                         "pending"
                     )])
+                );
+            }
+            if version == 9 {
+                db.execute_batch("UPDATE agent_workspaces SET input_candidate_id='superseded';")
+                    .unwrap();
+                let held = tree_artifacts(&db).unwrap();
+                assert!(held[0].1.unadopted.contains(&maintenance::candidate_ref(
+                    &maintenance::digest_text("tree"),
+                    "superseded"
+                )));
+                db.execute_batch("UPDATE agent_workspaces SET status='clean_removed';")
+                    .unwrap();
+                let removed = tree_artifacts(&db).unwrap();
+                assert!(
+                    !removed[0].1.unadopted.contains(&maintenance::candidate_ref(
+                        &maintenance::digest_text("tree"),
+                        "superseded"
+                    ))
                 );
             }
             let refs = &inventory[0].1.references;
@@ -2184,7 +2212,7 @@ mod tests {
             rusqlite::params![record.id, repo.path().display().to_string()],
         )
         .unwrap();
-        db.execute("INSERT INTO agent_workspaces(tree_id,workspace_id,owner_agent_id,path,mode,status,generation) VALUES(?1,'workspace','c1',?2,'fork','active',0)",
+        db.execute("INSERT INTO agent_workspaces(tree_id,workspace_id,owner_agent_id,path,mode,status,generation,conflict_paths) VALUES(?1,'workspace','c1',?2,'fork','active',0,'[]')",
             rusqlite::params![record.id, copy.display().to_string()]).unwrap();
         // Current inventory owns this shared legacy artifact by its recorded
         // branch, not by applying legacy naming to the copy directory.

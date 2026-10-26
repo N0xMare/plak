@@ -273,6 +273,9 @@ impl VcsOps for FakeVcs {
             ..
         } = *request;
         self.record(FakeOp::Adopt, target_path);
+        if let Some(reason) = request.resolution_refusal {
+            return Err(AdoptFailure::NotApplicable(reason.to_owned()));
+        }
         if let Some(answer) = self
             .next_adopt
             .lock()

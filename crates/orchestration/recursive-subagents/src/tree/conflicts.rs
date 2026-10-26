@@ -6,6 +6,16 @@ use super::{
 };
 use plakous_workspace::occupancy_vcs::{ConflictCandidate, ConflictPath, ConflictPin};
 
+#[derive(Clone)]
+pub(super) struct ResolverLineage {
+    pub(super) source: CandidateId,
+    pub(super) target: String,
+    pub(super) paths: Vec<ConflictPath>,
+    pub(super) superseded_by: Option<CandidateId>,
+}
+
+#[cfg(test)]
+mod retention_tests;
 #[cfg(test)]
 mod tests;
 
@@ -45,24 +55,15 @@ impl ProductAgentTree {
         else {
             return Ok(None);
         };
+        if self.resolution_accepted_via(candidate).is_some() {
+            return Ok(None);
+        }
         let source = self.candidates.get(id).ok_or_else(|| {
             TopologyError::new(
                 TopologyErrorCode::NotSealed,
                 format!("resolution source {id} is not retained"),
             )
         })?;
-        if let Some(via) = &source.adopted_via {
-            return Err(TopologyError::new(
-                TopologyErrorCode::AdoptNotApplicable,
-                format!("{id} was already adopted via {via}; nothing was adopted"),
-            ));
-        }
-        if let Some(adopter) = &source.adopted_by {
-            return Err(TopologyError::new(
-                TopologyErrorCode::AdoptNotApplicable,
-                format!("{id} was already adopted by {adopter}; nothing was adopted"),
-            ));
-        }
         if self.input_was_relinquished(source) {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
@@ -144,12 +145,75 @@ impl ProductAgentTree {
         Some(id)
     }
 
-    pub(super) fn resolver_input(&self, workspace: &str) -> Option<&CandidateRecord> {
-        let row = self.workspaces.get(workspace)?;
-        let id = row.input_candidate_id.as_ref()?;
-        self.candidates.get(id).filter(|candidate| {
-            candidate.kind == CandidateKind::Conflict
-                && row.base_commit.as_deref() == Some(candidate.base_commit.as_str())
+    pub(super) fn resolver_input(
+        &self,
+        workspace: &str,
+    ) -> Result<Option<ResolverLineage>, TopologyError> {
+        let missing = || {
+            TopologyError::new(
+                TopologyErrorCode::WorkspaceRecoveryRequired,
+                "resolver input or persisted lineage is missing; no candidate was sealed",
+            )
+        };
+        let row = self.workspaces.get(workspace).ok_or_else(missing)?;
+        let Some(id) = &row.input_candidate_id else {
+            return Ok(None);
+        };
+        let input = self.candidates.get(id).ok_or_else(missing)?;
+        if input.kind != CandidateKind::Conflict {
+            return Ok(None);
+        }
+        let source = row.resolves.as_ref().ok_or_else(missing)?;
+        let target = row.conflict_target.as_ref().ok_or_else(missing)?;
+        if row.conflict_paths.is_empty() || input.source_candidate_id.as_ref() != Some(source) {
+            return Err(missing());
+        }
+        if row.base_commit.as_deref() != Some(input.base_commit.as_str()) {
+            return Ok(None);
+        }
+        Ok(Some(ResolverLineage {
+            source: source.clone(),
+            target: target.clone(),
+            paths: row.conflict_paths.clone(),
+            superseded_by: self.candidates.get(source).and_then(Self::accepting_id),
+        }))
+    }
+
+    fn accepting_id(candidate: &CandidateRecord) -> Option<CandidateId> {
+        candidate.adopted_via.clone().or_else(|| {
+            candidate
+                .adopted_by
+                .as_ref()
+                .map(|_| candidate.candidate_id.clone())
+        })
+    }
+
+    pub(super) fn resolution_accepted_via(
+        &self,
+        candidate: &CandidateRecord,
+    ) -> Option<CandidateId> {
+        if candidate.kind != CandidateKind::Conflict && candidate.resolves.is_none() {
+            return None;
+        }
+        Self::accepting_id(candidate).or_else(|| {
+            candidate
+                .source_candidate_id
+                .as_ref()
+                .or(candidate.resolves.as_ref())
+                .and_then(|id| self.candidates.get(id))
+                .and_then(Self::accepting_id)
+        })
+    }
+
+    pub(super) fn conflict_input_retained(&self, candidate: &CandidateRecord) -> bool {
+        self.workspaces.values().any(|workspace| {
+            !matches!(
+                workspace.status,
+                WorkspaceStatus::Discarded | WorkspaceStatus::CleanRemoved
+            ) && !self.reclaimed(&workspace.workspace_id)
+                && (workspace.input_candidate_id.as_ref() == Some(&candidate.candidate_id)
+                    && candidate.kind == CandidateKind::Conflict
+                    || workspace.resolves.as_ref() == Some(&candidate.candidate_id))
         })
     }
 

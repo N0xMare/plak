@@ -385,6 +385,9 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
         return Err(AdoptFailure::TargetChanged(target.token()));
     }
     super::conflicts::check_resolver(request)?;
+    if let Some(reason) = request.resolution_refusal {
+        return Err(AdoptFailure::NotApplicable(reason.to_owned()));
+    }
     let merged = git_run(
         target_path,
         &[

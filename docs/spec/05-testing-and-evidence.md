@@ -1717,6 +1717,12 @@ textual conflict candidate and explicitly accept it. Its pilot verifies source,
 conflict and `adopted_via` ownership. Indexed cuts cover conflict-record
 publication and resolution acceptance; real Git tests separately verify marker
 contents, untouched targets, resolver bases, provenance pins and orphan-pin retry.
+The real-Git producer-collection probe keeps a losing resolver alive while the
+source and winning resolver conversations are collected. Its late seal must
+retain workspace lineage and be superseded; adopting its unresolved markers
+must refuse without changing the target. Separate laws refuse late resolver
+spawns and fail sealing closed when an input record is missing. SQLite and
+maintenance laws preserve the same workspace lineage and live-input protection.
 The opt-in `tree_conflict_resolver` shape instead spawns a resolver over that
 conflict candidate and adopts its sealed resolution. Its pilot verifies both
 the resolver and source acceptance; indexed cuts exercise the two-workspace

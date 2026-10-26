@@ -1246,9 +1246,16 @@ impl ProductAgentTree {
         input_candidate_id: Option<super::CandidateId>,
     ) -> BoundWorkspace {
         let workspace_id = format!("ws-{reserved_agent_id}");
+        let conflict = input_candidate_id
+            .as_ref()
+            .and_then(|id| self.candidates.get(id))
+            .filter(|row| row.kind == super::CandidateKind::Conflict);
         self.workspaces.insert(
             workspace_id.clone(),
             WorkspaceRecord {
+                resolves: conflict.and_then(|row| row.source_candidate_id.clone()),
+                conflict_target: conflict.and_then(|row| row.conflict_target.clone()),
+                conflict_paths: conflict.map_or_else(Vec::new, |row| row.conflict_paths.clone()),
                 input_candidate_id,
                 workspace_id: workspace_id.clone(),
                 owner_agent_id: caller_id.to_owned(),

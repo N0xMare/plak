@@ -576,7 +576,7 @@ pub fn load_agent_tree(
     let mut workspaces = BTreeMap::new();
     let mut workspace_statement = tx
         .prepare(
-            "SELECT workspace_id, owner_agent_id, path, mode, status, base_commit, base_content, base_change_id, generation, adopter_agent_id, input_candidate_id FROM agent_workspaces WHERE tree_id=?1",
+            "SELECT workspace_id, owner_agent_id, path, mode, status, base_commit, base_content, base_change_id, generation, adopter_agent_id, input_candidate_id, resolves, conflict_target, conflict_paths FROM agent_workspaces WHERE tree_id=?1",
         )
         .map_err(|_| "could not query agent workspaces".to_owned())?;
     let workspace_rows = workspace_statement
@@ -595,6 +595,19 @@ pub fn load_agent_tree(
                 input_candidate_id: row
                     .get::<_, Option<String>>(10)?
                     .map(CandidateId::from_persisted),
+                resolves: row
+                    .get::<_, Option<String>>(11)?
+                    .map(CandidateId::from_persisted),
+                conflict_target: row.get(12)?,
+                conflict_paths: serde_json::from_str(&row.get::<_, String>(13)?).map_err(
+                    |error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            13,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    },
+                )?,
             })
         })
         .map_err(|_| "could not query agent workspaces".to_owned())?;

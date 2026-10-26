@@ -273,6 +273,7 @@ fn assert_lineage_reopens(f: &mut Fixture) {
     f.tree.acknowledge_revision(store.save(&f.tree).unwrap());
     let reopened = ProductAgentTree::reopen(store.load("conflict-tests").unwrap().unwrap());
     assert_eq!(reopened.candidates(), f.tree.candidates());
+    assert_eq!(reopened.workspaces(), f.tree.workspaces());
 }
 
 #[test]

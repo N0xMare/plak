@@ -569,6 +569,9 @@ pub(crate) fn adopt_candidate(request: &AdoptRequest<'_>) -> Result<AdoptLanding
     } = *request;
     match detect_vcs(target_path).or_else(|_| detect_parent_vcs(target_path)) {
         Ok(SessionVcs::Git) => git_adopt(request),
+        Ok(SessionVcs::Jj) if request.resolution_refusal.is_some() => Err(
+            AdoptFailure::NotApplicable(request.resolution_refusal.unwrap_or_default().to_owned()),
+        ),
         Ok(SessionVcs::Jj) if request.resolved_source.is_some() => {
             Err(AdoptFailure::NotApplicable(
                 "conflict candidates are not yet available for jj".to_owned(),

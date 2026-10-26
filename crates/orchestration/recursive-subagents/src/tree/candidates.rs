@@ -192,7 +192,15 @@ impl ProductAgentTree {
             ..
         } = ticket;
         let completed_at_ms = now_unix_millis();
-        let sealed = match sealed {
+        let resolver = self.resolver_input(&workspace_id);
+        let sealed = match sealed.and_then(|sealed| {
+            resolver.as_ref().map(|_| sealed).map_err(|error| {
+                VcsError::new(
+                    plakous_workspace::occupancy_vcs::VcsErrorKind::RecoveryRequired,
+                    error.message.clone(),
+                )
+            })
+        }) {
             Ok(sealed) => sealed,
             Err(error) => {
                 // a seal that could not *run* is a fault, not
@@ -223,7 +231,7 @@ impl ProductAgentTree {
             .is_some_and(|snapshot| snapshot.history_left_base);
         let sealed = sealed.filter(|snapshot| diverged_from_base(snapshot, &base_content));
         if let Some(snapshot) = sealed {
-            let resolver = self.resolver_input(&workspace_id).cloned();
+            let resolver = resolver.ok().flatten();
             let producing_attempt_id = attempt_id
                 .clone()
                 .unwrap_or_else(|| AttemptId::new(&agent_id, 1));
@@ -232,14 +240,14 @@ impl ProductAgentTree {
                 CandidateRecord {
                     kind: super::CandidateKind::Work,
                     source_candidate_id: None,
-                    conflict_target: resolver
-                        .as_ref()
-                        .and_then(|input| input.conflict_target.clone()),
+                    conflict_target: resolver.as_ref().map(|input| input.target.clone()),
                     conflict_paths: resolver
                         .as_ref()
-                        .map_or_else(Vec::new, |input| input.conflict_paths.clone()),
-                    resolves: resolver.and_then(|input| input.source_candidate_id),
-                    adopted_via: None,
+                        .map_or_else(Vec::new, |input| input.paths.clone()),
+                    adopted_via: resolver
+                        .as_ref()
+                        .and_then(|input| input.superseded_by.clone()),
+                    resolves: resolver.map(|input| input.source),
                     target_before: None,
                     candidate_id: candidate_id.clone(),
                     workspace_id: workspace_id.clone(),
@@ -719,7 +727,9 @@ impl ProductAgentTree {
         }
         self.check_base_pin_recovery(&candidate.workspace_id)?;
         self.check_adopt_available(&candidate.workspace_id)?;
-        if let Some(via) = &candidate.adopted_via {
+        if let Some(via) = &candidate.adopted_via
+            && (candidate.resolves.is_none() || candidate.adopted_by.is_some())
+        {
             return Err(TopologyError::new(
                 TopologyErrorCode::AdoptNotApplicable,
                 format!("that candidate was already adopted via {via}"),
@@ -732,6 +742,32 @@ impl ProductAgentTree {
             ));
         }
         let source = self.resolution_source(caller_id, &candidate)?;
+        let resolution_refusal = self
+            .resolution_accepted_via(&candidate)
+            .map(|via| format!("resolution already accepted via {via}; nothing was adopted"));
+        let resolver_paths = if candidate.resolves.is_some() {
+            let workspace = self
+                .workspaces
+                .get(&candidate.workspace_id)
+                .filter(|row| row.resolves == candidate.resolves && !row.conflict_paths.is_empty())
+                .ok_or_else(|| {
+                    TopologyError::new(
+                        TopologyErrorCode::WorkspaceRecoveryRequired,
+                        "persisted resolver lineage is missing; nothing was adopted",
+                    )
+                })?;
+            workspace
+                .conflict_paths
+                .iter()
+                .map(|path| path.path.clone())
+                .collect()
+        } else {
+            candidate
+                .conflict_paths
+                .iter()
+                .map(|path| path.path.clone())
+                .collect()
+        };
         if candidate.kind == super::CandidateKind::Conflict && !request.accept_conflicts {
             let path = self
                 .workspaces
@@ -976,6 +1012,8 @@ impl ProductAgentTree {
         self.bump();
         self.take_adopt_conflict(candidate.candidate_id.as_str());
         self.effects.adopts.push(AdoptTicket {
+            resolution_refusal,
+            resolver_paths,
             accept_conflicts: request.accept_conflicts,
             conflict_pin,
             source,

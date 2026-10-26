@@ -206,6 +206,10 @@ one cross-build carrier (a build imports its own and the previous version).
   resolve it in a fork over the named conflict candidate or explicitly land
   markers with `adopt_candidate {accept_conflicts:true}`. Non-textual conflicts
   and JJ retain plain conflict refusals.
+  Resolver copies persist their source, target and marker paths independently
+  of conflict records. Live inputs protect those records and pins; late
+  resolutions are superseded at seal time and spent conflict inputs refuse
+  another resolver. Missing lineage fails closed rather than becoming work.
 
 - Conversations carry across builds and configuration changes: `/reload` and
   `session import` move the full neutral conversation through export

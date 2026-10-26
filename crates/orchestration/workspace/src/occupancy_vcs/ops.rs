@@ -25,6 +25,8 @@ pub struct MintRequest<'a> {
 
 /// One three-way landing and the identity of its retained provenance.
 pub struct AdoptRequest<'a> {
+    /// A spent resolution may be inspected for markers, but must never apply.
+    pub resolution_refusal: Option<&'a str>,
     /// Explicit permission to land marker-bearing work.
     pub accept_conflicts: bool,
     /// Reserved id for a new textual conflict, absent on resolution retries.

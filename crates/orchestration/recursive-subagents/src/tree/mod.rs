@@ -584,6 +584,12 @@ pub struct CandidateRecord {
 /// checkout itself, or a copy minted for one node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceRecord {
+    /// Original source when this copy was minted as a conflict resolver.
+    pub resolves: Option<CandidateId>,
+    /// Original adopter whose checkout may accept the resolution.
+    pub conflict_target: Option<String>,
+    /// Immutable marker-inspection paths captured at mint.
+    pub conflict_paths: Vec<plakous_workspace::occupancy_vcs::ConflictPath>,
     /// Candidate this copy was minted over, absent for a live-state fork.
     pub input_candidate_id: Option<CandidateId>,
     /// Durable id; `ws-<agent>` for a minted copy.
@@ -936,6 +942,8 @@ fn diverged_from_base(snapshot: &VcsSnapshot, base_content: &str) -> bool {
 /// landing. Carries no tree reference for the same reason.
 #[derive(Clone, Debug)]
 pub struct AdoptTicket {
+    resolution_refusal: Option<String>,
+    resolver_paths: Vec<String>,
     accept_conflicts: bool,
     conflict_pin: Option<plakous_workspace::occupancy_vcs::ConflictPin>,
     source: Option<CandidateRecord>,
@@ -958,14 +966,10 @@ impl AdoptTicket {
     /// reference so it can run with the tree mutex released.
     pub fn land(&self, vcs: &dyn VcsOps) -> Result<AdoptLanding, AdoptFailure> {
         vcs.adopt(&AdoptRequest {
+            resolution_refusal: self.resolution_refusal.as_deref(),
             accept_conflicts: self.accept_conflicts,
             conflict_pin: self.conflict_pin.as_ref(),
-            resolver_paths: &self
-                .candidate
-                .conflict_paths
-                .iter()
-                .map(|path| path.path.clone())
-                .collect::<Vec<_>>(),
+            resolver_paths: &self.resolver_paths,
             resolved_source: self.source.as_ref().map(|source| {
                 plakous_workspace::occupancy_vcs::ResolvedSource {
                     candidate_id: source.candidate_id.as_str(),
@@ -1724,6 +1728,9 @@ impl ProductAgentTree {
             close_ids: Vec::new(),
         };
         let workspace = WorkspaceRecord {
+            resolves: None,
+            conflict_target: None,
+            conflict_paths: Vec::new(),
             input_candidate_id: None,
             workspace_id: workspace_id.clone(),
             owner_agent_id: root_agent_id.clone(),

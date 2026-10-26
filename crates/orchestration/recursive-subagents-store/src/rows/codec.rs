@@ -500,6 +500,9 @@ impl Row for WorkspaceRecord {
             "generation",
             "adopter_agent_id",
             "input_candidate_id",
+            "resolves",
+            "conflict_target",
+            "conflict_paths",
         ],
     };
 
@@ -533,6 +536,10 @@ impl Row for WorkspaceRecord {
                     .input_candidate_id
                     .as_ref()
                     .map(CandidateId::as_str),
+                workspace.resolves.as_ref().map(CandidateId::as_str),
+                workspace.conflict_target,
+                serde_json::to_string(&workspace.conflict_paths)
+                    .map_err(|_| "workspace conflicts could not be encoded".to_owned())?,
             ],
         ))
     }
