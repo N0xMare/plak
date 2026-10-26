@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use futures_util::lock::Mutex as AsyncMutex;
+use plakous_auth::oauth_orchestrator::AuthBodyError as UsageTransportError;
 use plakous_auth::oauth_orchestrator::{
     BuildRequestFailure, ClaimedRefreshHooks, CredentialRefreshDetail,
     CredentialRefreshFailureReason, CredentialRefreshObserver, PullBodyError, pull_claimed_body,
@@ -429,11 +430,6 @@ const fn usage_credential_refusal(
         )),
         _ => Some(SubscriptionUsageUnavailable::LocalState),
     }
-}
-
-enum UsageTransportError {
-    Failure(plakous_http::Failure),
-    TooLarge,
 }
 
 fn map_pull_body_error(error: PullBodyError) -> ClaudeNativeAuthError {

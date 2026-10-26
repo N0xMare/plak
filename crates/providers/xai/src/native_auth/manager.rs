@@ -19,7 +19,7 @@ use super::{
     XaiSubscriptionIntegrationProfile, XaiSubscriptionStatus, auth_profile_id, authorization_url,
     bearer_header, bind_loopback_listener, decode_json, fmt, is_subscription_coding_model_id,
     native_route_authority, network_failure, refuse_retired_payload, sensitive_header_value,
-    system_unix_seconds, until_flow_deadline, urlencoded_form, usage_credential_refusal,
+    system_unix_seconds, until_deadline, urlencoded_form, usage_credential_refusal,
     validate_acceptance,
 };
 #[cfg(test)]
@@ -271,7 +271,7 @@ impl XaiNativeAuthManager {
         };
         let (status, is_json, body) = match self.core.execute(request).await {
             Ok(reply) => reply,
-            Err(AuthTransportError::ResponseTooLarge) => {
+            Err(AuthTransportError::TooLarge) => {
                 return unavailable(SubscriptionUsageUnavailable::InvalidResponse);
             }
             Err(AuthTransportError::Failure(failure)) => {
@@ -367,8 +367,9 @@ impl XaiNativeAuthManager {
             ("client_id", XAI_PUBLIC_CLIENT_ID),
             ("scope", XAI_OAUTH_SCOPE),
         ]);
-        let response = until_flow_deadline(
+        let response = until_deadline(
             authorization_deadline,
+            || XaiNativeAuthError::LoginExpired,
             self.core.send_form(self.core.endpoints.device(), form),
         )
         .await?;

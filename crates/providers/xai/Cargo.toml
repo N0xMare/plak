@@ -38,6 +38,7 @@ native-auth = [
     "dep:sha2",
     "dep:url",
     "plakous-auth/http-refresh",
+    "plakous-auth/jwt",
     "tokio/io-util",
     "tokio/net",
 ]

@@ -3730,6 +3730,17 @@ Chat) have no such window; their review-due dates only warn (§6).
 
 ### 7.2 The three OAuth verticals
 
+`plakous-auth` owns provider-neutral authentication scaffolding: bounded,
+zeroizing response-body pulls, media-type recognition, unvalidated audience
+and subject claim shapes (in the claimed-HTTP orchestrator module, not the
+facade's re-exported workflow helpers), and content-free JWT failure
+classification (the internal `jwt` feature). Callers supply byte bounds and
+deadline/error policy.
+The provider crates retain header multiplicity rules, request construction,
+signed-claim validation, account binding, token payload encodings, compatibility
+review checks and consent pins. Sharing scaffolding does not change their wire
+bytes, stored credentials or compiled identities.
+
 The facade's private `SubscriptionState` owns compatibility consent, login
 recovery markers, their locks and quarantine, and offline catalog persistence. Login and model
 workflows call named state operations; the catalog codec performs no I/O.

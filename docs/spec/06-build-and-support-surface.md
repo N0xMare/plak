@@ -389,6 +389,11 @@ which no other facade feature implies and only `full` and Plak's product
 closure enable. `plakous-mcp` depends on `plakous-auth` with `http-refresh`
 (the private credential store and claimed refresh, for MCP OAuth), so an
 `mcp` selection reaches `plakous-auth` without exposing `plakous::auth`.
+The internal `plakous-auth/jwt` feature adds shared JWT rejection
+classification and implies `http-refresh`; only the OpenAI and xAI
+`native-auth` features request it. The `auth`, `mcp` and `anthropic`
+closures do not acquire JWT crypto; the feature checker's closure exclusions
+pin that.
 The cap bounds the per-package subset enumeration, so the
 facade's own run is 1026 closures. Any eleventh public feature needs its own
 reviewed amendment here. Hidden repository-only `test-clock` is not public,

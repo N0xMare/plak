@@ -816,7 +816,8 @@ fn deadline_test_credential() -> Result<StoredCredential, NativeCodexAuthError> 
         account_id: "deadline-account".to_owned(),
         scopes: validate_exact_scopes(OPENAI_CODEX_OAUTH_SCOPES)?,
         access_expires_at: now_unix_secs() + 3_600,
-        selection_epoch: generate_selection_epoch()?,
+        selection_epoch: generate_login_selection_epoch()
+            .map_err(|_| NativeCodexAuthError::Binding)?,
     })
 }
 
@@ -2245,7 +2246,8 @@ fn relogin_credential(account: &str, marker: &str) -> TestResult<StoredCredentia
         account_id: account.to_owned(),
         scopes: validate_exact_scopes(OPENAI_CODEX_OAUTH_SCOPES)?,
         access_expires_at: now_unix_secs() + 3_600,
-        selection_epoch: generate_selection_epoch()?,
+        selection_epoch: generate_login_selection_epoch()
+            .map_err(|_| NativeCodexAuthError::Binding)?,
     })
 }
 

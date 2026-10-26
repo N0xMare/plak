@@ -32,11 +32,20 @@ use crate::{
     PrivateStoreError, RefreshClaim,
 };
 
+mod body;
 mod browser;
+mod claims;
 mod hooks;
 mod jwks;
 mod refresh;
 mod revoke;
+
+/// Content-free signed identity rejection classification (feature `jwt`).
+#[cfg(feature = "jwt")]
+pub mod jwt;
+
+pub use body::{AuthBodyError, is_json_media_type, pull_auth_body};
+pub use claims::{AudienceClaim, SubjectClaim};
 
 pub use browser::{
     BrowserLoopbackHooks, LoopbackConnectionEvent, ReadRequestHeadError, bind_loopback_listener,

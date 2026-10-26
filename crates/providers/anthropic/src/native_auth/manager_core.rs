@@ -9,6 +9,7 @@ use super::{
     UsageTransportError, Zeroizing, credential_record_from_grant, network_failure, remaining_until,
     system_unix_seconds, validate_acceptance,
 };
+use plakous_auth::oauth_orchestrator::{is_json_media_type, pull_auth_body};
 
 impl ManagerCore {
     pub(super) fn ensure_active(&self) -> Result<(), ClaudeNativeAuthError> {
@@ -64,17 +65,14 @@ impl ManagerCore {
             .await
             .map_err(|failure| ClaudeNativeAuthError::Transport(network_failure(failure)))?;
         let status = response.status();
-        let mut body = response.into_body();
-        let mut bytes = Zeroizing::new(Vec::new());
-        while let Some(chunk) = body.next_chunk().await {
-            let chunk = chunk
-                .map_err(|failure| ClaudeNativeAuthError::Transport(network_failure(failure)))?;
-            if bytes.len().saturating_add(chunk.len()) > MAX_TOKEN_BYTES {
-                let _ = body.close().await;
-                return Err(ClaudeNativeAuthError::LoginTokenExchange);
-            }
-            bytes.extend_from_slice(&chunk);
-        }
+        let bytes = pull_auth_body(response.into_body(), MAX_TOKEN_BYTES)
+            .await
+            .map_err(|error| match error {
+                UsageTransportError::Failure(failure) => {
+                    ClaudeNativeAuthError::Transport(network_failure(failure))
+                }
+                UsageTransportError::TooLarge => ClaudeNativeAuthError::LoginTokenExchange,
+            })?;
         if !status.is_success() {
             return Err(ClaudeNativeAuthError::LoginTokenExchange);
         }
@@ -132,23 +130,13 @@ impl ManagerCore {
             .map_err(UsageTransportError::Failure)?;
         let status = response.status();
         let is_json = response.headers().iter().any(|(name, value)| {
-            *name == HEADER_CONTENT_TYPE
-                && value
-                    .to_str()
-                    .ok()
-                    .and_then(|media| media.split(';').next())
-                    .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json"))
+            *name == HEADER_CONTENT_TYPE && value.to_str().is_ok_and(is_json_media_type)
         });
-        let mut body = response.into_body();
-        let mut bytes = Zeroizing::new(Vec::new());
-        while let Some(chunk) = body.next_chunk().await {
-            let chunk = chunk.map_err(UsageTransportError::Failure)?;
-            if bytes.len().saturating_add(chunk.len()) > MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES {
-                let _ = body.close().await;
-                return Err(UsageTransportError::TooLarge);
-            }
-            bytes.extend_from_slice(&chunk);
-        }
+        let bytes = pull_auth_body(
+            response.into_body(),
+            MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES,
+        )
+        .await?;
         Ok((status, is_json, bytes))
     }
 

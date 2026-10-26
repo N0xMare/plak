@@ -366,21 +366,6 @@ where
         .map_err(|_| NativeCodexAuthError::Coordination)?
 }
 
-fn remaining_login_time(
-    deadline: Instant,
-    expired: NativeCodexAuthError,
-) -> Result<Duration, NativeCodexAuthError> {
-    remaining_until(deadline, Instant::now()).ok_or(expired)
-}
-
-fn capped_login_deadline(
-    deadline: Instant,
-    cap: Duration,
-    expired: NativeCodexAuthError,
-) -> Result<Instant, NativeCodexAuthError> {
-    capped_deadline(deadline, cap, Instant::now()).ok_or(expired)
-}
-
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct StoredCredential {
@@ -448,10 +433,6 @@ fn parse_stored(payload: &SecretBytes) -> Result<StoredCredential, NativeCodexAu
         return Err(NativeCodexAuthError::LoginRequired);
     }
     Ok(credential)
-}
-
-fn generate_selection_epoch() -> Result<String, NativeCodexAuthError> {
-    generate_login_selection_epoch().map_err(|_| NativeCodexAuthError::Binding)
 }
 
 fn stored_record(

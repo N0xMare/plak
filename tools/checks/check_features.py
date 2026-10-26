@@ -182,7 +182,9 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plakous", "xai", "plakous-tool-web/image-gen"),
     ("plakous-anthropic", "native-auth", "plakous-auth/http-refresh"),
     ("plakous-openai", "native-auth", "plakous-auth/http-refresh"),
+    ("plakous-openai", "native-auth", "plakous-auth/jwt"),
     ("plakous-xai", "native-auth", "plakous-auth/http-refresh"),
+    ("plakous-xai", "native-auth", "plakous-auth/jwt"),
     # `FakeVcs` and the real-repository fixtures the tree's tests drive live in
     # `plakous-workspace`; `plakous-hosted`'s own test-support turns them on.
     # `MemoryStore` is the hosted session-record double `plakous-hosted`'s own
@@ -233,7 +235,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-agent": "a19134205d444cf4b88520e8da37268e19e9527aae92ac337ffb68691c7bdba7",
     "plakous-anthropic": "2b5706d014327cfb790b56a5aade9ecc92b4483dc411b54bbc8d71be161fb555",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
-    "plakous-auth": "742413d1a421cae95994a0be6fe1b0f7b3dda38ec87ea1a87cc4173914dd08cd",
+    "plakous-auth": "621ce8b075d3e56e9c250ce9c68da87c1aba95de0cb34750683574cda7995202",
     "plakous-chat-completions": "251fd50384154edbb997b1b0394df1cda3b1795f081a383db30835cca6a0295e",
     "plakous-exchange": "209703e22ea03737ebab1904ef0e5286f431a71ec59fe962342c976457902fc4",
     "plakous-http": "4ba11a284120802378d429ec77ea58c8a3f25663d1808a795974c297f934ede9",
@@ -241,7 +243,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "567ec57875dcd1f0b3b28325330bd3cd0e071a994088fb90b7445ae8f69ac166",
     "plakous-messages": "eae7f4a067455ca31bab364c39a597256a19c84e636a17af6b6012bba40284b1",
     "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
-    "plakous-openai": "1db5bb6636c51ca8702ecd2cfbdaa34592c89b058df71d9a7194a4cfebb13197",
+    "plakous-openai": "68cd7c2921152b0089085d63ed812b076c643f9485b7b5496f3b167435639347",
     "plakous-tool-files": "f91b59c3d65dff91d2fe462da36376abf3d82c44a5a86abf209d435cd046f759",
     "plakous-tool-plan": "7e57f5a8c4b1b39a7967fe97dbb83d7d78822878b40638d823e49c5a7d0b021c",
     "plakous-tool-process": "f70f0cd80a32e357f1b8381a78eeb0aa69861bb7f5fad614f0c52831a029c5cb",
@@ -254,7 +256,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-responses-dialect": "87c82cbbd98ded7dceeb4d2bbec480905da27084ee6ea8dba00e5c92f8212d8e",
     "plakous-store": "64f90ad9ab7d4143c47844d30dfcc4ce41fe06a980d80d6bfba681a3ae378015",
     "plakous-tools": "1140b910a06b7b83f425d6e0ed50a9466d7adc8e2da6a07b4885d4a3c0a737a0",
-    "plakous-xai": "2add014ed0d25e21fa4b0418425c4512b95b0a5bdcf14ea0af29c3181bd2656f",
+    "plakous-xai": "b1e753efb16cda3956a21aaa836d5c7da2fbd375216035d30f1f657ac729823f",
 }
 
 
@@ -278,6 +280,10 @@ EXCLUDED_CLOSURE_PACKAGES = {
         "plakous-http",
         "monty-proto",
     ),
+    # Credential-store, MCP and Claude closures never acquire JWT crypto.
+    ("plakous", ("auth",)): ("jsonwebtoken",),
+    ("plakous", ("mcp",)): ("jsonwebtoken",),
+    ("plakous", ("anthropic",)): ("jsonwebtoken",),
 }
 
 

@@ -12,12 +12,11 @@ use super::{
     OAuthCallbackOutcome, OAuthLoginTokenResponse, OPENAI_CODEX_NATIVE_CLIENT_ID,
     OPENAI_CODEX_OAUTH_SCOPES, Serialize, StatusCode, StoredCredential, TOKEN_PATH, TcpListener,
     Zeroizing, authorization_code_token_form, bind_loopback_listener, build_authorization_url,
-    capped_login_deadline, constant_time_value_eq, endpoint_url, execute_bounded, fmt, form_body,
+    capped_deadline, constant_time_value_eq, endpoint_url, execute_bounded, fmt, form_body,
     form_headers, generate_oauth_correlation_token, json_headers, map_oauth_workflow_error,
-    parse_http11_get_request, parse_loopback_callback_target, parse_strict_json,
-    remaining_login_time, require_json_media_type, require_status, run_blocking,
-    run_browser_loopback_session, stored_record, validate_oauth_value, validate_profile_at,
-    validate_user_code,
+    parse_http11_get_request, parse_loopback_callback_target, parse_strict_json, remaining_until,
+    require_json_media_type, require_status, run_blocking, run_browser_loopback_session,
+    stored_record, validate_oauth_value, validate_profile_at, validate_user_code,
 };
 #[cfg(test)]
 use super::{CALLBACK_RESPONSE_CAP, format_http11_text_response, write_all_before_deadline};
@@ -190,7 +189,7 @@ impl CodexSubscriptionCredentialManager {
         login: BrowserLoginAttempt,
         callback: OAuthCallbackOutcome,
     ) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
-        remaining_login_time(login.deadline, NativeCodexAuthError::Callback)?;
+        remaining_until(login.deadline, Instant::now()).ok_or(NativeCodexAuthError::Callback)?;
         let code = match callback {
             OAuthCallbackOutcome::AuthorizationCode { code, state } => {
                 if !constant_time_value_eq(login.state.expose_secret(), state.as_str()) {
@@ -205,7 +204,8 @@ impl CodexSubscriptionCredentialManager {
                 return Err(NativeCodexAuthError::Provider);
             }
         };
-        let remaining = remaining_login_time(login.deadline, NativeCodexAuthError::Callback)?;
+        let remaining = remaining_until(login.deadline, Instant::now())
+            .ok_or(NativeCodexAuthError::Callback)?;
         let _lifecycle = tokio::time::timeout(remaining, self.lifecycle.lock())
             .await
             .map_err(|_| NativeCodexAuthError::Callback)?;
@@ -308,11 +308,8 @@ impl CodexSubscriptionCredentialManager {
                 DEVICE_TOKEN_PATH,
                 json_headers(None)?,
                 body,
-                capped_login_deadline(
-                    login.deadline,
-                    AUTH_REQUEST_CAP,
-                    NativeCodexAuthError::DeviceCodeExpired,
-                )?,
+                capped_deadline(login.deadline, AUTH_REQUEST_CAP, Instant::now())
+                    .ok_or(NativeCodexAuthError::DeviceCodeExpired)?,
             )
             .await?;
             match reply.status {
@@ -373,8 +370,8 @@ impl CodexSubscriptionCredentialManager {
     ) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
         self.validate_profile_admission()?;
         let redirect_uri = endpoint_url(&self.endpoints.auth_origin, DEVICE_REDIRECT_PATH)?;
-        let remaining =
-            remaining_login_time(authorization.deadline, NativeCodexAuthError::Provider)?;
+        let remaining = remaining_until(authorization.deadline, Instant::now())
+            .ok_or(NativeCodexAuthError::Provider)?;
         let _lifecycle = tokio::time::timeout(remaining, self.lifecycle.lock())
             .await
             .map_err(|_| NativeCodexAuthError::Provider)?;
@@ -405,7 +402,8 @@ impl CodexSubscriptionCredentialManager {
         expected_identity: Option<(&str, &str)>,
         deadline: Instant,
     ) -> Result<StoredCredential, NativeCodexAuthError> {
-        remaining_login_time(deadline, NativeCodexAuthError::LoginTokenTransport)?;
+        remaining_until(deadline, Instant::now())
+            .ok_or(NativeCodexAuthError::LoginTokenTransport)?;
         validate_oauth_value(code, MAX_OAUTH_VALUE_BYTES)
             .map_err(|_| NativeCodexAuthError::LoginTokenTransport)?;
         let body = form_body(&authorization_code_token_form(
@@ -421,11 +419,8 @@ impl CodexSubscriptionCredentialManager {
             TOKEN_PATH,
             form_headers(),
             body,
-            capped_login_deadline(
-                deadline,
-                AUTH_REQUEST_CAP,
-                NativeCodexAuthError::LoginTokenTransport,
-            )?,
+            capped_deadline(deadline, AUTH_REQUEST_CAP, Instant::now())
+                .ok_or(NativeCodexAuthError::LoginTokenTransport)?,
         )
         .await
         .map_err(|_| NativeCodexAuthError::LoginTokenTransport)?;
@@ -447,16 +442,18 @@ impl CodexSubscriptionCredentialManager {
         credential_baseline: Option<CredentialFence>,
         deadline: Instant,
     ) -> Result<(), NativeCodexAuthError> {
-        remaining_login_time(deadline, NativeCodexAuthError::LoginPersistence)?;
+        remaining_until(deadline, Instant::now()).ok_or(NativeCodexAuthError::LoginPersistence)?;
         let store = Arc::clone(&self.store);
         let accepted_at = self.acceptance.accepted_at;
         let clock = Arc::clone(&self.clock);
         let (account, committed) = run_blocking(move || {
             validate_profile_at(accepted_at, clock.now().seconds())?;
-            remaining_login_time(deadline, NativeCodexAuthError::LoginPersistence)?;
+            remaining_until(deadline, Instant::now())
+                .ok_or(NativeCodexAuthError::LoginPersistence)?;
             let account = AccountBinding::new(&credential.account_id)
                 .map_err(|_| NativeCodexAuthError::LoginPersistence)?;
-            remaining_login_time(deadline, NativeCodexAuthError::LoginPersistence)?;
+            remaining_until(deadline, Instant::now())
+                .ok_or(NativeCodexAuthError::LoginPersistence)?;
             let committed = if let Some(fence) = credential_baseline {
                 let next = fence
                     .generation()
@@ -675,7 +672,9 @@ pub(super) async fn write_callback_response<W>(
 ) where
     W: tokio::io::AsyncWrite + Unpin,
 {
-    let Ok(remaining) = remaining_login_time(deadline, NativeCodexAuthError::Callback) else {
+    let Ok(remaining) =
+        remaining_until(deadline, Instant::now()).ok_or(NativeCodexAuthError::Callback)
+    else {
         return;
     };
     let remaining = remaining.min(CALLBACK_RESPONSE_CAP);

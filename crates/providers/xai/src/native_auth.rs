@@ -12,11 +12,12 @@ mod refresh;
 mod route_authority;
 mod verify;
 
+use error::LoginHttpStage;
 pub use error::XaiNativeAuthError;
-use error::{AuthTransportError, LoginHttpStage};
 pub use evidence::XaiModelResolutionEvidence;
 pub use manager::XaiNativeAuthManager;
 use manager_core::CatalogRenewal;
+use plakous_auth::oauth_orchestrator::AuthBodyError as AuthTransportError;
 pub use profile::{
     XaiCompatibilityAcceptance, XaiCompatibilityProvenance, XaiOfflineCredentialStatus,
     XaiOfflineSelectedSlot, XaiSubscriptionIntegrationProfile, XaiSubscriptionStatus,
@@ -65,8 +66,8 @@ use plakous_auth::oauth_orchestrator::{
     CredentialRefreshDetail, CredentialRefreshEvent, CredentialRefreshFailureClass,
     CredentialRefreshFailureReason, CredentialRefreshObserver, CredentialRefreshPhase, FetchedJwks,
     JwksCache, JwksResolvePolicy, LoopbackConnectionEvent, PullBodyError, bind_loopback_listener,
-    pull_claimed_body, run_browser_loopback_session, run_claimed_refresh, run_claimed_revoke,
-    until_deadline,
+    is_json_media_type, pull_claimed_body, run_browser_loopback_session, run_claimed_refresh,
+    run_claimed_revoke, until_deadline,
 };
 use plakous_auth::oauth_workflow::{
     AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, LoopbackCallbackOutcome,
@@ -403,8 +404,7 @@ fn headers_are_json(headers: &Headers) -> bool {
     values
         .next()
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("application/json"))
+        .is_some_and(is_json_media_type)
         && values.next().is_none()
 }
 
@@ -738,16 +738,6 @@ fn authorization_url(
     .map_err(|_| XaiNativeAuthError::Request)
 }
 
-fn until_flow_deadline<F, T>(
-    deadline: Instant,
-    future: F,
-) -> impl Future<Output = Result<T, XaiNativeAuthError>>
-where
-    F: Future<Output = Result<T, XaiNativeAuthError>>,
-{
-    until_deadline(deadline, || XaiNativeAuthError::LoginExpired, future)
-}
-
 fn credential_record(
     account: AccountBinding,
     generation: CredentialGeneration,
@@ -826,10 +816,6 @@ fn retired_or_quarantined(error: XaiNativeAuthError) -> BuildRequestFailure<XaiN
         XaiNativeAuthError::StoredCredentialFormatRetired => BuildRequestFailure::Restore(error),
         error => BuildRequestFailure::LeaveQuarantined(error),
     }
-}
-
-fn generate_selection_epoch() -> Result<String, XaiNativeAuthError> {
-    generate_login_selection_epoch().map_err(|_| XaiNativeAuthError::RandomnessUnavailable)
 }
 
 #[cfg(test)]

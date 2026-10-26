@@ -9,7 +9,7 @@ use super::{
     XAI_OAUTH_SCOPE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, XaiSubscriptionStatus, Zeroizing,
     decode_json, fmt, is_http_token_byte, loopback_redirect_authority, map_oauth_workflow_error,
     parse_http11_get_request, parse_loopback_callback_target, parse_remote_authorization_input,
-    run_browser_loopback_session, until_flow_deadline, urlencoded_form,
+    run_browser_loopback_session, until_deadline, urlencoded_form,
 };
 
 /// Non-cloneable redacted browser-login capability.
@@ -90,8 +90,9 @@ impl BrowserLoginFlow {
                 return Err(XaiNativeAuthError::AuthorizationDenied);
             }
         };
-        until_flow_deadline(
+        until_deadline(
             self.deadline,
+            || XaiNativeAuthError::LoginExpired,
             self.core.exchange_code(
                 code,
                 &self.redirect_uri,
@@ -219,16 +220,21 @@ impl XaiDeviceLogin {
                 ("client_id", XAI_PUBLIC_CLIENT_ID),
                 ("device_code", self.device_code.expose_secret()),
             ]);
-            match until_flow_deadline(
+            match until_deadline(
                 self.deadline,
+                || XaiNativeAuthError::LoginExpired,
                 self.core
                     .send_login_token_form_raw(self.core.endpoints.token(), form),
             )
             .await
             {
                 Ok((status, response)) if status.is_success() => {
-                    return until_flow_deadline(self.deadline, self.complete_success(response))
-                        .await;
+                    return until_deadline(
+                        self.deadline,
+                        || XaiNativeAuthError::LoginExpired,
+                        self.complete_success(response),
+                    )
+                    .await;
                 }
                 Ok((_status, response)) => {
                     self.core.ensure_flow_active(self.deadline)?;

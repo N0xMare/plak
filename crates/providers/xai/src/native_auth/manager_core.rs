@@ -19,6 +19,7 @@ use super::{
     system_unix_elapsed, system_unix_seconds, urlencoded_form, valid_admitted_catalog_entries,
     valid_login_selection_epoch, validate_acceptance_until,
 };
+use plakous_auth::oauth_orchestrator::pull_auth_body;
 
 impl ManagerCore {
     pub(super) fn ensure_active(&self) -> Result<(), XaiNativeAuthError> {
@@ -763,16 +764,7 @@ impl ManagerCore {
             .map_err(AuthTransportError::Failure)?;
         let status = response.status();
         let is_json = headers_are_json(response.headers());
-        let mut body = response.into_body();
-        let mut bytes = Zeroizing::new(Vec::new());
-        while let Some(chunk) = body.next_chunk().await {
-            let chunk = chunk.map_err(AuthTransportError::Failure)?;
-            if bytes.len().saturating_add(chunk.len()) > MAX_AUTH_BODY_BYTES {
-                let _ = body.close().await;
-                return Err(AuthTransportError::limit());
-            }
-            bytes.extend_from_slice(&chunk);
-        }
+        let bytes = pull_auth_body(response.into_body(), MAX_AUTH_BODY_BYTES).await?;
         Ok((status, is_json, bytes))
     }
 }

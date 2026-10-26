@@ -32,6 +32,7 @@ native-auth = [
     "dep:plakous-auth",
     "dep:subtle",
     "plakous-auth/http-refresh",
+    "plakous-auth/jwt",
     "tokio/io-util",
     "tokio/macros",
     "tokio/net",

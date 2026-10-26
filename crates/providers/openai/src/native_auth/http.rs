@@ -8,6 +8,7 @@ use super::{
     USER_AGENT, Url, Zeroizing, decode_json_bounded, map_oauth_workflow_error, network_failure,
     pull_claimed_body, sensitive_header_value, urlencoded_form_bytes, validate_oauth_value,
 };
+use plakous_auth::oauth_orchestrator::{AuthBodyError, is_json_media_type, pull_auth_body};
 
 pub(super) struct HttpReply {
     pub(super) status: StatusCode,
@@ -138,16 +139,14 @@ async fn execute_classified(
         .and_then(|value| value.to_str().ok())
         .filter(|value| value.len() <= 128)
         .map(str::to_owned);
-    let mut response_body = response.into_body();
-    let mut bytes = Zeroizing::new(Vec::new());
-    while let Some(chunk) = response_body.next_chunk().await {
-        let chunk = chunk.map_err(|failure| HttpAttemptError(network_failure(failure)))?;
-        if bytes.len().saturating_add(chunk.len()) > max_body_bytes {
-            let _ = response_body.close().await;
-            return Err(HttpAttemptError(None));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
+    let bytes = pull_auth_body(response.into_body(), max_body_bytes)
+        .await
+        .map_err(|error| {
+            HttpAttemptError(match error {
+                AuthBodyError::Failure(failure) => network_failure(failure),
+                AuthBodyError::TooLarge => None,
+            })
+        })?;
     Ok(HttpReply {
         status,
         cache_control,
@@ -230,13 +229,10 @@ pub(super) fn require_status(
 }
 
 pub(super) fn require_json_media_type(reply: &HttpReply) -> Result<(), NativeCodexAuthError> {
-    let is_json = reply.content_type.as_deref().is_some_and(|value| {
-        value
-            .split_once(';')
-            .map_or(value, |(media_type, _)| media_type)
-            .trim()
-            .eq_ignore_ascii_case("application/json")
-    });
+    let is_json = reply
+        .content_type
+        .as_deref()
+        .is_some_and(is_json_media_type);
     if is_json {
         Ok(())
     } else {

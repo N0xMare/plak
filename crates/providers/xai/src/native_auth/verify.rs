@@ -7,10 +7,12 @@ use super::{
     LoginHttpStage, MAX_AUTH_BODY_BYTES, MAX_JWKS_KEYS, MAX_STRING_BYTES, ManagerCore,
     PublicKeyUse, STORED_TOKENS_VERSION, StoredTokens, TOKEN_CLOCK_LEEWAY_SECONDS, TokenResponse,
     Validation, XAI_ISSUER, XAI_OAUTH_SCOPE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, decode,
-    decode_header, decode_json, generate_selection_epoch, login_account_verification_or,
+    decode_header, decode_json, generate_login_selection_epoch, login_account_verification_or,
     login_signing_keys_or, login_token_exchange_or, system_unix_seconds, unsigned_access_token_exp,
     valid_login_selection_epoch, valid_token_component,
 };
+use plakous_auth::oauth_orchestrator::jwt::jwt_failure_reason;
+use plakous_auth::oauth_orchestrator::{AudienceClaim, SubjectClaim};
 use zeroize::Zeroize as _;
 
 impl ManagerCore {
@@ -132,7 +134,8 @@ impl ManagerCore {
             selection_epoch: match retained_selection_epoch {
                 Some(value) if valid_login_selection_epoch(value) => value.to_owned(),
                 Some(_) => return Err(XaiNativeAuthError::InvalidStoredCredential),
-                None => generate_selection_epoch()?,
+                None => generate_login_selection_epoch()
+                    .map_err(|_| XaiNativeAuthError::RandomnessUnavailable)?,
             },
         })
     }
@@ -284,7 +287,7 @@ impl ManagerCore {
             self.get(self.endpoints.userinfo(), Some(access_token), None, false)
                 .await?
         };
-        let mut info: UserInfo = decode_json(&response, MAX_AUTH_BODY_BYTES)
+        let mut info: SubjectClaim = decode_json(&response, MAX_AUTH_BODY_BYTES)
             .map_err(|error| login_account_verification_or(login, error))?;
         AccountBinding::new(std::mem::take(&mut info.sub))
             .map_err(|error| login_account_verification_or(login, XaiNativeAuthError::from(error)))
@@ -294,7 +297,7 @@ impl ManagerCore {
 #[derive(Deserialize)]
 struct IdClaims {
     iss: String,
-    aud: Audience,
+    aud: AudienceClaim,
     azp: Option<String>,
     sub: String,
     // Optional here so a missing `exp` reaches jsonwebtoken's required-claim
@@ -311,66 +314,6 @@ impl Drop for IdClaims {
         self.azp.zeroize();
         self.sub.zeroize();
         self.nonce.zeroize();
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Audience {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl Audience {
-    fn is_exact(&self, expected: &str) -> bool {
-        match self {
-            Self::One(value) => value == expected,
-            Self::Many(values) => values.len() == 1 && values[0] == expected,
-        }
-    }
-}
-
-impl Drop for Audience {
-    fn drop(&mut self) {
-        match self {
-            Self::One(value) => value.zeroize(),
-            Self::Many(values) => values.zeroize(),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct UserInfo {
-    sub: String,
-}
-
-impl Drop for UserInfo {
-    fn drop(&mut self) {
-        self.sub.zeroize();
-    }
-}
-
-/// Names the `jsonwebtoken` check that rejected an ID token (content-free).
-fn jwt_failure_reason(error: &jsonwebtoken::errors::Error) -> CredentialRefreshFailureReason {
-    use jsonwebtoken::errors::ErrorKind as K;
-    match error.kind() {
-        K::InvalidSignature => CredentialRefreshFailureReason::IdTokenSignature,
-        K::ExpiredSignature => CredentialRefreshFailureReason::IdTokenExp,
-        K::ImmatureSignature => CredentialRefreshFailureReason::IdTokenNbf,
-        K::InvalidIssuer => CredentialRefreshFailureReason::IdTokenIss,
-        K::InvalidAudience => CredentialRefreshFailureReason::IdTokenAud,
-        K::InvalidSubject => CredentialRefreshFailureReason::IdTokenSub,
-        K::MissingRequiredClaim(claim) if claim == "sub" => {
-            CredentialRefreshFailureReason::IdTokenSub
-        }
-        K::MissingRequiredClaim(claim) if claim == "exp" => {
-            CredentialRefreshFailureReason::IdTokenExp
-        }
-        K::InvalidAlgorithm => CredentialRefreshFailureReason::IdTokenHeader,
-        K::InvalidToken | K::Base64(_) | K::Utf8(_) | K::Json(_) => {
-            CredentialRefreshFailureReason::TokenShape
-        }
-        _ => CredentialRefreshFailureReason::IdTokenClaims,
     }
 }
 

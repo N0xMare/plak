@@ -1,6 +1,8 @@
 //! Redaction-safe native authentication and transport errors.
 
-use super::{CredentialRefreshFailureReason, Error, Failure, PrivateStoreError, network_failure};
+use super::{
+    AuthTransportError, CredentialRefreshFailureReason, Error, PrivateStoreError, network_failure,
+};
 
 /// Redaction-safe native authentication failure.
 #[derive(Debug, Error)]
@@ -127,14 +129,9 @@ impl From<AuthTransportError> for XaiNativeAuthError {
     fn from(error: AuthTransportError) -> Self {
         Self::Transport(match error {
             AuthTransportError::Failure(failure) => network_failure(failure),
-            AuthTransportError::ResponseTooLarge => None,
+            AuthTransportError::TooLarge => None,
         })
     }
-}
-
-pub(super) enum AuthTransportError {
-    Failure(Failure),
-    ResponseTooLarge,
 }
 
 #[derive(Clone, Copy)]
@@ -149,17 +146,5 @@ impl LoginHttpStage {
             Self::SigningKeys => XaiNativeAuthError::LoginSigningKeys,
             Self::AccountVerification => XaiNativeAuthError::LoginAccountVerification,
         }
-    }
-}
-
-impl AuthTransportError {
-    pub(super) const fn limit() -> Self {
-        Self::ResponseTooLarge
-    }
-}
-
-impl From<Failure> for AuthTransportError {
-    fn from(value: Failure) -> Self {
-        Self::Failure(value)
     }
 }
