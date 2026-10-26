@@ -3984,7 +3984,8 @@ slots, leaving room for root content and terminal observations. Consecutive
 same-scope patches merge into one slot; raw assistant/reasoning appends coalesce
 within their scope and output location. Saturating the agent share marks only
 that scope's resync debt. Closing the agent view drops its publisher baseline
-and live-row indexes as well as the subscription.
+and live-row indexes as well as the subscription, even when no session or tree
+hub is attached and the pane contains only a fail-closed notice.
 Dropping the host drops all of its child observers. Unread presentation debt
 never backpressures the child or its terminal result.
 

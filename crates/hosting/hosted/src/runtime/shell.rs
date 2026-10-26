@@ -280,7 +280,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
                 Err("no session is attached yet".to_owned()),
             );
         }
-        UserAction::CloseAgentTranscript => {}
+        UserAction::CloseAgentTranscript => events.retire_agent_transcript(),
         UserAction::ResyncTranscript { scope } => {
             events.resync_transcript(&scope);
         }

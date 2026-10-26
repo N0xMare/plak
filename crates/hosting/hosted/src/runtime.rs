@@ -396,6 +396,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .resync(scope, &self.inner)
     }
 
+    fn retire_agent_transcript(&self) {
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .close_agent();
+    }
+
     /// Author a notice intent separately from its live observation. Only
     /// persisted scopes are intents; settings and approval feedback are live.
     pub(crate) fn notice(&self, row: TranscriptRow) -> bool {

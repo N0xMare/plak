@@ -11,6 +11,35 @@ use crate::runtime::test_kit::MemoryRows;
 use crate::runtime::test_support::*;
 use crate::sessions::SessionRecord;
 
+#[test]
+fn closing_an_agent_without_a_hub_retires_its_cached_notice_scope() {
+    use plakous_host_protocol::views::transcript::TranscriptScope;
+    let directory = tempfile::tempdir().unwrap();
+    let rows = MemoryRows::new();
+    let roots = crate::agent::ProductStateRoots::with_doubles(
+        directory.path().join("home"),
+        directory.path().join("state"),
+    );
+    let executor = ApplicationExecutor::new().unwrap();
+    let session = SessionRecord::new(directory.path().to_path_buf());
+    let (wire, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(wire);
+    assert!(events.send(logging::project_session_snapshot(&session)));
+    child_live::send_agent_transcript(&events, "c1", Err("no agent tree".into()));
+    let _ = receiver.try_iter().count();
+    dispatch_topology_navigator_sync(
+        &executor,
+        &rows,
+        &roots,
+        &session,
+        &events,
+        &UserAction::CloseAgentTranscript,
+        &mut TreeSnapshotPush::default(),
+    );
+    assert!(!events.resync_transcript(&TranscriptScope::Agent("c1".into())));
+    assert!(events.resync_transcript(&TranscriptScope::Root));
+}
+
 /// A finished child's result keeps 16 KiB and a cut says so and from how
 /// much, instead of ending mid-token behind `…`; multi-line text is cut
 /// at a line end.

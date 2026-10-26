@@ -575,6 +575,10 @@ pub(super) fn dispatch_topology_navigator_sync<P: plakous_host_protocol::Protoco
     push: &mut TreeSnapshotPush,
 ) {
     let resumed = matches!(action, UserAction::ResumeTopologyTree);
+    if matches!(action, UserAction::CloseAgentTranscript) {
+        push.child_live.close_agent_transcript(events);
+        return;
+    }
     if let Err(error) = executor.block_on(async {
         crate::topology_navigator::dispatch_topology_navigator_action(
             rows,

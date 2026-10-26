@@ -565,11 +565,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         fork.refuse("a turn is running; fork onto a profile when the root is idle");
                     }
                 }
+                Ok(UserAction::CloseAgentTranscript) => {
+                    self.host
+                        .last_tree_revision
+                        .child_live
+                        .close_agent_transcript(self.host.events);
+                }
                 Ok(
                     action @ (UserAction::OpenTopologyNavigator
                     | UserAction::RefreshTopologyTree
                     | UserAction::OpenAgentTranscript { .. }
-                    | UserAction::CloseAgentTranscript
                     | UserAction::ResumeTopologyTree
                     | UserAction::InterruptTopologyNode { .. }
                     | UserAction::CloseTopologyNode { .. }

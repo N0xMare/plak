@@ -375,6 +375,14 @@ impl ChildObservers {
         self.gate.bump();
     }
 
+    pub(super) fn close_agent_transcript<P: plakous_host_protocol::ProtocolExtension>(
+        &mut self,
+        events: &Sender<P>,
+    ) {
+        self.close_agent_view();
+        events.retire_agent_transcript();
+    }
+
     /// The job registry an agent view reads process subjects against.
     pub(super) fn set_jobs(&mut self, jobs: Arc<crate::jobs::JobRegistry>) {
         self.jobs = Some(jobs);
@@ -509,12 +517,7 @@ impl ChildObservers {
                     .await;
             }
             UserAction::CloseAgentTranscript => {
-                self.close_agent_view();
-                events
-                    .presentations
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .close_agent();
+                self.close_agent_transcript(events);
             }
             _ => {}
         }
