@@ -8537,7 +8537,11 @@ synthetic nested-effect fragments share their owning canonical item's position
 with disjoint increasing part ranges reserved for every retained durable child
 binding in acceptance order, not only children admitted by the window's decode
 budget. Bounding away earlier fragments never
-renumbers retained ones. These are observational read positions, not new stored
+renumbers retained ones while their binding metadata remains in the newest
+2,048-operation composition read. Aging older binding evidence out of that
+metadata window may rekey synthetic fragments, including a retained child's
+offset; it does not change the canonical item position or its stored facts.
+These are observational read positions, not new stored
 identities or export fields.
 A part is text (text and refusal blocks),
 reasoning that carries display text together with its declared visibility, a

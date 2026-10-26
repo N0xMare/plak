@@ -4078,6 +4078,8 @@ Child keys use that canonical position as `anchor`, the runtime lane, and the
 derived-row ordinal within the fragment's reserved part-offset range. Each
 offset reserves 16,384 row ordinals; omitted nested effects keep their slots
 from durable acceptance order and call identity, independent of decode budgets.
+This stability is within the retained composition-binding window (chapter 01
+§12); aging out older binding evidence may rekey synthetic nested fragments.
 Tail reads retain whole canonical position groups,
 including after fragment injection and byte accounting, so sliding the window cannot restart that ordinal
 inside an item. The zero key is reserved for truncation; neither row indices in

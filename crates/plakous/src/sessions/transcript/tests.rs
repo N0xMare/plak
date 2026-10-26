@@ -32,6 +32,66 @@ fn nested_fragment_slots_survive_window_decode_budget_omissions() {
 }
 
 #[test]
+fn nested_fragment_offsets_may_rekey_when_binding_evidence_ages_out() {
+    let mut source = ledger_only_source();
+    let fragment = |tail: &SessionTranscriptTail| {
+        let item = tail
+            .items()
+            .iter()
+            .find(|item| {
+                item.parts().iter().any(|part| {
+            matches!(part, SessionTranscriptPart::ToolCall { call_id, .. } if *call_id == id(3))
+        })
+            })
+            .unwrap();
+        (item.position(), item.part_offset(), item.parts().to_vec())
+    };
+    let before = fragment(&source.tail(512, usize::MAX));
+    let mut operations: Vec<_> = source.ledger.operations().into_iter().cloned().collect();
+    // The oldest child binding leaves the bounded metadata read, while the
+    // next child's exact evaluation owner and effect are still retained.
+    for index in 0..MAX_COMPOSITION_RECORDS - operations.len() + 2 {
+        let index = u16::try_from(index).unwrap();
+        operations.push(
+            DurableOperationRecord::new(
+                100 + u64::from(index),
+                DurableOperationKind::Effect {
+                    turn_id: id(20),
+                    attempt_id: id(21),
+                    call_id: id(1_000 + index),
+                    source_index: 0,
+                },
+                ReconstructiveComponent::new(
+                    RuntimeComponentKind::Operation,
+                    1,
+                    &b"aging fixture"[..],
+                )
+                .unwrap(),
+                vec![DurableOperationTransition::new(
+                    id(10_000 + index),
+                    DurableOperationState::Prepared,
+                )],
+            )
+            .unwrap(),
+        );
+    }
+    source.ledger = RuntimeOperationLedger::new(Vec::new(), operations).unwrap();
+    let after = fragment(&source.tail(512, usize::MAX));
+    assert_eq!(
+        before.0, after.0,
+        "the canonical item position is unchanged"
+    );
+    assert_eq!(
+        before.2, after.2,
+        "the retained child still has the same facts"
+    );
+    assert_ne!(
+        before.1, after.1,
+        "expired slot evidence may rekey synthetic fragments"
+    );
+}
+
+#[test]
 fn bounded_history_positions_and_fragment_offsets_do_not_shift_with_the_window() {
     let source = source("exec", true);
     let full = source.tail(512, usize::MAX);
