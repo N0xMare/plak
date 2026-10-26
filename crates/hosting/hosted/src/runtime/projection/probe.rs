@@ -42,6 +42,12 @@ pub(in crate::runtime) struct Counts {
     active: usize,
 }
 
+impl Counts {
+    pub(in crate::runtime) const fn open(&self) -> usize {
+        self.open
+    }
+}
+
 fn counts() -> &'static Mutex<BTreeMap<String, Counts>> {
     static COUNTS: OnceLock<Mutex<BTreeMap<String, Counts>>> = OnceLock::new();
     COUNTS.get_or_init(Mutex::default)

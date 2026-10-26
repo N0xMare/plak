@@ -799,7 +799,7 @@ async fn prepare_reopened_wake(
         .read(|tree| tree.retained_wait_receipts(agent_id))
         .map_err(|error| error.message)?;
     let evidence =
-        crate::agent::committed_wait_evidence(attached.sessions(), attached.locator(), retained)
+        crate::driver::reopen::wait_evidence(attached.sessions(), attached.locator(), retained)
             .await?;
     // Canonical reads join the committed head in the projector, including
     // receipts left behind by a prior process's abandonment publication.

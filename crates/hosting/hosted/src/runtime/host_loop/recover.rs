@@ -7,7 +7,7 @@
 //! crash matrix already covers, taken in place.
 
 use plakous::agent::AbandonedTurnReport;
-use plakous::sessions::feed::{FeedCursor, FeedFact, FeedPage, FeedPageRequest, FeedSeq};
+use plakous::sessions::feed::FeedSeq;
 
 use super::{
     CliFailure, CliResult, ContextQuery, HostEvent, HostLoop, SessionEvent,
@@ -284,42 +284,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let terminal_published = report.is_none()
             && self
                 .executor
-                .block_on(async {
-                    let mut cursor = previous_cursor;
-                    while cursor < applied_cursor {
-                        let page = self
-                            .opened
-                            .sessions()
-                            .feed_page(FeedPageRequest::after(FeedCursor::new(
-                                locator.session_id(),
-                                cursor,
-                            )))
-                            .await
-                            .map_err(|error| CliFailure::new(error.to_string()))?;
-                        let FeedPage::Records { records, .. } = page else {
-                            return Ok::<_, CliFailure>(false);
-                        };
-                        if records.is_empty() {
-                            return Ok(false);
-                        }
-                        for record in records {
-                            if record.header().seq > applied_cursor {
-                                return Ok(false);
-                            }
-                            cursor = record.header().seq;
-                            if record.header().branch_id == locator.branch_id()
-                                && record
-                                    .facts()
-                                    .iter()
-                                    .any(|fact| matches!(fact, FeedFact::TurnTerminal { .. }))
-                            {
-                                return Ok(true);
-                            }
-                        }
-                    }
-                    Ok(false)
-                })
-                .map_err(|_| CliFailure::new("application execution failed"))??;
+                .block_on(crate::driver::reopen::terminal_published_between(
+                    self.opened.sessions(),
+                    locator,
+                    previous_cursor,
+                    applied_cursor,
+                ))
+                .map_err(|_| CliFailure::new("application execution failed"))?
+                .map_err(|error| CliFailure::new(error.to_string()))?;
         let released = match self.executor.block_on(previous.release()) {
             Ok(Ok(_)) => None,
             Ok(Err(error)) => Some(error.to_string()),

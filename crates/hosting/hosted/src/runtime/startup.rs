@@ -360,9 +360,9 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
     // Spec 02 §4.2: step 0 names the head, step 1 opens exactly it. A stale
     // refusal means another owner committed in between: step 0 runs once
     // more, and a second stale answer is lease contention.
-    let (mut head, mut projection_error) = projected_head(config).await?;
-    let mut retried = false;
+    let mut retry = crate::driver::reopen::ExactRetry::default();
     loop {
+        let (head, projection_error) = projected_head(config).await?;
         match open_head(config, head, stderr_buf).await {
             Ok(session) => return Ok(session),
             Err(error) if error.current_locator.is_some() => {
@@ -377,14 +377,12 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
                         reason.message()
                     )));
                 }
-                if retried {
+                if !retry.adopt() {
                     return Err(CliFailure::new(format!(
                         "{}; another process is using this session",
                         error.failure.message()
                     )));
                 }
-                retried = true;
-                (head, projection_error) = projected_head(config).await?;
             }
             Err(error) => return Err(error.failure),
         }
@@ -1020,3 +1018,6 @@ pub(super) async fn api_runtime_for_record<P: plakous_host_protocol::ProtocolExt
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod reopen_tests;

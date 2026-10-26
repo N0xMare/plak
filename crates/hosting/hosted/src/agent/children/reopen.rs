@@ -1,5 +1,7 @@
 //! Reopening and reattaching children after a restart.
 
+use crate::driver::reopen::classify_opened;
+
 use super::{
     AgentSessionsError, AgentSessionsErrorKind, Arc, AttachedCodingSession, ChildBoundBind,
     ChildFeedSource, Duration, FromStr, LiveRelease, OpenSessionOutcome, OpenSessionRequest,
@@ -10,20 +12,6 @@ use super::{
     mutate_child, occupancy_session_fence, persist_or_fault,
     require_reconstructed_coding_projection, spawn_parent_tree_id, spawn_topology_turn_waiter,
 };
-
-/// A child reopen follows one stale-locator answer without a root predicate.
-/// A second stale answer is a fault, not another adoption opportunity.
-#[doc(hidden)]
-#[must_use]
-pub fn child_reopen_head(
-    error: &AgentSessionsError,
-    already_adopted: bool,
-) -> Option<SessionLocator> {
-    if already_adopted || error.kind() != AgentSessionsErrorKind::StaleLocator {
-        return None;
-    }
-    error.current_locator()
-}
 
 /// Rejoins the turn a mail Start's reopen recovered unbound: a Start the
 /// lost process journaled and the runtime admitted before the tree bound its
@@ -298,7 +286,7 @@ pub(in crate::agent) async fn reattach_inflight_children(
                 let retained = runtime
                     .read(|tree| tree.retained_wait_receipts(&child.agent_id))
                     .unwrap_or_default();
-                let evidence = match crate::agent::committed_wait_evidence(
+                let evidence = match crate::driver::reopen::wait_evidence(
                     attached.sessions(),
                     attached.locator(),
                     retained.clone(),
@@ -446,7 +434,7 @@ pub(in crate::agent) async fn reattach_inflight_children(
                     let retained = runtime
                         .read(|tree| tree.retained_wait_receipts(&agent_id))
                         .unwrap_or_default();
-                    let evidence = match crate::agent::committed_wait_evidence(
+                    let evidence = match crate::driver::reopen::wait_evidence(
                         session.sessions(),
                         session.locator(),
                         retained.clone(),
@@ -598,7 +586,7 @@ pub(in crate::agent) struct ChildReopenMode {
 impl ChildReopenMode {
     /// A reopen by the process that owns the child: waits out a lease the
     /// lost owner still held and records what it finds on the node.
-    pub(super) const OWNER: Self = Self {
+    pub(in crate::agent) const OWNER: Self = Self {
         lease_wait: CHILD_LEASE_WAIT,
         recovery: false,
         rejoin: false,
@@ -789,10 +777,6 @@ pub(in crate::agent) async fn reopen_spawned_child(
     .await
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one reopen: stale-head adoption, lease wait, and the outcome's reconciliation"
-)]
 async fn reopen_spawned_child_at_head(
     parent: &SpawnParent,
     agent_id: &str,
@@ -832,17 +816,8 @@ async fn reopen_spawned_child_at_head(
         ChildReopenError::unavailable(format!("child session locator is invalid: {error}"))
     })?;
     let generation = topology.read(|tree| tree.host_generation).unwrap_or(1);
-    // The tree's locator can lag the branch head (a turn that ended
-    // without the node hearing about it). Open the head
-    // the store names instead and record it, once; a second stale answer is a
-    // real fault.
-    let mut opened = None;
-    // A lease the lost parent still held expires on its own clock; waiting
-    // it out is how the reopen gets to abandon the turn that parent left.
-    let lease_wait_until = tokio::time::Instant::now() + mode.lease_wait;
-    let mut lease_waits = 0_u32;
-    let mut attempt = 0_u32;
-    while attempt < 2 {
+    let mut retry = crate::driver::reopen::ExactRetry::with_lease_wait(mode.lease_wait);
+    let opened = loop {
         // Read before the child's configuration is compiled, and re-read on the
         // second attempt because adoption moved the locator. A reopened child
         // keeps the output bound it was created with for the same reason a
@@ -854,8 +829,10 @@ async fn reopen_spawned_child_at_head(
                 Ok(bound) => bound,
                 // The head moved past the recorded locator, typically because
                 // the lost turn advanced it. Adopt it exactly as a stale open does.
-                Err(error) if let Some(current) = child_reopen_head(&error, attempt != 0) => {
-                    attempt += 1;
+                Err(error)
+                    if let Some(current) = crate::driver::reopen::stale_head(&error)
+                        && retry.adopt() =>
+                {
                     locator = current;
                     continue;
                 }
@@ -894,17 +871,20 @@ async fn reopen_spawned_child_at_head(
         .await
         .map_err(ChildReopenError::unavailable)?;
         let operation_id = SessionOperationId::new(format!(
-            "plak:{operation_kind}:{agent_id}:{generation}:{attempt}:{lease_waits}"
+            "plak:{operation_kind}:{agent_id}:{generation}:{}:{}",
+            u8::from(retry.adoptions),
+            retry.lease_waits
         ))
         .map_err(|_| ChildReopenError::unavailable("child reopen operation identity is invalid"))?;
+        #[cfg(test)]
+        super::reopen_error_tests::record_operation(&operation_id);
         match Box::pin(sessions.open(OpenSessionRequest::new(operation_id, locator, runtime))).await
         {
             Ok(OpenSessionOutcome::RecoveryRequired {
                 retry_after_seconds: Some(retry_after),
                 ..
             }) => {
-                let now = tokio::time::Instant::now();
-                if now >= lease_wait_until {
+                let Some(delay) = retry.lease_delay(CHILD_LEASE_POLL) else {
                     return Err(ChildReopenError {
                         kind: ChildReopenErrorKind::LeaseHeld {
                             retry_after_seconds: Some(retry_after),
@@ -914,16 +894,14 @@ async fn reopen_spawned_child_at_head(
                              {retry_after}s"
                         ),
                     });
-                }
-                lease_waits = lease_waits.saturating_add(1);
-                tokio::time::sleep(CHILD_LEASE_POLL.min(lease_wait_until - now)).await;
+                };
+                tokio::time::sleep(delay).await;
             }
-            Ok(outcome) => {
-                opened = Some(outcome);
-                break;
-            }
-            Err(error) if let Some(current) = child_reopen_head(&error, attempt != 0) => {
-                attempt += 1;
+            Ok(outcome) => break outcome,
+            Err(error)
+                if let Some(current) = crate::driver::reopen::stale_head(&error)
+                    && retry.adopt() =>
+            {
                 locator = current;
             }
             Err(error) => {
@@ -933,18 +911,15 @@ async fn reopen_spawned_child_at_head(
                 ));
             }
         }
-    }
-    let Some(opened) = opened else {
-        return Err(ChildReopenError::unavailable(
-            "child session could not be reopened at its current head",
-        ));
     };
     let incompatible = |error: crate::agent::CodingSessionOpenFailure| ChildReopenError {
         kind: ChildReopenErrorKind::Incompatible,
         message: error.failure.message().to_owned(),
     };
+    let recovered = classify_opened(&opened);
     let reopened = match opened {
-        OpenSessionOutcome::Opened { session, .. } => {
+        OpenSessionOutcome::Opened { session, .. }
+        | OpenSessionOutcome::RestoredWorking { session, .. } => {
             require_reconstructed_coding_projection(&session).map_err(incompatible)?;
             let locator = session.locator();
             ChildReopen::Attached {
@@ -953,27 +928,11 @@ async fn reopen_spawned_child_at_head(
                     reachability_probe: None,
                     sessions: Arc::clone(&sessions),
                     opened: Some(session),
-                    recovered_turn: None,
+                    recovered_turn: recovered.clone(),
                     locator,
                     topology_owner: None,
                 }),
-                recovered: None,
-            }
-        }
-        OpenSessionOutcome::RestoredWorking { session, turn, .. } => {
-            require_reconstructed_coding_projection(&session).map_err(incompatible)?;
-            let locator = session.locator();
-            ChildReopen::Attached {
-                session: Box::new(AttachedCodingSession {
-                    output_bound_rederived: None,
-                    reachability_probe: None,
-                    sessions: Arc::clone(&sessions),
-                    opened: Some(session),
-                    recovered_turn: Some(turn.clone()),
-                    locator,
-                    topology_owner: None,
-                }),
-                recovered: Some(turn),
+                recovered,
             }
         }
         OpenSessionOutcome::RecoveryRequired { recovery, .. } => {

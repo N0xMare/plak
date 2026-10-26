@@ -37,6 +37,7 @@ use super::children::{
     reopen_spawned_child, spawn_child_operation_id,
 };
 use super::{AttachedCodingSession, SpawnParent, occupancy_session_fence, spawn_parent_tree_id};
+use crate::driver::reopen::wait_evidence;
 
 /// The most one background recovery pass spends before it reports; children
 /// it did not reach are reported as not attempted and wait for `recover_agent`
@@ -389,41 +390,7 @@ pub(super) fn reopen_refusal(error: ChildReopenError) -> TopologyError {
     refusal(code, &error.message)
 }
 
-/// What a recovery reopen abandoned: its operator line, and the fact the
-/// caller's face reports once, when the reopen produced one.
-/// Pairs each await receipt id with whether `locator`'s committed canonical
-/// history holds that call. A nested wait's id is never in model history, so
-/// it is never committed on its own.
-pub(crate) async fn committed_wait_evidence(
-    sessions: &AgentSessions,
-    locator: plakous::sessions::SessionLocator,
-    ids: Vec<String>,
-) -> Result<Vec<(String, bool)>, String> {
-    let ids: Vec<_> = ids
-        .into_iter()
-        .map(|id| {
-            let call = uuid::Uuid::parse_str(&id)
-                .ok()
-                .and_then(|uuid| plakous::model::CallId::try_from(uuid).ok());
-            (id, call)
-        })
-        .collect();
-    let evidence: std::collections::BTreeMap<_, _> = sessions
-        .committed_calls(locator, ids.iter().filter_map(|(_, call)| *call).collect())
-        .await
-        .map_err(|error| format!("wait settlement could not read history: {error}"))?
-        .into_iter()
-        .collect();
-    Ok(ids
-        .into_iter()
-        .map(|(id, call)| {
-            let committed = call.is_some_and(|call| evidence.get(&call) == Some(&true));
-            (id, committed)
-        })
-        .collect())
-}
-
-/// [`committed_wait_evidence`] read from the committed history of a turn's
+/// [`wait_evidence`] read from the committed history of a turn's
 /// terminal checkpoint instead of the store: a receipt counts as committed
 /// when that history holds its call and result.
 pub(crate) fn wait_evidence_in(
@@ -853,10 +820,9 @@ async fn release_reopened(
         .await;
         // Read once no turn is live and before the release, at the head the
         // cancellation (or, below, the abandonment) left.
-        let evidence =
-            committed_wait_evidence(session.sessions(), session.locator(), retained_waits)
-                .await
-                .map_err(|message| session_refusal(&message))?;
+        let evidence = wait_evidence(session.sessions(), session.locator(), retained_waits)
+            .await
+            .map_err(|error| session_refusal(&error))?;
         let mut feed = read_tree_feed(session.sessions(), session.locator().session_id(), cursor)
             .await
             .map_err(|failure| session_refusal(&failure.to_string()))?;
@@ -878,9 +844,9 @@ async fn release_reopened(
         .agent()
         .and_then(plakous::agent::Agent::abandoned_turn)
         .map(|report| crate::runtime::events::abandoned_turn_operator_line(report).to_owned());
-    let evidence = committed_wait_evidence(session.sessions(), session.locator(), retained_waits)
+    let evidence = wait_evidence(session.sessions(), session.locator(), retained_waits)
         .await
-        .map_err(|message| session_refusal(&message))?;
+        .map_err(|error| session_refusal(&error))?;
     let mut feed = read_tree_feed(session.sessions(), session.locator().session_id(), cursor)
         .await
         .map_err(|failure| session_refusal(&failure.to_string()))?;
@@ -1228,6 +1194,9 @@ fn merge_pass_reports(
 
 #[cfg(test)]
 pub(super) mod tests;
+
+#[cfg(all(test, unix))]
+mod crash_tests;
 
 fn recovery_required_code(
     actions: impl IntoIterator<Item = SessionRecoveryAction>,

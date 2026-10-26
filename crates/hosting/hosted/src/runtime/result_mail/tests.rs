@@ -360,7 +360,7 @@ async fn exact_wait_history_load_then_head_advance_refuses_the_old_seed() {
         .await
         .unwrap();
     let cursor = initial.records.last().unwrap().header().seq.get();
-    let evidence = crate::agent::committed_wait_evidence(
+    let evidence = crate::driver::reopen::wait_evidence(
         &sessions,
         locator,
         vec![uuid::Uuid::from_u128(0xca11).to_string()],

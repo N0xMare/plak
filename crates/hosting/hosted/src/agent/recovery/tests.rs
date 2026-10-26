@@ -3163,6 +3163,85 @@ async fn a_terminal_refusal_lets_close_agent_end_the_node() {
     );
 }
 
+#[tokio::test]
+async fn owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id() {
+    use crate::agent::children::REOPEN_OPERATIONS;
+
+    let fixture = Fixture::new("owner-reopen-lease-poll");
+    let id = fixture.spawn();
+    let (held, handle, _) = fixture.start_failing_turn(&fixture.sessions(), &id).await;
+    Fixture::await_unknown_outcome(&handle).await;
+    let locator = held.locator();
+    fixture.bind_turn(&id, &locator, handle.turn_id());
+    held.release().await.unwrap();
+    reinstate_released_lease(&fixture.database());
+
+    let bindings = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&bindings);
+    let database = fixture.database();
+    let workspace = fixture.root.path().to_path_buf();
+    let controller =
+        BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &fixture.evidence)
+            .unwrap();
+    // Release only on the second binding: the first exact open must encounter
+    // the still-unexpired lease and complete its owner's inner poll first.
+    let _binding = fixture.binding.install(Arc::new(move |_, _, _| {
+        if observed.fetch_add(1, Ordering::SeqCst) == 1 {
+            release_reinstated_lease(&database);
+        }
+        projected_terminal_failure_runtime_binding(
+            &workspace,
+            controller.clone(),
+            ModelErrorKind::OutcomeUnknown,
+        )
+        .map_err(|error| error.to_string())
+    }));
+    let (path, generation) = fixture
+        .runtime
+        .read(|tree| {
+            (
+                tree.node(&id).unwrap().path.display().to_string(),
+                tree.host_generation,
+            )
+        })
+        .unwrap();
+    let started = tokio::time::Instant::now();
+    let (reopened, operations) = REOPEN_OPERATIONS
+        .scope(std::cell::RefCell::new(Vec::new()), async {
+            let reopened = tokio::time::timeout(
+                Duration::from_secs(20),
+                reopen_spawned_child(
+                    &fixture.parent,
+                    &id,
+                    &path,
+                    &locator.to_string(),
+                    "owner-lease-test",
+                    ChildReopenMode::OWNER,
+                ),
+            )
+            .await
+            .expect("owner reopen must finish after the lease is released")
+            .unwrap_or_else(|error| panic!("owner reopen must wait for the lease: {error:?}"));
+            (reopened, REOPEN_OPERATIONS.with(std::cell::RefCell::take))
+        })
+        .await;
+    assert!(started.elapsed() >= CHILD_LEASE_POLL);
+    assert_eq!(bindings.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        operations,
+        [
+            format!("plak:owner-lease-test:{id}:{generation}:0:0"),
+            format!("plak:owner-lease-test:{id}:{generation}:0:1"),
+        ]
+    );
+    let ChildReopen::Attached { session, recovered } = reopened else {
+        panic!("owner reopen must recover and attach the session");
+    };
+    assert!(recovered.is_none(), "unknown work must not be redispatched");
+    session.release().await.unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+}
+
 /// A fenced child's turn waiter recycles the session outside the reattach
 /// lock: while its reopen waits out a lease another process holds,
 /// `recover_agent` and the recovery pass answer `recovery_owner_live` at

@@ -50,7 +50,7 @@ pub(super) async fn settle_waits(
     if ids.is_empty() {
         return Ok(());
     }
-    let evidence = crate::agent::committed_wait_evidence(opened.sessions(), locator, ids).await?;
+    let evidence = crate::driver::reopen::wait_evidence(opened.sessions(), locator, ids).await?;
     let mut feed =
         crate::agent::read_tree_feed(opened.sessions(), locator.session_id(), cursor).await?;
     feed.reads.insert_waits(locator, evidence);

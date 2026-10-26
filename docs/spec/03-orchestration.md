@@ -2964,6 +2964,16 @@ already depends on that crate.
 
 ### 14.1 Reopen
 
+Root and child adapters share a small exact-retry state and reopened-turn
+classification. It permits one stale-head adoption and bounds child lease waits;
+child lease polls retain their
+existing operation identities. The root reprojects before its second exact
+open rather than blindly adopting the offered locator. Projection debt alone
+never fences a current head. Shared reads detect terminal publication for the
+root within its projected feed range and read committed wait evidence for both
+roles. Role adapters retain their short open loops, ownership guards,
+projectors and release/settlement order. No command or provider call is replayed.
+
 A pending child Resume is re-derived from its immutable decision and the exact
 canonical failed terminal, including when death occurred before that terminal
 was projected into the tree. No saved decision means conservative ordinary
@@ -2982,13 +2992,13 @@ A root or child, including the API lane, reads its own exact stored evaluator
 artifact and process bounds before compiling its runtime attachment. Current
 installation siblings are construction inputs for new sessions, not reopen
 authority. Child reopen uses the child's locator, never its parent's artifact;
-new children explicitly clear any parent reopen pin. A reopen follows chapter
-02 §4.2's order: the tree projector applies the child's feed to its tail
-without a lease, the host reads the construction facts of the head that feed
-names and opens it, and a stale refusal (another owner committed in between)
-repeats the feed pass once; a second stale answer is `recovery_lease_held`,
-never `recovery_required`. No artifact lookup advances or repairs a
-checkpoint.
+new children explicitly clear any parent reopen pin. Root reopen follows
+chapter 02 §4.2's lease-free projection then exact-open order and repeats that
+projection once on a stale answer. A child instead adopts the store-named head
+once, re-reading its created output bound and recorded evaluator before opening
+it. A second child stale answer is `recovery_session_unavailable`, not a held
+lease or another adoption opportunity. No artifact lookup advances or repairs
+a checkpoint.
 
 A restored tree opens `restored_paused` and does not dispatch until the user
 resumes it; a tool call meanwhile is `tree_restored_paused`. Root rebind

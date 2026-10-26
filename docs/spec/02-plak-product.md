@@ -2818,7 +2818,8 @@ one operator line, a `Recovered` observation, a `turn.abandoned` record — and
 unadmitted workflow requests are withdrawn), and then performs the action. Nothing
 is replayed. If the reopen fails — offline, a quarantined credential — the
 action is refused with the reason, the draft is handed back, and the next action
-tries again. The same reopen runs at startup and on `run --session` after a
+tries again. The shared hosted exact-reopen helpers also serve children
+(chapter 03 §14.1); it runs at startup and on `run --session` after a
 crash. A queue paused by the fence stays paused until it is resumed: what was
 queued was written behind a turn whose outcome nobody saw. The recovery
 republishes the queue and its attach-style note names the exact resume control

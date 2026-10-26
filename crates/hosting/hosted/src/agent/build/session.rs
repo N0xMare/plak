@@ -1,5 +1,6 @@
 //! Attached session lifecycle and build/open operations.
 
+use crate::driver::reopen::classify_opened;
 use crate::{CliFailure, CliResult};
 
 use super::binding::{api_session_runtime_binding_with_owner, coding_session_runtime_binding_for};
@@ -1035,8 +1036,10 @@ async fn attach_runtime_source(
                     failure: CliFailure::new((wording.reopen_failed)(&error)),
                     current_locator: error.current_locator(),
                 })?;
+        let recovered = classify_opened(&opened);
         return match opened {
-            OpenSessionOutcome::Opened { session, .. } => {
+            OpenSessionOutcome::Opened { session, .. }
+            | OpenSessionOutcome::RestoredWorking { session, .. } => {
                 if wording.checked {
                     require_reconstructed_coding_projection(&session)?;
                 }
@@ -1046,22 +1049,7 @@ async fn attach_runtime_source(
                     reachability_probe: reachability_probe.clone(),
                     sessions: Arc::clone(&sessions),
                     opened: Some(session),
-                    recovered_turn: None,
-                    locator,
-                    topology_owner,
-                })
-            }
-            OpenSessionOutcome::RestoredWorking { session, turn, .. } => {
-                if wording.checked {
-                    require_reconstructed_coding_projection(&session)?;
-                }
-                let locator = session.locator();
-                Ok(AttachedCodingSession {
-                    output_bound_rederived,
-                    reachability_probe: reachability_probe.clone(),
-                    sessions: Arc::clone(&sessions),
-                    opened: Some(session),
-                    recovered_turn: Some(turn),
+                    recovered_turn: recovered,
                     locator,
                     topology_owner,
                 })

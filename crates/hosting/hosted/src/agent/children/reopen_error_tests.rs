@@ -1,6 +1,16 @@
 use super::*;
 use plakous::sessions::SessionBackend;
 
+tokio::task_local! {
+    pub(in crate::agent) static REOPEN_OPERATIONS: std::cell::RefCell<Vec<String>>;
+}
+
+pub(super) fn record_operation(operation: &SessionOperationId) {
+    let _untracked = REOPEN_OPERATIONS.try_with(|operations| {
+        operations.borrow_mut().push(operation.as_str().to_owned());
+    });
+}
+
 #[test]
 fn reopen_formatter_collapses_nested_chains_without_hiding_the_distinct_refusal() {
     let error = SessionOperationId::new("").unwrap_err();

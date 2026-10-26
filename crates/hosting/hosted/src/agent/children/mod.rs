@@ -38,9 +38,11 @@ mod reopen;
 mod turns;
 mod waiter;
 
+#[cfg(test)]
+pub(super) use reopen_error_tests::REOPEN_OPERATIONS;
+
 pub(crate) mod runtime_factory;
 pub use bind::{ChildBoundBind, spawn_child_start_composition, spawned_child_spec};
-pub use reopen::child_reopen_head;
 pub use turns::{persist_or_fault, retire_live_child, settle_or_fault};
 #[cfg(any(test, feature = "test-support"))]
 pub use waiter::finalize_topology_child_turn;

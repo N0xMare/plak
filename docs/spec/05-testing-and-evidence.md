@@ -2214,7 +2214,32 @@ Cuts forbid dispatch past an unprojected capacity terminal, preserve the
 terminal across follow-up, and converge to the pilot's drain state. Follow-up
 and queued work require explicit queue resume after a capacity pause (chapter
 02); no automatic retry of the failed original is inference evidence.
-Child-turn sweeps are not enrolled: the ordinary scripted durable tree binder
+Exact-reopen regressions use a paused clock to pin one stale-head adoption,
+one shared lease deadline and unchanged lease-poll identities across adoption;
+ordinary refusals and a second stale answer never retry. Hosted root races commit
+through a second owner between projection and exact open: one re-projection
+follows a stale answer, a second stale refuses contention, and projection debt
+plus stale refuses without retry. Root startup and child reattach each rejoin a
+certified effect-decision barrier, publish one terminal and settle retained waits
+without repeating the admitted provider request or effect.
+The durability-lane child SIGKILL matrix uses separate real child sessions and
+SQLite runtime/tree stores. It kills the owner mid-turn, during a parked wake,
+while idle before wake, and after a wake intent is prepared. A traced cut follows
+durable wake admission but precedes its first provider dispatch; that admitted
+turn is honestly abandoned, never replayed. Relaunch uses production startup
+reattach and the tree recovery pass. A still-live lost owner exercises the
+explicit recovery lease wait before that owner dies. Repeated recovery preserves
+the single result mail, attempt count and command rows.
+`root_stale_open_reprojects_once_then_opens_the_new_head` pins root stale-head
+adoption; `root_second_stale_open_refuses_contention_without_a_third_projection`
+and `root_stale_open_with_projection_debt_refuses_without_retry` pin its refusal
+boundaries. `root_startup_rejoins_certified_decision_once_and_settles_waits` and
+`child_rejoin_preserves_certified_decision_and_settles_waits` pin both restored
+turns. `recover_agent_waits_for_a_still_held_child_lease` pins the explicit recovery
+wait; `owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id` pins the
+owner's inner lease poll, elapsed wait and incremented open identity. These
+durability tests are separate from enrollment in the single-root sweep.
+Child-turn sweeps remain unenrolled: the ordinary scripted durable tree binder
 aliases the root runtime locator and simulates child completion, while the real
 process-child binder requires multi-branch runtime/dispatch summaries and
 per-child relaunch bindings. Neither is a durable child-turn fixture for this
