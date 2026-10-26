@@ -577,8 +577,14 @@ when these settings changed. Reload requires an idle root with no live children
 or background processes; it creates a linked session under current config and
 login, freezes the new tree's spawn bounds and roster, and recompiles root tool
 descriptions. It records `orchestration settings changed; carried into a new
-session to apply them`. The source epoch is unchanged. An unchanged digest
-keeps exact reopen. `/rebind` explicitly performs the same carry even when
+session to apply them`. The source epoch is unchanged. The decision compares
+every frozen effective value against the current frozen snapshot, with the
+same genesis bound clamping. Only `digest`, `templates_digest` and `bind_hints`
+are excluded; reached tool tables compare as TOML values, not rendering bytes.
+Changed descriptions, cost tiers, model visibility, template names and root
+template selection count, including values supplied by built-ins or defaults
+when not overridden by the user. Hints or digest/render-recipe changes alone
+keep exact reopen, even through multiple build reloads. `/rebind` explicitly performs the same carry even when
 exact reopen cannot attach the root. Neither path relabels provider replay for
 another account; no prompt is automatically submitted. A profile's
 Fork now does not touch the running tree at all: the new session opens a tree

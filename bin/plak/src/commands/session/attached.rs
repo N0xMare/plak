@@ -1,7 +1,9 @@
 //! One-shot attached actions and carry-capacity probes.
 
 use super::import_export::PreparedImport;
-use crate::commands::host_config::{attached_target_accepts_effort, build_host_config};
+use crate::commands::host_config::{
+    TuiAttachEligibility, build_host_config, tui_attach_eligibility,
+};
 use crate::commands::support::{HOST_WORKER_JOIN_TIMEOUT, join_host_worker_bounded};
 use crate::presentation::tui_presentation_bundle;
 use crate::product_config;
@@ -84,6 +86,21 @@ pub(super) fn attached_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
+    build_attached_host_config(services, record, false)
+}
+
+pub(super) fn rebind_host_config(
+    services: &crate::shell::services::Services,
+    record: product_sessions::SessionRecord,
+) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
+    build_attached_host_config(services, record, true)
+}
+
+fn build_attached_host_config(
+    services: &crate::shell::services::Services,
+    record: product_sessions::SessionRecord,
+    classify_rebind_fallback: bool,
+) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
     crate::build_features::admit_session(&record)?;
     let paths = &crate::home::paths::PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
@@ -127,23 +144,16 @@ pub(super) fn attached_host_config(
     }
     let presentation = tui_presentation_bundle(paths)?;
     let ready_catalog = &presentation.sections;
-    require_catalog_binding(
+    let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
+    validate_catalog_for_attach(
         &record.target_selection,
         ready_catalog,
         &presentation.native_models,
         &account,
         &model,
-    )?;
-    let (effort, explicit) = product_host::effort_from_config(record.effort.as_deref());
-    if !attached_target_accepts_effort(
-        &record.target_selection,
-        ready_catalog,
-        &account,
-        &model,
         explicit,
-    ) {
-        return Err(CliFailure::new("session has no exact effort binding").into());
-    }
+        classify_rebind_fallback,
+    )?;
     let state_roots = services.state_roots()?;
     build_host_config(
         paths,
@@ -159,6 +169,28 @@ pub(super) fn attached_host_config(
         &presentation.native_models,
     )
     .map_err(|error| AttachedConfigError::Other(CliFailure::new(error)))
+}
+
+fn validate_catalog_for_attach(
+    target: &product_config::ProductTargetSelection,
+    catalog: &plakous_host_protocol::views::ReadyCatalog,
+    native_models: &[crate::presentation::TuiNativeModelFact],
+    account: &str,
+    model: &str,
+    effort_explicit: bool,
+    classify_rebind_fallback: bool,
+) -> Result<(), AttachedConfigError> {
+    if classify_rebind_fallback {
+        require_catalog_binding(target, catalog, native_models, account, model)?;
+    }
+    if tui_attach_eligibility(target, catalog, Some(account), Some(model), effort_explicit)
+        == TuiAttachEligibility::EffortRequired
+    {
+        return Err(CliFailure::new("session has no exact effort binding").into());
+    }
+    // An unavailable picker is not runtime authority. Exact actions/imports
+    // resolve the binding below rather than requiring the picker's Ready row.
+    Ok(())
 }
 
 fn require_catalog_binding(
@@ -321,12 +353,47 @@ mod binding_tests {
             "filtered-model",
         )
         .unwrap();
-        assert!(!attached_target_accepts_effort(
+        assert!(
+            !crate::commands::host_config::attached_target_accepts_effort(
+                &product_config::ProductTargetSelection::Native,
+                &catalog,
+                "codex",
+                "filtered-model",
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn exact_actions_and_carry_probes_do_not_require_a_ready_picker() {
+        let catalog = plakous_host_protocol::views::ReadyCatalog::new(vec![
+            plakous_host_protocol::views::ProviderSection {
+                account: "codex".into(),
+                label: "Codex".into(),
+                ready: false,
+                entries: Vec::new(),
+            },
+        ]);
+        validate_catalog_for_attach(
             &product_config::ProductTargetSelection::Native,
             &catalog,
+            &[],
             "codex",
-            "filtered-model",
-            true
-        ));
+            "known-model",
+            true,
+            false,
+        )
+        .unwrap();
+        let error = validate_catalog_for_attach(
+            &product_config::ProductTargetSelection::Native,
+            &catalog,
+            &[],
+            "codex",
+            "known-model",
+            true,
+            true,
+        )
+        .unwrap_err();
+        assert!(CliFailure::from(error).message().contains("before /rebind"));
     }
 }

@@ -152,13 +152,14 @@ login. The carry keeps replay with validation when its binding is unchanged.
 Persisted non-terminal children refuse carry even with no root attachment.
 The installed build performs the comparison after the normal reload handoff;
 a comparison reads effective bounds, occupancy/reclamation/evidence controls,
-working set, tool tables and template selection/authority fields from the
-source snapshot and compares them with the current effective values, not the
-rendered digest. A changed effective knob or template selection applies even
-when it came from a changed default rather than a file edit. Build-owned bind
-hints, template descriptions, card/prompt text and freeze/render recipe changes
-alone keep exact resume. This holds through successive builds: each compares
-against the source's stored values, never against a build-local render recipe.
+working set, tool tables and every template field from the source snapshot and
+compares them with the current frozen values, including genesis bound clamping.
+Only `digest`, `templates_digest` and `bind_hints` are excluded; tool tables are
+compared as TOML values. A changed effective knob or template field, including
+description, cost tier, model visibility and template names, applies even when
+it came from a changed built-in/default rather than a file edit. Bind hints and
+digest/render-recipe changes alone keep exact resume through successive builds;
+each hop compares against the tree the preceding hop actually kept.
 A cross-state import already creates the desired genesis and is not carried
 again. An unreadable config or tree skips apply with a notice and continues
 normal reload; settings then apply to new sessions.

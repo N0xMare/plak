@@ -245,8 +245,9 @@ session's spawn cap, not the old tree's cap. It preserves the source binding
 rather than selecting the config's default account or model, and validates
 retained provider replay. `/reload` starts the installed build first; that
 build applies the changed settings. Unchanged settings keep exact reopen.
-New card text, bind hints or rendering alone do not create another session;
-a changed effective orchestration default does, just like an explicit edit.
+Bind hints or digest/rendering changes alone do not create another session.
+Changed template text or other effective template/orchestration values do,
+including changed built-in defaults, just like an explicit edit.
 If the config or tree cannot be inspected, it skips apply with a notice and
 continues normal reload. Ordinary prompts do not silently replace the epoch.
 Before closing the old session, `/reload` checks the destination route.

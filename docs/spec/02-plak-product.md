@@ -3330,10 +3330,11 @@ is not a binding mismatch and is repaired with the named login command.
 orchestration/roster settings. On a same-state resume, the destination process
 compares the effective orchestration values and template selection fields
 stored in the source snapshot with the current effective values. It does not
-compare rendered epoch digests: build-owned bind hints, card/prompt text and
-freeze/render recipe changes alone keep exact resume, including across
+compare rendered epoch digests: build-owned bind hints and digest/render-recipe
+changes alone keep exact resume, including across
 successive builds that still reopen the original snapshot. Changed effective
-bounds, roster or template selections carry whether the change came from an
+bounds, roster or template values (including description, cost tier, model
+visibility and template names) carry whether the change came from an
 explicit config edit or a changed default. A changed value on an idle session
 with no live children or background processes takes
 the same carry and
@@ -3347,6 +3348,9 @@ keep the exact reopen path. An unreadable config or tree skips orchestration
 apply with a notice (`settings apply to new sessions`) and continues the normal
 reload. A cross-state import already freezes the destination's current roster
 and bounds at genesis and never creates a second carry for the same reload.
+Ready-catalog classification is only a `/rebind` fallback decision. Attached
+actions, carry-capacity probes and plain imports resolve their bound target
+even when the picker catalog is not Ready; runtime admission still validates it.
 If canonical creation commits but release or product persistence fails, the
 carry returns the committed successor and its locator with that failure. The
 TUI selects that successor and names it in a repair notice, rather than

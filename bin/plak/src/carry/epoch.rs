@@ -2,7 +2,7 @@
 
 use crate::home::paths::PlakPaths;
 use crate::store::sessions::SessionRecord;
-use plakous_hosted::orchestration::{OrchestrationSnapshot, RosterBinding, RosterInput};
+use plakous_hosted::orchestration::{OrchestrationSnapshot, RosterInput};
 use plakous_recursive_subagents_store::TreeInspection;
 
 pub(super) const ORCHESTRATION_CARRY_CAUSE: &str =
@@ -70,34 +70,19 @@ fn effective_settings_changed(
     frozen: &OrchestrationSnapshot,
     desired: &RosterInput,
 ) -> Result<bool, String> {
-    // Digests also cover build-owned hints and rendering. They remain reopen
-    // authority, but are not evidence that effective operator settings changed.
+    let mut desired = OrchestrationSnapshot::freeze(desired.clone());
+    let mut frozen = frozen.clone();
     let tool_sections_changed =
         tool_section_values(&frozen.tool_sections)? != tool_section_values(&desired.tool_sections)?;
-    Ok(
-        frozen.workspace_idle_seconds != desired.workspace_idle_seconds
-            || frozen.workspace_budget_mib != desired.workspace_budget_mib
-            || frozen.child_retention_days != desired.child_retention_days
-            || frozen.child_retention_count != desired.child_retention_count
-            || frozen.writer_mode != desired.writer_mode
-            || u16::from(frozen.max_depth) != desired.bounds.max_depth
-            || u16::from(frozen.max_children) != desired.bounds.max_children
-            || u16::from(frozen.max_nodes) != desired.bounds.max_nodes
-            || frozen.max_attempts != desired.bounds.max_attempts
-            || frozen.max_agents_per_cell != desired.bounds.max_agents_per_cell
-            || frozen.require_review_evidence != desired.require_review_evidence
-            || frozen.transient_resumes != desired.transient_resumes
-            || frozen.root_delegation != desired.root.delegation
-            || frozen.working_set != desired.working_set
-            || tool_sections_changed
-            || frozen.roster.len() != desired.templates.len()
-            || frozen.roster.iter().any(|(name, binding)| {
-                desired
-                    .templates
-                    .get(name)
-                    .is_none_or(|next| !same_template_selection(binding, next))
-            }),
-    )
+    // Compare every effective frozen field, including built-in/default values.
+    // Only these build-owned digests/hints and TOML formatting are excluded.
+    for snapshot in [&mut frozen, &mut desired] {
+        snapshot.digest.clear();
+        snapshot.templates_digest.clear();
+        snapshot.bind_hints = plakous_hosted::orchestration::BindHints::default();
+        snapshot.tool_sections.clear();
+    }
+    Ok(tool_sections_changed || frozen != desired)
 }
 
 fn tool_section_values(
@@ -113,26 +98,10 @@ fn tool_section_values(
         .collect()
 }
 
-fn same_template_selection(source: &RosterBinding, next: &RosterBinding) -> bool {
-    source.account == next.account
-        && source.tuple_id == next.tuple_id
-        && source.effort == next.effort
-        && source.composition == next.composition
-        && source.protocol == next.protocol
-        && source.processing_tier == next.processing_tier
-        && source.max_tier == next.max_tier
-        && source.tools == next.tools
-        && source.spawns == next.spawns
-        && source.may_adopt == next.may_adopt
-        && source.delegation == next.delegation
-        && source.max_turns == next.max_turns
-        && source.on_mint == next.on_mint
-        && source.env == next.env
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plakous_hosted::orchestration::RosterBinding;
     use plakous_hosted::topology_runtime::test_support::bootstrap;
 
     #[test]
@@ -148,9 +117,6 @@ mod tests {
             crate::roster_input::roster_input_from_config(&config, "grok", "grok-4.20", None);
         source.bind_hints = plakous_hosted::orchestration::BindHints::default();
         source.templates_digest = "old-build-render-recipe".into();
-        for template in source.templates.values_mut() {
-            template.description = "old built-in card text".into();
-        }
         let snapshot = OrchestrationSnapshot::freeze(source);
         let mut tree = bootstrap(&id, root.path().to_path_buf());
         tree.install_snapshot(snapshot.clone());
@@ -160,15 +126,21 @@ mod tests {
             let mut next =
                 crate::roster_input::roster_input_from_config(&config, "grok", "grok-4.20", None);
             next.templates_digest = recipe.into();
-            for template in next.templates.values_mut() {
-                template.description = format!("new built-in card text: {recipe}");
-                template.show_model = !template.show_model;
-            }
+            next.bind_hints = plakous_hosted::orchestration::BindHints::new(
+                std::collections::BTreeSet::from([recipe.to_owned()]),
+                std::collections::BTreeSet::new(),
+            );
+            let (_, TreeInspection::Tree(current)) =
+                crate::topology_product::inspect_session_tree(services.paths().unwrap(), &record)
+                    .unwrap()
+            else {
+                panic!("the preceding hop must retain its source tree");
+            };
             assert_ne!(
                 snapshot.digest,
                 OrchestrationSnapshot::freeze(next.clone()).digest
             );
-            assert!(!effective_settings_changed(&snapshot, &next).unwrap());
+            assert!(!effective_settings_changed(&current.rows().snapshot, &next).unwrap());
             assert!(apply_on_reload(&services, &mut record).is_none());
             assert_eq!(record.id, id);
         }
@@ -194,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn template_text_and_tool_table_rendering_are_not_selection_changes() {
+    fn template_values_carry_but_tool_table_formatting_alone_does_not() {
         let config = crate::product_config::ProductConfig::default_product();
         let mut source =
             crate::roster_input::roster_input_from_config(&config, "grok", "grok-4.20", None);
@@ -208,20 +180,43 @@ mod tests {
             "[tools.fetch_url]\nmax_bytes = 64\n".into(),
         );
         let frozen = OrchestrationSnapshot::freeze(source.clone());
-        let template = source.templates.get_mut(&name).unwrap();
-        template.description = "new built-in card instructions".into();
-        template.show_model = true;
-        template.cost_tier = Some(2);
         source.tool_sections.insert(
             "tools.fetch_url".into(),
             "[tools.fetch_url]\n# new rendering\nmax_bytes=64\n".into(),
         );
         assert!(!effective_settings_changed(&frozen, &source).unwrap());
+        let mut description_edit = source.clone();
+        description_edit
+            .templates
+            .get_mut(&name)
+            .unwrap()
+            .description = "changed card text".into();
+        assert!(effective_settings_changed(&frozen, &description_edit).unwrap());
+        let mut name_edit = source.clone();
+        name_edit.templates.get_mut(&name).unwrap().template = "renamed-card".into();
+        assert!(effective_settings_changed(&frozen, &name_edit).unwrap());
+        let mut cost_edit = source.clone();
+        cost_edit.templates.get_mut(&name).unwrap().cost_tier = Some(2);
+        assert!(effective_settings_changed(&frozen, &cost_edit).unwrap());
+        let mut visibility_edit = source.clone();
+        visibility_edit.templates.get_mut(&name).unwrap().show_model = true;
+        assert!(effective_settings_changed(&frozen, &visibility_edit).unwrap());
+        let mut root_edit = source.clone();
+        root_edit.root.template = Some("lead".into());
+        assert!(effective_settings_changed(&frozen, &root_edit).unwrap());
         source.tool_sections.insert(
             "tools.fetch_url".into(),
             "[tools.fetch_url]\nmax_bytes=128\n".into(),
         );
         assert!(effective_settings_changed(&frozen, &source).unwrap());
+    }
+
+    #[test]
+    fn bounds_are_compared_after_the_same_clamping_as_genesis() {
+        let mut source = RosterInput::unpinned("model");
+        source.bounds.max_children = u16::MAX;
+        let frozen = OrchestrationSnapshot::freeze(source.clone());
+        assert!(!effective_settings_changed(&frozen, &source).unwrap());
     }
 
     #[test]

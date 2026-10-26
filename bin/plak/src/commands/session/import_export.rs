@@ -207,7 +207,12 @@ fn import_host_config(
     history: &mut plakous::sessions::PortableSessionHistory,
     note: &mut String,
 ) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
-    let source_error = match super::attached::attached_host_config(services, record.clone()) {
+    let source = if root_fallback.is_some() {
+        super::attached::rebind_host_config(services, record.clone())
+    } else {
+        super::attached::attached_host_config(services, record.clone())
+    };
+    let source_error = match source {
         Ok(config) => return Ok(config),
         Err(super::attached::AttachedConfigError::Unresolvable(error)) => error,
         Err(super::attached::AttachedConfigError::Other(error)) => return Err(error),

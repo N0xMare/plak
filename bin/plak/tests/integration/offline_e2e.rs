@@ -6667,6 +6667,34 @@ fn import_warns_before_seeding_history_over_the_destination_route_input_window()
 }
 
 #[test]
+fn carry_probe_and_attached_recovery_work_without_a_ready_picker_catalog() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[{"output":{"text":"source answer"}}]}));
+    let source = run_cli(
+        &fixture,
+        &[
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--print-session-id",
+            "--",
+            "source prompt",
+        ],
+    );
+    assert!(source.status.success(), "{}", source.stderr);
+    let session = source.session_id();
+    let (path, _) = export_session(&fixture, &session, "unready-picker.json");
+    // The injected runtime binds its own model; its picker catalog is empty.
+    // These faces must resolve that binding, not classify a /rebind fallback.
+    let probe = run_cli(&fixture, &["version", "--carry-probe", &path]);
+    assert!(probe.status.success(), "{}", probe.stderr);
+    let recovered = run_cli(&fixture, &["session", "recover", &session]);
+    assert!(recovered.status.success(), "{}", recovered.stderr);
+    assert!(!recovered.stderr.contains("before /rebind"));
+}
+
+#[test]
 fn unknown_destination_window_does_not_block_import_or_capacity_probe() {
     let fixture = Fixture::new(&json!({"version":1,"steps":[{"output":{"text":"source"}}]}));
     let source = run_cli(
