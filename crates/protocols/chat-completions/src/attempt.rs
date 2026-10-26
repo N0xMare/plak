@@ -971,6 +971,54 @@ mod tests {
     }
 
     #[test]
+    fn an_in_band_deadline_after_a_hosted_effect_never_replays()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let attempt = attempt(b"hosted-before-deadline")?;
+        attempt.core.mark_service_admitted()?;
+        attempt.core.declare_server_effect()?;
+        attempt.observe_physical_request_started()?;
+        attempt.core.observe_received_event(true)?;
+        attempt.observe_physical_request_finished(PhysicalRequestOutcome::AcceptedDisconnect)?;
+        let facts = attempt.terminal_facts();
+        assert!(facts.hosted_effects_possible());
+        for status in [408, 504] {
+            assert_eq!(
+                ProviderRefusal::from_http_status(status),
+                Some(ProviderRefusal::Deadline)
+            );
+            let delay = plakous_attempt::RetryPolicy::TURN.next_delay(
+                facts,
+                plakous_attempt::FailurePoint::MidStream,
+                None,
+                std::time::Duration::ZERO,
+                plakous_attempt::Jitter::SHORTEST,
+            );
+            assert_eq!(delay, None);
+            let reason = plakous_exchange::retry_decline(
+                &plakous_exchange::RetryDeclineInput {
+                    deadline_remaining: None,
+                    established: None,
+                    redispatch_available: true,
+                    turn_retry: true,
+                    cause: plakous_model::ModelRetryCause::StreamInterrupted {
+                        fault: plakous_model::ModelTransportFault::Timeout,
+                    },
+                    point: plakous_attempt::FailurePoint::MidStream,
+                    facts,
+                    elapsed: std::time::Duration::ZERO,
+                    delay,
+                },
+                &mut plakous_attempt::LongStreamReplayBudget::default(),
+            );
+            assert_eq!(
+                reason,
+                Some(plakous_model::ModelRetryDeclineReason::ServerEffect)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn a_refused_generation_is_followed_by_a_fresh_one_never_an_overlapping_one()
     -> Result<(), Box<dyn std::error::Error>> {
         let attempt = attempt(b"generations")?;

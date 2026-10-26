@@ -38,8 +38,8 @@ pub use address::AddressPolicy;
 pub use bytes::Bytes;
 pub use control::{CancellationToken, ExchangeControl};
 pub use error::{
-    ConfigError, ConnectionUse, ErrorKind, Failure, LimitKind, Phase, RequestError, TlsCause,
-    TransmissionFact, WireProtocol,
+    ConfigError, ConnectAttempts, ConnectionUse, ErrorKind, Failure, LimitKind, Phase,
+    RequestError, TlsCause, TransmissionFact, WireProtocol,
 };
 pub use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Version};
 pub use observation::{ExchangeObservation, ExchangeObserver, ExchangeTerminal};

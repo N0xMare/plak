@@ -9,6 +9,76 @@ use plakous_model::{
 
 use super::*;
 
+#[test]
+fn codex_usage_limit_is_terminal_and_carries_reset_without_provider_prose()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/codex-usage-limit.json"
+    ))?;
+    for reset in [
+        Some(serde_json::json!(1_700_000_012_u64)),
+        None,
+        Some(serde_json::json!(-1)),
+        Some(serde_json::json!(u64::MAX)),
+    ] {
+        let mut native = fixture["error"].clone();
+        if let Some(reset) = &reset {
+            native["resets_at"] = reset.clone();
+        } else {
+            native
+                .as_object_mut()
+                .ok_or("error object")?
+                .remove("resets_at");
+        }
+        let provider = crate::parse_provider_error_with_policy(
+            &native,
+            crate::ResponsesResponseLimits::default(),
+            crate::ResponsesProviderErrorPolicy::OpenAiCompatible,
+        )?;
+        assert_eq!(provider.class(), crate::ResponsesProviderErrorClass::Quota);
+        let expected = (reset == Some(serde_json::json!(1_700_000_012_u64)))
+            .then_some(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_012));
+        assert_eq!(provider.usage_limit_resets_at(), expected);
+        let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
+            physical_attempts: 1,
+            provider_acceptance: ProviderAcceptance::NotAccepted,
+            visible_output: false,
+            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            hosted_effects_possible: false,
+            logical_success: false,
+        });
+        let error = model_error_from_attempt(
+            ResponsesAttemptError::HttpStatus {
+                physical: None,
+                status: StatusCode::TOO_MANY_REQUESTS,
+                class: ResponsesHttpStatusClass::Quota,
+                provider: Some(provider),
+                retry_after: Some(Duration::ZERO),
+                retry_disabled: true,
+                facts,
+            },
+            &descriptor()?,
+            None,
+            &StreamProgress::new(Instant::now()),
+        );
+        assert_eq!(error.kind(), ModelErrorKind::QuotaExceeded);
+        assert_eq!(
+            error.context().map(ModelErrorContext::retryability),
+            Some(ModelRetryability::Permanent)
+        );
+        assert!(error.message().contains("Codex usage limit reached"));
+        assert!(
+            error
+                .message()
+                .contains("https://chatgpt.com/settings/usage")
+        );
+        if expected.is_some() {
+            assert!(error.message().contains("Tue, 14 Nov 2023 22:13:32 GMT"));
+        }
+    }
+    Ok(())
+}
+
 fn descriptor() -> Result<ResolvedModelDescriptor, Box<dyn std::error::Error>> {
     Ok(ResolvedModelDescriptor::new(
         &StandardIntegrationAuthority::release_owned(),

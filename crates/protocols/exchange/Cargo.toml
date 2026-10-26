@@ -19,7 +19,6 @@ class = "published-internal"
 
 [dependencies]
 getrandom.workspace = true
-httpdate.workspace = true
 tokio = { workspace = true, features = ["time"] }
 zeroize.workspace = true
 futures-util = { workspace = true, features = ["std"] }

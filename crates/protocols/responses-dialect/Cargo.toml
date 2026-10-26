@@ -26,6 +26,7 @@ reason = "Existing item-local debt plus the mixed-presentation and canonical-rea
 [dependencies]
 base64.workspace = true
 futures-core.workspace = true
+httpdate.workspace = true
 plakous-attempt.workspace = true
 plakous-exchange.workspace = true
 plakous-http.workspace = true

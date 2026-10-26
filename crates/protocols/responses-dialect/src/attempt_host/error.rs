@@ -287,7 +287,11 @@ impl ResponsesAttemptError {
             | Self::ResponseMetadata { .. }
             | Self::Stream { .. }
             | Self::MultipleTerminals { .. }
-            | Self::Projection { .. } => RetryClass::Never,
+            | Self::Projection { .. }
+            | Self::HttpStatus {
+                class: ResponsesHttpStatusClass::Quota,
+                ..
+            } => RetryClass::Never,
             Self::Transport { source, facts, .. }
                 if matches!(
                     source.kind(),

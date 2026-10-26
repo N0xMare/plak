@@ -26,6 +26,7 @@ use crate::{
 };
 use crate::{ExchangeObserver, ExchangeTerminal};
 
+mod connect;
 mod connection;
 mod exchange;
 mod identity;
@@ -44,7 +45,7 @@ pub(crate) mod fault;
 mod pool;
 
 const HTTP1_MINIMUM_BUFFER_BYTES: usize = 8_192;
-const TRANSPORT_BEHAVIOR_REVISION: u32 = 4;
+const TRANSPORT_BEHAVIOR_REVISION: u32 = 5;
 /// How long a cleanly finished exchange waits for its HTTP/1.1 connection to
 /// accept another request before giving up on keeping it.
 const RELEASE_READY_BOUND: Duration = Duration::from_secs(1);
@@ -215,30 +216,29 @@ const fn resolution_failure(kind: ErrorKind) -> Failure {
     Failure::new(Phase::Resolution, TransmissionFact::NotStarted, kind)
 }
 
-/// Resolves `origin` and picks the address to connect: the first one, or with
-/// a policy the first one the policy admits.
+/// Resolves every address, filtering by policy before family interleaving.
 async fn resolve(
     resolver: Resolver,
     origin: &Origin,
     policy: Option<AddressPolicy>,
-) -> Result<SocketAddr, Failure> {
+) -> Result<Vec<SocketAddr>, Failure> {
     if policy.is_some_and(|policy| policy.refuses_host_name(origin.host())) {
         return Err(resolution_failure(ErrorKind::AddressRefused));
     }
     let addresses = resolver
         .lookup(origin.resolution_host(), origin.port())
         .await?;
-    let first = addresses
-        .first()
-        .copied()
-        .ok_or_else(|| resolution_failure(ErrorKind::Resolution))?;
-    let Some(policy) = policy else {
-        return Ok(first);
-    };
-    addresses
+    if addresses.is_empty() {
+        return Err(resolution_failure(ErrorKind::Resolution));
+    }
+    let addresses: Vec<_> = addresses
         .into_iter()
-        .find(|address| policy.admits(address.ip()))
-        .ok_or_else(|| resolution_failure(ErrorKind::AddressRefused))
+        .filter(|address| policy.is_none_or(|policy| policy.admits(address.ip())))
+        .collect();
+    if addresses.is_empty() {
+        return Err(resolution_failure(ErrorKind::AddressRefused));
+    }
+    Ok(connect::interleave(addresses))
 }
 
 impl Client {

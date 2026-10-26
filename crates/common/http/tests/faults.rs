@@ -195,9 +195,20 @@ async fn only_the_nth_matching_request_on_the_route_is_faulted() -> TestResult {
 
 #[tokio::test]
 async fn a_connect_fault_fails_like_a_refused_connection() -> TestResult {
-    let closed = TcpListener::bind("127.0.0.1:0").await?;
-    let refused = Origin::parse(&format!("https://{}", closed.local_addr()?))?;
-    drop(closed);
+    // An established socket reserves a non-listening local port. Dropping a
+    // listener before connecting lets a parallel test claim its ephemeral port.
+    let reservation = TcpListener::bind("127.0.0.1:0").await?;
+    let reserved = tokio::net::TcpStream::connect(reservation.local_addr()?).await?;
+    let (_peer, _) = reservation.accept().await?;
+    let refused = Origin::parse(&format!("https://{}", reserved.local_addr()?))?;
+    assert_eq!(
+        TcpListener::bind(reserved.local_addr()?)
+            .await
+            .err()
+            .ok_or("reserved port was reclaimed")?
+            .kind(),
+        std::io::ErrorKind::AddrInUse,
+    );
     let real = Client::new(Limits::default())?
         .with_faults(None)
         .execute(request(&refused, "/")?, control())

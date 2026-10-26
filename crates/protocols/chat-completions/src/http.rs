@@ -275,6 +275,7 @@ async fn execute<H: ChatHttpHooks>(
 ) -> Result<ChatAttemptResponse, ChatAttemptError> {
     let mut waited = Duration::ZERO;
     let mut fresh_connection = false;
+    let mut provider_deadline_replayed = false;
     let mut long_stream_replays = plakous_attempt::LongStreamReplayBudget::default();
     let mut unreachable = plakous_attempt::UnreachableRideOut::default();
     let timeout = attempt
@@ -445,6 +446,17 @@ async fn execute<H: ChatHttpHooks>(
                     .with_detail(interrupted.detail);
                     retryable.output_discarded = interrupted.delivered;
                     retryable.loss = interrupted.loss;
+                    if matches!(interrupted.error.http_status(), Some(408 | 504))
+                        && interrupted.error.refusal()
+                            == Some(plakous_attempt::ProviderRefusal::Deadline)
+                    {
+                        retryable.provider_refusal =
+                            Some(plakous_attempt::ProviderRefusal::Deadline);
+                        if provider_deadline_replayed {
+                            retryable.loss.declined_reason = Some(Decline::Budget);
+                        }
+                        provider_deadline_replayed = true;
+                    }
                     retryable
                         .loss
                         .transport_phase
@@ -544,6 +556,7 @@ struct Retryable {
     output_discarded: bool,
     detail: String,
     loss: plakous_model::ModelRetryLoss,
+    provider_refusal: Option<plakous_attempt::ProviderRefusal>,
 }
 
 impl Retryable {
@@ -554,6 +567,7 @@ impl Retryable {
             retry_after: None,
             output_discarded: false,
             detail: String::new(),
+            provider_refusal: None,
             loss: plakous_model::ModelRetryLoss {
                 assistant_text_bytes: 0,
                 reasoning_bytes: 0,
@@ -646,7 +660,9 @@ async fn wait_to_retry(
     attempt.record_failure(
         failure.point,
         phase.map(plakous_model::ModelRetryPhase::as_str),
-        retry_cause_refusal(failure.cause),
+        failure
+            .provider_refusal
+            .or_else(|| retry_cause_refusal(failure.cause)),
         unsent,
         reason.map(Decline::as_str),
     );
@@ -739,6 +755,11 @@ const fn stream_refusal_fault(error: &ChatAttemptProtocolError) -> Option<ModelT
     match error.refusal() {
         Some(plakous_attempt::ProviderRefusal::Overloaded) => Some(ModelTransportFault::Overloaded),
         Some(plakous_attempt::ProviderRefusal::RateLimit) => Some(ModelTransportFault::RateLimited),
+        Some(plakous_attempt::ProviderRefusal::Deadline)
+            if matches!(error.http_status(), Some(408 | 504)) =>
+        {
+            Some(ModelTransportFault::Timeout)
+        }
         _ => None,
     }
 }

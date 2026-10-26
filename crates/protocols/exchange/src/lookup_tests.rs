@@ -27,6 +27,28 @@ fn lookup_status_retry_classes() {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn lookup_retains_shared_retry_after_parsing_for_seconds_dates_and_garbage() {
+    for (value, expected) in [
+        ("12", Some(Duration::from_secs(12))),
+        ("Tue, 14 Nov 2023 22:13:20 GMT", Some(Duration::ZERO)),
+        ("garbage", None),
+    ] {
+        let result = super::lookup::run(
+            Duration::from_secs(30),
+            Duration::from_secs(60),
+            |_| async { Ok(reply_with_advice(429, b"", Some(value))) },
+            |_, _| panic!("single attempt retried"),
+            &mut |_| Ok(()),
+            1,
+        )
+        .await;
+        assert!(
+            matches!(result, Err(LookupError::Exhausted { retry_after, attempts: 1, .. }) if retry_after == expected)
+        );
+    }
+}
+
 #[test]
 fn lookup_failure_display_uses_singular_and_plural_attempts() {
     for (attempts, unit) in [(1, "attempt"), (2, "attempts")] {
@@ -84,7 +106,7 @@ fn lookup_backoff_and_cap() {
     assert!(can_retry(2, Duration::from_secs(2), Duration::from_secs(3)));
 }
 
-fn reply(status: u16, bytes: &[u8]) -> LookupReply {
+pub(super) fn reply(status: u16, bytes: &[u8]) -> LookupReply {
     reply_with_advice(status, bytes, None)
 }
 
@@ -388,4 +410,64 @@ async fn lookup_single_attempt_renewal_does_not_retry_transient_status() {
         })
     ));
     assert_eq!(attempts, 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn caller_deadline_is_shared_by_attempts_and_later_pages() {
+    let started = tokio::time::Instant::now();
+    let deadline = started + Duration::from_secs(4);
+    let mut attempts = 0;
+    let result = super::lookup::run(
+        Duration::from_secs(30),
+        deadline.saturating_duration_since(started),
+        |attempt_deadline| {
+            attempts += 1;
+            assert_eq!(attempt_deadline, deadline.into_std());
+            async {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                Ok(reply(503, b""))
+            }
+        },
+        |_, _| {},
+        &mut |_| Ok(()),
+        3,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(LookupError::Exhausted { attempts: 2, .. })
+    ));
+    assert_eq!(attempts, 2);
+    assert!(tokio::time::Instant::now() < deadline);
+}
+
+#[tokio::test(start_paused = true)]
+async fn oversleeping_backoff_never_dispatches_after_the_caller_deadline() {
+    let mut attempts = 0;
+    let mut dispatches = 0;
+    let result = super::lookup::run(
+        Duration::from_secs(30),
+        Duration::from_secs(1),
+        |_| {
+            attempts += 1;
+            async { Ok(reply(503, b"")) }
+        },
+        |_, _| {
+            tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::advance(Duration::from_secs(2)).await;
+            });
+        },
+        &mut |_| {
+            dispatches += 1;
+            Ok(())
+        },
+        3,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(LookupError::Exhausted { attempts: 1, .. })
+    ));
+    assert_eq!((attempts, dispatches), (1, 1));
 }

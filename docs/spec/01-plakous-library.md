@@ -2982,12 +2982,15 @@ It makes at most three physical attempts, with 500-750 ms then 2000-2250 ms
 jittered backoff. `Retry-After` (seconds or HTTP date) is a minimum delay;
 if the wait cannot leave at least `min(attempt_timeout, 5 seconds)` for the
 next attempt, the lookup returns the exhausted 429/provider cause immediately,
-without sleeping or sending again. Each catalog/discovery operation shares one 60-second overall
-cap across its GETs and pages; every physical attempt
-retains its original whole-exchange duration and phase deadlines, shortened
-by the remaining shared cap. Pagination and the two-GET OpenRouter discovery
-may therefore take up to 60 seconds in total, not merely one original attempt
-duration; advancing a page or endpoint never resets that operation cap. No attempt changes the exact URL, headers or
+without sleeping or sending again. Each catalog/discovery operation shares the
+caller's absolute deadline across its GETs, pages, retries and backoffs. Every
+physical attempt is bounded by 30 seconds or the remaining operation budget,
+whichever is shorter, as well as the transport phase deadlines. There is no
+independent 60-second cap, and advancing a page or endpoint never renews the
+caller's budget. Both lookup and inference use the same `Retry-After` parser:
+unsigned delta-seconds or an HTTP date, with past dates yielding zero delay,
+malformed/overflowing values ignored, and policy-specific wait bounds applied
+after parsing. No attempt changes the exact URL, headers or
 credentials, and none falls back to a different route. Only the successful
 exchange's body and headers can become admission evidence.
 
@@ -3007,12 +3010,12 @@ Native catalog-only and scoped-provider binding operations have a 120-second
 outer bound, including compatibility lock acquisition, credential setup,
 lookup and cleanup. Foreground retrying paths may hold their compatibility flock,
 Codex lifecycle lock and Ready lease for at most that operation bound; the
-physical catalog phase shares a tighter 60-second cap. Single-attempt paths
+physical catalog phase shares its caller-supplied absolute deadline. Single-attempt paths
 keep the original 30-second exchange deadline and never sleep while retaining
 that operation's authority; child resolution backoff occurs outside the operation.
 Explicit rebind allows 150 seconds per native catalog/resolution stage, leaving
-margin above the inner bound for host-side coordination; it must not cancel a
-stalled first GET at 30 seconds before the retry can start.
+margin above the inner bound for host-side coordination. A stalled GET may
+consume the entire supplied catalog budget; retry never extends that budget.
 
 An outer 120-second cut reports `ModelLookup` with cause `operation deadline`
 and the number of **charged dispatches** (unsent refunds excluded, possibly
@@ -9256,7 +9259,7 @@ guidance, and the session stays quiescent and admits the next prompt. It MUST
 NOT become `OutcomeUnknown`, which fences the session and forces the operator to
 discard a conversation over a transient condition the provider itself named.
 That definite terminal classification does not by itself grant retry authority:
-an in-band overload or rate limit on a cost-only turn request, including after
+an in-band overload or rate limit, or a Chat in-band deadline, on a cost-only turn request, including after
 a local tool call began streaming, is replayed by the kernel under the retry policy below, and a refusal that
 is not replayed or exhausts the budget keeps `Unsafe` retryability because a
 second inference could be billed. A pre-acceptance refusal may be `Eligible`
@@ -9350,6 +9353,7 @@ attempt ledger at admission.
 | Sent, response head not received (`MayHaveTransmitted` with `Io`/`Protocol`/`Tls`/timeout cause), `CostOnly` | yes |
 | HTTP `500`, `502`, `504` or `408` with no stream, or a refusal status not proven refused, `CostOnly` | yes |
 | Mid-stream break, including after a local tool call began, no hosted event, `CostOnly`: reset, EOF or missing terminal, idle timeout, or an in-stream provider error naming overload or rate limit | yes; the partial output is discarded |
+| Chat in-band upstream deadline (`408`, `504`), no hosted effect, `CostOnly` | at most one replay within the existing physical/wait budgets; partial output is discarded |
 | `x-should-retry: false` on any response, authentication (`401` beyond its one refresh), `403`, quota/billing/usage-limit, other `4xx`, other in-stream provider errors, malformed frames, local limits, cancellation | never |
 
 On HTTP/1.1 **with TLS 1.3**, a received TLS `bad_record_mac` alert (20) before
@@ -9389,7 +9393,13 @@ Quota, billing and exhausted entitlement are terminal even with `Retry-After`
 and a nominally retryable status. Kernels inspect bounded body codes/types as
 well as status: `insufficient_quota`, `quota_exceeded`, `payment_required`,
 `billing_error`, `credit_balance_exhausted`, `organization_spend_limit_exceeded`,
-`project_spend_limit_exceeded`, and `usage_not_included`. Ordinary
+`project_spend_limit_exceeded`, `usage_not_included`, and
+`usage_limit_reached`. A Codex HTTP 429 with `error.type` equal to
+`usage_limit_reached` is typed quota exhaustion, not a retryable rate limit.
+Its optional `error.resets_at` Unix-seconds value is exposed on the bounded
+provider error and rendered in UTC with advice to wait or review plan/credits.
+Missing or invalid reset values keep the quota classification and omit the
+timestamp. Ordinary
 `rate_limit_exceeded`, `rate_limit_error`, and overloaded 529 remain retryable.
 An OpenRouter numeric `402` is typed quota evidence; its native value is
 retained without synthesizing a provider code label.
@@ -9528,9 +9538,14 @@ An in-band status is typed exactly like that status before the stream: the
 terminal kind is its named refusal (`Timeout` for `408`/`504`, `Unavailable`
 for other `5xx` including the `52x` edge statuses, `RateLimited` for `429`),
 the status rides on the error context's `http_status`, and the attempt summary
-names the same class. Retry is unchanged: the in-stream overload and rate
-limit rows above replay; an in-band deadline (`408`, `504`) is not one of
-them and ends the attempt.
+names the same class. OpenRouter Chat in-band deadlines (`408`, `504`) permit
+one replay under the same turn, effect-safety, retry-disabled, wait and physical
+budgets as the in-stream overload and rate-limit rows. A second in-band
+deadline ends the attempt as `Timeout`, retaining its status and timeout
+summary; transport idle deadlines do not spend this provider-deadline allowance.
+No replay is allowed after a hosted effect started or might have started.
+Visible output from the interrupted generation is discarded with the turn,
+as for the other in-band refusals.
 
 A well-formed in-band error object is the provider's own report, not a stream
 that violated the grammar, and its diagnostic says so: `OpenRouter returned an
@@ -9628,7 +9643,16 @@ Paid compaction likewise carries no hard body deadline: its context supplies
 deadline still bounds preparation and stream start. Its single-dispatch
 semantics are unchanged; a billed body may outlive that start budget.
 Cancellation stops a stream at once; the single-dispatch paid-compaction
-workflow is unchanged. Connect remains bounded by 10 seconds; request-write
+workflow is unchanged. Fresh TCP connections race all admitted resolved
+addresses, interleaving IPv6 and IPv4 while preserving resolver order within
+each family and the first answer's family preference. Attempts start 250 ms
+apart; an immediate failure with no pending attempt advances immediately.
+The first successful TCP connection wins and drops all losing socket futures.
+The race shares one connect deadline (10 seconds, further capped by the
+exchange deadline); it never changes the URL, host, TLS server name or auth.
+All-address failure keeps `Connect`/`Io`/`NotStarted`, the final I/O cause, and
+typed IPv4/IPv6 attempt counts; diagnostics do not retain resolved addresses.
+Deadline exhaustion keeps `Connect`/`DeadlineExceeded`/`NotStarted`. Request-write
 idle is 30 seconds. Auth, catalog, discovery and other REST exchanges keep
 30-second stalls and a
 whole-exchange deadline (`ExchangeControl::new`), including their bodies.
@@ -9682,8 +9706,8 @@ host name and port 0. A loopback HTTP connection skips TLS and carries
 HTTP/1.1. A client may carry an `AddressPolicy` (`Client::with_address_policy`;
 none by default, and provider clients install none). With a policy, each fresh
 connection refuses the host names `localhost`, `*.localhost` and
-`metadata.google.internal` before resolution, then connects to the first
-resolved address the policy admits. The admitted address is the one connected,
+`metadata.google.internal` before resolution, then races only
+resolved addresses the policy admits. Only admitted addresses are connected,
 so a name that rebinds between a caller's check and the connection cannot reach
 a refused address. A refused name, or a resolution with no admitted address,
 fails `ErrorKind::AddressRefused` in the resolution phase before any connect;

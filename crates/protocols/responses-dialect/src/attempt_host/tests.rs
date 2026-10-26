@@ -5186,10 +5186,15 @@ async fn terminal_retry_advice_and_quota_bodies_never_replay() -> TestResult {
         ("insufficient_quota", ""),
         ("credit_balance_exhausted", ""),
         ("usage_not_included", ""),
+        ("usage_limit_reached", ""),
     ] {
-        let body = serde_json::to_vec(
-            &serde_json::json!({"error":{"code":code,"message":"fixture refusal"}}),
-        )?;
+        let body = if code == "usage_limit_reached" {
+            include_bytes!("../../tests/fixtures/codex-usage-limit.json").to_vec()
+        } else {
+            serde_json::to_vec(
+                &serde_json::json!({"error":{"code":code,"message":"fixture refusal"}}),
+            )?
+        };
         let response = http_response_with(
             "429 Fixture",
             Some("application/json"),
@@ -5210,6 +5215,13 @@ async fn terminal_retry_advice_and_quota_bodies_never_replay() -> TestResult {
             panic!("terminal refusal");
         };
         assert_eq!(error.facts().physical_attempts(), 1, "{code}");
+        if code == "usage_limit_reached" {
+            assert_eq!(error.retry_class(), RetryClass::Never);
+            assert!(
+                matches!(&error, ResponsesAttemptError::HttpStatus { class: ResponsesHttpStatusClass::Quota, provider: Some(provider), retry_disabled: true, .. }
+                if provider.usage_limit_resets_at() == Some(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_012)))
+            );
+        }
         assert_eq!(peer.await??.len(), 1);
     }
     Ok(())

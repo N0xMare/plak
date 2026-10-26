@@ -293,6 +293,7 @@ pub fn terminal_usage_error(label: &str) -> bool {
             | "organization_spend_limit_exceeded"
             | "project_spend_limit_exceeded"
             | "usage_not_included"
+            | "usage_limit_reached"
     )
 }
 
@@ -325,8 +326,8 @@ pub fn retry_after_seconds(value: &str) -> Option<Duration> {
 
 fn retry_after_at(value: &str, now: std::time::SystemTime) -> Option<Duration> {
     let value = value.trim();
-    if let Ok(seconds) = value.parse::<u64>() {
-        return Some(Duration::from_secs(seconds));
+    if value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return value.parse::<u64>().ok().map(Duration::from_secs);
     }
     httpdate::parse_http_date(value)
         .ok()
@@ -733,6 +734,14 @@ mod tests {
             Some(Duration::ZERO)
         );
         assert_eq!(retry_after_seconds("-1"), None);
+        assert_eq!(retry_after_seconds("garbage"), None);
+        assert_eq!(retry_after_seconds("+1"), None);
+        assert_eq!(retry_after_seconds("1.5"), None);
+        assert_eq!(retry_after_seconds("18446744073709551616"), None);
+        assert_eq!(
+            retry_after_seconds("18446744073709551615"),
+            Some(Duration::from_secs(u64::MAX))
+        );
     }
 
     #[test]

@@ -6,11 +6,11 @@ use plakous_http::{
 };
 use std::{
     fmt,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 use zeroize::Zeroizing;
 
-const OVERALL_CAP: Duration = Duration::from_secs(60);
+const ATTEMPT_CAP: Duration = Duration::from_secs(30);
 
 /// Content-free cause of a transient lookup failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -136,12 +136,12 @@ pub struct LookupBudget {
 }
 
 impl LookupBudget {
-    /// Retains the existing first-attempt duration, with a 60-second operation cap.
+    /// Uses the caller's absolute deadline for the entire operation, across retries and pages.
     #[must_use]
     pub fn from_deadline(deadline: Instant) -> Self {
         Self {
-            attempt_timeout: deadline.saturating_duration_since(Instant::now()),
-            deadline: tokio::time::Instant::now() + OVERALL_CAP,
+            attempt_timeout: ATTEMPT_CAP,
+            deadline: tokio::time::Instant::from_std(deadline),
             maximum_attempts: 3,
         }
     }
@@ -156,8 +156,8 @@ impl LookupBudget {
     }
 }
 
-/// Executes only the supplied GET, at most three times within 60 seconds.
-/// Each attempt keeps the original exchange duration and transport phase limits.
+/// Executes only the supplied GET, at most three times within the caller's budget.
+/// Each attempt is capped at 30 seconds and the remaining operation time.
 /// Catalog parsing and evidence validation MUST happen outside this function.
 ///
 /// # Errors
@@ -281,7 +281,7 @@ where
                     .headers
                     .get(&HeaderName::from_static("retry-after"))
                     .and_then(|v| v.to_str().ok())
-                    .and_then(parse_retry_after);
+                    .and_then(plakous_attempt::retry_after_seconds);
                 (LookupCause::Status(reply.status.as_u16()), delay)
             }
             Err(LookupError::Transport(failure)) if LookupCause::Transport(failure).retryable() => {
@@ -308,6 +308,13 @@ where
         }
         notify(attempt + 1, &cause.to_string());
         tokio::time::sleep(delay).await;
+        if tokio::time::Instant::now() >= cap {
+            return Err(LookupError::Exhausted {
+                attempts: attempt,
+                cause,
+                retry_after,
+            });
+        }
     }
     unreachable!("the third transient failure returns exhausted")
 }
@@ -384,20 +391,6 @@ pub(super) fn can_retry(attempt: u8, delay: Duration, remaining: Duration) -> bo
     attempt < 3 && delay < remaining
 }
 
-fn parse_retry_after(value: &str) -> Option<Duration> {
-    value
-        .trim()
-        .parse::<u64>()
-        .ok()
-        .map(Duration::from_secs)
-        .or_else(|| {
-            httpdate::parse_http_date(value)
-                .ok()?
-                .duration_since(SystemTime::now())
-                .ok()
-        })
-}
-
 pub(super) fn retryable_transport(phase: Phase, kind: ErrorKind) -> bool {
     matches!(
         kind,
@@ -410,5 +403,40 @@ struct LookupStatus<'a>(&'a Client);
 impl Drop for LookupStatus<'_> {
     fn drop(&mut self) {
         self.0.observe_lookup_finished();
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn caller_deadlines_bound_real_attempts_without_an_independent_cap() {
+        for (seconds, expected_attempts) in [(4, 1), (120, 3)] {
+            let started = tokio::time::Instant::now();
+            let deadline = started + Duration::from_secs(seconds);
+            let budget = LookupBudget::from_deadline(deadline.into_std());
+            let mut attempts = 0;
+            let result = run(
+                budget.attempt_timeout,
+                budget.deadline.saturating_duration_since(started),
+                |attempt_deadline| {
+                    attempts += 1;
+                    async move {
+                        tokio::time::sleep_until(attempt_deadline.into()).await;
+                        Ok(super::super::lookup_tests::reply(503, b""))
+                    }
+                },
+                |_, _| {},
+                &mut |_| Ok(()),
+                budget.maximum_attempts,
+            )
+            .await;
+            assert!(
+                matches!(result, Err(LookupError::Exhausted { attempts, .. }) if attempts == expected_attempts)
+            );
+            assert_eq!(attempts, expected_attempts);
+            assert!(tokio::time::Instant::now() <= deadline);
+        }
     }
 }

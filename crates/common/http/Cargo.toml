@@ -19,6 +19,7 @@ class = "published-internal"
 
 [dependencies]
 bytes.workspace = true
+futures-util = { workspace = true, features = ["std"] }
 h2.workspace = true
 http.workspace = true
 http-body.workspace = true

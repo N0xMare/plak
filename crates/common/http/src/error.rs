@@ -212,6 +212,26 @@ pub struct Failure {
     http2_io: bool,
     connection: Option<ConnectionUse>,
     idle_age: Option<std::time::Duration>,
+    connect_attempts: Option<ConnectAttempts>,
+}
+
+/// Content-free accounting of all TCP addresses attempted before failure.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ConnectAttempts {
+    /// IPv4 addresses attempted.
+    pub ipv4: u32,
+    /// IPv6 addresses attempted.
+    pub ipv6: u32,
+}
+
+impl ConnectAttempts {
+    pub(crate) fn record(&mut self, address: std::net::SocketAddr) {
+        if address.is_ipv4() {
+            self.ipv4 = self.ipv4.saturating_add(1);
+        } else {
+            self.ipv6 = self.ipv6.saturating_add(1);
+        }
+    }
 }
 
 impl Failure {
@@ -228,7 +248,20 @@ impl Failure {
             http2_io: false,
             connection: None,
             idle_age: None,
+            connect_attempts: None,
         }
+    }
+
+    pub(crate) const fn with_connect_attempts(mut self, attempts: ConnectAttempts) -> Self {
+        self.connect_attempts = Some(attempts);
+        self
+    }
+
+    /// Address-family counts when every TCP connection attempt failed.
+    /// Addresses themselves are not retained in this redacted failure.
+    #[must_use]
+    pub const fn connect_attempts(self) -> Option<ConnectAttempts> {
+        self.connect_attempts
     }
 
     pub(crate) fn with_protocol_cause(mut self, error: &hyper::Error) -> Self {
@@ -405,6 +438,7 @@ impl fmt::Debug for Failure {
             .field("http2_io", &self.http2_io)
             .field("connection", &self.connection)
             .field("idle_age", &self.idle_age)
+            .field("connect_attempts", &self.connect_attempts)
             .finish()
     }
 }
@@ -418,6 +452,13 @@ impl fmt::Display for Failure {
         )?;
         if let Some(age) = self.idle_age {
             write!(formatter, " [idle at checkout: {} ms]", age.as_millis())?;
+        }
+        if let Some(attempts) = self.connect_attempts {
+            write!(
+                formatter,
+                " [connect attempts: IPv4={}, IPv6={}]",
+                attempts.ipv4, attempts.ipv6
+            )?;
         }
         Ok(())
     }
@@ -558,7 +599,7 @@ mod tests {
             "Failure { phase: RequestWriteOrResponseHead, transmission: MayHaveTransmitted, \
              kind: Protocol, cause: Some(\"invalid_data\"), http2_reason: None, os_error: None, \
              tls: Some(\"tls_alert_received\"), tls_alert: Some(80), alpn: Some(\"h2\"), \
-             http2_io: false, connection: None, idle_age: None }"
+             http2_io: false, connection: None, idle_age: None, connect_attempts: None }"
         );
     }
 }

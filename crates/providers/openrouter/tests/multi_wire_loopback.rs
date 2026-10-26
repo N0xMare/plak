@@ -1668,12 +1668,20 @@ fn chat_sse_framing_then_in_band_error(code: u16) -> String {
 /// request can only cost inference: the turn replays it and completes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
-    for code in [520_u16, 429] {
+    for code in [520_u16, 429, 408, 504] {
+        let content = format!(
+            "data: {{\"id\":\"chat-inband\",\"object\":\"chat.completion.chunk\",\"created\":1787623695,\"model\":\"{MODEL}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"discarded\"}},\"finish_reason\":null}}]}}\n\n"
+        );
+        let interrupted = chat_sse_framing_then_in_band_error(code).replacen(
+            "data: {\"error\"",
+            &format!("{content}data: {{\"error\""),
+            1,
+        );
         let mut replies = discovery_replies();
         replies.extend([
             (
                 "text/event-stream",
-                chat_sse_framing_then_in_band_error(code),
+                interrupted,
                 "x-request-id: req-inband\r\n",
             ),
             (
@@ -1703,7 +1711,13 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
         assert!(result.error().is_none(), "HTTP {code} in band: {result:?}");
         assert_eq!(result.response().ok_or("response")?.output_text(), "chat");
         agent.shutdown().await?;
-        timeout(Duration::from_secs(5), peer).await???;
+        let requests = timeout(Duration::from_secs(5), peer).await???;
+        assert_eq!(
+            requests.len(),
+            4,
+            "two discovery calls and exactly one replay"
+        );
+        assert_eq!(requests[2], requests[3], "replay keeps the exact request");
     }
     Ok(())
 }
@@ -1927,14 +1941,25 @@ async fn an_in_band_401_is_post_acceptance_and_never_redispatched() -> TestResul
 /// It is the provider's timeout, read like that status before acceptance:
 /// typed `Timeout` with its status on the error context, and the operator
 /// text names the provider's error rather than a stream validation failure.
-/// No retry rule replays an in-band deadline, so the one inference stands.
+/// One replay is allowed; the second deadline ends the turn as Timeout.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_in_band_504_is_the_providers_timeout_with_its_status() -> TestResult {
     let stream = format!(
         ": OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\ndata: {{\"id\":\"gen-inband\",\"object\":\"chat.completion.chunk\",\"created\":1787623695,\"model\":\"{MODEL}\",\"provider\":\"Upstream\",\"choices\":[],\"error\":{{\"code\":504,\"message\":\"error code: 504\",\"metadata\":{{\"provider_name\":\"Upstream\"}}}}}}\n\n"
     );
     let mut replies = discovery_replies();
-    replies.push(("text/event-stream", stream, "x-request-id: req-inband\r\n"));
+    replies.extend([
+        (
+            "text/event-stream",
+            stream.clone(),
+            "x-request-id: req-inband\r\n",
+        ),
+        (
+            "text/event-stream",
+            stream,
+            "x-request-id: req-inband-2\r\n",
+        ),
+    ]);
     let (client, origin, peer) = loopback(b"openrouter-in-band-504-v1", replies).await?;
     let chat = discovered_chat_model(client, origin).await?;
     let workspace_dir = tempfile::tempdir()?;
@@ -1969,12 +1994,12 @@ async fn an_in_band_504_is_the_providers_timeout_with_its_status() -> TestResult
     assert_eq!(
         error.message(),
         "OpenRouter Chat operation failed: OpenRouter returned an in-band error after \
-         accepting the request: HTTP 504 (timeout) from Upstream [1 requests; last: timeout]"
+         accepting the request: HTTP 504 (timeout) from Upstream [2 requests; last: timeout; retry declined: budget]"
     );
 
     agent.shutdown().await?;
     let requests = timeout(Duration::from_secs(5), peer).await???;
-    assert_eq!(requests.len(), 3, "two discovery calls and one inference");
+    assert_eq!(requests.len(), 4, "two discovery calls and two inferences");
     Ok(())
 }
 

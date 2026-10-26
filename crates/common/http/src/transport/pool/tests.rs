@@ -539,19 +539,63 @@ async fn a_stale_connection_is_replaced_once_by_a_fresh_one() -> TestResult {
 
 #[tokio::test]
 async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestResult {
-    for alpn in [H1, H2] {
-        let server = Server::start(alpn).await?;
-        let client = server.pooled_client(Limits::default())?;
+    for protocol in [WireProtocol::Http1, WireProtocol::Http2] {
+        // Inject an already-idle socket owner. HTTP negotiation/readiness is
+        // tested separately; its one-second release deadline can expire under
+        // load before this ownership test even reaches the first client drop.
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let mut peer = TcpStream::connect(address).await?;
+        let (mut stream, _) = listener.accept().await?;
+        let client = Client::new(Limits::default())?.pooled();
         let derived = client.with_limits(Limits::for_streaming_inference())?;
-        assert_eq!(
-            exchange(&client, &server.origin, "/ok").await?,
-            ConnectionUse::Fresh
+        let driver = tokio::spawn(async move {
+            let mut byte = [0];
+            while let Ok(1) = stream.read(&mut byte).await {
+                if stream.write_all(&byte).await.is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        });
+        pool(&client)?.checkin(
+            super::PoolKey {
+                host: address.ip().to_string(),
+                port: address.port(),
+                plain_loopback: false,
+                address_policy: None,
+                tls_config: Arc::as_ptr(&client.inner.tls_config) as usize,
+                policy: client.inner.policy,
+                settings: super::ConnectionSettings::new(client.limits()),
+            },
+            super::IdleConnection {
+                connection: crate::transport::ConnectionTask::new(driver, None),
+                slot: crate::transport::ProgressSlot::new(Arc::new(
+                    crate::transport::RequestProgress::new(
+                        true,
+                        protocol == WireProtocol::Http2,
+                        0,
+                    ),
+                )),
+                protocol,
+                since: Instant::now(),
+            },
         );
         drop(client);
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(server.closed(), 0, "a derived client still owns the pool");
+        peer.write_all(b"x").await?;
+        let mut byte = [0];
+        peer.read_exact(&mut byte).await?;
+        assert_eq!(
+            &byte, b"x",
+            "a derived client still owns the live connection"
+        );
+        assert_eq!(pool(&derived)?.idle_count(), 1);
         drop(derived);
-        assert!(eventually(|| server.closed() == 1).await);
+        assert_eq!(
+            peer.read(&mut byte).await?,
+            0,
+            "last owner closes the socket"
+        );
     }
     Ok(())
 }

@@ -506,6 +506,20 @@ pub struct ResponsesProviderError {
 }
 
 impl ResponsesProviderError {
+    /// Subscription usage-limit reset, when the provider supplies Unix seconds.
+    #[must_use]
+    pub fn usage_limit_resets_at(&self) -> Option<std::time::SystemTime> {
+        if ![self.code(), self.kind()].contains(&Some("usage_limit_reached")) {
+            return None;
+        }
+        let seconds = self.native.get("resets_at")?.as_u64()?;
+        // Keep provider-controlled timestamps inside the HTTP-date formatter's range.
+        if seconds > 253_402_300_799 {
+            return None;
+        }
+        std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(seconds))
+    }
+
     /// Safe allowlisted error classification.
     #[must_use]
     pub const fn class(&self) -> ResponsesProviderErrorClass {

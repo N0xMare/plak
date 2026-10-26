@@ -1177,7 +1177,6 @@ version = "0.0.2"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
- "httpdate",
  "plakous-attempt",
  "plakous-http",
  "plakous-model",
@@ -1216,6 +1215,7 @@ name = "plakous-http"
 version = "0.0.2"
 dependencies = [
  "bytes",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -1368,6 +1368,7 @@ version = "0.0.2"
 dependencies = [
  "base64 0.22.1",
  "futures-core",
+ "httpdate",
  "plakous-attempt",
  "plakous-exchange",
  "plakous-http",

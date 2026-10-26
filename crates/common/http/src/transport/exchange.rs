@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use http::Request as WireRequest;
 use rustls::pki_types::ServerName;
-use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
 use crate::{
@@ -203,7 +202,7 @@ impl Client {
         let resolver = self.inner.resolver.clone();
         let policy = self.inner.address_policy;
         let target = origin.clone();
-        let address = wait_task(
+        let addresses = wait_task(
             TaskGuard::new(tokio::spawn(async move {
                 resolve(resolver, &target, policy).await
             })),
@@ -216,15 +215,7 @@ impl Client {
 
         let stream = wait_task(
             TaskGuard::new(tokio::spawn(async move {
-                let failed = |error: std::io::Error| {
-                    Failure::new(Phase::Connect, TransmissionFact::NotStarted, ErrorKind::Io)
-                        .with_io_cause(&error)
-                };
-                let stream = TcpStream::connect(address).await.map_err(failed)?;
-                // HTTP/2 writes a request as separate HEADERS and DATA frames;
-                // Nagle would hold the second for the peer's delayed ACK.
-                stream.set_nodelay(true).map_err(failed)?;
-                Ok(stream)
+                super::connect::connect(addresses).await
             })),
             control,
             self.inner.limits.connect_timeout,
