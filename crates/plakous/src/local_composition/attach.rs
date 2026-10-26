@@ -36,7 +36,14 @@ impl LocalCompositionProfile {
     pub fn cell(descriptor: &plakous_compose::CellDescriptor) -> Result<Self, AgentError> {
         let worker = match descriptor {
             plakous_compose::CellDescriptor::PythonPtcV1(_)
-            | plakous_compose::CellDescriptor::PythonHarnessSdkV1(_) => &plakous_cell::MONTY_WORKER,
+            | plakous_compose::CellDescriptor::PythonHarnessSdkV1(_) => {
+                if !python_capability::COMPILED {
+                    return Err(invalid(
+                        "Python composition is not included in this build (compiled without feature `composition-python`)",
+                    ));
+                }
+                &plakous_cell::MONTY_WORKER
+            }
             plakous_compose::CellDescriptor::CodexNativeLocalCodeModeV1(_)
             | plakous_compose::CellDescriptor::CodexMinimalLocalCodeModeV1(_)
             | plakous_compose::CellDescriptor::ProductJavaScriptV1(_) => {

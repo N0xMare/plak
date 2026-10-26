@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize as _;
 
 use super::McpOAuthSettings;
-use crate::error::{McpError, McpErrorKind};
+use crate::surface::error::{McpError, McpErrorKind};
 
 /// The private-store profile of MCP logins.
 pub(crate) const PROFILE_ID: &str = "plakous.mcp.oauth.compat.2026-07-28.r1";

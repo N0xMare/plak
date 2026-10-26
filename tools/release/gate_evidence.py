@@ -52,7 +52,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     ".markdownlint-cli2.yaml": (frozenset({"*.md"}), "markdownlint globs; not a gate"),
     "bin/plak/src/carry/history/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/cli.rs": (frozenset({'"docs"'}), "an MCP server id argument fixture"),
-    "bin/plak/src/commands/mcp.rs": (frozenset({'"docs"'}), "an MCP server id in help text"),
+    "bin/plak/src/commands/mcp/available.rs": (frozenset({'"docs"'}), "an MCP server id in help text"),
     "bin/plak/src/product_cli_output.rs": (frozenset({'"STATUS"'}), "a table header"),
     "bin/plak/src/product_config/mcp_edit/tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),
     "bin/plak/src/product_config/tool_sections_tests.rs": (frozenset({'"docs"'}), "an MCP server id fixture"),

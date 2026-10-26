@@ -11,11 +11,11 @@ use rmcp::model::{
 };
 use serde::Serialize;
 
-use crate::error::{McpError, McpErrorKind};
-use crate::http::{self, HttpRefusal};
-use crate::listing::{MAX_LISTED_TOOLS, MAX_LISTING_BYTES};
-use crate::pool::McpLease;
-use crate::result::inline_image;
+use crate::surface::error::{McpError, McpErrorKind};
+use crate::surface::http::{self, HttpRefusal};
+use crate::surface::listing::{MAX_LISTED_TOOLS, MAX_LISTING_BYTES};
+use crate::surface::pool::McpLease;
+use crate::surface::result::inline_image;
 
 /// The MCP-side name of the resources tool a definition with resources
 /// enabled gets, exposed as `mcp__<server>__read_resource`.

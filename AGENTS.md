@@ -130,6 +130,10 @@ confer accessibility, not support.
 Packages declare the dependency features their Rust targets use rather than
 relying on another workspace member's feature unification. The feature checker
 requires locally declared UUID generation features, including for test code.
+It validates 2n+3 feature closures per package (none, each singleton, full
+minus each feature, default and full), with a reviewed cap of 24 public
+optional features. Reduced products compile only in the full-only `variants`
+group, not in `check`.
 The root workspace excludes `.plak` operator state and fork worktrees; the
 workspace checker requires this exclusion without permitting unreviewed ones.
 The workspace checker also ratchets, per package, item-level allows of

@@ -17,15 +17,15 @@ use plakous_tools::{
 use rmcp::ServiceExt as _;
 use serde_json::{Value, json};
 
-use crate::pack::{CallResult, call, map_read_result, read};
+use crate::surface::pack::{CallResult, call, map_read_result, read};
 
 /// The scripted server the repository-only `plakous-mcp-fake-server` binary
 /// serves over stdio, compiled in here to serve in process: a dev-dependency
 /// on that package would close a dependency cycle through its own tests.
 #[path = "../../../../tests/fixtures/mcp-fake-server/src/lib.rs"]
 mod fake_server;
-use crate::result::map_call_result;
-use crate::{
+use crate::surface::result::map_call_result;
+use crate::surface::{
     CRASH_WINDOW, IDLE_STOP, McpErrorKind, McpLease, McpPool, McpResourceContents, McpServerSpec,
     McpServerState, McpToolPack, McpToolSelection,
 };
@@ -478,7 +478,11 @@ async fn roots_advertise_exactly_the_workspace_root() -> TestResult {
     let root = harness.environment.workspace().root().to_path_buf();
     assert_eq!(
         outcome.joined_text(),
-        format!("{}{}", header("roots"), crate::client::file_uri(&root))
+        format!(
+            "{}{}",
+            header("roots"),
+            crate::surface::client::file_uri(&root)
+        )
     );
     assert!(Path::new(&root).starts_with(std::fs::canonicalize(harness.workspace.path())?));
     let connection = lease.entry.connection().await?;

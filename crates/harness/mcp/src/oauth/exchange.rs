@@ -18,7 +18,7 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use super::credential::TokenEndpointAuth;
-use crate::error::{McpError, McpErrorKind};
+use crate::surface::error::{McpError, McpErrorKind};
 
 /// Bound of one authorization-server exchange.
 pub(crate) const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);

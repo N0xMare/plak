@@ -47,9 +47,7 @@ pub(crate) fn admit_config(config: &crate::product_config::ProductConfig) -> Cli
         if let Some(composition) = template.composition {
             require_composition(composition)?;
         }
-        if template.tools.mcp_servers().next().is_some() {
-            require_feature("mcp")?;
-        }
+        plakous_hosted::capabilities::require_tools(&template.tools)?;
     }
     Ok(())
 }
@@ -64,21 +62,16 @@ pub(crate) fn admit_selected(
     if let Some(template) = config.root_template()
         && Some(template.account.as_str()) == account
         && Some(template.model.as_str()) == model
-        && template.tools.mcp_servers().next().is_some()
     {
-        require_feature("mcp")?;
+        plakous_hosted::capabilities::require_tools(&template.tools)?;
     }
     Ok(())
 }
 
 pub(crate) fn admit_session(record: &crate::store::sessions::SessionRecord) -> CliResult<()> {
     require_composition(record.composition)?;
-    if record
-        .frozen_tools
-        .as_ref()
-        .is_some_and(|tools| tools.selection().selection.mcp_servers().next().is_some())
-    {
-        require_feature("mcp")?;
+    if let Some(tools) = record.frozen_tools.as_ref() {
+        plakous_hosted::capabilities::require_tools(&tools.selection().selection)?;
     }
     Ok(())
 }

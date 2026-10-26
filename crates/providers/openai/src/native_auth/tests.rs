@@ -664,11 +664,7 @@ fn acceptance() -> Result<CodexCompatibilityAcceptance, NativeCodexAuthError> {
     )
 }
 
-fn encode(
-    header: &Header,
-    claims: &impl Serialize,
-    key: &EncodingKey,
-) -> TestResult<String> {
+fn encode(header: &Header, claims: &impl Serialize, key: &EncodingKey) -> TestResult<String> {
     let base64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let message = format!(
         "{}.{}",

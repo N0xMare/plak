@@ -33,6 +33,7 @@
 /// Optional observational exchange hooks. These carry no dispatch authority.
 #[cfg(any(
     feature = "native-subscriptions",
+    feature = "web-fetch",
     feature = "openrouter",
     feature = "openai",
     feature = "anthropic",
@@ -539,21 +540,10 @@ pub mod model {
 /// Model Context Protocol client: a process-wide server pool, frozen tool
 /// listings and the MCP tool pack.
 #[cfg(feature = "mcp")]
-pub mod mcp {
-    pub use plakous_mcp::{
-        FrozenMcpListing, HeaderName, HeaderValue, MAX_DESCRIPTION_BYTES, MAX_EXPOSED_NAME_BYTES,
-        MAX_INLINE_TEXT_BYTES, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, MAX_PROMPT_TEXT_BYTES,
-        MAX_SSE_EVENT_BYTES, McpDeviceLogin, McpError, McpErrorKind, McpHttpEndpoint,
-        McpHttpSecret, McpHttpSecretResolver, McpLease, McpLocalLogin, McpLocalRetirement,
-        McpLogin, McpLoginOptions, McpLoginRemedy, McpLogoutOutcome, McpOAuthSecretResolver,
-        McpOAuthSettings, McpOAuthStatus, McpPasteLogin, McpPool, McpPrompt, McpPromptArgument,
-        McpPromptExpansion, McpRemoteLogin, McpResource, McpResourceContents, McpResourceTemplate,
-        McpSecretResolver, McpServerSpec, McpServerState, McpServerStatus, McpToolPack,
-        McpToolRecord, McpToolSelection, SchemaRefusal, SensitiveBytes, exposed_tool_name,
-        prompt_header, untrusted_header,
-    };
-    pub use plakous_tools::ServiceSecretValue;
-}
+pub mod mcp;
+#[cfg(not(feature = "mcp"))]
+#[path = "mcp_vocabulary.rs"]
+pub mod mcp;
 /// Exact-origin OpenAI API-key execution and the separate Codex subscription integration.
 ///
 /// The colliding upstream names are re-exported only under `OpenAi*` names:
@@ -1168,18 +1158,11 @@ pub mod tools {
     /// Hosted retrieval: the neutral port a route implements and the local
     /// wrapper tools that call it, one isolated side request per call.
     pub mod web {
-        /// The Plak-run `fetch_url` tool, built whenever the facade links an
-        /// HTTP stack.
-        #[cfg(any(
-            feature = "anthropic",
-            feature = "mcp",
-            feature = "native-subscriptions",
-            feature = "openai",
-            feature = "openrouter",
-            feature = "xai"
-        ))]
+        /// The Plak-run `fetch_url` tool, selected independently of providers.
+        #[cfg(feature = "web-fetch")]
+        pub use plakous_tool_web::FetchUrlPack;
         pub use plakous_tool_web::{
-            DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits, FetchUrlPack,
+            DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits,
             MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,
             MAX_INLINE_FETCH_TEXT_BYTES,
         };

@@ -41,10 +41,10 @@ use super::credential::{
 };
 use super::exchange::{ClientAuth, EXCHANGE_TIMEOUT, OAuthHttp, redact_query};
 use crate::McpOAuthStatus;
-use crate::error::{McpError, McpErrorKind};
-use crate::http::McpHttpEndpoint;
-use crate::pool::McpPool;
-use crate::spec::{McpServerSpec, Transport};
+use crate::surface::error::{McpError, McpErrorKind};
+use crate::surface::http::McpHttpEndpoint;
+use crate::surface::pool::McpPool;
+use crate::surface::spec::{McpServerSpec, Transport};
 
 const OFFLINE_ACCESS: &str = "offline_access";
 pub(super) const MAX_SCOPE_BYTES: usize = 1024;

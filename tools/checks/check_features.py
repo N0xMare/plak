@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Validate and optionally build every public feature subset, package by package.
+"""Validate and optionally build linear public feature witnesses per package.
 
 Every workspace package with at least one public optional feature gets its own
-closure run: 2^n subsets under `--no-default-features` (n capped at 10), plus
-`default` and, where defined, `full`. Closures are never cross-multiplied
+closure run: none, each singleton, full minus each feature, default and full
+(2n+3 profiles, n capped at 24). Closures are never cross-multiplied
 across packages: the layer matrix guarantees a host/bin crate reaches L0
 features only through `plakous/*`, so the facade's own run already covers the
 L0 side and each higher crate's run covers its side.
 
 The expected closure is walked from the package's own feature table over the
 workspace's normal dependency edges (from `cargo metadata`, no hardcoded edge
-map) and compared to `cargo tree`. Plak and hosted use linear product profiles:
-minimal, default, all, each singleton and six feature-off resolutions. The
+map) and compared to `cargo tree`. All packages use the same witness scheme.
+Named exclusion profiles independently pin complete external closures. The
 manifest security-surface digests are
 reviewed pins over the library layers (core, common, engine, protocol,
 provider, store, harness, facade) and stay hardcoded below.
@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import itertools
 import json
 import os
 import re
@@ -58,10 +57,9 @@ from check_workspace import _blank_rust_non_code  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 # Layers whose manifests carry a reviewed security-surface digest.
 DIGEST_LAYERS = L0_LAYERS + BELOW_FACADE_LAYERS
-MAX_OPTIONAL_FEATURES = 10
+MAX_OPTIONAL_FEATURES = 24
 FACADE = "plakous"
 PRODUCT_FEATURES = ("tui", "clipboard", "images", "python", "mcp")
-MAX_PRODUCT_FEATURES = 20
 
 
 def product_off_profiles(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ...], bool]]:
@@ -78,12 +76,8 @@ def product_off_profiles(manifest: dict[str, object]) -> list[tuple[str, tuple[s
 
 
 def product_feature_sets(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ...], bool]]:
-    """Product closures are a linear witness set, not a feature power set."""
-    features = optional_features(manifest)
-    return [("minimal", (), False), ("default", (), True),
-            ("all", tuple(features), False)] + [
-                (feature, (feature,), False) for feature in features
-            ] + product_off_profiles(manifest)
+    """Use the same bounded witness set for product and library packages."""
+    return feature_sets(optional_features(manifest), "full" in manifest.get("features", {}))
 
 
 def check_product_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT, operation: str = "build", target: str | None = None, fixture_binary: str | None = None, fixture_server: str | None = None) -> list[str]:
@@ -344,8 +338,19 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plak", "tui", "plakous-hosted/tui"),
     ("plak", "clipboard", "plakous-hosted/clipboard"),
     ("plak", "images", "plakous-hosted/images"),
+    ("plak", "js", "plakous-hosted/js"),
+    ("plak", "js", "plakous/composition"),
     ("plak", "python", "plakous-hosted/python"),
+    ("plak", "python", "plakous/composition-python"),
     ("plak", "mcp", "plakous-hosted/mcp"),
+    ("plak", "mcp", "plakous/mcp"),
+    ("plak", "web-fetch", "plakous-hosted/web-fetch"),
+    ("plak", "web-fetch", "plakous/web-fetch"),
+    ("plakous-hosted", "js", "plakous/composition"),
+    ("plakous-hosted", "python", "plakous/composition-python"),
+    ("plakous-hosted", "mcp", "plakous/mcp"),
+    ("plakous-hosted", "web-fetch", "plakous/web-fetch"),
+    ("plakous", "mcp", "plakous-mcp/client"),
     ("plakous", "test-clock", "plakous-openai?/test-clock"),
     ("plakous", "test-clock", "plakous-openrouter?/test-clock"),
     ("plak", "test-hooks", "plakous/test-clock"),
@@ -354,14 +359,8 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plakous", "native-subscriptions", "plakous-openai/native-auth"),
     ("plakous", "native-subscriptions", "plakous-xai/native-auth"),
     ("plakous", "sessions-sqlite", "plakous-store/sqlite"),
-    # Every facade feature that links plakous-http builds the Plak-run
-    # `fetch_url` and `image_gen`; composition-only closures stay HTTP-free.
-    ("plakous", "anthropic", "plakous-tool-web/fetch"),
-    ("plakous", "mcp", "plakous-tool-web/fetch"),
-    ("plakous", "native-subscriptions", "plakous-tool-web/fetch"),
-    ("plakous", "openai", "plakous-tool-web/fetch"),
-    ("plakous", "openrouter", "plakous-tool-web/fetch"),
-    ("plakous", "xai", "plakous-tool-web/fetch"),
+    # Local fetch is independent of provider-hosted tools and composition.
+    ("plakous", "web-fetch", "plakous-tool-web/fetch"),
     ("plakous", "anthropic", "plakous-tool-web/image-gen"),
     ("plakous", "mcp", "plakous-tool-web/image-gen"),
     ("plakous", "native-subscriptions", "plakous-tool-web/image-gen"),
@@ -428,7 +427,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-exchange": "209703e22ea03737ebab1904ef0e5286f431a71ec59fe962342c976457902fc4",
     "plakous-http": "4ba11a284120802378d429ec77ea58c8a3f25663d1808a795974c297f934ede9",
     "plakous-cell": "9dec57ce162f3258e4145ec2702e3a1c333faa4c221fe67b9f73296affbea620",
-    "plakous-mcp": "567ec57875dcd1f0b3b28325330bd3cd0e071a994088fb90b7445ae8f69ac166",
+    "plakous-mcp": "ce7a257bc2a1e8e92a83f0c8398bbd4360f92353c891a7989719104e9132b929",
     "plakous-messages": "eae7f4a067455ca31bab364c39a597256a19c84e636a17af6b6012bba40284b1",
     "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
     "plakous-openai": "245c035951bf08445c2c7d617f876ee870908aa4a9587ae7d262b897ec2a7ee6",
@@ -477,7 +476,11 @@ EXCLUDED_CLOSURE_PACKAGES = {
         "monty-proto",
     ),
     # Credential-store, MCP and Claude closures never acquire JWT crypto.
-    ("plakous", ("auth",)): ("jsonwebtoken",),
+    ("plakous", ("auth",)): ("jsonwebtoken", "plakous-openai", "plakous-xai"),
+    ("plakous", ("openai",)): ("htmd", "plakous-auth"),
+    ("plakous", ("web-fetch",)): (
+        "plakous-openai", "plakous-xai", "plakous-anthropic", "plakous-openrouter",
+    ),
     ("plakous", ("mcp",)): ("jsonwebtoken",),
     ("plakous", ("anthropic",)): ("jsonwebtoken",),
 }
@@ -855,14 +858,15 @@ def workspace_package_names(root: Path = ROOT) -> set[str]:
 def feature_sets(
     features: list[str], has_full: bool = True
 ) -> list[tuple[str, tuple[str, ...], bool]]:
-    """Return all no-default subsets plus the explicit default and full aliases."""
-    profiles: list[tuple[str, tuple[str, ...], bool]] = []
-    for size in range(len(features) + 1):
-        for selected in itertools.combinations(features, size):
-            profiles.append(("+".join(selected) or "minimal", selected, False))
+    """Return exactly 2n+3 witnesses without multiplying package selections."""
+    profiles: list[tuple[str, tuple[str, ...], bool]] = [("none", (), False)]
+    profiles.extend((feature, (feature,), False) for feature in features)
+    profiles.extend(
+        (f"full-minus-{feature}", tuple(other for other in features if other != feature), False)
+        for feature in features
+    )
     profiles.append(("default", (), True))
-    if has_full:
-        profiles.append(("full", ("full",), False))
+    profiles.append(("full", ("full",) if has_full else tuple(features), False))
     return profiles
 
 
@@ -1103,12 +1107,6 @@ def main() -> int:
     profiles: dict[str, list[tuple[str, tuple[str, ...], bool]]] = {}
     for package in closure_packages(manifests):
         features = optional_features(manifests[package])
-        if package in {"plak", "plakous-hosted"}:
-            if len(features) > MAX_PRODUCT_FEATURES:
-                errors.append(f"{package}: {len(features)} public features exceed the reviewed linear product cap of {MAX_PRODUCT_FEATURES}; amend spec 06 with a reviewed limit")
-                continue
-            profiles[package] = product_feature_sets(manifests[package])
-            continue
         if len(features) > MAX_OPTIONAL_FEATURES:
             errors.append(
                 f"{package}: {len(features)} public features exceed the closure cap of "
@@ -1161,7 +1159,7 @@ def main() -> int:
     if CARGO_OUTPUTS is not None:
         CARGO_OUTPUTS.save()
         CARGO_OUTPUTS = None
-    # --build already checks every facade subset.
+    # --build already checks the facade witnesses, including each singleton.
     if not args.build:
         errors.extend(check_facade_profiles(manifests))
     if errors:

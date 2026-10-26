@@ -5716,7 +5716,7 @@ The deterministic backend serves a service from a scripted FIFO of in-memory
 duplex peers held by the test, records argv and environment names without
 values, and counts live services in its drain status.
 
-**MCP client.** `plakous-mcp` (harness layer; no facade feature yet) is the
+**MCP client.** `plakous-mcp` (harness layer; facade feature `mcp`) is the
 local MCP client over `rmcp` (chapter 06 §7). An `McpServerSpec` is a frozen
 definition of a stdio server (program and arguments, declared environment,
 secret environment names with a resolver called at every spawn) or of a
@@ -8880,8 +8880,8 @@ Default features are empty, and the embedder-safe workflow surface — agent,
 sessions, model, tools, profiles, `VERSION` — is always on. `openai`, `xai`,
 `anthropic`, and `openrouter` re-export those provider crates as `plakous::*`
 and are provider internals rather than a presentation surface. `auth` adds the
-secret, credential-store, OAuth, pin, and account-binding foundations and
-implies `openai` and `xai`.
+secret, credential-store, OAuth, pin, and account-binding foundations without
+enabling either provider.
 
 The default facade closure includes `plakous-compose` and its reviewed
 vendored Codex protocol dependency for the pinned description and grammar
@@ -8892,21 +8892,25 @@ interpreter-neutral bootstrap data and links no worker client or interpreter.
 local composition attachment seam, the Code Mode presentation, and the cell client. It links
 `plakous-cell` and no other optional Plakous crate,
 so it reaches neither `plakous-auth` nor `plakous-http`, and it links neither
-rquickjs nor any Monty crate. Both JavaScript and Python PTC use this same
-feature, attach path and cell client; the Monty interpreter lives only in
-`plakous-py-host`.
+rquickjs nor any Monty crate. Python PTC and Python SDK profiles additionally
+require `composition-python`, which implies `composition`; without it profile
+construction refuses with an invalid-input error naming the omitted feature.
+They share the same attach path and cell client; the Monty interpreter lives
+only in `plakous-py-host`.
 All presentations select profiles through `LocalCompositionProfile::cell`
 using the compiled `plakous::tools::CellDescriptor`; language-specific profile
 constructors and Python-only component identity accessors are absent.
 
 `native-subscriptions` adds the subscription tier —
 `subscriptions`, and the provider crates' native-auth facets — and implies `composition`.
-`mcp` re-exports `plakous-mcp` as `plakous::mcp` (`McpPool`, `McpServerSpec`,
+The frozen `plakous::mcp::McpToolRecord` vocabulary is always available so
+smaller products can decode and export existing bindings. That data-only
+closure links neither rmcp, auth nor HTTP. `mcp` selects the internal crate's
+`client` feature and exposes the complete `plakous::mcp` client (`McpPool`, `McpServerSpec`,
 `McpToolPack`, the frozen listing and record types, the resource and prompt
 types, the OAuth settings, login and status types, `McpError`, and
 `ServiceSecretValue` for secret resolvers); it links `plakous-auth` with its
-`http-refresh` orchestrators, for MCP OAuth, and no other optional Plakous
-crate, and it does not expose `plakous::auth`. `native-subscriptions` does
+`http-refresh` orchestrators, for MCP OAuth, and does not expose `plakous::auth`. `native-subscriptions` does
 not imply it; Plak's product closure is `native-subscriptions` plus `mcp`.
 Configuration parsing, named-secret storage, the credential store's location
 and operator views stay with the product.
@@ -8956,14 +8960,14 @@ reports whether the committed history holds at least the 4,032 segments at
 which the next round is refused.
 
 
-Every feature that links `plakous-http` (`anthropic`, `openai`, `xai`,
-`openrouter`, `native-subscriptions` and `mcp`, and through them `auth` and
-`full`) also builds `plakous-tool-web/fetch`, the Plak-run `fetch_url` tool
-and its HTML-to-Markdown converter, and `plakous-tool-web/image-gen`, the
-`image_gen` tool, so `plakous::tools::web::FetchUrlPack` and
-`plakous::tools::web::ImageGenPack` exist exactly when an HTTP stack is
-linked. It adds no facade feature;
-composition-only closures reach neither `plakous-http` nor `htmd`.
+`web-fetch` independently builds `plakous-tool-web/fetch`, the Plak-run
+`fetch_url` tool and its HTML-to-Markdown converter. It enables no provider;
+provider, subscription and MCP features do not imply local web fetch.
+`FetchUrlLimits` and its bound constants remain available without the fetch
+implementation, so a smaller build can still read a frozen tool selection.
+Provider and MCP closures retain `plakous-tool-web/image-gen` and the
+`plakous::tools::web::ImageGenPack` interface. Composition-only closures reach
+neither `plakous-http` nor `htmd`.
 
 Evaluator deployment, subscription authentication, and durability are therefore
 independent choices. `tools/checks/check_features.py` pins this over the

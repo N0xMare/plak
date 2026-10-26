@@ -6,7 +6,7 @@ use plakous_tools::{
 };
 use rmcp::model::{CallToolResult, ContentBlock, ResourceContents};
 
-use crate::resources::McpResourceContents;
+use crate::surface::resources::McpResourceContents;
 
 /// Text bytes one call keeps inline; beyond it the full text is spilled.
 pub const MAX_INLINE_TEXT_BYTES: usize = 256 * 1024;
@@ -320,4 +320,5 @@ fn ceil_boundary(text: &str, mut index: usize) -> usize {
 }
 
 #[cfg(test)]
+#[path = "result/tests.rs"]
 mod tests;

@@ -68,6 +68,12 @@ mod evidence;
 mod integration;
 mod javascript;
 mod python;
+#[cfg(feature = "composition-python")]
+#[path = "selection/python.rs"]
+mod python_capability;
+#[cfg(not(feature = "composition-python"))]
+#[path = "selection/python_unavailable.rs"]
+mod python_capability;
 #[cfg(all(test, unix))]
 mod python_tests;
 mod sdk;

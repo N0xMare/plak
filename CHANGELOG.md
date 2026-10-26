@@ -54,6 +54,15 @@ one cross-build carrier (a build imports its own and the previous version).
   terminal paths. Waiting releases shared request capacity and does not spend
   the operation deadline. The HUD and child activity show the login wait. This
   is in-memory state only; persisted and export encodings are unchanged.
+- JS and Python evaluator choices forward independently from the product;
+  Python profiles require explicit `composition-python`. MCP client omission
+  unlinks its transports while preserving frozen MCP records for read/export.
+- `auth` no longer enables provider crates. `web-fetch` independently selects
+  the local page fetcher; provider, subscription and MCP features do not enable
+  it. Product defaults retain local fetch, and omitted fetch selections refuse
+  explicitly while frozen bounds remain readable.
+- Feature validation uses bounded 2n+3 closure witnesses for every package
+  instead of enumerating the library feature power set.
 - JWT identity verification shares ring with TLS instead of linking aws-lc.
   Only RS256 and ES256 verification is enabled; signing refuses. Embedders
   needing another JWT provider must explicitly install it before the first

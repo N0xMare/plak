@@ -12,6 +12,11 @@ mod images;
 mod images {
     pub(super) const COMPILED: bool = false;
 }
+#[cfg(feature = "js")]
+mod js;
+#[cfg(not(feature = "js"))]
+#[path = "build/js_unavailable.rs"]
+mod js;
 #[cfg(feature = "mcp")]
 mod mcp;
 #[cfg(not(feature = "mcp"))]
@@ -30,6 +35,12 @@ mod tui;
 mod tui {
     pub(super) const COMPILED: bool = false;
 }
+
+#[cfg(feature = "web-fetch")]
+mod web_fetch;
+#[cfg(not(feature = "web-fetch"))]
+#[path = "build/web_fetch_unavailable.rs"]
+mod web_fetch;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapabilityKind {
@@ -79,6 +90,12 @@ pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
         compiled: images::COMPILED,
     },
     BuildCapability {
+        id: "js-ptc",
+        kind: CapabilityKind::Evaluator,
+        feature: "js",
+        compiled: js::COMPILED,
+    },
+    BuildCapability {
         id: "mcp",
         kind: CapabilityKind::ToolPack,
         feature: "mcp",
@@ -95,6 +112,12 @@ pub const BUILD_CAPABILITIES: &[BuildCapability] = &[
         kind: CapabilityKind::Surface,
         feature: "tui",
         compiled: tui::COMPILED,
+    },
+    BuildCapability {
+        id: "fetch_url",
+        kind: CapabilityKind::ToolPack,
+        feature: "web-fetch",
+        compiled: web_fetch::COMPILED,
     },
 ];
 
@@ -116,6 +139,10 @@ pub fn require_feature(feature: &str) -> Result<(), CapabilityUnavailable> {
 pub fn require_composition(
     composition: crate::binding::CompositionSelection,
 ) -> Result<(), CapabilityUnavailable> {
+    use crate::binding::CompositionSelection;
+    if matches!(composition, CompositionSelection::JsPtc | CompositionSelection::NativePtc) {
+        require_feature("js")?;
+    }
     if composition.requires_python_worker() {
         require_feature("python").map_err(|mut error| {
             error.id = composition.as_str();

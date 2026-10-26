@@ -22,21 +22,29 @@ too-many-lines-ceiling = 1
 reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
 
 [dependencies]
-base64.workspace = true
-futures-util = { workspace = true, features = ["alloc"] }
-http.workspace = true
-plakous-auth = { workspace = true, features = ["http-refresh"] }
-plakous-http.workspace = true
+base64 = { workspace = true, optional = true }
+futures-util = { workspace = true, features = ["alloc"], optional = true }
+http = { workspace = true, optional = true }
+plakous-auth = { workspace = true, features = ["http-refresh"], optional = true }
+plakous-http = { workspace = true, optional = true }
 plakous-model.workspace = true
 plakous-tools.workspace = true
-rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"] }
+rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-sse-stream = "0.2.5"
-tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
-tracing.workspace = true
-url.workspace = true
-zeroize.workspace = true
+sse-stream = { version = "0.2.5", optional = true }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"], optional = true }
+tracing = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+zeroize = { workspace = true, optional = true }
+
+[features]
+default = ["client"]
+client = [
+    "dep:base64", "dep:futures-util", "dep:http", "dep:plakous-auth",
+    "dep:plakous-http", "dep:rmcp", "dep:sse-stream", "dep:tokio",
+    "dep:tracing", "dep:url", "dep:zeroize",
+]
 
 [dev-dependencies]
 rmcp = { version = "=3.5.1", default-features = false, features = ["client", "server", "transport-async-rw", "transport-streamable-http-client"] }

@@ -19,45 +19,11 @@
 
 #![forbid(unsafe_code)]
 
-mod client;
-mod error;
-mod http;
-mod listing;
-mod lowering;
-mod naming;
-mod oauth;
-mod pack;
-mod pool;
-mod prompts;
-mod resources;
-mod result;
-mod spec;
+#[cfg(feature = "client")]
+#[path = "client_surface.rs"]
+mod surface;
+#[cfg(not(feature = "client"))]
+#[path = "vocabulary_surface.rs"]
+mod surface;
 
-pub use error::{McpError, McpErrorKind};
-pub use http::{MAX_SSE_EVENT_BYTES, McpHttpEndpoint, McpHttpSecret, McpHttpSecretResolver};
-pub use listing::{
-    FrozenMcpListing, MAX_DESCRIPTION_BYTES, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, McpToolRecord,
-    McpToolSelection,
-};
-pub use lowering::{SchemaRefusal, lower_input_schema};
-pub use naming::{MAX_EXPOSED_NAME_BYTES, exposed_tool_name};
-pub use oauth::{
-    McpDeviceLogin, McpLocalLogin, McpLocalRetirement, McpLogin, McpLoginOptions, McpLoginRemedy,
-    McpLogoutOutcome, McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus, McpPasteLogin,
-    McpRemoteLogin,
-};
-pub use pack::McpToolPack;
-pub use plakous_http::{HeaderName, HeaderValue, SensitiveBytes};
-pub use pool::{
-    CRASH_WINDOW, IDLE_STOP, MAX_IN_FLIGHT_CALLS, McpLease, McpPool, McpServerState,
-    McpServerStatus,
-};
-pub use prompts::{
-    MAX_PROMPT_TEXT_BYTES, McpPrompt, McpPromptArgument, McpPromptExpansion, prompt_header,
-};
-pub use resources::{McpResource, McpResourceContents, McpResourceTemplate};
-pub use result::{MAX_INLINE_TEXT_BYTES, untrusted_header};
-pub use spec::{DEFAULT_CALL_TIMEOUT, DEFAULT_STARTUP_TIMEOUT, McpSecretResolver, McpServerSpec};
-
-#[cfg(test)]
-mod tests;
+pub use surface::*;

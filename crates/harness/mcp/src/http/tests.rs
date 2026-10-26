@@ -4,7 +4,7 @@ use plakous_http::{Phase, TransmissionFact};
 use rmcp::transport::DynamicTransportError;
 
 use super::*;
-use crate::spec::McpServerSpec;
+use crate::surface::spec::McpServerSpec;
 
 type TestResult = Result<(), Box<dyn Error>>;
 

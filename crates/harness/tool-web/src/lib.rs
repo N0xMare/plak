@@ -21,6 +21,7 @@
 
 #[cfg(feature = "fetch")]
 mod fetch;
+mod fetch_limits;
 #[cfg(feature = "image-gen")]
 mod image_gen;
 mod render;
@@ -30,10 +31,10 @@ mod web_fetch;
 mod x_search;
 
 #[cfg(feature = "fetch")]
-pub use fetch::{
-    DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits, FetchUrlPack,
-    MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,
-    MAX_INLINE_FETCH_TEXT_BYTES,
+pub use fetch::FetchUrlPack;
+pub use fetch_limits::{
+    DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits, MAX_FETCH_MAX_BYTES,
+    MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS, MAX_INLINE_FETCH_TEXT_BYTES,
 };
 #[cfg(feature = "image-gen")]
 pub use image_gen::{

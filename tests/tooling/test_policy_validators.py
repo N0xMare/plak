@@ -1012,7 +1012,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 self.assertEqual(validator(workspace), [])
 
     def test_product_explicit_api_features_cannot_be_borrowed_from_hosted(self) -> None:
-        expected = {"native-subscriptions", "mcp", "openai", "anthropic", "xai",
+        expected = {"native-subscriptions", "openai", "anthropic", "xai",
                     "openrouter", "sessions-sqlite"}
         self.assertEqual(set(self.workspace.policy.facade_features["plak"]), expected)
         self.assertEqual(workspace_policy.validate_facade_features(self.workspace), [])
@@ -2170,6 +2170,7 @@ class FeaturePolicyTests(unittest.TestCase):
             {
                 "plakous-agent",
                 "plakous-compose",
+                "plakous-mcp",
                 "plakous-model",
                 "plakous-prompts",
                 "plakous-store",
@@ -2292,16 +2293,15 @@ class FeaturePolicyTests(unittest.TestCase):
             )
             for package in packages
         }
-        self.assertEqual(profile_counts["plakous"], 2**9 + 2)
+        self.assertEqual(profile_counts["plakous"], 2 * 11 + 3)
         # sqlite, perf-instrumentation, repository-only commit-trace.
-        self.assertEqual(profile_counts["plakous-store"], 2**3 + 1)
-        # Minimal/default/all, each public feature alone, and the six off witnesses.
-        self.assertEqual(profile_counts["plak"], 20)
-        self.assertEqual(profile_counts["plakous-hosted"], 17)
+        self.assertEqual(profile_counts["plakous-store"], 2 * 3 + 3)
+        self.assertEqual(profile_counts["plak"], 2 * 13 + 3)
+        self.assertEqual(profile_counts["plakous-hosted"], 2 * 10 + 3)
         self.assertNotIn("plakous-cell", profile_counts)
         self.assertEqual(profile_counts["plakous-js-runtime"], 3)
         for count in profile_counts.values():
-            self.assertLessEqual(count, 2**feature_policy.MAX_OPTIONAL_FEATURES + 2)
+            self.assertLessEqual(count, 2 * feature_policy.MAX_OPTIONAL_FEATURES + 3)
 
     def test_expected_closure_walks_feature_tables_and_optional_edges(self) -> None:
         manifests = self.manifests
@@ -2313,6 +2313,7 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-agent",
                 "plakous-compose",
                 "plakous-codex-code-mode-protocol",
+                "plakous-mcp",
                 "plakous-model",
                 "plakous-prompts",
                 "plakous-store",

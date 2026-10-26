@@ -139,10 +139,12 @@ SUPPORTED_COMPILE_FIXTURES = {
         "facade-features": (
             "anthropic",
             "auth",
+            "composition-python",
             "native-subscriptions",
             "openai",
             "openrouter",
             "sessions-sqlite",
+            "web-fetch",
             "xai",
         ),
         "extra-dependencies": {
@@ -576,7 +578,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # A TUI attach refused over an unusable stored login logs the CLI's
     # remedy text, which names no secret.
     ("plak", "src/commands/host_config.rs"): {"warn"},
-    ("plakous-hosted", "src/mcp_binding.rs"): {"warn"},
+    ("plakous-hosted", "src/mcp_binding/available.rs"): {"warn"},
     # `test-hooks` only: scripted offline model plans for child fixtures.
     ("plak", "src/test_hooks.rs"): {"json"},
     ("plak", "src/build_identity.rs"): {"cfg"},
@@ -1356,7 +1358,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/api_runtime.rs"): {"tools": {"RegisteredToolIdentity"}},
     # MCP binding: the facade's MCP client, a host environment for the pool's
     # service processes, and the named-secret value type.
-    ("plakous-hosted", "src/mcp_binding.rs"): {
+    ("plakous-hosted", "src/mcp_binding/available.rs"): {
         "mcp": {
             "HeaderName", "HeaderValue", "McpError", "McpErrorKind", "McpHttpEndpoint", "McpHttpSecret",
             "McpHttpSecretResolver", "McpLease", "McpOAuthSecretResolver", "McpOAuthSettings",
@@ -1372,7 +1374,13 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
     },
     # `plak mcp list|show` report an OAuth server's stored login.
-    ("plak", "src/commands/mcp.rs"): {"mcp": {"McpOAuthStatus"}},
+    ("plak", "src/commands/mcp/available.rs"): {"mcp": {"McpOAuthStatus"}},
+    ("plakous-hosted", "src/mcp_binding/secret_value.rs"): {
+        "mcp": {"SensitiveBytes", "ServiceSecretValue"},
+    },
+    ("plakous-hosted", "src/mcp_binding/unavailable.rs"): {
+        "mcp": {"McpToolRecord"},
+    },
     ("plak", "src/commands/mcp_login.rs"): {
         "mcp": {
             "McpError",
@@ -4206,7 +4214,7 @@ def main() -> int:
             hosted = app.manifest.get(section, {}).get("plakous-hosted", {})
             if not isinstance(hosted, dict) or hosted.get("default-features") is not False:
                 errors.append(f"plak {section}: hosted defaults must be disabled for product selection")
-        for feature in ("tui", "clipboard", "images", "python", "mcp"):
+        for feature in ("tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"):
             if f"plakous-hosted/{feature}" not in app_features.get(feature, []):
                 errors.append(f"plak/{feature} must forward the matching hosted capability")
         if not {"tui", "images"} <= set(app_features.get("clipboard", [])):
@@ -4223,14 +4231,14 @@ def main() -> int:
             "test-support",
             "git-cli",
             "jj",
-            "tui", "clipboard", "images", "python", "mcp",
+            "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch",
         }:
             errors.append(
                 "plak may expose only default, maintainer, otel, test-hooks, test-support "
                 "workspace backend features and product build capabilities"
             )
-        elif set(app_features.get("default", [])) != {"git-cli", "tui", "clipboard", "images", "python", "mcp"}:
-            errors.append("plak default must enable git-cli and all five product capabilities")
+        elif set(app_features.get("default", [])) != {"git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"}:
+            errors.append("plak default must enable git-cli and all product capabilities")
         elif app_features.get("maintainer") != ["jj"]:
             errors.append(
                 "plak maintainer feature must enable jj"
@@ -4261,9 +4269,9 @@ def main() -> int:
         if len(libraries) != 1 or libraries[0]["name"] != "plakous_hosted":
             errors.append("plakous-hosted must expose exactly one library named plakous_hosted")
         host_features = host.metadata.get("features", {})
-        if set(host_features) != {"default", "test-support", "git-cli", "jj-lib", "tui", "clipboard", "images", "python", "mcp"}:
+        if set(host_features) != {"default", "test-support", "git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"}:
             errors.append("plakous-hosted must expose exactly the workspace backends, test-support and product capabilities")
-        elif set(host_features.get("default", [])) != {"git-cli", "jj-lib", "tui", "clipboard", "images", "python", "mcp"}:
+        elif set(host_features.get("default", [])) != {"git-cli", "jj-lib", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"}:
             errors.append("plakous-hosted default must enable both workspace backends and all product capabilities")
         elif host_features.get("test-support") != [
             "dep:tempfile",
@@ -4281,6 +4289,7 @@ def main() -> int:
             "anthropic",
             "auth",
             "composition",
+            "composition-python",
             "default",
             "full",
             "test-clock",
@@ -4289,6 +4298,7 @@ def main() -> int:
             "openai",
             "openrouter",
             "sessions-sqlite",
+            "web-fetch",
             "xai",
         }
         features = facade.metadata.get("features", {})

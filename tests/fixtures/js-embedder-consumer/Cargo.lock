@@ -447,6 +447,7 @@ dependencies = [
  "plakous-agent",
  "plakous-cell",
  "plakous-compose",
+ "plakous-mcp",
  "plakous-model",
  "plakous-prompts",
  "plakous-store",
@@ -522,6 +523,16 @@ dependencies = [
  "plakous",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "plakous-mcp"
+version = "0.0.2"
+dependencies = [
+ "plakous-model",
+ "plakous-tools",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

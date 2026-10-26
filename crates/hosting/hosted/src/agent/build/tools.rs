@@ -399,9 +399,7 @@ pub(in crate::agent) fn bind_node_tool_plan(
     state_roots: &ProductStateRoots,
 ) -> CliResult<crate::tool_plan::ToolPlan> {
     let selection = &tools.selection;
-    if selection.mcp_servers().next().is_some() {
-        crate::capabilities::require_feature("mcp")?;
-    }
+    crate::capabilities::require_tools(selection)?;
     if selection.is_empty() {
         return Ok(crate::tool_plan::ToolPlan::default());
     }

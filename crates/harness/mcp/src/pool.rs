@@ -20,14 +20,14 @@ use rmcp::{ClientLifecycleMode, ClientServiceExt, Peer, RoleClient};
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
 
-use crate::client::{Handler, HandlerState};
-use crate::error::{McpError, McpErrorKind};
-use crate::http::{self, HttpRefusal, MAX_SSE_EVENT_BYTES, McpHttpEndpoint};
-use crate::listing::{
+use crate::surface::client::{Handler, HandlerState};
+use crate::surface::error::{McpError, McpErrorKind};
+use crate::surface::http::{self, HttpRefusal, MAX_SSE_EVENT_BYTES, McpHttpEndpoint};
+use crate::surface::listing::{
     FrozenMcpListing, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, McpToolSelection, freeze_listing,
     listed_tool_digest,
 };
-use crate::spec::{McpServerSpec, StdioServer, Transport};
+use crate::surface::spec::{McpServerSpec, StdioServer, Transport};
 
 /// Concurrent calls one pool entry dispatches; later calls queue.
 pub const MAX_IN_FLIGHT_CALLS: usize = 16;

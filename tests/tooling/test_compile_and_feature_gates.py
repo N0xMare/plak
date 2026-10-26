@@ -634,12 +634,24 @@ class FeatureGateTests(unittest.TestCase):
     def test_feature_profiles_are_per_package_and_capped(self) -> None:
         manifests = feature_gate.load_workspace_manifests()
         facade = feature_gate.optional_features(manifests["plakous"])
-        self.assertEqual(len(feature_gate.feature_sets(facade, True)), 2 ** len(facade) + 2)
+        self.assertEqual(len(feature_gate.feature_sets(facade, True)), 2 * len(facade) + 3)
         self.assertLessEqual(len(facade), feature_gate.MAX_OPTIONAL_FEATURES)
         store = feature_gate.optional_features(manifests["plakous-store"])
-        self.assertEqual(len(feature_gate.feature_sets(store, False)), 2 ** len(store) + 1)
+        self.assertEqual(len(feature_gate.feature_sets(store, False)), 2 * len(store) + 3)
         self.assertEqual(feature_gate.cargo_command("tree", (), True, "plak")[:6],
                          ["cargo", "tree", "--locked", "--offline", "-p", "plak"])
+
+    def test_linear_witnesses_cover_every_feature_present_and_absent_at_both_extremes(self) -> None:
+        features = ["a", "b", "c", "d"]
+        profiles = feature_gate.feature_sets(features, False)
+        self.assertEqual(len(profiles), 11)
+        self.assertIn(("none", (), False), profiles)
+        self.assertIn(("default", (), True), profiles)
+        self.assertIn(("full", tuple(features), False), profiles)
+        for feature in features:
+            self.assertIn((feature, (feature,), False), profiles)
+            self.assertIn((f"full-minus-{feature}", tuple(item for item in features if item != feature), False), profiles)
+        self.assertEqual(feature_gate.feature_sets(features)[-1], ("full", ("full",), False))
 
     def test_maintainer_feature_enables_opt_in_jj(self) -> None:
         manifests = feature_gate.load_workspace_manifests()

@@ -166,6 +166,13 @@ class ResponsibilityReportTests(unittest.TestCase):
                         parent / "lib.rs",
                         parent.with_suffix(".rs"),
                     ]
+                    # Feature-selected surface modules can declare an explicit
+                    # sibling tests.rs with #[path = "tests.rs"].
+                    declarers.extend(
+                        candidate
+                        for candidate in parent.glob("*.rs")
+                        if '#[path = "tests.rs"]' in candidate.read_text(encoding="utf-8")
+                    )
                     declared = any(
                         candidate.is_file()
                         and re.search(

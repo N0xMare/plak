@@ -11,8 +11,8 @@ use plakous_tools::{
     ServiceSecretValue,
 };
 
-use crate::error::{McpError, McpErrorKind};
-use crate::http::McpHttpEndpoint;
+use crate::surface::error::{McpError, McpErrorKind};
+use crate::surface::http::McpHttpEndpoint;
 
 /// Default bound on spawn, handshake and the first `tools/list`.
 pub const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -198,7 +198,7 @@ impl McpServerSpec {
         let Some(settings) = endpoint.oauth() else {
             return Ok(None);
         };
-        crate::oauth::status(settings, &endpoint.canonical_resource()?).map(Some)
+        crate::surface::oauth::status(settings, &endpoint.canonical_resource()?).map(Some)
     }
 
     pub(crate) const fn transport(&self) -> &Transport {

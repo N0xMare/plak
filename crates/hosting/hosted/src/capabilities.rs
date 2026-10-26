@@ -160,6 +160,27 @@ pub fn no_native_protocol_accounts() -> impl Iterator<Item = &'static str> {
         .map(|route| route.account)
 }
 
+/// Admits the compiled tool packs selected by an unchanged binding vocabulary.
+///
+/// # Errors
+///
+/// Returns the exact omitted tool-pack capability without selecting a substitute.
+pub fn require_tools(
+    selection: &crate::tool_plan::TemplateToolSelection,
+) -> Result<(), CapabilityUnavailable> {
+    use crate::tool_plan::{OptionalTool, SelectedTool};
+    if selection
+        .entries()
+        .contains(&SelectedTool::Optional(OptionalTool::FetchUrl))
+    {
+        require_feature("web-fetch")?;
+    }
+    if selection.mcp_servers().next().is_some() {
+        require_feature("mcp")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

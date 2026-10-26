@@ -409,4 +409,5 @@ fn at(path: &str) -> &str {
 }
 
 #[cfg(test)]
+#[path = "lowering/tests.rs"]
 mod tests;

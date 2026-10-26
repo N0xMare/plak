@@ -13,11 +13,11 @@ use rmcp::model::{
 };
 use serde_json::Value;
 
-use crate::error::{McpError, McpErrorKind};
-use crate::listing::bounded_description;
-use crate::pool::McpLease;
-use crate::resources::{input_required, paged, request_failed, timed_out, unexpected};
-use crate::result::{Piece, Pieces};
+use crate::surface::error::{McpError, McpErrorKind};
+use crate::surface::listing::bounded_description;
+use crate::surface::pool::McpLease;
+use crate::surface::resources::{input_required, paged, request_failed, timed_out, unexpected};
+use crate::surface::result::{Piece, Pieces};
 
 /// Most text one prompt expansion may carry; a larger one is refused.
 pub const MAX_PROMPT_TEXT_BYTES: usize = 256 * 1024;

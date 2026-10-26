@@ -66,13 +66,13 @@ pub(crate) fn login(
     writeln!(
         stderr,
         "{label}: authorization server {}",
-        super::mcp::shown(login.issuer())
+        super::mcp_text::shown(login.issuer())
     )
     .and_then(|()| match login.scope() {
         Some(scope) => writeln!(
             stderr,
             "{label}: requesting scope \"{}\"",
-            super::mcp::shown(scope)
+            super::mcp_text::shown(scope)
         ),
         None => writeln!(stderr, "{label}: requesting no scope"),
     })
@@ -182,7 +182,7 @@ pub(crate) fn login(
     writeln!(
         stderr,
         "{label}: {}",
-        super::mcp::shown(&logged_in(&status))
+        super::mcp_text::shown(&logged_in(&status))
     )
     .map_err(|_| stderr_failed())?;
     Ok(ProcessOutcome::Success)

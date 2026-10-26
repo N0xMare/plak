@@ -320,9 +320,9 @@ plakous-hosted = [
 ]
 
 [workspace.metadata.plakous.facade-features]
-plak = ["native-subscriptions", "mcp", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+plak = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
 plakous-recursive-subagents = []
-plakous-hosted = ["native-subscriptions", "mcp", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+plakous-hosted = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
 
 [workspace.metadata.plakous.modules.plak.tui]
 forbid-crates = ["plakous", "plakous-*"]

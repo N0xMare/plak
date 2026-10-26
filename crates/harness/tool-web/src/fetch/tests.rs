@@ -1,3 +1,4 @@
+use crate::MAX_FETCH_TIMEOUT_SECONDS;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::Write as _;

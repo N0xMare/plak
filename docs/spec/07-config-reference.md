@@ -287,6 +287,11 @@ other name is an unknown section.
 | `tools.web_search.blocked_domains` | array of string | `[]` | at most 10 domain names, none twice; exclusive with allowed_domains | Never search these domains. |
 | `tools.x_search.allowed_x_handles` | array of string | `[]` | at most 20 handles of 1 to 15 letters, digits or `_`, without `@` | Search only posts from these X handles; empty is every handle. |
 
+A template or session selecting `fetch_url` requires the compiled `web-fetch`
+capability. A build without it refuses config/session admission with the typed
+`CapabilityUnavailable` (exit 2), before attach or writes; it never drops the
+selected tool silently. Frozen fetch bounds remain readable for show/log/export.
+
 A set `allowed_domains`, `blocked_domains` or `allowed_x_handles` replaces
 the list the model passes on a call. Each option travels in the route
 provider's own parameter, and a bind on a route whose provider has none

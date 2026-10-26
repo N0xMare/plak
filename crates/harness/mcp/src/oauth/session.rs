@@ -33,7 +33,7 @@ use super::credential::{
 use super::exchange::{ClientAuth, EXCHANGE_TIMEOUT, OAuthHttp};
 use super::login::{authorization_server, client_secret};
 use crate::McpOAuthStatus;
-use crate::error::{McpError, McpErrorKind};
+use crate::surface::error::{McpError, McpErrorKind};
 
 /// The OAuth state of one server start.
 pub(crate) struct OAuthSession {

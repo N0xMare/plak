@@ -39,7 +39,7 @@ plakous-host-protocol.workspace = true
 # model out of every build that does not explicitly ask for it.
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash", optional = true }
 tracing-subscriber.workspace = true
-plakous = { workspace = true, features = ["native-subscriptions", "mcp", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
+plakous = { workspace = true, features = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
 nix.workspace = true
 rusqlite.workspace = true
 rustix = { workspace = true, features = ["event", "fs", "process", "termios", "time"] }
@@ -110,12 +110,14 @@ harness = false
 required-features = ["test-support"]
 
 [features]
-default = ["git-cli", "tui", "clipboard", "images", "python", "mcp"]
+default = ["git-cli", "tui", "clipboard", "images", "js", "python", "mcp", "web-fetch"]
+js = ["plakous/composition", "plakous-hosted/js"]
+web-fetch = ["plakous/web-fetch", "plakous-hosted/web-fetch"]
 tui = ["plakous-hosted/tui", "dep:ratatui", "dep:crossterm", "dep:pulldown-cmark", "dep:syntect"]
 clipboard = ["tui", "images", "plakous-hosted/clipboard", "dep:arboard", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation"]
 images = ["plakous-hosted/images"]
-python = ["plakous-hosted/python"]
-mcp = ["plakous-hosted/mcp"]
+python = ["js", "plakous/composition-python", "plakous-hosted/python"]
+mcp = ["plakous/mcp", "plakous-hosted/mcp"]
 git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
 jj = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
 maintainer = ["jj"]

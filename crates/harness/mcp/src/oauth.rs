@@ -4,9 +4,13 @@
 //! private credential record. Logins store that record; the transport reads
 //! and refreshes it. Nothing here starts a login on its own.
 
+#[path = "oauth/credential.rs"]
 mod credential;
+#[path = "oauth/exchange.rs"]
 mod exchange;
+#[path = "oauth/login.rs"]
 mod login;
+#[path = "oauth/session.rs"]
 mod session;
 
 use std::fmt;
@@ -22,7 +26,7 @@ pub use login::{
 };
 pub(crate) use session::{Bearer, OAuthSession};
 
-use crate::error::{McpError, McpErrorKind};
+use crate::surface::error::{McpError, McpErrorKind};
 
 /// Resolves a pre-registered client's secret at each use.
 pub type McpOAuthSecretResolver = Arc<

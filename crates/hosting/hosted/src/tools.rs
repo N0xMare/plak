@@ -7,6 +7,12 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "web-fetch")]
+mod fetch_url;
+#[cfg(not(feature = "web-fetch"))]
+#[path = "tools/fetch_url_unavailable.rs"]
+mod fetch_url;
+
 use plakous::model::ToolName;
 use plakous::tools::{
     CodingPresentation, CompiledSurface, Earned, FrozenToolRegistry, MenuEntry, PassthroughPack,
@@ -161,15 +167,7 @@ impl ProductToolExtensions {
             );
         }
         if fetch_url {
-            let pack = plakous::tools::web::FetchUrlPack::new(
-                plan.fetch_url_limits(),
-                &format!("plak/{}", plakous::VERSION),
-            )
-            .map_err(|error| CliFailure::new(format!("fetch_url: {error}")))?;
-            appended.extend(
-                pack.registrations()
-                    .map_err(|error| CliFailure::new(format!("fetch_url: {error}")))?,
-            );
+            appended.extend(fetch_url::registrations(plan.fetch_url_limits())?);
         }
         let mut image_slot = None;
         if image_gen {

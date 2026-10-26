@@ -30,8 +30,8 @@ use rmcp::transport::streamable_http_client::{
 };
 use sse_stream::Sse;
 
-use crate::error::{McpError, McpErrorKind};
-use crate::oauth::{Bearer, McpOAuthSettings, OAuthHttp, OAuthSession};
+use crate::surface::error::{McpError, McpErrorKind};
+use crate::surface::oauth::{Bearer, McpOAuthSettings, OAuthHttp, OAuthSession};
 
 /// Largest server-sent event the client accepts.
 pub const MAX_SSE_EVENT_BYTES: usize = 4 * 1024 * 1024;
@@ -983,4 +983,5 @@ fn find_http_error<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a McpHttpEr
 }
 
 #[cfg(test)]
+#[path = "http/tests.rs"]
 mod tests;

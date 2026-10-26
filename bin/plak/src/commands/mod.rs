@@ -14,7 +14,10 @@ pub mod login;
 pub(crate) mod login_flow;
 mod login_host;
 pub(crate) mod mcp;
+#[cfg(feature = "mcp")]
 pub(crate) mod mcp_login;
+#[cfg(feature = "mcp")]
+mod mcp_text;
 #[cfg(feature = "maintainer")]
 pub(crate) mod reload_rehearsal;
 pub(crate) mod run;

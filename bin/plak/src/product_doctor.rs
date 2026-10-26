@@ -877,9 +877,12 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         CheckKind::StdoutTerminal,
         input.terminals.stdout,
     ));
-    if !input.python_containment_required
-        || crate::build_features::require_feature("python").is_ok()
-    {
+    let evaluator = if input.python_containment_required {
+        "python"
+    } else {
+        "js"
+    };
+    if crate::build_features::require_feature(evaluator).is_ok() {
         checks.extend(composition_checks(
             input.composition_requirement,
             input.composition_host,

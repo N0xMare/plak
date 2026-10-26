@@ -344,12 +344,15 @@ called out explicitly.
 | `plak`, `plakous-hosted` | `tui` | Default on; Plak's optional terminal presentation stack and interactive helpers. Hosted carries capability identity only, without a TUI dependency |
 | `plak`, `plakous-hosted` | `clipboard` | Default on; requires `tui` and `images`; Plak's optional clipboard libraries and image paste. Hosted carries capability identity |
 | `plak`, `plakous-hosted` | `images` | Default on; hosted image normalization and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
-| `plak`, `plakous-hosted` | `python` | Default on; admission of Python composition and Python worker resolution. Does not unlink the facade evaluator client |
-| `plak`, `plakous-hosted` | `mcp` | Default on; MCP command and selected-tool admission. Does not unlink the facade MCP closure |
+| `plak`, `plakous-hosted` | `js` | Default on; JavaScript/Code Mode admission, facade `composition`, and product JavaScript worker resolution |
+| `plak`, `plakous-hosted` | `python` | Default on; explicitly forwards facade `composition-python`, implies `js`, and selects Python worker resolution |
+| `plak`, `plakous-hosted` | `mcp` | Default on; forwards the facade client and selects active MCP commands/binding. Omission removes rmcp and the MCP transports while frozen records remain readable |
+| `plakous-mcp` | `client` | Internal runtime closure, default on for direct use. The facade disables this dependency's defaults and selects the client explicitly through `mcp`; without it only frozen record vocabulary, naming and errors remain |
+| `plak`, `plakous-hosted`, `plakous` | `web-fetch` | Explicit local `fetch_url` implementation and HTML converter; default on in the product, independent of providers in the facade. Omitted tool selections refuse with the typed capability error before attach or tool construction; frozen limits remain readable |
 | `plak` | `maintainer` | Empty feature gating only Plak's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (§6.2) |
 | `plak` | `otel` | OTLP export and the typed telemetry bridge. Default builds carry no `opentelemetry` dependency |
 | `plak` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
-| `plakous` | `composition` | Code Mode, JavaScript and Python PTC through one attachment seam and the engine-free cell client. It links no credential, HTTP, subscription, or interpreter machinery |
+| `plakous` | `composition`, `composition-python` | Code Mode and JavaScript through the engine-free cell client; Python profiles additionally require `composition-python`. Neither links credential, HTTP, subscription, or interpreter machinery |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
 | `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 §2.8). Enabled only by the repository harness crate, so `plak/test-hooks` is its one product edge; `check_features.py` refuses it in a default `plak` |
 | `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
@@ -401,10 +404,10 @@ implementation through this neutral carrier.
 `native-subscriptions` implies `composition`, so the
 product closure is unchanged by the split.
 
-`plakous` carries ten public optional features. The reviewed closure cap in
-`tools/checks/check_features.py` is **10**: the tenth is `mcp`, the MCP client,
-which no other facade feature implies and only `full` and Plak's product
-closure enable. `plakous-mcp` depends on `plakous-auth` with `http-refresh`
+The reviewed public-feature sanity cap in `tools/checks/check_features.py`
+is **24 per package**; growth requires an amendment here. `mcp` is independent:
+no other facade feature implies it except `full`. `plakous-mcp` depends on
+`plakous-auth` with `http-refresh`
 (the private credential store and claimed refresh, for MCP OAuth), so an
 `mcp` selection reaches `plakous-auth` without exposing `plakous::auth`.
 The internal `plakous-auth/jwt` feature adds shared JWT rejection
@@ -412,17 +415,15 @@ classification and implies `http-refresh`; only the OpenAI and xAI
 `native-auth` features request it. The `auth`, `mcp` and `anthropic`
 closures do not acquire JWT crypto; the feature checker's closure exclusions
 pin that.
-The cap bounds the per-package subset enumeration, so the
-facade's own run is 1026 closures. Any eleventh public feature needs its own
-reviewed amendment here. Hidden repository-only `test-clock` is not public,
-is excluded from this subset enumeration, and never enters `full` or the
+Every package uses the same **2n+3** witnesses for n public optional features:
+none, each feature alone, all public features minus each feature, `default`
+and `full` (all public features when the package has no `full` key).
+Package selections are never cross-multiplied. These witnesses bound gate
+cost; they do not claim an exhaustive power-set proof. Named external-closure
+exclusions are checked independently. Hidden repository-only `test-clock` is
+not public, is excluded from these witnesses, and never enters `full` or the
 product default/maintainer release closures.
-Product feature closures use a linear witness set for `plak` and
-`plakous-hosted`: minimal, default, all, each public feature alone, then each of
-the five product features omitted from defaults and all five omitted. The
-facade's subset checks remain unchanged. The reviewed linear product cap is
-**20 public optional features per package**; growth beyond it requires an
-amendment here. Only the `variants` group (full only) compiles reduced
+Only the `variants` group (full only) compiles reduced
 products: without TUI, clipboard, images, and all five product features.
 Python-only and MCP-only omissions have the default dependency closure, so
 they add no independent compile profile; their admission is covered by unit
@@ -1459,9 +1460,9 @@ publishes against html5ever 0.38) and adds `markup5ever`, `xml5ever`,
 MIT or MIT OR Apache-2.0) to the lock graph. The converter walks the tree
 recursively, so `fetch_url` bounds the parsed depth at 512 elements and
 converts on a thread with its own 32 MiB stack. URL parsing and IDNA use the
-already locked `url` crate. The feature is enabled only by facade features
-that already link `plakous-http` (chapter 01 section 12.1), so no
-composition-only closure reaches the converter.
+already locked `url` crate. The facade selects it only through `web-fetch`
+(chapter 01 section 12.1), independently of providers, subscriptions, auth
+and MCP; no composition-only closure reaches the converter.
 
 ### 7.1 Rules
 

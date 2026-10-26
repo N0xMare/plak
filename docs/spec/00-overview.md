@@ -164,10 +164,12 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` â€
 | Feature | Gates |
 | --- | --- |
 | `openai`, `xai`, `anthropic`, `openrouter` | Re-export that provider crate as `plakous::<name>`. Provider internals, not a presentation surface |
-| `auth` | `plakous::auth` secret, credential-store, OAuth, pin, and account-binding foundations; implies `openai` and `xai` |
-| `composition` | The local composition attachment seam in `plakous::agent` (`LocalCompositionAttachment`, `attach_local_composition`): Code Mode, JavaScript and Python through the engine-free cell client and explicit worker artifacts. It reaches no credential, HTTP, subscription, or interpreter machinery |
+| `auth` | `plakous::auth` secret, credential-store, OAuth, pin, and account-binding foundations; enables no provider |
+| `web-fetch` | The independent Plak-run `fetch_url` HTTP tool and HTML-to-Markdown converter; enables no provider |
+| `composition` | The local composition attachment seam in `plakous::agent` (`LocalCompositionAttachment`, `attach_local_composition`): Code Mode and JavaScript through the engine-free cell client and explicit worker artifacts. It reaches no credential, HTTP, subscription, or interpreter machinery |
+| `composition-python` | Explicitly admits Python PTC and Python SDK profiles through the same cell client; implies `composition`, never an interpreter |
 | `native-subscriptions` | The subscription tier: `subscriptions` and the native-auth facets of the provider crates. It implies `composition` |
-| `mcp` | Re-exports `plakous-mcp` as `plakous::mcp`, the MCP client (servers, tools, resources, prompts and MCP OAuth). It links `plakous-auth` for MCP OAuth without exposing `plakous::auth`; of the other features only `full` enables it. Plak's product closure is `native-subscriptions` plus `mcp` |
+| `mcp` | The MCP client (servers, tools, resources, prompts and MCP OAuth) through `plakous::mcp`. The frozen `McpToolRecord` vocabulary remains available without the client or its transports. The client links `plakous-auth` for MCP OAuth without exposing `plakous::auth`; of the other features only `full` enables it |
 | `sessions-sqlite` | The SQLite `SessionStore` backend |
 | `full` | All of the supported features above |
 

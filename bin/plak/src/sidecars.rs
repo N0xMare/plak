@@ -7,6 +7,10 @@
 use std::path::PathBuf;
 
 /// The JavaScript evaluator worker's install layout.
+#[cfg(feature = "js")]
+pub mod js_host;
+#[cfg(not(feature = "js"))]
+#[path = "sidecars/javascript_unavailable.rs"]
 pub mod js_host;
 /// The Python evaluator worker's install layout.
 #[cfg(feature = "python")]

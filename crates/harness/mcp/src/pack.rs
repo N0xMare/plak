@@ -21,13 +21,13 @@ use rmcp::service::PeerRequestOptions;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::error::{McpError, McpErrorKind};
-use crate::http::{self, HttpRefusal};
-use crate::listing::{FrozenMcpListing, McpToolRecord};
-use crate::naming::exposed_tool_name;
-use crate::pool::{Connection, Entry, McpLease};
-use crate::resources::{McpResourceContents, READ_RESOURCE};
-use crate::result::{Pieces, map_call_result, untrusted_header};
+use crate::surface::error::{McpError, McpErrorKind};
+use crate::surface::http::{self, HttpRefusal};
+use crate::surface::listing::{FrozenMcpListing, McpToolRecord};
+use crate::surface::naming::exposed_tool_name;
+use crate::surface::pool::{Connection, Entry, McpLease};
+use crate::surface::resources::{McpResourceContents, READ_RESOURCE};
+use crate::surface::result::{Pieces, map_call_result, untrusted_header};
 
 const MCP_TOOL_VERSION: &str = "1";
 const OUTPUT_MAX_PARTS: u32 = 128;

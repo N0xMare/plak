@@ -3,7 +3,7 @@
 use plakous_model::{ToolName, sha256_hex};
 use plakous_tools::McpServerName;
 
-use crate::error::{McpError, McpErrorKind};
+use crate::surface::error::{McpError, McpErrorKind};
 
 /// Longest exposed name: the common provider function-name bound.
 pub const MAX_EXPOSED_NAME_BYTES: usize = 64;
