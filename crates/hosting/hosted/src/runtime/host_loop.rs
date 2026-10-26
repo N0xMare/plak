@@ -50,7 +50,7 @@ use super::tree::{
     dispatch_invoke_tool_sync, dispatch_topology_navigator_sync,
     emit_tree_snapshot_if_revision_advanced, record_emitted_tree_revision,
 };
-use super::turn::{host_outcome_blocks_continuation, publish_recovered_turn_result};
+use super::turn::host_outcome_blocks_continuation;
 use super::usage::{
     compact_reason_for_disposition, emit_context_projection, last_enrolled_source_bytes,
     query_context, report_context,
@@ -137,6 +137,7 @@ mod prompt;
 pub(super) mod publication;
 mod recover;
 mod release;
+mod restored;
 mod run_until_idle;
 pub(in crate::runtime) mod transient;
 pub(in crate::runtime) mod wake;
@@ -476,6 +477,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     fn drive(&mut self, mut one_shot: Option<&mut super::oneshot::OneShotState>) -> CliResult<()> {
+        // A one-shot's initial prompt belongs after the recovered turn, not
+        // in its busy follow-up queue. Keep its delivery/provenance intact.
+        let initial_prompt = if one_shot.is_some() && self.opened.has_recovered_turn() {
+            self.interrupt_state
+                .borrow_mut()
+                .take_deferred()
+                .or_else(|| self.actions.try_recv().ok())
+        } else {
+            None
+        };
+        if matches!(self.drive_restored_turn()?, HostStep::Quit) {
+            return self.finish_projection(one_shot.is_some());
+        }
+        if let Some(delivery) = initial_prompt {
+            self.interrupt_state.borrow_mut().restore_front(delivery);
+        }
         let mut passive_checkpoint_scheduled = false;
         if let Some(state) = one_shot.as_deref_mut() {
             let tree_id = durable_tree_id(&self.config.topology_rows(), &self.config.session);

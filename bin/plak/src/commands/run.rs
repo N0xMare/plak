@@ -662,6 +662,12 @@ pub(crate) fn run_config(
             delivered_signals += 1;
             let _ = controls.send(action);
         }
+        if let Some(HostEvent::ApprovalRequired { approval_id, .. }) = event {
+            let _ = controls.send(UserAction::ResolveApproval {
+                approval_id: approval_id.clone(),
+                choice: plakous_host_protocol::ApprovalChoice::Deny,
+            });
+        }
         // Every stderr line this face writes is decided in `face`, so the text
         // a user reads is pinned by tests rather than by a live provider.
         let written = event

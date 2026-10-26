@@ -2738,7 +2738,6 @@ fn jsonl_face_cut_after_the_answer_reopens_exactly() -> TestResult {
 /// dispatch, a recovery warning or an abandonment. Approval UI ids may be
 /// renewed; the canonical call id and tool identify the retained decision.
 #[test]
-#[ignore = "JSONL-APPROVAL-RESUME: blocked by production fix"]
 fn jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen() -> TestResult {
     let fixture = FaceFixture::new(&decision_script())?;
     let mut agent = FaceAgent::start(&fixture, &[])?;
@@ -2759,6 +2758,10 @@ fn jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen() -> TestResult {
         record["kind"] == "approval"
     })?;
     agent.wait_for("the reopened hello", |record| record["kind"] == "hello")?;
+    assert_eq!(
+        agent.records().first().map(|record| &record["kind"]),
+        Some(&json!("hello"))
+    );
     if restored["call_id"] != call || restored["name"] != approval["name"] {
         return Err(format!("reopen changed the pending call: {approval} -> {restored}").into());
     }
@@ -2783,5 +2786,8 @@ fn jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen() -> TestResult {
     if !success {
         return Err(format!("quit after restored approval failed: {stderr}").into());
     }
-    Ok(())
+    approval_resume::assert_terminals(&fixture, 1)
 }
+
+#[path = "crash_matrix_routes/approval_resume.rs"]
+mod approval_resume;

@@ -7,8 +7,8 @@ use super::{
     SubscriptionUsageRefresh, TreeSnapshotPush, build_session_from_config, elapsed_ms_since,
     emit_agent_plan_notes, emit_prompt_history, emit_queue_snapshot, emit_restored_paused_note,
     emit_unavailable_context, log_ev, log_host_attached, log_host_ready, log_session_ready,
-    native_compact_facet, persist, publish_recovered_turn_result, query_context, report_context,
-    restored_paused_status_suffix, send_binding, sessions, surface,
+    native_compact_facet, persist, query_context, report_context, restored_paused_status_suffix,
+    send_binding, sessions, surface,
 };
 use crate::sessions::projector::{ProductTreeJoin as _, SubmissionKind, pending_command_ids};
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -19,7 +19,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         mut config: HostConfig<P>,
         actions: &'a crate::surface_protocol::UserActionReceiver<P>,
         events: Sender<P>,
-        mut startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+        startup: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
     ) -> CliResult<Self> {
         let storage_interrupt = actions.storage_interrupt_probe();
         config
@@ -403,67 +403,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         emit_prompt_history(&events, &config.session);
         super::super::info::send_last_user_prompt_at(&events, &config, &opened);
         emit_queue_snapshot(&events, &config.session);
-        let mut restored_recovery_blocked = false;
-        if opened.has_recovered_turn() {
-            let _ = events.send(ContentEvent::SetBusy(true));
-            let _ = events.send(ContentEvent::Status {
-                phase: "running".into(),
-                queue_len: config.session.pending_queue.len(),
-                detail: Some("restoring the original admitted turn".into()),
-            });
-            if let Some(startup) = startup.take() {
-                let _ = startup.send(Ok(()));
-            }
-        }
-        if let Some(turn) = opened.take_recovered_turn() {
-            let result = executor
-                .block_on(turn.result().result())
-                .map_err(|_| CliFailure::new("application execution failed"))?;
-            // The rejoined turn kept its receipts for replay; its terminal
-            // settles them as any root terminal does.
-            let exchange = result
-                .as_ref()
-                .map_or(crate::agent::TerminalExchange::Unresolved, |result| {
-                    crate::agent::TerminalExchange::of(result)
-                });
-            if let Err(error) = executor
-                .block_on(super::super::result_mail::settle_terminal_waits(
-                    &config.topology_rows(),
-                    &config.session,
-                    &opened,
-                    exchange,
-                ))
-                .unwrap_or_else(|_| Err("application execution failed".to_owned()))
-            {
-                let _ = events.notice(TranscriptRow::error(
-                    NoticeScope::Tree,
-                    format!("wait receipt settlement failed: {error}"),
-                ));
-            }
-            restored_recovery_blocked = publish_recovered_turn_result(
-                result,
-                &*config.store,
-                &config.home,
-                &mut config.session,
-                &events,
-            );
-            {
-                let rows = config.topology_rows();
-                executor
-                    .block_on(super::super::projection::project_tree(
-                        opened.sessions(),
-                        &rows,
-                        &super::durable_tree_id(&rows, &config.session),
-                        opened.locator().session_id(),
-                    ))
-                    .map_err(|_| CliFailure::new("application execution failed"))?
-                    .map_err(CliFailure::new)?;
-            }
-            if restored_recovery_blocked {
-                config.session.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-            }
-            events.resync_transcript_gaps();
-        }
         if let Err(error) = report_context(
             &executor,
             &opened,
@@ -494,21 +433,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         };
         if restored_working {
             let _ = events.send(ContentEvent::Status {
-                phase: if restored_recovery_blocked {
-                    "error"
-                } else {
-                    "idle"
-                }
-                .into(),
+                phase: "running".into(),
                 queue_len: config.session.pending_queue.len(),
-                detail: Some(with_pause(
-                    if restored_recovery_blocked {
-                        "restored turn's outcome is uncertain; the next prompt recovers it"
-                    } else {
-                        "restored turn complete"
-                    }
-                    .to_owned(),
-                )),
+                detail: Some("restoring the original admitted turn".into()),
             });
         } else {
             let _ = events.send(ContentEvent::Status {
@@ -517,15 +444,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                 detail: Some(with_pause(format!("ready · {}", config.model_id))),
             });
         }
-        let _ = events.send(ContentEvent::SetBusy(false));
+        let _ = events.send(ContentEvent::SetBusy(restored_working));
         let _ = events.send(ContentEvent::AgentAttached(true));
         let _ = events.send(ContentEvent::Activity {
-            label: if restored_recovery_blocked {
-                "agent recovery blocked"
-            } else {
-                "agent ready"
-            }
-            .into(),
+            label: "agent ready".into(),
             active: false,
         });
         if let Some(startup) = startup {
@@ -535,8 +457,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         // Disk-loaded queues are deliberately paused until the operator resumes them.
         let pending_start: Option<SessionQueueItem> = None;
         let last_tree_observed_at = Instant::now();
-        let recovery_blocked = restored_recovery_blocked
-            || query_context(&executor, &opened, ContextQuery::Current).is_ok_and(|projection| {
+        let recovery_blocked =
+            query_context(&executor, &opened, ContextQuery::Current).is_ok_and(|projection| {
                 projection.disposition() == ContextDisposition::RecoveryRequired
             });
         let held_usage = HeldUsage::default();

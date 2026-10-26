@@ -1904,6 +1904,16 @@ runtime checkpoint format epoch 33 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
+The recovered-turn handle exposes a single-take `Turn` capability, shared across
+handle clones, with its bounded event receiver registered before the restored
+driver starts. Hosts drive its events, decisions, controls and original result
+through the same path as a newly admitted turn; taking it admits no command and
+allocates no new turn identity. Independent result and control observers remain
+available on the recovered handle.
+An effect-decision restoration republishes `EffectDecisionRequired` from the
+recorded frame with the original decision address, call, prompt and expiry;
+this is an observation, not a new decision operation or dispatch admission.
+
 **The closure table.** Let T be the branch's newest open root turn, R its root
 command and P T's newest round provider operation (a compaction's own
 provider attempt is a compaction record, not a round). A commit obligation is recovered

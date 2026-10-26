@@ -6,7 +6,7 @@ use crate::runtime::driver::Driver;
 use crate::runtime::terminal::{actor_panic_error, insert_known_turn};
 use crate::runtime::{
     Agent, AgentInner, DriverRestoredStartup, PreparedAgent, PromptCommand, RecoveredTurnHandle,
-    TurnLifecycle, TurnResultHandle, TurnSettlement, TurnShared, TurnTelemetry,
+    Turn, TurnLifecycle, TurnResultHandle, TurnSettlement, TurnShared, TurnTelemetry,
     TurnTelemetryCompartments,
 };
 use crate::{EventPipeline, TurnControl};
@@ -107,11 +107,22 @@ impl PreparedAgent {
             if let Some(entry) = command_ledger.get_mut(&command_id) {
                 entry.result = Some(result.clone());
             }
+            let turn = Turn {
+                turn_id: command.turn_id,
+                result: result.clone(),
+                events: events.clone(),
+                event_limits,
+                initial_events: events.turn_events(command.turn_id, event_limits).ok().map(
+                    |events| events.with_terminal_failure(shared.terminal_failure.subscribe()),
+                ),
+                control: control.clone(),
+            };
             let handle = RecoveredTurnHandle {
                 turn_id: command.turn_id,
                 decision: restored.frame.pending_decision(),
                 result,
                 control,
+                turn: Arc::new(Mutex::new(Some(turn))),
             };
             (
                 Some(DriverRestoredStartup {

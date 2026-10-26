@@ -65,6 +65,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
         self.deferred.pop_front()
     }
 
+    /// Returns an earlier delivery held across restored-turn driving to the FIFO.
+    pub(crate) fn restore_front(&mut self, delivery: UserActionDelivery<P>) {
+        self.deferred.push_front(delivery);
+    }
+
     /// Whether any deferred action is still waiting to be handled.
     ///
     /// The drive loop asks before it starts a queued turn: an action the

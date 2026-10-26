@@ -168,6 +168,7 @@ not (
   | test(resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner)
   | test(durability::)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
+  | test(approval_resume::)
   | test(crash_sweep::durability_subset)
   | test(cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance)
   | test(real_cell_worker_crash_recovery_boundaries)
@@ -308,6 +309,7 @@ test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
+  | test(approval_resume::)
   | test(crash_sweep::durability_subset)
   | test(cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance)
   | test(real_cell_worker_crash_recovery_boundaries)

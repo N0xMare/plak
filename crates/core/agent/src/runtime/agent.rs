@@ -857,6 +857,19 @@ impl fmt::Debug for TurnSubmission {
 }
 
 impl RecoveredTurnHandle {
+    /// Takes the original turn for normal event, decision and result driving.
+    ///
+    /// Its bounded event receiver is registered before the restored driver
+    /// starts, so even the first pending decision is observable. Cloned handles
+    /// share this single take; subsequent calls return `None`.
+    #[must_use]
+    pub fn take_turn(&self) -> Option<Turn> {
+        self.turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
     /// Returns the persisted turn identity; reopen never allocates another one.
     #[must_use]
     pub const fn turn_id(&self) -> TurnId {

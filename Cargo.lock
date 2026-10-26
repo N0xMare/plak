@@ -4201,11 +4201,14 @@ dependencies = [
  "plakous-model",
  "plakous-responses-dialect",
  "plakous-store",
+ "portable-pty",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "uuid",
+ "vt100",
 ]
 
 [[package]]

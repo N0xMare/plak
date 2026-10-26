@@ -112,6 +112,9 @@ impl CliFace {
     /// decision pure, so a test pins the text a user reads without a host.
     pub(crate) fn lines(&mut self, event: &HostEvent) -> Vec<String> {
         match event {
+            HostEvent::ApprovalRequired { tool_name, .. } => vec![prefixed(&format!(
+                "denied approval for {tool_name}: run is non-interactive"
+            ))],
             HostEvent::Row(TranscriptRow::Notice(notice))
                 if notice.placement() != NoticePlacement::SessionLog =>
             {

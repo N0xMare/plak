@@ -43,6 +43,9 @@ plakous-compose = { workspace = true, features = ["scripted-code-mode-enrolment"
 plakous-http = { workspace = true, features = ["fault-injection"] }
 
 [dev-dependencies]
+portable-pty.workspace = true
+rusqlite.workspace = true
+vt100.workspace = true
 # The route axis lowers one recovered canonical history through each real wire
 # builder, so the reopen contract is proven carriable on every wire shape rather
 # than on the one the harness happens to speak. This is why the abandonment note

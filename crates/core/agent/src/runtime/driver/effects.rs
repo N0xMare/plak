@@ -35,7 +35,7 @@ use crate::{
     StoreAdmission, ToolAuditIdentity, ToolCallerLineageView, TurnCommand, ViewError,
 };
 use plakous_model::{
-    AttemptId, CallId, Digest, EntryId, EventId, Timestamp, ToolCallBlock, WorkingProjection,
+    AttemptId, CallId, Digest, EntryId, EventId, ToolCallBlock, WorkingProjection,
 };
 use plakous_tools::{
     EffectDecision, ProgressSink, ToolInvocation, ToolOutcomeKind, ToolPolicyDenial,
@@ -591,18 +591,27 @@ impl Driver {
         command: &PromptCommand,
         call: &ToolCallBlock,
         pending: PendingEffectDecision,
-        operation_id: OperationId,
-        decision_ref: EffectDecisionRef,
-        expires_at: Timestamp,
+        frame: &AwaitEffectDecisionV1,
     ) -> Result<AuthorizationOutcome, AgentError> {
         let audit_identity = ToolAuditIdentity::from_invocation(pending.invocation());
-        let remaining = timestamp_remaining(self.clock.now(), expires_at);
+        command.shared.events.publish_with(
+            EventContext::call(command.turn_id, frame.attempt_id, call.call_id()),
+            |_| AgentEventKind::EffectDecisionRequired {
+                identity: audit_identity.clone(),
+                decision: frame.decision.clone(),
+                prompt: Some(plakous_tools::EffectDecisionPrompt::new(
+                    &frame.decision_prompt,
+                )),
+                expires_at: frame.decision_expires_at,
+            },
+        )?;
+        let remaining = timestamp_remaining(self.clock.now(), frame.decision_expires_at);
         Box::pin(self.drive_effect_decision(
             command,
             call,
             pending,
-            operation_id,
-            decision_ref,
+            frame.decision_operation,
+            frame.decision.clone(),
             &audit_identity,
             remaining,
         ))

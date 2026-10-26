@@ -367,6 +367,11 @@ refuses the run (exit 1) before anything else happens. It uses full
 coding tools with no approval gates. `--session` reopens the recorded workspace locator, so your cwd
 must match the one the session was created in.
 
+`run` never asks you to approve an effect. If a coordination effect requests
+approval, it denies it and prints the tool name with `run is non-interactive` on stderr.
+This also applies to an approval restored by `--session`; the restored turn
+finishes before your new prompt starts. Use the TUI to allow an effect instead.
+
 Only the last turn answer is written to stdout, once after release, with
 separate text blocks of the answer split by a blank line and a final line break;
 terminal tool results continue on stderr. Set `PLAK_VERBOSE=1` to include

@@ -319,6 +319,7 @@ pub struct RecoveredTurnHandle {
     decision: Option<EffectDecisionRef>,
     result: TurnResultHandle,
     control: TurnControl,
+    turn: Arc<Mutex<Option<Turn>>>,
 }
 
 /// Cloneable bounded observer for one authoritative terminal turn result.

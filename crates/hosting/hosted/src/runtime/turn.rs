@@ -25,12 +25,9 @@ pub(super) fn completed_turn_row(assistant: &str) -> TranscriptRow {
     }
 }
 use super::rebind::durable_tree_id;
-use super::reconcile::{
-    commit_definite_failure_projection, commit_exceptional_terminal_projection,
-};
 use super::{
-    DriveTurnError, DrivenTurn, ExceptionalTerminalProjection, HOST_CANCEL_SETTLE_TIMEOUT,
-    PendingApproval, Sender, TopologyRows, TurnHostOutcome, TurnProjection, topology_state,
+    DriveTurnError, DrivenTurn, HOST_CANCEL_SETTLE_TIMEOUT, PendingApproval, Sender, TopologyRows,
+    TurnHostOutcome, TurnProjection, topology_state,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -241,138 +238,6 @@ pub(super) fn admitted_turn_lifecycle(turn_id: plakous::model::TurnId) -> TurnLi
         phase: TurnPhase::Admitted,
         model_error_kind: None,
         http_status: None,
-    }
-}
-
-pub(super) fn publish_recovered_turn_result<P: plakous_host_protocol::ProtocolExtension>(
-    result: Result<std::sync::Arc<TurnResult>, AgentError>,
-    store: &dyn SessionRecordStore,
-    home: &SessionHome,
-    session: &mut SessionRecord,
-    events: &Sender<P>,
-) -> bool {
-    let outcome = match result {
-        Ok(result) => {
-            emit_turn_lifecycle(events, None, session, turn_lifecycle(&result));
-            terminal_turn_outcome(&result)
-        }
-        Err(error) => {
-            let error = operator_facing_agent_error("restored agent turn failed", &error);
-            let saved = commit_exceptional_terminal_projection(
-                session,
-                ExceptionalTerminalProjection::UnresolvedError(&error),
-                |candidate| store.save(candidate),
-            );
-            if saved.is_ok() {
-                let _ = events.send(ContentEvent::Row(TranscriptRow::error(
-                    NoticeScope::Turn,
-                    error,
-                )));
-            }
-            return true;
-        }
-    };
-
-    publish_recovered_turn_outcome(outcome, store, home, session, events)
-}
-
-pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolExtension>(
-    outcome: TurnHostOutcome,
-    store: &dyn SessionRecordStore,
-    home: &SessionHome,
-    session: &mut SessionRecord,
-    events: &Sender<P>,
-) -> bool {
-    match outcome {
-        TurnHostOutcome::ConsumedDelivery => false,
-        TurnHostOutcome::Completed {
-            assistant,
-            finish_reason,
-            finish_detail,
-            wire_output_limit,
-        } => {
-            let transcript_line = completed_turn_row(&assistant);
-            let saved = commit_session_update(store, home, session, |candidate| {
-                candidate.append_transcript(transcript_line);
-                if finish_reason == plakous::model::FinishReason::Refusal {
-                    candidate.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-                }
-                true
-            });
-            if saved.is_err() {
-                return true;
-            }
-            if finish_reason == plakous::model::FinishReason::Length {
-                let _ = events.send(ContentEvent::Row(TranscriptRow::warning(
-                    NoticeScope::Turn,
-                    truncation_note(wire_output_limit),
-                )));
-            }
-            if assistant.is_empty() && finish_reason != plakous::model::FinishReason::Refusal {
-                let _ = events.notice(TranscriptRow::info(
-                    NoticeScope::Turn,
-                    "restored turn finished with no visible text",
-                ));
-            }
-            if !assistant.is_empty() {
-                let _ = events.send(ContentEvent::AssistantDelta(assistant));
-                let _ = events.send(ContentEvent::AssistantDone);
-            }
-            if finish_reason == plakous::model::FinishReason::Refusal {
-                let snapshot = super::logging::project_session_snapshot(session);
-                let _ = events.publish_transcript(snapshot);
-                let _ = events.send(ContentEvent::ModelRefusal {
-                    detail: finish_detail,
-                });
-            }
-            false
-        }
-        TurnHostOutcome::AdmissionRejected { error, .. } => {
-            let _ = events.notice(TranscriptRow::error(NoticeScope::Turn, error));
-            false
-        }
-        TurnHostOutcome::ContextCapacity { error, .. } | TurnHostOutcome::Failed { error, .. } => {
-            if commit_definite_failure_projection(session, &error, |candidate| {
-                store.save(candidate)
-            })
-            .is_ok()
-            {
-                let _ = events.send(ContentEvent::Row(TranscriptRow::error(
-                    NoticeScope::Turn,
-                    error,
-                )));
-                false
-            } else {
-                true
-            }
-        }
-        TurnHostOutcome::RecoveryRequired { error } => {
-            let saved = commit_exceptional_terminal_projection(
-                session,
-                ExceptionalTerminalProjection::RecoveryRequired(&error),
-                |candidate| store.save(candidate),
-            );
-            if saved.is_ok() {
-                let _ = events.send(ContentEvent::Row(TranscriptRow::error(
-                    NoticeScope::Turn,
-                    error,
-                )));
-            }
-            true
-        }
-        TurnHostOutcome::Interrupted { assistant, .. } => {
-            let saved = commit_exceptional_terminal_projection(
-                session,
-                ExceptionalTerminalProjection::Interrupted(&assistant),
-                |candidate| store.save(candidate),
-            );
-            if saved.is_ok() {
-                let _ = events.send(ContentEvent::Row(TranscriptRow::Interrupted));
-                false
-            } else {
-                true
-            }
-        }
     }
 }
 

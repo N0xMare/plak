@@ -383,6 +383,12 @@ impl Driver {
         } = restored;
         self.active_root = Some(command.clone());
         command.shared.start()?;
+        // This process's observation view has not seen the original start.
+        // Seed its lifecycle before publishing the restored decision or tail.
+        command.shared.events.publish(
+            EventContext::turn(command.turn_id),
+            AgentEventKind::TurnStarted,
+        )?;
         self.active_model_root_scope = Some(
             Arc::clone(&self.model)
                 .begin_operation_root(ModelOperationRoot::Turn(command.turn_id))
@@ -1968,15 +1974,9 @@ impl Driver {
             })
             .collect::<Vec<_>>();
         let pending_call = &calls[pending_index];
-        let authorization = Box::pin(self.drive_restored_effect_decision(
-            command,
-            pending_call,
-            pending,
-            frame.decision_operation,
-            frame.decision.clone(),
-            frame.decision_expires_at,
-        ))
-        .await?;
+        let authorization =
+            Box::pin(self.drive_restored_effect_decision(command, pending_call, pending, frame))
+                .await?;
         let mut dispatched = 0usize;
         Box::pin(self.execute_restored_authorization(
             command,

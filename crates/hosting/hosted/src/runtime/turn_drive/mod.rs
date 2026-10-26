@@ -142,6 +142,29 @@ mod finish;
 #[cfg(test)]
 mod prefix_tests;
 mod queue_projection;
+
+pub(in crate::runtime) async fn drive_recovered_turn<
+    P: plakous_host_protocol::ProtocolExtension,
+>(
+    turn: plakous::agent::Turn,
+    runtime: &plakous::sessions::AgentSessions,
+    host: TurnHost<'_, P>,
+) -> Result<DrivenTurn, DriveTurnError> {
+    host.job_agent
+        .set_notice_delivery_available(host.host_wakes);
+    let rows = host.rows;
+    let events = host.events;
+    let tree_id = super::rebind::durable_tree_id(rows, host.session);
+    let session_id = host.live_target.followed.session_id();
+    let driven = TurnDrive::new(turn.control(), host, None).run(turn).await;
+    if let Err(error) = super::projection::project_tree(runtime, rows, &tree_id, session_id).await {
+        let _ = events.notice(sessions::TranscriptRow::error(
+            sessions::NoticeScope::Tree,
+            format!("child mail projector deferred: {error}"),
+        ));
+    }
+    driven
+}
 #[cfg(test)]
 pub(in crate::runtime) mod quit_trace;
 #[cfg(test)]

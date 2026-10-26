@@ -195,6 +195,17 @@ fn root_startup_rejoins_certified_decision_once_and_settles_waits() {
         let turn = opened.take_recovered_turn().unwrap();
         assert_eq!(turn.turn_id().to_string(), saved["turn"].as_str().unwrap());
         let decision = turn.pending_decision().unwrap().clone();
+        let mut driven = turn.take_turn().unwrap();
+        assert!(turn.clone().take_turn().is_none(), "clones share one drive capability");
+        assert_eq!(driven.id(), turn.turn_id());
+        let mut events = driven.take_events().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if matches!(events.recv().await.unwrap().kind(), plakous::agent::AgentEventKind::EffectDecisionRequired { decision: offered, .. } if offered == &decision) {
+                    break;
+                }
+            }
+        }).await.unwrap();
         turn.control().allow_effect(decision, plakous::tools::EffectDecisionAuditId::new("root:restored-approval").unwrap()).await.unwrap();
         let result = turn.result().result().await.unwrap();
         assert_eq!(result.turn_id(), turn.turn_id());
