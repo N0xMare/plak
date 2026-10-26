@@ -16,6 +16,87 @@ source_doc="https://github.com/$repo/blob/main/docs/user-guide/getting-started.m
 die() { echo "plak install: $*" >&2; exit 1; }
 say() { echo "plak install: $*" >&2; }
 
+# "<uid> <mode>", with the sticky bit when $2 is "sticky". GNU `stat -f`
+# reports the file system instead; that output is discarded.
+owner_mode() {
+  bsd='%Lp'; [ "${2:-}" != sticky ] || bsd='%Mp%Lp'
+  facts="$(stat -f "%u $bsd" "$1" 2>/dev/null)" || facts="$(stat -c '%u %a' "$1")"
+  echo "$facts"
+}
+# Same rules as tools/build/build-plak.sh: physical installation ancestors
+# are user/root-owned and not writable by others, except root-owned sticky roots.
+safe_dir() {
+  [ -d "$1" ] && [ ! -L "$1" ] || die "unsafe or symlinked directory refused: $1"
+  dir="$(cd "$1" && pwd -P)"
+  while :; do
+    facts="$(owner_mode "$dir" sticky)"; owner="${facts% *}"; mode="${facts#* }"
+    if [ "$owner" = 0 ] && [ $((0$mode & 01000)) -ne 0 ]; then :
+    elif [ "$owner" != 0 ] && [ "$owner" != "$(id -u)" ]; then die "foreign installation ancestor refused: $dir"
+    elif [ $((0$mode & 022)) -ne 0 ]; then die "writable installation ancestor refused: $dir"
+    fi
+    [ "$dir" != / ] || break
+    dir="$(dirname "$dir")"
+  done
+}
+
+uninstall_link() {
+  link=$1
+  [ -L "$link" ] || return 0
+  target="$(readlink "$link")"
+  case "$target" in /*) ;; *) target="$(dirname "$link")/$target" ;; esac
+  # Resolve the parent, not the executable: stale executable links still belong
+  # to an existing snapshot, and HOME may contain a platform symlink like /tmp.
+  if physical_parent="$(cd "$(dirname "$target")" 2>/dev/null && pwd -P)"; then
+    target="$physical_parent/$(basename "$target")"
+    case "$target" in
+      "$lib/release/"*|"$lib/maintainer/"*|"$lib/sidecars/"*)
+        if [ "$dry_run" = 1 ]; then say "would remove link $link"
+        else say "removing link $link"; rm "$link"; fi
+        return 0 ;;
+    esac
+  fi
+  say "retained unrelated link: $link"
+}
+
+case "${1:-}" in
+  uninstall)
+    shift
+    dry_run=0
+    if [ "${1:-}" = --dry-run ]; then dry_run=1; shift; fi
+    [ "$#" -eq 0 ] || die "usage: sh install.sh uninstall [--dry-run] (product home is always retained)"
+    case "${HOME:-}" in /*) [ "$HOME" != / ] || die "HOME must not be /" ;; *) die "HOME must be absolute" ;; esac
+    lib="$HOME/.local/lib/plak"
+    if [ -e "$lib" ] || [ -L "$lib" ]; then
+      safe_dir "$lib"
+      lib="$(cd "$lib" && pwd -P)"
+    fi
+    bindir="$HOME/.local/bin"
+    if [ -e "$bindir" ] || [ -L "$bindir" ]; then safe_dir "$bindir"; fi
+    cargo_bindir="${CARGO_HOME:-$HOME/.cargo}/bin"
+    if [ -e "$cargo_bindir" ] || [ -L "$cargo_bindir" ]; then safe_dir "$cargo_bindir"; fi
+    # Validate all removal roots before changing links or snapshots.
+    for name in release maintainer sidecars; do
+      if [ -e "$lib/$name" ] || [ -L "$lib/$name" ]; then safe_dir "$lib/$name"; fi
+    done
+    for name in plak plakous-js-host plakous-py-host monty; do
+      uninstall_link "$bindir/$name"
+    done
+    for name in plak plakous-js-host plakous-py-host; do
+      uninstall_link "$cargo_bindir/$name"
+    done
+    for name in release maintainer sidecars; do
+      if [ -d "$lib/$name" ]; then
+        if [ "$dry_run" = 1 ]; then say "would remove root $lib/$name"
+        else say "removing $lib/$name"; rm -rf "$lib/$name"; fi
+      fi
+    done
+    if [ "$dry_run" = 1 ]; then say "dry run; nothing removed; product home and credentials retained"
+    else say "uninstalled; product home and credentials retained"; fi
+    exit 0 ;;
+  ''|install) [ "$#" -le 1 ] || die "usage: sh install.sh [install|uninstall]" ;;
+  *) die "usage: sh install.sh [install|uninstall]" ;;
+esac
+
 case "$(uname -s) $(uname -m)" in
   "Darwin arm64") triple=aarch64-apple-darwin ;;
   # An x86_64 shell under Rosetta still runs on Apple Silicon.
@@ -76,29 +157,6 @@ for name in plak plakous-js-host plakous-py-host; do
   [ -f "$work/$stem/$name" ] && [ ! -L "$work/$stem/$name" ] || die "$stem.tar.gz lacks $name"
 done
 
-# Same rules as tools/build/build-plak.sh: every installation directory and
-# its physical ancestors are owned by this user (or root) and not group- or
-# world-writable, except root-owned sticky temporary roots.
-# "<uid> <mode>", with the sticky bit when $2 is "sticky". GNU `stat -f`
-# reports the file system instead; that output is discarded.
-owner_mode() {
-  bsd='%Lp'; [ "${2:-}" != sticky ] || bsd='%Mp%Lp'
-  facts="$(stat -f "%u $bsd" "$1" 2>/dev/null)" || facts="$(stat -c '%u %a' "$1")"
-  echo "$facts"
-}
-safe_dir() {
-  [ -d "$1" ] && [ ! -L "$1" ] || die "unsafe or symlinked directory refused: $1"
-  dir="$(cd "$1" && pwd -P)"
-  while :; do
-    facts="$(owner_mode "$dir" sticky)"; owner="${facts% *}"; mode="${facts#* }"
-    if [ "$owner" = 0 ] && [ $((0$mode & 01000)) -ne 0 ]; then :
-    elif [ "$owner" != 0 ] && [ "$owner" != "$(id -u)" ]; then die "foreign installation ancestor refused: $dir"
-    elif [ $((0$mode & 022)) -ne 0 ]; then die "writable installation ancestor refused: $dir"
-    fi
-    [ "$dir" != / ] || break
-    dir="$(dirname "$dir")"
-  done
-}
 make_dir() { mkdir -p "$1" && safe_dir "$1"; }
 
 make_dir "$HOME/.local/lib/plak/release"

@@ -1371,7 +1371,15 @@ has no full-gate evidence for the tree (§6.5). Every action is pinned to a full
 commit SHA.
 
 `install.sh` at the repository root is a POSIX `sh` installer that never
-needs elevated privileges:
+needs elevated privileges. `sh install.sh uninstall [--dry-run]` removes Plak-owned
+links in `~/.local/bin` and `${CARGO_HOME:-~/.cargo}/bin`, including Cargo entries
+relinked by `just install`, and the release, maintainer and shared sidecar roots
+after validating installation ancestors. Link ownership uses physically resolved
+target directories, including relative targets and symlinked home components.
+`--dry-run` lists the links and roots it would remove without deleting anything.
+Unrelated links and files are retained. It never
+removes the product home or credentials and offers no home-deletion flag.
+Installation:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh

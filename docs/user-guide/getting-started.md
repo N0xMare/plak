@@ -144,6 +144,17 @@ workspace's default member is only `plak`; build both workers separately. Native
 JJ workspace operations do not require the `jj` executable; the Git CLI backend
 requires `git`.
 
+## Uninstall
+
+To uninstall an `install.sh` or `just install` installation, run
+`sh install.sh uninstall` from a source checkout. This removes Plak-owned links
+from `~/.local/bin` and `${CARGO_HOME:-~/.cargo}/bin` (including Cargo entries
+relinked by `just install`) and the release, maintainer and shared sidecar roots
+in `~/.local/lib/plak`. Preview these removals with
+`sh install.sh uninstall --dry-run`. Unrelated links and files stay in place. It never deletes
+the product home (`~/.plak` or `PLAK_HOME`) or credentials; there is no
+home-deletion flag. For a crates.io installation, use `cargo uninstall plak` instead.
+
 ## Connect an account
 
 Plak supports three subscription accounts and four separately billed API accounts. See [providers and accounts](providers-and-accounts.md) for their exact names and enrolled models.
