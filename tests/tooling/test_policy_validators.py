@@ -1558,7 +1558,7 @@ fn cli_human_output() {
 """,
                 "src/tui_launch.rs": """
 fn reload(executable: &std::path::Path) {
-    let _ = std::process::Command::new(&executable);
+    let _ = std::process::Command::new(executable);
 }
 """,
                 "src/main.rs": "use std::process::ExitCode;",

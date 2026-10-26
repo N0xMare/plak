@@ -13,7 +13,6 @@ pub(super) const RELOAD_CHECKING: &str = "checking installed build…";
 /// What the loop does with a settled probe.
 #[derive(Debug)]
 pub(super) enum ReloadOutcome {
-    Carry(String),
     HandOff(Option<crate::carry::ReloadTarget>),
     Refused,
 }
@@ -114,12 +113,6 @@ impl App {
         if let Some(reason) = refusal {
             self.push_block(ScrollBlock::System(reason));
             return Some(ReloadOutcome::Refused);
-        }
-        if let Some(cause) = target
-            .as_ref()
-            .and_then(|target| target.carry_cause.clone())
-        {
-            return Some(ReloadOutcome::Carry(cause));
         }
         if let Some(target) = target.as_ref()
             && let Some(capacity) = &target.capacity

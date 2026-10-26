@@ -354,6 +354,9 @@ FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS = {
 }
 SourceKey = tuple[str, str]
 EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]] = {
+    ("plak", "src/environment.rs"): [
+        ("var_os", (("string", "PLAK_RELOAD_APPLY_ORCHESTRATION"),)),
+    ],
     # Maintainer/test-hooks private inference capture, explicitly selected per process.
     ("plak", "src/commands/exchange_capture.rs"): [
         ("var_os", (("string", "PLAK_TEST_EXCHANGE_CAPTURE_DIR"),)),
@@ -488,7 +491,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
     ],
     # `/reload` execs the installed `plak` its own argv[0] resolves to.
     ("plak", "src/tui_launch.rs"): [
-        ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
+        ("std::process::Command", (("identifier", "executable"),)),
     ],
     ("plak", "src/commands/support.rs"): [
         ("std::process::Command", (("string", "/bin/sh"),)),

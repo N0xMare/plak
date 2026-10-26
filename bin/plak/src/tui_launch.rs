@@ -547,6 +547,16 @@ fn prepare_tui_launch(
         crate::build_features::admit_session(&record)?;
     }
 
+    if resume
+        && crate::environment::reload_epoch_requested()
+        && let Some(note) = carry::apply_on_reload(services, &mut record)
+    {
+        opening_note = Some(match opening_note {
+            Some(previous) => format!("{previous}; {note}"),
+            None => note,
+        });
+    }
+
     let mut initial_cfg = product_config::ProductConfig::load(&paths)
         .map_err(|error| CliFailure::new(format!("invalid product config: {error}")))?;
     for warning in &initial_cfg.warnings {
@@ -1396,26 +1406,24 @@ fn reload_installed_plak(
     if let Some(stored) = stored {
         *record = stored;
     }
-    let mut command = std::process::Command::new(&executable);
-    std::os::unix::process::CommandExt::arg0(&mut command, build_identity::invocation_argv0());
-    let mut carry_file = None;
-    let mut unverified = None;
-    match carry::reload_plan(
+    let plan = carry::reload_plan(
         resumable,
         &home::state::state_key(),
         installed_key.as_deref(),
-    ) {
+    );
+    let mut command = reload_command(&executable, &plan, &record.id);
+    std::os::unix::process::CommandExt::arg0(&mut command, build_identity::invocation_argv0());
+    let mut carry_file = None;
+    let mut unverified = None;
+    match plan {
         carry::ReloadPlan::Fresh => {}
-        carry::ReloadPlan::Resume => {
-            command.arg("--resume").arg(&record.id);
-        }
+        carry::ReloadPlan::Resume => {}
         carry::ReloadPlan::ResumeUnverified => {
             unverified = Some(format!(
                 "; {} did not report its state key, so {} was resumed without carrying it forward",
                 executable.display(),
                 record.id
             ));
-            command.arg("--resume").arg(&record.id);
         }
         carry::ReloadPlan::Carry => {
             let (path, summary) = match carry::carry_out(paths, record) {
@@ -1456,6 +1464,23 @@ fn reload_installed_plak(
         executable.display(),
         unverified.unwrap_or_default()
     )))
+}
+
+fn reload_command(
+    executable: &Path,
+    plan: &carry::ReloadPlan,
+    session: &str,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(executable);
+    command.env_remove(crate::environment::RELOAD_EPOCH_ENV);
+    if matches!(
+        plan,
+        carry::ReloadPlan::Resume | carry::ReloadPlan::ResumeUnverified
+    ) {
+        command.env(crate::environment::RELOAD_EPOCH_ENV, "1");
+        command.arg("--resume").arg(session);
+    }
+    command
 }
 
 fn remove_failed_handoff_receipt(path: Option<&Path>) {

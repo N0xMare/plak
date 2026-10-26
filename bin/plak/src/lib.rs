@@ -60,6 +60,8 @@ mod composition_tests;
 mod config;
 mod diagnostics;
 mod dispatch;
+#[cfg(feature = "tui")]
+mod environment;
 mod lookup_status;
 mod review_expiry;
 pub(crate) mod surface_protocol;

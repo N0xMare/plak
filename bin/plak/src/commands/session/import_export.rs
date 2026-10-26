@@ -83,24 +83,34 @@ pub(crate) fn rebind_document(
     services: &crate::shell::services::Services,
     document: crate::carry::CarryDocument,
     cause: &str,
+    mode: crate::carry::ReboundMode,
 ) -> CliResult<(product_sessions::SessionRecord, String)> {
     let estimated_tokens = document.estimated_tokens();
     let messages = document.message_count();
     let config = product_config::ProductConfig::load(services.paths()?).map_err(CliFailure::new)?;
-    let carried = document.into_rebound_import(&config, cause)?;
-    import_prepared(
+    let carried = document.into_rebound_import(cause)?;
+    import_prepared_with_fallback(
         services,
         PreparedImport {
             carried,
             estimated_tokens,
             messages,
         },
+        (mode != crate::carry::ReboundMode::Orchestration).then_some(&config),
     )
 }
 
 pub(crate) fn import_prepared(
     services: &crate::shell::services::Services,
     prepared: PreparedImport,
+) -> CliResult<(product_sessions::SessionRecord, String)> {
+    import_prepared_with_fallback(services, prepared, None)
+}
+
+fn import_prepared_with_fallback(
+    services: &crate::shell::services::Services,
+    prepared: PreparedImport,
+    root_fallback: Option<&product_config::ProductConfig>,
 ) -> CliResult<(product_sessions::SessionRecord, String)> {
     let PreparedImport {
         carried,
@@ -109,7 +119,7 @@ pub(crate) fn import_prepared(
     } = prepared;
     let crate::carry::CarriedImport {
         record,
-        history,
+        mut history,
         mut note,
     } = carried;
     let paths = crate::home::paths::PlakPaths::for_workspace(
@@ -135,7 +145,7 @@ pub(crate) fn import_prepared(
         )));
     }
     record.validate_for_store().map_err(CliFailure::new)?;
-    let mut config = super::attached::attached_host_config(services, record)?;
+    let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
     config.seed_history = Some(history);
     let (record, notes) =
         product_host::create_seeded_session_with_preflight(config, move |window| {
@@ -182,4 +192,44 @@ pub(crate) fn import_prepared(
         );
     }
     Ok((record, note))
+}
+
+fn import_host_config(
+    services: &crate::shell::services::Services,
+    record: product_sessions::SessionRecord,
+    root_fallback: Option<&product_config::ProductConfig>,
+    history: &mut plakous::sessions::PortableSessionHistory,
+    note: &mut String,
+) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
+    let source_error = match super::attached::attached_host_config(services, record.clone()) {
+        Ok(config) => return Ok(config),
+        Err(error) => error,
+    };
+    let Some(root) = root_fallback else {
+        return Err(source_error);
+    };
+    let mut fallback = record.clone();
+    fallback.target_selection = product_config::ProductTargetSelection::Native;
+    super::binding::seed_new_session_binding(&mut fallback, root)?;
+    if fallback.account != record.account
+        || fallback.model != record.model
+        || fallback.effort != record.effort
+        || fallback.composition != record.composition
+        || fallback.target_selection != record.target_selection
+    {
+        *history = history
+            .clone()
+            .without_replay()
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+    }
+    let notice = format!(
+        "source binding could not be resolved ({}); using the configured root binding",
+        plakous::model::SafeDiagnostic::new(source_error.message())
+    );
+    fallback.record_notice(plakous_hosted::sessions::TranscriptRow::info(
+        product_sessions::NoticeScope::Session,
+        &notice,
+    ));
+    note.push_str(&format!("; {notice}"));
+    super::attached::attached_host_config(services, fallback)
 }

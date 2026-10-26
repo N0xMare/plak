@@ -3303,14 +3303,19 @@ is not paused it changes nothing and says `agent tree is not paused; nothing to
 resume`. Bare `/tree` opens the Agents list. Other tree arguments are refused.
 
 `/rebind` carries the full neutral conversation and typed transcript into a new
-session at genesis under the current root configuration and login. It works
+session at genesis, resolving the source account, model, effort, composition
+and target selection under the current login. Only when that binding cannot
+be resolved does it fall back to the configured root binding, with an explicit
+notice. It works
 when the root is unattached: export reads canonical history without exact
 runtime reopen. The source is unchanged, the new session is linked as
 `carried forward from <id>`, and a transcript notice names the cause. Provider
-replay is stripped rather than relabeled for a new account. Missing or invalid
+replay is kept with offline replay validation when the binding is unchanged;
+a changed binding strips it rather than relabeling it for a new account. Missing or invalid
 configuration, an unexportable source or failed import leaves the selected
 source open with a repair notice. It is refused while the root turn, children
-or background processes are live. Queued prompts carry paused, never dispatch
+or background processes are live, including non-terminal children in the
+persisted source tree even when the root is unattached. Queued prompts carry paused, never dispatch
 automatically. No shell export/import round trip is required.
 
 An unattached exact reopen refusal naming a different account or frozen
@@ -3319,16 +3324,23 @@ the same in-process carry path. Restoring the original account/configuration
 instead permits exact reopen. A missing login or quarantined credential alone
 is not a binding mismatch and is repaired with the named login command.
 
-`/reload` also compares the current epoch-scoped orchestration/roster settings
-with the session's frozen epoch. A changed digest on an idle session with no
-live children or background processes takes the same in-process carry and
+`/reload` restarts on the installed build before applying changed epoch-scoped
+orchestration/roster settings. On a same-state resume, the destination process
+compares its current settings with the session's frozen epoch. A changed
+digest on an idle session with no live children or background processes takes
+the same carry and
 records `orchestration settings changed; carried into a new session to apply
 them`, linked to the source. The new tree freezes current bounds and roster
-and recompiles root tool descriptions at genesis; the source tree is not
-mutated. Unchanged settings keep the exact reopen path. The comparison runs
-off the UI thread, and the ordinary refusal checks run again before handoff.
+and recompiles root tool descriptions at genesis. The source account, model,
+effort, composition and target selection are preserved and revalidated under
+the current login, never replaced by config defaults; replay is validated as
+for a local reload handoff. The source tree is not mutated. Unchanged settings
+keep the exact reopen path. An unreadable config or tree skips orchestration
+apply with a notice (`settings apply to new sessions`) and continues the normal
+reload. A cross-state import already freezes the destination's current roster
+and bounds at genesis and never creates a second carry for the same reload.
 
-Otherwise `/reload` restarts on the installed build, carrying the session forward when
+The normal reload handoff carries the session forward when
 that build has another state key (§2.5.1). It is refused while a turn runs,
 while sub-agents or background processes are live, or when no installed `plak` resolves on `PATH`, so a
 refusal never closes the TUI. Asking the installed build its state key runs off

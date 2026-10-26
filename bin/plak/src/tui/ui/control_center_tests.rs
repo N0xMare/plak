@@ -1294,17 +1294,13 @@ fn the_reload_probe_runs_off_the_ui_thread_and_hands_off_when_it_answers() {
 }
 
 #[test]
-fn changed_epoch_reload_carries_only_without_live_children() {
+fn reload_hands_off_to_the_installed_executable_before_applying_an_epoch() {
     for children in [0, 1] {
         let mut app = App::new(launch_basic(), true);
         app.tree_live_descendants = children;
         app.start_reload_probe(|| {
             Some(crate::carry::ReloadTarget {
-                carry_cause: Some(
-                    "orchestration settings changed; carried into a new session to apply them"
-                        .to_owned(),
-                ),
-                executable: std::path::PathBuf::from("unused"),
+                executable: std::path::PathBuf::from("new-installed-plak"),
                 capacity: None,
                 capacity_error: None,
                 state_key: Some(crate::home::state::state_key()),
@@ -1313,8 +1309,12 @@ fn changed_epoch_reload_carries_only_without_live_children() {
         });
         let outcome = settle_reload_probe(&mut app);
         if children == 0 {
-            assert!(
-                matches!(outcome, super::reload::ReloadOutcome::Carry(cause) if cause.starts_with("orchestration settings changed;"))
+            let super::reload::ReloadOutcome::HandOff(Some(target)) = outcome else {
+                panic!("reload must start the installed build: {outcome:?}");
+            };
+            assert_eq!(
+                target.executable,
+                std::path::PathBuf::from("new-installed-plak")
             );
         } else {
             assert!(matches!(outcome, super::reload::ReloadOutcome::Refused));

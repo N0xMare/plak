@@ -146,6 +146,14 @@ children or background processes: it carries the full history into a new
 session whose tree freezes the current settings at genesis and recompiles the
 root's tool descriptions. The transcript says `orchestration settings changed;
 carried into a new session to apply them` and links `carried forward from <id>`.
+Only roster and bounds are refrozen: the source account, model, effort,
+composition and target selection stay selected, revalidated under the current
+login. The carry keeps replay with validation when its binding is unchanged.
+Persisted non-terminal children refuse carry even with no root attachment.
+The installed build performs the comparison after the normal reload handoff;
+a cross-state import already creates the desired genesis and is not carried
+again. An unreadable config or tree skips apply with a notice and continues
+normal reload; settings then apply to new sessions.
 The source keeps its tree and frozen bounds; no config edit silently changes
 an existing tree. Unchanged settings keep exact reopen. A successor epoch may
 also install on a quiescent tree during a model rebind that stays on it. A

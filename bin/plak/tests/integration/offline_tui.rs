@@ -2337,6 +2337,12 @@ fn a_parked_shell_stays_parked_over_a_stranded_input_burst() {
 /// exact session id without creating an export or replacement session.
 #[test]
 fn a_reload_onto_the_same_state_key_resumes_exactly() {
+    for changed_orchestration in [false, true] {
+        assert_same_key_reload_starts_installed_build(changed_orchestration);
+    }
+}
+
+fn assert_same_key_reload_starts_installed_build(changed_orchestration: bool) {
     let fixture = Fixture::new(&tool_then_answer("same-key answer"));
     let key = Command::new(env!("CARGO_BIN_EXE_plak"))
         .args(["version", "--state-key"])
@@ -2351,6 +2357,7 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
     let fake_bin = fixture.root.join("fake-bin-same-key");
     std::fs::create_dir_all(&fake_bin).expect("fake bin");
     let args = fixture.root.join("same-key-reload-args");
+    let marker = fixture.root.join("reload-epoch-marker");
     let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
     terminal.wait_ready();
     write_script_file(
@@ -2359,14 +2366,24 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
             "#!/bin/sh\n\
              if [ \"$1 $2\" = 'version --state-key' ]; then echo '{}'; exit 0; fi\n\
              printf '%s\\n' \"$@\" > '{}'\n\
+             printf '%s' \"$PLAK_RELOAD_APPLY_ORCHESTRATION\" > '{}'\n\
              exit 0\n",
             key.trim(),
-            args.display()
+            args.display(),
+            marker.display()
         ),
     );
     terminal.send(b"same key prompt\r");
     terminal.wait_screen("same-key answer");
     let session = fixture.session_ids()[0].clone();
+    if changed_orchestration {
+        let path = fixture.home().join("config.toml");
+        let config = std::fs::read_to_string(&path).unwrap();
+        write_private(
+            &path,
+            &config.replace("[orchestration]", "[orchestration]\nmax_children = 31"),
+        );
+    }
     let reload_started = Instant::now();
     let raw_before_reload = terminal.raw_len();
     let deadline = reload_started + Duration::from_millis(1200);
@@ -2390,6 +2407,7 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
     assert!(restore < notice, "restore precedes reload notice");
     eprintln!("TUI reload: {}ms", reload_started.elapsed().as_millis());
     assert!(terminal.finish().success());
+    assert_eq!(std::fs::read_to_string(marker).unwrap(), "1");
     assert_eq!(
         std::fs::read_to_string(args).expect("reload args"),
         format!("--resume\n{session}\n")

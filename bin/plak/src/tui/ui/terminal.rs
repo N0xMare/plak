@@ -537,9 +537,6 @@ pub(super) fn run_app(
             Some(super::reload::ReloadOutcome::HandOff(target)) => {
                 request_terminal_handoff(&mut app, actions, TuiHandoff::Reload { target });
             }
-            Some(super::reload::ReloadOutcome::Carry(cause)) => {
-                request_terminal_handoff(&mut app, actions, TuiHandoff::Rebind { cause });
-            }
             Some(super::reload::ReloadOutcome::Refused) | None => {}
         }
 

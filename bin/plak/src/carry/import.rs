@@ -13,22 +13,11 @@ use std::io::IsTerminal as _;
 use std::path::Path;
 
 impl CarryDocument {
-    pub(crate) fn into_rebound_import(
-        self,
-        config: &crate::product_config::ProductConfig,
-        cause: &str,
-    ) -> CliResult<CarriedImport> {
+    pub(crate) fn into_rebound_import(self, cause: &str) -> CliResult<CarriedImport> {
         let mut carried = self
-            .into_import_with_replay(false)
+            .into_import_with_replay(true)
             .map_err(|error| CliFailure::new(error.to_string()))?;
         let record = &mut carried.record;
-        record.target_selection = crate::product_config::ProductTargetSelection::Native;
-        commands::session::seed_new_session_binding(record, config)?;
-        if record.account.is_none() || record.model.is_none() {
-            return Err(CliFailure::new(
-                "configure a root agent with an account and model before /rebind",
-            ));
-        }
         let source = record
             .carried_forward_from()
             .map(|(id, _)| id)

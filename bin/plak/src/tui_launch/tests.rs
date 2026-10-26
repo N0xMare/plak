@@ -7,13 +7,40 @@
 use super::*;
 
 #[test]
+fn reload_applies_orchestration_in_the_installed_build_without_a_second_import() {
+    let executable = Path::new("/new-build/plak");
+    for (installed_key, applies_on_resume) in [("same", true), ("other", false)] {
+        let plan = carry::reload_plan(true, "same", Some(installed_key));
+        let command = reload_command(executable, &plan, "source-session");
+        assert_eq!(command.get_program(), executable.as_os_str());
+        let marker = command
+            .get_envs()
+            .find(|(key, _)| *key == crate::environment::RELOAD_EPOCH_ENV)
+            .unwrap()
+            .1;
+        assert_eq!(
+            marker,
+            applies_on_resume.then_some(std::ffi::OsStr::new("1"))
+        );
+        let args: Vec<_> = command.get_args().collect();
+        if applies_on_resume {
+            assert_eq!(args, ["--resume", "source-session"]);
+        } else {
+            assert!(
+                args.is_empty(),
+                "cross-state reload imports a fresh genesis, not --resume"
+            );
+        }
+    }
+}
+
+#[test]
 fn reload_handoff_reuses_the_tui_probe_verdict_without_reprobing() {
     let root = tempfile::tempdir().unwrap();
     let paths = product_paths::PlakPaths::explicit(root.path().join("home"));
     let mut record = product_sessions::SessionRecord::new(root.path().to_path_buf());
     let key = home::state::state_key();
     let target = carry::ReloadTarget {
-        carry_cause: None,
         capacity: None,
         capacity_error: None,
         executable: root.path().join("absent-plak"),

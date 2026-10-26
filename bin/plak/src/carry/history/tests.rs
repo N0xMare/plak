@@ -7,13 +7,21 @@ fn rebind_keeps_full_history_and_source_lineage_without_an_attachment() {
         (1..=4)
             .map(|n| {
                 HistorySegment::new(
-                    HistorySegmentKind::Conversation,
+                    HistorySegmentKind::ReasoningReplay,
                     vec![entry(
                         n,
-                        Actor::User,
-                        vec![ContentBlock::Text(
-                            TextBlock::new(format!("turn {n}"), None).unwrap(),
-                        )],
+                        Actor::Assistant,
+                        vec![
+                            ContentBlock::Reasoning(
+                                ReasoningBlock::new(
+                                    ReasoningVisibility::OpaqueReplay,
+                                    None,
+                                    Some(replay()),
+                                )
+                                .unwrap(),
+                            ),
+                            ContentBlock::Text(TextBlock::new(format!("turn {n}"), None).unwrap()),
+                        ],
                     )],
                 )
                 .unwrap()
@@ -29,18 +37,29 @@ fn rebind_keeps_full_history_and_source_lineage_without_an_attachment() {
     document.archive = None;
     document.history = Some(History::export(&history).unwrap());
     let source_id = document.source.session_id.clone();
-    let mut config = crate::product_config::ProductConfig::default_product();
-    config.bind_root_tuple("claude", "claude-opus-5", Some("high"));
+    document.binding.account = Some("grok".into());
+    document.binding.model = Some("grok-4.20".into());
+    document.binding.effort = Some("high".into());
+    document.binding.composition = crate::product_config::ProductCompositionSelection::JsPtc;
+    document.binding.target_selection = crate::product_config::ProductTargetSelection::Native;
     let carried = document
-        .into_rebound_import(&config, "different account binding")
+        .into_rebound_import("different account binding")
         .unwrap();
     assert_eq!(carried.history.segments(), history.segments());
-    assert_eq!(carried.history.replay_account(), "");
+    assert_eq!(carried.history.replay_account(), "source-account");
     assert!(carried.record.plakous_locator.is_none());
     assert_ne!(carried.record.id, source_id);
-    assert_eq!(carried.record.account.as_deref(), Some("claude"));
-    assert_eq!(carried.record.model.as_deref(), Some("claude-opus-5"));
+    assert_eq!(carried.record.account.as_deref(), Some("grok"));
+    assert_eq!(carried.record.model.as_deref(), Some("grok-4.20"));
     assert_eq!(carried.record.effort.as_deref(), Some("high"));
+    assert_eq!(
+        carried.record.composition,
+        crate::product_config::ProductCompositionSelection::JsPtc
+    );
+    assert_eq!(
+        carried.record.target_selection,
+        crate::product_config::ProductTargetSelection::Native
+    );
     assert_eq!(
         carried.record.carried_forward_from().map(|(id, _)| id),
         Some(source_id.as_str())
