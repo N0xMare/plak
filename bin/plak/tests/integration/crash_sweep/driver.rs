@@ -1002,6 +1002,46 @@ fn traced_reopen(
     })
 }
 
+#[test]
+fn crash_while_native_credential_waiting_recovers_one_terminal_without_redispatch() {
+    let shape = "native_credential_wait_then_final";
+    let (seed, session) = setup(shape);
+    let baseline = summary::read_converged(&seed);
+    let fixture = seed.fork(&shapes::script(shape));
+    (shapes::get(shape).configure)(&fixture);
+    let mut command = fixture.command();
+    command
+        .args(["agent", "--session", &session])
+        .env(TRACE_ENV, fixture.root.join("commit-trace.jsonl"));
+    let mut agent = AgentProcess::start_command(command, true);
+    agent.wait_for("ready", |row| row["kind"] == "ready");
+    agent.send(&prompt_frame("crash-sweep-original-prompt"));
+    agent.wait_for("parked at dispatch", |row| {
+        row["kind"] == "credential_wait" && !row["account"].is_null()
+    });
+    assert_eq!(
+        invariants::dispatches(&fixture),
+        Vec::<(String, String)>::new()
+    );
+    agent.child.kill().unwrap();
+    assert_eq!(agent.finish().status.signal(), Some(9));
+    let commits = trace::read(&fixture.root.join("commit-trace.jsonl"));
+    let before = summary::read(&fixture);
+    let result = cut_after_kill(&fixture, &session, shape, &commits, &before, &baseline);
+    assert_eq!(result["invariants"], true, "{result}");
+    assert!(
+        result["outcome"].as_str().unwrap().starts_with("ABANDONED"),
+        "{result}"
+    );
+    assert_eq!(
+        invariants::dispatches(&fixture).len(),
+        1,
+        "only the explicit followup dispatches"
+    );
+    let after = summary::read_converged(&fixture);
+    assert_eq!(after.original_answers, 0);
+}
+
 fn kill_fixture(
     seed: &Fixture,
     session: &str,

@@ -110,6 +110,7 @@ impl Shape {
 
     pub(super) fn followup(&self) -> Value {
         let mut script = (self.script)();
+        script.as_object_mut().unwrap().remove("credential_ready");
         script["steps"] = json!([{"output": {"text": FOLLOWUP}, "finish": "stop"}]);
         script
     }
@@ -129,6 +130,16 @@ pub(super) enum ExpectedTerminal {
 }
 
 pub(super) const REGISTRY: &[Shape] = &[
+    Shape {
+        name: "native_credential_wait_then_final",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: credential_wait_script,
+        configure: configure_credential_wait,
+        setup: no_setup,
+        lifecycle: credential_wait_lifecycle,
+        assert_live: assert_credential_wait,
+    },
     Shape {
         name: "uncertain_mcp_tool",
         subset: false,
@@ -842,6 +853,54 @@ pub(super) fn script(shape: &str) -> Value {
 
 fn final_only() -> Value {
     basic_script(false)
+}
+
+fn credential_wait_script() -> Value {
+    let mut script = final_only();
+    script["credential_ready"] = json!({"file": "credential-ready"});
+    script
+}
+
+fn configure_credential_wait(fixture: &Fixture) {
+    let mut script: Value =
+        serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
+    if script.get("credential_ready").is_some() {
+        script["credential_ready"] = json!({"file": fixture.root.join("credential-ready")});
+        fixture.write_script(&script);
+    }
+}
+
+fn credential_wait_lifecycle(
+    fixture: &Fixture,
+    records: &[Value],
+    state: &mut Lifecycle,
+) -> Option<Value> {
+    if records
+        .iter()
+        .any(|row| row["kind"] == "credential_wait" && !row["account"].is_null())
+    {
+        std::fs::write(fixture.root.join("credential-ready"), b"same-account-ready").unwrap();
+    }
+    prompt_then_quit(fixture, records, state)
+}
+
+fn assert_credential_wait(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    assert_final_only(fixture, outcome, state);
+    let waits: Vec<_> = outcome
+        .records()
+        .into_iter()
+        .filter(|row| row["kind"] == "credential_wait")
+        .collect();
+    assert_eq!(waits.len(), 2, "one park, one clear");
+    assert_eq!(waits[0]["account"], "codex");
+    assert!(waits[1]["account"].is_null());
+}
+
+#[test]
+fn native_credential_wait_pilot_proves_one_park_and_one_dispatch() {
+    let shape = "native_credential_wait_then_final";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
 }
 
 fn direct_tool_then_final() -> Value {

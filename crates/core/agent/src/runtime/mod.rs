@@ -42,6 +42,15 @@ use tokio::sync::{mpsc, watch};
 
 pub use durable::DurableSessionAddress;
 
+/// Scope of a live credential wait; never persisted or dispatch authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CredentialWait {
+    /// An admitted root remains running.
+    Turn(TurnId),
+    /// A session workflow is waiting without an admitted root turn.
+    SessionWorkflow,
+}
+
 pub use durable::DurableCodeCellAbandonmentOutcome;
 pub use durable::DurableCodeCellAbandonmentRequest;
 pub use durable::DurableCompactionReceipt;
@@ -238,6 +247,9 @@ enum JobStopState {
 }
 
 struct AgentInner {
+    #[cfg(test)]
+    provider_dispatch_gate: Arc<tokio::sync::Mutex<()>>,
+    credential_wait: Arc<Mutex<Option<CredentialWait>>>,
     job_stop: Mutex<JobStopState>,
     job_runtime: tokio::runtime::Handle,
     job_sessions: plakous_tools::JoinedProcessSessions,

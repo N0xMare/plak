@@ -149,6 +149,10 @@ pub type RuntimeModelAuthorityOperation = Pin<
     >,
 >;
 
+/// A cancellable-by-drop wait for the selected credential to permit revalidation.
+pub type RuntimeModelAuthorityWaitOperation =
+    Pin<Box<dyn Future<Output = Result<(), RuntimeModelAuthorityError>> + Send + 'static>>;
+
 /// Fresh credential-free authority facts owned by the selected model adapter.
 ///
 /// The account and credential-authority values are one-way digests. Raw
@@ -435,6 +439,9 @@ impl fmt::Debug for RuntimeModelAuthority {
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum RuntimeModelAuthorityError {
+    /// The selected native credential needs a login before dispatch can proceed.
+    #[error("waiting for the selected credential to become ready")]
+    AwaitingCredential,
     /// A login selected a different provider account; a new session is required.
     #[error("provider account changed; start a new session for the newly logged-in account")]
     AccountChanged,

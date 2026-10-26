@@ -100,6 +100,7 @@ pub struct ClaudeOAuthLanguageModel {
     credentials: ClaudeNativeAuthManager,
     observation: Mutex<AuthorityObservation>,
     login_renewed: Arc<AtomicBool>,
+    parked_credential: Mutex<Option<crate::ClaudeSubscriptionStatus>>,
     #[cfg(test)]
     test_dial_origin: Option<Origin>,
 }
@@ -130,6 +131,7 @@ impl ClaudeOAuthLanguageModel {
                 grant,
             }),
             login_renewed: Arc::new(AtomicBool::new(false)),
+            parked_credential: Mutex::new(None),
             authority,
             credentials,
             #[cfg(test)]
@@ -224,11 +226,37 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
     ) -> RuntimeModelAuthorityOperation {
         let descriptor = self.resolved.descriptor().clone();
         Box::pin(async move {
-            let Ok(((_, generation, grant), current_identity)) =
-                self.credentials.identity_credentials()
-            else {
-                return Err(RuntimeModelAuthorityError::Stale);
-            };
+            if let Err(error) = self.credentials.refresh_if_needed().await {
+                let status = self
+                    .credentials
+                    .async_status()
+                    .await
+                    .map_err(credential_authority_error)?;
+                if !status
+                    .as_ref()
+                    .is_some_and(|status| status.status() == plakous_auth::CredentialStatus::Ready)
+                {
+                    *self
+                        .parked_credential
+                        .lock()
+                        .map_err(|_| RuntimeModelAuthorityError::Unavailable)? = status;
+                    return Err(RuntimeModelAuthorityError::AwaitingCredential);
+                }
+                return Err(credential_authority_error(error));
+            }
+            let ((_, generation, grant), current_identity) =
+                match self.credentials.identity_credentials() {
+                    Err(ClaudeNativeAuthError::AccountIdentityUnavailable) => {
+                        self.credentials
+                            .ensure_account_identity()
+                            .await
+                            .map_err(credential_authority_error)?;
+                        self.credentials
+                            .identity_credentials()
+                            .map_err(credential_authority_error)?
+                    }
+                    result => result.map_err(credential_authority_error)?,
+                };
             if current_identity.account_uuid() != self.identity.account_uuid() {
                 return Err(RuntimeModelAuthorityError::AccountChanged);
             }
@@ -285,6 +313,22 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
             observation.authority = refreshed.clone();
             observation.grant = Some(grant);
             Ok(refreshed)
+        })
+    }
+
+    fn wait_for_runtime_authority(
+        self: Arc<Self>,
+    ) -> plakous_model::RuntimeModelAuthorityWaitOperation {
+        Box::pin(async move {
+            let parked = self
+                .parked_credential
+                .lock()
+                .map_err(|_| RuntimeModelAuthorityError::Unavailable)?
+                .clone();
+            self.credentials
+                .wait_for_ready(parked)
+                .await
+                .map_err(credential_authority_error)
         })
     }
 
@@ -511,6 +555,17 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                 })
             },
         ))
+    }
+}
+
+fn credential_authority_error(error: ClaudeNativeAuthError) -> RuntimeModelAuthorityError {
+    match error {
+        ClaudeNativeAuthError::NotLoggedIn
+        | ClaudeNativeAuthError::NotReady
+        | ClaudeNativeAuthError::RefreshQuarantined => RuntimeModelAuthorityError::Unavailable,
+        ClaudeNativeAuthError::AccountIdentityUnavailable
+        | ClaudeNativeAuthError::InvalidStoredCredential => RuntimeModelAuthorityError::Invalid,
+        _ => RuntimeModelAuthorityError::Unavailable,
     }
 }
 
@@ -1047,6 +1102,10 @@ fn configuration_identity(error: impl std::fmt::Display) -> AnthropicError {
 mod auth_binding_tests;
 
 #[cfg(test)]
+#[path = "oauth_model/credential_wait_tests.rs"]
+mod credential_wait_tests;
+
+#[cfg(test)]
 #[allow(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -1176,6 +1235,13 @@ mod tests {
     pub(super) async fn local_peer(
         responses: Vec<Vec<u8>>,
     ) -> (Client, Origin, JoinHandle<Vec<Vec<u8>>>) {
+        local_peer_with_first_response_gate(responses, None).await
+    }
+
+    pub(super) async fn local_peer_with_first_response_gate(
+        responses: Vec<Vec<u8>>,
+        gate: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
+    ) -> (Client, Origin, JoinHandle<Vec<Vec<u8>>>) {
         let CertifiedKey { cert, signing_key } =
             generate_simple_self_signed(vec!["localhost".to_owned(), "127.0.0.1".to_owned()])
                 .unwrap();
@@ -1214,10 +1280,16 @@ mod tests {
         let acceptor = TlsAcceptor::from(Arc::new(server));
         let peer = tokio::spawn(async move {
             let mut requests = Vec::new();
-            for response in responses {
+            for (index, response) in responses.into_iter().enumerate() {
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut stream = acceptor.accept(stream).await.unwrap();
                 requests.push(read_local_request(&mut stream).await);
+                if index == 0
+                    && let Some((observed, release)) = &gate
+                {
+                    observed.notify_one();
+                    release.notified().await;
+                }
                 if response.is_empty() {
                     // Read the request, then drop TLS without `close_notify`.
                     drop(stream);
@@ -1235,7 +1307,10 @@ mod tests {
         request_gate(0, inference)
     }
 
-    fn request_gate(refresh: u32, inference: u32) -> Arc<InMemorySubscriptionRequestGate> {
+    pub(super) fn request_gate(
+        refresh: u32,
+        inference: u32,
+    ) -> Arc<InMemorySubscriptionRequestGate> {
         let limits = SubscriptionRequestLimits::new(
             1,
             refresh,

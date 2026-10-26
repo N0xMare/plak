@@ -1065,7 +1065,13 @@ impl App {
                 self.request_slot_wait = Some(slots);
                 self.mark_dirty();
             }
+            HostEvent::CredentialWait { account } => {
+                self.credential_wait = account;
+                self.request_slot_wait = None;
+                self.mark_dirty();
+            }
             HostEvent::ModelRequestStarted => {
+                self.credential_wait = None;
                 self.request_slot_wait = None;
                 self.model_request_started = Some(self.now());
                 self.pane.assistant_stream_active = false;
@@ -1095,6 +1101,7 @@ impl App {
                     self.phase_started = None;
                     self.model_request_started = None;
                     self.request_slot_wait = None;
+                    self.credential_wait = None;
                     self.retire_unresolved_approval();
                 }
                 if busy {

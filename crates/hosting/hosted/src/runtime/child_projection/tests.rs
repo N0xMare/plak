@@ -36,6 +36,58 @@ async fn publish(
 }
 
 #[tokio::test]
+async fn credential_wait_labels_snapshot_without_rewriting_retained_updates() {
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0xc8)).unwrap();
+    let (sender, receiver) = tokio::sync::mpsc::channel(1);
+    let owner = ChildTurnProjection::start(
+        turn,
+        None,
+        std::future::ready(Some(Source::Fixture(receiver))),
+    );
+    let observation = &owner.observation;
+    publish(
+        &sender,
+        observation,
+        event(turn, AgentEventKind::ModelCredentialWait { waiting: true }),
+    )
+    .await;
+    let before = observation.snapshot();
+    assert_eq!(
+        before.progress.activity.as_deref(),
+        Some("waiting for login")
+    );
+    let retained = observation.lock().updates.back().unwrap().ops.clone();
+    observation.set_login_account("claude");
+    let (snapshot, _) = observation.attach();
+    assert_eq!(
+        snapshot.cursor, before.cursor,
+        "a label does not manufacture another event"
+    );
+    assert_eq!(
+        snapshot.progress.activity.as_deref(),
+        Some("waiting for login: run `plak login claude`")
+    );
+    assert!(!snapshot.terminal);
+    {
+        let state = observation.lock();
+        let update = state.updates.back().unwrap();
+        assert!(Arc::ptr_eq(&retained, &update.ops));
+        assert!(
+            matches!(&update.ops[0], HostEvent::Row(crate::sessions::TranscriptRow::Notice(notice))
+            if notice.text == "waiting for login")
+        );
+    }
+    publish(
+        &sender,
+        observation,
+        event(turn, AgentEventKind::ModelCredentialWait { waiting: false }),
+    )
+    .await;
+    assert!(observation.snapshot().progress.activity.is_none());
+    assert!(!observation.snapshot().terminal);
+}
+
+#[tokio::test]
 async fn a_late_in_flight_face_keeps_exact_counters_after_the_event_prefix_is_evicted() {
     let turn = TurnId::try_from(uuid::Uuid::from_u128(7)).unwrap();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);

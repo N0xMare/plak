@@ -276,6 +276,23 @@ impl ChildObservation {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Fills the product label without adding another reducer or subscription.
+    pub(super) fn set_login_account(&self, account: &str) {
+        let mut state = self.lock();
+        let Some(projection) = state.projection.as_mut() else {
+            return;
+        };
+        if projection.progress.account.as_deref() == Some(account) {
+            return;
+        }
+        projection.progress.account = Some(account.to_owned());
+        let label = projection.progress.login_notice();
+        if projection.progress.view.activity.as_deref() == Some("waiting for login") {
+            projection.progress.view.activity = Some(label);
+        }
+        state.progress = projection.progress.view.clone();
+    }
+
     pub(super) fn snapshot(&self) -> Snapshot {
         let state = self.lock();
         Snapshot {

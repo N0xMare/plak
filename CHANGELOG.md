@@ -45,6 +45,14 @@ one cross-build carrier (a build imports its own and the previous version).
   Committed history still uses the facade's atomic transcript attachment.
   `TurnEvents::recv_delivery` reports turn-filtered lost ranges, and
   `SubscriptionEnd` and `SubscriptionLimits` are nameable through the facade.
+
+- Native credential failures before send park the turn for login rather than
+  failing it. Same-account readiness resumes the captured request once;
+  cancellation, shutdown and account drift still settle through the ordinary
+  terminal paths. Waiting releases shared request capacity and does not spend
+  the operation deadline. The HUD and child activity show the login wait. This
+  is in-memory state only; persisted and export encodings are unchanged.
+
 - All local cell profiles use `LocalCompositionProfile::cell(&CellDescriptor)`.
   The four per-engine profile constructors and Python-only component identity
   accessors are removed. `CellDescriptor` is available at the compose crate

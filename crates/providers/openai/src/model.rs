@@ -627,7 +627,8 @@ pub struct OpenAiLanguageModel {
 }
 
 /// One exact credential receipt bound to the shared Responses host. A renewal
-/// replaces the whole target; a prepared call keeps its own.
+/// replaces the whole target; an undispatched prepared call reads the current
+/// validated service only when its one-shot start is consumed.
 #[cfg(feature = "native-auth")]
 struct CodexDispatchTarget {
     target: OpenAiTarget,
@@ -915,13 +916,101 @@ impl LanguageModel for OpenAiLanguageModel {
     ) -> RuntimeModelAuthorityOperation {
         Box::pin(async move {
             let target = self.current_target()?;
-            match self.revalidate_target(&target, checked_at).await {
+            if checked_at < self.admitted_from || checked_at >= self.admitted_until {
+                return Err(RuntimeModelAuthorityError::Stale);
+            }
+            let checked = match self
+                .receipt_renewal
+                .ensure_credential_ready(&target.target)
+                .await
+            {
+                Ok(()) => self.revalidate_target(&target, checked_at).await,
+                Err(error) => Err(error),
+            };
+            let result = match checked {
                 // The fence moved (Unavailable) or the access token entered
                 // its refresh lead (Stale): renew the receipt.
                 Err(
                     RuntimeModelAuthorityError::Stale | RuntimeModelAuthorityError::Unavailable,
-                ) => self.renew(target, checked_at).await,
+                ) => self.renew(Arc::clone(&target), checked_at).await,
                 result => result,
+            };
+            if result.is_err() {
+                self.receipt_renewal
+                    .ensure_credential_ready(&target.target)
+                    .await
+                    .or_else(|error| {
+                        if error == RuntimeModelAuthorityError::Stale {
+                            Ok(())
+                        } else {
+                            Err(error)
+                        }
+                    })?;
+            }
+            result
+        })
+    }
+
+    fn wait_for_runtime_authority(
+        self: Arc<Self>,
+    ) -> plakous_model::RuntimeModelAuthorityWaitOperation {
+        Box::pin(async move {
+            let stale = self.current_target()?;
+            let mut delay = Duration::from_millis(250);
+            let mut previous = None;
+            loop {
+                if !Arc::ptr_eq(&self.current_target()?, &stale) {
+                    return Ok(());
+                }
+                let observation = self.receipt_renewal.ready_selection(&stale.target).await;
+                if previous.as_ref() != Some(&observation) {
+                    delay = Duration::from_millis(250);
+                }
+                previous = Some(observation);
+                match observation {
+                    Ok(selection) => {
+                        let _renewal = self.renewal.lock().await;
+                        if !Arc::ptr_eq(&self.current_target()?, &stale) {
+                            return Ok(());
+                        }
+                        self.renewal_floor.note(stale.target.clock().now());
+                        let result = self
+                            .receipt_renewal
+                            .renew_selection(
+                                &stale.target,
+                                self.admitted_until,
+                                &self.renewal_floor,
+                                selection,
+                            )
+                            .await;
+                        self.renewal_floor.clear();
+                        match result {
+                            Ok(target) => {
+                                let service = codex_dispatch_service(
+                                    &target,
+                                    &self.client,
+                                    &self.attempt_data,
+                                )
+                                .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
+                                *self
+                                    .target
+                                    .lock()
+                                    .map_err(|_| RuntimeModelAuthorityError::Unavailable)? =
+                                    Arc::new(CodexDispatchTarget { target, service });
+                                return Ok(());
+                            }
+                            Err(RuntimeModelAuthorityError::AwaitingCredential) => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    Err(
+                        RuntimeModelAuthorityError::AwaitingCredential
+                        | RuntimeModelAuthorityError::Stale,
+                    ) => {}
+                    Err(error) => return Err(error),
+                }
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(2));
             }
         })
     }
@@ -1208,11 +1297,25 @@ impl LanguageModel for OpenAiLanguageModel {
             )
         })?;
         let prepared_execution = prepared_execution.with_content_filter_retry(content_filter_retry);
-        let service = Arc::clone(&current.service);
         let config = self.config;
         Ok(PreparedModelCall::new(record, move |call_context| {
-            let deadline = operation_deadline(clock.as_ref(), config, None);
-            start_prepared_responses_model_call(prepared_execution, service, call_context, deadline)
+            Box::pin(async move {
+                let service = Arc::clone(
+                    &self
+                        .current_target()
+                        .map_err(ModelPreparationError::from)
+                        .map_err(plakous_model::ModelError::from)?
+                        .service,
+                );
+                let deadline = operation_deadline(clock.as_ref(), config, None);
+                start_prepared_responses_model_call(
+                    prepared_execution,
+                    service,
+                    call_context,
+                    deadline,
+                )
+                .await
+            })
         }))
     }
 }

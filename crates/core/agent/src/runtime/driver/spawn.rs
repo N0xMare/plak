@@ -168,7 +168,9 @@ impl PreparedAgent {
                 .canonical()
                 .history()
                 .is_empty();
+        let credential_wait = Arc::new(Mutex::new(None));
         let driver = Driver {
+            credential_wait: Arc::clone(&credential_wait),
             job_sessions: self.job_sessions,
             job_host: self.job_host,
             job_owner: plakous_tools::JobOwner {
@@ -223,6 +225,8 @@ impl PreparedAgent {
             seed_compaction_pending,
             post_compaction_note: self.post_compaction_note,
             request_slots: self.request_slots,
+            request_slot: None,
+            credential_wait_elapsed: std::time::Duration::ZERO,
             prompt_in_history: None,
             appended_prompt: None,
             segment_refused_turn: None,
@@ -265,6 +269,9 @@ impl PreparedAgent {
 
         Agent {
             inner: Arc::new(AgentInner {
+                #[cfg(test)]
+                provider_dispatch_gate,
+                credential_wait,
                 job_stop: Mutex::new(crate::runtime::JobStopState::Idle),
                 job_runtime: tokio::runtime::Handle::current(),
                 job_sessions,

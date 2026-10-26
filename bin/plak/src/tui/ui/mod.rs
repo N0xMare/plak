@@ -735,6 +735,7 @@ pub(crate) struct App {
     model_request_started: Option<Instant>,
     /// The account whose request budget the next model round waits on.
     request_slot_wait: Option<String>,
+    credential_wait: Option<String>,
     composer_chrome: composer_chrome::ComposerChrome,
     /// Hit rect for the composer HUD agents count; a click opens the canvas.
     status_agents_hit: Option<Rect>,
@@ -1000,6 +1001,7 @@ impl App {
             phase_started: None,
             model_request_started: None,
             request_slot_wait: None,
+            credential_wait: None,
             composer_chrome: composer_chrome::ComposerChrome::default(),
             status_agents_hit: None,
             tree_live_descendants: 0,

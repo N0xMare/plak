@@ -324,6 +324,20 @@ pub(crate) trait XaiSubscriptionCredentialAuthority: Send + Sync + 'static {
     fn credential_authority(&self) -> &str;
     fn credential_generation(&self) -> u64;
     fn selection_epoch(&self) -> &str;
+    fn ensure_credential_ready(&self) -> Result<(), RuntimeModelAuthorityError>;
+    fn ready_selection(&self) -> Result<String, RuntimeModelAuthorityError>;
+    fn renew_ready<'a>(
+        &'a self,
+        selection: &'a str,
+        floor: &'a XaiRenewalFloor,
+        clock: &'a dyn plakous_model::Clock,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<XaiRenewedAuthority, RuntimeModelAuthorityError>>
+                + Send
+                + 'a,
+        >,
+    >;
     fn revalidate_runtime_authority(
         &self,
         checked_at: Timestamp,

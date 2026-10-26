@@ -83,6 +83,7 @@ pub fn host_event_kind<P: ProtocolExtension>(event: &SessionObservation<P>) -> &
         SessionObservation::SessionOpening => "session_opening",
         SessionObservation::ModelRequestStarted => "model_request_started",
         SessionObservation::ModelRequestQueued { .. } => "model_request_queued",
+        SessionObservation::CredentialWait { .. } => "credential_wait",
         SessionObservation::SessionOpened { .. } => "session_opened",
         SessionObservation::TopologyNavigatorSnapshot(_) => "tree",
         SessionObservation::CallDetail(_) => "call_detail",
@@ -521,6 +522,16 @@ pub fn project_host_event<P: ProtocolExtension>(
             JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
             fields.insert("kind".to_owned(), Value::from("model_request_queued"));
             fields.insert("account".to_owned(), Value::from(slots.as_str()));
+        }
+        SessionObservation::CredentialWait { account } => {
+            JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
+            fields.insert("kind".to_owned(), Value::from("credential_wait"));
+            fields.insert(
+                "account".to_owned(),
+                account
+                    .as_ref()
+                    .map_or(Value::Null, |account| Value::from(account.as_str())),
+            );
         }
         SessionObservation::SteerAck { state, position } => {
             JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());

@@ -240,9 +240,21 @@ A different Claude account refuses exact reopen. Restore the original account,
 or use `/rebind` to carry its full history into a new session under
 the current configuration and login, even while the root is unattached.
 `/reload` from a binding mismatch takes the same carry path. Choosing `/agents`
-cannot repair a frozen binding. Codex and Grok retain their live login-selection
-fence: a new login stops the old running receipt before sending anything and
-needs explicit carry or rebind, even for the same account.
+cannot repair a frozen binding. At the next prompt boundary, Codex and Grok
+re-resolve an unavailable or replaced receipt in the same process. If the
+fresh account, model and login-selection binding still match, the host reopens
+in place and continues. A changed login-selection fence needs `/reload` or
+`/rebind` to carry the history; restarting is not the remedy. They never reuse
+the old login's receipt or switch accounts implicitly. A different account
+needs explicit carry or rebind.
+
+If a running turn reaches an unavailable native credential before sending, it
+waits rather than failing. The status line says `waiting for login` and names
+the `plak login <provider>` command to run in another shell. A same-account
+login resumes the captured request once; Esc/stop cancels the waiting turn.
+Children already running can finish and their results stay queued while the
+root waits. A different-account login ends the wait with a refusal, not a send
+on that account.
 
 Use **one login per machine; never copy credential dirs between hosts**.
 Refresh tokens rotate: refreshing a copied directory can invalidate the source

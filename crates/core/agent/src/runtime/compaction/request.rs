@@ -508,6 +508,14 @@ pub(in crate::runtime) async fn exact_compaction_runtime(
 ) -> Result<ExactCompactionRuntime, AgentError> {
     validate_durable_builder(&builder)?;
     let _admission = sealed_runtime_admission(&builder).await?;
+    admitted_compaction_runtime(builder, checkpoint)
+}
+
+pub(in crate::runtime) fn admitted_compaction_runtime(
+    builder: AgentBuilder,
+    checkpoint: &RuntimeCheckpoint,
+) -> Result<ExactCompactionRuntime, AgentError> {
+    validate_durable_builder(&builder)?;
     let manifest = checkpoint.manifest();
     validate_compaction_provider_configuration(
         &builder.provider_configuration,

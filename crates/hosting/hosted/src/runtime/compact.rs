@@ -99,6 +99,19 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
     scheduled_command: Option<&UserInput>,
 ) -> CliResult<CompactPass> {
     watch.begin();
+    let _credential_notices = if let (Some(agent), Some(account)) =
+        (opened.agent().cloned(), config.session.account.clone())
+    {
+        Some(
+            executor
+                .block_on(async {
+                    super::credential_wait::CredentialNotices::start(agent, account, events.clone())
+                })
+                .map_err(|_| CliFailure::new("application execution failed"))?,
+        )
+    } else {
+        None
+    };
     let _compact_span = tracing::info_span!(
         "compact",
         session_id = config.session.id.as_str(),

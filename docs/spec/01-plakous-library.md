@@ -846,10 +846,11 @@ since), the same provider configuration, ledger length and request anchor, and
 the same family artifact and cache affinity. Such a round dispatches under the
 admission's attempt id and preparation time, once it holds its request slot
 and the runtime authority revalidated then still authorizes the preparation;
-the dispatch-time revalidation is unchanged. A refreshed credential, another
-account or an expired authority window since the admission prepares the round
-afresh under the current authority, keeping the admission's attempt id, which
-nothing durable has recorded. Any other change prepares the round afresh under
+the first-dispatch check accepts monotonic same-class credential renewal without
+rebuilding the captured request. Account/class drift and an expired admission
+still refuse dispatch. Other authority changes may prepare the round afresh
+under current authority, keeping the admission's attempt id, which nothing
+durable has recorded. Any other change prepares the round afresh under
 a new attempt id. The retained preparation never outlives its turn. Either way
 the round's request, sent status and context measure are the ones a fresh
 preparation of that history produces (§10.3).
@@ -1704,6 +1705,53 @@ at exact reopen; its grant lineage is a credential-store write fence, not a
 session binding. Live adapter revalidation names a different account; exact
 reopen retains its Revalidation binding-mismatch refusal. Neither dispatches
 on the changed account. An old Working attempt is never upgraded to the new generation.
+
+Before native open/create and at a quiescent prompt boundary, the host treats
+`AwaitingCredential` like stale/foreign authority and attempts fresh resolution.
+Missing or quarantined credentials fail before admission with named login or
+refresh-rejection guidance. A Ready resolution reopens in place only when
+`FreshNativeBinding` still admits its model/account/selection and monotonic
+generation; otherwise the existing named binding/selection refusal applies.
+This pre-admission repair is distinct from parking an already admitted turn.
+
+A native route may return the neutral `AwaitingCredential` outcome before send
+when its selected credential is missing/logged out, quarantined after rejected
+refresh, or replaced by a login selection requiring a same-account receipt.
+The driver calls `LanguageModel::wait_for_runtime_authority`, then repeats the
+same authority check. The wait grants no authority and never selects another
+route or account. API-key routes never park. Invalid identity, account drift,
+profile/semantic drift and expired admission remain refusals.
+
+The live host observes `plakous::agent::CredentialWait` through
+`Agent::credential_wait()` (including an idle session workflow), and root turn
+streams publish `AgentEventKind::ModelCredentialWait` once on entry and exit.
+Custom/native model ports name `RuntimeModelAuthorityWaitOperation` as the
+return type of `wait_for_runtime_authority`; these public types are required
+by the separately compiled hosted layer and external model implementations.
+
+Credential parking is in memory only. The turn and any child attempt remain
+running, with no terminal result. The driver releases its per-session dispatch
+gate and shared request slot, excludes the wait from the request operation
+deadline, and continues processing controls and child-result notice wakes.
+Ready credentials, exact-turn cancellation, shutdown or lease loss end the wait.
+A ready login to another account ends it with the named account refusal.
+Compaction measurement, preparation and first dispatch use the same wait.
+An idle compaction owns its in-flight fence before any wait; competing compacts
+return Busy and new roots are not admitted. After readiness it rechecks head
+and lifecycle before proceeding. Wait notifications are edge-triggered from the
+parked status/generation observation, with polling backed off from 250 ms to
+2 s and reset on a change. A failed refresh with a still-Ready credential takes
+the normal authority error path, not a login wait. Credential-store status reads
+run off the async executor. `ModelFinished` elapsed excludes credential parking.
+
+An undispatched Prepared call keeps its exact captured body, plan, attempt and
+one-shot start capability. Its first-dispatch fence accepts only fresh authority
+on the same route/account/credential-authority class, with nondecreasing
+generation and observation time; it does not require the old credential to
+remain unexpired. Descriptor and context-admission expiry are still checked.
+No historical record or Working attempt is rewritten. Exactly one dispatch
+consumes the captured capability after readiness. A crash while parked therefore
+recovers under the existing Prepared, undispatched-operation rules (§5.5).
 
 Exact reopen validates the recorded and fresh runtime admission evidence against
 their respective complete provider configurations. Credential generations may
@@ -4386,8 +4434,12 @@ refreshed generation without a receipt. The Plak host may resolve a stale or
 foreign Codex or xAI receipt once before exact session open, or at a quiescent
 prompt boundary, only when selected and effective model identities,
 account, credential authority and login selection are unchanged and credential
-generation has not decreased. This does not retry
-a refused canonical open or substitute a different session head. **A subscription
+generation has not decreased. Separately, credential parking permits the native
+model port to adopt a new login selection for the same account after validating
+fresh catalog/model semantics and monotonic generation/observation floors. It
+does not reclassify that login as a refresh or upgrade a Working attempt.
+This does not retry a refused canonical open or substitute a different session
+head. **A subscription
 route never falls back to an API-key route, another subscription, or another
 account.**
 

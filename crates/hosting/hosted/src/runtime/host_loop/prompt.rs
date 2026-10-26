@@ -912,6 +912,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 &mut self.config,
             ))
             .map_err(|_| CliFailure::new("application execution failed"))??;
+        self.reopen_after_native_authority_refresh(changed)
+    }
+
+    fn reopen_after_native_authority_refresh(&mut self, changed: bool) -> CliResult<()> {
         if changed {
             if let Err(error) = self.reopen_in_place() {
                 self.recovery_blocked = true;

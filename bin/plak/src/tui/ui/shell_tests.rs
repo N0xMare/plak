@@ -1219,6 +1219,32 @@ fn the_description_panel_explains_a_quarantined_credential() {
     );
 }
 
+#[test]
+fn credential_wait_names_the_login_on_the_hud_and_cancellation_still_wins() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::SetBusy(true));
+    app.apply_host_event(HostEvent::CredentialWait {
+        account: Some("claude".to_owned()),
+    });
+    assert_eq!(
+        app.turn_status_label().as_deref(),
+        Some("waiting for login: run `plak login claude`")
+    );
+    let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    assert!(screen_text(&terminal).contains("waiting for login"));
+    app.phase = "interrupting".to_owned();
+    assert_eq!(app.turn_status_label().as_deref(), Some("cancelling…"));
+    app.phase.clear();
+    app.apply_host_event(HostEvent::CredentialWait { account: None });
+    assert_ne!(
+        app.turn_status_label().as_deref(),
+        Some("waiting for login: run `plak login claude`")
+    );
+    app.apply_host_event(HostEvent::SetBusy(false));
+    assert!(app.turn_status_label().is_none());
+}
+
 /// A replay announcement names its wait, budget and cause on the HUD
 ///, marks the streamed text it discarded, and clears once the replay
 /// streams.

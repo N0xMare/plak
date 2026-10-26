@@ -204,7 +204,7 @@ impl Driver {
     /// measurement that cannot be made answers `false`, leaving the paid fold
     /// and its own successor check to decide.
     pub(super) async fn retained_tail_cannot_fit(
-        &self,
+        &mut self,
         runtime: &ExactCompactionRuntime,
         stable_prefix: &plakous_model::StableRequestPrefix,
         cut: &SemanticCompactionCut,
@@ -244,7 +244,7 @@ impl Driver {
     }
 
     pub(in crate::runtime::driver) async fn measure_compaction_projection(
-        &self,
+        &mut self,
         runtime: &ExactCompactionRuntime,
         request: ModelRequest,
         basis: CompactionFitBasis,
@@ -263,7 +263,7 @@ impl Driver {
     }
 
     pub(in crate::runtime::driver) async fn measure_compaction_projection_with_wire_digest(
-        &self,
+        &mut self,
         runtime: &ExactCompactionRuntime,
         request: ModelRequest,
         basis: CompactionFitBasis,
@@ -284,12 +284,9 @@ impl Driver {
             .map_err(ModelPreparationError::from)
             .map_err(ModelError::from)
             .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
-        let authority = Arc::clone(&runtime.model)
-            .revalidate_runtime_authority(prepared_at)
-            .await
-            .map_err(ModelPreparationError::from)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+        let (authority, prepared_at) = self
+            .request_authority(Arc::clone(&runtime.model), prepared_at)
+            .await?;
         validate_configuration_runtime_authority(
             &runtime.provider_configuration,
             &descriptor,

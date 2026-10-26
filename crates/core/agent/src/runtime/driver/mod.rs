@@ -65,6 +65,7 @@ pub(super) enum ToolDispatchOrigin {
     NestedComposition,
 }
 
+mod credential_wait;
 mod operator_input;
 mod reresolution;
 mod turn;
@@ -145,6 +146,9 @@ struct Driver {
     post_compaction_note: Option<crate::runtime::PostCompactionNote>,
     /// The host's shared bound on concurrent model requests, if any.
     request_slots: Option<crate::runtime::RequestSlots>,
+    request_slot: Option<crate::runtime::request_slots::RequestSlot>,
+    credential_wait_elapsed: Duration,
+    credential_wait: Arc<Mutex<Option<super::CredentialWait>>>,
     effect_decision_tombstones: VecDeque<EffectDecisionTombstone>,
     command_ledger: BTreeMap<CommandId, CommandLedgerEntry>,
     next_command_sequence: u64,

@@ -66,18 +66,15 @@ impl Driver {
     /// authorizes its preparation, checked once the round holds its request
     /// slot. The window since the admission spans the exchange's promotion,
     /// fence (b), steering and notices, reresolution and the slot queue; a
-    /// credential refresh, an account switch or an expiry in it fails the
-    /// dispatch-time check of the admitted preparation, while a preparation
-    /// under the current authority dispatches.
+    /// same-account credential renewal may authorize the captured request;
+    /// account/class drift or an expired admission cannot.
     pub(super) async fn admitted_round_authorized(
-        &self,
+        &mut self,
         descriptor: &ResolvedModelDescriptor,
         round: &AdmittedRound,
     ) -> bool {
         let now = self.clock.now();
-        let Ok(authority) = Arc::clone(&self.model)
-            .revalidate_runtime_authority(now)
-            .await
+        let Ok((authority, now)) = self.request_authority(Arc::clone(&self.model), now).await
         else {
             return false;
         };
@@ -96,9 +93,8 @@ impl Driver {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let record = prepared.record();
-        record.revalidate(descriptor, &round.plan, now).is_ok()
-            && record
-                .revalidate_selected_authority(&authority, descriptor, now)
-                .is_ok()
+        record
+            .revalidate_first_dispatch(descriptor, &round.plan, &authority, now)
+            .is_ok()
     }
 }

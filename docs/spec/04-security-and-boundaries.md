@@ -845,12 +845,21 @@ A running SuperGrok or Codex OAuth model that renews its credential receipt
 after a refresh (spec 01 §7.4) stays on its exact route: the claimed refresh and
 the catalog fetch are bound to the same account, login selection epoch and
 credential authority, the renewed receipt must also keep the origin and model
-semantics, it is installed only before dispatch, and a prepared call is never
-re-bound to it. Any changed fact refuses without dispatch. The login selection
+semantics, and it is installed only before dispatch. Any changed route/account/
+model semantics refuse without dispatch. A Prepared call retains its exact
+captured body and plan; its first-dispatch fence can accept only fresh,
+non-regressing authority in that same class. Historical Working authority is
+never upgraded, and a paid request is never replayed to repair a login.
+The login selection
 epoch is random, non-secret credential evidence stored inside the private
 credential payload: every successful login mints a new one and refresh carries
-it unchanged, so a same-account relogin is a different selection and is never
-renewed into. It is not a session binding and nothing outside the credential
+it unchanged, so a same-account relogin is a different selection, not a refresh.
+The separate native credential-wait path may renew into it only after Ready
+readiness, account equality, fresh catalog/model semantic checks, and monotonic
+generation/observation floors. That wait grants no dispatch authority, releases
+the dispatch gate and request slot, and is interruptible. A different account
+ends it with a refusal. API-key routes never use this wait.
+The selection epoch is not a session binding and nothing outside the credential
 payload persists it. A stored Codex login without one (made by an earlier
 build) is refused as login-required, never synthesized or parsed in an older
 shape: a claim that cannot parse it restores it unsent, and this build does not

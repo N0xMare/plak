@@ -231,7 +231,7 @@ impl Driver {
 
     /// Replaces `request` with the shallowest summary depth whose paid input fits.
     async fn fit_harness_summary_depth(
-        &self,
+        &mut self,
         runtime: &ExactCompactionRuntime,
         workflow_id: crate::SessionWorkflowId,
         cache_affinity: &ModelCacheAffinity,
@@ -443,7 +443,7 @@ impl Driver {
     /// The preparation context for the selected request and its portable
     /// variant without the completed-history prefix.
     async fn compaction_preparation_contexts(
-        &self,
+        &mut self,
         runtime: &ExactCompactionRuntime,
         descriptor: &plakous_model::ResolvedModelDescriptor,
         validated: &ValidatedRequestPlan,
@@ -458,12 +458,10 @@ impl Driver {
             .map_err(ModelError::from)
             .map_err(|error| self.compact_preparation_endpoint_error(error))?;
         let prepared_at = runtime.clock.now();
-        let authority = Arc::clone(&runtime.model)
-            .revalidate_runtime_authority(prepared_at)
+        let (authority, prepared_at) = self
+            .request_authority(Arc::clone(&runtime.model), prepared_at)
             .await
-            .map_err(ModelPreparationError::from)
-            .map_err(ModelError::from)
-            .map_err(|error| self.compact_preparation_endpoint_error(error))?;
+            .map_err(|error| compact_runtime_endpoint_error(&error))?;
         validate_configuration_runtime_authority(
             &runtime.provider_configuration,
             descriptor,

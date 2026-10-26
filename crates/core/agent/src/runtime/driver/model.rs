@@ -214,7 +214,7 @@ impl Driver {
         attempt_id: AttemptId,
         request: RoundRequest,
     ) -> ModelOperationResult {
-        let _slot = match self.take_request_slot(command).await {
+        self.request_slot = match self.take_request_slot(command).await {
             Ok(slot) => slot,
             Err(error) => {
                 return ModelOperationResult {
@@ -230,6 +230,7 @@ impl Driver {
             }
         };
         let started = tokio::time::Instant::now();
+        let parked_before = self.credential_wait_elapsed;
         let operation_deadline = started + self.config.model_operation_timeout;
         let context = self
             .telemetry_context
@@ -261,13 +262,16 @@ impl Driver {
         ))
         .await
         .map(|response| self.land_tool_calls(command, attempt_id, response));
+        self.request_slot.take();
         if let Err(error) = &mut result {
             error.fill_missing_wire_output_limit(prepared_wire_output_limit);
         }
         if let Ok(response) = &result {
             usage = response.usage().or(usage);
         }
-        let model_elapsed = started.elapsed();
+        let model_elapsed = started
+            .elapsed()
+            .saturating_sub(self.credential_wait_elapsed.saturating_sub(parked_before));
         let served_by = result
             .as_ref()
             .ok()
@@ -354,6 +358,10 @@ impl Driver {
         prepared_wire_output_limit: &mut Option<NonZeroU32>,
         output_deltas: &mut u64,
     ) -> Result<ModelResponse, AgentError> {
+        let wait_elapsed_before = self.credential_wait_elapsed;
+        let base_deadline = operation_deadline;
+        let mut operation_deadline;
+        let mut slot_wait_elapsed = std::time::Duration::ZERO;
         let descriptor = self.provider_configuration.effective().descriptor().clone();
         let (plan, prepared, prepared_at) = match request {
             RoundRequest::Fresh(request) => {
@@ -505,12 +513,22 @@ impl Driver {
             )
             .await?;
         }
-        let start = {
+        let start = loop {
+            if self.request_slot.is_none() {
+                let queued_at = tokio::time::Instant::now();
+                self.request_slot = self.take_request_slot(command).await?;
+                slot_wait_elapsed = slot_wait_elapsed.saturating_add(queued_at.elapsed());
+            }
+            operation_deadline = base_deadline
+                + self
+                    .credential_wait_elapsed
+                    .saturating_sub(wait_elapsed_before)
+                + slot_wait_elapsed;
             if tokio::time::Instant::now() >= operation_deadline {
                 return Err(self.model_timeout_error());
             }
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
-            let _dispatch_guard = provider_dispatch_gate.lock().await;
+            let dispatch_guard = provider_dispatch_gate.lock().await;
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 return Err(cancelled_error());
             }
@@ -518,12 +536,19 @@ impl Driver {
                 return Err(self.model_timeout_error());
             }
             let dispatch_checked_at = self.clock.now();
-            let dispatch_authority = Arc::clone(&self.model)
+            let dispatch_authority = match Arc::clone(&self.model)
                 .revalidate_runtime_authority(dispatch_checked_at)
                 .await
-                .map_err(ModelPreparationError::from)
-                .map_err(ModelError::from)
-                .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+            {
+                Ok(authority) => authority,
+                Err(plakous_model::RuntimeModelAuthorityError::AwaitingCredential) => {
+                    drop(dispatch_guard);
+                    self.wait_for_credential(Arc::clone(&self.model), command.cancellation.clone())
+                        .await?;
+                    continue;
+                }
+                Err(error) => return Err(self.authority_error(error)),
+            };
             validate_configuration_runtime_authority(
                 &self.provider_configuration,
                 &descriptor,
@@ -533,14 +558,12 @@ impl Driver {
             .map_err(ModelError::from)
             .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
             prepared_record
-                .revalidate(&descriptor, &plan, dispatch_checked_at)
-                .and_then(|()| {
-                    prepared_record.revalidate_selected_authority(
-                        &dispatch_authority,
-                        &descriptor,
-                        dispatch_checked_at,
-                    )
-                })
+                .revalidate_first_dispatch(
+                    &descriptor,
+                    &plan,
+                    &dispatch_authority,
+                    dispatch_checked_at,
+                )
                 .map_err(ModelError::from)
                 .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
             self.authority.check_heartbeat()?;
@@ -566,10 +589,10 @@ impl Driver {
                 EventContext::attempt(command.turn_id, attempt_id),
                 AgentEventKind::ModelDispatchStarted,
             );
-            match start.as_mut().poll(&mut task_context) {
+            break match start.as_mut().poll(&mut task_context) {
                 std::task::Poll::Pending => ModelStartAdmission::Pending(start),
                 std::task::Poll::Ready(result) => ModelStartAdmission::Ready(result),
-            }
+            };
         };
         let digest = plan.digest();
         let operation_timeout = tokio::time::sleep_until(operation_deadline);
@@ -852,7 +875,7 @@ impl Driver {
                 TelemetryObservationKind::ModelArtifactPrefixDrift { fields },
             );
         }
-        let prepared = self
+        let (prepared, prepared_at) = self
             .prepare_round_call(
                 descriptor,
                 &plan,
@@ -895,13 +918,10 @@ impl Driver {
         prepared_at: Timestamp,
         family_artifact: Option<ActiveFamilyArtifact>,
         cache_affinity: ModelCacheAffinity,
-    ) -> Result<PreparedModelCall, AgentError> {
-        let authority = Arc::clone(&self.model)
-            .revalidate_runtime_authority(prepared_at)
-            .await
-            .map_err(ModelPreparationError::from)
-            .map_err(ModelError::from)
-            .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+    ) -> Result<(PreparedModelCall, Timestamp), AgentError> {
+        let (authority, prepared_at) = self
+            .request_authority(Arc::clone(&self.model), prepared_at)
+            .await?;
         validate_configuration_runtime_authority(
             &self.provider_configuration,
             descriptor,
@@ -918,6 +938,7 @@ impl Driver {
         }
         Arc::clone(&self.model)
             .prepare_call(plan.clone(), preparation_context)
+            .map(|prepared| (prepared, prepared_at))
             .map_err(ModelError::from)
             .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))
     }

@@ -28,12 +28,45 @@ pub(super) fn native_route_authority(
     })
 }
 
+#[derive(Clone)]
 struct NativeRouteAuthority {
     pub(super) core: Arc<ManagerCore>,
     pub(super) expected_receipt: CatalogReceiptCore,
 }
 
 impl NativeRouteAuthority {
+    fn ready_selection(&self) -> Result<String, RuntimeModelAuthorityError> {
+        let fence = self
+            .core
+            .store
+            .load()
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)?
+            .ok_or(RuntimeModelAuthorityError::AwaitingCredential)?;
+        if fence.status() != plakous_auth::CredentialStatus::Ready {
+            if matches!(
+                self.core
+                    .store
+                    .offline_lifecycle()
+                    .map_err(|_| RuntimeModelAuthorityError::Invalid)?,
+                plakous_auth::OfflineCredentialLifecycle::Refreshing
+                    | plakous_auth::OfflineCredentialLifecycle::Ready
+            ) {
+                return Err(RuntimeModelAuthorityError::Stale);
+            }
+            return Err(RuntimeModelAuthorityError::AwaitingCredential);
+        }
+        if fence.account_binding() != &self.expected_receipt.public.account {
+            return Err(RuntimeModelAuthorityError::AccountChanged);
+        }
+        if fence.generation() < self.expected_receipt.fence.generation() {
+            return Err(RuntimeModelAuthorityError::ForeignAuthority);
+        }
+        self.core
+            .read_stored(&fence)
+            .map(|stored| stored.selection_epoch.clone())
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)
+    }
+
     async fn route_refresh(&self, force: bool) -> Result<(), crate::XaiAuthError> {
         self.core
             .refresh_with_force(
@@ -63,13 +96,22 @@ impl NativeRouteAuthority {
         &self,
         floor: &crate::XaiRenewalFloor,
     ) -> Result<crate::XaiRenewedAuthority, crate::XaiAuthError> {
+        self.renew_route_selection(floor, &self.expected_receipt.selection_epoch)
+            .await
+    }
+
+    async fn renew_route_selection(
+        &self,
+        floor: &crate::XaiRenewalFloor,
+        selection: &str,
+    ) -> Result<crate::XaiRenewedAuthority, crate::XaiAuthError> {
         let transient = |_| crate::XaiAuthError::CredentialSource;
         let expected = &self.expected_receipt;
         let receipt = self
             .core
             .refresh_catalog_with(Some(&CatalogRenewal {
                 account: &expected.public.account,
-                selection_epoch: &expected.selection_epoch,
+                selection_epoch: selection,
                 authority_id: &expected.authority_id,
                 floor,
             }))
@@ -81,7 +123,7 @@ impl NativeRouteAuthority {
                 _ => crate::XaiAuthError::CredentialSource,
             })?;
         if receipt.public.account != expected.public.account
-            || receipt.selection_epoch != expected.selection_epoch
+            || receipt.selection_epoch != selection
             || receipt.authority_id != expected.authority_id
             || receipt.fence.generation() < expected.fence.generation()
         {
@@ -125,6 +167,50 @@ impl crate::XaiSubscriptionCredentialAuthority for NativeRouteAuthority {
 
     fn selection_epoch(&self) -> &str {
         &self.expected_receipt.selection_epoch
+    }
+
+    fn ensure_credential_ready(&self) -> Result<(), RuntimeModelAuthorityError> {
+        if self.ready_selection()? != self.expected_receipt.selection_epoch {
+            return Err(RuntimeModelAuthorityError::AwaitingCredential);
+        }
+        Ok(())
+    }
+
+    fn ready_selection(&self) -> Result<String, RuntimeModelAuthorityError> {
+        NativeRouteAuthority::ready_selection(self)
+    }
+
+    fn renew_ready<'a>(
+        &'a self,
+        selection: &'a str,
+        floor: &'a crate::XaiRenewalFloor,
+        clock: &'a dyn plakous_model::Clock,
+    ) -> std::pin::Pin<
+        Box<
+            dyn Future<Output = Result<crate::XaiRenewedAuthority, RuntimeModelAuthorityError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            floor.note(clock.now());
+            let result = self.renew_route_selection(floor, selection).await;
+            floor.clear();
+            if let Ok(renewed) = result {
+                return Ok(renewed);
+            }
+            let reader = self.clone();
+            let current = tokio::task::spawn_blocking(move || reader.ready_selection())
+                .await
+                .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
+            match current {
+                Err(error) => Err(error),
+                Ok(current) if current != selection => {
+                    Err(RuntimeModelAuthorityError::AwaitingCredential)
+                }
+                Ok(_) => Err(RuntimeModelAuthorityError::Stale),
+            }
+        })
     }
 
     fn revalidate_runtime_authority(

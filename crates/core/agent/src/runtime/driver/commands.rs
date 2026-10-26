@@ -380,6 +380,16 @@ impl Driver {
 
         match command {
             command @ (TurnCommand::Start { .. } | TurnCommand::StartInstruction { .. }) => {
+                if self.compaction_in_flight && self.active_root.is_none() {
+                    return self.unrecorded_rejection(
+                        command_id,
+                        None,
+                        ControlError::new(
+                            ControlErrorKind::WrongPhase,
+                            "session compaction is in flight",
+                        ),
+                    );
+                }
                 let (input, instruction) = match command {
                     TurnCommand::Start { input, .. } => (input, false),
                     TurnCommand::StartInstruction { text, .. } => (UserInput::from(text), true),

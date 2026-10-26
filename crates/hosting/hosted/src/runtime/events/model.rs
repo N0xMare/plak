@@ -243,6 +243,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
         });
     }
 
+    pub(super) fn credential_wait(self) {
+        let AgentEventKind::ModelCredentialWait { waiting } = self.event.kind() else {
+            return;
+        };
+        flush_assistant_delta(self.delta_buf, self.last_flush, self.events, true);
+        let account = waiting.then(|| self.session.account.clone()).flatten();
+        if let Some(account) = &account {
+            let _ = self.events.notice(TranscriptRow::info(
+                NoticeScope::Settings,
+                format!("waiting for login: run `plak login {account}`"),
+            ));
+        }
+        let _ = self.events.send(ContentEvent::CredentialWait { account });
+    }
+
     /// The turn spent its model-operation budget.
     pub(super) fn operation_budget_exhausted(self) {
         let Self {

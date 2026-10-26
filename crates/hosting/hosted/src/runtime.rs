@@ -123,6 +123,7 @@ mod oneshot;
 mod projection;
 #[cfg(test)]
 pub(crate) use projection::probe::view_write as observe_projector_view_write;
+mod credential_wait;
 mod factory;
 #[cfg(test)]
 pub(crate) mod fault_store;

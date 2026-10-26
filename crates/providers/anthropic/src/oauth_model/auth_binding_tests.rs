@@ -34,7 +34,7 @@ async fn builder(
     configured_builder(model, authority, descriptor, root)
 }
 
-fn configured_builder(
+pub(super) fn configured_builder(
     model: Arc<dyn LanguageModel>,
     authority: RuntimeModelAuthority,
     descriptor: ResolvedModelDescriptor,

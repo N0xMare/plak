@@ -542,62 +542,82 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
     else {
         return Ok(false);
     };
+    let provider = *provider;
+    let resolved = std::sync::Arc::clone(resolved);
+    let subscriptions = subscriptions.clone();
     let (label, account) = match provider {
         NativeProvider::Codex => ("Codex", "codex"),
         NativeProvider::Xai => ("xAI", "grok"),
         NativeProvider::Claude => ("Claude", "claude"),
         _ => return Ok(false),
     };
-    match resolved
-        .model()
-        .revalidate_runtime_authority(SystemClock.now())
-        .await
-    {
-        Ok(_) => return Ok(false),
-        Err(RuntimeModelAuthorityError::AccountChanged) => {
-            return Err(native_account_changed(label, account));
-        }
-        // The model renews its own receipt; it reports Stale past the admitted
-        // catalog window and ForeignAuthority when the selection changed. Both
-        // re-resolve so the binding comparison below names the cause.
-        Err(RuntimeModelAuthorityError::Stale | RuntimeModelAuthorityError::ForeignAuthority) => {}
-        Err(RuntimeModelAuthorityError::Unavailable) => {
-            return Err(native_credential_failure(subscriptions, *provider, label, account).await);
-        }
-        Err(error) => {
-            return Err(CliFailure::new(format!(
-                "{label} runtime authority cannot be refreshed: {error}"
-            )));
-        }
-    }
-    let previous = resolved.as_ref();
-    let selected = previous.configuration().selected().clone();
-    let limits = crate::agent::product_subscription_request_limits()?;
-    let fresh = match subscriptions
-        .resolve_turn_scoped_provider(selected, limits, SessionLineage::Root)
-        .await
-    {
-        Ok(fresh) => fresh,
-        Err(error) => {
-            let repair = native_credential_failure(subscriptions, *provider, label, account).await;
-            return Err(CliFailure::new(format!(
-                "exact {label} resolution failed: {}; {}",
-                error.kind,
-                repair.message()
-            )));
-        }
-    };
-    let previous_binding = FreshNativeBinding::from_resolved(previous)?;
-    let fresh_binding = FreshNativeBinding::from_resolved(&fresh)?;
-    if !previous_binding.admits(&fresh_binding) {
-        return Err(previous_binding.refusal(&fresh_binding, label, account));
-    }
-    let HostTargetAuthority::Native { resolved, .. } = &mut config.target else {
-        unreachable!("the native target was checked above");
-    };
-    *resolved = std::sync::Arc::new(fresh);
-    Ok(true)
+    Box::pin(refresh_native_authority(
+        resolved.model(),
+        label,
+        account,
+        async {
+            let previous = resolved.as_ref();
+            let selected = previous.configuration().selected().clone();
+            let limits = crate::agent::product_subscription_request_limits()?;
+            let fresh = match subscriptions
+                .resolve_turn_scoped_provider(selected, limits, SessionLineage::Root)
+                .await
+            {
+                Ok(fresh) => fresh,
+                Err(error) => {
+                    let repair =
+                        native_credential_failure(&subscriptions, provider, label, account).await;
+                    return Err(CliFailure::new(format!(
+                        "exact {label} resolution failed: {}; {}",
+                        error.kind,
+                        repair.message()
+                    )));
+                }
+            };
+            let previous_binding = FreshNativeBinding::from_resolved(previous)?;
+            let fresh_binding = FreshNativeBinding::from_resolved(&fresh)?;
+            if !previous_binding.admits(&fresh_binding) {
+                return Err(previous_binding.refusal(&fresh_binding, label, account));
+            }
+            let HostTargetAuthority::Native { resolved, .. } = &mut config.target else {
+                unreachable!("the native target was checked above");
+            };
+            *resolved = std::sync::Arc::new(fresh);
+            Ok(true)
+        },
+        native_credential_failure(&subscriptions, provider, label, account),
+    ))
+    .await
 }
+
+pub(super) async fn refresh_native_authority(
+    model: std::sync::Arc<dyn plakous::model::LanguageModel>,
+    label: &str,
+    account: &str,
+    resolve: impl Future<Output = CliResult<bool>>,
+    unavailable: impl Future<Output = CliFailure>,
+) -> CliResult<bool> {
+    match model.revalidate_runtime_authority(SystemClock.now()).await {
+        Ok(_) => Ok(false),
+        Err(RuntimeModelAuthorityError::AccountChanged) => {
+            Err(native_account_changed(label, account))
+        }
+        // A pre-admission login wait must re-resolve too: Ready can carry a
+        // fresh receipt, while missing/quarantined credentials name the repair.
+        Err(
+            RuntimeModelAuthorityError::Stale
+            | RuntimeModelAuthorityError::ForeignAuthority
+            | RuntimeModelAuthorityError::AwaitingCredential,
+        ) => resolve.await,
+        Err(RuntimeModelAuthorityError::Unavailable) => Err(unavailable.await),
+        Err(error) => Err(CliFailure::new(format!(
+            "{label} runtime authority cannot be refreshed: {error}"
+        ))),
+    }
+}
+
+#[cfg(test)]
+pub(in crate::runtime) mod native_refresh_tests;
 
 async fn native_credential_failure(
     subscriptions: &NativeSubscriptions,

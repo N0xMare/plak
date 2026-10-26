@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct Progress {
+    pub(in crate::runtime) account: Option<String>,
     started: BTreeSet<(AttemptId, CallId)>,
     pub(in crate::runtime) view: ChildProgress,
     pub(in crate::runtime) terminal: bool,
@@ -38,6 +39,9 @@ impl Progress {
             }
             AgentEventKind::ModelRequestQueued { slots } => {
                 self.view.activity = Some(format!("waiting for a {slots} slot"));
+            }
+            AgentEventKind::ModelCredentialWait { waiting } => {
+                self.view.activity = waiting.then(|| self.login_notice());
             }
             AgentEventKind::ToolStarted {
                 identity,
@@ -82,6 +86,13 @@ impl Progress {
             }
             _ => {}
         }
+    }
+
+    pub(in crate::runtime) fn login_notice(&self) -> String {
+        self.account.as_ref().map_or_else(
+            || "waiting for login".to_owned(),
+            |account| format!("waiting for login: run `plak login {account}`"),
+        )
     }
 
     fn usage(&mut self, usage: Usage) {

@@ -732,8 +732,34 @@ impl PreparedCallRecord {
         plan: &ValidatedRequestPlan,
         now: Timestamp,
     ) -> Result<(), ModelPreparationError> {
-        self.projection.validate_for_plan(descriptor, plan)?;
         self.revalidate_selected_authority(&self.authority_evidence, descriptor, now)?;
+        self.revalidate_projection(descriptor, plan, now)
+    }
+
+    /// Rechecks an undispatched request under a fresh same-class credential.
+    ///
+    /// # Errors
+    ///
+    /// Rejects projection/admission drift, expiry, or authority rollback. The
+    /// historical credential's expiry does not invalidate its captured wire.
+    pub fn revalidate_first_dispatch(
+        &self,
+        descriptor: &ResolvedModelDescriptor,
+        plan: &ValidatedRequestPlan,
+        authority: &RuntimeModelAuthority,
+        now: Timestamp,
+    ) -> Result<(), ModelPreparationError> {
+        self.revalidate_first_dispatch_authority(authority, descriptor, now)?;
+        self.revalidate_projection(descriptor, plan, now)
+    }
+
+    fn revalidate_projection(
+        &self,
+        descriptor: &ResolvedModelDescriptor,
+        plan: &ValidatedRequestPlan,
+        now: Timestamp,
+    ) -> Result<(), ModelPreparationError> {
+        self.projection.validate_for_plan(descriptor, plan)?;
         let status = descriptor
             .context_status(plan, &self.projection, now)
             .map_err(ContextAdmissionError::from)?;
@@ -776,6 +802,31 @@ impl PreparedCallRecord {
         authority.validate(descriptor, now)?;
         if authority.execution_authority_binding()? != self.projection.authority
             || authority.authority_class_binding()? != self.projection.authority_class
+        {
+            return Err(RuntimeModelAuthorityError::ForeignAuthority.into());
+        }
+        Ok(())
+    }
+
+    /// Checks fresh authority immediately before the call's first dispatch.
+    ///
+    /// A newer credential may authorize the exact captured wire on the same
+    /// route/account/authority class. Historical prepared and Working evidence
+    /// remains unchanged; recovery uses the strict selected-authority check.
+    ///
+    /// # Errors
+    ///
+    /// Rejects class drift, rollback, regressing observations or stale authority.
+    fn revalidate_first_dispatch_authority(
+        &self,
+        authority: &RuntimeModelAuthority,
+        descriptor: &ResolvedModelDescriptor,
+        now: Timestamp,
+    ) -> Result<(), ModelPreparationError> {
+        authority.validate(descriptor, now)?;
+        if authority.authority_class_binding()? != self.projection.authority_class
+            || authority.credential_generation() < self.authority_evidence.credential_generation()
+            || authority.observed_at() < self.authority_evidence.observed_at()
         {
             return Err(RuntimeModelAuthorityError::ForeignAuthority.into());
         }

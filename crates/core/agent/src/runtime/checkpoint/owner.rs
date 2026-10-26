@@ -703,6 +703,11 @@ impl CheckpointOwner {
 }
 
 impl CheckpointReader {
+    pub(in crate::runtime) fn cooperative_wait_interrupted(&self) -> bool {
+        let probe = lock_mutex(&self.state).storage_interrupt.clone();
+        super::storage_pause::interrupted(&probe)
+    }
+
     #[cfg(test)]
     pub(in crate::runtime) fn lease_lost_for_test(&self) -> bool {
         self.heartbeat_lost.is_cancelled()

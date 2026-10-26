@@ -711,6 +711,11 @@ mod shared_host_model {
         }
 
         #[cfg(test)]
+        pub(crate) fn renewal_floor_for_test(&self) -> Option<Timestamp> {
+            self.renewal_floor.earliest()
+        }
+
+        #[cfg(test)]
         pub(crate) fn with_subscription_request_gate(
             self,
             gate: Arc<dyn plakous_auth::subscription_limit::SubscriptionRequestGate>,
@@ -863,6 +868,15 @@ mod shared_host_model {
                     _ => RuntimeModelAuthorityError::Stale,
                 }
             })?;
+            self.install_renewed(&stale, renewed, checked_at)
+        }
+
+        fn install_renewed(
+            &self,
+            stale: &SuperGrokDispatchTarget,
+            renewed: crate::XaiRenewedAuthority,
+            checked_at: Timestamp,
+        ) -> Result<RuntimeModelAuthority, RuntimeModelAuthorityError> {
             let route = stale
                 .resolved
                 .route()
@@ -940,9 +954,97 @@ mod shared_host_model {
         ) -> RuntimeModelAuthorityOperation {
             Box::pin(async move {
                 let target = self.current_target()?;
-                match self.revalidate_target(&target, checked_at) {
+                if checked_at < self.admitted_from || checked_at >= self.admitted_until {
+                    return Err(RuntimeModelAuthorityError::Stale);
+                }
+                let authority = target
+                    .resolved
+                    .route()
+                    .credential_authority()
+                    .ok_or(RuntimeModelAuthorityError::Unavailable)?;
+                let reader = Arc::clone(authority);
+                let checked = tokio::task::spawn_blocking(move || reader.ensure_credential_ready())
+                    .await
+                    .map_err(|_| RuntimeModelAuthorityError::Unavailable)?
+                    .and_then(|()| self.revalidate_target(&target, checked_at));
+                let result = match checked {
                     Err(RuntimeModelAuthorityError::Stale) => self.renew(target, checked_at).await,
                     result => result,
+                };
+                if result.is_err() {
+                    let current = self.current_target()?;
+                    let reader = Arc::clone(
+                        current
+                            .resolved
+                            .route()
+                            .credential_authority()
+                            .ok_or(RuntimeModelAuthorityError::Unavailable)?,
+                    );
+                    tokio::task::spawn_blocking(move || reader.ensure_credential_ready())
+                        .await
+                        .map_err(|_| RuntimeModelAuthorityError::Unavailable)?
+                        .or_else(|error| {
+                            if error == RuntimeModelAuthorityError::Stale {
+                                Ok(())
+                            } else {
+                                Err(error)
+                            }
+                        })?;
+                }
+                result
+            })
+        }
+
+        fn wait_for_runtime_authority(
+            self: Arc<Self>,
+        ) -> plakous_model::RuntimeModelAuthorityWaitOperation {
+            Box::pin(async move {
+                let stale = self.current_target()?;
+                let authority = stale
+                    .resolved
+                    .route()
+                    .credential_authority()
+                    .ok_or(RuntimeModelAuthorityError::Unavailable)?;
+                let mut delay = Duration::from_millis(250);
+                let mut previous = None;
+                loop {
+                    if !Arc::ptr_eq(&self.current_target()?, &stale) {
+                        return Ok(());
+                    }
+                    let reader = Arc::clone(authority);
+                    let observation = tokio::task::spawn_blocking(move || reader.ready_selection())
+                        .await
+                        .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
+                    if previous.as_ref() != Some(&observation) {
+                        delay = Duration::from_millis(250);
+                    }
+                    previous = Some(observation.clone());
+                    match observation {
+                        Ok(selection) => {
+                            let _renewal = self.renewal.lock().await;
+                            if !Arc::ptr_eq(&self.current_target()?, &stale) {
+                                return Ok(());
+                            }
+                            match authority
+                                .renew_ready(&selection, &self.renewal_floor, self.clock.as_ref())
+                                .await
+                            {
+                                Ok(renewed) => {
+                                    self.install_renewed(&stale, renewed, self.clock.now())?;
+                                    return Ok(());
+                                }
+                                Err(RuntimeModelAuthorityError::AwaitingCredential) => {}
+                                Err(error) => return Err(error),
+                            }
+                        }
+                        Err(
+                            RuntimeModelAuthorityError::AwaitingCredential
+                            | RuntimeModelAuthorityError::Stale,
+                        ) => {}
+                        Err(error) => return Err(error),
+                    }
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(2));
                 }
             })
         }
@@ -1204,12 +1306,21 @@ mod shared_host_model {
                     "SuperGrok prepared execution facts are inconsistent",
                 )
             })?;
-            let service = Arc::clone(&target.service);
             let clock = Arc::clone(&self.clock);
             let timeout = self.config.operation_timeout();
             Ok(PreparedModelCall::new(record, move |call_context| {
-                let deadline = operation_deadline(clock.as_ref(), timeout, None);
-                start_prepared_responses_model_call(execution, service, call_context, deadline)
+                Box::pin(async move {
+                    let service = Arc::clone(
+                        &self
+                            .current_target()
+                            .map_err(ModelPreparationError::from)
+                            .map_err(plakous_model::ModelError::from)?
+                            .service,
+                    );
+                    let deadline = operation_deadline(clock.as_ref(), timeout, None);
+                    start_prepared_responses_model_call(execution, service, call_context, deadline)
+                        .await
+                })
             }))
         }
     }

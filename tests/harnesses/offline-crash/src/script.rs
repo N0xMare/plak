@@ -48,6 +48,10 @@ mod gate_tests {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptPlan {
+    /// Park the first Prepared request at its pre-send authority check until
+    /// this test-owned readiness gate opens. No native credential is read.
+    #[serde(default)]
+    pub credential_ready: Option<crate::gate::ScriptGate>,
     /// Must equal [`SCRIPT_VERSION`].
     pub version: u16,
     /// The assistant steps, in round order. Round `n` reads `steps[n - 1]`.

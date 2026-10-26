@@ -790,6 +790,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "RegisteredContextSource",
         # One shared per-account bound on concurrent model requests.
         "RequestSlots",
+        # Read-only in-memory native credential wait scope, not admission authority.
+        "CredentialWait",
         "ReresolvedModel",
         "ResolvedContextSourceFact",
         "Turn",

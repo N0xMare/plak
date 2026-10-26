@@ -380,6 +380,11 @@ define_observations! {
         /// The account whose budget is full.
         slots: String,
     },
+    /// Live credential wait; `None` clears the wait without ending the turn.
+    CredentialWait {
+        /// Product login account, not a provider account identity or credential.
+        account: Option<String>,
+    },
     /// The host finished opening the session. Carries the host's own
     /// `session_open_ms` measurement (logged, not painted as TUI chrome).
     SessionOpened {

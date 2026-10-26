@@ -5,7 +5,7 @@ use std::io::{self, BufReader, Write};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use futures_util::{StreamExt, stream};
 use plakous::agent::{
@@ -227,6 +227,8 @@ async fn pause_if(should_pause: bool) {
 }
 
 struct LoopbackModel {
+    credential_prepared: AtomicBool,
+    credential_ready: AtomicBool,
     descriptor: ResolvedModelDescriptor,
     authority: RuntimeModelAuthority,
     controller: BoundaryController,
@@ -300,6 +302,8 @@ impl LoopbackModel {
             None,
         )?;
         Ok(Self {
+            credential_prepared: AtomicBool::new(false),
+            credential_ready: AtomicBool::new(false),
             descriptor,
             authority,
             controller,
@@ -347,11 +351,34 @@ impl LanguageModel for LoopbackModel {
         self: Arc<Self>,
         checked_at: Timestamp,
     ) -> RuntimeModelAuthorityOperation {
-        let authority = self.authority.clone();
-        let descriptor = self.descriptor.clone();
         Box::pin(async move {
-            authority.validate(&descriptor, checked_at)?;
-            Ok(authority)
+            if matches!(&self.scenario, LoopbackScenario::Scripted(script) if script.credential_ready.is_some())
+                && self.credential_prepared.load(Ordering::Acquire)
+                && !self.credential_ready.load(Ordering::Acquire)
+            {
+                return Err(RuntimeModelAuthorityError::AwaitingCredential);
+            }
+            self.authority.validate(&self.descriptor, checked_at)?;
+            Ok(self.authority.clone())
+        })
+    }
+
+    fn wait_for_runtime_authority(
+        self: Arc<Self>,
+    ) -> plakous::model::RuntimeModelAuthorityWaitOperation {
+        Box::pin(async move {
+            let LoopbackScenario::Scripted(script) = &self.scenario else {
+                return Err(RuntimeModelAuthorityError::Unavailable);
+            };
+            let gate = script
+                .credential_ready
+                .as_ref()
+                .ok_or(RuntimeModelAuthorityError::Unavailable)?;
+            crate::gate::wait_gate(gate, &plakous::model::CancellationToken::new(), false)
+                .await
+                .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
+            self.credential_ready.store(true, Ordering::Release);
+            Ok(())
         })
     }
 
@@ -573,6 +600,7 @@ impl LanguageModel for LoopbackModel {
         // reports as `input_tokens` for the operation it belongs to.
         let prepared_input_tokens = counted_tokens;
         let cache_affinity = record.projection().cache_affinity();
+        self.credential_prepared.store(true, Ordering::Release);
         Ok(PreparedModelCall::new(record, move |call_context| {
             let cancellation = call_context.cancellation().clone();
             let round = self.next_round.fetch_add(1, Ordering::AcqRel);

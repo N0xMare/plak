@@ -222,6 +222,92 @@ pub(crate) struct CodexReceiptRenewal {
 }
 
 impl CodexReceiptRenewal {
+    pub(crate) async fn ready_selection(
+        &self,
+        stale: &OpenAiTarget,
+    ) -> Result<Digest, RuntimeModelAuthorityError> {
+        let expected = stale
+            .native_codex_credential_selection()
+            .ok_or(RuntimeModelAuthorityError::Invalid)?
+            .0
+            .clone();
+        let renewal = self.clone();
+        let fence = tokio::task::spawn_blocking(move || renewal.read_ready_fence(&expected))
+            .await
+            .map_err(|_| RuntimeModelAuthorityError::Unavailable)??;
+        let lease = self
+            .source
+            .manager
+            .acquire_ready_lease(fence)
+            .await
+            .map_err(renewal_error)?;
+        let stored = super::parse_stored(lease.payload()).map_err(renewal_error)?;
+        credential_selection_epoch(
+            stale.account_binding(),
+            stale.credential_authority_binding(),
+            &stored.selection_epoch,
+        )
+        .map_err(|_| RuntimeModelAuthorityError::Invalid)
+    }
+
+    fn read_ready_fence(
+        &self,
+        expected: &CredentialFence,
+    ) -> Result<CredentialFence, RuntimeModelAuthorityError> {
+        if self
+            .source
+            .manager
+            .selected_account()
+            .map_err(renewal_error)?
+            != *expected.account_binding()
+        {
+            return Err(RuntimeModelAuthorityError::AccountChanged);
+        }
+        let fence = self
+            .source
+            .manager
+            .store
+            .load()
+            .map_err(|_| RuntimeModelAuthorityError::Invalid)?
+            .ok_or(RuntimeModelAuthorityError::AwaitingCredential)?;
+        if fence.status() != CredentialStatus::Ready {
+            if matches!(
+                self.source
+                    .manager
+                    .store
+                    .offline_lifecycle()
+                    .map_err(|_| RuntimeModelAuthorityError::Invalid)?,
+                plakous_auth::OfflineCredentialLifecycle::Refreshing
+                    | plakous_auth::OfflineCredentialLifecycle::Ready
+            ) {
+                return Err(RuntimeModelAuthorityError::Stale);
+            }
+            return Err(RuntimeModelAuthorityError::AwaitingCredential);
+        }
+        if fence.account_binding() != expected.account_binding() {
+            return Err(RuntimeModelAuthorityError::AccountChanged);
+        }
+        if fence.generation() < expected.generation() {
+            return Err(RuntimeModelAuthorityError::ForeignAuthority);
+        }
+        Ok(fence)
+    }
+
+    pub(crate) async fn ensure_credential_ready(
+        &self,
+        stale: &OpenAiTarget,
+    ) -> Result<(), RuntimeModelAuthorityError> {
+        let current = self.ready_selection(stale).await?;
+        let expected = stale
+            .native_codex_credential_selection()
+            .ok_or(RuntimeModelAuthorityError::Invalid)?
+            .1;
+        if current != expected {
+            return Err(RuntimeModelAuthorityError::AwaitingCredential);
+        }
+        Ok(())
+    }
+
     /// Builds a new receipt for `stale`'s admitted descriptor: one claimed
     /// refresh when due and one authenticated catalog fetch, both bound to the
     /// stale receipt's account and login selection; installs nothing unless
@@ -233,10 +319,25 @@ impl CodexReceiptRenewal {
         admitted_until: Timestamp,
         floor: &CodexRenewalFloor,
     ) -> Result<OpenAiTarget, RuntimeModelAuthorityError> {
-        let source = &self.source;
-        let (expected_fence, selection_epoch) = stale
+        let selection = stale
             .native_codex_credential_selection()
-            .map(|(fence, epoch)| (fence.clone(), epoch))
+            .ok_or(RuntimeModelAuthorityError::Invalid)?
+            .1;
+        self.renew_selection(stale, admitted_until, floor, selection)
+            .await
+    }
+
+    pub(crate) async fn renew_selection(
+        &self,
+        stale: &OpenAiTarget,
+        admitted_until: Timestamp,
+        floor: &CodexRenewalFloor,
+        selection_epoch: Digest,
+    ) -> Result<OpenAiTarget, RuntimeModelAuthorityError> {
+        let source = &self.source;
+        let expected_fence = stale
+            .native_codex_credential_selection()
+            .map(|(fence, _)| fence.clone())
             .ok_or(RuntimeModelAuthorityError::Invalid)?;
         if stale.validate_route(&source.route).is_err()
             || stale.account_binding() != source.manager.route_account_digest()
@@ -331,9 +432,9 @@ async fn refresh_detached(
 
 fn renewal_error(error: NativeCodexAuthError) -> RuntimeModelAuthorityError {
     match error {
-        NativeCodexAuthError::AccountChanged
-        | NativeCodexAuthError::SelectionChanged
-        | NativeCodexAuthError::LoginRequired
+        NativeCodexAuthError::AccountChanged => RuntimeModelAuthorityError::AccountChanged,
+        NativeCodexAuthError::SelectionChanged => RuntimeModelAuthorityError::AwaitingCredential,
+        NativeCodexAuthError::LoginRequired
         | NativeCodexAuthError::ProfileChanged
         | NativeCodexAuthError::WrittenByNewerBuild => RuntimeModelAuthorityError::ForeignAuthority,
         NativeCodexAuthError::Unavailable => RuntimeModelAuthorityError::Unavailable,

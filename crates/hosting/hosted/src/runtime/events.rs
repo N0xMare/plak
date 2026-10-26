@@ -143,6 +143,7 @@ pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
         AgentEventKind::SteeringQueued { .. } => applier.steering_queued(),
         AgentEventKind::SteeringApplied => applier.steering_applied(),
         AgentEventKind::ModelRequestQueued { .. } => applier.model_request_queued(),
+        AgentEventKind::ModelCredentialWait { .. } => applier.credential_wait(),
         AgentEventKind::OperationBudgetExhausted => applier.operation_budget_exhausted(),
         AgentEventKind::ModelStarted => applier.model_started(),
         AgentEventKind::OutputLimitRetry { .. } => applier.output_limit_retry(),

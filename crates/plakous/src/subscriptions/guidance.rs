@@ -45,6 +45,12 @@ impl LanguageModel for GuidedModel {
         Arc::clone(&self.inner).revalidate_runtime_authority(checked_at)
     }
 
+    fn wait_for_runtime_authority(
+        self: Arc<Self>,
+    ) -> plakous_model::RuntimeModelAuthorityWaitOperation {
+        Arc::clone(&self.inner).wait_for_runtime_authority()
+    }
+
     fn recover_call(
         self: Arc<Self>,
         request: ModelCallRecoveryRequest,

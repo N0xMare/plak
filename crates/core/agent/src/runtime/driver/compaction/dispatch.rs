@@ -32,8 +32,7 @@ use crate::{
 use futures_util::StreamExt;
 use plakous_model::{
     Digest, DigestDomain, ModelError, ModelErrorKind, ModelErrorPhase, ModelEvent,
-    ModelOperationRoot, ModelPreparationError, ModelResponse, ModelStreamItem,
-    ProviderCallRecoveryLocatorStage,
+    ModelOperationRoot, ModelResponse, ModelStreamItem, ProviderCallRecoveryLocatorStage,
 };
 use std::sync::Arc;
 
@@ -202,10 +201,22 @@ impl Driver {
         &mut self,
         live: &mut LiveCompaction,
     ) -> Result<ModelResponse, AgentError> {
-        let _slot = self
+        let result = Box::pin(self.run_compaction_call_inner(live)).await;
+        self.request_slot.take();
+        result
+    }
+
+    async fn run_compaction_call_inner(
+        &mut self,
+        live: &mut LiveCompaction,
+    ) -> Result<ModelResponse, AgentError> {
+        self.request_slot = self
             .take_compaction_request_slot(live.cancellation().clone())
             .await?;
-        let (deadline_at, context) = live.begin_call()?;
+        let wait_elapsed_before = self.credential_wait_elapsed;
+        let (base_deadline, context) = live.begin_call()?;
+        let mut deadline_at;
+        let mut slot_wait_elapsed = std::time::Duration::ZERO;
         let identity = live.identity();
         let (compaction_operation, provider_operation) = live.operations();
         let cancellation = live.cancellation().clone();
@@ -214,9 +225,21 @@ impl Driver {
         let model = Arc::clone(&live.runtime().model);
         let provider_configuration = Arc::clone(&live.runtime().provider_configuration);
         let descriptor = provider_configuration.effective().descriptor().clone();
-        let start = {
+        let start = loop {
+            if self.request_slot.is_none() {
+                let queued_at = tokio::time::Instant::now();
+                self.request_slot = self
+                    .take_compaction_request_slot(cancellation.clone())
+                    .await?;
+                slot_wait_elapsed = slot_wait_elapsed.saturating_add(queued_at.elapsed());
+            }
+            deadline_at = base_deadline
+                + self
+                    .credential_wait_elapsed
+                    .saturating_sub(wait_elapsed_before)
+                + slot_wait_elapsed;
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
-            let _dispatch_guard = provider_dispatch_gate.lock().await;
+            let dispatch_guard = provider_dispatch_gate.lock().await;
             if self.shutdown.is_cancelled() || cancellation.is_cancelled() {
                 return Err(cancelled_error());
             }
@@ -225,12 +248,19 @@ impl Driver {
             }
             self.authority.check_heartbeat()?;
             let dispatch_checked_at = self.clock.now();
-            let dispatch_authority = Arc::clone(&model)
+            let dispatch_authority = match Arc::clone(&model)
                 .revalidate_runtime_authority(dispatch_checked_at)
                 .await
-                .map_err(ModelPreparationError::from)
-                .map_err(ModelError::from)
-                .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
+            {
+                Ok(authority) => authority,
+                Err(plakous_model::RuntimeModelAuthorityError::AwaitingCredential) => {
+                    drop(dispatch_guard);
+                    self.wait_for_credential(Arc::clone(&model), cancellation.clone())
+                        .await?;
+                    continue;
+                }
+                Err(error) => return Err(self.authority_error(error)),
+            };
             validate_configuration_runtime_authority(
                 &provider_configuration,
                 &descriptor,
@@ -240,14 +270,12 @@ impl Driver {
             .map_err(ModelError::from)
             .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
             prepared_record
-                .revalidate(&descriptor, &plan, dispatch_checked_at)
-                .and_then(|()| {
-                    prepared_record.revalidate_selected_authority(
-                        &dispatch_authority,
-                        &descriptor,
-                        dispatch_checked_at,
-                    )
-                })
+                .revalidate_first_dispatch(
+                    &descriptor,
+                    &plan,
+                    &dispatch_authority,
+                    dispatch_checked_at,
+                )
                 .map_err(ModelError::from)
                 .map_err(|error| self.project_model_error(error, ModelErrorPhase::Preparation))?;
             self.transition_compaction_operations(
@@ -267,10 +295,10 @@ impl Driver {
             }
             let mut start = live.take_prepared()?.start_with_control(context);
             let mut task_context = std::task::Context::from_waker(std::task::Waker::noop());
-            match start.as_mut().poll(&mut task_context) {
+            break match start.as_mut().poll(&mut task_context) {
                 std::task::Poll::Pending => ModelStartAdmission::Pending(start),
                 std::task::Poll::Ready(result) => ModelStartAdmission::Ready(result),
-            }
+            };
         };
         let mut timeout = Box::pin(tokio::time::sleep_until(deadline_at));
         let mut stream = match start {

@@ -572,9 +572,21 @@ impl Agent {
         self.inner.authority.storage_unavailable()
     }
 
+    /// Returns the live credential wait scope, without granting dispatch authority.
+    #[must_use]
+    pub fn credential_wait(&self) -> Option<super::CredentialWait> {
+        *self
+            .inner
+            .credential_wait
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// Binds this agent's operator interruption signal for storage waits.
     /// It does not interrupt any other agent sharing the store or acknowledge
     /// a command. Hosts bind it only on their attached root agent.
+    /// Session-workflow credential waits also observe it, because they have no
+    /// root turn cancellation capability.
     pub fn set_storage_interrupt(&self, probe: Arc<dyn Fn() -> bool + Send + Sync>) {
         self.inner.authority.set_storage_interrupt(probe);
     }

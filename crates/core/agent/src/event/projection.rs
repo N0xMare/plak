@@ -75,6 +75,7 @@ fn event_context_shape_is_valid(event: &AgentEvent) -> bool {
         | AgentEventKind::SteeringApplied
         | AgentEventKind::OperationBudgetExhausted
         | AgentEventKind::ModelRequestQueued { .. }
+        | AgentEventKind::ModelCredentialWait { .. }
         | AgentEventKind::OutputLimitRetry { .. }
         | AgentEventKind::ToolResultsReplaced { .. }
         | AgentEventKind::ConversationCommitted { .. }

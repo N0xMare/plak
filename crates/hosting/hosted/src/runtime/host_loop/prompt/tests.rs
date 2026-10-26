@@ -177,6 +177,64 @@ use crate::runtime::test_support::{actual_ingress_backpressure, fresh_injected_a
 use crate::sessions::SessionRecord;
 use std::sync::{Arc, Mutex};
 
+#[test]
+fn awaiting_native_same_account_login_reopens_in_place_before_the_next_prompt() {
+    use crate::runtime::Sender;
+    use crate::runtime::startup::{native_refresh_tests, refresh_native_authority};
+    use crate::surface_protocol::UserAction;
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = HostLoop::open(config, &actions, Sender::over(wire), None).unwrap();
+    let session = host.config.session.id.clone();
+    let locator = host.config.session.plakous_locator.unwrap();
+    let old = native_refresh_tests::binding(1);
+    let fresh = native_refresh_tests::binding(2);
+    let changed = host
+        .executor
+        .block_on(refresh_native_authority(
+            Arc::new(native_refresh_tests::AwaitingNativeModel),
+            "Claude",
+            "claude",
+            async {
+                assert!(old.admits(&fresh), "same-account grant keeps exact binding");
+                Ok(true)
+            },
+            async { panic!("Ready login must be resolved") },
+        ))
+        .unwrap()
+        .unwrap();
+    assert!(changed);
+    host.reopen_after_native_authority_refresh(changed).unwrap();
+    assert_eq!(host.config.session.id, session);
+    assert_eq!(
+        host.config.session.plakous_locator.unwrap().branch_id(),
+        locator.branch_id()
+    );
+    assert!(!host.recovery_blocked);
+    action_tx
+        .send(UserAction::Prompt("continue after renewing login".into()))
+        .unwrap();
+    let HostStep::Prompt {
+        text,
+        queued_delivery,
+        user_echoed,
+    } = host.next_prompt(None).unwrap()
+    else {
+        panic!("prompt should proceed in this process");
+    };
+    host.run_prompt(text, queued_delivery, user_echoed, None)
+        .unwrap();
+    assert!(
+        events
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::TurnLifecycle(turn)
+        if turn.phase == plakous_host_protocol::TurnPhase::Completed))
+    );
+    host.release().unwrap();
+}
+
 struct CapacityProbe(Arc<Mutex<crate::session_store::StorageAdmission>>);
 
 impl crate::runtime::fault_store::StoreFaults for CapacityProbe {

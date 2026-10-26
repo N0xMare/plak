@@ -115,6 +115,41 @@ impl ClaudeNativeAuthManager {
             }))
     }
 
+    pub(crate) async fn async_status(
+        &self,
+    ) -> Result<Option<ClaudeSubscriptionStatus>, ClaudeNativeAuthError> {
+        let manager = self.clone();
+        tokio::task::spawn_blocking(move || manager.status())
+            .await
+            .map_err(|_| ClaudeNativeAuthError::NotReady)?
+    }
+
+    pub(crate) async fn wait_for_ready(
+        &self,
+        parked: Option<ClaudeSubscriptionStatus>,
+    ) -> Result<(), ClaudeNativeAuthError> {
+        let mut previous = parked.clone();
+        let mut delay = std::time::Duration::from_millis(250);
+        loop {
+            let current = self.async_status().await?;
+            if current != parked
+                && current
+                    .as_ref()
+                    .is_some_and(|status| status.status() == CredentialStatus::Ready)
+            {
+                return self.ensure_account_identity().await;
+            }
+            if current != previous {
+                delay = std::time::Duration::from_millis(250);
+                previous = current;
+            }
+            // Login is cross-process; observe the durable generation/readiness,
+            // not an in-process notification that another process cannot send.
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(std::time::Duration::from_secs(2));
+        }
+    }
+
     /// Performs the Claude Code `/usage` control-plane reads.
     ///
     /// `GET /api/oauth/usage` supplies the session, all-models weekly, and

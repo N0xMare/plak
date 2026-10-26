@@ -3904,7 +3904,7 @@ async fn authenticated_catalog_receipt_authorizes_only_reference_client_envelope
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn same_account_relogin_epoch_invalidates_captured_route_before_inference() -> TestResult {
+async fn same_account_relogin_wait_renews_captured_route_without_inference() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
     let temp = tempdir()?;
     let auth = mock_peer().await?;
@@ -3930,7 +3930,10 @@ async fn same_account_relogin_epoch_invalidates_captured_route_before_inference(
         GrokCodingProfile::pinned_compatibility(),
         now_timestamp()?,
     )?;
-    let model = permitted_subscription_model(resolved, inference.client.clone())?;
+    let model = renewable_subscription_model(resolved, inference.client.clone())?;
+    let request = model_request("00000000-0000-4000-8000-000000000452")?;
+    let prepared = prepare_model_call(Arc::clone(&model), request, None).await?;
+    let prepared_identity = prepared.record().identity();
 
     let baseline = required(manager.core.store.load()?, "baseline fence")?;
     let replacement = StoredTokens {
@@ -3977,6 +3980,123 @@ async fn same_account_relogin_epoch_invalidates_captured_route_before_inference(
         "selection epoch must fence route use without redefining stable credential authority"
     );
     assert_eq!(auth.requests.lock().await.len(), 2);
+    enqueue_admitted_catalog(&auth).await?;
+    manager.core.store.logout_local()?;
+    let logged_out = required(manager.core.store.load()?, "logged out fence")?;
+    let waiting_model = Arc::clone(&model);
+    let mut waiters = tokio::spawn(async move {
+        tokio::join!(
+            Arc::clone(&waiting_model).wait_for_runtime_authority(),
+            waiting_model.wait_for_runtime_authority(),
+        )
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut waiters)
+            .await
+            .is_err(),
+        "unchanged unavailable credentials must remain parked"
+    );
+    let ready_generation = logged_out.generation().next()?;
+    manager.core.store.replace_selected_login(
+        &logged_out,
+        credential_record(
+            AccountBinding::new("epoch-subject")?,
+            ready_generation,
+            &replacement,
+        )?,
+    )?;
+    let (first_wait, second_wait) = tokio::time::timeout(Duration::from_secs(5), waiters).await??;
+    first_wait?;
+    second_wait?;
+    let renewed = Arc::clone(&model)
+        .revalidate_runtime_authority(now_timestamp()?)
+        .await?;
+    assert_eq!(
+        renewed.credential_authority_binding(),
+        original_credential_authority
+    );
+    assert_eq!(renewed.credential_generation(), ready_generation.get());
+    assert_eq!(auth.requests.lock().await.len(), 3);
+    assert!(inference.requests.lock().await.is_empty());
+    inference
+        .responses
+        .send(MockResponse {
+            status: "200 OK",
+            content_type: "text/event-stream",
+            body: success_sse().replace("grok-4.5", XAI_GROK_PRIMARY_CODING_MODEL),
+            extra_headers: String::new(),
+            disconnect_after_request: false,
+            truncate_after: None,
+            before_head: None,
+            before_body: None,
+        })
+        .await?;
+    assert_eq!(prepared.record().identity(), prepared_identity);
+    let response = complete_prepared_model_round(
+        prepared,
+        ModelCallContext::new(
+            AttemptId::from_str("00000000-0000-4000-8000-000000000452")?,
+            plakous_model::CancellationToken::new(),
+            None,
+        ),
+    )
+    .await?;
+    assert_ne!(response.output(), []);
+    assert_eq!(inference.requests.lock().await.len(), 1);
+    auth.shutdown().await?;
+    inference.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn different_account_login_ends_native_credential_wait_without_catalog_or_inference()
+-> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let auth = mock_peer().await?;
+    let manager = manager(&temp, &auth)?;
+    install_stored(
+        &manager,
+        "wait-account",
+        "wait-access",
+        "wait-refresh",
+        system_unix_seconds()? + 3_600,
+    )?;
+    admit_catalog(&manager, &auth).await?;
+    let inference = mock_peer().await?;
+    let route =
+        manager.test_subscription_route(crate::XaiOrigin::new(inference.origin.clone())?)?;
+    let resolved = XaiResolvedModel::new(
+        route,
+        XaiModel::new(ModelId::new(XAI_GROK_PRIMARY_CODING_MODEL)?, None),
+        GrokCodingProfile::pinned_compatibility(),
+        now_timestamp()?,
+    )?;
+    let model = permitted_subscription_model(resolved, inference.client.clone())?;
+    let before = required(manager.core.store.load()?, "ready credential")?;
+    let replacement = stored_record(
+        "wait-different-account",
+        "other-access",
+        "other-refresh",
+        system_unix_seconds()? + 3_600,
+        before.generation().next()?,
+    )?;
+    manager
+        .core
+        .store
+        .replace_selected_login(&before, replacement)?;
+    assert_eq!(
+        Arc::clone(&model)
+            .revalidate_runtime_authority(now_timestamp()?)
+            .await,
+        Err(RuntimeModelAuthorityError::AccountChanged)
+    );
+    assert_eq!(
+        model.wait_for_runtime_authority().await,
+        Err(RuntimeModelAuthorityError::AccountChanged)
+    );
+    assert_eq!(auth.requests.lock().await.len(), 1);
+    assert!(inference.requests.lock().await.is_empty());
     auth.shutdown().await?;
     inference.shutdown().await?;
     Ok(())
@@ -4059,7 +4179,8 @@ async fn peer_generation_renews_running_model_like_a_fresh_resolution() -> TestR
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn generation_rotation_after_resolve_before_dispatch_rejects_exact_target() -> TestResult {
+async fn generation_rotation_before_dispatch_keeps_prepared_wire_and_uses_renewed_target()
+-> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
     let temp = tempdir()?;
     let auth = mock_peer().await?;
@@ -4118,9 +4239,8 @@ async fn generation_rotation_after_resolve_before_dispatch_rejects_exact_target(
         "a refresh-equivalent rotation must preserve the selection epoch"
     );
 
-    // The prep->dispatch race: the agent's dispatch-time check renews the
-    // receipt, but the prepared call stays bound to the generation it was
-    // prepared with, so it fails closed: no dispatch and no replay.
+    // First dispatch can adopt the renewed same-class receipt, without
+    // rewriting the historical Prepared evidence or its captured wire.
     enqueue_admitted_catalog(&auth).await?;
     let dispatch_authority = Arc::clone(&model)
         .revalidate_runtime_authority(now_timestamp()?)
@@ -4138,9 +4258,9 @@ async fn generation_rotation_after_resolve_before_dispatch_rejects_exact_target(
                 now_timestamp()?
             )
             .is_err(),
-        "a renewed generation must not authorize a call prepared on the old one"
+        "historical authority validation must remain strict"
     );
-    let error = tokio::time::timeout(
+    let response = tokio::time::timeout(
         Duration::from_secs(5),
         complete_prepared_model_round(
             prepared,
@@ -4151,14 +4271,9 @@ async fn generation_rotation_after_resolve_before_dispatch_rejects_exact_target(
             ),
         ),
     )
-    .await?
-    .err()
-    .ok_or_else(|| std::io::Error::other("rotated qualified target dispatched"))?;
-    assert_eq!(error.kind(), ModelErrorKind::Authentication);
-    assert!(
-        inference.requests.lock().await.is_empty(),
-        "generation rotation after resolution must precede inference dispatch"
-    );
+    .await??;
+    assert_ne!(response.output(), []);
+    assert_eq!(inference.requests.lock().await.len(), 1);
     assert_eq!(auth.requests.lock().await.len(), 2);
     auth.shutdown().await?;
     inference.abort_join().await?;
@@ -4466,7 +4581,7 @@ async fn renewal_fails_closed_on_changed_model_semantics_or_account_without_disp
         Arc::clone(&model)
             .revalidate_runtime_authority(now_timestamp()?)
             .await,
-        Err(RuntimeModelAuthorityError::ForeignAuthority)
+        Err(RuntimeModelAuthorityError::AccountChanged)
     ));
     assert!(
         prepare_model_call(
@@ -7436,21 +7551,36 @@ async fn a_waiter_behind_a_failed_renewal_keeps_its_floor() -> TestResult {
     let renewer_checked_at = Timestamp::new(admitted_at.seconds() + 6, 500_000_000)?;
     let waiter_checked_at = Timestamp::new(admitted_at.seconds() + 4, 250_000_000)?;
     // A renewal is single-attempt even on a transient failure.
-    auth.responses
-        .send(raw_response(
-            "503 Service Unavailable",
-            "application/json",
-            "{}",
-        ))
-        .await?;
+    let (mut failure, release_failure) = gated_response(&json!({}));
+    failure.status = "503 Service Unavailable";
+    auth.responses.send(failure).await?;
     enqueue_admitted_catalog(&auth).await?;
-    let (renewer, waiter) = tokio::time::timeout(Duration::from_secs(5), async {
-        tokio::join!(
-            Arc::clone(&model).revalidate_runtime_authority(renewer_checked_at),
-            Arc::clone(&model).revalidate_runtime_authority(waiter_checked_at),
-        )
+    let renewing = Arc::clone(&model);
+    let renewer = tokio::spawn(async move {
+        renewing
+            .revalidate_runtime_authority(renewer_checked_at)
+            .await
+    });
+    wait_until_request_count(&auth, 2).await?;
+    let waiting = Arc::clone(&model);
+    let waiter = tokio::spawn(async move {
+        waiting
+            .revalidate_runtime_authority(waiter_checked_at)
+            .await
+    });
+    // Blocking-pool probes need not complete in invocation order. Keep the
+    // first catalog response gated until the earlier check really queued.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while model.renewal_floor_for_test() != Some(waiter_checked_at) {
+            tokio::task::yield_now().await;
+        }
     })
     .await?;
+    release_failure
+        .send(())
+        .map_err(|()| std::io::Error::other("renewal gate closed"))?;
+    let renewer = tokio::time::timeout(Duration::from_secs(5), renewer).await??;
+    let waiter = tokio::time::timeout(Duration::from_secs(5), waiter).await??;
     assert!(
         renewer.is_err(),
         "the renewer's catalog failed: {renewer:?}"

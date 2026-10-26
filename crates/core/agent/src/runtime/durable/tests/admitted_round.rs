@@ -87,11 +87,10 @@ fn round_attempts(model: &ArtifactModel, from: usize) -> Vec<AttemptId> {
 }
 
 /// A credential refreshed after the admission (fence (b)'s measurement here)
-/// would fail the admitted preparation's dispatch-time check; the round
-/// prepares afresh under the refreshed authority, keeping the admission's
-/// attempt, and dispatches.
+/// authorizes the same captured request without another preparation or attempt.
 #[tokio::test]
-async fn a_credential_refresh_after_the_admission_prepares_the_round_afresh() -> TestResult {
+async fn a_credential_refresh_after_the_admission_dispatches_the_same_prepared_round() -> TestResult
+{
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let (builder, model) = placeholder_fixture(
@@ -115,10 +114,10 @@ async fn a_credential_refresh_after_the_admission_prepares_the_round_afresh() ->
     assert!(lock_mutex(&model.refreshed_authority).is_some());
     assert_eq!(model.calls.load(Ordering::Acquire), 2);
     let rounds = round_attempts(&model, 0);
-    // Round one, the admission, and round two under the refreshed authority.
-    assert_eq!(rounds.len(), 3, "{rounds:?}");
-    assert_eq!(rounds[1], rounds[2]);
-    assert!(lock_mutex(&model.prepared_attempts).contains(&(rounds[2], 2)));
+    assert_eq!(rounds.len(), 2, "{rounds:?}");
+    // Two model rounds and the tool-group scheduling measurement.
+    assert_eq!(model.prepares.load(Ordering::Acquire), 3);
+    assert!(lock_mutex(&model.prepared_attempts).contains(&(rounds[1], 1)));
     agent.shutdown().await?;
     Ok(())
 }

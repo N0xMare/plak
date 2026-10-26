@@ -1786,6 +1786,13 @@ continues to the original answer. Its pilot requires native provenance with
 a protected current-round tool tail and exactly one compaction operation;
 it is not a harness-summary substitute. The fixture-only dial requires
 scheduled direct composition and an admitted context contract.
+`native_credential_wait_then_final` uses a test-owned readiness gate on the
+scripted model port, without native credential files. It becomes unavailable
+after preparation, publishes exactly one login wait and clear, then dispatches
+the captured request once after readiness and commits its answer. Its strict
+store-cut sweep covers Prepared undispatched recovery; an additional process
+test SIGKILLs the owner after observing the live wait, recovers one interrupted
+terminal, and proves the old request is never redispatched.
 Every lifecycle also has an absolute cap of ten step budgets (450 s), even
 when it continues producing progress. Pilots that expect success fail as soon
 as an `error` terminal or failed `turn_lifecycle` record appears. Cut runs and
@@ -2528,7 +2535,7 @@ rule whose ordinal it is wins.
 
 | `fault=` | Effect | What a classifier sees |
 | --- | --- | --- |
-| `401`, `429`, `500`, `502`, `503`, `529` | An in-memory HTTP/1.1 peer answers; nothing is resolved, connected or sent upstream. `retry-after=<s>` adds that header | That status, `content-type: application/json`, `x-plak-injected-fault`, and a body both error dialects read: `{"type":"error","error":{"type":…,"code":…,"message":…}}`, with `overloaded_error` for `529`, `rate_limit_error` for `429` and `authentication_error` for `401` |
+| `400`, `401`, `429`, `500`, `502`, `503`, `529` | An in-memory HTTP/1.1 peer answers; nothing is resolved, connected or sent upstream. `retry-after=<s>` adds that header | That status, `content-type: application/json`, `x-plak-injected-fault`, and a body both error dialects read: `{"type":"error","error":{"type":…,"code":…,"message":…}}`, with `overloaded_error` for `529`, `rate_limit_error` for `429` and `authentication_error` for `401`. A token-path `400` exercises rejected refresh and credential parking without a live auth endpoint |
 | `xai-refusal` | The same in-memory peer | HTTP 403, `x-plak-injected-fault: 403`, and xAI's pre-generation usage-guideline refusal body `{"code":"permission-denied","error":"I'm sorry, I can't help with that request."}` |
 | `connect` | The exchange fails before resolution | `Failure(Connect, NotStarted, Io)`, as for a refused connection |
 | `write-reset` | The exchange fails before resolution | `Failure(RequestWriteOrResponseHead, RequestIncomplete, Protocol)`, as for a peer that resets the connection while the request body is being written |

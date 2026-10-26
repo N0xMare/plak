@@ -27,6 +27,7 @@ mod command_retention;
 mod composition_steer_tests;
 #[path = "../content_filter_tests.rs"]
 mod content_filter_tests;
+mod credential_wait_recovery;
 mod driver_live_paths;
 mod driver_reliability;
 #[path = "../feed_fact_tests.rs"]

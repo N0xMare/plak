@@ -13,7 +13,7 @@
 //! | `host=<host>` | Only requests to this origin host (any host when absent) |
 //! | `path=<prefix>` | Only requests whose path and query start with this |
 //! | `nth=<n>` | Only the n-th matching request, counting from 1 (every one when absent) |
-//! | `fault=<kind>` | `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
+//! | `fault=<kind>` | `400`, `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
 //! | `retry-after=<secs>` | Status faults: send this `Retry-After` |
 //! | `after-events=<n>` / `after-bytes=<n>` | Stream faults: deliver this many SSE events (comment-only blocks such as keep-alives do not count) or bytes of the body first |
 //! | `seconds=<secs>` | `stall`: how long the body goes silent |
@@ -243,7 +243,7 @@ fn parse_rule(rule: &str) -> Result<Rule, String> {
     }
     let kind = kind.ok_or("`fault` is required")?;
     let fault = match kind {
-        "401" | "429" | "500" | "502" | "503" | "529" => Fault::Status {
+        "400" | "401" | "429" | "500" | "502" | "503" | "529" => Fault::Status {
             status: kind.parse().map_err(|_| "status")?,
             retry_after,
         },
@@ -436,6 +436,7 @@ fn status_reply(status: u16, retry_after: Option<u64>) -> Vec<u8> {
         dialect_error_body(status)
     };
     let reason = match status {
+        400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
         429 => "Too Many Requests",

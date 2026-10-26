@@ -232,6 +232,9 @@ impl App {
         if self.phase == "interrupting" {
             return Some("cancelling…".to_owned());
         }
+        if let Some(account) = &self.credential_wait {
+            return Some(format!("waiting for login: run `plak login {account}`"));
+        }
         if self.phase == "compacting" {
             return Some("compacting".to_owned());
         }

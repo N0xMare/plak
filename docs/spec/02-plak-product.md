@@ -3001,7 +3001,7 @@ are both refused with a named message.
 **Correlation.** A command's `id` is echoed on the events it caused. Turn-scoped
 events — `status`, `busy`, `assistant`, `assistant_done`, `model_refusal`, `tool`, `queue`,
 `turn`, `turn_lifecycle`, `reasoning`, `approval`, `approval_resolved`, `steer_ack`,
-`model_request_queued` — carry the
+`model_request_queued`, `credential_wait` — carry the
 proven originating prompt's id, and otherwise omit it. Operator `invoke_tool`
 observations instead carry the originating invocation's command id, bound to
 the host-generated call UUID by an explicit in-process provenance receipt;
@@ -3117,6 +3117,7 @@ closes. This does not change the v1 command or event encoding.
 | `approval` / `approval_resolved` | the decision's id, name, expiry, subject and prompt; then its resolution |
 | `steer_ack` | `state`, optional `position` |
 | `model_request_queued` | `account` — the root's next model request waits for a slot in that account's request budget (chapter 03 §10.4); the request proceeds when one frees |
+| `credential_wait` | nullable `account` — a native login wait starts for this account, or clears when null; carries the originating turn-scoped command `id` when proven (idle workflow waits omit it) |
 | `queue` | `drain` ∈ `live_auto_drain` \| `restored_paused`, and `items[]` of `{id, revision, text, rejected}` |
 | `turn` | terminal usage: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cached_input_tokens`, `cache_write_tokens` |
 | `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status` |
@@ -4361,6 +4362,7 @@ bottom border is a plain line. HUD vocabulary, highest priority first:
 | Idle, no pending indicator, product-home capacity refused (§2.2) | `storage low · new turns refused` |
 | Idle, no pending indicator, product-home capacity warning (§2.2) | `storage warning · plak doctor` |
 | Stop in progress | `cancelling…` |
+| Native credential unavailable before send | ``waiting for login: run `plak login <provider>` `` |
 | Compaction | spinner + `compacting` + elapsed |
 | Provider retry | spinner + `retrying Xs (n/N)`; cause in the transcript |
 | Running tool | spinner + `running command`, `editing`, `reading` (also web fetches), `searching` (also web and X searches), `waiting`, `waiting on agents`, or `calling mcp:<server>` for a tool exposed as `mcp__<server>__<tool>`, plus elapsed |
@@ -4374,6 +4376,12 @@ replace work: `error: <short reason>` in the error colour, `interrupted`, or
 `switching model…`. Codex does not expose thought blocks (§9), so its busy
 fallback is waiting for the model. The HUD never carries a tool subject,
 stream-token badge, stop button, duplicate turn clock, or send-now sentence.
+`CredentialWait { account }` is a live host
+observation (`credential_wait` in JSONL); `None` clears it without terminalizing
+the turn. The named login command is a live `settings` notice, not persisted
+recovery authority. The host observes root waits through the turn event stream
+and idle compaction waits through the agent's read-only live wait scope. Operator
+interruption also ends an idle compaction's credential wait.
 The waiting-for-model clock starts at each host-observed model request dispatch,
 not at the turn, last tool, or compaction phase start. The typed
 `ModelRequestStarted` observation is presentation-only and omitted from JSONL.

@@ -1268,7 +1268,7 @@ impl Driver {
         let plan = self.validate_round_request(&descriptor, request)?;
         let (active_family_artifact, cache_affinity) =
             self.pending_model_preparation_state(artifact_transition)?;
-        let prepared = self
+        let (prepared, prepared_at) = self
             .prepare_round_call(
                 &descriptor,
                 &plan,

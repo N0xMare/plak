@@ -31,7 +31,7 @@ mod recovery;
 
 pub use authority::{
     MAX_RUNTIME_ADMISSION_WITNESS_BYTES, RuntimeAdmissionWitness, RuntimeModelAuthority,
-    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation,
+    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, RuntimeModelAuthorityWaitOperation,
 };
 pub use cancellation::{CancellationFuture, CancellationToken};
 pub use family_artifact::{
@@ -294,6 +294,16 @@ pub trait LanguageModel: Send + Sync + 'static {
         self: Arc<Self>,
         _checked_at: Timestamp,
     ) -> RuntimeModelAuthorityOperation {
+        Box::pin(async { Err(RuntimeModelAuthorityError::Unavailable) })
+    }
+
+    /// Waits until this exact route's credential permits another authority check.
+    ///
+    /// Only `AwaitingCredential` authorizes this wait. It grants no dispatch
+    /// authority: callers must revalidate again afterwards. Dropping the future
+    /// cancels the wait, not an independently owned credential refresh.
+    /// API-key and custom routes do not wait by default.
+    fn wait_for_runtime_authority(self: Arc<Self>) -> RuntimeModelAuthorityWaitOperation {
         Box::pin(async { Err(RuntimeModelAuthorityError::Unavailable) })
     }
 

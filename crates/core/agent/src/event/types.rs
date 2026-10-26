@@ -1235,6 +1235,11 @@ pub enum AgentEventKind {
         /// The host-supplied label of the budget the request waits on.
         slots: String,
     },
+    /// An undispatched request is waiting for the selected credential.
+    ModelCredentialWait {
+        /// True while parked; false when readiness, cancellation or shutdown ends it.
+        waiting: bool,
+    },
     /// The turn spent its model-operation budget and is wrapping up.
     ///
     /// Published when the runtime injects its budget note and before the one
@@ -1542,6 +1547,9 @@ impl AgentEventKind {
             Self::ModelRequestQueued { slots } => Self::ModelRequestQueued {
                 slots: slots.clone(),
             },
+            Self::ModelCredentialWait { waiting } => {
+                Self::ModelCredentialWait { waiting: *waiting }
+            }
             Self::OutputLimitRetry { bound } => Self::OutputLimitRetry { bound: *bound },
             Self::ToolResultsReplaced {
                 results,
@@ -1700,6 +1708,7 @@ impl AgentEventKind {
             | Self::SteeringQueued { .. }
             | Self::SteeringApplied
             | Self::OperationBudgetExhausted
+            | Self::ModelCredentialWait { .. }
             | Self::OutputLimitRetry { .. }
             | Self::ToolResultsReplaced { .. }
             | Self::ConversationCommitted { items: None, .. }
@@ -2001,6 +2010,9 @@ impl fmt::Debug for AgentEventKind {
             Self::ModelRequestQueued { slots } => event
                 .field("kind", &"model_request_queued")
                 .field("slots", slots),
+            Self::ModelCredentialWait { waiting } => event
+                .field("kind", &"model_credential_wait")
+                .field("waiting", waiting),
             Self::OutputLimitRetry { bound } => event
                 .field("kind", &"output_limit_retry")
                 .field("bound", bound),
@@ -2253,6 +2265,7 @@ impl AgentEvent {
             | AgentEventKind::SteeringApplied
             | AgentEventKind::OperationBudgetExhausted
             | AgentEventKind::ModelRequestQueued { .. }
+            | AgentEventKind::ModelCredentialWait { .. }
             | AgentEventKind::OutputLimitRetry { .. }
             | AgentEventKind::ToolResultsReplaced { .. }
             | AgentEventKind::ObservationClipped { .. }
@@ -2445,6 +2458,7 @@ pub(super) fn event_metadata(kind: &AgentEventKind) -> (EventOrigin, DataClassif
         // Counts, budgets and tool names only: agent-owned and public.
         AgentEventKind::OperationBudgetExhausted
         | AgentEventKind::ModelRequestQueued { .. }
+        | AgentEventKind::ModelCredentialWait { .. }
         | AgentEventKind::OutputLimitRetry { .. }
         | AgentEventKind::ToolResultsReplaced { .. }
         | AgentEventKind::ObservationClipped { .. }

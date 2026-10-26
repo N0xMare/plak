@@ -2675,6 +2675,19 @@ authority. The context-occupancy meter is untouched by any of this.
 
 ### 10.4 Per-account request budget
 
+A child waiting for a native credential remains running in the same attempt.
+The Agents activity says `waiting for login: run plak login <account>` (with
+command formatting). The live transcript notice includes that command when
+the account is already known, or says `waiting for login` otherwise. No
+per-face reducer is created: the admission-owned hosted turn projection reduces
+the wait once, and faces share its progress and retained updates. The tree's
+account label supplies the snapshot login remedy, never dispatch authority;
+labelling a snapshot never rewrites an already-retained update. No
+failed terminal or transient-resume attempt is manufactured. Result-mail wakes
+continue through the normal queue while a root waits. Readiness resumes the
+same undispatched request; cancellation/shutdown and different-account refusal
+use the ordinary single-terminal paths (chapter 01 §5.4).
+
 Every session the process builds — the root and every descendant — draws its
 model requests from one budget per account, sized by the home-scoped
 `[orchestration] max_concurrent_requests_per_account` (1–64, default 8; read
@@ -2687,6 +2700,10 @@ line, and a `model.request_queued` session-log event), and proceeds when a
 slot frees. Interrupt, close, shutdown and a lost lease end the wait without
 taking a slot. A request never holds a slot while its tools run, so a
 parent waiting on its children cannot starve them.
+
+A credential wait also relinquishes its slot and reacquires it in FIFO order
+after readiness. Neither credential nor slot waiting spends the request's
+operation deadline, and compaction uses the same rules.
 
 ## 11. Code Mode cells and the per-cell budget
 

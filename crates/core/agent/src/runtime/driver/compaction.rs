@@ -3,7 +3,7 @@
 use crate::runtime::PromptCommand;
 use crate::runtime::compaction::record::compaction_checkpoint_id;
 use crate::runtime::compaction::request::{
-    compact_runtime_endpoint_error, exact_compaction_runtime,
+    admitted_compaction_runtime, compact_runtime_endpoint_error,
 };
 use crate::runtime::compaction::{
     CompactOrigin, DurableCompactionIdentity, ExactCompactionRuntime,
@@ -14,9 +14,10 @@ use crate::runtime::observation::{
     compaction_event_reason, compaction_session_event_outcome, compaction_telemetry_tokens,
 };
 use crate::{
-    AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentError, AgentSessionEndpointError,
-    CompactionEventOutcome, ContextEvaluationAudit, DurableOperationKind, DurableOperationRecord,
-    DurableOperationState, RuntimeCheckpoint, RuntimeLifecycle, TelemetryObservationKind,
+    AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentError, AgentErrorKind,
+    AgentSessionEndpointError, CompactionEventOutcome, ContextEvaluationAudit,
+    DurableOperationKind, DurableOperationRecord, DurableOperationState, RuntimeCheckpoint,
+    RuntimeLifecycle, TelemetryObservationKind,
 };
 use plakous_model::{
     ContextStatus, ContextStatusKind, ConversationView, Digest, ModelCacheAffinity, ModelError,
@@ -225,14 +226,9 @@ impl Driver {
         origin: CompactOrigin,
         committed_detail: &mut CompactionDetail,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
-        let mut request = request;
-        let source = DurableSessionAddress::new(
-            request.session_id,
-            request.branch_id,
-            request.checkpoint_id,
-        );
-        let identity = DurableCompactionIdentity::new(&request.operation_id, source)
-            .map_err(|_| AgentSessionEndpointError::InvalidInput)?;
+        if self.compaction_in_flight {
+            return Err(AgentSessionEndpointError::Busy);
+        }
         let checkpoint = self.authority.checkpoint();
         let topology = checkpoint.manifest().topology();
         if (
@@ -246,9 +242,6 @@ impl Driver {
                 branch_id: topology.branch_id,
                 checkpoint_id: topology.checkpoint_id,
             });
-        }
-        if self.compaction_in_flight {
-            return Err(AgentSessionEndpointError::Busy);
         }
         let working_empty = checkpoint
             .manifest()
@@ -276,6 +269,29 @@ impl Driver {
         if busy {
             return Err(AgentSessionEndpointError::Busy);
         }
+        self.compaction_in_flight = true;
+        let outcome =
+            Box::pin(self.compact_session_admitted(active, request, origin, committed_detail))
+                .await;
+        self.compaction_in_flight = false;
+        outcome
+    }
+
+    async fn compact_session_admitted(
+        &mut self,
+        active: Option<&PromptCommand>,
+        mut request: AgentCompactSessionRequest,
+        origin: CompactOrigin,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        let checkpoint = self.authority.checkpoint();
+        let source = DurableSessionAddress::new(
+            request.session_id,
+            request.branch_id,
+            request.checkpoint_id,
+        );
+        let identity = DurableCompactionIdentity::new(&request.operation_id, source)
+            .map_err(|_| AgentSessionEndpointError::InvalidInput)?;
         let runtime = match (origin, request.runtime.take()) {
             (CompactOrigin::TurnFence { .. }, None) => ExactCompactionRuntime {
                 model: Arc::clone(&self.model),
@@ -284,13 +300,41 @@ impl Driver {
                 model_operation_timeout: self.config.model_operation_timeout,
             },
             (CompactOrigin::Endpoint, Some(builder)) => {
-                exact_compaction_runtime(builder, &checkpoint, self.run_id)
+                let (authority, checked_at) = self
+                    .request_authority(Arc::clone(&builder.model), builder.clock.now())
                     .await
+                    .map_err(|error| compact_runtime_endpoint_error(&error))?;
+                crate::runtime::admission::validate_configuration_runtime_authority(
+                    &builder.provider_configuration,
+                    builder.provider_configuration.effective().descriptor(),
+                    &authority,
+                    checked_at,
+                )
+                .map_err(|error| {
+                    compact_runtime_endpoint_error(&AgentError::new(
+                        AgentErrorKind::InvalidInput,
+                        error.to_string(),
+                    ))
+                })?;
+                let current = self.authority.checkpoint();
+                let topology = current.manifest().topology();
+                if current.id() != checkpoint.id() {
+                    return Err(AgentSessionEndpointError::Stale {
+                        session_id: topology.session_id,
+                        branch_id: topology.branch_id,
+                        checkpoint_id: topology.checkpoint_id,
+                    });
+                }
+                if self.active_root.is_some()
+                    || !matches!(current.manifest().lifecycle(), RuntimeLifecycle::Quiescent)
+                {
+                    return Err(AgentSessionEndpointError::Busy);
+                }
+                admitted_compaction_runtime(builder, &current)
                     .map_err(|error| compact_runtime_endpoint_error(&error))?
             }
             _ => return Err(AgentSessionEndpointError::InvalidInput),
         };
-        self.compaction_in_flight = true;
         let compaction_reason = compaction_event_reason(request.reason);
         let compaction_turn_id = active.map(|command| command.turn_id);
         let compaction_context = self.telemetry_context_for_turn(compaction_turn_id);
@@ -313,7 +357,6 @@ impl Driver {
             committed_detail,
         ))
         .await;
-        self.compaction_in_flight = false;
         let compaction_elapsed = compaction_started.elapsed();
         if matches!(outcome, Ok(AgentCompactSessionOutcome::Compacted { .. })) {
             // A successor is a different request prefix: nothing the provider

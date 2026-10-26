@@ -125,6 +125,13 @@ impl ChildObservers {
         let Some(children) = running_children(runtime) else {
             return;
         };
+        let _ = runtime.try_read(|tree| {
+            for (id, _, _, observation) in &children {
+                if let Ok(node) = tree.node(id) {
+                    observation.set_login_account(&node.account);
+                }
+            }
+        });
         self.sync_children(children);
     }
 
@@ -295,7 +302,14 @@ impl ChildObservers {
             return;
         }
         let task_tools = runtime
-            .read(|tree| node_presents_task_tools(tree, agent_id))
+            .read(|tree| {
+                if let Some((_, _, observation)) = &live
+                    && let Ok(node) = tree.node(agent_id)
+                {
+                    observation.set_login_account(&node.account);
+                }
+                node_presents_task_tools(tree, agent_id)
+            })
             .unwrap_or(false);
         self.start_agent_view(
             task_tools, session_id, agent_id, locator, sessions, live, events,
@@ -680,6 +694,12 @@ pub(super) fn transcript_ops(
         .progress
         .observe(event.kind(), event.attempt_id().zip(event.call_id()));
     match event.kind() {
+        AgentEventKind::ModelCredentialWait { waiting: true } => {
+            ops.push(HostEvent::Row(TranscriptRow::info(
+                NoticeScope::Settings,
+                projection.progress.login_notice(),
+            )));
+        }
         AgentEventKind::Model {
             event: Some(model), ..
         } => match model.as_ref() {

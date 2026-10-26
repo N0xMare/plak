@@ -2872,20 +2872,20 @@ async fn runtime_authority_is_exact_redacted_and_rejects_account_generation_and_
             .await,
         Err(RuntimeModelAuthorityError::Stale)
     );
-    // A changed account or a new login is never renewed into.
+    // A changed selection is refused; a new login requires the explicit wait.
     manager.install_selected_account(AccountBinding::new("account-runtime-authority-drift")?)?;
     assert_eq!(
         Arc::clone(&model)
             .revalidate_runtime_authority(observed_at)
             .await,
-        Err(RuntimeModelAuthorityError::ForeignAuthority)
+        Err(RuntimeModelAuthorityError::AccountChanged)
     );
     manager.install_selected_account(AccountBinding::new(account)?)?;
     let rotated = externally_replace_ready_generation(&slot, account, "runtime-authority")?;
     assert_eq!(rotated.generation().get(), 2);
     assert_eq!(
         model.revalidate_runtime_authority(observed_at).await,
-        Err(RuntimeModelAuthorityError::ForeignAuthority)
+        Err(RuntimeModelAuthorityError::AwaitingCredential)
     );
     drop(directory);
     Ok(())
@@ -6837,7 +6837,7 @@ async fn a_token_entering_its_refresh_lead_mid_turn_renews_with_one_claimed_refr
 }
 
 #[tokio::test]
-async fn a_new_login_fails_the_running_receipt_closed_before_any_dispatch() -> TestResult {
+async fn a_new_login_waits_or_refuses_a_different_account_before_any_dispatch() -> TestResult {
     for (marker, account) in [
         ("same-account", "renew-relogin-account"),
         ("other-account", "renew-relogin-foreign"),
@@ -6865,7 +6865,11 @@ async fn a_new_login_fails_the_running_receipt_closed_before_any_dispatch() -> T
             .ok_or("a new login renewed the running receipt")?;
         assert_eq!(
             error,
-            RuntimeModelAuthorityError::ForeignAuthority,
+            if marker == "same-account" {
+                RuntimeModelAuthorityError::AwaitingCredential
+            } else {
+                RuntimeModelAuthorityError::AccountChanged
+            },
             "{marker}"
         );
         let run = run_text(
@@ -6887,6 +6891,161 @@ async fn a_new_login_fails_the_running_receipt_closed_before_any_dispatch() -> T
             0
         );
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn credential_wait_renews_same_account_login_but_refuses_a_different_account() -> TestResult {
+    for different in [false, true] {
+        let replies = if different {
+            Vec::new()
+        } else {
+            vec![catalog_reply()?]
+        };
+        let (fixture, _, server) = renew_fixture(
+            "wait-login-account",
+            "wait-login-subject",
+            now_unix_secs() + 3_600,
+            0,
+            replies,
+        )
+        .await?;
+        let before = Arc::clone(&fixture.model)
+            .revalidate_runtime_authority(review_timestamp())
+            .await?;
+        fixture.manager.store.logout_local()?;
+        let waiting_model = Arc::clone(&fixture.model);
+        let mut waiters = tokio::spawn(async move {
+            tokio::join!(
+                Arc::clone(&waiting_model).wait_for_runtime_authority(),
+                waiting_model.wait_for_runtime_authority(),
+            )
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut waiters)
+                .await
+                .is_err(),
+            "unchanged unavailable credentials must remain parked"
+        );
+        let account = if different {
+            "wait-login-other"
+        } else {
+            "wait-login-account"
+        };
+        fixture
+            .manager
+            .commit_login(
+                relogin_credential(account, "wait-login")?,
+                fixture.manager.store.load()?,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await?;
+        let (result, peer_result) = tokio::time::timeout(Duration::from_secs(5), waiters).await??;
+        assert_eq!(
+            result, peer_result,
+            "concurrent waiters share one renewed target"
+        );
+        if different {
+            assert_eq!(result, Err(RuntimeModelAuthorityError::AccountChanged));
+        } else {
+            result?;
+            let after = Arc::clone(&fixture.model)
+                .revalidate_runtime_authority(review_timestamp())
+                .await?;
+            assert_eq!(before.account_binding(), after.account_binding());
+            assert_eq!(
+                before.credential_authority_binding(),
+                after.credential_authority_binding()
+            );
+            assert!(after.credential_generation() > before.credential_generation());
+            assert!(after.observed_at() >= before.observed_at());
+        }
+        let (requests, unexpected) = server.await??;
+        assert_eq!(
+            request_kinds(&requests),
+            if different {
+                vec!["catalog"]
+            } else {
+                vec!["catalog", "catalog"]
+            }
+        );
+        assert!(!unexpected);
+        assert_eq!(
+            dispatched(&fixture.gate, SubscriptionRequestClass::Inference)?,
+            0
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn prepared_call_after_login_wait_uses_renewed_service_and_exact_wire_once() -> TestResult {
+    let (fixture, _, server) = renew_fixture(
+        "prepared-login-account",
+        "prepared-login-subject",
+        now_unix_secs() + 3_600,
+        0,
+        vec![catalog_reply()?, inference_reply()],
+    )
+    .await?;
+    let attempt = "00000000-0000-7000-8000-000000000599";
+    let request = text_request(attempt)?;
+    let now = request.metadata().created_at();
+    let plan = fixture
+        .descriptor
+        .validate_request(request, ValidationMode::Strict)?;
+    let before = Arc::clone(&fixture.model)
+        .revalidate_runtime_authority(now)
+        .await?;
+    let prepared =
+        Arc::clone(&fixture.model).prepare_call(plan.clone(), preparation_context(before, now)?)?;
+    let identity = prepared.record().identity();
+    fixture
+        .manager
+        .commit_login(
+            relogin_credential("prepared-login-account", "prepared-login-new")?,
+            fixture.manager.store.load()?,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .await?;
+    assert_eq!(
+        Arc::clone(&fixture.model)
+            .revalidate_runtime_authority(now)
+            .await,
+        Err(RuntimeModelAuthorityError::AwaitingCredential)
+    );
+    Arc::clone(&fixture.model)
+        .wait_for_runtime_authority()
+        .await?;
+    let authority = Arc::clone(&fixture.model)
+        .revalidate_runtime_authority(now)
+        .await?;
+    prepared
+        .record()
+        .revalidate_first_dispatch(&fixture.descriptor, &plan, &authority, now)?;
+    assert_eq!(prepared.record().identity(), identity);
+    let response = collect_terminal_model_stream(
+        prepared
+            .start(ModelCallContext::new(
+                attempt.parse()?,
+                plakous_model::CancellationToken::new(),
+                None,
+            ))
+            .await?,
+        plan.digest(),
+    )
+    .await?;
+    assert_ne!(response.output(), []);
+    let (requests, unexpected) = server.await??;
+    assert_eq!(
+        request_kinds(&requests),
+        ["catalog", "catalog", "inference"]
+    );
+    assert!(!unexpected);
+    assert_eq!(
+        dispatched(&fixture.gate, SubscriptionRequestClass::Inference)?,
+        1
+    );
     Ok(())
 }
 
@@ -7431,7 +7590,7 @@ async fn a_renewal_restores_another_login_found_under_its_claim() -> TestResult 
         .await;
     assert_eq!(
         result.err(),
-        Some(RuntimeModelAuthorityError::ForeignAuthority)
+        Some(RuntimeModelAuthorityError::AwaitingCredential)
     );
     let (requests, unexpected) = server.await??;
     assert_eq!(request_kinds(&requests), ["catalog"]);
@@ -7439,7 +7598,7 @@ async fn a_renewal_restores_another_login_found_under_its_claim() -> TestResult 
     let after = slot_store(&fixture.slot)?.load()?.ok_or("gone")?;
     assert_eq!(after.status(), CredentialStatus::RefreshRequired);
     assert_eq!(after.account_binding(), replaced.account_binding());
-    assert!(after.generation() > replaced.generation());
+    assert_eq!(after.generation(), replaced.generation());
     Ok(())
 }
 
