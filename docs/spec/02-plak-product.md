@@ -340,10 +340,15 @@ Quit releases the runtime cleanly even if final product projection remains
 storage-unavailable. Root Esc affects only the attached root's storage wait;
 child waits observe their own cancellation or latched process shutdown.
 
-When composing cleanup or release failures, CLI rendering prints an identical
-semicolon-separated leaf cause once and uses `[same cause]` at later stages.
-Ordinary value-shaped diagnostics, such as expected and actual revisions,
-are unchanged. Stage labels, distinct causes, typed
+When composing cleanup or release failures, CLI rendering compresses repeated
+semicolon-separated leaf causes with `[same cause]` at later stages.
+Reopen/recovery failures are compressed on entry to CLI rendering too, even
+when no later cleanup failure is appended. Identical repeated clauses are
+omitted, including chains already embedded by nested cleanup; remedies remain.
+If two distinct clauses compress to the same label, the later clause remains
+uncompressed so its stage and cause are not lost. Numeric, boolean and null
+leaves are not compressed, so value pairs such as expected and actual
+revisions are unchanged. Stage labels, distinct causes, typed
 sources, shutdown evidence and exit categories are retained. This is display
 compression, not classification by prose or a change to recovery authority.
 

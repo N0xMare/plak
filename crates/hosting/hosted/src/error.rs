@@ -179,7 +179,7 @@ impl std::fmt::Display for CliFailure {
 }
 impl From<plakous::sessions::AgentSessionsError> for CliFailure {
     fn from(error: plakous::sessions::AgentSessionsError) -> Self {
-        let mut failure = Self::new(error.to_string());
+        let mut failure = Self::new(collapse_repeated_causes(&error.to_string()));
         failure.source = Some(Box::new(LookupFailure::Recovery(error)));
         failure
     }
@@ -251,7 +251,10 @@ impl CliFailure {
 
     /// Failure that requires explicit operator recovery (no silent bootstrap).
     pub fn recovery_required(message: impl Into<String>) -> Self {
-        Self::classified(CliFailureKind::RecoveryRequired, message)
+        Self::classified(
+            CliFailureKind::RecoveryRequired,
+            collapse_repeated_causes(&message.into()),
+        )
     }
 
     /// True when this failure is an explicit recovery-required product failure.
@@ -334,26 +337,35 @@ impl CliFailure {
 
 /// Keep every stage, but print an identical leaf cause only once. This is
 /// presentation only: the failure kind, typed source and shutdown parts stay intact.
-fn collapse_repeated_causes(message: &str) -> String {
-    let mut causes = Vec::new();
-    message
-        .split("; ")
-        .map(|clause| {
-            let (stage, cause) = clause
-                .rsplit_once(": ")
-                .map_or((None, clause), |(stage, cause)| (Some(stage), cause));
-            if !cause.is_empty() && causes.contains(&cause) {
-                stage.map_or_else(
-                    || "[same cause]".to_owned(),
-                    |stage| format!("{stage}: [same cause]"),
-                )
-            } else {
-                causes.push(cause);
-                clause.to_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
+pub(crate) fn collapse_repeated_causes(message: &str) -> String {
+    let mut leaves = Vec::new();
+    let mut originals = Vec::new();
+    let mut output = Vec::new();
+    for clause in message.split("; ") {
+        if originals.contains(&clause) {
+            continue;
+        }
+        originals.push(clause);
+        let (stage, reason) = clause
+            .rsplit_once(": ")
+            .map_or((None, clause), |(stage, cause)| (Some(stage), cause));
+        let scalar = reason.parse::<f64>().is_ok() || matches!(reason, "true" | "false" | "null");
+        let compressed = if !reason.is_empty() && !scalar && leaves.contains(&reason) {
+            stage.map_or_else(
+                || "[same cause]".to_owned(),
+                |stage| format!("{stage}: [same cause]"),
+            )
+        } else {
+            leaves.push(reason);
+            clause.to_owned()
+        };
+        if output.contains(&compressed) {
+            output.push(clause.to_owned());
+        } else {
+            output.push(compressed);
+        }
+    }
+    output.join("; ")
 }
 
 impl From<&'static str> for CliFailure {
@@ -411,6 +423,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reopen_normalizes_a_nested_repeated_chain_before_cleanup_is_added() {
+        let chain = "initiating Session failure: session store disk is full; cleanup disposition: initiating Session failure: session store disk is full";
+        let message = format!(
+            "reopen failed: {chain}; cleanup disposition: {chain}; {chain}; remedy: free disk space and retry"
+        );
+        let failure = CliFailure::recovery_required(message).with_context("resume");
+        assert_eq!(
+            failure
+                .message()
+                .matches("session store disk is full")
+                .count(),
+            1
+        );
+        assert_eq!(
+            failure
+                .message()
+                .matches("cleanup disposition: initiating Session failure: [same cause]")
+                .count(),
+            1
+        );
+        assert!(
+            failure
+                .message()
+                .ends_with("remedy: free disk space and retry")
+        );
+        assert_eq!(
+            collapse_repeated_causes(failure.message()),
+            failure.message()
+        );
+        assert_eq!(failure.exit_code(), 5);
+    }
+
+    #[test]
     fn repeated_causes_keep_all_stages_and_the_failure_category() {
         let failure = CliFailure::classified(
             CliFailureKind::RecoveryRequired,
@@ -434,6 +479,7 @@ mod tests {
     fn distinct_causes_and_nested_context_are_not_dropped() {
         let values = "expected revision: 3; actual revision: 3";
         assert_eq!(CliFailure::new(values).message(), values);
+        assert_eq!(CliFailure::recovery_required(values).message(), values);
         let message = "open: database full; cleanup: permission denied; release: lease lost";
         assert_eq!(CliFailure::new(message).message(), message);
         let failure =
@@ -442,6 +488,23 @@ mod tests {
             failure.message(),
             "open: database full; release: [same cause]"
         );
+    }
+
+    #[test]
+    fn compressed_collisions_preserve_distinct_original_stages() {
+        for (message, expected) in [
+            (
+                "open: disk full; release: lease lost; cleanup disposition: disk full; cleanup disposition: lease lost",
+                "open: disk full; release: lease lost; cleanup disposition: [same cause]; cleanup disposition: lease lost",
+            ),
+            (
+                "initiating Session failure: disk full; cleanup disposition: lease lost; disk full; lease lost",
+                "initiating Session failure: disk full; cleanup disposition: lease lost; [same cause]; lease lost",
+            ),
+        ] {
+            assert_eq!(collapse_repeated_causes(message), expected);
+            assert_eq!(collapse_repeated_causes(expected), expected);
+        }
     }
 
     #[test]

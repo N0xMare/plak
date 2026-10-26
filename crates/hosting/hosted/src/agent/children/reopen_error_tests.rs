@@ -2,6 +2,18 @@ use super::*;
 use plakous::sessions::SessionBackend;
 
 #[test]
+fn reopen_formatter_collapses_nested_chains_without_hiding_the_distinct_refusal() {
+    let error = SessionOperationId::new("").unwrap_err();
+    let cause = "initiating Session failure: session store disk is full";
+    let prefix = format!(
+        "{cause}; cleanup disposition: {cause}; cleanup disposition: {cause}; exact session reopen failed"
+    );
+    let rendered = format_session_reopen_error(&prefix, &error);
+    assert_eq!(rendered.matches("session store disk is full").count(), 1);
+    assert!(rendered.contains(&error.to_string()));
+}
+
+#[test]
 fn an_incompatible_store_reads_as_the_one_incompatible_build_refusal() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("runtime.sqlite3");

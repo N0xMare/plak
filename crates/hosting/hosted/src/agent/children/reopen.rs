@@ -700,13 +700,14 @@ pub(in crate::agent) fn format_session_reopen_error(
     prefix: &str,
     error: &AgentSessionsError,
 ) -> String {
-    match error.kind() {
+    let message = match error.kind() {
         AgentSessionsErrorKind::IncompatibleBuild => incompatible_session_message(error),
         AgentSessionsErrorKind::Ownership => {
             format!("{prefix} (Ownership): {SESSION_LEASE_HOLD_HINT} {error}")
         }
         kind => format!("{prefix} ({kind:?}): {error}"),
-    }
+    };
+    crate::error::collapse_repeated_causes(&message)
 }
 
 /// The one refusal every surface prints for a session another build wrote.

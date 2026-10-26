@@ -40,15 +40,15 @@ impl From<CliFailure> for CodingSessionOpenFailure {
 
 impl From<AgentSessionsError> for CodingSessionOpenFailure {
     fn from(error: AgentSessionsError) -> Self {
+        let current_locator = error.current_locator();
+        let failure = if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
+            CliFailure::new(incompatible_session_message(&error))
+        } else {
+            CliFailure::from(error)
+        };
         Self {
-            failure: CliFailure::new(
-                if error.kind() == AgentSessionsErrorKind::IncompatibleBuild {
-                    incompatible_session_message(&error)
-                } else {
-                    error.to_string()
-                },
-            ),
-            current_locator: error.current_locator(),
+            failure,
+            current_locator,
         }
     }
 }
