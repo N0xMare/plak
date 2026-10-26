@@ -315,6 +315,16 @@ pub fn inspect(
             false
         });
     }
+    inspect_references(launch, worktrees, references, &registrations)?;
+    Ok(dirty)
+}
+
+fn inspect_references(
+    launch: &Path,
+    worktrees: &[PathBuf],
+    references: &[String],
+    registrations: &[u8],
+) -> Result<(), VcsError> {
     for reference in references {
         if !reference.starts_with("refs/heads/plak/") && !reference.starts_with("refs/plak/") {
             return Err(VcsError::mint_unavailable("refusing non-Plak reference"));
@@ -352,7 +362,7 @@ pub fn inspect(
             }
         }
     }
-    Ok(dirty)
+    Ok(())
 }
 
 /// Removes only the supplied owned artifacts. Dirty copies are retained even

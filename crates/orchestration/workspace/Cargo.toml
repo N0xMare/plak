@@ -19,9 +19,9 @@ class = "published-internal"
 neutral = true
 
 [package.metadata.plakous-lint]
+too-many-lines-ceiling = 3
 large-file-ceiling = 0
-crate-wide-allows = ["src/lib.rs:too_many_lines"]
-reason = "The occupancy split removed the large file. The crate-root too_many_lines allow remains."
+reason = "Three fixture-local exhaustive refusal and retention scenarios keep their shared before/after invariants together; production functions have no line-count allowances."
 
 [dependencies]
 plakous-host-protocol.workspace = true

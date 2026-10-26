@@ -18,7 +18,6 @@
     clippy::missing_panics_doc,
     clippy::must_use_candidate,
     clippy::map_unwrap_or,
-    clippy::too_many_lines,
     reason = "the set this crate actually trips"
 )]
 #![cfg_attr(

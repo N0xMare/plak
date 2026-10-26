@@ -209,6 +209,10 @@ fn jj_shim_refuses_nested_or_linked_workspace_discovery() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one exhaustive refusal table shares before/after repository and sibling invariants"
+)]
 fn jj_shim_refuses_repository_wide_operations() {
     if !jj_available() {
         return;
@@ -410,27 +414,7 @@ fn jj_shim_immutability_and_secret_auto_track() {
         .stdout,
         before
     );
-    let config = launch.path().join("aliases.toml");
-    std::fs::write(&config, "[aliases]\ndangerous-alias=['undo']\nb=['undo']\n").unwrap();
-    let denied = Command::new(&shim)
-        .arg("dangerous-alias")
-        .env("JJ_CONFIG", &config)
-        .current_dir(&child.path)
-        .output()
-        .unwrap();
-    assert_eq!(denied.status.code(), Some(1));
-    let safe = Command::new(&shim)
-        .args(["b", "list"])
-        .env("JJ_CONFIG", &config)
-        .current_dir(&child.path)
-        .output()
-        .unwrap();
-    assert!(
-        safe.status.success(),
-        "{}",
-        String::from_utf8_lossy(&safe.stderr)
-    );
-    std::fs::remove_file(config).unwrap();
+    assert_jj_aliases_fenced(launch.path(), &child.path, &shim);
     let root = String::from_utf8(
         jj(
             launch.path(),
@@ -467,6 +451,36 @@ fn jj_shim_immutability_and_secret_auto_track() {
             );
         }
     }
+    assert_secret_auto_track(&child, &shim);
+}
+
+#[cfg(feature = "jj-lib")]
+fn assert_jj_aliases_fenced(launch: &Path, child: &Path, shim: &Path) {
+    let config = launch.join("aliases.toml");
+    std::fs::write(&config, "[aliases]\ndangerous-alias=['undo']\nb=['undo']\n").unwrap();
+    let denied = Command::new(shim)
+        .arg("dangerous-alias")
+        .env("JJ_CONFIG", &config)
+        .current_dir(child)
+        .output()
+        .unwrap();
+    assert_eq!(denied.status.code(), Some(1));
+    let safe = Command::new(shim)
+        .args(["b", "list"])
+        .env("JJ_CONFIG", &config)
+        .current_dir(child)
+        .output()
+        .unwrap();
+    assert!(
+        safe.status.success(),
+        "{}",
+        String::from_utf8_lossy(&safe.stderr)
+    );
+    std::fs::remove_file(config).unwrap();
+}
+
+#[cfg(feature = "jj-lib")]
+fn assert_secret_auto_track(child: &crate::occupancy_vcs::MintedCopy, shim: &Path) {
     std::fs::create_dir(child.path.join("sub")).unwrap();
     for name in [
         ".env",
@@ -488,7 +502,7 @@ fn jj_shim_immutability_and_secret_auto_track() {
         vec!["file", "track", "all()"],
         vec!["--at-op", "@", "file", "track", "ordinary.txt"],
     ] {
-        let denied = Command::new(&shim)
+        let denied = Command::new(shim)
             .args(args)
             .env("JJ_CONFIG", "/dev/null")
             .current_dir(&child.path)
@@ -496,7 +510,7 @@ fn jj_shim_immutability_and_secret_auto_track() {
             .unwrap();
         assert_eq!(denied.status.code(), Some(1));
     }
-    let tracked = Command::new(&shim)
+    let tracked = Command::new(shim)
         .args(["file", "track", "ordinary.txt", ".env.example"])
         .env("JJ_CONFIG", "/dev/null")
         .current_dir(&child.path)
@@ -519,7 +533,7 @@ fn jj_shim_immutability_and_secret_auto_track() {
         vec!["commit", "-m", "own"],
         vec!["new"],
     ] {
-        let out = Command::new(&shim)
+        let out = Command::new(shim)
             .args(&args)
             .env("JJ_CONFIG", "/dev/null")
             .current_dir(child.path.join("sub"))
@@ -531,7 +545,7 @@ fn jj_shim_immutability_and_secret_auto_track() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    let output = Command::new(&shim)
+    let output = Command::new(shim)
         .args(["file", "list"])
         .env("JJ_CONFIG", "/dev/null")
         .current_dir(&child.path)
@@ -1222,6 +1236,10 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> String {
 
 /// Refuses writes to pins, other copies' branches, the stash, and retention.
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the exhaustive coordination-write table checks one unchanged ref and index snapshot"
+)]
 fn guard_refuses_coordination_writes() {
     let parent = git_repo();
     git_ok(
@@ -1991,7 +2009,6 @@ fn configured_fetches_guard_default_remotes_groups_and_effective_pruning() {
 /// A stdin update of a pin is refused. An admitted stdin script still reaches git.
 #[test]
 fn update_ref_stdin_naming_a_pin_is_refused_and_stdin_is_preserved_when_admitted() {
-    use std::io::Write as _;
     let parent = git_repo();
     git_ok(
         parent.path(),
@@ -2015,28 +2032,7 @@ fn update_ref_stdin_naming_a_pin_is_refused_and_stdin_is_preserved_when_admitted
     );
     let shim = install(&child).unwrap();
     let run_stdin_with_namespace = |script: &str, zero: bool, namespace: Option<&str>| {
-        let mut command = Command::new(&shim);
-        if let Some(namespace) = namespace {
-            command.args(["--namespace", namespace]);
-        }
-        command.args(["update-ref", "--stdin"]);
-        if zero {
-            command.arg("-z");
-        }
-        let mut process = command
-            .current_dir(&child)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        process
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(script.as_bytes())
-            .unwrap();
-        process.wait_with_output().unwrap()
+        update_ref_stdin(&shim, &child, script, zero, namespace)
     };
     let run_stdin = |script: &str, zero: bool| run_stdin_with_namespace(script, zero, None);
     let refused = run_stdin_with_namespace(
@@ -2055,15 +2051,7 @@ fn update_ref_stdin_naming_a_pin_is_refused_and_stdin_is_preserved_when_admitted
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert_eq!(refused.status.code(), Some(128), "{stderr}");
     assert!(stderr.contains("refs/plak/pin"), "{stderr}");
-    let pin = String::from_utf8(
-        Command::new("git")
-            .args(["rev-parse", "refs/plak/pin"])
-            .current_dir(parent.path())
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap();
+    let pin = git_stdout(parent.path(), &["rev-parse", "refs/plak/pin"]);
     assert_eq!(pin.trim(), head);
     let before = coordination_refs(parent.path());
     let checked_out_target = format!(
@@ -2102,15 +2090,7 @@ fn update_ref_stdin_naming_a_pin_is_refused_and_stdin_is_preserved_when_admitted
         "{}",
         String::from_utf8_lossy(&admitted.stderr)
     );
-    let feature = String::from_utf8(
-        Command::new("git")
-            .args(["rev-parse", "refs/heads/feature"])
-            .current_dir(parent.path())
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap();
+    let feature = git_stdout(parent.path(), &["rev-parse", "refs/heads/feature"]);
     assert_eq!(feature.trim(), head);
     let admitted = run_stdin(&format!("update refs/heads/nul-feature\0{head}\0\0"), true);
     assert!(
@@ -2122,6 +2102,38 @@ fn update_ref_stdin_naming_a_pin_is_refused_and_stdin_is_preserved_when_admitted
         git_stdout(parent.path(), &["rev-parse", "refs/heads/nul-feature"]).trim(),
         head
     );
+}
+
+fn update_ref_stdin(
+    shim: &Path,
+    child: &Path,
+    script: &str,
+    zero: bool,
+    namespace: Option<&str>,
+) -> std::process::Output {
+    use std::io::Write as _;
+    let mut command = Command::new(shim);
+    if let Some(namespace) = namespace {
+        command.args(["--namespace", namespace]);
+    }
+    command.args(["update-ref", "--stdin"]);
+    if zero {
+        command.arg("-z");
+    }
+    let mut process = command
+        .current_dir(child)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    process
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(script.as_bytes())
+        .unwrap();
+    process.wait_with_output().unwrap()
 }
 
 #[test]

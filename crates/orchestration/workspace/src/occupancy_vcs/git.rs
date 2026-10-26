@@ -396,6 +396,17 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
     if let Some(reason) = request.resolution_refusal {
         return Err(AdoptFailure::NotApplicable(reason.to_owned()));
     }
+    let merged_tree = merge_adoption_tree(request, &target, base_commit, candidate_commit)?;
+    apply_adoption_tree(request, target, &merged_tree)
+}
+
+fn merge_adoption_tree(
+    request: &AdoptRequest<'_>,
+    target: &VcsSnapshot,
+    base_commit: &str,
+    candidate_commit: &str,
+) -> Result<String, AdoptFailure> {
+    let target_path = request.target_path;
     let merged = git_run(
         target_path,
         &[
@@ -414,7 +425,7 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
         // anything else (bad base object, corrupt ref). Only the former is a
         // `merge_conflict`; the rest is the VCS refusing to run the merge.
         if merged.status.code() == Some(1) {
-            return Err(super::conflicts::pin_conflict(request, &target, &stdout)?);
+            return Err(super::conflicts::pin_conflict(request, target, &stdout)?);
         }
         return Err(AdoptFailure::Unavailable(format!(
             "git merge-tree exited {}: {}",
@@ -436,6 +447,15 @@ pub(super) fn git_adopt(request: &AdoptRequest<'_>) -> Result<AdoptLanding, Adop
             "git merge-tree produced no tree".to_owned(),
         ));
     };
+    Ok(merged_tree.to_owned())
+}
+
+fn apply_adoption_tree(
+    request: &AdoptRequest<'_>,
+    target: VcsSnapshot,
+    merged_tree: &str,
+) -> Result<AdoptLanding, AdoptFailure> {
+    let target_path = request.target_path;
     let names = git_run(
         target_path,
         &[

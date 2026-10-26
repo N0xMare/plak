@@ -274,6 +274,32 @@ pub(super) fn snapshot(path: &Path) -> std::result::Result<VcsSnapshot, VcsError
     .map_err(|error| failure(&error))
 }
 
+fn git_common_dir(workspace: &Workspace) -> Result<std::path::PathBuf> {
+    pollster::block_on(async {
+        let repo = workspace.repo_loader().load_at_head().await?;
+        let backend = repo
+            .store()
+            .backend()
+            .downcast_ref::<jj_lib::git_backend::GitBackend>()
+            .ok_or("only Git-backed JJ repositories are supported")?;
+        Ok(backend.git_repo().common_dir().to_path_buf())
+    })
+}
+
+fn install_excludes(repo: &ReadonlyRepo) -> Result<()> {
+    let backend = repo
+        .store()
+        .backend()
+        .downcast_ref::<jj_lib::git_backend::GitBackend>()
+        .ok_or("only Git-backed JJ repositories are supported")?;
+    let excludes = backend.git_repo_path().join("info/exclude");
+    if let Some(parent) = excludes.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    super::occupancy_vcs::append_exclude_lines(&excludes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub(super) fn mint(
     request: &super::occupancy_vcs::MintRequest<'_>,
 ) -> std::result::Result<MintedCopy, VcsError> {
@@ -295,30 +321,12 @@ pub(super) fn mint(
     let id = names.dir.as_str();
     let dest = launch.join(".plak/workspaces").join(id);
     let mut parent = load(parent_cwd).map_err(|error| failure(&error))?;
-    let common = pollster::block_on(async {
-        let repo = parent.repo_loader().load_at_head().await?;
-        let backend = repo
-            .store()
-            .backend()
-            .downcast_ref::<jj_lib::git_backend::GitBackend>()
-            .ok_or("only Git-backed JJ repositories are supported")?;
-        Ok::<_, Error>(backend.git_repo().common_dir().to_path_buf())
-    })
-    .map_err(|error| failure(&error))?;
+    let common = git_common_dir(&parent).map_err(|error| failure(&error))?;
     let namespace_guard = super::occupancy_vcs::reserve_copy_namespace(&common, namespace)?;
     let created = std::cell::Cell::new(false);
     pollster::block_on(async {
         let (repo, head) = snapshot_workspace(&mut parent).await?;
-        let backend = repo
-            .store()
-            .backend()
-            .downcast_ref::<jj_lib::git_backend::GitBackend>()
-            .ok_or("only Git-backed JJ repositories are supported")?;
-        let excludes = backend.git_repo_path().join("info/exclude");
-        if let Some(parent) = excludes.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        super::occupancy_vcs::append_exclude_lines(&excludes).map_err(|e| e.to_string())?;
+        install_excludes(&repo)?;
         let supplied_base = base.is_some();
         let base = match base {
             Some(base) => {
@@ -492,14 +500,16 @@ pub(super) fn adopt(
             }))
         }
         .await;
-        result.map_err(|e| {
-            if e.is::<RecoveryRequired>() {
-                AdoptFailure::RecoveryRequired(e.to_string())
-            } else {
-                AdoptFailure::Unavailable(e.to_string())
-            }
-        })?
+        result.map_err(|error| adopt_failure(&error))?
     })
+}
+
+fn adopt_failure(error: &Error) -> AdoptFailure {
+    if error.is::<RecoveryRequired>() {
+        AdoptFailure::RecoveryRequired(error.to_string())
+    } else {
+        AdoptFailure::Unavailable(error.to_string())
+    }
 }
 
 pub(super) fn diverged(path: &Path, base: &str) -> std::result::Result<bool, VcsError> {

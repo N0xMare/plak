@@ -274,6 +274,10 @@ fn seal_pins_candidate_and_base_atomically() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one retention lifecycle must keep its original candidate and adoption pins through prune and GC"
+)]
 fn adopted_candidate_and_provenance_survive_copy_prune_and_gc_prune_now() {
     let repo = git_repo();
     let namespace = digest_text("retained-provenance");
