@@ -12,6 +12,7 @@ pub struct ClaudeOAuthLogin {
     pub(super) core: Arc<ManagerCore>,
     pub(super) baseline: Option<CredentialFence>,
     pub(super) pkce: PkceS256,
+    pub(super) state: plakous_auth::SecretString,
     pub(super) authorization_url: String,
     pub(super) deadline: Instant,
 }
@@ -34,9 +35,10 @@ impl ClaudeOAuthLogin {
     ) -> Result<ClaudeSubscriptionStatus, ClaudeNativeAuthError> {
         self.core.ensure_flow_active(self.deadline)?;
         let verifier = self.pkce.verifier().expose_secret();
-        let code = parse_claude_oauth_authorization_input(authorization_input, verifier)
+        let state = self.state.expose_secret();
+        let code = parse_claude_oauth_authorization_input(authorization_input, state)
             .ok_or(ClaudeNativeAuthError::InvalidCallback)?;
-        let body = claude_token_code_body(&code, CLAUDE_OAUTH_REDIRECT_URI, verifier, verifier);
+        let body = claude_token_code_body(&code, CLAUDE_OAUTH_REDIRECT_URI, verifier, state);
         let response = until_flow_deadline(self.deadline, self.core.post_json(body)).await?;
         let grant = parse_claude_oauth_token_grant(&response)
             .map_err(|_| ClaudeNativeAuthError::LoginTokenExchange)?;

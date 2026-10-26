@@ -55,7 +55,7 @@ impl ManagerCore {
 
     pub(super) async fn post_json(
         &self,
-        body: String,
+        body: secrecy::SecretString,
     ) -> Result<Zeroizing<Vec<u8>>, ClaudeNativeAuthError> {
         let request = self.json_request(body)?;
         let control = ExchangeControl::new(Instant::now() + REQUEST_TIMEOUT);
@@ -79,7 +79,11 @@ impl ManagerCore {
         Ok(bytes)
     }
 
-    pub(super) fn json_request(&self, body: String) -> Result<Request, ClaudeNativeAuthError> {
+    pub(super) fn json_request(
+        &self,
+        body: secrecy::SecretString,
+    ) -> Result<Request, ClaudeNativeAuthError> {
+        use secrecy::ExposeSecret as _;
         let mut headers = HeaderMap::new();
         headers.insert(
             HEADER_CONTENT_TYPE,
@@ -87,13 +91,12 @@ impl ManagerCore {
         );
         headers.insert(HEADER_ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(HEADER_USER_AGENT, HeaderValue::from_static(USER_AGENT));
-        let mut body = Zeroizing::new(body);
         Request::new(
             Origin::parse(&self.token_origin)?,
             Method::POST,
             CLAUDE_OAUTH_TOKEN_PATH,
             headers,
-            SensitiveBytes::new(std::mem::take(&mut *body).into_bytes()).into_bytes(),
+            SensitiveBytes::new(body.expose_secret().as_bytes().to_vec()).into_bytes(),
             self.client.limits(),
         )
         .map_err(Into::into)

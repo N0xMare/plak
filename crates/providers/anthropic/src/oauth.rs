@@ -8,7 +8,9 @@
 //! The Plak product prompt remains a later system block.
 
 use plakous_model::ReasoningEffort;
+use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
+use subtle::ConstantTimeEq as _;
 
 use crate::{AnthropicError, AnthropicErrorKind, AnthropicErrorPhase};
 
@@ -349,7 +351,7 @@ const CLAUDE_OTHER_MAX_OUTPUT_TOKENS: u32 = 64_000;
 /// Builds the authorize URL for a PKCE Claude OAuth login.
 ///
 /// Query order matches the Claude Code contract: `code=true`, client, response
-/// type, redirect, scope, S256 challenge, `state` (the PKCE verifier).
+/// type, redirect, scope, S256 challenge, independently random `state`.
 #[must_use]
 pub fn claude_authorize_url(code_challenge: &str, state: &str) -> String {
     format!(
@@ -368,8 +370,8 @@ pub fn claude_authorize_url(code_challenge: &str, state: &str) -> String {
 ///
 /// Accepts the HTTPS callback URL (current or legacy console), a `code=` query
 /// string, OpenCode `code#state`, or a bare code. A present `state` must equal
-/// `expected_state` (the PKCE verifier). A missing `state` is bound to that
-/// verifier at token exchange.
+/// `expected_state` in constant time. Bare codes remain bound to this login's
+/// PKCE verifier at token exchange.
 #[must_use]
 pub fn parse_claude_oauth_authorization_input(input: &str, expected_state: &str) -> Option<String> {
     let trimmed = input.trim();
@@ -389,7 +391,7 @@ pub fn parse_claude_oauth_authorization_input(input: &str, expected_state: &str)
         return None;
     }
     if let Some(state) = state
-        && state != expected_state
+        && !bool::from(state.as_bytes().ct_eq(expected_state.as_bytes()))
     {
         return None;
     }
@@ -539,7 +541,7 @@ pub fn claude_token_code_body(
     redirect_uri: &str,
     code_verifier: &str,
     state: &str,
-) -> String {
+) -> SecretString {
     serde_json::json!({
         "grant_type": "authorization_code",
         "code": code,
@@ -549,11 +551,12 @@ pub fn claude_token_code_body(
         "state": state,
     })
     .to_string()
+    .into()
 }
 
 /// JSON body for a refresh-token exchange.
 #[must_use]
-pub fn claude_token_refresh_body(refresh_token: &str) -> String {
+pub fn claude_token_refresh_body(refresh_token: &str) -> SecretString {
     serde_json::json!({
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
@@ -561,14 +564,15 @@ pub fn claude_token_refresh_body(refresh_token: &str) -> String {
         "scope": CLAUDE_OAUTH_REFRESH_SCOPES,
     })
     .to_string()
+    .into()
 }
 
 /// Parsed Claude OAuth token JSON.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct ClaudeOAuthTokenGrant {
     account_uuid: Option<crate::ClaudeAccountUuid>,
-    access_token: String,
-    refresh_token: Option<String>,
+    access_token: SecretString,
+    refresh_token: Option<SecretString>,
     expires_in: i64,
     scope: Option<String>,
 }
@@ -581,12 +585,14 @@ impl ClaudeOAuthTokenGrant {
     /// Access token.
     #[must_use]
     pub fn access_token(&self) -> &str {
-        &self.access_token
+        self.access_token.expose_secret()
     }
     /// Refresh token when present.
     #[must_use]
     pub fn refresh_token(&self) -> Option<&str> {
-        self.refresh_token.as_deref()
+        self.refresh_token
+            .as_ref()
+            .map(|token| token.expose_secret())
     }
     /// Lifetime in seconds.
     #[must_use]
@@ -610,13 +616,26 @@ struct TokenGrantAccount {
 struct TokenGrantWire {
     #[serde(default)]
     account: Option<TokenGrantAccount>,
-    access_token: String,
-    #[serde(default)]
-    refresh_token: Option<String>,
+    #[serde(deserialize_with = "deserialize_secret")]
+    access_token: SecretString,
+    #[serde(default, deserialize_with = "deserialize_optional_secret")]
+    refresh_token: Option<SecretString>,
     #[serde(default)]
     expires_in: Option<i64>,
     #[serde(default)]
     scope: Option<String>,
+}
+
+fn deserialize_secret<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<SecretString, D::Error> {
+    String::deserialize(deserializer).map(Into::into)
+}
+
+fn deserialize_optional_secret<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<SecretString>, D::Error> {
+    Option::<String>::deserialize(deserializer).map(|value| value.map(Into::into))
 }
 
 /// Parses a Claude OAuth token JSON object.
@@ -634,7 +653,7 @@ pub fn parse_claude_oauth_token_grant(
             "Claude OAuth token JSON could not be parsed",
         )
     })?;
-    if wire.access_token.is_empty() {
+    if wire.access_token.expose_secret().is_empty() {
         return Err(AnthropicError::new(
             AnthropicErrorKind::InvalidRequest,
             AnthropicErrorPhase::Prepare,
@@ -652,7 +671,9 @@ pub fn parse_claude_oauth_token_grant(
     Ok(ClaudeOAuthTokenGrant {
         account_uuid: wire.account.and_then(|account| account.uuid),
         access_token: wire.access_token,
-        refresh_token: wire.refresh_token.filter(|value| !value.is_empty()),
+        refresh_token: wire
+            .refresh_token
+            .filter(|value| !value.expose_secret().is_empty()),
         expires_in,
         scope: wire.scope.filter(|value| !value.is_empty()),
     })
@@ -719,7 +740,7 @@ mod tests {
 
     #[test]
     fn authorize_url_uses_cai_not_platform_authorize() {
-        let url = claude_authorize_url("challenge", "verifier-state");
+        let url = claude_authorize_url("challenge", "independent-state");
         assert!(url.starts_with("https://claude.com/cai/oauth/authorize?"));
         assert!(url.contains("client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e"));
         assert!(url.contains("code=true"));
@@ -738,6 +759,48 @@ mod tests {
         assert_eq!(grant.expires_in(), 3600);
         assert!(claude_oauth_scope_admits_inference(grant.scope().unwrap()));
         assert!(parse_claude_oauth_token_grant(br#"{"access_token":"at"}"#).is_err());
+    }
+
+    #[test]
+    fn token_material_is_redacted() {
+        let grant = parse_claude_oauth_token_grant(
+            br#"{"access_token":"fixture-access-secret","refresh_token":"fixture-refresh-secret","expires_in":3600}"#,
+        ).unwrap();
+        let refresh = claude_token_refresh_body("fixture-refresh-secret");
+        let code = claude_token_code_body(
+            "fixture-code-secret",
+            "redirect",
+            "fixture-verifier-secret",
+            "state",
+        );
+        for debug in [
+            format!("{grant:?}"),
+            format!("{refresh:?}"),
+            format!("{code:?}"),
+        ] {
+            for secret in [
+                "fixture-access-secret",
+                "fixture-refresh-secret",
+                "fixture-code-secret",
+                "fixture-verifier-secret",
+            ] {
+                assert!(!debug.contains(secret), "{debug}");
+            }
+        }
+        assert!(refresh.expose_secret().contains("fixture-refresh-secret"));
+        assert!(code.expose_secret().contains("fixture-verifier-secret"));
+    }
+
+    #[test]
+    fn invalid_expiry_keeps_wire_tokens_in_secret_containers() {
+        let bytes = br#"{"access_token":"fixture-access-secret","refresh_token":"fixture-refresh-secret","expires_in":0}"#;
+        let wire: TokenGrantWire = serde_json::from_slice(bytes).unwrap();
+        // Rejected wire values have the same zeroizing ownership as admitted grants.
+        let _: &SecretString = &wire.access_token;
+        let _: &SecretString = wire.refresh_token.as_ref().unwrap();
+        assert!(!format!("{:?}", wire.access_token).contains("fixture-access-secret"));
+        let error = parse_claude_oauth_token_grant(bytes).unwrap_err();
+        assert!(!format!("{error:?}").contains("fixture-refresh-secret"));
     }
 
     #[test]
@@ -909,32 +972,31 @@ mod tests {
 
     #[test]
     fn paste_input_accepts_callback_url_query_hash_and_bare_code() {
-        let verifier = "a".repeat(43);
+        let state = "a".repeat(43);
         let code = "b".repeat(32);
-        let url = format!("{CLAUDE_OAUTH_REDIRECT_URI}?code={code}&state={verifier}");
+        let url = format!("{CLAUDE_OAUTH_REDIRECT_URI}?code={code}&state={state}");
         assert_eq!(
-            parse_claude_oauth_authorization_input(&url, &verifier).as_deref(),
+            parse_claude_oauth_authorization_input(&url, &state).as_deref(),
             Some(code.as_str())
         );
         assert_eq!(
             parse_claude_oauth_authorization_input(
                 &format!("{CLAUDE_OAUTH_REDIRECT_URI}?code={code}"),
-                &verifier
+                &state
             )
             .as_deref(),
             Some(code.as_str())
         );
         assert_eq!(
-            parse_claude_oauth_authorization_input(&format!("code={code}"), &verifier).as_deref(),
+            parse_claude_oauth_authorization_input(&format!("code={code}"), &state).as_deref(),
             Some(code.as_str())
         );
         assert_eq!(
-            parse_claude_oauth_authorization_input(&format!("{code}#{verifier}"), &verifier)
-                .as_deref(),
+            parse_claude_oauth_authorization_input(&format!("{code}#{state}"), &state).as_deref(),
             Some(code.as_str())
         );
         assert_eq!(
-            parse_claude_oauth_authorization_input(&code, &verifier).as_deref(),
+            parse_claude_oauth_authorization_input(&code, &state).as_deref(),
             Some(code.as_str())
         );
         assert!(
@@ -942,15 +1004,15 @@ mod tests {
                 &format!(
                     "{CLAUDE_OAUTH_REDIRECT_URI}?code={code}&state=other-state-value-xxxxxxxx"
                 ),
-                &verifier
+                &state
             )
             .is_none()
         );
-        assert!(parse_claude_oauth_authorization_input("nope", &verifier).is_none());
+        assert!(parse_claude_oauth_authorization_input("nope", &state).is_none());
         assert!(
             parse_claude_oauth_authorization_input(
                 "https://evil.example/oauth/code/callback?code=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                &verifier
+                &state
             )
             .is_none()
         );

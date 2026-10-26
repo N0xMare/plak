@@ -1,6 +1,6 @@
 //! Plakous-owned Claude Code OAuth login and selected-slot credential authority.
 //!
-//! Authorize is HTTPS-callback PKCE (`state` is the verifier). There is no
+//! Authorize is HTTPS-callback PKCE with independent random state. There is no
 //! loopback listener: local and remote product modes share this paste-complete
 //! handle. Token exchange is JSON against the pinned Platform token origin.
 

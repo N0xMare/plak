@@ -460,7 +460,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-js-runtime": "ed321c92092e4cb542b36fa116ad3084aaa0ae1f42e8efd7a7239c4f47424496",
     "plakous": "d749651e34497e95033b9d735451e70b1d464d191e2f39fa942c179dc9c3dbdf",
     "plakous-agent": "a19134205d444cf4b88520e8da37268e19e9527aae92ac337ffb68691c7bdba7",
-    "plakous-anthropic": "2f501ee54d5ac3cf1867512c91ba2bfe82c70f74de7767a735b1f977f0c35b90",
+    "plakous-anthropic": "8633d4d85d5d34e24b95ef99f2dfdcb4b508482a0dfdfb49dfd811501cbfcecb",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
     "plakous-auth": "66114ada91a9e5f095e80ca61b9268d97d4c684b2fa5d98dfd61d11c87bb6c63",
     "plakous-chat-completions": "251fd50384154edbb997b1b0394df1cda3b1795f081a383db30835cca6a0295e",

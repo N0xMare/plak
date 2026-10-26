@@ -105,14 +105,14 @@ async fn login_body_size_and_provider_refusal_are_distinct() {
     )
     .await;
     assert!(matches!(
-        manager.core.post_json("{}".to_owned()).await,
+        manager.core.post_json("{}".into()).await,
         Err(ClaudeNativeAuthError::LoginTokenExchange)
     ));
     peer.await.unwrap();
 
     let (_temp, manager, peer) = fixture(serde_json::json!("x".repeat(MAX_TOKEN_BYTES))).await;
     assert!(matches!(
-        manager.core.post_json("{}".to_owned()).await,
+        manager.core.post_json("{}".into()).await,
         Err(ClaudeNativeAuthError::InvalidTokenResponse)
     ));
     peer.await.unwrap();

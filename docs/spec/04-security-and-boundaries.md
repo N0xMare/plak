@@ -941,7 +941,12 @@ paste-completed even locally, because their pages do not call back to
 localhost. The CLI **refuses** a local login when it detects an SSH session
 rather than silently switching modes. Callback input validates the exact
 redirect origin, port, path, and query grammar, and compares state in constant
-time. A loopback callback is checked against the redirect URI its attempt
+time. Claude generates state independently of the PKCE verifier; the verifier
+never appears in its authorize URL. Claude token grants and serialized token
+requests redact secret material in Debug and zeroize it on drop, including wire
+tokens refused for invalid expiry. The workspace checker pins Claude's callback
+rejection to its constant-time comparison. A loopback
+callback is checked against the redirect URI its attempt
 actually sent: the `Host` header must equal that redirect's authority exactly,
 and `http://<Host><request-target>` must then match the redirect's path and
 query grammar. Production listeners bind only the pinned redirect ports, so

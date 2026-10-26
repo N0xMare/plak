@@ -198,7 +198,7 @@ fn acceptance_binds_the_contract_and_expires_ninety_days_after_review() {
 }
 
 #[test]
-fn begin_login_uses_cai_authorize_and_verifier_state() {
+fn begin_login_uses_cai_authorize_and_independent_state() {
     let temp = tempfile::tempdir().unwrap();
     let manager = manager(private_store(&temp));
     let login = manager.begin_login().unwrap();
@@ -207,6 +207,12 @@ fn begin_login_uses_cai_authorize_and_verifier_state() {
     assert!(url.contains("code=true"));
     assert!(url.contains("code_challenge_method=S256"));
     assert!(url.contains("state="));
+    assert!(url.ends_with(login.state.expose_secret()));
+    assert_ne!(
+        login.state.expose_secret(),
+        login.pkce.verifier().expose_secret()
+    );
+    assert!(!url.contains(login.pkce.verifier().expose_secret()));
     assert!(!url.contains("platform.claude.com/oauth/authorize"));
     assert_eq!(
         format!("{login:?}"),
@@ -221,6 +227,25 @@ async fn invalid_paste_fails_before_token_exchange() {
     let login = manager.begin_login().unwrap();
     assert!(matches!(
         login.complete("nope").await,
+        Err(ClaudeNativeAuthError::InvalidCallback)
+    ));
+    assert!(manager.status().unwrap().is_none());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mismatched_state_fails_before_token_exchange() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut manager = manager(private_store(&temp));
+    // If validation regresses, request construction fails without any network.
+    Arc::get_mut(&mut manager.core).unwrap().token_origin = "invalid-test-origin".to_owned();
+    let login = manager.begin_login().unwrap();
+    let input = format!(
+        "{}#{}",
+        "fixture-code".repeat(3),
+        login.pkce.verifier().expose_secret()
+    );
+    assert!(matches!(
+        login.complete(&input).await,
         Err(ClaudeNativeAuthError::InvalidCallback)
     ));
     assert!(manager.status().unwrap().is_none());

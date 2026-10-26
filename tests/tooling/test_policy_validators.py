@@ -1473,6 +1473,16 @@ class RepositoryPolicyTests(unittest.TestCase):
 class SourceScanTests(unittest.TestCase):
     """Token-aware production source scanning and the security pins."""
 
+    def test_claude_callback_requires_constant_time_state_rejection(self):
+        source = (ROOT / "crates/providers/anthropic/src/oauth.rs").read_text()
+        validate = workspace_policy.validate_claude_oauth_state_comparison
+        self.assertEqual(validate(source), [])
+        comparison = "!bool::from(state.as_bytes().ct_eq(expected_state.as_bytes()))"
+        self.assertIn(comparison, source)
+        mutated = source.replace(comparison, "state != expected_state")
+        self.assertTrue(validate(mutated))
+        self.assertTrue(validate(mutated + '\nconst DECOY: &str = "' + comparison + '";'))
+
     def test_facade_exchange_edge_names_only_the_shared_backoff(self) -> None:
         workspace = policy_module.load_workspace(ROOT)
         sources, errors = workspace_policy.production_rust_sources(

@@ -314,13 +314,15 @@ impl ClaudeNativeAuthManager {
         let deadline = ManagerCore::flow_deadline(LOGIN_TIMEOUT)?;
         let baseline = self.core.store.load()?;
         let pkce = PkceS256::generate()?;
+        let state = plakous_auth::generate_oauth_correlation_token()?;
         let authorization_url =
-            claude_authorize_url(pkce.challenge().as_str(), pkce.verifier().expose_secret());
+            claude_authorize_url(pkce.challenge().as_str(), state.expose_secret());
         self.core.ensure_flow_active(deadline)?;
         Ok(ClaudeOAuthLogin {
             core: Arc::clone(&self.core),
             baseline,
             pkce,
+            state,
             authorization_url,
             deadline,
         })

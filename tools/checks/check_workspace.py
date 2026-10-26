@@ -2151,6 +2151,26 @@ def _process_command_calls(
     return calls
 
 
+def validate_claude_oauth_state_comparison(source: str) -> list[str]:
+    """Pin the production callback rejection to subtle's constant-time comparison."""
+    tokens = rust_tokens(source)
+    try:
+        function = next(index for index, token in enumerate(tokens[:-1])
+                        if token.value == "fn" and tokens[index + 1].value == "parse_claude_oauth_authorization_input")
+        opening = next(index for index in range(function, len(tokens)) if tokens[index].value == "{")
+        body = tokens[opening:_token_group_end(tokens, opening)]
+    except StopIteration:
+        body = []
+    rejection = rust_tokens("""
+        if let Some(state) = state
+            && !bool::from(state.as_bytes().ct_eq(expected_state.as_bytes()))
+        { return None; }
+    """)
+    if any(body[index:index + len(rejection)] == rejection for index in range(len(body))):
+        return []
+    return ["plakous-anthropic:src/oauth.rs: callback state must reject through the pinned constant-time ct_eq comparison"]
+
+
 def validate_product_session_authority_sources(
     package: str, sources: dict[str, str]
 ) -> list[str]:
@@ -4165,6 +4185,10 @@ def main() -> int:
         sources, discovery_errors = package_sources(packages[name], ROOT)
         errors.extend(discovery_errors)
         errors.extend(validate_commit_trace_sql(name, sources))
+
+    sources, discovery_errors = package_sources(packages["plakous-anthropic"], ROOT)
+    errors.extend(discovery_errors)
+    errors.extend(validate_claude_oauth_state_comparison(sources.get("src/oauth.rs", "")))
 
     directories = {package.directory for package in packages.values()}
     errors.extend(validate_ratchet_clippy_thresholds(ROOT))
