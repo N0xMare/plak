@@ -1,0 +1,4 @@
+error: failed to publish to registry at https://crates.io
+
+Caused by:
+  the remote server responded with an error (status 429 Too Many Requests): You have published too many crates in a short period of time. Please try again after Sat, 24 Oct 2026 00:10:00 GMT

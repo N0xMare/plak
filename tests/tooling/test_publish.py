@@ -33,6 +33,7 @@ def load(name: str):
 publish_plan = load("publish_plan")
 publish_shape = load("publish_shape")
 review_expiry = load("review_expiry")
+publish_retry = load("publish_retry")
 
 ORDER = ["plakous-zeta", "plakous-mid", "plak"]
 
@@ -84,6 +85,12 @@ if args[:1] == ["fetch"]:
         sys.exit(1)
 if args[:1] == ["publish"]:
     name = args[args.index("-p") + 1]
+    state = Path(os.environ["FAKE_CARGO_LOG"] + ".attempts")
+    attempts = int(state.read_text()) if state.exists() else 0
+    if attempts < int(os.environ.get("FAKE_PUBLISH_FAILURES", "0")):
+        state.write_text(str(attempts + 1))
+        print(os.environ.get("FAKE_PUBLISH_DIAGNOSTIC", "HTTP/2 429 Too Many Requests"), file=sys.stderr)
+        sys.exit(101)
     if name not in os.environ.get("FAKE_UNINDEXED", "").split(","):
         entry = Path(os.environ["FAKE_INDEX"]) / os.environ["FAKE_INDEX_PATHS"].split(",")[
             os.environ["FAKE_NAMES"].split(",").index(name)]
@@ -113,7 +120,7 @@ class PublishScriptTests(unittest.TestCase):
         self.target = base / "target"
         self.index = base / "index"
         self.log = base / "cargo.jsonl"
-        for relative in ("scripts/publish.sh", "tools/release/publish_plan.py",
+        for relative in ("scripts/publish.sh", "tools/release/publish_retry.py", "tools/release/publish_plan.py",
                          "tools/release/publish_shape.py", "tools/release/review_expiry.py",
                          "tools/release/prefetch_packages.py", "tools/release/gate_evidence.py",
                          "tools/release/offline_first.py",
@@ -166,6 +173,10 @@ class PublishScriptTests(unittest.TestCase):
         shim = bin_dir / "cargo"
         shim.write_text("#!" + sys.executable + "\n" + CARGO_SHIM)
         shim.chmod(0o700)
+        sleep = bin_dir / "sleep"
+        sleep.write_text("#!" + sys.executable + "\nimport os, sys\nfrom pathlib import Path\np = Path(os.environ['FAKE_SLEEP_LOG'])\nwith p.open('a') as log: log.write(sys.argv[1] + '\\n')\n")
+        sleep.chmod(0o700)
+        self.sleeps = base / "sleeps"
         self.git("init", "-q")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "fixture")
@@ -178,6 +189,7 @@ class PublishScriptTests(unittest.TestCase):
         self.env.update(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}", REAL_CARGO=real_cargo,
             FAKE_CARGO_LOG=str(self.log), FAKE_INDEX=str(self.index),
+            FAKE_SLEEP_LOG=str(self.sleeps),
             FAKE_NAMES=",".join(ORDER),
             FAKE_INDEX_PATHS=",".join(publish_plan.index_path(name) for name in ORDER),
             CARGO_TARGET_DIR=str(self.target), TMPDIR=str(base / "tmp"),
@@ -457,6 +469,68 @@ class PublishScriptTests(unittest.TestCase):
             [call["args"][-1] for call in calls if call["args"][0] == "publish"],
             ["plakous-zeta", "plakous-mid"],
         )
+
+    def test_publish_retries_only_429_and_honors_retry_after(self) -> None:
+        self.record_evidence()
+        self.env.update(CARGO_REGISTRY_TOKEN="fixture-token", FAKE_PUBLISH_FAILURES="2",
+                        FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 429 Too Many Requests\nRetry-After: 7")
+        result, calls = self.publish("--execute")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.sleeps.read_text().splitlines(), ["7", "7"])
+        self.assertEqual([c["args"][-1] for c in calls if c["args"][0] == "publish"],
+                         [ORDER[0], ORDER[0], *ORDER])
+
+    def test_publish_429_retries_are_bounded_with_capped_backoff(self) -> None:
+        self.record_evidence()
+        self.env.update(CARGO_REGISTRY_TOKEN="fixture-token", FAKE_PUBLISH_FAILURES="9")
+        result, calls = self.publish("--execute")
+        self.assertEqual(result.returncode, 101, result.stderr)
+        self.assertEqual(self.sleeps.read_text().splitlines(), ["5", "10", "20", "30"])
+        self.assertEqual([c["args"][-1] for c in calls if c["args"][0] == "publish"], [ORDER[0]] * 5)
+
+    def test_publish_does_not_retry_other_failures(self) -> None:
+        self.record_evidence()
+        self.env.update(CARGO_REGISTRY_TOKEN="fixture-token", FAKE_PUBLISH_FAILURES="1",
+                        FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 403 Forbidden\nBody: a previous 429 response is unrelated")
+        result, calls = self.publish("--execute")
+        self.assertEqual(result.returncode, 101, result.stderr)
+        self.assertFalse(self.sleeps.exists())
+        self.assertEqual(len([c for c in calls if c["args"][0] == "publish"]), 1)
+
+    def test_publish_refuses_excessive_retry_after_without_sleeping(self) -> None:
+        self.record_evidence()
+        self.env.update(CARGO_REGISTRY_TOKEN="fixture-token", FAKE_PUBLISH_FAILURES="1",
+                        FAKE_PUBLISH_DIAGNOSTIC="HTTP/2 429 Too Many Requests\nRetry-After: 901")
+        result, calls = self.publish("--execute")
+        self.assertEqual(result.returncode, 101, result.stderr)
+        self.assertIn("exceeds the 900s maximum", result.stderr)
+        self.assertFalse(self.sleeps.exists())
+        self.assertEqual(len([c for c in calls if c["args"][0] == "publish"]), 1)
+
+
+class PublishRetryTests(unittest.TestCase):
+    def test_cargo_new_crate_limit_body_honors_ten_minute_deadline(self):
+        from datetime import datetime, timezone
+        diagnostic = (ROOT / "tests/tooling/fixtures/cargo-publish-429.txt").read_text()
+        self.assertEqual(publish_retry.retry_delay(
+            diagnostic, 1, datetime(2026, 10, 24, tzinfo=timezone.utc)), 600)
+
+    def test_honored_delay_has_a_hard_maximum(self):
+        self.assertEqual(publish_retry.retry_delay("status: 429\nRetry-After: 900", 1), 900)
+        with self.assertRaisesRegex(ValueError, "exceeds the 900s maximum"):
+            publish_retry.retry_delay("status: 429\nRetry-After: 901", 1)
+
+    def test_non_429_body_cannot_trigger_a_retry(self):
+        for diagnostic in ["HTTP/2 403 Forbidden\n429 response", "status: 503\nBody: status 429 Too Many Requests"]:
+            self.assertIsNone(publish_retry.retry_delay(diagnostic, 1))
+
+    def test_retry_after_http_date_and_invalid_header(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 24, tzinfo=timezone.utc)
+        self.assertEqual(publish_retry.retry_delay(
+            "status: 429\nRetry-After: Sat, 24 Oct 2026 00:00:09 GMT", 1, now), 9)
+        self.assertEqual(publish_retry.retry_delay("status code: 429\nRetry-After: bad", 2), 10)
+        self.assertIsNone(publish_retry.retry_delay("connection reset; version 429", 1))
 
 
 class PublishOrderTests(unittest.TestCase):

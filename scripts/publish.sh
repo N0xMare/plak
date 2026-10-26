@@ -104,6 +104,25 @@ fi
 index="${PLAK_PUBLISH_INDEX:-https://index.crates.io}"
 timeout="${PLAK_PUBLISH_TIMEOUT:-600}"
 indexed() { python3 "$root/tools/release/publish_plan.py" indexed "$index" "$1" "$2"; }
+publish_crate() {
+  local name=$1 attempt=1 status delay diagnostic="$scratch/publish.log"
+  while :; do
+    if cargo publish --locked --no-verify -p "$name" >"$diagnostic" 2>&1; then
+      cat "$diagnostic"
+      return 0
+    else
+      status=$?
+    fi
+    cat "$diagnostic" >&2
+    if (( attempt >= 5 )); then return "$status"; fi
+    if ! delay=$(python3 "$root/tools/release/publish_retry.py" "$diagnostic" "$attempt"); then
+      return "$status"
+    fi
+    echo "publish: $name rate limited; retry $attempt/4 in ${delay}s" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+}
 for entry in "${order[@]}"; do
   name="${entry%% *}"; version="${entry#* }"
   if indexed "$name" "$version"; then
@@ -111,7 +130,7 @@ for entry in "${order[@]}"; do
     continue
   fi
   echo "== cargo publish $name $version =="
-  cargo publish --locked --no-verify -p "$name"
+  publish_crate "$name"
   waited=0
   until indexed "$name" "$version"; do
     if (( waited >= timeout )); then

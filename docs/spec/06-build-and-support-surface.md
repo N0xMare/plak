@@ -1400,6 +1400,15 @@ behave identically. `~/.cargo/bin` is not touched; the installer notes a `plak`
 earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
 macOS.
 
+Publication retries only Cargo HTTP 429 failures: at most five attempts per
+crate, honoring a numeric or HTTP-date Retry-After, or Cargo's crates.io body
+deadline (`Please try again after <HTTP-date>`), when reported. Honored delays
+have a 900-second maximum: a longer delay stops with a clear refusal to wait,
+never an early retry. Without a usable hint it waits 5, 10, 20, then 30 seconds.
+Only an HTTP status of 429 admits retries, not mentions of 429 in another
+status's body. Other failures stop immediately;
+dependents are never published before their prerequisites appear in the index.
+
 ## 7. Dependency and supply-chain policy
 
 JWT identity verification uses `jsonwebtoken =11.1.0` without either built-in
