@@ -16,8 +16,8 @@ pub(crate) enum TranscriptPart<'a> {
         call_id: String,
         canonical: &'a str,
         exposed: &'a str,
-        observation: Option<&'a ToolCallObservation>,
-        lineage: Option<&'a ToolCallerLineageView>,
+        observation: &'a ToolCallObservation,
+        lineage: &'a ToolCallerLineageView,
         composition_owner: Option<String>,
     },
     Result {
@@ -25,7 +25,7 @@ pub(crate) enum TranscriptPart<'a> {
         succeeded: bool,
         preview: &'a str,
         subject: Option<&'a str>,
-        lineage: Option<&'a ToolCallerLineageView>,
+        lineage: &'a ToolCallerLineageView,
     },
     Compaction,
 }
@@ -87,8 +87,8 @@ fn transcript_part<'a>(
             call_id: call_id.to_string(),
             canonical: canonical_name.as_str(),
             exposed: exposed_name.as_str(),
-            observation: Some(observation),
-            lineage: Some(lineage),
+            observation,
+            lineage,
             composition_owner: owner(*call_id)
                 .filter(|owner| owner != call_id)
                 .map(|owner| owner.to_string()),
@@ -102,7 +102,7 @@ fn transcript_part<'a>(
             succeeded: observation.succeeded(),
             preview: observation.preview(),
             subject: observation.subject(),
-            lineage: Some(lineage),
+            lineage,
         }),
         SessionTranscriptPart::Compaction => Some(TranscriptPart::Compaction),
         SessionTranscriptPart::Image {

@@ -88,10 +88,9 @@ fn items_from_reads(
                     composition_owner,
                 } => {
                     flush_text(&mut rows, item, &mut text);
-                    let args = observation.and_then(|observation| {
+                    let args =
                         serde_json::from_str::<serde_json::Value>(observation.arguments_preview())
-                            .ok()
-                    });
+                            .ok();
                     // Read exactly as a live row reads its audit identity:
                     // presentation renames the canonical call, and a renamed
                     // call keeps no exposed name.
@@ -118,7 +117,7 @@ fn items_from_reads(
                     let StartedToolText { subject, detail } = started_tool_text(
                         tool,
                         label_exposed,
-                        *observation,
+                        Some(*observation),
                         None,
                         ProcessContext {
                             label,
@@ -162,12 +161,10 @@ fn items_from_reads(
                         detail,
                         started_at_ms: None,
                         finished_at_ms: None,
-                        parent_call_id: composition_owner.clone().or_else(|| {
-                            lineage.and_then(|lineage| {
-                                lineage.parent_call_id().map(|parent| parent.to_string())
-                            })
-                        }),
-                        cell_id: lineage.and_then(row_cell_id),
+                        parent_call_id: composition_owner
+                            .clone()
+                            .or_else(|| lineage.parent_call_id().map(|parent| parent.to_string())),
+                        cell_id: row_cell_id(lineage),
                         wait: super::tool_facts::wait_started(tool, label, args.as_ref()),
                     }));
                 }
@@ -185,12 +182,10 @@ fn items_from_reads(
                     let Some(TranscriptRow::Tool(tool)) = rows.get_mut(call.row) else {
                         continue;
                     };
-                    if let Some(lineage) = lineage {
-                        tool.cell_id = row_cell_id(lineage).or_else(|| tool.cell_id.take());
-                        if tool.parent_call_id.is_none() {
-                            tool.parent_call_id =
-                                lineage.parent_call_id().map(|parent| parent.to_string());
-                        }
+                    tool.cell_id = row_cell_id(lineage).or_else(|| tool.cell_id.take());
+                    if tool.parent_call_id.is_none() {
+                        tool.parent_call_id =
+                            lineage.parent_call_id().map(|parent| parent.to_string());
                     }
                     if *succeeded {
                         settle_bare_await(tool, &mut call, preview, *subject, task_tools);

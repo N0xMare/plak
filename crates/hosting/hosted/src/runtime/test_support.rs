@@ -23,6 +23,23 @@ use super::*;
 use crate::runtime::rebind::*;
 use crate::runtime::startup::*;
 
+pub(super) fn direct_transcript_lineage() -> &'static plakous::agent::ToolCallerLineageView {
+    static DIRECT: std::sync::OnceLock<plakous::agent::ToolCallerLineageView> =
+        std::sync::OnceLock::new();
+    DIRECT.get_or_init(plakous::agent::ToolCallerLineageView::direct)
+}
+
+pub(super) fn empty_transcript_call() -> &'static plakous::agent::ToolCallObservation {
+    static EMPTY: std::sync::OnceLock<plakous::agent::ToolCallObservation> =
+        std::sync::OnceLock::new();
+    EMPTY.get_or_init(|| {
+        serde_json::from_value(serde_json::json!({
+            "subject": null, "arguments_preview": "",
+        }))
+        .unwrap()
+    })
+}
+
 pub(super) fn started_observation(
     arguments: &serde_json::Value,
 ) -> plakous::agent::ToolCallObservation {

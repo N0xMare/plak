@@ -2677,6 +2677,9 @@ atomic bounds refusals. A row-content change still fails observation parity;
 the JSONL kind table remains checked against the production closed projection.
 An assistant-completion or status boundary alone does not identify a live twin:
 patches carrying canonical settlement rows at those boundaries remain compared.
+Hosted coverage also folds the actual live publication into a keyed state,
+checks a quiet settlement is an empty advancing patch rather than a snapshot,
+and compares the keys and complete rows with an exact reopened attachment.
 Usage parity omits the live request's Coding/Agent tool-inventory
 informational rows and the timestamp-dependent `Live turn growth (est.)`
 category: prepared-request and terminal refreshes supersede one

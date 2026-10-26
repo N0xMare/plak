@@ -609,11 +609,10 @@ fn read_part(part: TranscriptPart<'_>) -> Option<ReadPart> {
             call_id,
             canonical: canonical.to_owned(),
             exposed: exposed.to_owned(),
-            arguments: observation.map(|observation| observation.arguments_preview().to_owned()),
-            parent_call_id: lineage
-                .and_then(|lineage| lineage.parent_call_id().map(|parent| parent.to_string())),
-            cell_id: lineage.and_then(|lineage| lineage.cell_id().map(str::to_owned)),
-            subject: observation.and_then(|observation| observation.subject().map(str::to_owned)),
+            arguments: Some(observation.arguments_preview().to_owned()),
+            parent_call_id: lineage.parent_call_id().map(|parent| parent.to_string()),
+            cell_id: lineage.cell_id().map(str::to_owned),
+            subject: observation.subject().map(str::to_owned),
         }),
         TranscriptPart::Result {
             call_id,

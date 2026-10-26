@@ -3,6 +3,7 @@
 use super::{
     TranscriptPart, TranscriptRead, bound_rows, read_rows, read_rows_within, rows_from_items,
 };
+use crate::runtime::test_support::{direct_transcript_lineage, empty_transcript_call};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use plakous::model::{Actor, ReasoningVisibility};
 use plakous::sessions::{
@@ -119,8 +120,8 @@ fn unlinked_nested_calls_have_neither_a_parent_nor_a_cell_row_identity() {
                         call_id: CALL.into(),
                         canonical: "read_file",
                         exposed: "read_file",
-                        observation: None,
-                        lineage: Some(lineage),
+                        observation: empty_transcript_call(),
+                        lineage,
                         composition_owner: None,
                     }],
                 ),
@@ -131,7 +132,7 @@ fn unlinked_nested_calls_have_neither_a_parent_nor_a_cell_row_identity() {
                         succeeded: true,
                         preview: "done",
                         subject: None,
-                        lineage: Some(lineage),
+                        lineage,
                     }],
                 ),
             ],
@@ -167,32 +168,32 @@ fn explicit_owners_win_over_history_order_and_reused_cell_ids() {
                     call_id: CALL.into(),
                     canonical: "exec",
                     exposed: "exec",
-                    observation: None,
-                    lineage: Some(&marker),
+                    observation: empty_transcript_call(),
+                    lineage: &marker,
                     composition_owner: None,
                 },
                 TranscriptPart::Call {
                     call_id: other.into(),
                     canonical: "exec",
                     exposed: "exec",
-                    observation: None,
-                    lineage: Some(&marker),
+                    observation: empty_transcript_call(),
+                    lineage: &marker,
                     composition_owner: None,
                 },
                 TranscriptPart::Call {
                     call_id: child.into(),
                     canonical: "read_file",
                     exposed: "read_file",
-                    observation: None,
-                    lineage: Some(&nested),
+                    observation: empty_transcript_call(),
+                    lineage: &nested,
                     composition_owner: None,
                 },
                 TranscriptPart::Call {
                     call_id: wait.into(),
                     canonical: "wait",
                     exposed: "wait",
-                    observation: None,
-                    lineage: Some(&marker),
+                    observation: empty_transcript_call(),
+                    lineage: &marker,
                     composition_owner: Some(CALL.into()),
                 },
             ],
@@ -245,8 +246,8 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
             call_id: CALL.into(),
             canonical: name,
             exposed: name,
-            observation: None,
-            lineage: Some(&marker),
+            observation: empty_transcript_call(),
+            lineage: &marker,
         }];
         calls.extend(
             ids.iter()
@@ -256,8 +257,8 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
                     call_id: (*id).into(),
                     canonical: "read_file",
                     exposed: "read_file",
-                    observation: Some(&observation),
-                    lineage: Some(lineage),
+                    observation: &observation,
+                    lineage,
                 }),
         );
         let mut results = ids
@@ -269,7 +270,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
                 succeeded: index != 1,
                 preview: "read result",
                 subject: None,
-                lineage: Some(lineage),
+                lineage,
             })
             .collect::<Vec<_>>();
         results.push(TranscriptPart::Result {
@@ -281,7 +282,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
                 "Script completed"
             },
             subject: None,
-            lineage: Some(&marker),
+            lineage: &marker,
         });
         let mut history = vec![item(Actor::Assistant, calls), item(Actor::Tool, results)];
         if name == "exec" {
@@ -292,8 +293,8 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
                     call_id: wait.into(),
                     canonical: "wait",
                     exposed: "wait",
-                    observation: None,
-                    lineage: Some(&marker),
+                    observation: empty_transcript_call(),
+                    lineage: &marker,
                     composition_owner: Some(CALL.into()),
                 }],
             ));
@@ -304,7 +305,7 @@ fn finished_native_and_local_cells_restore_three_nested_calls_and_one_failure() 
                     succeeded: true,
                     preview: "Script completed",
                     subject: None,
-                    lineage: Some(&marker),
+                    lineage: &marker,
                 }],
             ));
         }
@@ -422,19 +423,19 @@ fn a_call_joins_its_result_by_call_id_and_a_credential_in_the_result_is_redacted
                 vec![
                     TranscriptPart::Call {
                         composition_owner: None,
-                        lineage: None,
+                        lineage: direct_transcript_lineage(),
                         call_id: CALL.to_owned(),
                         canonical: "read_file",
                         exposed: "read_file",
-                        observation: None,
+                        observation: empty_transcript_call(),
                     },
                     TranscriptPart::Call {
                         composition_owner: None,
-                        lineage: None,
+                        lineage: direct_transcript_lineage(),
                         call_id: "unsettled".to_owned(),
                         canonical: "read_file",
                         exposed: "read_file",
-                        observation: None,
+                        observation: empty_transcript_call(),
                     },
                 ],
             ),
@@ -442,14 +443,14 @@ fn a_call_joins_its_result_by_call_id_and_a_credential_in_the_result_is_redacted
                 Actor::Tool,
                 vec![
                     TranscriptPart::Result {
-                        lineage: None,
+                        lineage: direct_transcript_lineage(),
                         call_id: CALL.to_owned(),
                         succeeded: true,
                         preview: &preview,
                         subject: None,
                     },
                     TranscriptPart::Result {
-                        lineage: None,
+                        lineage: direct_transcript_lineage(),
                         call_id: "never-called".to_owned(),
                         succeeded: false,
                         preview: "x",
@@ -691,17 +692,17 @@ fn a_settled_process_wait_reads_like_the_live_row() {
                 Actor::Assistant,
                 vec![TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CALL.to_owned(),
                     canonical: "process_session_poll",
                     exposed: "process_session_poll",
-                    observation: Some(&observation),
+                    observation: &observation,
                 }],
             ),
             item(
                 Actor::Tool,
                 vec![TranscriptPart::Result {
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CALL.to_owned(),
                     succeeded: true,
                     preview: &result,
@@ -744,17 +745,17 @@ fn a_process_wait_names_the_command_an_earlier_start_ran() {
                 Actor::Assistant,
                 vec![TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CALL.to_owned(),
                     canonical: "exec_command",
                     exposed: "exec_command",
-                    observation: Some(&start),
+                    observation: &start,
                 }],
             ),
             item(
                 Actor::Tool,
                 vec![TranscriptPart::Result {
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CALL.to_owned(),
                     succeeded: true,
                     preview: &started,
@@ -765,17 +766,17 @@ fn a_process_wait_names_the_command_an_earlier_start_ran() {
                 Actor::Assistant,
                 vec![TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: WAIT.to_owned(),
                     canonical: "process_session_poll",
                     exposed: "process_session_poll",
-                    observation: Some(&wait),
+                    observation: &wait,
                 }],
             ),
             item(
                 Actor::Tool,
                 vec![TranscriptPart::Result {
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: WAIT.to_owned(),
                     succeeded: true,
                     preview: &exited,
@@ -905,27 +906,27 @@ fn grok_calls_naming_a_child_read_as_the_await_and_the_interrupt() {
             vec![
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CALL.to_owned(),
                     canonical: "get_command_or_subagent_output",
                     exposed: "get_command_or_subagent_output",
-                    observation: Some(&await_child),
+                    observation: &await_child,
                 },
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: KILL.to_owned(),
                     canonical: "kill_command_or_subagent",
                     exposed: "kill_command_or_subagent",
-                    observation: Some(&kill_child),
+                    observation: &kill_child,
                 },
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: PROCESS.to_owned(),
                     canonical: "get_command_or_subagent_output",
                     exposed: "get_command_or_subagent_output",
-                    observation: Some(&process_only),
+                    observation: &process_only,
                 },
             ],
         )],
@@ -953,11 +954,11 @@ fn grok_calls_naming_a_child_read_as_the_await_and_the_interrupt() {
             Actor::Assistant,
             vec![TranscriptPart::Call {
                 composition_owner: None,
-                lineage: None,
+                lineage: direct_transcript_lineage(),
                 call_id: CALL.to_owned(),
                 canonical: "get_command_or_subagent_output",
                 exposed: "get_command_or_subagent_output",
-                observation: Some(&await_child),
+                observation: &await_child,
             }],
         )],
         locator(),
@@ -1012,35 +1013,35 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
             vec![
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CALL.to_owned(),
                     canonical: "wait",
                     exposed: "wait",
-                    observation: Some(&wait),
+                    observation: &wait,
                 },
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: BARE.to_owned(),
                     canonical: "wait",
                     exposed: "wait",
-                    observation: Some(&bare),
+                    observation: &bare,
                 },
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: STOP.to_owned(),
                     canonical: "stop",
                     exposed: "stop",
-                    observation: Some(&stop),
+                    observation: &stop,
                 },
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CHILD.to_owned(),
                     canonical: "wait",
                     exposed: "wait",
-                    observation: Some(&child),
+                    observation: &child,
                 },
             ],
         )],
@@ -1087,11 +1088,11 @@ fn pi_wait_and_stop_history_rows_read_as_process_calls() {
             Actor::Assistant,
             vec![TranscriptPart::Call {
                 composition_owner: None,
-                lineage: None,
+                lineage: direct_transcript_lineage(),
                 call_id: CHILD.to_owned(),
                 canonical: "process_session_poll",
                 exposed: "wait",
-                observation: Some(&child),
+                observation: &child,
             }],
         )],
         locator(),
@@ -1139,17 +1140,17 @@ fn a_bare_pi_wait_that_ran_the_await_restores_as_the_await() {
                         Actor::Assistant,
                         vec![TranscriptPart::Call {
                             composition_owner: None,
-                            lineage: None,
+                            lineage: direct_transcript_lineage(),
                             call_id: (*call_id).to_owned(),
                             canonical: "wait",
                             exposed: "wait",
-                            observation: Some(&bare),
+                            observation: &bare,
                         }],
                     ),
                     item(
                         Actor::Tool,
                         vec![TranscriptPart::Result {
-                            lineage: None,
+                            lineage: direct_transcript_lineage(),
                             call_id: (*call_id).to_owned(),
                             succeeded: true,
                             preview: preview.as_str(),
@@ -1205,17 +1206,17 @@ fn a_restored_bare_wait_keeps_the_observation_subject_when_the_preview_drops_it(
                     Actor::Assistant,
                     vec![TranscriptPart::Call {
                         composition_owner: None,
-                        lineage: None,
+                        lineage: direct_transcript_lineage(),
                         call_id: CALL.to_owned(),
                         canonical: "wait",
                         exposed: "wait",
-                        observation: Some(&bare),
+                        observation: &bare,
                     }],
                 ),
                 item(
                     Actor::Tool,
                     vec![TranscriptPart::Result {
-                        lineage: None,
+                        lineage: direct_transcript_lineage(),
                         call_id: CALL.to_owned(),
                         succeeded: true,
                         preview: preview.as_str(),
@@ -1256,19 +1257,19 @@ fn aliased_history_calls_are_labelled_by_exposed_name_and_classified_by_canonica
             vec![
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: CALL.to_owned(),
                     canonical: "apply_patch",
                     exposed: "edit",
-                    observation: Some(&edit),
+                    observation: &edit,
                 },
                 TranscriptPart::Call {
                     composition_owner: None,
-                    lineage: None,
+                    lineage: direct_transcript_lineage(),
                     call_id: WRITE.to_owned(),
                     canonical: "apply_patch",
                     exposed: "write",
-                    observation: Some(&write),
+                    observation: &write,
                 },
             ],
         )],

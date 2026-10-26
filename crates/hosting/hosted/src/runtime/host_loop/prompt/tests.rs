@@ -13,6 +13,99 @@ fn hosted_call_counts_catch_up_after_deferred_projection() {
     assert_hosted_calls_projected(true);
 }
 
+#[test]
+fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() {
+    use crate::runtime::Sender;
+    use crate::surface_protocol::UserAction;
+    use plakous_host_protocol::views::transcript::TranscriptState;
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let store = config.store.clone();
+    let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = HostLoop::open(config, &actions, Sender::over(wire), None).unwrap();
+    let id = host.config.session.id.clone();
+    let mut folded = TranscriptState::default();
+    for event in events.try_iter() {
+        if let HostEvent::PresentationSnapshot(snapshot) = event {
+            folded.replace(snapshot).unwrap();
+        }
+    }
+    assert!(folded.revision() > 0);
+    action_tx
+        .send(UserAction::Prompt("check live and restored keys".into()))
+        .unwrap();
+    let HostStep::Prompt {
+        text,
+        queued_delivery,
+        user_echoed,
+    } = host.next_prompt(None).unwrap()
+    else {
+        panic!("prompt");
+    };
+    host.run_prompt(text, queued_delivery, user_echoed, None)
+        .unwrap();
+    host.publish_projected_transcript(true);
+    let mut patches = 0;
+    for event in events.try_iter() {
+        match event {
+            HostEvent::TranscriptPatch(patch) => {
+                folded.apply(patch).unwrap();
+                patches += 1;
+            }
+            HostEvent::PresentationSnapshot(_) => {
+                panic!("ordinary turn settlement must not replace its baseline")
+            }
+            _ => {}
+        }
+    }
+    assert!(patches > 0);
+    let expected = super::super::super::logging::project_session_snapshot(&host.config.session);
+    assert_eq!(
+        folded.items(),
+        &expected
+            .items
+            .into_iter()
+            .map(|item| (item.key, item.row))
+            .collect()
+    );
+    host.publish_projected_transcript(true);
+    let quiet: Vec<_> = events
+        .try_iter()
+        .filter_map(|event| match event {
+            HostEvent::TranscriptPatch(patch) => Some(patch),
+            HostEvent::PresentationSnapshot(_) => panic!("quiet settlement must publish a patch"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(quiet.len(), 1);
+    assert!(quiet[0].upserts.is_empty() && quiet[0].deletes.is_empty());
+    folded.apply(quiet.into_iter().next().unwrap()).unwrap();
+    host.release().unwrap();
+
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    config.session = store.load(&id).unwrap();
+    config.store = store;
+    let (wire, restored) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let reopened = HostLoop::open(config, &actions, Sender::over(wire), None).unwrap();
+    let snapshot = restored
+        .try_iter()
+        .find_map(|event| match event {
+            HostEvent::PresentationSnapshot(snapshot) => Some(snapshot),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        folded.items(),
+        &snapshot
+            .items
+            .into_iter()
+            .map(|item| (item.key, item.row))
+            .collect()
+    );
+    reopened.release().unwrap();
+}
+
 fn assert_hosted_calls_projected(defer_projection: bool) {
     use crate::surface_protocol::UserAction;
 
