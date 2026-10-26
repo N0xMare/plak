@@ -120,7 +120,10 @@ pub(super) fn command_attempt(command_id: &str) -> Option<&str> {
     let rest = command_id
         .strip_prefix("plak:park-wake:")
         .or_else(|| command_id.strip_prefix(SUBMIT_HARNESS_PREFIX))
-        .or_else(|| command_id.strip_prefix(crate::driver::transient::COMMAND_PREFIX))?;
+        .or_else(|| {
+            command_id
+                .strip_prefix(crate::agent_tree::ProductAgentTree::TRANSIENT_RESUME_COMMAND_PREFIX)
+        })?;
     let mut parts = rest.rsplitn(3, ':');
     let _count = parts.next()?;
     let attempt = parts.next()?;

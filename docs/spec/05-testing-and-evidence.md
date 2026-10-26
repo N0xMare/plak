@@ -1676,6 +1676,12 @@ The matrix also checks non-cancelling product capacity refusal cancels a root
 continuation before retaining a live, paused host with no submission or retry,
 reopen at the exact spent budget, and startup cancellation as the probe resolves
 without failed settlement.
+The one-shot wake capacity regression drives the real run loop with a pending
+process notice and a `SaveSubmission` capacity refusal: one unavailable notice,
+no new submission or live queue item, and a bounded exit before its deadline.
+The transient capacity case checks cancellation precedes the unavailable
+notice through that same loop. A corrupt zero saved round refuses without
+panicking; the command-id validity assertion remains in force.
 
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on

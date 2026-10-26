@@ -219,6 +219,124 @@ fn run_continuation_ignores_auto_continue_and_admits_its_own_terminal() {
 }
 
 #[test]
+fn run_wake_storage_full_exits_once_without_phantom_queue_items() {
+    use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct FullSubmission {
+        unavailable: AtomicBool,
+        attempts: AtomicUsize,
+    }
+    impl StoreFaults for FullSubmission {
+        fn before(
+            &self,
+            _: StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        fn storage_unavailable(&self) -> bool {
+            self.unavailable.load(Ordering::Acquire)
+        }
+        fn refusal(&self, call: StoreCall) -> Option<crate::error::StoreRefusal> {
+            if call != StoreCall::SaveSubmission {
+                return None;
+            }
+            self.attempts.fetch_add(1, Ordering::Relaxed);
+            self.unavailable.store(true, Ordering::Release);
+            Some(crate::error::StoreRefusal::StorageFull)
+        }
+    }
+
+    let jobs = Arc::new(WakeJobFixture::default());
+    with_configured_fixture(
+        0,
+        false,
+        |config, _| jobs.configure(config, &[2, 0]),
+        |host, runtime, actions, observed| {
+            actions.send(UserAction::Prompt("start".into())).unwrap();
+            let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
+            host.run_prompt(text, item, echoed, None).unwrap();
+            jobs.complete(host, 1);
+            assert_eq!(host.opened.agent().unwrap().jobs().len(), 2);
+            runtime
+                .mutate_then_emit(false, |tree| {
+                    let child = tree
+                        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                        .map_err(|error| error.message)?;
+                    tree.set_active_turn(&child.agent_id, true)
+                        .map_err(|error| error.message)
+                })
+                .unwrap();
+            let _ = observed.try_iter().count();
+            let records = host.config.store.clone();
+            let store = Arc::new(FaultStore::new(records.clone(), FullSubmission::default()));
+            host.config.store = store.clone();
+            let queue = host.config.session.pending_queue.clone();
+            let before = submissions(host);
+            let mut state = completed_run(100);
+            state.run.as_mut().unwrap().deadline = Some(Instant::now() + Duration::from_secs(5));
+            host.drive(Some(&mut state)).unwrap();
+            assert!(matches!(
+                state.result,
+                Some(Ok(crate::runtime::OneShotOutcome::Interrupted { .. }))
+            ));
+            assert_eq!(store.faults.attempts.load(Ordering::Relaxed), 1);
+            assert!(
+                host.opened
+                    .agent()
+                    .unwrap()
+                    .jobs()
+                    .iter()
+                    .all(|job| job.status != plakous::tools::JobStatus::Running)
+            );
+            assert_eq!(
+                runtime.read(|tree| tree.nodes()["c1"].status).unwrap(),
+                crate::agent_tree_protocol::NodeStatus::Interrupted
+            );
+            assert_eq!(host.config.session.pending_queue, queue);
+            assert_eq!(
+                host.config.session.queue_drain_state,
+                QueueDrainState::RestoredPaused
+            );
+            assert_eq!(submissions(host), before);
+            assert_eq!(
+                records.load(&host.config.session.id).unwrap().pending_queue,
+                queue
+            );
+            let notices: Vec<_> = observed
+                .try_iter()
+                .filter_map(|event| match event {
+                    HostEvent::Row(TranscriptRow::Notice(row)) => Some(row.text),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                notices
+                    .iter()
+                    .filter(|text| text.contains("storage write unavailable"))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                notices
+                    .iter()
+                    .filter(|text| text.as_str() == "plak: run stopped at storage unavailable")
+                    .count(),
+                1
+            );
+            store.faults.unavailable.store(false, Ordering::Release);
+            host.config.store.save(&mut host.config.session).unwrap();
+            assert_eq!(
+                records.load(&host.config.session.id).unwrap().pending_queue,
+                queue
+            );
+        },
+    );
+}
+
+#[test]
 fn run_max_turns_stops_before_admitting_a_continuation() {
     with_host(1, |host, _, _, observed| {
         let mut state = completed_run(1);

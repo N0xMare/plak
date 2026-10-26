@@ -2128,6 +2128,9 @@ recovers; no background retry or inference replay is scheduled.
 An automatic root continuation whose product preparation refuses capacity is
 cancelled with its notice before the host retains the storage pause; it creates
 no submission and is not retried in the background.
+A one-shot run stages each wake queue item on a candidate record and installs
+it only after submission preparation succeeds. A retained storage outage pauses
+its queue and ends the wait without another wake attempt or undurable item.
 Child publication waits belong to the command recipient. A refused root batch
 leaves the queued input and unread mail retryable. Retrying a batch written
 before its product submission reuses the same command identity and bytes

@@ -47,6 +47,9 @@ pub struct ChildTerminal {
 }
 
 impl ProductAgentTree {
+    /// Prefix of every persisted transient-continuation command identity.
+    pub const TRANSIENT_RESUME_COMMAND_PREFIX: &str = "plak:resume-transient:";
+
     /// The persisted command identity for an immutable child continuation round.
     #[must_use]
     pub fn transient_resume_command_id(
@@ -54,7 +57,10 @@ impl ProductAgentTree {
         attempt: &crate::protocol::AttemptId,
         round: u8,
     ) -> String {
-        format!("plak:resume-transient:{agent_id}:{attempt}:{round}")
+        format!(
+            "{}{agent_id}:{attempt}:{round}",
+            Self::TRANSIENT_RESUME_COMMAND_PREFIX
+        )
     }
 
     /// Records the host decision, keyed by child, attempt and exact ended turn.

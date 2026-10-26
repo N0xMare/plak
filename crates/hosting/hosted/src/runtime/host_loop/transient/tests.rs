@@ -338,16 +338,25 @@ fn root_transient_failure_announces_automatic_continue() {
 #[test]
 fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() {
     use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use crate::runtime::oneshot::{OneShotOutcome, OneShotState, RunBounds, RunState};
     use crate::session_store::SessionRecordStore as _;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
-    struct FullSubmission;
+    struct FullSubmission(AtomicBool);
     impl StoreFaults for FullSubmission {
         fn before(&self, _: StoreCall, _: Option<&sessions::SessionRecord>) -> Result<(), String> {
             Ok(())
         }
         fn refusal(&self, call: StoreCall) -> Option<crate::error::StoreRefusal> {
-            (call == StoreCall::SaveSubmission).then_some(crate::error::StoreRefusal::StorageFull)
+            if call != StoreCall::SaveSubmission {
+                return None;
+            }
+            self.0.store(true, Ordering::Release);
+            Some(crate::error::StoreRefusal::StorageFull)
+        }
+        fn storage_unavailable(&self) -> bool {
+            self.0.load(Ordering::Acquire)
         }
     }
 
@@ -356,7 +365,10 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
     let records = Arc::new(crate::session_store::MemoryStore::new());
     records.save(&mut config.session).unwrap();
     let id = config.session.id.clone();
-    config.store = Arc::new(FaultStore::new(records.clone(), FullSubmission));
+    config.store = Arc::new(FaultStore::new(
+        records.clone(),
+        FullSubmission(AtomicBool::new(false)),
+    ));
     let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
@@ -367,16 +379,27 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
         .ready
         .store(true, Ordering::Release);
     assert!(!host.config.store.storage_wait_cancelled());
-    let error = host
-        .transient_resume_prompt()
-        .err()
-        .expect("typed capacity refusal");
-    assert_eq!(
-        error.store_refusal(),
-        Some(crate::error::StoreRefusal::StorageFull)
-    );
+    let mut state = OneShotState {
+        attempted: true,
+        resume_tree: false,
+        result: Some(Err(CliFailure::new("original failure"))),
+        run: Some(RunState {
+            bounds: RunBounds {
+                max_turns: 100,
+                leave_jobs_running: false,
+                deadline: None,
+            },
+            deadline: Some(Instant::now() + Duration::from_secs(5)),
+            turns: 1,
+            timed_out: Arc::new(AtomicBool::new(false)),
+        }),
+    };
+    host.drive(Some(&mut state)).unwrap();
+    assert!(!matches!(
+        state.result,
+        Some(Ok(OneShotOutcome::Bounded { .. }))
+    ));
     assert!(host.pending_resume.is_none());
-    assert!(host.retain_interrupted_storage(&error));
     assert_eq!(
         host.config.session.queue_drain_state,
         sessions::QueueDrainState::RestoredPaused
@@ -387,9 +410,29 @@ fn root_transient_uncancelled_product_full_pauses_without_submission_or_retry() 
         host.transient_resume_prompt().unwrap(),
         HostStep::Continue
     ));
-    assert!(observations.try_iter().any(|event| matches!(event,
-        HostEvent::Row(TranscriptRow::Notice(row)) if row.text == "automatic continuation cancelled"
-    )));
+    let notices: Vec<_> = observations
+        .try_iter()
+        .filter_map(|event| match event {
+            HostEvent::Row(TranscriptRow::Notice(row)) => Some(row.text),
+            _ => None,
+        })
+        .collect();
+    let cancelled = notices
+        .iter()
+        .position(|text| text == "automatic continuation cancelled")
+        .unwrap();
+    let unavailable = notices
+        .iter()
+        .position(|text| text.contains("storage write unavailable"))
+        .unwrap();
+    assert!(cancelled < unavailable);
+    assert_eq!(
+        notices
+            .iter()
+            .filter(|text| text.contains("storage write unavailable"))
+            .count(),
+        1
+    );
     host.release().unwrap();
 }
 

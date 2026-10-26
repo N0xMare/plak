@@ -2326,6 +2326,11 @@ owned until stop, session release, attempt end, or the hard runtime cap.
 There is no consecutive-wake limit; the explicit max-turns and timeout bounds
 below still apply. It exits with the last turn status. Refused, failed and
 interrupted continuations end the run without retry.
+If capacity refuses an automatic continuation and storage remains unavailable,
+the run emits `plak: run stopped at storage unavailable`, maps a completed or
+truncated last turn to interrupted (exit 4), and performs the same job
+stop/disown and child interruption cleanup as a bound. `--leave-jobs-running`
+still relinquishes leftover groups first. No unadmitted wake item is retained.
 
 `--max-turns <n>` counts admitted turns including the first (1..=100, default
 25). `--timeout <seconds>` bounds the whole run wall clock (default none).

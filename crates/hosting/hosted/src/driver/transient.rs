@@ -9,7 +9,6 @@ use plakous::model::{
 use std::future::Future;
 use std::time::Duration;
 
-pub(crate) const COMMAND_PREFIX: &str = "plak:resume-transient:";
 pub(crate) const ROOT_COMMAND_PREFIX: &str = "plak:resume-transient:root:";
 
 pub(crate) enum ResumeOwner<'a> {
@@ -51,7 +50,6 @@ impl ResumePlan {
         failure: &str,
         round: u8,
     ) -> Option<Self> {
-        debug_assert!(round > 0, "continuation rounds are one-based");
         if round == 0 {
             return None;
         }
@@ -194,6 +192,21 @@ fn classify(
 mod tests {
     use super::*;
     use plakous::model::{ModelRetryDelay, ModelRetryRisk};
+
+    #[test]
+    fn a_zero_saved_round_is_refused_without_panicking() {
+        assert!(
+            ResumePlan::for_round(
+                ResumeGate::Network,
+                ResumeOwner::Root {
+                    failed_turn: TurnId::try_from(uuid::Uuid::from_u128(1)).unwrap(),
+                },
+                "temporary failure",
+                0,
+            )
+            .is_none()
+        );
+    }
 
     #[test]
     fn transient_classifier_uses_only_persisted_facts() {

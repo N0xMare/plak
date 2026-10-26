@@ -10,6 +10,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     pub(super) fn next_run_prompt(&mut self, state: &mut OneShotState) -> CliResult<HostStep> {
         let mut waiting_noted = false;
         loop {
+            let storage_unavailable =
+                self.storage_interrupted && self.config.store.storage_unavailable();
             let Some(run) = state.run.as_ref() else {
                 return Ok(HostStep::Quit);
             };
@@ -93,7 +95,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             } else {
                 None
             };
-            if bound.is_some() || interrupted || (!completed && !resuming) {
+            if storage_unavailable || bound.is_some() || interrupted || (!completed && !resuming) {
                 self.cancel_transient_resume();
                 let stopped = jobs
                     .iter()
@@ -170,7 +172,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     Ok(Err(error)) => failures.push(error),
                     Err(error) => failures.push(error.to_string()),
                 }
-                if let Some(bound) = bound {
+                if storage_unavailable {
+                    let _ = self.events.notice(TranscriptRow::info(
+                        NoticeScope::Tree,
+                        "plak: run stopped at storage unavailable",
+                    ));
+                }
+                if let Some(bound) = bound.filter(|_| !storage_unavailable) {
                     if let Some(session_id) =
                         crate::product_observation::session_id_from_text(&self.config.session.id)
                     {
@@ -211,7 +219,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         format!("plak: run stopped at {bound}{suffix}"),
                     ));
                     state.result = Some(Ok(OneShotOutcome::Bounded { assistant, bound }));
-                } else if interrupted && completed {
+                } else if (interrupted || storage_unavailable) && completed {
                     if let Some(Ok(
                         OneShotOutcome::Completed { assistant }
                         | OneShotOutcome::Truncated { assistant },
@@ -260,15 +268,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     .map(|job| format!("p{}", job.number))
                     .chain(mail.iter().map(|(id, _)| id.clone()))
                     .collect::<Vec<_>>();
-                let item = self
-                    .config
-                    .session
+                let mut candidate = self.config.session.clone();
+                let item = candidate
                     .enqueue_live(super::wake::WAKE_PROMPT)
                     .map_err(|_| CliFailure::new("run continuation queue admission was refused"))?;
                 self.config.session = super::super::result_mail::prepare_instruction(
                     &self.config.topology_rows(),
                     self.config.store.as_ref(),
-                    &self.config.session,
+                    &candidate,
                     &item,
                     &command,
                     batch,
@@ -316,6 +323,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 
     fn pause_run_queue(&mut self) -> CliResult<()> {
         self.config.session.queue_drain_state = crate::sessions::QueueDrainState::RestoredPaused;
+        if self.storage_interrupted && self.config.store.storage_unavailable() {
+            return Ok(());
+        }
         self.config
             .store
             .save(&mut self.config.session)
