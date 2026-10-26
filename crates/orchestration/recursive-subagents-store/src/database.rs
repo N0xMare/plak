@@ -62,7 +62,7 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "agent_workspaces",
-        "CREATE TABLE agent_workspaces(tree_id TEXT NOT NULL,workspace_id TEXT NOT NULL,owner_agent_id TEXT NOT NULL,path TEXT NOT NULL,mode TEXT NOT NULL CHECK(mode IN('inherit','snapshot','fork')),status TEXT NOT NULL CHECK(status IN('active','adopting','discarding','clean_removed','adopted','discarded')),base_commit TEXT,base_content TEXT,base_change_id TEXT,generation INTEGER NOT NULL CHECK(generation>=0),adopter_agent_id TEXT CHECK(adopter_agent_id IS NULL OR status='adopting'),input_candidate_id TEXT,resolves TEXT,conflict_target TEXT,conflict_paths TEXT NOT NULL,PRIMARY KEY(tree_id,workspace_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
+        "CREATE TABLE agent_workspaces(tree_id TEXT NOT NULL,workspace_id TEXT NOT NULL,owner_agent_id TEXT NOT NULL,path TEXT NOT NULL,mode TEXT NOT NULL CHECK(mode IN('inherit','snapshot','fork')),status TEXT NOT NULL CHECK(status IN('active','adopting','discarding','clean_removed','adopted','discarded')),base_commit TEXT,base_content TEXT,base_change_id TEXT,generation INTEGER NOT NULL CHECK(generation>=0),adopter_agent_id TEXT CHECK(adopter_agent_id IS NULL OR status='adopting'),input_candidate_id TEXT,resolves TEXT,conflict_base TEXT,conflict_target TEXT,conflict_paths TEXT NOT NULL,PRIMARY KEY(tree_id,workspace_id),FOREIGN KEY(tree_id) REFERENCES agent_trees(tree_id))",
     ),
     (
         "agent_commands",
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(SCHEMA_VERSION, 9);
         assert_eq!(
             expected_schema_fingerprint(),
-            "b7f03c5d97e2f9bdf4736ef2d2fa47d7f8563fb1592cfe21a30e844c531d5411"
+            "64556904e308c8a32d6820b79bbe5f1a1a9d6ca5a297e68d0db1d907b21b37ef"
         );
     }
 

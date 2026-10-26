@@ -586,6 +586,8 @@ pub struct CandidateRecord {
 pub struct WorkspaceRecord {
     /// Original source when this copy was minted as a conflict resolver.
     pub resolves: Option<CandidateId>,
+    /// Mint-time merge base, independent of the collectable conflict record.
+    pub conflict_base: Option<String>,
     /// Original adopter whose checkout may accept the resolution.
     pub conflict_target: Option<String>,
     /// Immutable marker-inspection paths captured at mint.
@@ -1728,6 +1730,7 @@ impl ProductAgentTree {
             close_ids: Vec::new(),
         };
         let workspace = WorkspaceRecord {
+            conflict_base: None,
             resolves: None,
             conflict_target: None,
             conflict_paths: Vec::new(),

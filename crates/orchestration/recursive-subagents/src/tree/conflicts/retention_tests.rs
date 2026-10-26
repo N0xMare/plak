@@ -4,6 +4,15 @@ use crate::protocol::{CandidateId, NodeStatus, WriterMode};
 use crate::tree::test_support::{adopt_req, candidate_of, close_req, mint_req, tree_at};
 use crate::tree::{AwaitAgents, ListAgentsRequest, ProductAgentTree};
 
+fn acknowledge(tree: &mut ProductAgentTree, agent: &str) {
+    let mail = tree
+        .timeout_wait_rows_for_test("root", &AwaitAgents::Named(vec![agent.to_owned()]))
+        .unwrap();
+    for row in mail.mail {
+        tree.acknowledge_mail(&row.message_id).unwrap();
+    }
+}
+
 struct Fixture {
     repo: tempfile::TempDir,
     tree: ProductAgentTree,
@@ -178,15 +187,138 @@ fn a_late_resolver_seal_is_superseded_and_a_spent_conflict_cannot_mint_another()
 }
 
 #[test]
-fn a_missing_input_record_fails_sealing_closed_instead_of_erasing_lineage() {
+fn inconsistent_persisted_resolver_lineage_fails_sealing_closed() {
     let mut f = Fixture::new();
     let resolver = f.resolver();
-    f.tree.candidates.remove(&f.conflict);
+    let workspace = f.tree.node(&resolver).unwrap().workspace_id.clone();
+    f.tree.workspaces.get_mut(&workspace).unwrap().conflict_base = None;
     f.tree.record_turn_completed(&resolver).unwrap();
     f.tree.settle_for_test();
     assert!(f.tree.attempt(&resolver).unwrap().candidate_id.is_none());
     assert_eq!(
         f.tree.node(&resolver).unwrap().status,
         NodeStatus::RecoveryRequired
+    );
+}
+
+#[test]
+fn ordinary_stacked_child_over_collected_input_seals_at_turn_end_and_dormancy() {
+    for dormant in [false, true] {
+        let repo = plakous_workspace::vcs_fixtures::git_repo();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let first = tree.spawn_agent("root", &mint_req(), None).unwrap();
+        let path = tree.node(&first.agent_id).unwrap().path.clone();
+        std::fs::write(path.join("FIRST.txt"), "first\n").unwrap();
+        tree.record_turn_completed(&first.agent_id).unwrap();
+        tree.settle_for_test();
+        let input = candidate_of(&tree, &first.agent_id);
+        tree.adopt_candidate("root", &adopt_req(&input), None)
+            .unwrap();
+        let mut request = mint_req();
+        request.inputs = Some(vec![input.to_string()]);
+        let second = tree.spawn_agent("root", &request, None).unwrap();
+        acknowledge(&mut tree, &first.agent_id);
+        tree.close_agent("root", &close_req(&first.agent_id), None)
+            .unwrap();
+        tree.settle_for_test();
+        tree.reclaim_dormant(u64::MAX, &std::collections::BTreeMap::new())
+            .unwrap();
+        tree.settle_for_test();
+        for ticket in tree.prepare_child_retention(u64::MAX).unwrap() {
+            tree.finish_child_retention(&ticket).unwrap();
+        }
+        assert!(!tree.candidates.contains_key(&input));
+        let path = tree.node(&second.agent_id).unwrap().path.clone();
+        if dormant {
+            tree.record_turn_completed(&second.agent_id).unwrap();
+            tree.settle_for_test();
+            acknowledge(&mut tree, &second.agent_id);
+        }
+        std::fs::write(path.join("SECOND.txt"), "second\n").unwrap();
+        if dormant {
+            tree.reclaim_dormant(u64::MAX, &std::collections::BTreeMap::new())
+                .unwrap();
+        } else {
+            tree.record_turn_completed(&second.agent_id).unwrap();
+        }
+        let settled = tree.settle_for_test();
+        assert_eq!(settled.seal_failures, Vec::new());
+        assert_eq!(settled.cleanup_failures, Vec::new());
+        let candidate = tree
+            .candidates
+            .values()
+            .find(|row| row.producing_agent_id == second.agent_id)
+            .unwrap();
+        assert!(candidate.resolves.is_none());
+        let id = candidate.candidate_id.clone();
+        tree.adopt_candidate("root", &adopt_req(&id), None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("SECOND.txt")).unwrap(),
+            "second\n"
+        );
+    }
+}
+
+#[test]
+fn accepted_resolver_rehydrates_after_its_source_and_conflict_are_collected_then_seals_work() {
+    use crate::protocol::{MessagePurpose, SendAgentMessageRequest};
+    let mut f = Fixture::new();
+    let resolver = f.resolver();
+    let accepted = f.finish(&resolver, true);
+    f.tree
+        .adopt_candidate("root", &adopt_req(&accepted), None)
+        .unwrap();
+    let source_agent = f.tree.candidates[&f.source].producing_agent_id.clone();
+    acknowledge(&mut f.tree, &source_agent);
+    acknowledge(&mut f.tree, &resolver);
+    f.tree
+        .close_agent("root", &close_req(&source_agent), None)
+        .unwrap();
+    f.tree.settle_for_test();
+    f.tree
+        .reclaim_dormant(u64::MAX, &std::collections::BTreeMap::new())
+        .unwrap();
+    f.tree.settle_for_test();
+    let workspace = f.tree.node(&resolver).unwrap().workspace_id.clone();
+    assert!(f.tree.reclaimed(&workspace));
+    for ticket in f
+        .tree
+        .prepare_child_retention(super::super::now_unix_millis())
+        .unwrap()
+    {
+        assert_eq!(ticket.agent_id, source_agent);
+        f.tree.finish_child_retention(&ticket).unwrap();
+    }
+    assert!(!f.tree.candidates.contains_key(&f.source));
+    assert!(!f.tree.candidates.contains_key(&f.conflict));
+    let request = SendAgentMessageRequest {
+        agent_id: resolver.clone(),
+        message: "follow up".into(),
+        purpose: Some(MessagePurpose::Followup),
+        priority: None,
+        in_reply_to: None,
+        output_schema_json: None,
+    };
+    f.tree
+        .rehydrate_followup("root", &request, "revive")
+        .unwrap();
+    f.tree.settle_for_test();
+    f.tree
+        .send_agent_message("root", &request, Some("revive"))
+        .unwrap();
+    let path = f.tree.node(&resolver).unwrap().path.clone();
+    std::fs::write(path.join("FOLLOWUP.txt"), "ordinary delta\n").unwrap();
+    f.tree.record_turn_completed(&resolver).unwrap();
+    f.tree.settle_for_test();
+    let next = candidate_of(&f.tree, &resolver);
+    let row = &f.tree.candidates[&next];
+    assert!(row.resolves.is_none());
+    assert_eq!(row.conflict_paths, Vec::new());
+    f.tree
+        .adopt_candidate("root", &adopt_req(&next), None)
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(f.repo.path().join("FOLLOWUP.txt")).unwrap(),
+        "ordinary delta\n"
     );
 }

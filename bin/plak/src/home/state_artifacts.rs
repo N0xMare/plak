@@ -835,17 +835,7 @@ pub(crate) fn remember_deleted_tree(paths: &PlakPaths, tree_id: &str) -> Result<
             &maintenance::digest_text(tree_id),
             candidate.candidate_id.as_str(),
         );
-        if (candidate.adopted_by.is_none() && candidate.adopted_via.is_none())
-            || rows.workspaces().values().any(|workspace| {
-                !matches!(
-                    workspace.status,
-                    plakous_host_protocol::topology::WorkspaceStatus::Discarded
-                        | plakous_host_protocol::topology::WorkspaceStatus::CleanRemoved
-                ) && ((candidate.source_candidate_id.is_some()
-                    && workspace.input_candidate_id.as_ref() == Some(&candidate.candidate_id))
-                    || workspace.resolves.as_ref() == Some(&candidate.candidate_id))
-            })
-        {
+        if candidate.adopted_by.is_none() && candidate.adopted_via.is_none() {
             artifact.unadopted.insert(reference.clone());
         }
         artifact.references.extend(maintenance::candidate_refs(
@@ -2760,6 +2750,74 @@ mod tests {
                     .contains(&format!("refs/heads/plak/{dir}"))
             );
         }
+    }
+
+    #[test]
+    fn deleted_tree_has_no_live_resolver_input_protection() {
+        use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, Tier};
+        let (_home, paths) = PlakPaths::isolated_test_home();
+        let repo = git_repo();
+        paths.ensure_layout().unwrap();
+        let record = crate::store::sessions::SessionRecord::new(repo.path().to_path_buf());
+        let mut tree = plakous_hosted::topology_runtime::test_support::bootstrap(
+            &record.id,
+            repo.path().to_path_buf(),
+        );
+        let request =
+            SpawnAgentRequest::test_named("implement", Tier::Mutate, "editor", "edit").with_fork();
+        let child = tree.spawn_agent("root", &request, None).unwrap();
+        fs::write(
+            tree.node(&child.agent_id).unwrap().path.join("SEED.txt"),
+            "child\n",
+        )
+        .unwrap();
+        fs::write(repo.path().join("SEED.txt"), "parent\n").unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        let source = tree
+            .attempt(&child.agent_id)
+            .unwrap()
+            .candidate_id
+            .clone()
+            .unwrap();
+        let adopt = serde_json::from_value(serde_json::json!({"candidate_id": source})).unwrap();
+        assert!(tree.adopt_candidate("root", &adopt, None).is_err());
+        let conflict = tree
+            .candidates()
+            .values()
+            .find(|row| row.source_candidate_id.is_some())
+            .unwrap()
+            .candidate_id
+            .clone();
+        let mut resolver = request;
+        resolver.inputs = Some(vec![conflict.to_string()]);
+        let resolver = tree.spawn_agent("root", &resolver, None).unwrap();
+        let path = tree.node(&resolver.agent_id).unwrap().path.clone();
+        fs::write(path.join("SEED.txt"), "parent\n").unwrap();
+        fs::write(path.join("RESOLVED.txt"), "resolution\n").unwrap();
+        tree.record_turn_completed(&resolver.agent_id).unwrap();
+        tree.settle_for_test();
+        let candidate = tree
+            .attempt(&resolver.agent_id)
+            .unwrap()
+            .candidate_id
+            .clone()
+            .unwrap();
+        let adopt = serde_json::from_value(serde_json::json!({"candidate_id": candidate})).unwrap();
+        tree.adopt_candidate("root", &adopt, None).unwrap();
+        crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+        remember_deleted_tree(&paths, &record.id).unwrap();
+        let artifact: Artifacts = serde_json::from_slice(
+            &fs::read(
+                paths
+                    .state_dir()
+                    .join("deleted-artifacts")
+                    .join(format!("{}.json", record.id)),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(artifact.unadopted, BTreeSet::new());
     }
 
     #[test]

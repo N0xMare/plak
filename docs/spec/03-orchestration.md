@@ -1938,15 +1938,23 @@ they leave `list_agents`' `candidates` and no longer protect retention or count
 as unadopted maintenance artifacts, except that a live resolver input still
 protects its conflict record and source acceptance record. Neither is collected
 or unpinned while a non-discarded, non-reclaimed copy names the conflict as its
-`input_candidate_id`; maintenance applies the same protection. Normal producer collection queues their
+`input_candidate_id`. Live-tree maintenance is deliberately more conservative:
+it keeps this protection until the workspace is `discarded` or `clean_removed`,
+without interpreting intermediate reclamation intents. For a deleted tree there
+are no live input owners: maintenance classifies work only by `adopted_by` and
+`adopted_via`. Normal producer collection queues their
 candidate and base refs for unpinning, just like other spent candidate records.
 A follow-up in the accepted resolver copy seals an ordinary delta over that
 advanced base, not another resolution of the original source.
 
-At mint the workspace row stores the resolver's `resolves`, `conflict_target`
-and `conflict_paths`, independently of candidate-record lifetime. Sealing and
-marker inspection use this immutable workspace lineage. A missing input record
-fails sealing closed rather than producing ordinary work without lineage.
+At mint the workspace row stores the resolver's `resolves`, `conflict_base`
+(mint-time base commit), `conflict_target` and `conflict_paths`, independently
+of candidate-record lifetime. Sealing and marker inspection use this immutable
+workspace lineage, never a lookup of the input conflict record. A non-resolver
+copy (`resolves` absent) seals ordinary work even after its adopted input was
+collected. A resolver with inconsistent persisted lineage fails sealing closed.
+An accepted resolver whose base advanced beyond `conflict_base` seals ordinary
+follow-up deltas, including after reclamation, source collection and rehydration.
 Even a spent resolver's pinned snapshot is inspected for unresolved markers
 before returning its acceptance refusal; it can never apply a second landing.
 
@@ -2886,7 +2894,7 @@ operator must not repair it by guessing a new tree locator.
 | `agent_messages` | `(tree_id, message_id)` | body, `purpose` (including `followup` and the host-authored `result`), priority, reply link, disposition, durable state |
 | `agent_attempts` | `(tree_id, attempt_id)` | `AttemptStatus`, turn token and plain turn id, the 0–2 harness nudge count, `candidate_id`, `retry_of`, `request_key`, start and end stamps, the blocked reason, the failure `{kind, message}`, and the five usage counters; submitted output is derived from its intent |
 | `agent_candidates` | `(tree_id, candidate_id)` | workspace, producing agent and attempt, base commit / content / change id, candidate commit / content / change id, seal stamp, adopter, merged-at target commit, target-before snapshot commit, evidence, `kind` (`work\|conflict`), source candidate, conflict target and JSON path/kind array, `resolves`, `adopted_via` |
-| `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, nullable `input_candidate_id`, immutable resolver `resolves` / `conflict_target` / JSON `conflict_paths`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
+| `agent_workspaces` | `(tree_id, workspace_id)` | owner, path, `mode` (`inherit`, `snapshot`, `fork`), `status` (`active`, `adopting`, `discarding`, `clean_removed`, `adopted`, `discarded`), base identity, nullable `input_candidate_id`, immutable resolver `resolves` / `conflict_base` / `conflict_target` / JSON `conflict_paths`, generation, and the in-flight adopter (`adopter_agent_id`, set only while `adopting`) |
 | `agent_commands` | `(tree_id, command_id)` | every runtime command the tree prepares — a root admission's result-mail batch, a child Start, wake, mail Start, followup or corrective round — with its recipient, attempt, kind, exact canonical text and message ids, all immutable; the tree's withdrawal of a command no fact settled; and, as a view, the fact the recipient's feed recorded for it (`accepted`, `rejected`, or `returned` by a withheld terminal) with the plain turn id it bound and nullable INTEGER `accepted_seq` |
 | `agent_feed_cursors` | `(tree_id, runtime_session_id)` | the last feed sequence the tree projector applied for that session, root or child |
 

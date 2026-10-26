@@ -3138,6 +3138,7 @@ mod tests {
         tree.workspaces.insert(
             "ws-c2".into(),
             WorkspaceRecord {
+                conflict_base: None,
                 resolves: None,
                 conflict_target: None,
                 conflict_paths: Vec::new(),

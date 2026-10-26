@@ -1254,6 +1254,7 @@ impl ProductAgentTree {
             workspace_id.clone(),
             WorkspaceRecord {
                 resolves: conflict.and_then(|row| row.source_candidate_id.clone()),
+                conflict_base: conflict.map(|row| row.base_commit.clone()),
                 conflict_target: conflict.and_then(|row| row.conflict_target.clone()),
                 conflict_paths: conflict.map_or_else(Vec::new, |row| row.conflict_paths.clone()),
                 input_candidate_id,

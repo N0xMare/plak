@@ -152,23 +152,20 @@ impl ProductAgentTree {
         let missing = || {
             TopologyError::new(
                 TopologyErrorCode::WorkspaceRecoveryRequired,
-                "resolver input or persisted lineage is missing; no candidate was sealed",
+                "persisted resolver lineage is inconsistent; no candidate was sealed",
             )
         };
         let row = self.workspaces.get(workspace).ok_or_else(missing)?;
-        let Some(id) = &row.input_candidate_id else {
+        let Some(source) = &row.resolves else {
             return Ok(None);
         };
-        let input = self.candidates.get(id).ok_or_else(missing)?;
-        if input.kind != CandidateKind::Conflict {
-            return Ok(None);
-        }
-        let source = row.resolves.as_ref().ok_or_else(missing)?;
+        let base = row.conflict_base.as_deref().ok_or_else(missing)?;
+        let current_base = row.base_commit.as_deref().ok_or_else(missing)?;
         let target = row.conflict_target.as_ref().ok_or_else(missing)?;
-        if row.conflict_paths.is_empty() || input.source_candidate_id.as_ref() != Some(source) {
+        if base.is_empty() || row.conflict_paths.is_empty() || row.input_candidate_id.is_none() {
             return Err(missing());
         }
-        if row.base_commit.as_deref() != Some(input.base_commit.as_str()) {
+        if current_base != base {
             return Ok(None);
         }
         Ok(Some(ResolverLineage {

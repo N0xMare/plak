@@ -1721,7 +1721,11 @@ The real-Git producer-collection probe keeps a losing resolver alive while the
 source and winning resolver conversations are collected. Its late seal must
 retain workspace lineage and be superseded; adopting its unresolved markers
 must refuse without changing the target. Separate laws refuse late resolver
-spawns and fail sealing closed when an input record is missing. SQLite and
+spawns and fail sealing closed when persisted resolver lineage is inconsistent.
+Real-Git stacked ordinary copies seal and adopt after an adopted input is
+collected, through both turn-end and dormancy sealing. An accepted resolver
+also rehydrates after source collection and seals an ordinary follow-up delta.
+SQLite and
 maintenance laws preserve the same workspace lineage and live-input protection.
 The opt-in `tree_conflict_resolver` shape instead spawns a resolver over that
 conflict candidate and adopts its sealed resolution. Its pilot verifies both
