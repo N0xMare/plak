@@ -240,11 +240,12 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                 .lock()
                 .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
             let authority = &observation.authority;
-            if generation < authority.credential_generation()
-                || checked_at < authority.observed_at()
-            {
+            if generation < authority.credential_generation() {
                 return Err(RuntimeModelAuthorityError::Stale);
             }
+            // This receipt observes the resolved admission, not the order in
+            // which callers sample clocks before asynchronous revalidation.
+            let checked_at = checked_at.max(authority.observed_at());
             let account = digest_binding(
                 b"claude-oauth-provider-account",
                 current_identity.account_uuid().as_str().as_bytes(),
@@ -269,7 +270,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
                 account,
                 credential_authority,
                 generation,
-                checked_at,
+                authority.observed_at(),
                 authority.valid_until(),
             )
             .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
@@ -2220,7 +2221,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revalidation_rejects_regressing_observation_after_relogin() {
+    async fn revalidation_accepts_older_checked_at_without_regressing_admission_observation() {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(private_store(&temp));
         manager
@@ -2242,14 +2243,32 @@ mod tests {
             .unwrap();
         let then = model.authority.observed_at();
         let later = Timestamp::new(then.seconds() + 1, then.nanoseconds()).unwrap();
-        Arc::clone(&model)
+        let newer = Arc::clone(&model)
             .revalidate_runtime_authority(later)
             .await
             .unwrap();
+        let earlier = Arc::clone(&model)
+            .revalidate_runtime_authority(then)
+            .await
+            .unwrap();
         assert_eq!(
-            model.revalidate_runtime_authority(then).await,
-            Err(RuntimeModelAuthorityError::Stale)
+            earlier.credential_generation(),
+            newer.credential_generation()
         );
+        assert_eq!(earlier.observed_at(), newer.observed_at());
+        earlier.validate(model.resolved.descriptor(), then).unwrap();
+        let plan = model
+            .resolved
+            .descriptor()
+            .validate_request(request(then), ValidationMode::Strict)
+            .unwrap();
+        model
+            .prepare_call(
+                plan,
+                ModelPreparationContext::new(earlier, then)
+                    .with_cache_affinity(test_affinity(99, 0)),
+            )
+            .unwrap();
     }
 
     #[tokio::test]

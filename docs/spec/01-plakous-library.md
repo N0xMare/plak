@@ -1701,8 +1701,9 @@ credential/catalog receipt. A new login selection epoch is not a refresh, even
 when its account and credential authority are unchanged. Claude OAuth accepts
 a new grant for the same validated provider account at the next request and
 at exact reopen; its grant lineage is a credential-store write fence, not a
-session binding. A different account is refused by name and needs a new
-session. An old Working attempt is never upgraded to the new generation.
+session binding. Live adapter revalidation names a different account; exact
+reopen retains its Revalidation binding-mismatch refusal. Neither dispatches
+on the changed account. An old Working attempt is never upgraded to the new generation.
 
 Exact reopen validates the recorded and fresh runtime admission evidence against
 their respective complete provider configurations. Credential generations may
@@ -4092,10 +4093,12 @@ names the fixed OAuth route/client authority for that account, not a token,
 refresh-token lineage, device identity, or login selection. The private store
 retains its grant-lineage fence for credential CAS. A same-account re-login
 advances credential generation without changing session identity; live authority
-observations reject generation rollback and regressing observation time. The
+rejects generation rollback and retains its resolution-time admission observation
+floor. Revalidation checks use the maximum of that floor and the caller's time,
+so an older concurrent clock sample does not turn call ordering into authority.
+Admission expiry still refuses dispatch. The
 next dispatch emits `Claude login renewed; continuing on the same account`.
-Model
-resolution refreshes through the existing credential manager and hydrates missing
+Model resolution refreshes through the existing credential manager and hydrates missing
 UUID metadata under a Ready lease, then persists it using generation CAS. A stale
 writer cannot replace a concurrent login or refresh. Missing or invalid profile
 identity fails before inference; it never becomes a digest, an invented UUID,

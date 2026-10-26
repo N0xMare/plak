@@ -174,7 +174,14 @@ async fn exact_reopen(different_account: bool) -> TestResult {
         let error = result
             .err()
             .ok_or("different account reopened the session")?;
-        assert!(error.to_string().contains("account"), "{error}");
+        assert_eq!(error.kind(), plakous_agent::AgentErrorKind::InvalidInput);
+        assert!(
+            error
+                .to_string()
+                .contains("bound to a different model/route/adapter"),
+            "{error}"
+        );
+        assert!(!error.to_string().contains("provider account changed"));
     } else {
         let DurableRuntimeOpen::Opened(agent) = result? else {
             return Err("reopen was not attached".into());

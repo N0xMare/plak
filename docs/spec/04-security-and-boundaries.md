@@ -532,10 +532,14 @@ requests; that exfiltration path is residual risk (section 9).
 
 ## 3. Credentials
 
-Claude OAuth wire account UUIDs come only from authenticated token grants or the
-pinned profile GET and remain separate from internal credential authority.
-Missing UUID metadata is hydrated through the existing Ready lease and generation
-CAS; conflicting refresh identity is quarantined. Installation device IDs are
+Claude OAuth account UUIDs come only from the authenticated token grant or the
+pinned profile GET. Missing UUID metadata is hydrated through the existing Ready
+lease and generation CAS; a conflicting refresh UUID quarantines the credential.
+Claude's account and credential-authority bindings are domain-separated digests
+of that validated UUID, not of the grant. A new grant for the same account is
+accepted; a different account is refused before dispatch. The grant lineage is
+only the private credential store's CAS fence, never session authority.
+Installation device IDs are
 fresh Plak-owned random values persisted with the existing hardened subscription
 metadata primitives. Tokens, token hashes, and other clients' installation IDs
 never supply these wire identifiers.
@@ -810,6 +814,16 @@ payloads into an aggregate artifact; coordinate storage is limited by the
 existing request's canonical positions. History size never authorizes dropping
 encrypted replay or weakening integrity, structure, classification, expiry or
 exact-target checks (spec 01 §6.1).
+
+Claude OAuth revalidation accepts a new same-account grant without changing the
+session's route/account/credential-authority class. Credential generations must
+not roll back. Its observation remains the resolution-time admission floor,
+not the order in which concurrent revalidation callers sampled their clocks;
+checks use at least that floor and still enforce admission expiry. Live adapter
+revalidation names a changed account. Exact reopen instead retains its generic
+binding-mismatch Revalidation refusal: a credential fingerprint, project or
+route/configuration change is not generically claimed to be a provider account
+change. No route or account fallback is permitted.
 
 A running SuperGrok or Codex OAuth model that renews its credential receipt
 after a refresh (spec 01 §7.4) stays on its exact route: the claimed refresh and

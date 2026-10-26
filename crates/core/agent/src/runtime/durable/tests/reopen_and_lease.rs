@@ -280,8 +280,7 @@ async fn durable_genesis_is_exact_reconstructive_and_revalidates_all_live_facts(
 }
 
 #[tokio::test]
-async fn durable_create_recovers_lost_ack_repeats_opens_and_refuses_account_drift_before_lease()
--> TestResult {
+async fn durable_create_recovers_lost_ack_repeats_opens_and_releases_on_drift() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let tools = ToolRegistryBuilder::default().freeze();
@@ -355,11 +354,6 @@ async fn durable_create_recovers_lost_ack_repeats_opens_and_refuses_account_drif
     );
 
     let releases_before = store.releases.load(Ordering::Relaxed);
-    let fence_before = store
-        .state
-        .lock()
-        .map_err(|_| "store state poisoned")?
-        .last_fence;
     let drifted = sessions
         .open(
             "open:drifted-auth",
@@ -367,16 +361,11 @@ async fn durable_create_recovers_lost_ack_repeats_opens_and_refuses_account_drif
             durable_test_builder(workspace, tools, "test.route", b"beta", false)?,
         )
         .await;
-    let error = drifted.err().ok_or("account drift unexpectedly reopened")?;
-    assert!(error.to_string().contains("provider account changed"));
-    assert_eq!(store.releases.load(Ordering::Relaxed), releases_before);
+    let error = drifted.err().ok_or("binding drift unexpectedly reopened")?;
+    assert!(!error.to_string().contains("provider account changed"));
     assert_eq!(
-        store
-            .state
-            .lock()
-            .map_err(|_| "store state poisoned")?
-            .last_fence,
-        fence_before
+        store.releases.load(Ordering::Relaxed),
+        releases_before.saturating_add(1)
     );
     Ok(())
 }

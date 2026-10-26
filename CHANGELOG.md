@@ -103,6 +103,9 @@ one cross-build carrier (a build imports its own and the previous version).
   instead of a grant lineage, so a same-account re-login can continue and
   reopen. This identity change rides unreleased epoch 33; export document v8
   and its embedded history and binding encodings are unchanged.
+  Carrying a Claude session from an epoch-32 build preserves visible history
+  but drops provider replay once: the account digest changes from grant lineage
+  to the provider UUID, so old opaque replay is not retagged to the new scope.
 - Runtime format epoch 32: Python PTC records the Monty cell-worker engine
   contract and adapter `plakous.monty-python-adapter.v8` instead of the
   monty-pool contract and adapter v7. Its worker artifact, host and containment
