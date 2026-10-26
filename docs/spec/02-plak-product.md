@@ -1860,6 +1860,14 @@ updating only the indexed blocks named by changed keys. Tool and thinking UI
 state stays on its existing block; local approval rows, refusal messages and
 product notices remain after the keyed block they followed. Inserts and deletes
 remap the remaining block indexes without rebuilding unchanged block content.
+The key-to-block index uses ordered slot queries for local anchors and group
+boundaries. Splices visit only slots in the affected range; appending at the
+tail or moving a key within the tail does not scan older history. Surviving
+slots keep their coordinates behind a head offset, so retention advances the
+origin and removes only evicted slots rather than shifting survivors, including
+at the 10,000-block ceiling. Deterministic
+root/child regressions count index lookups and entries visited as well as
+changed-block conversions at 0, 2,000, 8,000 and the 10,000-row ceiling.
 A gap keeps the last good presentation and requests one scope resync; later
 patches are ignored until a valid snapshot replaces it. A pending request has
 a one-second floor between retries, including when newer baseline evidence

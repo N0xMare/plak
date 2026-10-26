@@ -190,7 +190,9 @@ impl App {
                 index
             })
         };
-        self.pane.keyed.remap(remap);
+        self.pane
+            .keyed
+            .remap(at.min(target)..end.max(target), remap);
         self.remap_keyed_ui(remap);
         self.mark_transcript_structural();
         start

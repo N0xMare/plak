@@ -133,7 +133,7 @@ fn a_settling_key_moves_its_block_and_local_followers_without_losing_focus() {
 #[test]
 fn patch_block_work_depends_only_on_changed_keys_for_root_and_child() {
     for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
-        for count in [0_u64, 2_000, 8_000] {
+        for count in [0_u64, 2_000, 8_000, 10_000] {
             let mut app = App::new(launch_basic(), true);
             pin_clock(&mut app);
             if matches!(scope, TranscriptScope::Agent(_)) {
@@ -155,9 +155,14 @@ fn patch_block_work_depends_only_on_changed_keys_for_root_and_child() {
             baseline.scope = scope.clone();
             app.apply_host_event(HostEvent::PresentationSnapshot(baseline));
             app.push_block(super::ScrollBlock::System("local notice".into()));
+            let tool_index = app.pane.keyed.get(key).unwrap();
+            if count == 10_000 {
+                assert_eq!(app.pane.blocks.len(), super::MAX_LIVE_TRANSCRIPT_BLOCKS);
+            }
             app.pane.pending_transcript_change = super::TranscriptChange::Unchanged;
             let work = app.pane.keyed_block_work;
             let rebuilds = app.pane.keyed_rebuilds;
+            let index_work = app.pane.keyed.work();
             tool.state = "done".into();
             app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
                 scope: scope.clone(),
@@ -175,15 +180,59 @@ fn patch_block_work_depends_only_on_changed_keys_for_root_and_child() {
                 "history={count} scope={scope:?}"
             );
             assert_eq!(app.pane.keyed_rebuilds, rebuilds);
+            assert!(
+                app.pane.keyed.work() - index_work <= 6,
+                "history={count} scope={scope:?}"
+            );
             assert_eq!(
                 app.pane.pending_transcript_change,
-                super::TranscriptChange::Block(count as usize)
+                super::TranscriptChange::Block(tool_index)
             );
             assert!(
                 matches!(app.pane.blocks.last(), Some(super::ScrollBlock::System(text)) if text == "local notice")
             );
+            assert_tail_index_work(&mut app, &scope, count, key);
         }
     }
+}
+
+fn assert_tail_index_work(app: &mut App, scope: &TranscriptScope, count: u64, key: RowKey) {
+    let index_work = app.pane.keyed.work();
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+        scope: scope.clone(),
+        from_revision: 2,
+        to_revision: 3,
+        upserts: vec![TranscriptItem {
+            key: RowKey::new(count + 2, Lane::Runtime, 0),
+            row: TranscriptRow::assistant("answer"),
+        }],
+        deletes: Vec::new(),
+    }));
+    assert!(
+        app.pane.keyed.work() - index_work <= if count == 10_000 { 24 } else { 8 },
+        "tail append history={count} scope={scope:?}"
+    );
+    let index_work = app.pane.keyed.work();
+    let moved = RowKey::new(count + 3, Lane::Runtime, 0);
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+        scope: scope.clone(),
+        from_revision: 3,
+        to_revision: 4,
+        upserts: vec![TranscriptItem {
+            key: moved,
+            row: TranscriptRow::Tool(tool_item("changed", "read_file")),
+        }],
+        deletes: vec![key],
+    }));
+    assert!(
+        app.pane.keyed.work() - index_work <= 20,
+        "key move history={count} scope={scope:?}"
+    );
+    let index_work = app.pane.keyed.work();
+    let local = app.pane.blocks.len() - 1;
+    assert_eq!(app.pane.keyed.local_anchor(local), Some(moved));
+    assert_eq!(app.pane.keyed.group_end(local - 1, local + 1), local + 1);
+    assert_eq!(app.pane.keyed.work() - index_work, 3);
 }
 
 #[test]
