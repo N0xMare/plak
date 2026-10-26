@@ -178,6 +178,15 @@ async fn long_turn_rearms_pressure_after_committed_paid_folds() -> TestResult {
 
 #[tokio::test]
 async fn long_turn_paid_failure_backs_off_then_commits_a_new_fold() -> TestResult {
+    paid_failure_backoff_case(ModelErrorKind::RateLimited).await
+}
+
+#[tokio::test]
+async fn dispatched_fold_context_overflow_backs_off_then_commits_a_new_fold() -> TestResult {
+    paid_failure_backoff_case(ModelErrorKind::ContextLimit).await
+}
+
+async fn paid_failure_backoff_case(kind: ModelErrorKind) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let bodies = [20_000, 60_000, 60_000, 60_000, 2_000];
@@ -191,18 +200,32 @@ async fn long_turn_paid_failure_backs_off_then_commits_a_new_fold() -> TestResul
         LocalDurabilityDisposition::Ephemeral,
     )?;
     model.script_tool_rounds_around_compactions();
+    *lock_mutex(&model.compaction_failure_kind) = kind;
     model
         .fail_first_compaction_call
         .store(true, Ordering::Release);
     let agent = builder.build()?;
-    let result = agent
-        .prompt("read the files despite a failed fold")
-        .await?
-        .result()
-        .await?;
+    let mut turn = agent.prompt("read the files despite a failed fold").await?;
+    let mut events = turn.take_events()?;
+    let result = turn.result().await?;
+    let mut failures = 0;
+    loop {
+        match events.recv().await?.kind() {
+            AgentEventKind::CompactionFinished {
+                outcome: CompactionEventOutcome::Failed,
+                ..
+            } => failures += 1,
+            AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(failures, 1);
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(result.tool_calls(), bodies.len());
     assert_eq!(*lock_mutex(&model.paid_compaction_rounds), [2, 4]);
+    // A spent paid-fold guard skips round 3. Round 4 is a new operation,
+    // not redispatch of the failed fold or an immediate overflow recovery.
+    assert_eq!(model.compaction_starts.load(Ordering::Acquire), 2);
     assert_eq!(
         agent
             .checkpoint()

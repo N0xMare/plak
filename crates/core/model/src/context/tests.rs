@@ -19,6 +19,9 @@ use crate::{
     Support, TextBlock, Timestamp, TurnId, ValidatedRequestPlan, ValidationMode, WorkingProjection,
 };
 
+#[path = "reference_fit_tests.rs"]
+mod reference_fit_tests;
+
 pub(super) fn timestamp(seconds: u64) -> Timestamp {
     Timestamp::new(seconds, 0).expect("valid timestamp")
 }

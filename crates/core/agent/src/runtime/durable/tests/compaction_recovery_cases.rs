@@ -528,6 +528,10 @@ async fn a_definite_provider_failure_fails_the_compaction_without_fencing_the_se
             "provider rate limited the compaction",
         ),
         (ModelErrorKind::Unavailable, "provider was overloaded"),
+        (
+            ModelErrorKind::ContextLimit,
+            "provider refused the dispatched fold because its input exceeded context capacity",
+        ),
     ] {
         let directory = tempfile::tempdir()?;
         let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -576,6 +580,7 @@ async fn a_definite_provider_failure_fails_the_compaction_without_fencing_the_se
             "{kind:?} fenced the session instead of failing the compaction: {outcome:?}"
         );
         assert_eq!(model.starts.load(Ordering::Acquire), 1);
+        assert_eq!(model.recover_calls.load(Ordering::Acquire), 0);
         // The canonical history is exactly what it was: nothing was replaced,
         // so there is nothing to recover and the session continues on it.
         let working = agent.checkpoint();

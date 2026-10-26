@@ -3658,6 +3658,19 @@ against the input ceiling, with a requested output reservation subtracted **only
 on shared-window routes. Credible anchored measurement makes this local
 admission decision authoritative.
 
+For a `ReferenceClientEnvelope` contract, its matching, receipt-bound
+`ReferenceClientEnvelopeUpperBound` measurement is also a candidate complete-input
+bound. The enrolled counter may itself use bytes/4; unlike the unanchored
+bytes/4 permission below, this count is certificate- and receipt-bound.
+The local check takes the tighter of that count (plus the dialect's
+explicit visual-token bounds) and the whole-wire byte/image bound before applying
+the same anchor minimum and margin. The reviewed complete-input counter is
+admission evidence alongside the byte and item-delta bounds. This is the reference client's
+operating envelope, not a provider hard-limit claim; it cannot satisfy
+`ReleaseVerifiedRequired`. Unknown image bounds, foreign receipts, routes,
+accounts, models and stale evidence are still refused by the existing admission
+checks. Other measurement classes use the byte/item-delta policy.
+
 Without an anchor (first request, import, model switch/rebind or unanchored
 resume), a fitting conservative byte bound is used when available. If it
 exceeds the envelope but a whole-input bytes/4 estimate still fits, Plakous sends
@@ -7635,19 +7648,31 @@ occupancy measure, once, for its first preflight fold; this is not paid admissio
 authority.
 The export document is version 8; this build imports versions 8 and 7 (chapter 02 §2.5.1).
 
-A paid fold's **own input must admit under a conservative bound** before
+A paid fold's **own input must admit under a conservative bound, or on a
+`ReferenceClientEnvelope` contract its enrolled reference envelope (§6.8,
+not a guarantee)** before
 physical dispatch; it seals the current-binding anchor and uses the same
 minimum of anchored item-delta and whole-wire upper bounds as ordinary admission.
+An enrolled reference-client complete-input bound participates in that same
+minimum (§6.8), including for a native request or a fresh harness-summary
+projection that cannot reuse the previous request's item digests. Ciphertext
+and replay inflation must not make every locally transformed summary fail a
+stronger byte-only test than its already-admitted reference envelope. This uses
+only the current descriptor's certified counter, never a guessed conversion
+factor derived from a live session's local/provider ratio.
 It never uses the unanchored bytes/4 permission. Elision is probed only when
 that minimum overflows. The sealed
 fold-span reduction family first elides oversized eligible tool-result bodies,
 oldest first, until that input admits. Each fit probe is offline, with its own
 attempt identity and the current-binding request anchor; an anchored fit at
 depth zero dispatches without elision even if the whole-wire-only bound would
-overflow. Without an anchor, whole-wire overflow still requires elision.
+overflow. Without an anchor, overflow of the enrolled complete-input bound
+still requires elision.
 Only one selected input is prepared and dispatched. If no
 candidate fits, the existing placeholder rung/typed error applies without a paid
 fold. Canonical source history is unchanged by these request-only reductions.
+A provider context overflow of the dispatched fold is a definite `Failed`
+outcome, with no redispatch and the paid-fold backoff at the turn fence.
 
 Offline placeholder and replay-omission fit probes instead use ordinary
 next-round admission on the successor: the whole-wire bound, else the

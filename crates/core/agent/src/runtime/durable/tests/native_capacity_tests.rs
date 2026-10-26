@@ -1,5 +1,201 @@
 use super::*;
 
+fn inflated_compaction_history(
+    replay_bytes: usize,
+    text_bytes: usize,
+) -> TestResult<CanonicalHistory> {
+    let item = |index: u128, actor, blocks| -> TestResult<ConversationItem> {
+        Ok(ConversationItem::new(
+            EntryId::try_from(uuid::Uuid::from_u128(910_000 + index))?,
+            actor,
+            blocks,
+            if actor == Actor::User {
+                Provenance::UserInput
+            } else {
+                Provenance::ModelOutput
+            },
+        )?)
+    };
+    let replay = plakous_model::ReplayEnvelope::new(
+        ProtocolId::new("test.protocol")?,
+        None,
+        plakous_model::ReplayScope::Protocol,
+        plakous_model::ReplayKindId::new("test.encrypted-reasoning")?,
+        1,
+        plakous_model::DataClassification::Sensitive,
+        serde_json::value::RawValue::from_string(
+            json!({"type":"reasoning","encrypted_content":"A".repeat(replay_bytes)}).to_string(),
+        )?,
+    )?;
+    Ok(CanonicalHistory::new(vec![
+        HistorySegment::new(
+            HistorySegmentKind::RecentIntent,
+            vec![item(
+                0,
+                Actor::User,
+                vec![ContentBlock::Text(TextBlock::new(
+                    "older requirement",
+                    None,
+                )?)],
+            )?],
+        )?,
+        HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![item(
+                1,
+                Actor::Assistant,
+                vec![
+                    ContentBlock::Text(TextBlock::new("x".repeat(text_bytes), None)?),
+                    ContentBlock::Opaque(plakous_model::OpaqueBlock::new(
+                        replay,
+                        plakous_model::OpaqueFallback::Omit,
+                    )?),
+                ],
+            )?],
+        )?,
+        HistorySegment::new(
+            HistorySegmentKind::RecentIntent,
+            vec![item(
+                2,
+                Actor::User,
+                vec![ContentBlock::Text(TextBlock::new(
+                    "current protected requirement",
+                    None,
+                )?)],
+            )?],
+        )?,
+    ])?)
+}
+
+#[tokio::test]
+async fn encrypted_replay_compaction_uses_the_reference_envelope_not_a_byte_only_refusal()
+-> TestResult {
+    for (native, native_rejected_for_capacity, ceiling, replay_bytes, text_bytes) in [
+        // Provider anchor = 0.92 * ceiling, reference = 1.66 * provider:
+        // unlike the smaller cases, native's reference count cannot fit.
+        (true, true, 47_500, 228_168, 62_000),
+        (true, false, 95_000, 114_000, 60_000),
+        (true, true, 95_000, 114_000, 60_000),
+        (false, false, 95_000, 114_000, 60_000),
+    ] {
+        let directory = tempfile::tempdir()?;
+        let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+        let descriptor = reference_input_descriptor(
+            native,
+            CapacityRule::ProviderReservedInput {
+                reported_context_window: Some(ceiling * 100 / 95),
+                maximum_projected_input: ceiling,
+                auto_compact_input: Some(ceiling * 90 / 95),
+            },
+        )?;
+        let fixture = || {
+            placeholder_fixture_with_descriptor(
+                workspace.clone(),
+                910_000,
+                descriptor.clone(),
+                &[],
+                &[],
+                LocalDurabilityDisposition::DurableRequired,
+                0,
+                &[],
+            )
+        };
+        let (builder, live_model) = fixture()?;
+        live_model.item_context.store(true, Ordering::Release);
+        let sessions = DurableSessionRuntime::current(
+            Arc::new(TestCreateStore::default()),
+            RuntimeDurability::Required,
+            NonZeroU64::new(30).ok_or("lease")?,
+        )?;
+        let source_history = inflated_compaction_history(replay_bytes, text_bytes)?;
+        let projection =
+            ConversationView::from_shared(source_history.clone(), WorkingProjection::default());
+        let plan = plakous_model::ContextHistoryPlan::new(&projection)?;
+        let cut = plakous_model::SemanticCompactionCut::seal(&projection, &plan)?;
+        assert_eq!(cut.summary_input().history().segments().len(), 2);
+        assert!(source_history.retained_bytes_upper_bound() > 47_500);
+        let agent = sessions
+            .create_seeded(
+                "create:inflated-reference-history",
+                builder.with_scheduled_compaction_enabled(false),
+                source_history.clone(),
+            )
+            .await?;
+        let source = DurableSessionAddress::new(
+            agent.session_id(),
+            agent.branch_id(),
+            agent.checkpoint().id(),
+        );
+        let (compact_builder, model) = fixture()?;
+        model.item_context.store(true, Ordering::Release);
+        model.allow_unbound_opaque.store(true, Ordering::Release);
+        if native_rejected_for_capacity && ceiling == 95_000 {
+            model
+                .native_context_overhead
+                .store(100_000, Ordering::Release);
+        }
+        let result = agent
+            .session_endpoint()
+            .compact_session(AgentCompactSessionRequest::new(
+                "compact:inflated-reference-history".into(),
+                source.session_id,
+                source.branch_id,
+                source.checkpoint_id,
+                AgentCompactionReason::Manual,
+                compact_builder,
+            ))
+            .await
+            .map_err(|error| format!("compaction refused: {error:?}"))?;
+        assert!(
+            matches!(result, AgentCompactSessionOutcome::Compacted { .. }),
+            "native={native}: {result:?}"
+        );
+        let paid = model.paid_compaction_calls.load(Ordering::Acquire);
+        if ceiling == 47_500 {
+            assert_eq!(
+                paid, 1,
+                "the incident regime must commit one paid summary: {result:?}"
+            );
+        } else {
+            assert!(paid <= 1, "never redispatch: {result:?}");
+        }
+        assert_eq!(
+            live_model.calls.load(Ordering::Acquire),
+            0,
+            "compaction never redispatches source work"
+        );
+        let checkpoint = agent.checkpoint();
+        let provenance = checkpoint
+            .manifest()
+            .canonical()
+            .context()
+            .compaction_provenance()
+            .ok_or("compaction provenance")?;
+        if native && !native_rejected_for_capacity {
+            assert_eq!(paid, 1);
+            assert_eq!(
+                provenance.strategy(),
+                RuntimeCompactionStrategy::NativeResponsesTriggerV1
+            );
+        } else if paid == 1 {
+            assert_eq!(
+                provenance.strategy(),
+                RuntimeCompactionStrategy::SemanticSummaryPrefixV1
+            );
+        }
+        assert!(
+            checkpoint
+                .manifest()
+                .canonical()
+                .history()
+                .retained_bytes_upper_bound()
+                < source_history.retained_bytes_upper_bound()
+        );
+        agent.shutdown().await?;
+    }
+    Ok(())
+}
+
 fn reference_input_descriptor(
     native: bool,
     rule: CapacityRule,

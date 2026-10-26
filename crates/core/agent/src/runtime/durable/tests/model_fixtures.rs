@@ -180,6 +180,7 @@ pub(super) struct ArtifactModel {
     pub(super) paid_compaction_calls: AtomicUsize,
     /// Dispatches the compaction's own request, then fails it definitely.
     pub(super) fail_compaction_call: AtomicBool,
+    pub(super) compaction_failure_kind: Mutex<ModelErrorKind>,
     pub(super) fail_first_compaction_call: AtomicBool,
     pub(super) fail_compaction_calls: Mutex<BTreeSet<usize>>,
     pub(super) reject_compaction_calls: Mutex<BTreeSet<usize>>,
@@ -301,6 +302,7 @@ impl ArtifactModel {
             native_protected_refusal_attempts: Mutex::new(Vec::new()),
             paid_compaction_calls: AtomicUsize::new(0),
             fail_compaction_call: AtomicBool::new(false),
+            compaction_failure_kind: Mutex::new(ModelErrorKind::RateLimited),
             fail_first_compaction_call: AtomicBool::new(false),
             fail_compaction_calls: Mutex::new(BTreeSet::new()),
             reject_compaction_calls: Mutex::new(BTreeSet::new()),
@@ -1045,10 +1047,11 @@ impl LanguageModel for ArtifactModel {
                         .fail_first_compaction_call
                         .swap(false, Ordering::AcqRel)
             {
-                return Box::pin(async {
+                let kind = *lock_mutex(&self.compaction_failure_kind);
+                return Box::pin(async move {
                     Err(ModelError::new(
-                        ModelErrorKind::RateLimited,
-                        "provider rate limited the compaction",
+                        kind,
+                        "provider refused the dispatched compaction",
                     ))
                 });
             }

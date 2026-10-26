@@ -1092,10 +1092,21 @@ impl ContextStatus {
         });
         let ceiling = capacity.rule().input_ceiling();
         let margin = context_admission_margin(ceiling);
+        // A reviewed reference-client envelope already measures this complete
+        // prepared input. Replacing that certificate with one token per wire
+        // byte can refuse every compaction candidate after replay is rendered
+        // fresh and its old item digests no longer match the usage anchor.
+        // Image transport bytes are not visual-token evidence in either path.
+        let whole_input_bound = match self.measurement.as_ref().map(ContextMeasurement::bound) {
+            Some(CountBound::ReferenceClientEnvelopeUpperBound { tokens, .. }) => input
+                .upper_bound()
+                .min(tokens.saturating_add(input.image_tokens())),
+            _ => input.upper_bound(),
+        };
         let bounded = anchor
             .map_or_else(
-                || input.upper_bound(),
-                |anchor| anchor.occupied_tokens(input).min(input.upper_bound()),
+                || whole_input_bound,
+                |anchor| anchor.occupied_tokens(input).min(whole_input_bound),
             )
             .saturating_add(margin);
         let reserved = self.reservation.as_ref().map(OutputReservation::tokens);
