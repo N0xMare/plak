@@ -1,6 +1,7 @@
 use super::*;
 use crate::CliFailure;
-use crate::carry::document::{private_dir, write_private_new};
+use crate::carry::document::private_dir;
+use crate::carry::interactive::write_private_new;
 
 #[test]
 fn only_an_exact_private_local_handoff_receipt_retains_replay() {

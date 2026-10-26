@@ -4,6 +4,14 @@ pub(crate) use plakous_hosted::capabilities::{
 };
 
 pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
+    if let Command::Run { prompt, .. }
+    | Command::RunOpenRouter { prompt, .. }
+    | Command::RunPlatform { prompt, .. }
+    | Command::ContinueSession { prompt, .. } = command
+        && !prompt.images.is_empty()
+    {
+        require_feature("images")?;
+    }
     match command {
         Command::Tui { .. } | Command::Resume { .. } => require_feature("tui")?,
         Command::Mcp(_) => require_feature("mcp")?,
@@ -17,6 +25,15 @@ pub(crate) fn admit_command(command: &Command) -> CliResult<()> {
             require_composition(*composition)?;
         }
         _ => {}
+    }
+    Ok(())
+}
+
+// Refuse before parsing reads a file; parsed-command admission covers callers
+// that already hold a Draft instead of CLI paths.
+pub(crate) fn admit_image_arguments(images: &[std::path::PathBuf]) -> CliResult<()> {
+    if !images.is_empty() {
+        require_feature("images")?;
     }
     Ok(())
 }
@@ -117,6 +134,34 @@ mod tests {
             let composition: ProductCompositionSelection = option.composition.into();
             assert!(require_composition(composition).is_ok());
         }
+    }
+
+    #[test]
+    fn image_argument_refusal_preserves_the_capability_source_before_file_io() {
+        if require_feature("images").is_ok() {
+            return;
+        }
+        let failure = crate::cli::parse(
+            [
+                "run",
+                "--account",
+                "grok",
+                "--model",
+                "m",
+                "--image",
+                "/nonexistent-image.png",
+                "--",
+                "describe",
+            ]
+            .map(std::ffi::OsString::from),
+        )
+        .unwrap_err();
+        assert_eq!(failure.exit_code(), 2);
+        let source = std::error::Error::source(&failure).unwrap();
+        let capability = source
+            .downcast_ref::<plakous_hosted::capabilities::CapabilityUnavailable>()
+            .expect("capability refusal remains typed");
+        assert_eq!(capability.feature, "images");
     }
 
     #[test]

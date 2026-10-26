@@ -1,7 +1,5 @@
 //! Export a session into a carry document.
 
-#[cfg(any(test, feature = "tui"))]
-use super::document::write_document;
 use super::document::{
     CarryBinding, CarryDocument, CarrySource, FORMAT, PendingWorkEntry, ProducerBuild, VERSION,
 };
@@ -14,8 +12,6 @@ use plakous_host_protocol::topology::{
 };
 use plakous_recursive_subagents_store::TreeInspection;
 use std::fmt;
-#[cfg(any(test, feature = "tui"))]
-use std::fs;
 use std::path::PathBuf;
 
 /// Why a session cannot be exported now. Each names its cause; none is
@@ -87,6 +83,13 @@ pub(crate) fn export_session(
     if let Some(projected) = current_projection(paths, record)? {
         return export_projected(paths, record, &projected);
     }
+    export_after_projection(paths, record)
+}
+
+fn export_after_projection(
+    paths: &PlakPaths,
+    record: &SessionRecord,
+) -> Result<CarryDocument, ExportRefusal> {
     let runtime = |error: String| ExportRefusal::Runtime(error);
     let records: std::sync::Arc<dyn crate::store::session_records::SessionRecordStore> =
         std::sync::Arc::new(crate::store::session_records::SqliteSessionStore::new(
@@ -374,26 +377,6 @@ fn carry_dir(paths: &PlakPaths) -> Result<PathBuf, String> {
 /// A fresh carry file path for `session_id`; the file does not exist yet.
 pub(crate) fn new_carry_file(paths: &PlakPaths, session_id: &str) -> Result<PathBuf, String> {
     Ok(carry_dir(paths)?.join(format!("{session_id}.{}.json", uuid::Uuid::new_v4())))
-}
-
-/// Exports `record` into a fresh private carry file and returns its path.
-#[cfg(any(test, feature = "tui"))]
-pub(crate) fn carry_out(
-    paths: &PlakPaths,
-    record: &SessionRecord,
-) -> Result<(PathBuf, String), String> {
-    let document = export_session(paths, record)
-        .map_err(|refusal| format!("session {} cannot be exported: {refusal}", record.id))?;
-    let path = new_carry_file(paths, &record.id)?;
-    write_document(&path, &document)?;
-    let digest = plakous::model::sha256_hex(&[&fs::read(&path).map_err(|e| e.to_string())?]);
-    if let Err(error) =
-        super::document::write_private_new(&path.with_extension("handoff"), digest.as_bytes())
-    {
-        let _ = fs::remove_file(&path);
-        return Err(error);
-    }
-    Ok((path, document.carry_summary()))
 }
 
 #[cfg(test)]

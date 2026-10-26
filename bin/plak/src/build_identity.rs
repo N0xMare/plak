@@ -1,11 +1,19 @@
 //! Product build identity, independent of the working directory's Git state.
 
+#[cfg(any(test, feature = "tui"))]
 use std::ffi::OsString;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use sha2::{Digest as _, Sha256};
+
+#[cfg(any(test, feature = "tui"))]
+mod interactive;
+#[cfg(feature = "tui")]
+pub(crate) use interactive::invocation_argv0;
+#[cfg(any(test, feature = "tui"))]
+pub(crate) use interactive::{installed_executable, newer_build_installed};
 
 pub(crate) const JJ_ENABLED: bool = cfg!(feature = "jj");
 
@@ -21,24 +29,12 @@ pub(crate) const FLAVOR: &str = match (cfg!(feature = "maintainer"), cfg!(debug_
 struct Launch {
     /// `argv[0]` as a command name searched on `PATH`, or as a path made
     /// absolute against the launch directory.
-    #[cfg_attr(
-        not(feature = "tui"),
-        allow(
-            dead_code,
-            reason = "launch identity records invocation even without interactive reload"
-        )
-    )]
+    #[cfg(any(test, feature = "tui"))]
     invocation: Invocation,
     executable: Option<FileIdentity>,
 }
 
-#[cfg_attr(
-    not(feature = "tui"),
-    allow(
-        dead_code,
-        reason = "launch identity records invocation even without interactive reload"
-    )
-)]
+#[cfg(any(test, feature = "tui"))]
 enum Invocation {
     Name(OsString),
     Path(PathBuf),
@@ -106,7 +102,9 @@ pub(crate) fn ready_binary_id() -> Option<&'static str> {
 
 /// Record the invocation and the running executable. Call once, first thing.
 pub(crate) fn record_launch(argv0: Option<&std::ffi::OsStr>) {
+    let _ = argv0;
     LAUNCH.get_or_init(|| {
+        #[cfg(any(test, feature = "tui"))]
         let invocation = match argv0 {
             Some(arg) if Path::new(arg).components().count() > 1 => Invocation::Path(
                 std::env::current_dir()
@@ -120,6 +118,7 @@ pub(crate) fn record_launch(argv0: Option<&std::ffi::OsStr>) {
             .ok()
             .and_then(|path| FileIdentity::of(&path));
         Launch {
+            #[cfg(any(test, feature = "tui"))]
             invocation,
             executable,
         }
@@ -134,19 +133,10 @@ fn launch() -> &'static Launch {
         let current = std::env::current_exe().ok();
         Launch {
             executable: current.as_deref().and_then(FileIdentity::of),
+            #[cfg(any(test, feature = "tui"))]
             invocation: Invocation::Path(current.unwrap_or_else(|| PathBuf::from("plak"))),
         }
     })
-}
-
-/// `argv[0]` to hand a re-exec, so the successor records the same invocation
-/// (a `PATH` name stays a name) and keeps detecting newer installs.
-#[cfg(feature = "tui")]
-pub(crate) fn invocation_argv0() -> OsString {
-    match &launch().invocation {
-        Invocation::Name(name) => name.clone(),
-        Invocation::Path(path) => path.clone().into_os_string(),
-    }
 }
 
 /// The canonical file this process runs. Sidecars are found beside it, so a
@@ -157,45 +147,6 @@ pub(crate) fn running_executable() -> Option<&'static Path> {
         .executable
         .as_ref()
         .map(|identity| identity.path.as_path())
-}
-
-/// The executable the same invocation would start now: `argv[0]` resolved on
-/// `PATH` (or as recorded), with symlinks followed to the installed file.
-#[cfg(any(test, feature = "tui"))]
-pub(crate) fn installed_executable() -> Option<PathBuf> {
-    let candidate = match &launch().invocation {
-        Invocation::Path(path) => path.clone(),
-        Invocation::Name(name) => std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
-            .find(|path| is_executable_file(path))?,
-    };
-    std::fs::canonicalize(candidate).ok()
-}
-
-#[cfg(any(test, feature = "tui"))]
-fn is_executable_file(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    metadata.is_file()
-}
-
-/// Whether the invocation now resolves to a different file than the one this
-/// process is running: a new snapshot, or a rebuild in place.
-#[cfg(any(test, feature = "tui"))]
-pub(crate) fn newer_build_installed() -> bool {
-    let Some(running) = &launch().executable else {
-        return false;
-    };
-    installed_executable()
-        .and_then(|path| FileIdentity::of(&path))
-        .is_some_and(|installed| installed != *running)
 }
 
 /// The first twelve SHA-256 digits of this executable, not a source revision.

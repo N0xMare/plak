@@ -6,6 +6,72 @@ use plakous_host_protocol::topology::{NodeStatus, WorkspaceMode, WorkspaceStatus
 use std::fs;
 
 #[test]
+fn settled_export_matches_the_writable_projector_path() {
+    use plakous::sessions::{
+        CreateSessionOutcome, CreateSessionRequest, SessionBackend, SessionOperationId,
+    };
+    use plakous_hosted::session_store::SessionRecordStore;
+    use plakous_offline_crash_harness::protocol::CrashBoundary;
+    use plakous_offline_crash_harness::{BoundaryController, text_runtime_binding};
+
+    let (home, paths) = PlakPaths::isolated_test_home();
+    paths.ensure_layout().unwrap();
+    let mut document = crate::carry::document::sample_document();
+    document.workspace_root = home.path().to_path_buf();
+    let crate::carry::CarriedImport {
+        mut record,
+        history,
+        ..
+    } = document.into_import().unwrap();
+    let sessions =
+        AgentSessions::new(SessionBackend::sqlite(paths.runtime_database()).unwrap()).unwrap();
+    let binding = text_runtime_binding(
+        home.path(),
+        BoundaryController::quiet_from_evidence_path(
+            CrashBoundary::None,
+            home.path().join("evidence"),
+        )
+        .unwrap(),
+        "synthetic",
+        "synthetic",
+    )
+    .unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let CreateSessionOutcome::Created { session, .. } = executor
+        .block_on(
+            sessions.create(
+                CreateSessionRequest::new(
+                    SessionOperationId::new(&record.create_operation_id).unwrap(),
+                    binding,
+                )
+                .with_history(history),
+            ),
+        )
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("new source session");
+    };
+    record.plakous_locator = Some(executor.block_on(session.release()).unwrap().unwrap());
+    let records = crate::store::session_records::SqliteSessionStore::new(paths.clone());
+    records.save(&mut record).unwrap();
+
+    // Settle once, then exercise the public fast path and force the ordinary
+    // writable projector path over exactly that same session.
+    export_after_projection(&paths, &record).unwrap();
+    let record = records.load(&record.id).unwrap();
+    assert!(current_projection(&paths, &record).unwrap().is_some());
+    let mut read_only = export_session(&paths, &record).unwrap();
+    let mut writable = export_after_projection(&paths, &record).unwrap();
+    read_only.local_digest = None;
+    writable.local_digest = None;
+    assert_eq!(
+        serde_json::to_value(read_only).unwrap(),
+        serde_json::to_value(writable).unwrap()
+    );
+}
+
+#[test]
 fn readable_spellings_pin_every_variant_to_the_previous_debug_output() {
     for actor in [
         Actor::Developer,

@@ -328,11 +328,12 @@ test-support seams remain separate from this metadata registry. Serialized
 binding enums, the complete template-account vocabulary and credential-store
 directory names remain ungated; they describe records, not enabled menus.
 
-Reduced builds gate their TUI-only carry/reload/identity and lookup helpers,
-imports and re-exports explicitly, rather than hiding entire modules behind
-dead-code allowances. These reviewed item-level predicates and the five
-disabled capability aliases are included in the placement inventory: Plak's
-feature ceiling is 180 and hosted's is 32. The ceilings remain exact ratchets.
+Reduced builds group their interactive carry/reload and identity helpers in
+TUI-gated submodules; the launch invocation field itself is absent without
+TUI support. Lookup helpers, imports and re-exports retain explicit gates,
+not dead-code allowances. Capability markers use feature-gated modules rather
+than conditional aliases. Plak's placement feature ceiling is 150 and hosted's
+is 27. The ceilings remain exact ratchets.
 
 `plakous` facade features are listed in chapter 00. The host and product
 features and the evaluator selection are summarized here; backend defaults are

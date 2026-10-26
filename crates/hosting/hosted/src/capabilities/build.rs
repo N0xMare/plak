@@ -3,32 +3,33 @@
 #[cfg(feature = "clipboard")]
 mod clipboard;
 #[cfg(not(feature = "clipboard"))]
-use disabled as clipboard;
+mod clipboard {
+    pub(super) const COMPILED: bool = false;
+}
 #[cfg(feature = "images")]
 mod images;
 #[cfg(not(feature = "images"))]
-use disabled as images;
+mod images {
+    pub(super) const COMPILED: bool = false;
+}
 #[cfg(feature = "mcp")]
 mod mcp;
 #[cfg(not(feature = "mcp"))]
-use disabled as mcp;
+mod mcp {
+    pub(super) const COMPILED: bool = false;
+}
 #[cfg(feature = "python")]
 mod python;
 #[cfg(not(feature = "python"))]
-use disabled as python;
+mod python {
+    pub(super) const COMPILED: bool = false;
+}
 #[cfg(feature = "tui")]
 mod tui;
 #[cfg(not(feature = "tui"))]
-use disabled as tui;
-
-#[cfg(not(all(
-    feature = "clipboard",
-    feature = "images",
-    feature = "mcp",
-    feature = "python",
-    feature = "tui"
-)))]
-mod disabled;
+mod tui {
+    pub(super) const COMPILED: bool = false;
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapabilityKind {

@@ -1,13 +1,6 @@
-#[cfg(any(test, feature = "tui"))]
-use super::document::IMPORTABLE_VERSIONS;
 use super::document::privately_owned;
 use super::document::{
     CarryBinding, CarryDocument, CarrySource, ImportError, ProducerBuild, read_document,
-};
-#[cfg(any(test, feature = "tui"))]
-use super::{
-    export::new_carry_file,
-    reload::{export_with_snapshot, snapshot_export_version, snapshot_for_key},
 };
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
@@ -179,86 +172,6 @@ fn consume_handoff_receipt(path: &Path, home: &Path, digest: Option<&str>) -> bo
     let expected = fs::read_to_string(&receipt);
     let _ = fs::remove_file(&receipt);
     matches!((expected,digest),(Ok(expected),Some(digest)) if expected==digest)
-}
-
-/// `plak --resume` of a session another build's state holds. When a kept
-/// maintainer snapshot of that build exists, it exports the session and this
-/// build imports it as a new session; the new id and its note are returned.
-/// Without one the caller's refusal stands.
-#[cfg(any(test, feature = "tui"))]
-pub(crate) fn carry_foreign_session(
-    services: &Services,
-    paths: &PlakPaths,
-    cwd: &Path,
-    requested: &str,
-) -> CliResult<Option<(String, String)>> {
-    let Some((key, id)) = crate::home::state::foreign_session(paths, requested) else {
-        return Ok(None);
-    };
-    if let Some(existing) = already_carried(services.session_records()?.as_ref(), cwd, &id, &key)
-        .map_err(CliFailure::new)?
-    {
-        let note = format!(
-            "session {id} ({key}) was already carried forward as {}; resuming it",
-            existing.id
-        );
-        return Ok(Some((existing.id, note)));
-    }
-    let Some(snapshot) = snapshot_for_key(&crate::home::paths::installed_snapshot_roots(), &key)
-    else {
-        return Ok(None);
-    };
-    let workspace_paths = PlakPaths::for_workspace(paths.home().to_path_buf(), cwd);
-    crate::product_config::SessionPolicy::load(&workspace_paths).map_err(|error| {
-        CliFailure::new(format!(
-            "could not carry session {id} forward: {error}; fix the config and retry the same command"
-        ))
-    })?;
-    let export_version = snapshot_export_version(&snapshot).map_err(|error| {
-        CliFailure::new(format!(
-            "could not carry session {id} forward: {error}; fix the error and retry the same command"
-        ))
-    })?;
-    if let Some(version) = export_version
-        && !IMPORTABLE_VERSIONS.contains(&version)
-    {
-        return Err(CliFailure::new(format!(
-            "could not carry session {id} forward: the kept snapshot writes version {version} session exports; this build imports versions {:?}; use this workspace's newest carried session from `plak session list`",
-            IMPORTABLE_VERSIONS
-        )));
-    }
-    let out = new_carry_file(paths, &id).map_err(CliFailure::new)?;
-    let result = export_with_snapshot(&snapshot, &id, &out, cwd)
-        .map_err(CliFailure::new)
-        .and_then(|()| {
-            let document = read_document(&out).map_err(|error| {
-                CliFailure::new(format!(
-                    "{error}; use this workspace's newest carried session from `plak session list`"
-                ))
-            })?;
-            commands::session::import_document(services, document, false).map_err(|failure| {
-                CliFailure::new(format!(
-                    "{}; fix the error and retry the same command",
-                    failure.message()
-                ))
-            })
-        });
-    let (record, note) = result.map_err(|failure| {
-        let cleanup = match fs::remove_file(&out) {
-            Ok(()) => String::new(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(error) => format!("; could not delete {}: {error}", out.display()),
-        };
-        CliFailure::new(format!(
-            "could not carry session {id} forward: {}{cleanup}",
-            failure.message()
-        ))
-    })?;
-    let note = match fs::remove_file(&out) {
-        Ok(()) => note,
-        Err(error) => format!("{note}; could not delete {}: {error}", out.display()),
-    };
-    Ok(Some((record.id, note)))
 }
 
 /// `plak --import-resume <file>`: the new build's half of a carrying

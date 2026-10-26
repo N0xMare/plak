@@ -398,7 +398,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
         ("var_os", (("string", "PLAK_VERBOSE"),)),
     ],
     # `/reload` resolves its own argv[0] on PATH the way the shell did.
-    ("plak", "src/build_identity.rs"): [
+    ("plak", "src/build_identity/interactive.rs"): [
         ("var_os", (("string", "PATH"),)),
     ],
     ("plak", "src/oauth_ui.rs"): [
@@ -495,7 +495,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
     # destination/config and carry-capacity probes, then the bare state-key
     # fallback) and has a kept
     # maintainer snapshot export a session its own state holds.
-    ("plak", "src/carry/reload.rs"): [
+    ("plak", "src/carry/interactive.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
         ("std::process::Command", (("punct", "&"), ("identifier", "target"), ("punct", "."), ("identifier", "executable"))),
         ("std::process::Command", (("identifier", "executable"),)),

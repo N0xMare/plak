@@ -228,11 +228,6 @@ impl CarryDocument {
     pub(crate) fn estimated_tokens(&self) -> u64 {
         self.history.estimated_tokens()
     }
-
-    #[cfg(any(test, feature = "tui"))]
-    pub(crate) fn carry_summary(&self) -> String {
-        self.history.summary()
-    }
 }
 
 /// Writes `document` to a new file only the owner can read. An existing file
@@ -362,23 +357,6 @@ fn raw_history_field<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<&'de serde_json::value::RawValue>, D::Error> {
     <&serde_json::value::RawValue>::deserialize(d).map(Some)
-}
-
-#[cfg(any(test, feature = "tui"))]
-pub(super) fn write_private_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|error| format!("could not create {}: {error}", path.display()))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("could not write {}: {error}", path.display()))
 }
 
 pub(super) fn private_dir(dir: &Path) -> Result<PathBuf, String> {

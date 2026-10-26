@@ -1,5 +1,6 @@
 use super::*;
-use crate::carry::document::{read_document, sample_document};
+use crate::carry::document::{IMPORTABLE_VERSIONS, read_document, sample_document};
+use crate::home::paths::PlakPaths;
 use std::fs;
 use std::time::{Duration, Instant};
 

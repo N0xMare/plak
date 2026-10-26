@@ -58,11 +58,12 @@ different account, route, composition, or tool pack. Bare `plak` and the resume
 picker refuse without `tui`; CLI verbs, `run`, and JSONL remain available.
 Without `clipboard`, Ctrl+V reports `clipboard image paste is not in this build`;
 file attachments still work with `images`. Without `images`, `--image`, path
-attachments and JSONL image inputs refuse; canonical image history still
-replays without a decoder. Without `python`, composition options and model
-capability listings omit both `py-ptc` and `py-sdk`
-and Python config/session bindings refuse before session writes, with the
-selected composition as the refusal id. Without `mcp`,
+attachments and JSONL image inputs refuse; CLI refusal precedes image file
+reads and retains `CapabilityUnavailable` as the `CliFailure` source.
+Canonical image history still replays without a decoder. Without `python`,
+composition options and model capability listings omit both `py-ptc` and
+`py-sdk`, and Python config/session bindings refuse before session writes, with
+the selected composition as the refusal id. Without `mcp`,
 `plak mcp` commands refuse, `/mcp` is omitted, and MCP-selecting templates
 refuse session admission (server definitions alone enable nothing). Read-only session
 show/log/export and carry export do not require the bound evaluator.

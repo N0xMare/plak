@@ -10,7 +10,8 @@ use plakous::subscriptions::{NativeLoginMode, NativeProvider};
 use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
 
 /// Parse argv tokens (without binary name) into a product [`Command`].
-pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, String> {
+pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> crate::CliResult<Command> {
+    let usage = |message| crate::CliFailure::classified(crate::CliFailureKind::Usage, message);
     let values = arguments
         .into_iter()
         .map(|value| {
@@ -18,7 +19,8 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
                 .into_string()
                 .map_err(|_| "command arguments must be valid UTF-8".to_owned())
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(usage)?;
 
     // Bare `plak` → TUI.
     if values.is_empty() {
@@ -70,7 +72,8 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
         return match values.as_slice() {
             [_, path] if !path.starts_with('-') => Ok(Command::ImportResume { path: path.into() }),
             _ => Err("plak --import-resume takes exactly one export file".to_owned()),
-        };
+        }
+        .map_err(usage);
     }
 
     // `plak --resume [uuid]`
@@ -84,7 +87,8 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
                 "unknown option for `plak --resume`; expected an optional session UUID".to_owned(),
             ),
             _ => Err("plak --resume accepts at most one session UUID".to_owned()),
-        };
+        }
+        .map_err(usage);
     }
 
     let cli = Cli::try_parse_from(values.iter().map(String::as_str)).map_err(|error| {
@@ -101,7 +105,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
             Some(verb) => message.replace("<command>", verb),
             None => message.replace("plak <command> --help", "plak help"),
         }
-    })?;
+    }).map_err(usage)?;
     let account = match cli.command.as_ref() {
         Some(
             TopCommand::Login { account, .. }
@@ -130,12 +134,15 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
         _ => None,
     };
     if account == Some("xai") {
-        return Err(
+        return Err(usage(
             "`xai` is ambiguous: use `grok` (SuperGrok subscription) or `xai-api` (API key)"
                 .to_owned(),
-        );
+        ));
     }
-    cli.into_command()
+    if let Some(TopCommand::Run { image, .. }) = &cli.command {
+        crate::build_features::admit_image_arguments(image)?;
+    }
+    cli.into_command().map_err(usage)
 }
 
 #[cfg(test)]
@@ -431,7 +438,6 @@ enum TopCommand {
 
 impl TopCommand {
     fn into_command(self) -> Result<Command, String> {
-        admit_arguments(&self)?;
         match self {
             Self::Login { account: None, .. } => Ok(Command::CommandHelp {
                 command: "login".to_owned(),
@@ -1373,16 +1379,6 @@ impl SessionAction {
     }
 }
 
-fn admit_arguments(command: &TopCommand) -> Result<(), String> {
-    if let TopCommand::Run { image, .. } = command
-        && !image.is_empty()
-    {
-        crate::build_features::require_feature("images")
-            .map_err(|error| crate::CliFailure::from(error).message().to_owned())?;
-    }
-    Ok(())
-}
-
 /// The prompt words after `--` and the `--image` paths of one `plak run`.
 struct RunPrompt {
     words: Vec<String>,
@@ -1924,6 +1920,10 @@ mod tests {
     use super::*;
     use crate::command::Command;
     use proptest::prelude::*;
+
+    fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, String> {
+        super::parse(arguments).map_err(|failure| failure.message().to_owned())
+    }
 
     fn args(values: &[&str]) -> Vec<OsString> {
         values.iter().map(|s| OsString::from(*s)).collect()

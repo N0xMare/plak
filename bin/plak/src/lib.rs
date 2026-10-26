@@ -312,9 +312,7 @@ fn log_command_start(command: &Command) {
 }
 
 fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
-    let arguments: Vec<_> = arguments.into_iter().collect();
-    let command = parse(arguments)
-        .map_err(|message| CliFailure::classified(CliFailureKind::Usage, message))?;
+    let command = cli::parse(arguments)?;
     build_features::admit_command(&command)?;
 
     if let Command::WriteBinaryManifest { directory } = &command {
@@ -1179,8 +1177,9 @@ fn config_key_changes_orchestration(key: &str) -> bool {
     product_config::config_key(key).is_some_and(|row| row.scope == ConfigScope::Epoch)
 }
 
+#[cfg(test)]
 fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, String> {
-    cli::parse(arguments)
+    cli::parse(arguments).map_err(|failure| failure.message().to_owned())
 }
 
 #[cfg(test)]

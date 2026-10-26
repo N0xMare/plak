@@ -10,6 +10,8 @@ mod document;
 mod export;
 mod history;
 mod import;
+#[cfg(any(test, feature = "tui"))]
+mod interactive;
 mod reference;
 mod reload;
 
@@ -17,15 +19,14 @@ pub(crate) use document::{
     CarryDocument, IMPORTABLE_VERSIONS, VERSION, read_document, write_document,
 };
 
-#[cfg(feature = "tui")]
-pub(crate) use export::carry_out;
 pub(crate) use export::{export_session, new_carry_file};
+#[cfg(feature = "tui")]
+pub(crate) use interactive::{
+    ReloadPlan, ReloadTarget, carry_foreign_session, carry_out, reload_plan,
+    reload_target_for_session,
+};
 pub(crate) use reload::{CarryCapacityProbe, ReloadProbe, reload_probe};
-#[cfg(feature = "tui")]
-pub(crate) use reload::{ReloadPlan, ReloadTarget, reload_plan, reload_target_for_session};
 
-#[cfg(feature = "tui")]
-pub(crate) use import::carry_foreign_session;
 pub(crate) use import::{CarriedImport, already_carried, carried_forward_label, import_and_resume};
 
 pub(crate) use reference::remove_retained_archive;
