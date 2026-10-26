@@ -16,7 +16,6 @@
 
 #![allow(
     clippy::missing_errors_doc,
-    clippy::too_many_lines,
     reason = "the set this crate actually trips"
 )]
 
