@@ -14,6 +14,10 @@ one cross-build carrier (a build imports its own and the previous version).
   Omitted capabilities refuse explicitly (exit 2), never select another route;
   doctor, non-default version labels and JSONL hello report build capabilities.
 
+- Harbor supports declared `py-ptc` versus `py-sdk` A/B arms, with verified
+  observed selection and the Python worker in the frozen upload cohort.
+  Adapter support is covered without inference; no paid trial is a gate.
+
 - `py-sdk` is selectable for a single-agent root through settings, CLI and
   JSONL. Its typed Python base replaces the family base; existing composition
   text stays unchanged. This root opens no topology; child templates and

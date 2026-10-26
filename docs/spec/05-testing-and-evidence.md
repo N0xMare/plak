@@ -2598,6 +2598,16 @@ the SDK descriptor identity is pinned beside the existing goldens. Existing
 text pins are unchanged; descriptors naming the revised cell protocol rotate
 in unreleased epoch 33.
 
+Harbor's opt-in `plak-py-ptc`/`plak-py-sdk` A/B recipe declares composition
+per arm in a digest-bound campaign. Default arms do not admit overrides;
+observed composition must equal the declared value. Plak trials upload,
+digest-pin and verify both cell sidecars with the binary. The adapter's
+`rung-a-py.yaml` recipe fixes the eight-task slice, tuple, arms and three
+repeat blocks; private inventory generation records its digest and checks
+calibrations against the declared tuple. The adapter's
+zero-inference suite exercises this path; neither calibration nor paid
+trials belong to a gate, and adding support does not authorize a trial.
+
 Child-observation regressions exercise the eight-subscription activity bound,
 live counter replacement and terminal clearing, canonical prefix before the
 addressed live tail, explicit missing-activity markers, transcript open/close,

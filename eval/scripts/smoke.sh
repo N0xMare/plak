@@ -83,6 +83,7 @@ run_plak() {
     --agent-kwarg "arch=$arch" \
     --agent-kwarg "binary_path=$installed/plak" \
     --agent-kwarg "js_host_path=$installed/plakous-js-host" \
+    --agent-kwarg "py_host_path=$installed/plakous-py-host" \
     --n-attempts 1 --n-concurrent "$n_concurrent" \
     "${include[@]}"
 }

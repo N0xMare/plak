@@ -14,13 +14,15 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN cargo build --locked -p plak --features maintainer --release
-RUN cargo build --locked -p plakous-js-runtime --bin plakous-js-host --release
-RUN printf '{"schemaVersion":1,"source":{"repo":"plak","commit":"%s","dirty":%s},"features":["maintainer"],"toolchain":"%s","binaries":{"plak":{"sha256":"%s"},"plakous-js-host":{"sha256":"%s"}}}\n' \
+RUN cargo build --locked -p plakous-js-runtime --bin plakous-js-host -p plakous-py-worker --bin plakous-py-host --release
+RUN printf '{"schemaVersion":1,"source":{"repo":"plak","commit":"%s","dirty":%s},"features":["maintainer"],"toolchain":"%s","binaries":{"plak":{"sha256":"%s"},"plakous-js-host":{"sha256":"%s"},"plakous-py-host":{"sha256":"%s"}}}\n' \
     "$SOURCE_COMMIT" "$SOURCE_DIRTY" "$(rustc --version)" \
     "$(sha256sum target/release/plak | cut -d' ' -f1)" \
-    "$(sha256sum target/release/plakous-js-host | cut -d' ' -f1)" > /src/plak-build.json
+    "$(sha256sum target/release/plakous-js-host | cut -d' ' -f1)" \
+    "$(sha256sum target/release/plakous-py-host | cut -d' ' -f1)" > /src/plak-build.json
 
 FROM scratch AS artifact
 COPY --from=build /src/target/release/plak /plak
 COPY --from=build /src/target/release/plakous-js-host /plakous-js-host
+COPY --from=build /src/target/release/plakous-py-host /plakous-py-host
 COPY --from=build /src/plak-build.json /plak-build.json

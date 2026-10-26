@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "slice": "ab",
+  "blocks": 3,
+  "tasks": [
+    "terminal-bench/openssl-selfsigned-cert",
+    "terminal-bench/fix-git",
+    "terminal-bench/nginx-request-logging",
+    "terminal-bench/sqlite-db-truncate",
+    "terminal-bench/cancel-async-tasks",
+    "terminal-bench/log-summary-date-ranges",
+    "terminal-bench/regex-log",
+    "terminal-bench/configure-git-webserver"
+  ],
+  "arms": {
+    "plak-py-ptc": {
+      "account": "codex",
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "composition": "py-ptc"
+    },
+    "plak-py-sdk": {
+      "account": "codex",
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "composition": "py-sdk"
+    }
+  }
+}

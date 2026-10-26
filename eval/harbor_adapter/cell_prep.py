@@ -52,7 +52,9 @@ async def record_cell(agent: Any, environment: Any) -> None:
     arm = plan["arms"].get(os.environ.get("HARBOR_ARM"))
     if arm is None:
         raise PreflightError("HARBOR_ARM must name a frozen campaign arm")
-    remotes = {"claude-policy-launcher": "/installed-agent/claude-no-web", "plak": "/installed-agent/plak", "plakous-js-host": "/installed-agent/plakous-js-host",
+    if hasattr(agent, "_composition") and agent._composition != arm.get("composition"):
+        raise PreflightError("Plak composition differs from the declared campaign arm")
+    remotes = {"claude-policy-launcher": "/installed-agent/claude-no-web", "plak": "/installed-agent/plak", "plakous-js-host": "/installed-agent/plakous-js-host", "plakous-py-host": "/installed-agent/plakous-py-host",
                "node": "/installed-agent/vendor/node/bin/node", "node-archive": "/installed-agent/vendor/node.tar.gz"}
     for cli in ("codex", "grok", "pi", "opencode", "claude"):
         remotes[cli] = "/usr/local/bin/" + cli

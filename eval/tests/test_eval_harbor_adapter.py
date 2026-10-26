@@ -3641,17 +3641,16 @@ class ArtifactIdentityTests(unittest.TestCase):
             record = pmux_artifact_record(bins)
             self.assertIs(record["source"]["dirty"], True)
 
-    def test_plak_record_includes_the_js_host_when_present(self) -> None:
+    def test_plak_record_includes_both_worker_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "plak").write_bytes(b"plak")
             (root / "js").write_bytes(b"js")
-            record = plak_artifact_record(root / "plak", root / "js", arch="amd64")
+            (root / "py").write_bytes(b"py")
+            record = plak_artifact_record(root / "plak", root / "js", root / "py", arch="amd64")
             self.assertEqual(record["harness"], "plak")
-            self.assertEqual(sorted(record["binaries"]), ["plak", "plakous-js-host"])
+            self.assertEqual(sorted(record["binaries"]), ["plak", "plakous-js-host", "plakous-py-host"])
             self.assertNotIn("source", record)
-            bare = plak_artifact_record(root / "plak", None, arch="amd64")
-            self.assertEqual(sorted(bare["binaries"]), ["plak"])
 
     def test_helpers_read_the_record_back(self) -> None:
         record = artifact_record(

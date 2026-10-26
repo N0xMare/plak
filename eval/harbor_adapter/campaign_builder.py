@@ -19,7 +19,24 @@ from harbor_adapter.tuples import RUNG_A_AB_TASKS, RUNG_A_EXPANDED_TASKS, RUNG_A
 SLICES = {"plumbing": RUNG_A_PLUMBING_TASKS, "ab": RUNG_A_AB_TASKS, "expanded": RUNG_A_EXPANDED_TASKS}
 PACKAGES = "ca-certificates coreutils procps curl git python3 openssl bash"
 ACCOUNTS = {"plak-codex": "codex", "codex": "codex", "pi-codex-oauth": "codex", "opencode-codex-oauth": "codex",
-            "plak-grok": "grok", "grok-build": "grok", "plak-claude": "claude", "claude-code": "claude"}
+            "plak-grok": "grok", "grok-build": "grok", "plak-claude": "claude", "claude-code": "claude",
+            "plak-py-ptc": "codex", "plak-py-sdk": "codex"}
+PYTHON_ARMS = {"plak-py-ptc": "py-ptc", "plak-py-sdk": "py-sdk"}
+
+
+def python_recipe(path: Path) -> dict:
+    """Read this recipe's JSON-compatible YAML without optional parser dependencies."""
+    try:
+        recipe = json.loads(path.read_text())
+        arms = {name: {"account": "codex", "model": "gpt-6-luna", "effort": "low",
+                       "composition": composition} for name, composition in PYTHON_ARMS.items()}
+        if (recipe.get("schemaVersion") != 1 or recipe.get("slice") != "ab"
+                or recipe.get("blocks") != 3 or recipe.get("tasks") != list(RUNG_A_AB_TASKS)
+                or recipe.get("arms") != arms):
+            raise ValueError
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise PreflightError("Python A/B recipe differs from the frozen task/tuple/arm design") from None
+    return recipe
 
 
 def docker(*args: str, **kwargs) -> str:
@@ -54,7 +71,7 @@ def frozen_binaries(root: Path, arch: str, name: str) -> dict:
     from harbor_adapter.vendor_pins import CLI_PINS, NODE_VERSION, load_manifest, node_sha256, node_tarball_name
     prefix = Path(".plak/installed") / arch
     if name.startswith("plak-"):
-        return {key: str(prefix / key) for key in ("plak", "plakous-js-host")}
+        return {key: str(prefix / key) for key in ("plak", "plakous-js-host", "plakous-py-host")}
     cli = {"codex": "codex", "pi-codex-oauth": "pi", "opencode-codex-oauth": "opencode", "grok-build": "grok", "claude-code": "claude"}[name]
     manifest = load_manifest(root / prefix / "vendor", arch)
     entry = manifest.get("clis", {}).get(cli, {})
@@ -102,6 +119,7 @@ def inventory(task_root: Path, arch: str, slice_name: str, arms: list[str], cali
         raise PreflightError("unknown or disabled arm")
     return {"arch": arch, "tasks": tasks, "arms": {name: {
         "account": ACCOUNTS[name],
+        **({"composition": PYTHON_ARMS[name]} if name in PYTHON_ARMS else {}),
         **({"calibration_file": str((calibrations / (name + ".json")).resolve())} if calibrations else {}),
     } for name in arms}}
 
@@ -137,6 +155,8 @@ def task_binding(root: Path, arch: str, task: dict) -> dict:
 
 
 def generate(root: Path, inventory: dict, *, phase: str, slice_name: str, blocks: int) -> dict:
+    if recipe := inventory.get("recipe"):
+        slice_name, blocks = recipe["slice"], recipe["blocks"]
     arch = inventory["arch"]
     selected = inventory["tasks"]
     if phase == "calibration":
@@ -156,6 +176,8 @@ def generate(root: Path, inventory: dict, *, phase: str, slice_name: str, blocks
             "tasks": {name: task_binding(root, arch, task) for name, task in selected.items()},
             "artifact_sha256": {path: artifact_digest(root, arch, path)
                                 for path in inventory.get("artifact_paths", [])}, "arms": {}}
+    if recipe:
+        plan["recipe_sha256"] = recipe["sha256"]
     for name, entry in inventory["arms"].items():
         if "openrouter" in name or entry["account"] == "openrouter":
             raise PreflightError("OpenRouter comparisons remain disabled")
@@ -169,6 +191,8 @@ def generate(root: Path, inventory: dict, *, phase: str, slice_name: str, blocks
                "leftover_processes": "preserve", "cell_prep": "frozen-common-v1"},
                "binaries": {key: artifact_digest(root, arch, path)
                             for key, path in binaries.items()}}
+        if "composition" in entry:
+            arm["composition"] = entry["composition"]
         if name == "claude-code":
             arm["binaries"]["claude-policy-launcher"] = sha256(Path(__file__).with_name("claude-no-web.sh"))
             manifest = str(Path(".plak/installed") / arch / "pmux/manifest.json")
@@ -176,7 +200,7 @@ def generate(root: Path, inventory: dict, *, phase: str, slice_name: str, blocks
         if name.startswith("plak-"):
             from harbor_adapter.artifact_identity import require_plak_provenance
             binary = root / ".plak/installed" / arch / "plak"
-            provenance = require_plak_provenance(binary, binary.with_name("plakous-js-host"))
+            provenance = require_plak_provenance(binary, binary.with_name("plakous-js-host"), binary.with_name("plakous-py-host"))
             if provenance["source"]["commit"] != source:
                 raise PreflightError("Plak must be built at this campaign source commit")
             manifest = str(binary.with_name("plak-build.json"))
@@ -188,10 +212,17 @@ def generate(root: Path, inventory: dict, *, phase: str, slice_name: str, blocks
                 raise PreflightError("calibration must come from actual wire bytes")
             if reduced.get("calibration_binding") != {"source_commit": source, "arch": arch, "binaries": arm["binaries"]}:
                 raise PreflightError("calibration belongs to different source, architecture or executed bytes")
+            if any(key in entry and entry[key] != reduced["first_request"].get(key)
+                   for key in ("model", "effort")):
+                raise PreflightError("calibration tuple differs from the declared Python A/B recipe")
             if name.startswith("plak-"):
                 composition = reduced.get("resolved_composition")
-                if composition not in ("direct", "native-ptc"):
+                if composition in ("py-ptc", "py-sdk") and arm.get("composition") != composition:
+                    raise PreflightError("undeclared_python_composition")
+                if composition not in ("direct", "native-ptc", "py-ptc", "py-sdk"):
                     raise PreflightError("calibration has no observed shipped Plak composition")
+                if arm.get("composition") is not None and arm["composition"] != composition:
+                    raise PreflightError("calibration composition differs from declared A/B arm")
                 arm["resolved_composition"] = composition
             arm.update(calibration_file=str(path), calibration_sha256=sha256(path),
                        observed_config=reduced["first_request"])
@@ -241,6 +272,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("inventory", "freeze", "generate"))
     parser.add_argument("--inventory", type=Path)
+    parser.add_argument("--recipe", type=Path, help="Python A/B recipe for inventory generation")
     parser.add_argument("--task-root", type=Path)
     parser.add_argument("--arch", choices=("amd64", "arm64"), default="amd64")
     parser.add_argument("--arms", nargs="+", default=["plak-codex", "codex"])
@@ -256,9 +288,18 @@ def main() -> None:
     if args.action == "inventory":
         if not args.task_root:
             parser.error("inventory requires --task-root")
+        recipe = python_recipe(args.recipe) if args.recipe else None
+        if recipe:
+            args.slice, args.arms = recipe["slice"], list(recipe["arms"])
         result = inventory(args.task_root, args.arch, args.slice, args.arms, args.calibrations)
+        if recipe:
+            result["recipe"] = {"slice": recipe["slice"], "blocks": recipe["blocks"], "sha256": sha256(args.recipe)}
+            for name, arm in recipe["arms"].items():
+                result["arms"][name].update(model=arm["model"], effort=arm["effort"])
         print(private_json(args.output, result) + "  " + str(args.output))
         return
+    if args.recipe:
+        parser.error("--recipe is only used when creating the inventory")
     if not args.inventory:
         parser.error("freeze and generate require --inventory")
     inputs = json.loads(args.inventory.read_text())

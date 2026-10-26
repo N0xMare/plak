@@ -197,8 +197,11 @@ class BuilderTests(unittest.TestCase):
         plan = campaign()
         plan.update(phase='null', tasks={t: copy.deepcopy(plan['tasks']['task']) for t in RUNG_A_AB_TASKS})
         plan['arms'] = {'plak-codex': plan['arms']['a'], 'plak-codex-aa': plan['arms']['b']}
+        for arm in plan['arms'].values():
+            arm['binaries'] = {name: 'b' * 64 for name in ('plak', 'plakous-js-host', 'plakous-py-host')}
+            arm['resolved_composition'] = 'direct'
         self.assertEqual(validate_campaign(plan), [])
-        plan['arms']['plak-codex-aa']['binaries']['binary'] = 'e' * 64
+        plan['arms']['plak-codex-aa']['binaries']['plak'] = 'e' * 64
         self.assertIn('null_requires_identical_arms', validate_campaign(plan))
 
 

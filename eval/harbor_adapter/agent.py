@@ -34,6 +34,7 @@ from harbor_adapter.arch import (
 )
 from harbor_adapter.arguments import (
     require_js_host,
+    require_composition_override,
     require_prompt_variant,
     require_tuple,
     run_arguments,
@@ -49,6 +50,7 @@ from harbor_adapter.tuples import (
     REMOTE_BINARY,
     REMOTE_HOME,
     REMOTE_JS_HOST,
+    REMOTE_PY_HOST,
     REMOTE_OPENROUTER_KEY,
     REMOTE_XDG,
 )
@@ -88,12 +90,12 @@ class PlakAgent(BaseInstalledAgent):
         self._js_host_path = Path(
             kwargs.pop("js_host_path", None) or root / "plakous-js-host"
         )
+        self._py_host_path = Path(kwargs.pop("py_host_path", None) or root / "plakous-py-host")
         self._account = str(kwargs.pop("account", "codex"))
         self._model = str(kwargs.pop("model", "gpt-5.6-luna"))
         self._effort = str(kwargs.pop("effort", "low"))
         require_tuple(self._account, self._model, self._effort)
-        if kwargs.pop("composition", None) is not None:
-            raise ValueError("scored Plak arms use the shipped composition, not an override")
+        self._composition = require_composition_override(kwargs.pop("composition", None), self._account)
         xdg = kwargs.pop("xdg_state_home", None)
         self._xdg_state_home = Path(xdg) if xdg else None
         plak_home = kwargs.pop("plak_home", None)
@@ -118,9 +120,10 @@ class PlakAgent(BaseInstalledAgent):
                 f"run `just harbor build-agent` with HARBOR_ARCH={self._arch}"
             )
         require_elf_arch(self._binary_path, self._arch, "frozen plak")
-        provenance = require_plak_provenance(self._binary_path, self._js_host_path)
+        provenance = require_plak_provenance(self._binary_path, self._js_host_path, self._py_host_path)
         require_js_host(self._js_host_path)
         require_elf_arch(self._js_host_path, self._arch, "frozen plakous-js-host")
+        require_elf_arch(self._py_host_path, self._arch, "frozen plakous-py-host")
         # Copy once: the digest and upload must refer to the same bytes even if
         # a local build replaces the installed binary during a trial.
         with tempfile.TemporaryDirectory(prefix="plak-harbor-upload-") as directory:
@@ -128,7 +131,9 @@ class PlakAgent(BaseInstalledAgent):
             shutil.copyfile(self._binary_path, frozen)
             frozen_js = Path(directory) / "plakous-js-host"
             shutil.copyfile(self._js_host_path, frozen_js)
-            self._artifact = plak_artifact_record(frozen, frozen_js, arch=self._arch)
+            frozen_py = Path(directory) / "plakous-py-host"
+            shutil.copyfile(self._py_host_path, frozen_py)
+            self._artifact = plak_artifact_record(frozen, frozen_js, frozen_py, arch=self._arch)
             if any(entry["sha256"] != provenance["binaries"][name]["sha256"]
                    for name, entry in self._artifact["binaries"].items()):
                 raise ValueError("Plak build changed during frozen upload")
@@ -136,7 +141,8 @@ class PlakAgent(BaseInstalledAgent):
             self._artifact["build"] = {key: provenance[key] for key in ("features", "toolchain")}
             await environment.upload_file(str(frozen), REMOTE_BINARY)
             await environment.upload_file(str(frozen_js), REMOTE_JS_HOST)
-        for name, remote in (("plak", REMOTE_BINARY), ("plakous-js-host", REMOTE_JS_HOST)):
+            await environment.upload_file(str(frozen_py), REMOTE_PY_HOST)
+        for name, remote in (("plak", REMOTE_BINARY), ("plakous-js-host", REMOTE_JS_HOST), ("plakous-py-host", REMOTE_PY_HOST)):
             entry = self._artifact["binaries"].get(name)
             if entry:
                 line = shlex.quote(entry["sha256"] + "  " + remote)
@@ -149,12 +155,15 @@ class PlakAgent(BaseInstalledAgent):
             environment, command=f"chmod 0755 {shlex.quote(REMOTE_JS_HOST)}"
         )
         uploaded.append(REMOTE_JS_HOST)
+        await self.exec_as_root(environment, command=f"chmod 0755 {shlex.quote(REMOTE_PY_HOST)}")
+        uploaded.append(REMOTE_PY_HOST)
         await environment.upload_file(
             str(Path(__file__).with_name("observed_config.py")), "/tmp/plak-observed-config.py"
         )
         await probe_executable(environment, REMOTE_BINARY)
         await probe_run_capabilities(environment, REMOTE_BINARY)
         await probe_executable(environment, REMOTE_JS_HOST, version_argument=None)
+        await probe_executable(environment, REMOTE_PY_HOST, version_argument=None)
         await self.exec_as_root(
             environment,
             command=(
@@ -211,6 +220,7 @@ class PlakAgent(BaseInstalledAgent):
             model=self._model,
             effort=self._effort,
             prompt=instruction,
+            composition=self._composition,
         )
         from harbor_adapter.argv import write_argv
         write_argv(self.logs_dir, argv[:-1])

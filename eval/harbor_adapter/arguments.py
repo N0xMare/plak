@@ -12,6 +12,7 @@ from harbor_adapter.tuples import (
     REMOTE_BINARY,
     REMOTE_HOME,
     REMOTE_JS_HOST,
+    REMOTE_PY_HOST,
     REMOTE_WORKSPACE,
     REMOTE_XDG,
     STRIP_ENV,
@@ -20,6 +21,25 @@ from harbor_adapter.tuples import (
 
 class ArgumentError(ValueError):
     pass
+
+
+def require_composition_override(composition: str | None, account: str) -> str | None:
+    if composition is None:
+        return None
+    if composition not in ("py-ptc", "py-sdk"):
+        raise ArgumentError("composition override requires an explicit Python A/B campaign arm")
+    import os
+    from harbor_adapter.campaign import load_campaign
+    from harbor_adapter.preflight import PreflightError
+    try:
+        plan = load_campaign()
+    except PreflightError as error:
+        raise ArgumentError("composition override requires an explicit A/B campaign arm") from error
+    arm = plan["arms"].get(os.environ.get("HARBOR_ARM"))
+    if (len(plan["arms"]) < 2 or not arm or arm.get("composition") != composition
+            or arm.get("account") != account):
+        raise ArgumentError("composition override differs from the declared A/B campaign arm")
+    return composition
 
 
 def require_tuple(account: str, model: str, effort: str) -> None:
@@ -66,6 +86,7 @@ def run_env(
     env["PLAK_HOME"] = REMOTE_HOME
     env["XDG_STATE_HOME"] = REMOTE_XDG
     env["PLAK_JS_HOST"] = REMOTE_JS_HOST
+    env["PLAK_PY_HOST"] = REMOTE_PY_HOST
     env["PLAK_LOG"] = "1"
     env.pop("PLAK_TEST_EXCHANGE_CAPTURE_DIR", None)
     # The ablation switch reaches the plak binary only. Vendor arms run their
@@ -82,6 +103,7 @@ def run_arguments(
     model: str,
     effort: str,
     prompt: str,
+    composition: str | None = None,
 ) -> list[str]:
     require_tuple(account, model, effort)
     if not prompt.strip():
@@ -97,6 +119,9 @@ def run_arguments(
     # OpenRouter Chat models that attest no effort enumeration refuse --effort.
     if effort != "none":
         argv.extend(["--effort", effort])
+    if composition is not None:
+        require_composition_override(composition, account)
+        argv.extend(["--composition", composition])
     argv.extend(
         [
             "--print-session-id",
@@ -108,9 +133,9 @@ def run_arguments(
     return argv
 
 
-def host_binary_paths(repo_root: Path) -> tuple[Path, Path]:
+def host_binary_paths(repo_root: Path) -> tuple[Path, Path, Path]:
     installed = repo_root / ".plak" / "installed"
-    return installed / "plak", installed / "plakous-js-host"
+    return installed / "plak", installed / "plakous-js-host", installed / "plakous-py-host"
 
 
 def workspace_cwd() -> str:

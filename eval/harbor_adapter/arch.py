@@ -1,6 +1,7 @@
 """One switch for the Harbor eval plane's cell architecture.
 
-The eval plane packages a frozen `plak`, a frozen `plakous-js-host`, frozen
+The eval plane packages a frozen `plak`, frozen `plakous-js-host` and
+`plakous-py-host` workers, frozen
 vendor CLI prefixes and frozen pmux companions, uploads them into a Terminal-
 Bench cell, and runs them there. Those artifacts are native binaries, so the
 whole plane has to agree on one architecture.

@@ -231,6 +231,10 @@ def resolved_composition(stderr: str) -> str | None:
             values.add("direct")
         elif line.startswith("plak: composition Code Mode (native-ptc):"):
             values.add("native-ptc")
+        elif line.startswith("plak: composition py-ptc:"):
+            values.add("py-ptc")
+        elif line.startswith("plak: composition py-sdk:"):
+            values.add("py-sdk")
     return values.pop() if len(values) == 1 else None
 
 

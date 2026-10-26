@@ -52,7 +52,7 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
     if not isinstance(arms, dict) or len(arms) < (1 if calibration else 2):
         failures.append("arms_missing")
     else:
-        for arm in arms.values():
+        for name, arm in arms.items():
             if not isinstance(arm, dict):
                 failures.append("arm_binding_incomplete")
                 continue
@@ -70,6 +70,23 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
                 not re.fullmatch(r"[0-9a-f]{64}", str(digest)) for digest in binaries.values()
             ):
                 failures.append("executed_binary_pins_required")
+            if name.startswith("plak-") and (not isinstance(binaries, dict) or
+                    not {"plak", "plakous-js-host", "plakous-py-host"} <= binaries.keys()):
+                failures.append("plak_worker_cohort_required")
+            composition = arm.get("composition")
+            resolved = arm.get("resolved_composition")
+            if (name.startswith("plak-") and resolved in ("py-ptc", "py-sdk")
+                    and composition != resolved):
+                failures.append("undeclared_python_composition")
+            if (not calibration and name.startswith("plak-")
+                    and resolved not in ("direct", "native-ptc", "py-ptc", "py-sdk")):
+                failures.append("shipped_composition_unverified")
+            if composition is not None:
+                if (not name.startswith("plak-") or len(arms) < 2 or
+                        composition not in ("py-ptc", "py-sdk")):
+                    failures.append("composition_override_not_declared_ab")
+                if not calibration and arm.get("resolved_composition") != composition:
+                    failures.append("declared_composition_unverified")
             policy = arm.get("policy")
             policy = policy if isinstance(policy, dict) else {}
             if not all(k in policy for k in ("user", "web_tools", "leftover_processes", "cell_prep")):
@@ -87,6 +104,12 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
                                         "tier": observed.get("requested_service_tier"), "policy": policy}, sort_keys=True))
         if not calibration and len(set(controls)) != 1:
             failures.append("policy_or_wire_parity")
+        declared = [arm for arm in arms.values() if isinstance(arm, dict) and arm.get("composition") is not None]
+        if declared and (len(arms) != 2 or len(declared) != 2
+                or {arm.get("composition") for arm in declared} != {"py-ptc", "py-sdk"}
+                or len({arm.get("account") for arm in declared}) != 1
+                or declared[0].get("binaries") != declared[1].get("binaries")):
+            failures.append("python_ab_requires_same_build_account_and_two_compositions")
     pins = plan.get("artifact_sha256")
     if not isinstance(pins, dict) or not pins or any(
         not re.fullmatch(r"[0-9a-f]{64}", str(value)) for value in pins.values()
@@ -207,6 +230,8 @@ def trial_gate(plan: dict[str, Any], arm: str, task: str, evidence: dict[str, An
     if arm.startswith("plak-") and (not evidence.get("resolved_composition") or
                                   evidence.get("resolved_composition") != expected.get("resolved_composition")):
         failures.append("shipped_composition_unverified")
+    if expected.get("composition") is not None and evidence.get("resolved_composition") != expected["composition"]:
+        failures.append("declared_composition_unverified")
     binaries = evidence.get("artifact", {}).get("binaries") or {}
     pins = expected.get("binaries") or {}
     if not pins or set(pins) != set(binaries) or any(

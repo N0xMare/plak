@@ -115,16 +115,15 @@ def pmux_artifact_record(bins: Any, *, arch: str = "") -> dict[str, Any]:
 
 
 def plak_artifact_record(
-    binary: Path, js_host: Path | None = None, *, arch: str = ""
+    binary: Path, js_host: Path, py_host: Path, *, arch: str = ""
 ) -> dict[str, Any]:
-    """Identity of the frozen plak binary, and the JS host when one is used."""
-    items = [("plak", Path(binary))]
-    if js_host is not None:
-        items.append(("plakous-js-host", Path(js_host)))
+    """Identity of the frozen Plak binary and its uploaded worker cohort."""
+    items = [("plak", Path(binary)), ("plakous-js-host", Path(js_host)),
+             ("plakous-py-host", Path(py_host))]
     return artifact_record(harness="plak", binaries=digest_all(items), arch=arch)
 
 
-def require_plak_provenance(binary: Path, js_host: Path) -> dict[str, Any]:
+def require_plak_provenance(binary: Path, js_host: Path, py_host: Path) -> dict[str, Any]:
     """No source-less or dirty maintainer snapshot may enter a scored run."""
     try:
         manifest = json.loads(binary.with_name("plak-build.json").read_text())
@@ -134,7 +133,7 @@ def require_plak_provenance(binary: Path, js_host: Path) -> dict[str, Any]:
                 or manifest.get("features") != ["maintainer"]
                 or not manifest.get("toolchain", "").startswith("rustc 1.99.0")):
             raise ValueError
-        for path in (binary, js_host):
+        for path in (binary, js_host, py_host):
             digest = digest_file(path)
             if digest is None or digest.sha256 != manifest["binaries"][path.name]["sha256"]:
                 raise ValueError

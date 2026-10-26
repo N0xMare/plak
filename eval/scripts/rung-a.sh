@@ -230,13 +230,16 @@ record_comparison_context() {
 }
 
 run_plak() {
-  local account="$1" model="$2" effort="$3" variant="${4:-}"
+  local account="$1" model="$2" effort="$3" variant="${4:-}" composition="${5:-}"
   local config concurrent
   config="$(slice_config)"
   concurrent=1
   local include=() source_flags=() variant_flags=()
   load_slice_cli_flags
   while IFS= read -r flag; do variant_flags+=("$flag"); done < <(prompt_variant_kwargs "$variant")
+  if [[ -n "$composition" ]]; then
+    variant_flags+=(--agent-kwarg "composition=$composition")
+  fi
   record_comparison_context "$account" "$model" "$effort" "$concurrent" "$variant"
   harbor_bin run --config "$config" --jobs-dir "$jobs_dir" \
     ${variant_flags[@]+"${variant_flags[@]}"} \
@@ -248,6 +251,7 @@ run_plak() {
     --agent-kwarg "arch=$arch" \
     --agent-kwarg "binary_path=$installed/plak" \
     --agent-kwarg "js_host_path=$installed/plakous-js-host" \
+    --agent-kwarg "py_host_path=$installed/plakous-py-host" \
     --n-attempts "1" --n-concurrent "$concurrent" \
     --env "$HARBOR_DOCKER_ENV" \
     "${source_flags[@]}" \
@@ -319,6 +323,8 @@ run_named_arm() (
   fi; exit "$arm_status"' EXIT
   case "$named" in
     plak-codex|plak-codex-aa) run_plak codex gpt-6-luna low ;;
+    plak-py-ptc) run_plak codex gpt-6-luna low "" py-ptc ;;
+    plak-py-sdk) run_plak codex gpt-6-luna low "" py-sdk ;;
     plak-codex-legacy) run_plak codex gpt-6-luna low legacy ;;
     plak-codex-parity) run_plak codex gpt-6-luna low parity ;;
     plak-grok) run_plak grok grok-4.6 low ;;
@@ -406,6 +412,8 @@ usage: eval/scripts/rung-a.sh <plumbing|ab|expanded> <arm>
 
 arms: plak-codex|codex|pi-codex-oauth|plak-grok|grok-build|plak-claude|claude-code|all
 
+declared Python A/B arms: plak-py-ptc|plak-py-sdk
+
 prompt-variant ablation arms (plak only, same pair, same tasks):
   plak-codex-legacy|plak-codex-parity|plak-grok-legacy|plak-grok-parity|
   plak-claude-legacy|plak-claude-parity
@@ -451,7 +459,7 @@ case "$slice" in
 esac
 
 case "$arm" in
-  plak-codex|plak-codex-aa|opencode-codex-oauth|plak-grok|plak-openrouter|plak-claude|codex|pi-codex-oauth|grok-build|pi-openrouter|opencode-openrouter|claude-code)
+  plak-codex|plak-codex-aa|plak-py-ptc|plak-py-sdk|opencode-codex-oauth|plak-grok|plak-openrouter|plak-claude|codex|pi-codex-oauth|grok-build|pi-openrouter|opencode-openrouter|claude-code)
     run_named_arm "$arm"
     ;;
   plak-codex-legacy|plak-codex-parity|plak-grok-legacy|plak-grok-parity|plak-claude-legacy|plak-claude-parity)

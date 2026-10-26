@@ -77,6 +77,39 @@ and `HARBOR_CAMPAIGN_SHA256`; a changed file, dirty eval source, absent
 calibration or missing pin fails closed before dispatch. `--print-config` and
 the offline tests need neither credentials nor a campaign.
 
+`rung-a-py.yaml` declares the zero-inference-supported Python A/B recipe:
+`plak-py-ptc` versus `plak-py-sdk`, the same Codex tuple and eight Rung A
+tasks, three interleaved repeat blocks. Generate the private inventory with
+`just harbor inventory --recipe eval/rung-a-py.yaml --task-root … --calibrations … --output …`;
+the recipe fixes both arm names, their tuple, the task slice and repeat blocks.
+It uses JSON-compatible YAML so offline tools need no YAML parser. Each arm
+records its explicit `composition`. Overrides are
+accepted only for the matching arm of a digest-bound campaign, never for
+default arms, and the observed stderr selection must match its declaration.
+The frozen Plak prefix and every Plak trial include and verify all three
+artifacts: `plak`, `plakous-js-host`, and `plakous-py-host`. Rebuild the cohort
+before freezing a new campaign; a missing or changed Python worker is refused.
+`just harbor test` tests this adapter path without launching a trial. Paid
+calibration and A/B trials remain separate operator actions.
+
+For an authorized Python comparison, first create a calibration inventory for
+`plak-py-ptc` and `plak-py-sdk` on the `write-hello` plumbing task (without
+`--recipe`, whose slice and blocks are for the scored run), freeze it, and
+generate a `--phase calibration --blocks 1` campaign. Review its digest, set
+`HARBOR_CAMPAIGN` and `HARBOR_CAMPAIGN_SHA256`, then run
+`uv run --project eval python eval/scripts/campaign.py calibration` to obtain the reduced
+`calibrations/ARM.json` files. This step spends inference and needs its own
+approval; generating or testing an inventory does not authorize it.
+
+Next generate and freeze the `rung-a-py.yaml` recipe inventory with those
+calibrations, generate and review its scored campaign, bind its file and digest
+in the same environment variables, and run
+`uv run --project eval python eval/scripts/campaign.py ab`. The A/A noise baseline is the Codex
+`null-receipt.json` described below, for the same source, architecture and Plak
+binary cohort, not another Python arm or a prompt ablation. Review that receipt
+before authorizing the scored run. The Python recipe uses the existing `ab`
+scheduler mode; its campaign records the recipe digest.
+
 Prepare a private campaign JSON (schema in `harbor_adapter/campaign.py`):
 
 1. Record `schemaVersion: 1`, `phase` (`calibration`, `null` or `scored`),
