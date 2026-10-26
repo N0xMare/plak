@@ -513,6 +513,9 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
         .await
     {
         Ok(_) => return Ok(false),
+        Err(RuntimeModelAuthorityError::AccountChanged) => {
+            return Err(native_account_changed(label, account));
+        }
         // The model renews its own receipt; it reports Stale past the admitted
         // catalog window and ForeignAuthority when the selection changed. Both
         // re-resolve so the binding comparison below names the cause.
@@ -566,6 +569,12 @@ async fn native_credential_failure(
         .await
         .is_ok_and(|status| status.credential() == NativeAuthStatus::Quarantined);
     native_credential_message(label, account, quarantined)
+}
+
+fn native_account_changed(label: &str, account: &str) -> CliFailure {
+    CliFailure::new(format!(
+        "{label} provider account changed; log in to the original account with `plak login {account}` to reopen exactly, or use /rebind to carry the history into a new session under the newly logged-in account"
+    ))
 }
 
 fn native_credential_message(label: &str, account: &str, quarantined: bool) -> CliFailure {

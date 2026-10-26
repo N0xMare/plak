@@ -247,6 +247,25 @@ fn unavailable_native_authority_names_its_login_remedy() {
 }
 
 #[test]
+fn changed_native_account_names_both_exact_restore_and_history_carry() {
+    let failure = native_account_changed("Claude", "claude");
+    assert!(
+        failure
+            .message()
+            .contains("original account with `plak login claude`")
+    );
+    assert!(failure.message().contains("/rebind"));
+    let guidance = attach_repair_guidance(
+        "provider account changed; start a new session for the newly logged-in account",
+    );
+    assert!(guidance.contains("original account"));
+    assert!(guidance.contains("/rebind"));
+    let guidance = attach_repair_guidance("login selection changed");
+    assert!(guidance.contains("login-selection fence"));
+    assert!(guidance.contains("cannot restore the old selection"));
+}
+
+#[test]
 fn claude_refresh_rejection_and_attach_guidance_name_distinct_repairs() {
     let failure = native_credential_message("Claude", "claude", true);
     assert_eq!(
