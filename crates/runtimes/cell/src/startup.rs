@@ -1,6 +1,7 @@
 //! A worker refused before any cell source can be dispatched.
 
 use std::fmt;
+use std::time::Duration;
 
 use crate::WorkerIdentity;
 
@@ -9,7 +10,7 @@ use crate::WorkerIdentity;
 pub struct CellStartupError {
     worker: &'static str,
     cause: String,
-    timed_out: bool,
+    timeout: Option<Duration>,
 }
 
 impl CellStartupError {
@@ -17,13 +18,13 @@ impl CellStartupError {
         Self {
             worker: expected.binary,
             cause,
-            timed_out: false,
+            timeout: None,
         }
     }
 
-    pub(super) fn timeout(expected: WorkerIdentity, cause: String) -> Self {
+    pub(super) fn timeout(expected: WorkerIdentity, bound: Duration, cause: String) -> Self {
         Self {
-            timed_out: true,
+            timeout: Some(bound),
             ..Self::new(expected, cause)
         }
     }
@@ -37,11 +38,13 @@ impl CellStartupError {
 
 impl fmt::Display for CellStartupError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.timed_out {
+        if let Some(bound) = self.timeout {
             return write!(
                 formatter,
-                "Code Mode worker did not answer within 10 s ({}); retry if the host is overloaded, otherwise reinstall the matching {}",
-                self.cause, self.worker
+                "Code Mode worker did not answer within {} s ({}); retry if the host is overloaded, otherwise reinstall the matching {}",
+                bound.as_secs_f64(),
+                self.cause,
+                self.worker
             );
         }
         write!(
@@ -71,11 +74,16 @@ mod tests {
     #[test]
     fn timeout_guidance_distinguishes_host_load_from_incompatibility() {
         for worker in [MONTY_WORKER, QUICKJS_WORKER] {
-            let message = CellStartupError::timeout(worker, "hello timed out".into()).to_string();
+            let message = CellStartupError::timeout(
+                worker,
+                crate::client::WORKER_HELLO_TIMEOUT,
+                "hello timed out".into(),
+            )
+            .to_string();
             assert_eq!(
                 message,
                 format!(
-                    "Code Mode worker did not answer within 10 s (hello timed out); retry if the host is overloaded, otherwise reinstall the matching {}",
+                    "Code Mode worker did not answer within 30 s (hello timed out); retry if the host is overloaded, otherwise reinstall the matching {}",
                     worker.binary
                 )
             );

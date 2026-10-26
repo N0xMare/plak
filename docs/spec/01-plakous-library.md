@@ -6589,13 +6589,17 @@ body are all loss. The worker opens with a `Hello` naming the protocol
 revision, engine and adapter; the client refuses any other worker before it
 sends its one `Configure` (the engine's heap and stack limits). Any refused
 worker — wrong or malformed `Hello`, EOF before or during it, no `Hello`
-within 10 s, or a failed `Configure` — is killed and reaped within the
-two-second settle bound, or is reported unreaped. The same ten-second
+within 30 s, or a failed `Configure` — is killed and reaped within the
+two-second settle bound, or is reported unreaped. The same thirty-second
 handshake deadline covers reading `Hello` and writing `Configure`; it is
-not renewed between those steps. Startup returns a typed `CellStartupError`
+started after spawn returns and is not renewed between those steps. Worker
+identity hashing precedes spawn and does not consume this budget. Workers
+write `Hello` before engine initialization; the bound leaves scheduling and
+loader headroom on an overloaded host without retrying or dispatching source.
+Startup returns a typed `CellStartupError`
 naming the cause and asking to reinstall the matching `plakous-js-host` or
 `plakous-py-host`. A deadline failure instead says the worker did not answer
-within 10 s and advises retrying if the host is overloaded, otherwise
+within 30 s and advises retrying if the host is overloaded, otherwise
 reinstalling the matching worker. Worker-supplied revision, engine and adapter
 strings echoed in refusal diagnostics are capped at 64 UTF-8 bytes each.
 No cell source is dispatched: the outer tool and root turn

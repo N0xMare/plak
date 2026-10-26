@@ -44,7 +44,7 @@ pub const MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
 /// Shutdown includes cancelable I/O and a bounded child reap.
 pub const WORKER_SHUTDOWN_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long a spawned worker has to send `Hello` and receive `Configure`.
-pub const WORKER_HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+pub const WORKER_HELLO_TIMEOUT: Duration = Duration::from_secs(30);
 const QUEUE_ITEMS: usize = 64;
 /// Outstanding host commands a queue holds before it is a genuine resource limit.
 ///
@@ -585,6 +585,7 @@ async fn handshake(
         Ok(Err(error)) => Err(failure(error)),
         Err(_) => Err(CellStartupError::timeout(
             expected,
+            bound,
             "cell worker did not say hello in time".into(),
         )),
     }?;
@@ -600,6 +601,7 @@ async fn handshake(
         Ok(Err(error)) => Err(failure(format!("cell worker configure failed: {error}"))),
         Err(_) => Err(CellStartupError::timeout(
             expected,
+            bound,
             "cell worker configure timed out".into(),
         )),
     }
@@ -878,6 +880,31 @@ mod tests {
     async fn a_late_hello_is_refused_at_its_bound() {
         let error = refusal(&[], Duration::from_millis(300)).await;
         assert!(error.contains("did not say hello in time"), "{error}");
+        assert!(error.contains("within 0.3 s"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_slow_worker_can_say_hello_inside_the_startup_bound() {
+        let directory = tempfile::tempdir().expect("directory");
+        let opening = hello(
+            CELL_PROTOCOL_REVISION,
+            QUICKJS_WORKER.engine,
+            QUICKJS_WORKER.adapter,
+        );
+        let program = worker(directory.path(), &opening);
+        let source = std::fs::read_to_string(&program).expect("program");
+        std::fs::write(&program, source.replacen("cat ", "sleep 0.1\ncat ", 1))
+            .expect("delay hello");
+        let client = CellClient::spawn_within(
+            &program,
+            QUICKJS_WORKER,
+            EngineConfig::QUICKJS,
+            Duration::from_secs(5),
+            None,
+        )
+        .await
+        .expect("a slow worker inside the bound is usable");
+        client.stop().await.expect("reaped slow worker");
     }
 
     #[tokio::test]

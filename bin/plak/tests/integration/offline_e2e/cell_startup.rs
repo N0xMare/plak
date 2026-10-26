@@ -22,7 +22,7 @@ fn refused_worker(body: &str, cause: &str) {
                 .as_str()
                 .is_some_and(|text| text.contains("agent turn failed"))
     });
-    assert!(started.elapsed() < Duration::from_secs(15));
+    assert!(started.elapsed() < Duration::from_secs(35));
     agent.wait_for("idle after failure", |record| {
         record["kind"] == "busy" && record["busy"] == false
     });
@@ -47,7 +47,7 @@ fn refused_worker(body: &str, cause: &str) {
     }));
     assert!(output.contains(cause), "{output}");
     if cause == "hello" {
-        assert!(output.contains("did not answer within 10 s"), "{output}");
+        assert!(output.contains("did not answer within 30 s"), "{output}");
         assert!(
             output.contains("retry if the host is overloaded"),
             "{output}"
@@ -62,7 +62,7 @@ fn refused_worker(body: &str, cause: &str) {
 
 #[test]
 fn a_silent_worker_fails_the_turn_at_the_handshake_deadline() {
-    refused_worker("exec sleep 30", "hello");
+    refused_worker("exec sleep 120", "hello");
 }
 
 #[test]
