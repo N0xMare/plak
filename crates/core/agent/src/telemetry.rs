@@ -773,6 +773,65 @@ pub struct CredentialRefreshDetail {
     pub id_token_iat_age_secs: Option<i64>,
     /// `exp - now` of the returned ID token.
     pub id_token_exp_in_secs: Option<i64>,
+    /// Bounded, sanitized OAuth failure metadata, never a raw response body.
+    pub oauth_error: CredentialRefreshDiagnostic,
+}
+
+/// Copyable OAuth failure metadata supplied after credential filtering.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CredentialRefreshDiagnostic {
+    bytes: [u8; 144],
+    code_len: u8,
+    description_len: u8,
+}
+
+impl Default for CredentialRefreshDiagnostic {
+    fn default() -> Self {
+        Self {
+            bytes: [0; 144],
+            code_len: 0,
+            description_len: 0,
+        }
+    }
+}
+
+impl CredentialRefreshDiagnostic {
+    /// Copies already-sanitized fields into fixed storage, truncating on UTF-8
+    /// boundaries at 32 bytes for the code and 112 for the description.
+    #[must_use]
+    pub fn new(code: Option<&str>, description: Option<&str>) -> Self {
+        let mut result = Self::default();
+        let (code_bytes, description_bytes) = result.bytes.split_at_mut(32);
+        for (value, bytes, len) in [
+            (code, code_bytes, &mut result.code_len),
+            (description, description_bytes, &mut result.description_len),
+        ] {
+            let value = value.unwrap_or("");
+            let mut end = value.len().min(bytes.len());
+            while !value.is_char_boundary(end) {
+                end -= 1;
+            }
+            bytes[..end].copy_from_slice(&value.as_bytes()[..end]);
+            *len = u8::try_from(end).unwrap_or(0);
+        }
+        result
+    }
+
+    /// Returns the sanitized OAuth code when supplied.
+    #[must_use]
+    pub fn code(&self) -> Option<&str> {
+        (self.code_len != 0)
+            .then(|| std::str::from_utf8(&self.bytes[..usize::from(self.code_len)]).unwrap_or(""))
+    }
+
+    /// Returns sanitized provider prose when supplied.
+    #[must_use]
+    pub fn description(&self) -> Option<&str> {
+        (self.description_len != 0).then(|| {
+            std::str::from_utf8(&self.bytes[32..32 + usize::from(self.description_len)])
+                .unwrap_or("")
+        })
+    }
 }
 
 /// Closed failure class for a credential-refresh observation.

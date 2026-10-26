@@ -10,7 +10,9 @@ use plakous::model::{
     SelectedProviderConfigurationId, SessionLineage, SystemClock,
 };
 use plakous::sessions::SessionRuntimeBinding;
-use plakous::subscriptions::{NativeProvider, ResolvedProvider};
+use plakous::subscriptions::{
+    NativeAuthStatus, NativeProvider, NativeSubscriptions, ResolvedProvider,
+};
 
 use crate::agent::{
     AttachedCodingSession, ProductAgentSpec, SessionToolFence, api_session_runtime_binding,
@@ -484,14 +486,14 @@ fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
     })
 }
 
-/// Re-resolve only a stale Codex or xAI receipt, retaining the exact model and
+/// Re-resolve stale native authority, retaining the exact model and
 /// selected login. Returns whether the attached host must reopen under the
 /// fresh receipt.
 pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
 ) -> CliResult<bool> {
     let HostTargetAuthority::Native {
-        provider: provider @ (NativeProvider::Codex | NativeProvider::Xai),
+        provider,
         resolved,
         subscriptions,
         ..
@@ -501,7 +503,9 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
     };
     let (label, account) = match provider {
         NativeProvider::Codex => ("Codex", "codex"),
-        _ => ("xAI", "grok"),
+        NativeProvider::Xai => ("xAI", "grok"),
+        NativeProvider::Claude => ("Claude", "claude"),
+        _ => return Ok(false),
     };
     match resolved
         .model()
@@ -514,7 +518,7 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
         // re-resolve so the binding comparison below names the cause.
         Err(RuntimeModelAuthorityError::Stale | RuntimeModelAuthorityError::ForeignAuthority) => {}
         Err(RuntimeModelAuthorityError::Unavailable) => {
-            return Err(native_authority_unavailable(label, account));
+            return Err(native_credential_failure(subscriptions, *provider, label, account).await);
         }
         Err(error) => {
             return Err(CliFailure::new(format!(
@@ -525,17 +529,25 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
     let previous = resolved.as_ref();
     let selected = previous.configuration().selected().clone();
     let limits = crate::agent::product_subscription_request_limits()?;
-    let fresh = subscriptions
+    let fresh = match subscriptions
         .resolve_turn_scoped_provider(selected, limits, SessionLineage::Root)
         .await
-        .map_err(|error| {
-            CliFailure::new(format!("exact {label} resolution failed: {}", error.kind))
-        })?;
+    {
+        Ok(fresh) => fresh,
+        Err(error) => {
+            let repair = native_credential_failure(subscriptions, *provider, label, account).await;
+            return Err(CliFailure::new(format!(
+                "exact {label} resolution failed: {}; {}",
+                error.kind,
+                repair.message()
+            )));
+        }
+    };
     if !FreshNativeBinding::from_resolved(previous)?
         .admits(&FreshNativeBinding::from_resolved(&fresh)?)
     {
         return Err(CliFailure::new(format!(
-            "fresh {label} authority changed the selected login or model semantics; explicit rebind required"
+            "exact reopen refused: {label} is bound to a different account, login, or model; log in to the original account with `plak login {account}`, or carry the history into a new session"
         )));
     }
     let HostTargetAuthority::Native { resolved, .. } = &mut config.target else {
@@ -543,6 +555,29 @@ pub(super) async fn refresh_native_target<P: plakous_host_protocol::ProtocolExte
     };
     *resolved = std::sync::Arc::new(fresh);
     Ok(true)
+}
+
+async fn native_credential_failure(
+    subscriptions: &NativeSubscriptions,
+    provider: NativeProvider,
+    label: &str,
+    account: &str,
+) -> CliFailure {
+    let quarantined = subscriptions
+        .status(provider)
+        .await
+        .is_ok_and(|status| status.credential() == NativeAuthStatus::Quarantined);
+    native_credential_message(label, account, quarantined)
+}
+
+fn native_credential_message(label: &str, account: &str, quarantined: bool) -> CliFailure {
+    if quarantined {
+        CliFailure::new(format!(
+            "{label} credential was rejected at refresh; run `plak login {account}`"
+        ))
+    } else {
+        native_authority_unavailable(label, account)
+    }
 }
 
 /// A renewal that found no usable credential names the repair, as other

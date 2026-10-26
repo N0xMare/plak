@@ -290,6 +290,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
         let body = pull_claimed_body_cancellable(response, self.cancellation).await?;
         if !response.status().is_success() {
             self.detail.reason = Some(CredentialRefreshFailureReason::ProviderRejected);
+            self.detail.record_oauth_error(&body);
             return Err(NativeCodexAuthError::Provider);
         }
         let tokens: OAuthRefreshTokenResponse = parse_strict_json(&body).inspect_err(|_| {
@@ -364,7 +365,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
             _ => None,
         };
         let reason = self.detail.reason.or(fallback);
-        self.detail.with_reason(reason)
+        self.detail.clone().with_reason(reason)
     }
 
     fn output_from_completed(

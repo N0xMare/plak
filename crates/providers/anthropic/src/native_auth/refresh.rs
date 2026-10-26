@@ -129,13 +129,17 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
         prepared: Self::Prepared,
         response: &mut ClaimedHttpResponse,
     ) -> Result<CredentialRecord, Self::Error> {
+        if !response.status().is_success() {
+            self.detail.reason = Some(CredentialRefreshFailureReason::ProviderRejected);
+            if let Ok(body) = pull_claimed_body(response, MAX_TOKEN_BYTES).await {
+                self.detail.record_oauth_error(&body);
+            }
+            return Err(ClaudeNativeAuthError::RefreshQuarantined);
+        }
         let mut reject = |reason| {
             self.detail.reason = Some(reason);
             ClaudeNativeAuthError::RefreshQuarantined
         };
-        if !response.status().is_success() {
-            return Err(reject(CredentialRefreshFailureReason::ProviderRejected));
-        }
         let body = pull_claimed_body(response, MAX_TOKEN_BYTES)
             .await
             .map_err(map_pull_body_error)?;
@@ -233,6 +237,6 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
             _ => None,
         };
         let reason = self.detail.reason.or(fallback);
-        self.detail.with_reason(reason)
+        self.detail.clone().with_reason(reason)
     }
 }

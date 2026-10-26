@@ -232,6 +232,21 @@ fn unavailable_native_authority_names_its_login_remedy() {
 }
 
 #[test]
+fn claude_refresh_rejection_and_attach_guidance_name_distinct_repairs() {
+    let failure = native_credential_message("Claude", "claude", true);
+    assert_eq!(
+        failure.message(),
+        "Claude credential was rejected at refresh; run `plak login claude`"
+    );
+    assert!(attach_repair_guidance(failure.message()).contains("same-account Claude"));
+    assert!(
+        attach_repair_guidance("resolved harness plan is bound to a different model/route/adapter")
+            .contains("export/import")
+    );
+    assert!(attach_repair_guidance("credential is unavailable").contains("no usable login"));
+}
+
+#[test]
 fn exact_openrouter_resume_binds_selected_and_resolved_wire() {
     let mut current = SessionRecord::new("/work/openrouter".into());
     current.account = Some("openrouter".into());

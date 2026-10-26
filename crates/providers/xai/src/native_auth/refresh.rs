@@ -189,6 +189,9 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                 .map_err(XaiNativeAuthError::from)?;
             return credential_record(prepared.expected_subject, replacement_generation, &stored);
         }
+        if let Ok(body) = pull_claimed_body(response, MAX_TOKEN_BYTES).await {
+            self.detail.record_oauth_error(&body);
+        }
         if status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error() {
             return Err(XaiNativeAuthError::Transport(None));
         }
@@ -237,7 +240,7 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
     }
 
     fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
-        self.detail.with_reason(xai_failure_reason(error))
+        self.detail.clone().with_reason(xai_failure_reason(error))
     }
 
     fn after_post_start_failure(&mut self, store: &PrivateCredentialStore, error: &Self::Error) {

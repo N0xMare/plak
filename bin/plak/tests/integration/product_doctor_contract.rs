@@ -402,6 +402,10 @@ fn oauth_doctor_prints_record_metadata_and_last_refresh_without_payload() {
             transport_phase: Some("resolution".to_owned()),
             http_status_class: Some("5xx".to_owned()),
             age_secs: 120,
+            generation: 40,
+            at_ns: 1_720_000_100_000_000_000,
+            oauth_error_code: Some("invalid_grant".to_owned()),
+            oauth_error_description: Some("The grant was revoked".to_owned()),
         }),
     };
     let report = diagnose(values);
@@ -415,6 +419,7 @@ fn oauth_doctor_prints_record_metadata_and_last_refresh_without_payload() {
     );
     assert!(grok.detail.contains("2m ago"));
     assert!(grok.detail.contains("transport=resolution"));
+    assert!(grok.detail.contains("invalid_grant: The grant was revoked"));
     assert_eq!(
         grok.remediation.as_deref(),
         Some("run plak refresh grok; run plak login grok if that fails")

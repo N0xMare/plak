@@ -23,6 +23,18 @@ async fn fixture_with_overlapping_reads(
     ClaudeNativeAuthManager,
     tokio::task::JoinHandle<String>,
 ) {
+    fixture_with_response(body, overlapping, "200 OK").await
+}
+
+async fn fixture_with_response(
+    body: serde_json::Value,
+    overlapping: bool,
+    status: &'static str,
+) -> (
+    tempfile::TempDir,
+    ClaudeNativeAuthManager,
+    tokio::task::JoinHandle<String>,
+) {
     let temp = tempfile::tempdir().unwrap();
     let mut manager = tests::manager(tests::private_store(&temp));
     let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
@@ -65,7 +77,7 @@ async fn fixture_with_overlapping_reads(
         }
         let body = body.to_string();
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
         );
         let mut request_lines = Vec::new();
@@ -82,6 +94,28 @@ async fn fixture_with_overlapping_reads(
         request_lines.join("\n")
     });
     (temp, manager, peer)
+}
+
+#[tokio::test]
+async fn login_body_size_and_provider_refusal_are_distinct() {
+    let (_temp, manager, peer) = fixture_with_response(
+        serde_json::json!({"error": "invalid_grant"}),
+        false,
+        "400 Bad Request",
+    )
+    .await;
+    assert!(matches!(
+        manager.core.post_json("{}".to_owned()).await,
+        Err(ClaudeNativeAuthError::LoginTokenExchange)
+    ));
+    peer.await.unwrap();
+
+    let (_temp, manager, peer) = fixture(serde_json::json!("x".repeat(MAX_TOKEN_BYTES))).await;
+    assert!(matches!(
+        manager.core.post_json("{}".to_owned()).await,
+        Err(ClaudeNativeAuthError::InvalidTokenResponse)
+    ));
+    peer.await.unwrap();
 }
 
 async fn read_fixture_request(

@@ -66,6 +66,10 @@ impl CredentialRefreshObserver for FacadeCredentialObserver {
                     expires_in_secs: event.detail.expires_in_secs,
                     id_token_iat_age_secs: event.detail.id_token_iat_age_secs,
                     id_token_exp_in_secs: event.detail.id_token_exp_in_secs,
+                    oauth_error: plakous_agent::CredentialRefreshDiagnostic::new(
+                        event.detail.oauth_error_code.as_deref(),
+                        event.detail.oauth_error_description.as_deref(),
+                    ),
                 },
             },
         ));
@@ -156,6 +160,67 @@ fn map_transport_phase(phase: plakous_http::Phase) -> plakous_model::ModelRetryP
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plakous_agent::{TelemetrySink, TelemetrySinkError};
+
+    #[derive(Default)]
+    struct Recorded(Mutex<Vec<TelemetryObservation>>);
+
+    impl TelemetrySink for Recorded {
+        fn try_emit(&self, observation: TelemetryObservation) -> Result<(), TelemetrySinkError> {
+            self.0
+                .lock()
+                .map_err(|_| TelemetrySinkError::Closed)?
+                .push(observation);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn provider_error_body_is_filtered_before_telemetry_records_it()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let sink = Arc::new(Recorded::default());
+        let emitter = Arc::new(TelemetryEmitter::enabled(sink.clone()));
+        for provider in [
+            NativeProvider::Codex,
+            NativeProvider::Xai,
+            NativeProvider::Claude,
+        ] {
+            let mut detail = plakous_auth::oauth_orchestrator::CredentialRefreshDetail::default();
+            detail.record_oauth_error(br#"{"error":"invalid_grant","error_description":"Grant revoked sk-private-fixture refresh_token=private-fixture eyJheader.payload.signature", "access_token":"private-body-field"}"#);
+            FacadeCredentialObserver {
+                provider: CredentialProviderLabel::new(provider.as_str())?,
+                emitter: emitter.clone(),
+            }
+            .observe(AuthRefreshEvent {
+                phase: AuthRefreshPhase::Quarantined,
+                failure_class: Some(AuthFailureClass::HttpStatus(
+                    AuthHttpStatusClass::ClientError,
+                )),
+                transport_phase: None,
+                http_status: Some(400),
+                elapsed: std::time::Duration::from_secs(1),
+                generation: 7,
+                detail,
+            });
+        }
+        let rows = sink.0.lock().map_err(|_| "recording sink poisoned")?;
+        assert_eq!(rows.len(), 3);
+        for row in rows.iter() {
+            let TelemetryObservationKind::CredentialRefresh {
+                detail, generation, ..
+            } = row.kind()
+            else {
+                return Err("unexpected telemetry kind".into());
+            };
+            assert_eq!(generation, 7);
+            assert_eq!(detail.oauth_error.code(), Some("invalid_grant"));
+            let description = detail.oauth_error.description().unwrap_or("");
+            assert!(description.starts_with("Grant revoked"));
+            assert!(!description.contains("private"));
+            assert!(!description.contains("eyJ"));
+        }
+        Ok(())
+    }
 
     #[test]
     fn credential_refresh_reason_keeps_its_label_across_layers() {

@@ -565,10 +565,13 @@ valid for 6 hours. A root turn or a child agent that runs longer (for example a
 root waiting on children) continues on a fresh read of the same model between
 model calls, with no action from you. It stops with this message, before
 anything is sent, only when that fresh read could not be used: a signed-out or
-quarantined credential says `run plak login codex` (or `grok`); a new login,
-another account or a changed model row since the session started says an
-explicit rebind is required: rebind with **Fork now** in the Agents tab, or
-start a new session.
+quarantined credential names `plak login codex`, `grok`, or `claude`. A same-account
+Claude login preserves the session binding; retry the prompt or `/attach`.
+Another account or a changed model binding refuses exact reopen: restore the
+original login/configuration, or export/import to carry the full history into
+a new session. `/agents` is not a repair for a frozen binding mismatch.
+`plak doctor` and `plak status` show the sanitized last refresh failure with its
+time and credential generation; no raw response body or token is retained.
 After fixing the login, retry the prompt: it reads the catalog afresh rather
 than reusing the read that was refused.
 

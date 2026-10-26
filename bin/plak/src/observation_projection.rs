@@ -1042,6 +1042,8 @@ pub(crate) fn project(observation: &TelemetryObservation, output: Output) -> Pro
                                 .reason
                                 .map(plakous::agent::CredentialRefreshFailureReason::as_str),
                         ),
+                        Cell::from(detail.oauth_error.code()),
+                        Cell::from(detail.oauth_error.description()),
                     ],
                     fallback: None,
                 })

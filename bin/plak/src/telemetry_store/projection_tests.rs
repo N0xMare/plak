@@ -160,7 +160,7 @@ fn every_observation_keeps_the_before_refactor_rows_and_spans() -> TestResult {
         .collect();
     assert_eq!(
         digest,
-        "5d8381d4f60dcfba12c5884ddca165bb3e73016f9737bed7627d6d8c7b38aa56"
+        "22fc53c0a75efd5646c0f36ed9d1c143b3157d29460f39e35e96458c3d2e5c7a"
     );
     Ok(())
 }

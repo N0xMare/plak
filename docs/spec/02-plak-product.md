@@ -249,7 +249,7 @@ launch directory — the cwd of the process, resolved once.
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        obsolete archives, retained only for cleanup (§2.5)
-  telemetry/telemetry-v19.sqlite3 disposable analytics, schema 19
+  telemetry/telemetry-v20.sqlite3 disposable analytics, schema 20
   logs/plak.log               PLAK_LOG boundary spans
   binary-ids                  development-build identity cache, 0600 (§1), disposable
 ```
@@ -6227,7 +6227,7 @@ prose enters the row. The cause column is unconstrained SQL `TEXT`, populated
 by `ModelRetryCause::kind()`: its closed spelling set is `http_status`, `connect`,
 `record_rejected_in_transit`, `transport_after_send`, and `stream_interrupted`.
 The new string value requires no column of its own. The disposable store is
-schema 19. Request host, route and body size are log fields, not SQL columns.
+schema 20. Request host, route and body size are log fields, not SQL columns.
 The bounded writer has the same best-effort drop behavior
 as other analytics; these rows are not recovery authority. `v_replay_loss` is
 the canned view printed by `plak telemetry status --views`, including declined
@@ -6301,7 +6301,7 @@ that cannot yet shrink.
 
 Two asymmetries are worth stating. `telemetry sql` is strictly read-only, while
 `telemetry status` opens the current per-schema file for writing, creating
-schema 19 from scratch when absent. Existing older telemetry files are left
+schema 20 from scratch when absent. Existing older telemetry files are left
 untouched and are not imported; telemetry is disposable. A mismatched schema
 inside the current file is refused without migration or deletion. And a stale schema on a *read* path fails closed
 with the found and expected versions rather than silently wiping analytics the
@@ -6845,6 +6845,22 @@ Claimed refreshes are recorded as telemetry through the ordinary sink, and
 latest refresh phase, failure class, and nullable transport phase
 (`resolution`, `connect`, `tls`, `send`, or `response`) — or an explicit unavailable detail when
 the telemetry schema cannot be read.
+
+Refresh failure rows also retain the provider's OAuth `error` code (at most
+32 bytes) and sanitized `error_description` (at most 112 bytes on the telemetry
+lane). Parsing is bounded; only those two fields are considered, control
+characters are stripped, and token-looking values are redacted before
+truncation. Raw bodies, token fields and headers are never recorded. All three
+native providers use this path. Doctor and status show the available failure
+code, description, time and claimed generation; absent fields are explicitly
+not recorded. Telemetry remains disposable and never authorizes recovery.
+
+Claude participates in the host's native freshness re-resolution. Quarantined
+credentials name `plak login claude`; a changed account refuses exact reopen
+and names restoration of the original account or an explicit history carry.
+Attach guidance distinguishes a frozen binding mismatch, a missing login and
+quarantine; selecting a profile is not represented as repair for a binding
+mismatch. A same-account Claude login preserves its stable account binding.
 
 ### 8.5 Logout
 

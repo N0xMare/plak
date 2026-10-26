@@ -218,6 +218,7 @@ pub mod agent {
         ControlErrorKind,
         CredentialProviderLabel,
         CredentialRefreshDetail,
+        CredentialRefreshDiagnostic,
         CredentialRefreshFailureClass,
         CredentialRefreshFailureReason,
         CredentialRefreshPhase,

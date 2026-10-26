@@ -27,7 +27,7 @@ use crate::observation_projection::labels::{
 use crate::observation_projection::{Output, project};
 use plakous_hosted::product_observation::{ChildKind, ProductObservation};
 
-pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 19;
+pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 20;
 
 /// Default disposable telemetry retention.
 pub const DEFAULT_TELEMETRY_MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -247,7 +247,9 @@ CREATE TABLE credential_refreshes (
   http_status INTEGER,
   elapsed_ns INTEGER,
   generation INTEGER NOT NULL,
-  failure_reason TEXT
+  failure_reason TEXT,
+  oauth_error_code TEXT,
+  oauth_error_description TEXT
 );
 
 CREATE TABLE prompt_cache_diagnoses (
@@ -358,6 +360,8 @@ SELECT
   elapsed_ns,
   generation,
   failure_reason,
+  oauth_error_code,
+  oauth_error_description,
   at
 FROM credential_refreshes;
 ";
@@ -1364,6 +1368,8 @@ pub struct CredentialRefreshRow {
     pub generation: u64,
     pub at_ns: i64,
     pub failure_reason: Option<String>,
+    pub oauth_error_code: Option<String>,
+    pub oauth_error_description: Option<String>,
 }
 
 impl TelemetryStore {
@@ -1406,7 +1412,7 @@ impl TelemetryStore {
         TelemetryStore::require_attached_schema(&connection)?;
         let row = connection.query_row(
             "SELECT provider, phase, failure_class, http_status_class, http_status, generation, at, transport_phase,
-                    failure_reason
+                    failure_reason, oauth_error_code, oauth_error_description
                  FROM v_credential_refreshes
                  WHERE provider = ?1
                    AND (?2 = 0 OR phase IN ('completed', 'restored', 'outcome_unknown', 'quarantined'))
@@ -1425,6 +1431,8 @@ impl TelemetryStore {
                     at_ns: row.get(6)?,
                     transport_phase: row.get(7)?,
                     failure_reason: row.get(8)?,
+                    oauth_error_code: row.get(9)?,
+                    oauth_error_description: row.get(10)?,
                 })
             },
         );
@@ -2230,7 +2238,7 @@ mod tests {
             store.query_i64("SELECT COUNT(*) FROM v_replay_loss"),
             Some(2)
         );
-        assert_eq!(store.query_i64("PRAGMA user_version"), Some(19));
+        assert_eq!(store.query_i64("PRAGMA user_version"), Some(20));
         assert_eq!(
             store.query_i64(
                 "SELECT COUNT(*) FROM model_retries WHERE cause_kind = 'record_rejected_in_transit'"
@@ -2818,7 +2826,7 @@ mod tests {
             drop(connection);
             let before = std::fs::read(&database)?;
             let store = TelemetryStore::open(&paths)?;
-            assert_eq!(store.query_i64("PRAGMA user_version"), Some(19));
+            assert_eq!(store.query_i64("PRAGMA user_version"), Some(20));
             assert_eq!(
                 store.query_i64("SELECT count(*) FROM sqlite_master WHERE name = 'evidence'"),
                 Some(0)
@@ -2907,6 +2915,10 @@ mod tests {
         let context = fixture_context()?;
         let older = Timestamp::new(1_720_000_000, 0).expect("older");
         let newer = Timestamp::new(1_720_000_100, 0).expect("newer");
+        let oauth_error = plakous::agent::CredentialRefreshDiagnostic::new(
+            Some("invalid_grant"),
+            Some("Grant revoked [redacted]"),
+        );
         store.write_batch(&[
             TelemetryItem::Agent(TelemetryObservation::new(
                 context,
@@ -2938,6 +2950,7 @@ mod tests {
                         expires_in_secs: Some(21_600),
                         id_token_iat_age_secs: Some(3_700),
                         id_token_exp_in_secs: Some(-100),
+                        oauth_error,
                     },
                 },
             )),
@@ -2961,6 +2974,11 @@ mod tests {
         assert_eq!(latest.generation, 40);
         assert_eq!(latest.transport_phase.as_deref(), Some("resolution"));
         assert_eq!(latest.failure_reason.as_deref(), Some("id_token_exp"));
+        assert_eq!(latest.oauth_error_code.as_deref(), Some("invalid_grant"));
+        let description = latest.oauth_error_description.as_deref().unwrap_or("");
+        assert!(description.starts_with("Grant revoked"));
+        assert!(!description.contains("private"));
+        assert!(!format!("{latest:?}").contains("private"));
         Ok(())
     }
 

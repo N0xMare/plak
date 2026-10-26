@@ -3859,6 +3859,12 @@ supply only pins, key shapes and error mapping.
 Every subscription request identifies truthfully as Plak (`originator=plak`,
 never a borrowed CLI identity) and is pinned to HTTP/1.1.
 
+Claude's login token exchange distinguishes a provider's non-2xx rejection
+(`LoginTokenExchange`) from a response that exceeds the bounded token-body
+limit (`InvalidTokenResponse`). Body transport failures preserve their network
+classification. These paths use the shared `AuthBodyError` directly, not a
+usage-only alias, and never retain response bodies in diagnostics.
+
 SuperGrok's `x-grok-client-version` is `1.0.46`, the value native Grok Build
 1.0.46 sends. Native Grok derives this proxy version-gate value from its CLI
 version, not a fixed protocol version. At the 2026-10-24 review the latest Grok
@@ -8369,7 +8375,7 @@ supplies its typed wake classification, without topology entering L0.
   `missed_input_tokens` is an optional non-negative integer, absent when the
   provider omitted the count. The observation carries no provider message id
   and no raw unknown spelling. Malformed diagnostics are not an observation.
-  The product persists that pair in telemetry schema 19, with the count
+  The product persists that pair in telemetry schema 20, with the count
   column nullable, and does not project it to OTEL. Turn model rounds and
   compaction provider streams both record it. It is not canonical usage;
 - `ModelArtifactPrefixDrift { fields }`, a model round whose stable request
@@ -8408,13 +8414,23 @@ phase, including failed response-body pulls. Local dispatch refusals remain
 `NotReady`, never transport failures. These observations are display evidence,
 not credential recovery or admission authority.
 
+OAuth refresh rejection metadata is the one bounded provider-prose diagnostic
+on this lane: the OAuth error code (32 bytes) and credential-filtered description
+(112 bytes) occupy fixed-size copyable storage. Only the two named OAuth fields
+are parsed from a bounded error body, control characters are stripped and
+token-looking values are redacted before truncation. Tokens, raw bodies and
+headers cannot be retained in these fields. Native Codex, Claude and xAI all
+report this evidence, including the time and claimed generation already carried
+by refresh observations. Missing or malformed diagnostics do not change refresh
+classification or claim disposition.
+
 Compaction usage is separate from the root turn's model-operation usage. A
 refused endpoint retains its typed content-free refusal class (backpressure,
 busy, stale, unavailable, invalid_input, or rejected) in `CompactionFinished`,
 and retains the measured source tokens even when the ladder cannot commit.
 The exact bounded diagnostic remains in the session event's `detail`, never
 in the content-incapable telemetry sink. The product persists the refusal class
-in telemetry schema 19 and projects it to OTEL.
+in telemetry schema 20 and projects it to OTEL.
 
 Driver shutdown emits content-free `DurabilityAttemptFinished` phase timings
 for tool drain, job-terminal publication, heartbeat join, lease release and

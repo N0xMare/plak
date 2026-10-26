@@ -35,6 +35,7 @@ use crate::{
 mod body;
 mod browser;
 mod claims;
+mod diagnostic;
 mod hooks;
 mod jwks;
 mod refresh;

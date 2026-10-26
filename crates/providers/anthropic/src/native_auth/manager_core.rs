@@ -1,13 +1,13 @@
 //! The shared manager core: admission, stored credentials and leases.
 
 use super::{
-    Bytes, CLAUDE_OAUTH_MESSAGES_ORIGIN, CLAUDE_OAUTH_TOKEN_PATH, ClaudeNativeAuthError,
-    ClaudeOAuthTokenGrant, ClaudeSubscriptionStatus, CredentialFence, CredentialGeneration,
-    Duration, ExchangeControl, HEADER_ACCEPT, HEADER_CONTENT_TYPE, HEADER_USER_AGENT, HeaderMap,
-    HeaderValue, Instant, MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES, MAX_TOKEN_BYTES, ManagerCore,
-    Method, Origin, REQUEST_TIMEOUT, Request, SensitiveBytes, StatusCode, StoredTokens, USER_AGENT,
-    UsageTransportError, Zeroizing, credential_record_from_grant, network_failure, remaining_until,
-    system_unix_seconds, validate_acceptance,
+    AuthBodyError, Bytes, CLAUDE_OAUTH_MESSAGES_ORIGIN, CLAUDE_OAUTH_TOKEN_PATH,
+    ClaudeNativeAuthError, ClaudeOAuthTokenGrant, ClaudeSubscriptionStatus, CredentialFence,
+    CredentialGeneration, Duration, ExchangeControl, HEADER_ACCEPT, HEADER_CONTENT_TYPE,
+    HEADER_USER_AGENT, HeaderMap, HeaderValue, Instant, MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES,
+    MAX_TOKEN_BYTES, ManagerCore, Method, Origin, REQUEST_TIMEOUT, Request, SensitiveBytes,
+    StatusCode, StoredTokens, USER_AGENT, Zeroizing, credential_record_from_grant, network_failure,
+    remaining_until, system_unix_seconds, validate_acceptance,
 };
 use plakous_auth::oauth_orchestrator::{is_json_media_type, pull_auth_body};
 
@@ -68,10 +68,10 @@ impl ManagerCore {
         let bytes = pull_auth_body(response.into_body(), MAX_TOKEN_BYTES)
             .await
             .map_err(|error| match error {
-                UsageTransportError::Failure(failure) => {
+                AuthBodyError::Failure(failure) => {
                     ClaudeNativeAuthError::Transport(network_failure(failure))
                 }
-                UsageTransportError::TooLarge => ClaudeNativeAuthError::LoginTokenExchange,
+                AuthBodyError::TooLarge => ClaudeNativeAuthError::InvalidTokenResponse,
             })?;
         if !status.is_success() {
             return Err(ClaudeNativeAuthError::LoginTokenExchange);
@@ -121,13 +121,13 @@ impl ManagerCore {
     pub(super) async fn execute_usage(
         &self,
         request: Request,
-    ) -> Result<(StatusCode, bool, Zeroizing<Vec<u8>>), UsageTransportError> {
+    ) -> Result<(StatusCode, bool, Zeroizing<Vec<u8>>), AuthBodyError> {
         let control = ExchangeControl::new(Instant::now() + REQUEST_TIMEOUT);
         let response = self
             .client
             .execute(request, control)
             .await
-            .map_err(UsageTransportError::Failure)?;
+            .map_err(AuthBodyError::Failure)?;
         let status = response.status();
         let is_json = response.headers().iter().any(|(name, value)| {
             *name == HEADER_CONTENT_TYPE && value.to_str().is_ok_and(is_json_media_type)

@@ -189,7 +189,7 @@ of versions 8 and 9 only (§2.5.1 of chapter 02).
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **33** (the named-state manifest, checkpoint integrity and commit identity encodings, the unified v3 cell descriptor identities, the Python cell-worker engine, artifact and containment identities, cell-protocol engine contracts and the Code Mode descriptor identities that name the cell worker revision, inline media bytes as canonical padded base64, request-plan digests over the request identity, reconstructive process discovery ceiling, account-scoped replay, and native compaction provenance that records a retained current-round tail) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **34** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **9** |
-| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
+| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **20**, disposable, never recovery authority |
 | Session export document | Plak | version **9**, imports **9** and **8** |
 
 Tree schema 9 records candidate `target_before` provenance and each workspace's

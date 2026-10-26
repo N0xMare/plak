@@ -231,14 +231,17 @@ ago`.
 Ordinary commands refresh their own tokens; `plak refresh <account>` claims a
 new grant immediately and prints when the new access token expires.
 
-A refresh by one Plak process does not interrupt another: running Codex and
-Grok sessions and children renew their credential before their next model
-request, as long as the refresh kept the same login. For Claude, a new
-`plak login claude` to the same provider account continues at the next request
-and permits exact session reopen. Logging in to a different account is refused
-and needs a new session. Codex and Grok keep a separate live login-selection
-fence: a new login stops the old running receipt before sending anything and
-needs a reopen or rebind.
+A refresh by one Plak process does not interrupt another: running sessions
+and children renew their credential before their next model request, as long
+as the refresh kept the same account binding. For Claude, a new
+`plak login claude` with the same account continues at the next request and
+permits exact session reopen: retry the prompt or `/attach`.
+A different Claude account refuses exact reopen. Restore the original account,
+or export/import the session to carry its full history into a new session under
+the current login. Merely reopening or choosing `/agents` cannot repair a frozen
+binding. Codex and Grok retain their live login-selection fence: a new login
+stops the old running receipt before sending anything and needs explicit carry
+or rebind, even for the same account.
 
 A Codex login made by an earlier Plak build must be redone once: run
 `plak login codex`, which replaces it locally. Until then `plak status` shows
@@ -252,7 +255,9 @@ older build asks before replacing it (the newer build then logs in again).
 
 When a refresh comes back with a result Plak cannot interpret unambiguously, the
 credential is **quarantined** rather than used — Plak fails closed instead of
-guessing. You see it as `Unavailable` in `plak status`.
+guessing. `plak status` names the quarantined credential and its login remedy.
+`plak status` and `plak doctor` include sanitized OAuth error code and description,
+time and generation for the last refresh failure when telemetry is available.
 
 An ambiguous refresh is recorded **on disk**, so restarting the process does not
 clear it. Codex and Claude then need `plak login` again; SuperGrok retries under

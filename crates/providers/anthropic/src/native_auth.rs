@@ -11,9 +11,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use futures_util::lock::Mutex as AsyncMutex;
-use plakous_auth::oauth_orchestrator::AuthBodyError as UsageTransportError;
 use plakous_auth::oauth_orchestrator::{
-    BuildRequestFailure, ClaimedRefreshHooks, CredentialRefreshDetail,
+    AuthBodyError, BuildRequestFailure, ClaimedRefreshHooks, CredentialRefreshDetail,
     CredentialRefreshFailureReason, CredentialRefreshObserver, PullBodyError, pull_claimed_body,
     run_claimed_refresh,
 };

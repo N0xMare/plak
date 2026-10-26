@@ -101,7 +101,7 @@ mod tests {
         let mut rendered = Vec::new();
         write_limits(&view, Some(&paths), &zone, &mut rendered)?;
         let text = String::from_utf8(rendered)?;
-        assert!(text.contains("refresh failed at 05:48: network unreachable (DNS lookup timed out); credential unchanged; retry when online"), "{text}");
+        assert!(text.contains("refresh failed at 05:48 (generation 2): network unreachable (DNS lookup timed out); OAuth not recorded: not recorded; credential unchanged; retry when online"), "{text}");
         assert!(!text.contains("credential needs a token refresh"), "{text}");
         // The canonical host snapshot is untouched by display decoration.
         assert!(host_usage::render_limits_text(&view).contains("credential needs a token refresh"));

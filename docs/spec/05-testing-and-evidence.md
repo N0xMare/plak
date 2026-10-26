@@ -2578,7 +2578,7 @@ and observer combination plus TLS 1.2 (run with `--run-ignored only`; its
 nextest override allows 300-second periods).
 Pool fixtures pin the five-second idle bound and content-free checkout age in
 failure diagnostics. Product telemetry tests pin replay-loss counts, ids,
-`v_replay_loss`, retention and disposable schema version 19.
+`v_replay_loss`, retention and disposable schema version 20.
 Responses in-band rate-limit and overload fixtures pin failed lifecycle,
 closed observations, fresh terminal facts and one physical request for session
 workflows (including compaction) and turns carrying `x-should-retry: false`.

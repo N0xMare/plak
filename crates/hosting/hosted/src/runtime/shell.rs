@@ -565,7 +565,7 @@ pub(super) fn emit_shell_empty_state<P: plakous_host_protocol::ProtocolExtension
         ));
         let _ = events.notice(TranscriptRow::info(
             NoticeScope::Session,
-            attach_repair_guidance(detail).to_owned(),
+            attach_repair_guidance(detail),
         ));
     } else {
         match config.reason.as_str() {
@@ -590,8 +590,8 @@ pub(super) fn emit_shell_empty_state<P: plakous_host_protocol::ProtocolExtension
     }
 }
 
-pub(super) fn attach_repair_guidance(detail: &str) -> &'static str {
-    if detail.contains("product JavaScript host is unavailable")
+pub(super) fn attach_repair_guidance(detail: &str) -> String {
+    let guidance = if detail.contains("product JavaScript host is unavailable")
         || detail.contains("JavaScript host is unavailable")
         || detail.contains("Code Mode sidecar is unavailable")
     {
@@ -600,9 +600,32 @@ pub(super) fn attach_repair_guidance(detail: &str) -> &'static str {
         || detail.contains("Python host is unavailable")
     {
         "fix: set PLAK_PY_HOST or place plakous-py-host beside plak, then /attach"
+    } else if detail.contains("bound to a different")
+        || detail.contains("binding mismatch")
+        || detail.contains("explicit rebind required")
+    {
+        "fix: restore the original account and configuration for exact reopen, or export/import the session to carry its history under the current login; choosing /agents cannot repair a frozen binding"
+    } else if detail.contains("quarantined") || detail.contains("rejected at refresh") {
+        "fix: the credential was rejected or its refresh outcome is unknown; run `plak login <account>` in a shell, then retry /attach; a same-account Claude login preserves the session"
+    } else if detail.contains("credential")
+        || detail.contains("login")
+        || detail.contains("not logged in")
+        || detail.contains("signed out")
+    {
+        "fix: no usable login is available; run `plak login <account>` in a shell, then retry /attach"
     } else {
-        "fix: run plak login in a shell, then choose a profile with /agents; the agent attaches automatically"
-    }
+        "fix: address the attach failure above, then retry /attach; use /agents only to select a different profile"
+    };
+    let account = if detail.contains("Claude") || detail.contains("claude") {
+        "claude"
+    } else if detail.contains("Codex") || detail.contains("codex") {
+        "codex"
+    } else if detail.contains("xAI") || detail.contains("Grok") || detail.contains("grok") {
+        "grok"
+    } else {
+        "<account>"
+    };
+    guidance.replace("<account>", account)
 }
 
 pub(super) fn send_shell_binding<P: plakous_host_protocol::ProtocolExtension>(

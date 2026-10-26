@@ -159,7 +159,7 @@ impl CredentialRefreshFailureReason {
 ///
 /// Deltas are seconds relative to the local clock at validation time. They
 /// come from the received response only; no token value is retained.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CredentialRefreshDetail {
     /// Which check rejected the response, when known.
     pub reason: Option<CredentialRefreshFailureReason>,
@@ -169,6 +169,10 @@ pub struct CredentialRefreshDetail {
     pub id_token_iat_age_secs: Option<i64>,
     /// `exp - now` of the returned ID token (negative means already expired).
     pub id_token_exp_in_secs: Option<i64>,
+    /// Bounded provider OAuth error code, without response-body content.
+    pub oauth_error_code: Option<String>,
+    /// Bounded provider prose with credential-looking values removed.
+    pub oauth_error_description: Option<String>,
 }
 
 impl CredentialRefreshDetail {
@@ -191,7 +195,14 @@ impl CredentialRefreshDetail {
             expires_in_secs,
             id_token_iat_age_secs: iat.and_then(|iat| delta(now_unix, iat)),
             id_token_exp_in_secs: exp.and_then(|exp| delta(exp, now_unix)),
+            oauth_error_code: None,
+            oauth_error_description: None,
         }
+    }
+
+    /// Retains only sanitized OAuth failure fields from a bounded body.
+    pub fn record_oauth_error(&mut self, body: &[u8]) {
+        (self.oauth_error_code, self.oauth_error_description) = super::diagnostic::decode(body);
     }
 
     /// Returns this detail with `reason` set.
@@ -203,7 +214,7 @@ impl CredentialRefreshDetail {
 }
 
 /// One content-free claimed-refresh (or revoke) ladder observation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CredentialRefreshEvent {
     /// Ladder phase reached by this observation.
     pub phase: CredentialRefreshPhase,

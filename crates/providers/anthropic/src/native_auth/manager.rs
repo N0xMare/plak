@@ -1,17 +1,17 @@
 //! The app-owned manager for one explicit Claude selected-account slot.
 
 use super::{
-    AccountBinding, Arc, AsyncMutex, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
+    AccountBinding, Arc, AsyncMutex, AuthBodyError, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
     CLAUDE_OAUTH_TOKEN_ORIGIN, CLAUDE_SUBSCRIPTION_PROFILE_PATH, CLAUDE_SUBSCRIPTION_USAGE_PATH,
     ClaudeCompatibilityAcceptance, ClaudeEnrolledModel, ClaudeNativeAuthError, ClaudeOAuthLogin,
     ClaudeRefreshHooks, ClaudeSubscriptionStatus, Client, CredentialGeneration,
     CredentialRefreshDetail, CredentialRefreshObserver, CredentialSlotId, CredentialStatus,
     LOGIN_TIMEOUT, ManagerCore, PathBuf, PkceS256, PrivateCredentialStore, PrivateStoreError,
     StoredTokens, SubscriptionRequestGate, SubscriptionUsageCredentialState, SubscriptionUsageRead,
-    SubscriptionUsageUnavailable, Timestamp, UsageTransportError, attach_claude_profile,
-    auth_profile_id, claude_authorize_url, credential_record, fmt, network_failure,
-    oauth_control_headers, run_claimed_refresh, system_unix_seconds, usage_credential_refusal,
-    validate_acceptance, validate_current_ready_record,
+    SubscriptionUsageUnavailable, Timestamp, attach_claude_profile, auth_profile_id,
+    claude_authorize_url, credential_record, fmt, network_failure, oauth_control_headers,
+    run_claimed_refresh, system_unix_seconds, usage_credential_refusal, validate_acceptance,
+    validate_current_ready_record,
 };
 #[cfg(test)]
 use super::{Origin, parse_claude_oauth_token_grant};
@@ -216,10 +216,10 @@ impl ClaudeNativeAuthManager {
             });
         let (status, is_json, body) = match usage_reply {
             Ok(reply) => reply,
-            Err(UsageTransportError::TooLarge) => {
+            Err(AuthBodyError::TooLarge) => {
                 return unavailable(SubscriptionUsageUnavailable::InvalidResponse);
             }
-            Err(UsageTransportError::Failure(failure)) => {
+            Err(AuthBodyError::Failure(failure)) => {
                 return unavailable(SubscriptionUsageUnavailable::Transport(network_failure(
                     failure,
                 )));
@@ -443,8 +443,8 @@ impl ClaudeNativeAuthManager {
             let (status, is_json, body) =
                 self.core.execute_usage(request).await.map_err(|error| {
                     ClaudeNativeAuthError::Transport(match error {
-                        UsageTransportError::Failure(failure) => network_failure(failure),
-                        UsageTransportError::TooLarge => None,
+                        AuthBodyError::Failure(failure) => network_failure(failure),
+                        AuthBodyError::TooLarge => None,
                     })
                 })?;
             if status.as_u16() != 200 || !is_json {

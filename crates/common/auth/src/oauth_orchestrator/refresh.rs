@@ -456,6 +456,7 @@ mod tests {
                     expires_in_secs: Some(21_600),
                     id_token_iat_age_secs: Some(3_700),
                     id_token_exp_in_secs: Some(-100),
+                    ..Default::default()
                 },
                 _ => CredentialRefreshDetail::default(),
             }
@@ -765,6 +766,7 @@ mod tests {
                 expires_in_secs: Some(21_600),
                 id_token_iat_age_secs: Some(3_700),
                 id_token_exp_in_secs: Some(-100),
+                ..Default::default()
             }
         );
         Ok(())
