@@ -778,7 +778,7 @@ only to the current schema. Removing older files remains an explicit action.
 ```
 plak config show          # prints `config_path=<path>` on its first line
 plak config set <key> <value> [--scope user|project]
-plak config edit          # uses $VISUAL, then $EDITOR; supports shell arguments
+plak config edit          # uses $VISUAL, then $EDITOR; quoted arguments, no shell
 plak config init          # creates a commented template that pins no defaults
 plak config trust         # admits the discovered project .plak
 plak config untrust       # revokes project trust

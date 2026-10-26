@@ -36,8 +36,10 @@ symlinked ancestor. macOS system aliases such as `/tmp` and `/var` are allowed. 
 PLAK_HOME="$HOME/plak-scratch" plak config init
 ```
 
-`config edit` chooses `VISUAL`, then `EDITOR`, as a shell command (for example
-`EDITOR="code --wait"`). Without either, it uses `vi` only at a terminal;
+`config edit` chooses `VISUAL`, then `EDITOR`, as a program plus arguments (for example
+`EDITOR="code --wait"`). Quotes and escapes group arguments; unmatched quotes
+are refused. No shell runs: variables, substitutions and shell operators are
+not expanded. The config path is appended as one argument. Without either, it uses `vi` only at a terminal;
 headless callers must set an editor explicitly.
 
 Deleting a key from the file restores its default. Deleting `config.toml`

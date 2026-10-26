@@ -286,14 +286,9 @@ pub fn edit_config_file(paths: &product_paths::PlakPaths) -> CliResult<()> {
                 "config edit needs a terminal or an explicit editor; set VISUAL or EDITOR",
             )
         })?;
+    let mut command = editor_command(&editor, &paths.config_file())?;
     product_config::init_if_missing(paths).map_err(CliFailure::from)?;
-    // The operator's editor is a shell command; the config path is a separate
-    // positional argument, never shell source.
-    let status = std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(format!("exec {editor} \"$1\""))
-        .arg("plak-config-editor")
-        .arg(paths.config_file())
+    let status = command
         .status()
         .map_err(|_| CliFailure::new("could not launch EDITOR"))?;
     if status.success() {
@@ -301,6 +296,21 @@ pub fn edit_config_file(paths: &product_paths::PlakPaths) -> CliResult<()> {
     } else {
         Err(CliFailure::new("editor exited with failure"))
     }
+}
+
+fn editor_command(editor: &str, path: &Path) -> CliResult<std::process::Command> {
+    let words = shell_words::split(editor).map_err(|_| {
+        CliFailure::classified(CliFailureKind::Usage, "VISUAL/EDITOR has unbalanced quotes")
+    })?;
+    let (program, arguments) = words
+        .split_first()
+        .filter(|(program, _)| !program.is_empty())
+        .ok_or_else(|| {
+            CliFailure::classified(CliFailureKind::Usage, "VISUAL/EDITOR needs a program")
+        })?;
+    let mut command = std::process::Command::new(program);
+    command.args(arguments).arg(path);
+    Ok(command)
 }
 
 pub const fn compatibility_state(status: FacadeCompatibilityStatus) -> CompatibilityState {
@@ -855,3 +865,6 @@ pub fn join_host_worker_bounded_with_notice(
         .join()
         .map_err(|_| CliFailure::new(format!("{label} worker failed")))?
 }
+
+#[cfg(test)]
+mod editor_tests;

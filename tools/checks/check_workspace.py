@@ -374,7 +374,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
     ("plak", "src/presentation.rs"): [
         ("var_os", (("string", "NO_COLOR"),)),
     ],
-    # Config edit selects the operator's VISUAL/EDITOR shell command.
+    # Config edit selects the operator's VISUAL/EDITOR program and arguments.
     ("plak", "src/commands/support.rs"): [
         ("var", (("identifier", "name"),)),
     ],
@@ -496,7 +496,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
         ("std::process::Command", (("identifier", "executable"),)),
     ],
     ("plak", "src/commands/support.rs"): [
-        ("std::process::Command", (("string", "/bin/sh"),)),
+        ("std::process::Command", (("identifier", "program"),)),
     ],
     # Product-only, best-effort local host provenance for Harbor login pins.
     ("plak", "src/commands/login_host.rs"): [

@@ -1574,9 +1574,9 @@ fn reload(executable: &std::path::Path) {
                 "src/main.rs": "use std::process::ExitCode;",
                 "src/commands/support.rs": """
 use std::env;
-fn edit_config_file(name: &str) {
+fn edit_config_file(name: &str, program: &str) {
     let _ = env::var(name);
-    let _ = std::process::Command::new("/bin/sh");
+    let _ = std::process::Command::new(program);
 }
 """,
                 "src/oauth_ui.rs": """
@@ -1692,6 +1692,14 @@ fn fixtures() {
             main_extra='// std::process::Command; env::vars_os();\nconst DECOY: &str = "Command::new";'
         )
         self.assertEqual(self.validate_fixture(sources), [])
+
+    def test_editor_process_pin_rejects_reintroducing_a_shell(self) -> None:
+        sources = self.cli_security_fixture()
+        path = "src/commands/support.rs"
+        sources["plak"][path] = sources["plak"][path].replace(
+            "Command::new(program)", 'Command::new("/bin/sh")')
+        self.assertTrue(any("process command constructors" in error
+                            for error in self.validate_fixture(sources)))
 
     def test_keyword_before_bang_is_not_a_macro(self) -> None:
         sources = self.cli_security_fixture(

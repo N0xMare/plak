@@ -2136,6 +2136,10 @@ no `plak update`. `auth` is not a hidden alias: it parses as an unknown
 command. `config show` prints `config_path=` as its first line, and
 `telemetry status --views` appends the recommended read-only SQL views. `models`
 is not gated by a build feature.
+`config edit` splits `VISUAL`, then `EDITOR`, into a program and quoted/escaped
+arguments and appends the config path as one argument. It never invokes a shell
+or expands variables, substitutions or operators; malformed quoting refuses
+before config creation. Without an explicit editor it uses `vi` only at a terminal.
 `models openrouter` reads the authenticated catalog using the product API-key
 source and prints one exact model identifier per line in catalog order. It
 makes one bounded catalog GET, no endpoint or inference calls, and does not
