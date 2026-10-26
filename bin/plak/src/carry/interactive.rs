@@ -168,7 +168,7 @@ pub(crate) fn reload_target_for_session(
                 .collect::<String>();
             let cause = safe_terminal_block(&cause);
             return Err(if output.status.code() == Some(2) {
-                format!("destination build too old for v8 carry: {cause}")
+                format!("destination build too old for v10 carry: {cause}")
             } else {
                 format!(
                     "destination route capacity inspection failed: {cause}; fix configuration/auth and retry /reload"

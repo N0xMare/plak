@@ -14,9 +14,10 @@ use serde_json::{Value, value::RawValue};
 use super::{
     CODE_EXECUTION_RESULT_REPLAY_KIND, CacheControlParam, MESSAGES_REPLAY_SCHEMA_REVISION,
     MessageBlock, MessageParam, MessageRole, MessagesRequestError, MessagesRequestPolicy,
-    MessagesThinkingDisplay, OutputConfigParam, PendingTool, REDACTED_REPLAY_KIND,
-    SIGNATURE_REPLAY_KIND, ThinkingParam, ToolCallerParam, ToolChoiceParam, ToolOwnership,
-    ToolResultContent, image_source, invalid, native_compaction_refusal, unsupported,
+    MessagesThinkingDisplay, NATIVE_REPLAY_KIND, OutputConfigParam, PendingTool,
+    REDACTED_REPLAY_KIND, SIGNATURE_REPLAY_KIND, SKIPPED_BLOCKS_REPLAY_KIND, ThinkingParam,
+    ToolCallerParam, ToolChoiceParam, ToolOwnership, ToolResultContent, image_source, invalid,
+    native_compaction_refusal, unsupported,
 };
 
 type TranslatedHistory = (Vec<MessageParam>, Option<String>, Vec<ModelDiagnostic>);
@@ -437,7 +438,12 @@ fn translate_assistant_with_history(
     let mut output = Vec::with_capacity(blocks.len());
     let mut pending = Vec::new();
     let mut remote_ids = BTreeSet::new();
-    for block in blocks {
+    let mut native = super::native::native_projections(blocks, policy, replay_diagnostics)?;
+    for (index, block) in blocks.iter().enumerate() {
+        if let Some(replacement) = native.remove(&index) {
+            output.extend(replacement);
+            continue;
+        }
         match block {
             ContentBlock::Text(text) => output.push(text_block(text.text().to_owned())),
             ContentBlock::Reasoning(reasoning) => {
@@ -967,11 +973,25 @@ fn historical_projection_identity(
     .map_err(|_| invalid("failed to digest historical projection transition"))
 }
 
-fn replay_payload(
+pub(super) fn replay_payload(
     replay: &ReplayEnvelope,
     policy: &MessagesRequestPolicy,
     expected_kind: &str,
 ) -> Result<Box<RawValue>, MessagesRequestError> {
+    let (payload, mismatch) = replay_payload_for_projection(replay, policy, expected_kind)?;
+    if let Some(category) = mismatch {
+        return Err(invalid(format!(
+            "opaque replay target binding mismatch: {category}"
+        )));
+    }
+    Ok(payload)
+}
+
+pub(super) fn replay_payload_for_projection(
+    replay: &ReplayEnvelope,
+    policy: &MessagesRequestPolicy,
+    expected_kind: &str,
+) -> Result<(Box<RawValue>, Option<&'static str>), MessagesRequestError> {
     let ReplayScope::ExactModel(source_model) = replay.scope() else {
         return Err(invalid("opaque thinking replay must use exact-model scope"));
     };
@@ -988,16 +1008,22 @@ fn replay_payload(
             "opaque thinking replay is incompatible with the exact model",
         ));
     }
-    let payload = match replay.version() {
+    let (payload, mismatch) = match replay.version() {
         MESSAGES_REPLAY_SCHEMA_REVISION => {
             let bound: BoundReplayPayload = serde_json::from_str(replay.payload().get())
                 .map_err(|_| invalid("opaque replay binding was malformed"))?;
-            if let Some(category) = replay_binding_mismatch(&bound, source_model, policy) {
-                return Err(invalid(format!(
-                    "opaque replay target binding mismatch: {category}"
-                )));
+            if &bound.actual_model != source_model {
+                return Err(invalid(
+                    "opaque replay target binding mismatch: reported model",
+                ));
             }
-            bound.value
+            if bound.replay_schema_revision != MESSAGES_REPLAY_SCHEMA_REVISION {
+                return Err(invalid(
+                    "opaque replay target binding mismatch: replay schema",
+                ));
+            }
+            let mismatch = replay_binding_mismatch(&bound, source_model, policy);
+            (bound.value, mismatch)
         }
         _ => {
             return Err(invalid(
@@ -1009,7 +1035,7 @@ fn replay_payload(
         serde_json::from_str::<String>(payload.get())
             .map_err(|_| invalid("opaque thinking replay payload must be an exact JSON string"))?;
     }
-    Ok(payload)
+    Ok((payload, mismatch))
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1079,7 +1105,11 @@ pub fn bind_replay_payload(
 ) -> Result<ReplayEnvelope, MessagesRequestError> {
     if !matches!(
         kind,
-        SIGNATURE_REPLAY_KIND | REDACTED_REPLAY_KIND | CODE_EXECUTION_RESULT_REPLAY_KIND
+        SIGNATURE_REPLAY_KIND
+            | REDACTED_REPLAY_KIND
+            | CODE_EXECUTION_RESULT_REPLAY_KIND
+            | NATIVE_REPLAY_KIND
+            | SKIPPED_BLOCKS_REPLAY_KIND
     ) || policy
         .expected_reported_model
         .as_ref()

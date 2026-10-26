@@ -450,23 +450,6 @@ pub(super) fn raw_block_start_has_hosted_effect(data: &str) -> bool {
         .is_some_and(|kind| kind.starts_with("server_tool") || kind == "web_search_tool_result")
 }
 
-pub(super) fn reject_citations(citations: Option<&RawValue>) -> Result<(), MessagesStreamError> {
-    let Some(citations) = citations else {
-        return Ok(());
-    };
-    let value: serde_json::Value = serde_json::from_str(citations.get())
-        .map_err(|error| invalid_response(format!("invalid Messages citations: {error}")))?;
-    if value.is_null() || value.as_array().is_some_and(Vec::is_empty) {
-        Ok(())
-    } else {
-        Err(MessagesStreamError::new(
-            MessagesStreamErrorKind::UnsupportedSemantic,
-            MessagesStreamErrorPhase::Stream,
-            "Messages citations are explicitly excluded by adapter revision 1",
-        ))
-    }
-}
-
 pub(super) fn validate_opaque_string(
     value: &RawValue,
     field: &str,

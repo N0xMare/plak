@@ -5,7 +5,7 @@ fn document_versions() -> [CarryDocument; 2] {
     [
         sample_document(),
         serde_json::from_str(include_str!(
-            "../../../tests/fixtures/session-export-v8.json"
+            "../../../tests/fixtures/session-export-v9.json"
         ))
         .unwrap(),
     ]
@@ -17,10 +17,7 @@ fn current_and_previous_documents_preserve_every_transcript_row_type() {
     let path = dir.path().join("export.json");
     for mut document in document_versions() {
         document.transcript = crate::store::every_stored_row_type();
-        let mut value = serde_json::to_value(&document).unwrap();
-        if document.version == 8 {
-            value.as_object_mut().unwrap().remove("named_state");
-        }
+        let value = serde_json::to_value(&document).unwrap();
         fs::write(&path, value.to_string()).unwrap();
         let imported = read_document(&path).unwrap().into_import().unwrap();
         assert_eq!(imported.record.transcript.to_vec(), document.transcript);
@@ -45,10 +42,7 @@ fn current_and_previous_documents_carry_send_times_and_process_commands() {
                 subject: Some("just check".into()),
             }),
         ];
-        let mut value = serde_json::to_value(&document).unwrap();
-        if document.version == 8 {
-            value.as_object_mut().unwrap().remove("named_state");
-        }
+        let value = serde_json::to_value(&document).unwrap();
         assert_eq!(value["transcript"][0]["sent_at_ms"], 1_791_383_520_000_u64);
         assert_eq!(value["transcript"][1]["subject"], "just check");
         fs::write(&path, value.to_string()).unwrap();
@@ -65,9 +59,6 @@ fn current_and_previous_documents_reject_resolved_count_pseudo_work() {
     let path = dir.path().join("export.json");
     for document in document_versions() {
         let mut value = serde_json::to_value(document).unwrap();
-        if value["version"] == 8 {
-            value.as_object_mut().unwrap().remove("named_state");
-        }
         value["pending_work"] = serde_json::json!([{
             "operation": "resolved_source_work", "kind": "source_resolved_count",
             "state": "3", "detail": "settled child/candidate/workspace rows omitted"
@@ -81,7 +72,7 @@ fn current_and_previous_documents_reject_resolved_count_pseudo_work() {
 }
 
 #[test]
-fn v8_refuses_present_named_state_or_sdk_before_import() {
+fn v8_is_refused_before_import_regardless_of_named_state_or_selection() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("export.json");
     let original: serde_json::Value = serde_json::from_str(include_str!(
@@ -98,7 +89,10 @@ fn v8_refuses_present_named_state_or_sdk_before_import() {
         fs::write(&path, value.to_string()).unwrap();
         assert_eq!(
             read_document(&path).unwrap_err().to_string(),
-            "version 8 exports cannot carry named state or py-sdk selection"
+            format!(
+                "{} is a version 8 session export; this build imports versions 9 and 10",
+                path.display()
+            )
         );
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
@@ -107,7 +101,10 @@ fn v8_refuses_present_named_state_or_sdk_before_import() {
     fs::write(&path, value.to_string()).unwrap();
     assert_eq!(
         read_document(&path).unwrap_err().to_string(),
-        "version 8 exports cannot carry named state or py-sdk selection"
+        format!(
+            "{} is a version 8 session export; this build imports versions 9 and 10",
+            path.display()
+        )
     );
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
 }
@@ -157,26 +154,26 @@ fn file_import_validates_named_state_keys_count_and_total_before_creation() {
 }
 
 #[test]
-fn v8_import_starts_with_empty_named_state_and_v7_is_refused() {
+fn v9_import_preserves_named_state_and_v8_is_refused() {
     let root = tempfile::tempdir().unwrap();
     let mut value = serde_json::to_value(sample_document()).unwrap();
-    value["version"] = serde_json::json!(8);
-    value.as_object_mut().unwrap().remove("named_state");
-    let path = root.path().join("v8.json");
+    value["version"] = serde_json::json!(9);
+    value["named_state"] = serde_json::json!({"answer":42});
+    let path = root.path().join("v9.json");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let imported = read_document(&path).unwrap().into_import().unwrap();
-    assert!(imported.history.named_state().unwrap().is_empty());
-    value["version"] = serde_json::json!(7);
+    assert_eq!(imported.history.named_state().unwrap()["answer"], 42);
+    value["version"] = serde_json::json!(8);
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let error = read_document(&path).unwrap_err().to_string();
     assert!(
-        error.contains("version 7 session export; this build imports versions 8 and 9"),
+        error.contains("version 8 session export; this build imports versions 9 and 10"),
         "{error}"
     );
 }
 
 #[test]
-fn v9_document_round_trips_named_state_selection_and_full_history() {
+fn v10_document_round_trips_named_state_selection_and_full_history() {
     use plakous::model::{
         Actor, ContentBlock, ConversationItem, EntryId, HistorySegment, HistorySegmentKind,
         ModelId, Provenance, TextBlock,
@@ -204,7 +201,7 @@ fn v9_document_round_trips_named_state_selection_and_full_history() {
         .insert("answer".into(), serde_json::json!({"n":42}));
     document.history = history::History::export(&original).unwrap();
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("v9.json");
+    let path = root.path().join("v10.json");
     write_document(&path, &document).unwrap();
     let bytes = fs::read(&path).unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();

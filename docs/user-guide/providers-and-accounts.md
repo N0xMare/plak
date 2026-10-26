@@ -16,6 +16,13 @@ Subscription and API accounts have separate credentials and billing.
 Use `grok` for the SuperGrok subscription and `xai-api` for separately billed
 API sessions. The ambiguous bare spelling `xai` is refused.
 
+Claude subscription, Anthropic API and OpenRouter Messages retain cited answer
+text and source metadata, including citations received across stream deltas.
+Required native citation tokens survive compatible replay. Unfamiliar
+informational blocks are skipped with a counted notice rather than failing the
+turn. Unknown tool-related or incomplete signed content still refuses when it
+cannot be continued faithfully; this does not enable additional hosted tools.
+
 Login and key entry are CLI-only. The TUI's Providers tab is read-only: per
 vertical it names the account, its status, and the command that connects it.
 

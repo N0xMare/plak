@@ -128,9 +128,9 @@ release, including abandonment of a Working provider turn, with terminal rows
 and the number counter preserved. A release receipt alone still yields an
 unknown process outcome. Reload admission reads a process-local host count and
 refuses without closing the terminal.
-Export-v9/v8 fixtures round-trip neutral content (including inline image bytes,
-opaque replay, native compaction bindings and turn counts), retain only the v8
-reader, and reject malformed or oversized input. Explicit account/protocol
+Export-v10/v9 fixtures round-trip neutral content (including inline image bytes,
+opaque replay, native compaction bindings and turn counts), retain only the v9
+reader and refuse v8, and reject malformed or oversized input. Explicit account/protocol
 loopback bindings pin same-binding equality and cross-provider replay stripping.
 The scripted `history_report` output reports the text actually present in a
 model request, proving a >64 KiB, multi-turn conversation reaches the next
@@ -1778,7 +1778,7 @@ Conflict laws run the real topology tool with distinct operation ids, then
 present its terminals with reused, absent and empty display ids. Every
 operation retains one keyed conflict notice and its own whole path; conflict
 facts still cross the existing process-local tool boundary, not a new store
-encoding. Product schema 34, tree schema 9 and export v9 importing v8 stay
+encoding. Product schema 34, tree schema 9 and export v10 importing v9 stay
 unchanged by these notice corrections.
 The bounded result-mail observation law requires start and finished milestones
 before its result row even on the first read. The spawn/wait/adopt parity
@@ -2211,10 +2211,10 @@ requires the reopen alone to converge before the harness checks idempotence.
 - An alias regression drives pi's `edit` and `write` through one turn and
   checks the committed `exposed_name` on both calls, exact replay of each name
   on every kernel, both history rows' labels and activity kinds, and a
-  version 8 previous-document import preserving its exposed name. The remaining
-  v8 fixture and `current_and_previous_documents_preserve_every_transcript_row_type` pin
+  version 9 previous-document import preserving its exposed name. The remaining
+  v9 fixture and `current_and_previous_documents_preserve_every_transcript_row_type` pin
   typed rows; `rejected_exports_do_not_create_state_or_reference_files` pins
-  refusal of v7. The v9 neutral round-trip includes presentation subjects,
+  refusal of v8. The v10 neutral round-trip includes presentation subjects,
   base64 media, bounded parsing and closed unknown-field refusals. Production-dialect
   carry fixtures lower sanitized Responses encrypted reasoning, Messages thinking
   signatures and Codex native compaction without dispatch. Unsupported nested
@@ -2681,12 +2681,12 @@ not move library evidence out of §3.1.
 
 | Selection and carry contract | Offline evidence |
 | --- | --- |
-| v9 selection and committed named-state carry | `v9_document_round_trips_named_state_selection_and_full_history`; the real SDK driver exports committed values; `oversized_named_state_is_refused_before_import` |
-| v8 imports without named state; v7 refused | `v8_import_starts_with_empty_named_state_and_v7_is_refused`; `v8_refuses_present_named_state_or_sdk_before_import` |
-| Typed rows, send times and process commands for v9 and v8 | `current_and_previous_documents_preserve_every_transcript_row_type`, `current_and_previous_documents_carry_send_times_and_process_commands` |
+| v10 selection and committed named-state carry | `v10_document_round_trips_named_state_selection_and_full_history`; the real SDK driver exports committed values; `oversized_named_state_is_refused_before_import` |
+| v9 imports with named state; v8 refused | `v9_import_preserves_named_state_and_v8_is_refused`; `v8_is_refused_before_import_regardless_of_named_state_or_selection` |
+| Typed rows, send times and process commands for v10 and v9 | `current_and_previous_documents_preserve_every_transcript_row_type`, `current_and_previous_documents_carry_send_times_and_process_commands` |
 | Import rejects pseudo-work and rebuilds durable intents | `current_and_previous_documents_reject_resolved_count_pseudo_work`, `v9_import_intents_survive_reopen_and_rebuild` |
 | Root-only selection and cross-field refusal | `sdk_is_a_root_override_not_a_child_template_capability`, `root_composition_cross_field_rules_apply_on_load_and_save`, `applying_claude_profile_discards_saved_sdk_selection`, `sdk_child_selection_refusals_are_exact_and_create_nothing`, `sdk_spawned_api_binding_refuses_before_discovery_or_creation` |
-| Optional tool/MCP and v8 SDK-field refusal before creation or dispatch | `sdk_optional_tools_and_fence_refuse_before_surface_compilation`, `agent_sdk_hello_and_configured_mcp_refusal_are_offline`, `v8_sdk_fields_refuse_file_import_without_creating_sessions` |
+| Optional tool/MCP and v8 version refusal before creation or dispatch | `sdk_optional_tools_and_fence_refuse_before_surface_compilation`, `agent_sdk_hello_and_configured_mcp_refusal_are_offline`, `v8_exports_refuse_file_import_without_creating_sessions` |
 | Python feature-off SDK admission | The `variants` product smoke invokes `run` and JSONL `agent` with `--composition py-sdk`, requires exit 2 naming py-sdk and the python feature, requires error/bye for JSONL, and checks no state was created; settings options use the same worker requirement |
 
 The typed Python SDK's real-worker driver fixture exercises gathered typed

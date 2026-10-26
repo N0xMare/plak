@@ -93,6 +93,77 @@ fn hosted_artifact_roundtrips_without_expiry_or_secret_state() {
     assert!(!json.contains("authorization"));
 }
 
+fn legacy_signed_redacted_artifact() -> MessagesFamilyArtifact {
+    let mut artifact = mixed_direct_artifact();
+    let signed = MessageBlock::Thinking {
+        thinking: "synthetic reasoning".into(),
+        signature: RawValue::from_string(r#""synthetic\u002dsignature""#.into())
+            .expect("sanitized fixture"),
+    };
+    let redacted = MessageBlock::RedactedThinking {
+        data: RawValue::from_string(r#""synthetic\u002dredacted""#.into())
+            .expect("sanitized fixture"),
+    };
+    assert_eq!(
+        serde_json::to_string(&signed).expect("sanitized fixture"),
+        r#"{"type":"thinking","thinking":"synthetic reasoning","signature":"synthetic\u002dsignature"}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&redacted).expect("sanitized fixture"),
+        r#"{"type":"redacted_thinking","data":"synthetic\u002dredacted"}"#
+    );
+    artifact.assistant_blocks.insert(0, signed);
+    artifact.assistant_blocks.insert(1, redacted);
+    artifact
+}
+
+#[test]
+fn legacy_signed_redacted_and_hosted_artifact_has_unchanged_byte_digest() {
+    let bytes = legacy_signed_redacted_artifact()
+        .encode()
+        .expect("sanitized fixture");
+    assert_eq!(
+        plakous_model::sha256_hex(&[&bytes]),
+        "0ec2633c67c6de17b84887bec4f63d654433ff61502d2a72b58566396b388b97"
+    );
+}
+
+#[test]
+fn signed_redacted_and_hosted_artifact_bytes_keep_the_existing_grammar() {
+    let artifact = legacy_signed_redacted_artifact();
+    let bytes = artifact.encode().expect("sanitized fixture");
+    let reopened = MessagesFamilyArtifact::decode(&bytes).expect("sanitized fixture");
+    assert_eq!(reopened.encode().expect("sanitized fixture"), bytes);
+    assert_eq!(
+        serde_json::to_vec(reopened.native_blocks()).expect("sanitized fixture"),
+        serde_json::to_vec(artifact.native_blocks()).expect("sanitized fixture")
+    );
+}
+
+#[test]
+fn native_cited_text_artifact_roundtrips_without_changing_hosted_lineage() {
+    let original = mixed_direct_artifact();
+    let mut value = serde_json::to_value(&original).expect("sanitized fixture");
+    value["assistant_blocks"]
+        .as_array_mut()
+        .expect("sanitized fixture")
+        .push(serde_json::json!({
+            "type":"native", "block":{"type":"text","text":"Synthetic answer.","citations":[{
+                "type":"web_search_result_location","encrypted_index":"synthetic-index"
+            }]}
+        }));
+    let artifact = mutate(&value).expect("sanitized fixture");
+    assert_eq!(artifact.lineage, original.lineage);
+    let bytes = artifact.encode().expect("sanitized fixture");
+    assert_eq!(
+        MessagesFamilyArtifact::decode(&bytes)
+            .expect("sanitized fixture")
+            .encode()
+            .expect("sanitized fixture"),
+        bytes
+    );
+}
+
 #[test]
 fn mixed_programmatic_explicit_direct_and_legacy_absent_callers_have_exact_golden_replay() {
     let artifact = mixed_direct_artifact();

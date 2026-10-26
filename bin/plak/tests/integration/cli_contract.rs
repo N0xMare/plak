@@ -2018,7 +2018,7 @@ fn prune_keeps_orphaned_references_unless_explicitly_requested() {
 
 #[test]
 fn rejected_exports_do_not_create_state_or_reference_files() {
-    for version in [6, 7] {
+    for version in [6, 7, 8] {
         let dir = isolated_home_dir();
         let path = dir.path().join("export.json");
         let source = if version == 7 {
@@ -2046,12 +2046,12 @@ fn rejected_exports_do_not_create_state_or_reference_files() {
 }
 
 #[test]
-fn malformed_v8_history_refuses_before_any_state_admission() {
+fn malformed_v9_history_refuses_before_any_state_admission() {
     let dir = isolated_home_dir();
-    let path = dir.path().join("v8.json");
+    let path = dir.path().join("v9.json");
     let mut doc: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v8.json")).unwrap();
-    doc["version"] = serde_json::json!(8);
+        serde_json::from_str(include_str!("../fixtures/session-export-v9.json")).unwrap();
+    doc["version"] = serde_json::json!(9);
     doc["history"] = serde_json::json!({"replay_account":"00ff","replay_model":"carry.model","groups":[{"kind":"conversation","messages":[{"id":"not-a-uuid","actor":"user","origin":"user_input","blocks":[{"kind":"text","text":"hello","phase":null}]}]}]});
     std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
     let rejected = run_plak(dir.path(), &["session", "import", path.to_str().unwrap()]);

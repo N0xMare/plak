@@ -21,14 +21,14 @@ use crate::{
 };
 
 mod blocks;
+mod citations;
 mod message;
 mod parse;
 
 use parse::{
     ToolCaller, map_finish, nonempty_opaque_signature, parse_event, parse_message_delta,
     parse_message_start, parse_stop_details, parse_thinking_delta, parse_tool_caller,
-    raw_block_start_has_hosted_effect, reject_citations, validate_opaque_string,
-    validate_stop_blocks,
+    raw_block_start_has_hosted_effect, validate_opaque_string, validate_stop_blocks,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -484,6 +484,14 @@ enum StreamState {
 enum OpenBlock {
     Text {
         text: String,
+        citations: Vec<Box<RawValue>>,
+        native: Box<RawValue>,
+    },
+    Skipped {
+        bytes: usize,
+    },
+    Native {
+        block: Box<RawValue>,
     },
     Thinking {
         text: String,
@@ -519,10 +527,26 @@ struct ToolUseInput {
     json: String,
 }
 
+struct CitedText {
+    target: u32,
+    native: Box<RawValue>,
+    citations: Vec<Box<RawValue>>,
+}
+
 impl OpenBlock {
     fn retained_bytes(&self) -> usize {
         match self {
-            Self::Text { text } | Self::Refusal { text } => text.len(),
+            Self::Text {
+                text,
+                citations,
+                native,
+            } => text
+                .len()
+                .saturating_add(native.get().len())
+                .saturating_add(citations.iter().map(|v| v.get().len()).sum::<usize>()),
+            Self::Refusal { text } => text.len(),
+            Self::Skipped { bytes } => *bytes,
+            Self::Native { block } => block.get().len(),
             Self::Thinking {
                 text, signature, ..
             } => text
@@ -575,6 +599,10 @@ pub struct MessagesStreamProjector {
     reported_model: Option<ModelId>,
     provider_request_id: Option<ModelProviderRequestId>,
     next_block_index: u32,
+    next_output_index: u32,
+    output_indices: BTreeMap<u32, u32>,
+    cited_text: Vec<CitedText>,
+    skipped_blocks: u32,
     remote_tool_ids: BTreeSet<String>,
     explicit_direct_tool_ids: BTreeSet<String>,
     server_tool_ids: BTreeSet<String>,
@@ -696,6 +724,10 @@ impl MessagesStreamProjector {
             reported_model: None,
             provider_request_id: None,
             next_block_index: 0,
+            next_output_index: 0,
+            output_indices: BTreeMap::new(),
+            cited_text: Vec::new(),
+            skipped_blocks: 0,
             remote_tool_ids: BTreeSet::new(),
             explicit_direct_tool_ids: BTreeSet::new(),
             server_tool_ids,

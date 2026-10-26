@@ -18,8 +18,8 @@ pub(super) const FORMAT: &str = "plak-session-export";
 /// and of the immediately previous one. Any change to the document, including
 /// the embedded canonical-history and binding encodings, bumps this; the
 /// previous version's importer is kept for one bump only.
-pub(crate) const VERSION: u32 = 9;
-const PREVIOUS_VERSION: u32 = 8;
+pub(crate) const VERSION: u32 = 10;
+const PREVIOUS_VERSION: u32 = 9;
 pub(crate) const IMPORTABLE_VERSIONS: [u32; 2] = [PREVIOUS_VERSION, VERSION];
 const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
@@ -35,8 +35,7 @@ pub(crate) struct CarryDocument {
     pub(super) workspace_root: PathBuf,
     pub(super) title: Option<String>,
     pub(super) binding: CarryBinding,
-    /// Version 8 has no named state; its importer supplies the empty map.
-    #[serde(default)]
+    /// Committed session-owned state, shared by both importable versions.
     pub(super) named_state: std::collections::BTreeMap<String, serde_json::Value>,
     pub(super) history: history::History,
     /// Unresolved source workflow facts retained as inert operator context.
@@ -46,7 +45,7 @@ pub(crate) struct CarryDocument {
     /// never queued here: export refuses while one is unresolved.
     pub(super) queue: Vec<String>,
     pub(super) prompt_history: Vec<String>,
-    /// Typed product transcript rows, oldest first, shared by versions 8 and 9.
+    /// Typed product transcript rows, oldest first, shared by versions 9 and 10.
     #[serde(deserialize_with = "bounded_transcript")]
     pub(super) transcript: Vec<TranscriptRow>,
     /// Non-live sub-agents the source tree held; their trees are not carried.
@@ -194,17 +193,7 @@ impl CarryDocument {
             );
         }
         match self.version {
-            VERSION | PREVIOUS_VERSION => {
-                if self.version == PREVIOUS_VERSION
-                    && (!self.named_state.is_empty()
-                        || self.binding.composition == ProductCompositionSelection::PySdk)
-                {
-                    return Err(ImportError::Invalid(
-                        "version 8 exports cannot carry named state or py-sdk selection".into(),
-                    ));
-                }
-                self.history.validate_size()
-            }
+            VERSION | PREVIOUS_VERSION => self.history.validate_size(),
             _ => Err(ImportError::Invalid(
                 "export payload does not match its version".to_owned(),
             )),
@@ -298,11 +287,6 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
             header.version
         )));
     }
-    if header.version == PREVIOUS_VERSION && header.named_state_present {
-        return Err(ImportError::Invalid(
-            "version 8 exports cannot carry named state or py-sdk selection".into(),
-        ));
-    }
     if header.raw_history.is_none() || header.checkpoint_present || header.archive_present {
         return Err(ImportError::Invalid(
             "export payload fields do not match its version".to_owned(),
@@ -344,8 +328,6 @@ struct DocumentHeader<'a> {
     checkpoint_present: bool,
     #[serde(default, rename = "archive", deserialize_with = "field_present")]
     archive_present: bool,
-    #[serde(default, rename = "named_state", deserialize_with = "field_present")]
-    named_state_present: bool,
 }
 
 fn field_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {

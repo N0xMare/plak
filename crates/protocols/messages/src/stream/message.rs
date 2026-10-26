@@ -237,7 +237,7 @@ impl MessagesStreamProjector {
         if self
             .blocks
             .keys()
-            .any(|index| *index >= self.next_block_index)
+            .any(|index| *index >= self.next_output_index)
         {
             return Err(self.fail("Messages completed a content block outside the started range"));
         }
@@ -258,10 +258,15 @@ impl MessagesStreamProjector {
         if !self.open_blocks.is_empty() {
             return Err(self.fail("message_stop arrived with an open content block"));
         }
-        let blocks = self.ordered_blocks()?;
         let stop_reason = self
             .stop_reason
             .ok_or_else(|| self.fail("message_stop arrived without a terminal stop_reason"))?;
+        if stop_reason != MessagesStopReason::Refusal {
+            self.complete_citations(output)?;
+            self.retain_empty_skip_marker(output)?;
+        }
+        self.skipped_diagnostic(output);
+        let blocks = self.ordered_blocks()?;
         if stop_reason == MessagesStopReason::Refusal && self.hosted_effects_possible {
             return Err(MessagesStreamError::new(
                 MessagesStreamErrorKind::UnsupportedSemantic,
@@ -283,7 +288,7 @@ impl MessagesStreamProjector {
         let item_id = self.item_id()?;
         // Streaming refusal revokes the entire provisional response, including tool
         // proposals and signed thinking. Nothing from it is eligible for replay.
-        let items = if stop_reason == MessagesStopReason::Refusal {
+        let items = if stop_reason == MessagesStopReason::Refusal || blocks.is_empty() {
             Vec::new()
         } else {
             vec![

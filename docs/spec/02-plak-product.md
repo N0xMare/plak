@@ -1022,13 +1022,13 @@ is a warning, not an export refusal.
 The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
-writes **version 9** and imports **9 and 8**, never older documents. Runtime
-canonical format epochs are not export versions: v9 carries a Plak-owned neutral
+writes **version 10** and imports **10 and 9**, never older documents. Runtime
+canonical format epochs are not export versions: v10 carries a Plak-owned neutral
 conversation encoding, not canonical segment bytes, digests, checkpoints, or
 runtime serde representations.
 
 `plak session export <id> [--out <path>]` writes one JSON document with
-`"format": "plak-session-export", "version": 9` and prints its path. The
+`"format": "plak-session-export", "version": 10` and prints its path. The
 exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
 state key and producer build provenance (verified binary id, or explicitly
@@ -1040,9 +1040,9 @@ Otherwise the common lease-free projector first catches the views up to the
 feed tail; any required writes remain derived product-view writes, not attach.
 The binding carries `py-sdk` like every other explicit selection. `named_state`
 is a key-ordered JSON map of committed session-owned values (01 §9.8); import
-validates it and seeds it atomically with history. The v8 importer uses the
-same history decoder with empty named state. Version 7 is refused with
-`this build imports versions 8 and 9`.
+validates it and seeds it atomically with history. The v9 importer uses the
+same history decoder and preserves named state. Version 8 is refused with
+`this build imports versions 9 and 10`.
 
 `history` contains `replay_account` (source account reference), `replay_model`
 (model identifier string), and ordered `groups`. Each group contains its
@@ -1177,7 +1177,7 @@ unresolved rows belong in `pending_work`; settled rows are the optional typed
 refuses). Closed children's dirty/adopted workspaces remain unresolved reference
 facts when appropriate. Live process ownership, store/feed/event state, usage,
 telemetry, provider continuation and other model/tool-owned runtime state do
-not carry. Session-owned named state is the explicit v9 exception.
+not carry. Session-owned named state is the explicit carried exception.
 Earlier compaction has already replaced superseded history; carry cannot recover
 what that compaction removed. Old stores, source children and workspaces remain
 untouched.
@@ -1202,7 +1202,7 @@ same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
 on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
 
-Versions 8 and 9 carry full conversation rather than a separate archive;
+Versions 9 and 10 carry full conversation rather than a separate archive;
 neither has a restart checkpoint or archive import arm. There is no
 `session reference` command or search/tail archive reader. Old retained
 reference files are never read or used as import authority;
@@ -2196,7 +2196,7 @@ marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
 `plak version --carry-probe <file>` is a hidden machine form: it validates a
-v9/v8 export and reports the destination route, optional total/admitted input
+v10/v9 export and reports the destination route, optional total/admitted input
 windows, estimated history tokens and message count. It performs no inference
 or session creation and emits no startup event.
 

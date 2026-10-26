@@ -256,7 +256,7 @@ pub(crate) const MESSAGES_FEATURE_MATRIX_V1: &[FeatureMatrixEntry] = &[
     },
     FeatureMatrixEntry {
         feature: "citations",
-        status: FeatureStatus::Excluded,
+        status: FeatureStatus::CodecOnly,
     },
     FeatureMatrixEntry {
         feature: "multimodal",

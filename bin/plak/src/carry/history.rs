@@ -1,4 +1,4 @@
-//! Plak-owned export-v8/v9 history vocabulary. Never serialize canonical runtime values here.
+//! Plak-owned export-v9/v10 history vocabulary. Never serialize canonical runtime values here.
 use base64::Engine as _;
 use plakous::model::{
     Actor, AudioBlock, CallId, CanonicalHistory, CitationBlock, CitationRange, CitationSource,

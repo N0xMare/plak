@@ -18,6 +18,8 @@ use super::*;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+mod citations;
+
 fn selected_id(label: &[u8]) -> TestResult<SelectedProviderConfigurationId> {
     Ok(serde_json::from_value(serde_json::to_value(
         Digest::sha256(DigestDomain::SelectedProviderConfiguration, 5, &[label])?,

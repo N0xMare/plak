@@ -639,10 +639,10 @@ A smaller destination route schedules compaction at the first prompt when
 needed; if its protected history or summary input still cannot fit, it returns
 the normal context-limit refusal rather than silently truncating conversation.
 An unknown destination window is reported but does not block carry.
-This build writes version 9 and imports versions 9 and 8. Version 9 preserves
+This build writes version 10 and imports versions 10 and 9. Both versions preserve
 the composition selection, including `py-sdk`, and session-owned named state.
-Version 8 imports with empty named state; version 7 is refused with
-`this build imports versions 8 and 9`. New exports have no separate archive.
+Version 8 is refused with `this build imports versions 9 and 10`.
+New exports have no separate archive.
 Keep exports private: they contain full conversation/tool contents and named
 values, not a redacted transcript.
 Documents larger than 256 MiB, histories larger than 128 MiB/100,000 messages,

@@ -1,6 +1,65 @@
 use super::*;
 
 #[test]
+fn v10_native_citations_survive_local_carry_and_file_import_keeps_semantic_text() {
+    let native = r#"{"type":"text","text":"Synthetic answer.","citations":[{"type":"web_search_result_location","encrypted_index":"synthetic\u002dindex"}]}"#;
+    let payload = serde_json::json!({"target":0,"block":native});
+    let replay = ReplayEnvelope::new(
+        ProtocolId::new("anthropic.messages").unwrap(),
+        None,
+        ReplayScope::ExactModel(ModelId::new("carry.model").unwrap()),
+        ReplayKindId::new("messages.native_block").unwrap(),
+        4,
+        DataClassification::Sensitive,
+        serde_json::value::RawValue::from_string(payload.to_string()).unwrap(),
+    )
+    .unwrap();
+    let source = PortableSessionHistory::new(
+        vec![
+            HistorySegment::new(
+                HistorySegmentKind::ReasoningReplay,
+                vec![entry(
+                    1,
+                    Actor::Assistant,
+                    vec![
+                        ContentBlock::Text(TextBlock::new("Synthetic answer.", None).unwrap()),
+                        ContentBlock::Opaque(
+                            OpaqueBlock::new(replay, OpaqueFallback::CompatibleReplay).unwrap(),
+                        ),
+                    ],
+                )],
+            )
+            .unwrap(),
+        ],
+        "source-account".into(),
+        ModelId::new("carry.model").unwrap(),
+    );
+    let mut document = crate::carry::document::sample_document();
+    document.history = History::export(&source).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("v10.json");
+    crate::carry::document::write_document(&path, &document).unwrap();
+    let local = crate::carry::document::read_document(&path)
+        .unwrap()
+        .into_import_with_replay(true)
+        .unwrap();
+    assert_eq!(local.history.segments(), source.segments());
+    let ContentBlock::Opaque(opaque) = &local.history.segments()[0].items()[0].blocks()[1] else {
+        panic!("native replay")
+    };
+    let restored: serde_json::Value =
+        serde_json::from_str(opaque.replay().payload().get()).unwrap();
+    assert_eq!(restored["block"], native);
+    let file = crate::carry::document::read_document(&path)
+        .unwrap()
+        .into_import()
+        .unwrap();
+    assert!(
+        matches!(file.history.segments()[0].items()[0].blocks(), [ContentBlock::Text(text)] if text.text() == "Synthetic answer.")
+    );
+}
+
+#[test]
 fn rebind_keeps_full_history_and_source_lineage_without_an_attachment() {
     let root = tempfile::tempdir().unwrap();
     let history = PortableSessionHistory::new(

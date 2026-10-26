@@ -2688,6 +2688,52 @@ configuration, API version and beta set. Freshness-sensitive descriptor bindings
 remain mandatory for plan validation and dispatch; a stable replay binding never
 admits an old plan.
 
+Messages accepts text citations both on `content_block_start` and through
+`citations_delta`, in arrival order, without changing answer text. Canonical
+citations associate source metadata with that text. Native document character,
+page and content-block offsets locate the source, not the generated answer, so
+they do not become canonical answer ranges. A bound opaque companion retains
+the native cited-text block, including citation JSON and `encrypted_index`.
+Compatible replay substitutes it for its semantic text exactly once. A valid
+cited-text companion with an incompatible model, account, configuration, API
+version or beta binding is omitted: its canonical text lowers normally and one
+content-free diagnostic reports stripped native citation replay. Malformed
+payloads, mismatched target text, duplicate targets and incompatible opaque-only
+blocks without a portable text projection still refuse rather than fabricate data.
+
+Unfamiliar informational blocks and their informational deltas are consumed
+under the existing wire, event, block-count and byte limits. One content-free
+diagnostic counts skipped blocks; neither type names nor payloads enter it.
+Wire indexes remain contiguous while canonical indexes exclude skipped content.
+If all content is skipped, canonical output contains only an opaque skipped-block
+count with `Omit` fallback. This content-free marker satisfies the nonempty
+successful-output invariant; it is never sent to the provider or presented as
+answer text.
+Complete unfamiliar signed or encrypted blocks retain exact native JSON as bound
+opaque replay. This is a conservative syntactic heuristic: `signature`,
+`encrypted_content`, `encrypted_index` or `data` keys at any nesting depth, or
+`signed`, `encrypted`, `redacted` or `thinking` in the block type, mark protected
+content. Unmarked unfamiliar blocks take the counted informational-skip path;
+this is not evidence that every future semantic is replay-optional. Deliberately
+excluded fallback, multimodal, structured-output and unadmitted server-tool
+content refuses rather than taking that path.
+Unrecognized deltas on protected blocks refuse: their final native
+shape cannot be reconstructed safely. An unfamiliar block with tool semantics,
+a caller/container/tool-result reference, or an unresolved hosted-tool predecessor
+also refuses: skipping it could lose effects, correlation or continuation state.
+A signature, citation or tool-input delta on a skipped block refuses rather than
+lose required replay data. Informational blocks around ordinary direct client
+tool calls do not revoke those calls. Tool admission, signed-thinking validation
+and hosted-result lineage remain mandatory; standalone citation events without
+a text-block association remain unsupported.
+
+Sealed Messages artifacts add a distinct `native` block variant; the HTTP request
+serializer unwraps it into native JSON. Existing variants, artifact revisions
+and sealed digests are unchanged. An older decoder refuses that unfamiliar
+persisted tag as an invalid artifact envelope, rather than treating native cited
+text as uncited text. Export v10 carries the new opaque replay vocabulary;
+v9 remains importable (chapter 02 §2.5.1).
+
 **On this wire reasoning has exactly two forms, and text is not one of them.** A
 thinking block is replayed with its signature or not at all, and a redacted block
 is replayed opaque or not at all. **Under exact thinking replay, reasoning that
@@ -2789,7 +2835,7 @@ model, family and dialect. The canonical replay scope and its digest include the
 full account-binding digest, including its version; an accountless envelope
 never acquires Responses replay authority. This check applies to historical
 prefixes as well as newly appended output and hosted-program lineage. Export
-v8 and v9 preserve the scope. Ordinary forks and validated imports cannot widen it.
+v9 and v10 preserve the scope. Ordinary forks and validated imports cannot widen it.
 The Responses limits of 4,096 replay items and 3 MiB replay payload apply to
 one newly appended response, not the accumulated canonical history. An exact
 active artifact remains reusable beyond either historical total, including
@@ -5086,7 +5132,7 @@ format 4 and host backend semantic revision 15 bind them, and exact reopen rejec
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
 the ceiling boolean, including when false. The runtime format epoch isolates
 these bindings from earlier state. CarryBinding does not embed an environment
-descriptor; export v9 retains the v8 importer.
+descriptor; export v10 retains the v9 importer.
 Unsupported descriptors have no compatibility path.
 The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
@@ -7115,10 +7161,10 @@ lists saved keys and their sizes, plus running promoted job numbers. Values
 themselves are not included in that note. Compaction may drop a state-only note
 because the next boundary re-emits it.
 
-The Python SDK presentation issues these state operations. Export v9 carries
+The Python SDK presentation issues these state operations. Export v10 carries
 the committed named values as JSON and validates their keys, values and quotas
 before seeding the new session's genesis atomically with its history. Export
-v8 has no named values, so its importer starts with empty named state.
+v9 preserves named values; v8 is refused.
 
 ### 9.9 Typed Python SDK cells
 
@@ -7864,7 +7910,7 @@ contain no anchor, so import is unanchored. A nonempty root genesis seed
 (never a fork, rebind or clear successor) may use the destination's unanchored
 occupancy measure, once, for its first preflight fold; this is not paid admission
 authority.
-The export document is version 9; this build imports versions 9 and 8 (chapter 02 §2.5.1).
+The export document is version 10; this build imports versions 10 and 9, refusing v8 (chapter 02 §2.5.1).
 
 A paid fold's **own input must admit under a conservative bound, or on a
 `ReferenceClientEnvelope` contract its enrolled reference envelope (§6.8,
@@ -8285,7 +8331,7 @@ it, so the position survives compaction, reopen and fork unchanged. A
 compaction segment without the record leaves
 the position unknown and the indices are omitted, as native omits an unknown
 position. The record is an optional field of the canonical compaction block
-encoding; exports v8 and v9 carry the turn record in its independent neutral
+encoding; exports v9 and v10 carry the turn record in its independent neutral
 compaction fields, so conversation carry preserves the position (spec 02
 §2.5.1). Carrying a history to
 another binding turns a native compaction block into a plain compaction block

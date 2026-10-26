@@ -11,8 +11,17 @@ use plakous_model::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
 
+mod blocks;
 mod lower;
+mod native;
 mod translate;
+
+#[cfg(test)]
+pub(crate) use native::native_replay_block;
+pub(crate) use native::{
+    NATIVE_REPLAY_KIND, NativeReplay, excluded_content_block, protected_tool_block,
+};
+pub(crate) const SKIPPED_BLOCKS_REPLAY_KIND: &str = "messages.skipped_blocks";
 
 pub use lower::{lower_request, lower_request_with_active_artifact};
 pub(crate) use lower::{
@@ -699,11 +708,17 @@ enum MessageRole {
 #[derive(Serialize)]
 struct MessageParam {
     role: MessageRole,
+    #[serde(serialize_with = "native::serialize_wire_blocks")]
     content: Vec<MessageBlock>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum MessageBlock {
+    // Keep a distinct persisted tag: older artifact decoders must refuse this
+    // variant, not deserialize native cited text while discarding its citations.
+    Native {
+        block: Box<RawValue>,
+    },
     Text {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]

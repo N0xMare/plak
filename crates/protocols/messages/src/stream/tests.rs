@@ -13,6 +13,8 @@ use super::{
 use crate::request::ToolOwnership;
 use crate::{MessagesRequestPolicy, MessagesStreamErrorKind};
 
+mod native;
+
 fn projector_with_hosted(hosted: bool) -> MessagesStreamProjector {
     let selected: SelectedProviderConfigurationId = serde_json::from_value(
         serde_json::to_value(

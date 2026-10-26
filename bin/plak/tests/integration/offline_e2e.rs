@@ -4692,7 +4692,7 @@ fn agent_sdk_hello_and_configured_mcp_refusal_are_offline() {
 }
 
 #[test]
-fn v8_sdk_fields_refuse_file_import_without_creating_sessions() {
+fn v8_exports_refuse_file_import_without_creating_sessions() {
     for field in ["empty_state", "null_state", "selection"] {
         let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
         let mut document: Value =
@@ -4710,7 +4710,7 @@ fn v8_sdk_fields_refuse_file_import_without_creating_sessions() {
         assert!(
             result
                 .stderr
-                .contains("version 8 exports cannot carry named state or py-sdk selection"),
+                .contains("version 8 session export; this build imports versions 9 and 10"),
             "{}",
             result.stderr
         );
@@ -6484,7 +6484,7 @@ fn export_session(fixture: &Fixture, session: &str, name: &str) -> (String, Valu
     let document: Value =
         serde_json::from_slice(&std::fs::read(&path).expect("export document")).expect("json");
     assert_eq!(document["format"], "plak-session-export");
-    assert_eq!(document["version"], 9);
+    assert_eq!(document["version"], 10);
     assert!(document["source_resolved_count"].is_u64());
     assert!(
         document["pending_work"]
@@ -7422,7 +7422,7 @@ fn nested_workspace_import_refuses_broken_trusted_parent_before_successor() {
     let nested = fixture.workspace().join("nested");
     std::fs::create_dir_all(&nested).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v8.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v9.json")).unwrap();
     document["workspace_root"] = json!(nested);
     let path = fixture.root.join("nested-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -7470,7 +7470,7 @@ fn home_workspace_import_does_not_treat_product_home_as_overlay() {
     let home = fixture.root.join(".plak");
     std::fs::rename(fixture.home(), &home).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v8.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v9.json")).unwrap();
     document["workspace_root"] = json!(fixture.root);
     let path = fixture.root.join("home-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -7627,12 +7627,12 @@ fn reload_probe_reports_strict_effective_config_without_creating_sessions() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     let version = run_cli(&fixture, &["version", "--export-version"]);
     assert!(version.status.success(), "{}", version.stderr);
-    assert_eq!(version.stdout.trim(), "9");
+    assert_eq!(version.stdout.trim(), "10");
     let valid = run_cli(&fixture, &["version", "--reload-probe"]);
     assert!(valid.status.success(), "{}", valid.stderr);
     let verdict: Value = serde_json::from_str(&valid.stdout).unwrap();
     assert_eq!(verdict["config_error"], Value::Null);
-    assert_eq!(verdict["export_versions"], json!([8, 9]));
+    assert_eq!(verdict["export_versions"], json!([9, 10]));
 
     let project = fixture.workspace().join(".plak");
     std::fs::create_dir_all(&project).unwrap();
@@ -7689,13 +7689,13 @@ fn doctor_checks_trusted_project_config_and_template_files() {
 }
 
 #[test]
-fn a_v8_session_imports_and_exports_as_v9_with_empty_named_state() {
+fn a_v9_session_imports_and_exports_as_v10_with_named_state() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v8.json"))
+        serde_json::from_str(include_str!("../fixtures/session-export-v9.json"))
             .expect("sanitized previous export");
     document["workspace_root"] = json!(fixture.workspace());
-    let path = fixture.root.join("v8-session.json");
+    let path = fixture.root.join("v9-session.json");
     write_private(&path, &serde_json::to_string(&document).expect("document"));
     let imported = run_cli(
         &fixture,
@@ -7707,9 +7707,9 @@ fn a_v8_session_imports_and_exports_as_v9_with_empty_named_state() {
         .lines()
         .find_map(|line| line.strip_prefix("resume with: plak --resume "))
         .expect("imported session id");
-    let (_, exported) = export_session(&fixture, new, "v9-session.json");
-    assert_eq!(exported["version"], 9);
-    assert_eq!(exported["named_state"], json!({}));
+    let (_, exported) = export_session(&fixture, new, "v10-session.json");
+    assert_eq!(exported["version"], 10);
+    assert_eq!(exported["named_state"], json!({"fixture_answer":42}));
     assert_eq!(exported["binding"]["composition"], "direct");
     assert!(!fixture.home().join("references").exists());
 }

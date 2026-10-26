@@ -9,6 +9,10 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Plak
 
+- Session export v10 retains Messages native citation replay, including protected
+  citation tokens. Versions 10 and 9 import; version 8 is refused before session
+  creation. Runtime epoch, product/tree schemas and state key are unchanged.
+
 - Fast children retain their start and finished transcript milestones even
   when they complete before the host's first tree observation. Durable notice
   identities prevent duplicates after reattachment or transcript truncation.
@@ -32,9 +36,8 @@ one cross-build carrier (a build imports its own and the previous version).
   JSONL. Its typed Python base replaces the family base; existing composition
   text stays unchanged. This root opens no topology; child templates and
   optional tools refuse this root-only surface before inference.
-- Session export v9 carries the selected composition and committed named
-  state. V8 imports with empty named state; the v7 checkpoint importer is
-  removed. Product schema 34 admits `py-sdk`; state key `r26.e33.p34.t9`.
+- Session exports carry the selected composition and committed named state.
+  Product schema 34 admits `py-sdk`; state key `r26.e33.p34.t9`.
   `[root] composition` overrides the root template's composition without
   granting that selection to children.
 
@@ -43,6 +46,15 @@ one cross-build carrier (a build imports its own and the previous version).
   Changing the root template or applying a profile clears that override.
 
 ### Plakous
+
+- Messages accepts initial and streamed text citations, preserving source
+  associations and exact native replay without duplicating answer text.
+  Unfamiliar informational blocks produce a counted, content-free notice;
+  complete unfamiliar signed blocks retain opaque replay. Unknown tool lineage
+  and signed deltas that cannot be reconstructed still fail closed.
+
+- Messages artifact decoding preserves raw Thinking and RedactedThinking blocks
+  instead of refusing their signed or redacted replay payloads.
 
 - Atomic attachment now exposes only the cursor, source/turn lifecycles and
   pending decisions. Presentation counters, usage, conversation summaries and

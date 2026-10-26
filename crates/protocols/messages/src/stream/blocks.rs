@@ -15,12 +15,11 @@ use crate::request::{
 
 use super::{
     ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent, EventEnvelope,
-    InputJsonDeltaWire, MessagesStreamError, MessagesStreamErrorKind, MessagesStreamErrorPhase,
-    MessagesStreamExtensions, MessagesStreamProjector, OpenBlock, RedactedStart, RefusalDeltaWire,
-    RefusalStart, SignatureDeltaWire, TextDeltaWire, TextStart, ThinkingStart, ToolCaller,
-    ToolUseInput, ToolUseStart, invalid_response, nonempty_opaque_signature, parse_event,
-    parse_thinking_delta, parse_tool_caller, raw_block_start_has_hosted_effect, reject_citations,
-    validate_opaque_string,
+    InputJsonDeltaWire, MessagesStreamError, MessagesStreamExtensions, MessagesStreamProjector,
+    OpenBlock, RedactedStart, RefusalDeltaWire, RefusalStart, SignatureDeltaWire, TextDeltaWire,
+    TextStart, ThinkingStart, ToolCaller, ToolUseInput, ToolUseStart, invalid_response,
+    nonempty_opaque_signature, parse_event, parse_thinking_delta, parse_tool_caller,
+    raw_block_start_has_hosted_effect, validate_opaque_string,
 };
 
 impl MessagesStreamProjector {
@@ -57,13 +56,34 @@ impl MessagesStreamProjector {
         }
         let kind: EventEnvelope = serde_json::from_str(event.content_block.get())
             .map_err(|error| invalid_response(format!("invalid content block: {error}")))?;
-        let location = OutputLocation::new(0, event.index);
+        if crate::request::excluded_content_block(&kind.kind) {
+            return Err(MessagesStreamError::new(
+                super::MessagesStreamErrorKind::UnsupportedSemantic,
+                super::MessagesStreamErrorPhase::Stream,
+                "Messages content block is deliberately excluded by the feature matrix",
+            ));
+        }
+        if !matches!(
+            kind.kind.as_str(),
+            "text"
+                | "thinking"
+                | "redacted_thinking"
+                | "server_tool_use"
+                | "code_execution_tool_result"
+                | "tool_use"
+                | "refusal"
+        ) {
+            return self.open_unknown_block(event.index, event.content_block);
+        }
+        let index = self.reserve_output_index()?;
+        self.output_indices.insert(event.index, index);
+        let location = OutputLocation::new(0, index);
         let item_id = self.item_id()?;
         let block = match kind.kind.as_str() {
             "text" => {
                 let value: TextStart = serde_json::from_str(event.content_block.get())
                     .map_err(|error| invalid_response(error.to_string()))?;
-                reject_citations(value.citations.as_deref())?;
+                let citations = super::citations::parse_citations(value.citations.as_deref())?;
                 output.push(ModelEvent::BlockStarted(BlockStarted::new(
                     item_id,
                     location,
@@ -75,7 +95,11 @@ impl MessagesStreamProjector {
                         value.text.as_bytes(),
                     )));
                 }
-                OpenBlock::Text { text: value.text }
+                OpenBlock::Text {
+                    text: value.text,
+                    citations,
+                    native: event.content_block,
+                }
             }
             "thinking" => {
                 let value: ThinkingStart = serde_json::from_str(event.content_block.get())
@@ -358,23 +382,7 @@ impl MessagesStreamProjector {
                     text: value.refusal,
                 }
             }
-            "fallback" => {
-                return Err(MessagesStreamError::new(
-                    MessagesStreamErrorKind::UnsupportedSemantic,
-                    MessagesStreamErrorPhase::Stream,
-                    "Messages fallback content is explicitly excluded by adapter revision 1",
-                ));
-            }
-            other => {
-                if matches!(other, "server_tool_use" | "web_search_tool_result") {
-                    self.hosted_effects_possible = true;
-                }
-                return Err(MessagesStreamError::new(
-                    MessagesStreamErrorKind::UnsupportedSemantic,
-                    MessagesStreamErrorPhase::Stream,
-                    "Messages content block type is outside the declared feature matrix",
-                ));
-            }
+            _ => return Err(self.fail("Messages known block dispatch was inconsistent")),
         };
         if block.retained_bytes() > self.limits.max_block_bytes() {
             return Err(self.fail("Messages content block exceeded the byte limit"));
@@ -418,14 +426,31 @@ impl MessagesStreamProjector {
             .reported_model
             .clone()
             .ok_or_else(|| invalid_response("provider-reported model was not initialized"))?;
+        let index = self.output_indices.get(&event.index).copied();
         let Some(block) = self.open_blocks.get_mut(&event.index) else {
             return Err(self.fail("content delta arrived without an open block"));
         };
         let kind: EventEnvelope = serde_json::from_str(event.delta.get())
             .map_err(|error| invalid_response(error.to_string()))?;
-        let location = OutputLocation::new(0, event.index);
+        if let OpenBlock::Skipped { bytes } = block {
+            *bytes = bytes.saturating_add(event.delta.get().len());
+            if *bytes
+                > self
+                    .limits
+                    .max_unknown_event_bytes()
+                    .min(self.limits.max_block_bytes())
+            {
+                return Err(self.fail("unknown Messages block exceeded the byte limit"));
+            }
+            super::citations::validate_skipped_delta(event.delta.get())?;
+            return Ok(());
+        }
+        let location = OutputLocation::new(
+            0,
+            index.ok_or_else(|| invalid_response("Messages block has no output location"))?,
+        );
         match (kind.kind.as_str(), block) {
-            ("text_delta", OpenBlock::Text { text }) => {
+            ("text_delta", OpenBlock::Text { text, .. }) => {
                 let delta: TextDeltaWire = serde_json::from_str(event.delta.get())
                     .map_err(|error| invalid_response(error.to_string()))?;
                 if delta.text.is_empty() {
@@ -528,12 +553,17 @@ impl MessagesStreamProjector {
             (_, OpenBlock::Complete(_)) => {
                 return Err(self.fail("complete hosted result received a delta"));
             }
-            ("citations_delta", _) => {
-                return Err(MessagesStreamError::new(
-                    MessagesStreamErrorKind::UnsupportedSemantic,
-                    MessagesStreamErrorPhase::Stream,
-                    "Messages citations are explicitly excluded by adapter revision 1",
-                ));
+            ("citations_delta", OpenBlock::Text { citations, .. }) => {
+                #[derive(serde::Deserialize)]
+                struct Delta {
+                    citation: Box<RawValue>,
+                }
+                let delta: Delta = serde_json::from_str(event.delta.get())
+                    .map_err(|_| invalid_response("invalid Messages citation delta"))?;
+                if citations.len() >= self.limits.max_blocks() {
+                    return Err(self.fail("Messages citations exceeded the block limit"));
+                }
+                citations.push(delta.citation);
             }
             _ => return Err(self.fail("content delta type did not match its open block")),
         }
@@ -565,13 +595,41 @@ impl MessagesStreamProjector {
         let Some(block) = self.open_blocks.remove(&event.index) else {
             return Err(self.fail("content_block_stop arrived without an open block"));
         };
-        let index = event.index;
+        if matches!(block, OpenBlock::Skipped { .. }) {
+            return Ok(());
+        }
+        let index = self.output_index(event.index)?;
         let location = OutputLocation::new(0, index);
         let item_id = self.item_id()?;
         let canonical = match block {
-            OpenBlock::Text { text } => ContentBlock::Text(
-                TextBlock::new(text, None).map_err(|error| invalid_response(error.to_string()))?,
-            ),
+            OpenBlock::Text {
+                text,
+                citations,
+                native,
+            } => {
+                if !citations.is_empty() {
+                    let native = super::citations::final_text_block(native, &text, &citations)?;
+                    self.cited_text.push(super::CitedText {
+                        target: index,
+                        native,
+                        citations,
+                    });
+                }
+                ContentBlock::Text(
+                    TextBlock::new(text, None)
+                        .map_err(|error| invalid_response(error.to_string()))?,
+                )
+            }
+            OpenBlock::Native { block } => {
+                let block = self.native_content(None, &block)?;
+                output.push(ModelEvent::BlockStarted(BlockStarted::new(
+                    item_id,
+                    location,
+                    BlockStart::Complete(block.clone()),
+                )));
+                block
+            }
+            OpenBlock::Skipped { .. } => return Ok(()),
             OpenBlock::Thinking {
                 text,
                 signature,
@@ -657,7 +715,7 @@ impl MessagesStreamProjector {
                     return Err(self.fail("terminal Messages tool input must be a JSON object"));
                 }
                 self.deferred_programmatic_blocks.push((
-                    event.index,
+                    index,
                     OpenBlock::DeferredProgrammaticToolUse {
                         call_id,
                         remote_id,
@@ -678,7 +736,7 @@ impl MessagesStreamProjector {
             &canonical,
             ContentBlock::Reasoning(reasoning)
                 if reasoning.visibility() == ReasoningVisibility::Redacted
-        );
+        ) && !matches!(&canonical, ContentBlock::Opaque(_));
         if self.blocks.insert(index, canonical).is_some() {
             return Err(self.fail("Messages completed one content block more than once"));
         }

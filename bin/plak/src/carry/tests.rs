@@ -223,9 +223,6 @@ fn document(version: u32, transcript: serde_json::Value) -> CarryDocument {
     let path = dir.path().join("export.json");
     let mut value = serde_json::to_value(sample_document()).unwrap();
     value["version"] = serde_json::json!(version);
-    if version == 8 {
-        value.as_object_mut().unwrap().remove("named_state");
-    }
     value["transcript"] = transcript;
     fs::write(&path, value.to_string()).unwrap();
     read_document(&path).unwrap()
@@ -237,7 +234,7 @@ fn document(version: u32, transcript: serde_json::Value) -> CarryDocument {
 #[test]
 fn an_imported_process_command_is_redacted_like_a_live_one() {
     let document = document(
-        8,
+        9,
         serde_json::json!([{
             "kind": "process",
             "job_id": "p1",
@@ -269,7 +266,7 @@ fn an_imported_tool_detail_is_redacted_like_a_live_one() {
         .unwrap();
     let mut row = serde_json::to_value(tool).unwrap();
     row["detail"] = serde_json::json!("GITHUB_TOKEN=ghp_abcdefghijklmnopqrst gh pr list");
-    let document = document(8, serde_json::json!([row]));
+    let document = document(9, serde_json::json!([row]));
     let CarriedImport { record, .. } = document.into_import().unwrap();
     let detail = record
         .transcript

@@ -183,7 +183,7 @@ Monty worker package needs.
 
 The workspace release is **0.0.2**. The current versions below are the 0.0.2
 state tuple; older state is not opened. This build imports export documents
-of versions 8 and 9 only (§2.5.1 of chapter 02).
+of versions 9 and 10 only (§2.5.1 of chapter 02).
 
 | Store | Owner | Current version |
 | --- | --- | --- |
@@ -192,7 +192,7 @@ of versions 8 and 9 only (§2.5.1 of chapter 02).
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **34** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **9** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **20**, disposable, never recovery authority |
-| Session export document | Plak | version **9**, imports **9** and **8** |
+| Session export document | Plak | version **10**, imports **10** and **9** |
 
 Tree schema 9 records candidate `target_before` provenance and each workspace's
 `input_candidate_id`; retained snapshots have independent Git-backend pins.
@@ -205,10 +205,10 @@ and submit-result replay receipts keep a digest summary. Provisional wait
 receipts retain the exact views they returned.
 The canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Builds open
-only their current version tuple as state authority. Export v9 carries
+only their current version tuple as state authority. Export v10 carries
 conversation history, CarryBinding (including `py-sdk`) and session-owned
 named state, not tree seal outcomes. Its history preserves exact account/model
-replay scope. The v8 importer starts with empty named state; v7 is refused.
+replay scope. The v9 importer preserves named state; v8 is refused.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the
