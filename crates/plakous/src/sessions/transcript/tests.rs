@@ -3,6 +3,35 @@
 use super::*;
 
 #[test]
+fn nested_fragment_slots_survive_window_decode_budget_omissions() {
+    let source = ledger_only_source();
+    let view = ConversationView::from_shared(source.history.clone(), WorkingProjection::default());
+    let children = composition_child_owners(&source.ledger);
+    let canonical: Vec<_> = view
+        .items()
+        .iter()
+        .enumerate()
+        .map(|(at, item)| project_item(item, &children, at as u64))
+        .collect();
+    let full = inject_nested_with_budget(canonical.clone(), &source.ledger, usize::MAX);
+    let mut partial_seen = false;
+    for budget in [0, 512, 1024, 2048, 4096, 8192] {
+        let narrow = inject_nested_with_budget(canonical.clone(), &source.ledger, budget);
+        partial_seen |= narrow.len() > canonical.len() && narrow.len() < full.len();
+        for retained in &narrow {
+            assert!(
+                full.iter().any(|item| item == retained),
+                "a budget omission moved a retained fragment at budget {budget}: {retained:?}"
+            );
+        }
+    }
+    assert!(
+        partial_seen,
+        "fixture must omit an earlier effect while retaining a later effect"
+    );
+}
+
+#[test]
 fn bounded_history_positions_and_fragment_offsets_do_not_shift_with_the_window() {
     let source = source("exec", true);
     let full = source.tail(512, usize::MAX);
@@ -211,13 +240,21 @@ fn transcript_tail_projects_live_lineage_from_explicit_evaluation_receipt() {
             if name == "exec" { 5 } else { 4 }
         );
         for item in tail.items() {
-            for (index, part) in item.parts().iter().enumerate() {
-                let (SessionTranscriptPart::ToolCall { lineage, .. }
-                | SessionTranscriptPart::ToolResult { lineage, .. }) = part
+            for part in item.parts() {
+                let (SessionTranscriptPart::ToolCall {
+                    call_id, lineage, ..
+                }
+                | SessionTranscriptPart::ToolResult {
+                    call_id, lineage, ..
+                }) = part
                 else {
                     unreachable!()
                 };
-                let expected = if index == 0 {
+                let index = (1..=5)
+                    .find(|value| id::<CallId>(*value) == *call_id)
+                    .unwrap()
+                    - 1;
+                let expected = if index == 0 || index == 4 {
                     ToolCallerLineageView::local_composition_marker(Some("cell-7"))
                 } else {
                     ToolCallerLineageView::from_lineage(
@@ -225,8 +262,8 @@ fn transcript_tail_projects_live_lineage_from_explicit_evaluation_receipt() {
                             41,
                             7,
                             "cell-7",
-                            u32::try_from(index).unwrap(),
-                            id(u16::try_from(index).unwrap() + 1),
+                            u32::from(index),
+                            id(index + 1),
                             1,
                         )
                         .unwrap(),

@@ -284,11 +284,13 @@ pub fn history_composition_calls(
 /// Reads exact canonical child bindings from at most the newest
 /// `max_operations` records. Evaluation ids alone are not ownership proof:
 /// seeded history may carry ids minted by another session's ledger.
+/// Each binding includes its durable request sequence for budget-independent
+/// presentation slot reservation.
 #[must_use]
 pub fn history_composition_child_owners(
     ledger: &crate::manifest::RuntimeOperationLedger,
     max_operations: usize,
-) -> Vec<(plakous_model::CallId, u64, plakous_model::CallId)> {
+) -> Vec<(plakous_model::CallId, u64, plakous_model::CallId, u32)> {
     ledger
         .newest_operations(max_operations)
         .into_iter()
@@ -296,13 +298,14 @@ pub fn history_composition_child_owners(
             let crate::manifest::DurableOperationKind::CompositionChild {
                 call_id,
                 evaluation_operation_id,
+                request_sequence,
                 ..
             } = record.kind()
             else {
                 return None;
             };
             history_composition_owner(ledger, *evaluation_operation_id)
-                .map(|owner| (*call_id, *evaluation_operation_id, owner))
+                .map(|owner| (*call_id, *evaluation_operation_id, owner, *request_sequence))
         })
         .collect()
 }

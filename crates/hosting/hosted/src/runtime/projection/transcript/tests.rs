@@ -589,7 +589,7 @@ fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
             } else {
                 TranscriptScope::Agent(format!("c{}", (random >> 32) % 3))
             };
-            match random % 8 {
+            match random % 12 {
                 0 => {
                     publisher.clear();
                     let _ = sink.send(HostEvent::ClearView);
@@ -607,9 +607,45 @@ fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
                     publisher.resync(&scope, &sink);
                 }
                 4..=6 => {
+                    if matches!(scope, TranscriptScope::Agent(_)) {
+                        let _ = sink.send(HostEvent::TranscriptStream { scope: scope.clone(), delta: plakous_host_protocol::views::transcript::TranscriptStreamDelta::Assistant(format!("{step}")) });
+                    }
                     publisher.observe(
                         scope.clone(),
                         &HostEvent::<Core>::AssistantDelta(format!("{step}")),
+                        &sink,
+                    );
+                }
+                7 => {
+                    publisher.observe(scope.clone(), &HostEvent::<Core>::AssistantDone, &sink);
+                }
+                8 => {
+                    publisher.observe(
+                        scope.clone(),
+                        &HostEvent::<Core>::Row(TranscriptRow::info(
+                            NoticeScope::Host,
+                            format!("row {step}"),
+                        )),
+                        &sink,
+                    );
+                }
+                9..=10 => {
+                    publisher.observe(
+                        scope.clone(),
+                        &HostEvent::<Core>::ToolLine {
+                            call_id: Some("tool".into()),
+                            parent_call_id: None,
+                            cell_id: None,
+                            kind: plakous_host_protocol::views::ActivityKind::Tool,
+                            name: "read_file".into(),
+                            state: if random % 12 == 9 { "running" } else { "done" }.into(),
+                            subject: None,
+                            detail: Some(format!("detail {step}")),
+                            duration_ms: Some(5),
+                            started_at_ms: Some(1),
+                            finished_at_ms: None,
+                            wait: None,
+                        },
                         &sink,
                     );
                 }
@@ -627,19 +663,31 @@ fn randomized_publisher_mailbox_consumer_converges_across_scopes_and_clear() {
                 continue;
             }
             fold_delivery(&receiver, &mut consumer);
-            let scopes: Vec<_> = publisher.states.keys().cloned().collect();
+            let scopes: Vec<_> = publisher
+                .states
+                .iter()
+                .filter(|(_, state)| state.revision() != 0)
+                .map(|(scope, _)| scope.clone())
+                .collect();
             for scope in scopes {
-                if sink.transcript_resnapshot_required_for(&scope)
-                    || consumer.get(&scope) != publisher.states.get(&scope)
-                {
+                if sink.transcript_resnapshot_required_for(&scope) {
                     assert!(
                         publisher.resync(&scope, &sink),
                         "seed={seed} step={step} scope={scope:?}"
+                    );
+                } else {
+                    assert_eq!(
+                        consumer.get(&scope),
+                        publisher.states.get(&scope),
+                        "convergence without resync: seed={seed} step={step} scope={scope:?}"
                     );
                 }
             }
             fold_delivery(&receiver, &mut consumer);
             for (scope, state) in &publisher.states {
+                if state.revision() == 0 {
+                    continue;
+                }
                 assert_eq!(
                     consumer.get(scope),
                     Some(state),

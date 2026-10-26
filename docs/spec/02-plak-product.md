@@ -1836,6 +1836,8 @@ Keyed live publication occurs at assistant completion, a new user/tool row,
 sealed reasoning, retry discard, status or idle boundaries. Consecutive queued
 same-scope patches compose into one patch; prose and reasoning appends coalesce
 without crossing a boundary or a different scope/location.
+Patch composition never moves a boundary past intervening same-scope live
+appends; only observations explicitly belonging to another scope may be crossed.
 This live state is the resync baseline, so busy resync preserves in-flight
 previews and subsequent deltas continue their same keys. Resync does not reset
 the reducer's stream boundary, call index or reasoning clocks. Canonical
@@ -1847,11 +1849,15 @@ assertion in debug builds). Automatic gap repayment and explicit resync use
 the same retained live baseline, never a separate stale session snapshot.
 Reload rehearsal keeps the projector's keys through bounded presentation
 projection rather than manufacturing identities from window indices.
-The TUI keeps a keyed baseline and applies only exact-revision patches. A gap
-keeps the last good presentation and requests one scope resync; later patches
-are ignored until a valid snapshot replaces it. A pending request re-arms only
-after one second or evidence of a baseline newer than the revision recorded
-when that request was sent; repeated refused patches do not each send a request.
+The TUI keeps a keyed baseline and applies only exact-revision patches,
+updating only the indexed blocks named by changed keys. Tool and thinking UI
+state stays on its existing block; local approval rows, refusal messages and
+product notices remain after the keyed block they followed. Inserts and deletes
+remap the remaining block indexes without rebuilding unchanged block content.
+A gap keeps the last good presentation and requests one scope resync; later
+patches are ignored until a valid snapshot replaces it. A pending request has
+a one-second floor between retries, including when newer baseline evidence
+arrives; repeated refused patches do not each send a request.
 An observation-channel gap is
 scoped: a root snapshot does not pay an agent's presentation debt. Replacing
 the one open agent view retires its previous scope's queued patches and gap

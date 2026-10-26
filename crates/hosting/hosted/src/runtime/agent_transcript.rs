@@ -45,6 +45,13 @@ fn items_from_reads(
         if rows.items.is_empty() || rows.anchor != item.position {
             rows.ordinal = 1;
         }
+        // A fragment's reserved range is derived from its durable child
+        // binding, even if earlier effects were omitted by the read budget.
+        rows.ordinal = rows.ordinal.max(
+            item.part_offset
+                .saturating_mul(MAX_SNAPSHOT_ROWS as u32)
+                .saturating_add(1),
+        );
         rows.anchor = item.position;
         let mut text = String::new();
         for (block_index, part) in item.parts.iter().enumerate() {

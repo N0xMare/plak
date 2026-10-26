@@ -1053,3 +1053,39 @@ fn merged_patches_fold_deletes_reinsertion_and_key_moves_across_another_scope() 
     assert_eq!(folded.revision(), 30);
     assert_eq!(folded.items(), &after);
 }
+
+#[test]
+fn patches_never_merge_across_raw_or_same_scope_stream_appends() {
+    use crate::views::transcript::{TranscriptPatch, TranscriptScope, TranscriptStreamDelta};
+    for scope in [
+        TranscriptScope::Root,
+        TranscriptScope::Agent("child".into()),
+    ] {
+        let (sender, receiver) = observation_channel::<Core>();
+        let patch = |from_revision| {
+            SessionObservation::TranscriptPatch(TranscriptPatch {
+                scope: scope.clone(),
+                from_revision,
+                to_revision: from_revision + 1,
+                upserts: Vec::new(),
+                deletes: Vec::new(),
+            })
+        };
+        sender.send(patch(1)).unwrap();
+        let stream = match &scope {
+            TranscriptScope::Root => {
+                SessionObservation::AssistantDelta("between boundaries".into())
+            }
+            TranscriptScope::Agent(_) => SessionObservation::TranscriptStream {
+                scope: scope.clone(),
+                delta: TranscriptStreamDelta::Assistant("between boundaries".into()),
+            },
+        };
+        sender.send(stream.clone()).unwrap();
+        sender.send(patch(2)).unwrap();
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            vec![patch(1), stream, patch(2)]
+        );
+    }
+}

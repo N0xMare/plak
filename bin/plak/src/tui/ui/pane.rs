@@ -15,6 +15,9 @@ use crate::tui::blocks::{self, ScrollBlock, TranscriptChange, TranscriptRenderCa
 pub(crate) struct TranscriptPane {
     #[cfg(test)]
     pub(super) keyed_rebuilds: usize,
+    #[cfg(test)]
+    pub(super) keyed_block_work: usize,
+    pub(super) keyed: super::keyed::BlockIndex,
     pub(crate) blocks: Vec<ScrollBlock>,
     pub(super) presentation: TranscriptState,
     pub(super) presentation_ready: bool,
@@ -77,6 +80,9 @@ impl TranscriptPane {
             resync: None,
             #[cfg(test)]
             keyed_rebuilds: 0,
+            #[cfg(test)]
+            keyed_block_work: 0,
+            keyed: super::keyed::BlockIndex::default(),
             resync_sent: None,
             resync_after_revision: 0,
             transcript_revision: 0,
@@ -415,17 +421,13 @@ impl App {
     }
 
     pub(super) fn rearm_transcript_resync(&mut self, from_revision: u64) {
-        if self
-            .pane
-            .resync_sent
-            .is_some_and(|(revision, _)| from_revision > revision)
-        {
-            self.pane.resync_sent = None;
-        }
+        // New evidence updates the watermark, but never removes the retry
+        // floor of an outstanding request.
         self.pane.resync_after_revision = self.pane.resync_after_revision.max(from_revision);
     }
 
     pub(super) fn clear_presentation(&mut self) {
+        self.pane.keyed = super::keyed::BlockIndex::default();
         self.pane.presentation = TranscriptState::default();
         self.pane.presentation_ready = false;
         self.pane.resync = None;

@@ -95,6 +95,38 @@ fn a_retained_canonical_item_keeps_its_child_keys_across_full_and_narrow_reads()
 }
 
 #[test]
+fn omitted_nested_fragments_do_not_rekey_later_child_rows() {
+    let mut reads = vec![
+        item(Actor::Assistant, vec![TranscriptPart::Text("marker")]),
+        item(
+            Actor::Tool,
+            vec![TranscriptPart::Text("earlier nested effect")],
+        ),
+        item(
+            Actor::Tool,
+            vec![TranscriptPart::Text("later nested effect")],
+        ),
+        item(
+            Actor::Assistant,
+            vec![TranscriptPart::Text("canonical suffix")],
+        ),
+    ];
+    for (read, offset) in reads.iter_mut().zip([0, 2, 5, 8]) {
+        read.position = 7;
+        read.part_offset = offset;
+    }
+    let full = super::items_from_reads(&reads, locator(), &[], false);
+    reads.remove(1); // Its effect was outside the window-wide decode budget.
+    let narrow = super::items_from_reads(&reads, locator(), &[], false);
+    for retained in narrow {
+        assert!(
+            full.contains(&retained),
+            "retained fragment key shifted: {retained:?}"
+        );
+    }
+}
+
+#[test]
 fn unlinked_nested_calls_have_neither_a_parent_nor_a_cell_row_identity() {
     use plakous::agent::ToolCallerLineageView;
     use plakous::model::{NamespaceId, ToolCallerLineage};

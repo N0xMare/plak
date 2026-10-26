@@ -8518,7 +8518,9 @@ position, not its index in the requested window. Reopening or sliding a window
 over unchanged canonical history preserves it; rewriting history can rekey it.
 `part_offset()` gives the first presentation-part ordinal of a fragment:
 synthetic nested-effect fragments share their owning canonical item's position
-with disjoint increasing part ranges, so bounding away earlier fragments never
+with disjoint increasing part ranges reserved for every retained durable child
+binding in acceptance order, not only children admitted by the window's decode
+budget. Bounding away earlier fragments never
 renumbers retained ones. These are observational read positions, not new stored
 identities or export fields.
 A part is text (text and refusal blocks),

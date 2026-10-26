@@ -4025,8 +4025,10 @@ lineage before their row projection. Canonical-history read positions and
 fragment offsets are defined in chapter 01 §12; they are not bounded-window
 indices and remain identical for retained items across reopen and window slides.
 Child keys use that canonical position as `anchor`, the runtime lane, and the
-one-based derived-row ordinal within that canonical item, including its
-synthetic fragments in order. Tail reads retain whole canonical position groups,
+derived-row ordinal within the fragment's reserved part-offset range. Each
+offset reserves 16,384 row ordinals; omitted nested effects keep their slots
+from durable acceptance order and call identity, independent of decode budgets.
+Tail reads retain whole canonical position groups,
 including after fragment injection and byte accounting, so sliding the window cannot restart that ordinal
 inside an item. The zero key is reserved for truncation; neither row indices in
 a bounded window nor process-local sequence numbers participate. A compaction marker's call

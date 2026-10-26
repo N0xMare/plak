@@ -468,6 +468,7 @@ impl App {
             return;
         }
         self.pane.blocks.drain(..remove);
+        self.pane.keyed.splice(0, remove, 0);
         // Every block-space index the operator's place and the render cache
         // hold names a block that just moved. `dropped_below` is the lowest old
         // index that survives; `shift` is how far the survivors moved down.
@@ -478,6 +479,7 @@ impl App {
                 0,
                 ScrollBlock::System(TRANSCRIPT_TRUNCATION_MARKER.to_owned()),
             );
+            self.pane.keyed.splice(0, 0, 1);
             self.pane.transcript_bytes = self.pane.transcript_bytes.saturating_add(marker_bytes);
             shift = shift.saturating_sub(1);
         }
@@ -487,6 +489,7 @@ impl App {
                 .transcript_bytes
                 .saturating_sub(self.pane.blocks[1].retained_bytes());
             self.pane.blocks.remove(1);
+            self.pane.keyed.splice(1, 1, 0);
             dropped_below = dropped_below.saturating_add(1);
             shift = shift.saturating_add(1);
         }

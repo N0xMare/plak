@@ -80,7 +80,8 @@ impl SessionTranscriptItem {
 
     /// Returns the first presentation-part ordinal of this fragment. Synthetic
     /// effect-backed fragments share their owning canonical item's position
-    /// and have disjoint, increasing part ranges.
+    /// and have disjoint, increasing part ranges reserved from durable child
+    /// bindings, including children omitted by the read's decode budget.
     #[must_use]
     pub const fn part_offset(&self) -> u32 {
         self.part_offset
@@ -406,6 +407,29 @@ fn inject_nested_items(
     items: Vec<SessionTranscriptItem>,
     ledger: &RuntimeOperationLedger,
 ) -> Vec<SessionTranscriptItem> {
+    inject_nested_with_budget(items, ledger, 8 * 1_048_576)
+}
+
+fn nested_slots(ledger: &RuntimeOperationLedger) -> HashMap<CallId, Vec<(u32, CallId)>> {
+    let mut slots: HashMap<CallId, Vec<(u32, CallId)>> = HashMap::new();
+    for (call, _, owner, sequence) in
+        history_composition_child_owners(ledger, MAX_COMPOSITION_RECORDS)
+    {
+        slots.entry(owner).or_default().push((sequence, call));
+    }
+    for calls in slots.values_mut() {
+        calls.sort_unstable();
+        calls.dedup();
+    }
+    slots
+}
+
+fn inject_nested_with_budget(
+    items: Vec<SessionTranscriptItem>,
+    ledger: &RuntimeOperationLedger,
+    decode_bytes: usize,
+) -> Vec<SessionTranscriptItem> {
+    let slots = nested_slots(ledger);
     let mut present: HashSet<_> = items
         .iter()
         .flat_map(|item| &item.parts)
@@ -426,7 +450,7 @@ fn inject_nested_items(
         })
         .collect();
     let mut nested: HashMap<_, Vec<_>> = HashMap::new();
-    for call in history_nested_tools(ledger, &owners, MAX_COMPOSITION_RECORDS, 8 * 1_048_576) {
+    for call in history_nested_tools(ledger, &owners, MAX_COMPOSITION_RECORDS, decode_bytes) {
         if present.insert(call.call_id) {
             nested.entry(call.owner).or_default().push(call);
         }
@@ -434,27 +458,35 @@ fn inject_nested_items(
     let mut expanded = Vec::new();
     for item in items {
         let position = item.position;
-        let first_fragment = expanded.len();
         let mut parts = Vec::new();
+        let mut offset = 0_u32;
         for part in item.parts {
-            let inserted = if let SessionTranscriptPart::ToolCall { call_id, .. } = &part {
-                nested.remove(call_id)
+            let reservation = if let SessionTranscriptPart::ToolCall { call_id, .. } = &part {
+                slots.get(call_id).map(|slots| (*call_id, slots))
             } else {
                 None
             };
             parts.push(part);
-            if let Some(calls) = inserted {
+            if let Some((owner, slots)) = reservation {
+                let next = offset
+                    .saturating_add(u32::try_from(parts.len()).unwrap_or(u32::MAX))
+                    .saturating_add(1);
                 expanded.push(SessionTranscriptItem {
                     position,
-                    part_offset: 0,
+                    part_offset: offset,
                     actor: item.actor,
                     provenance: item.provenance,
                     parts: std::mem::take(&mut parts),
                 });
-                for call in calls {
+                for call in nested.remove(&owner).unwrap_or_default() {
+                    let rank = slots
+                        .binary_search(&(call.sequence, call.call_id))
+                        .unwrap_or(slots.len());
                     expanded.push(SessionTranscriptItem {
                         position,
-                        part_offset: 0,
+                        part_offset: next.saturating_add(
+                            u32::try_from(rank).unwrap_or(u32::MAX).saturating_mul(3),
+                        ),
                         actor: Actor::Tool,
                         provenance: Provenance::ToolExecution,
                         parts: vec![
@@ -473,23 +505,23 @@ fn inject_nested_items(
                         ],
                     });
                 }
+                // Reserve slots for every proven child binding, not only
+                // effects that survived this read's window-wide byte budget.
+                offset = next.saturating_add(
+                    u32::try_from(slots.len())
+                        .unwrap_or(u32::MAX)
+                        .saturating_mul(3),
+                );
             }
         }
         if !parts.is_empty() {
             expanded.push(SessionTranscriptItem {
                 position,
-                part_offset: 0,
+                part_offset: offset,
                 actor: item.actor,
                 provenance: item.provenance,
                 parts,
             });
-        }
-        let mut offset = 0_u32;
-        for fragment in &mut expanded[first_fragment..] {
-            fragment.part_offset = offset;
-            offset = offset
-                .saturating_add(u32::try_from(fragment.parts.len()).unwrap_or(u32::MAX))
-                .saturating_add(1);
         }
     }
     expanded
@@ -498,7 +530,7 @@ fn inject_nested_items(
 fn composition_child_owners(ledger: &RuntimeOperationLedger) -> CompositionChildOwners {
     history_composition_child_owners(ledger, MAX_COMPOSITION_RECORDS)
         .into_iter()
-        .map(|(child, evaluation, owner)| ((child, evaluation), owner))
+        .map(|(child, evaluation, owner, _)| ((child, evaluation), owner))
         .collect()
 }
 

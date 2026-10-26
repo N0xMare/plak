@@ -42,7 +42,12 @@ impl App {
         let Some(note) = self.opening_note.clone() else {
             return;
         };
-        blocks.retain(|block| !matches!(block, ScrollBlock::System(text) if *text == note));
+        for at in (0..blocks.len()).rev() {
+            if matches!(&blocks[at], ScrollBlock::System(text) if *text == note) {
+                blocks.remove(at);
+                self.pane.keyed.splice(at, 1, 0);
+            }
+        }
         let position = match &self.opening_note_position {
             None => {
                 let boundary = blocks
@@ -90,6 +95,7 @@ impl App {
         };
         if let Some(position) = position {
             blocks.insert(position, ScrollBlock::System(note));
+            self.pane.keyed.splice(position, 0, 1);
         } else {
             self.opening_note = None;
             self.opening_note_position = None;

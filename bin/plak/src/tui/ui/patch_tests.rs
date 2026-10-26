@@ -32,6 +32,161 @@ fn paint(app: &mut App) -> String {
 }
 
 #[test]
+fn a_mid_turn_patch_keeps_pending_approval_and_local_notices_in_place() {
+    let mut app = App::new(launch_basic(), true);
+    pin_clock(&mut app);
+    app.busy = true;
+    app.render_prefs.group_tool_calls = false;
+    let first = RowKey::new(2, Lane::Runtime, 0);
+    let second = RowKey::new(4, Lane::Runtime, 0);
+    let mut tool = tool_item("parallel", "read_file");
+    tool.state = "running".into();
+    let before = BTreeMap::from([
+        (
+            first,
+            TranscriptRow::Tool(tool_item("approval", "exec_command")),
+        ),
+        (second, TranscriptRow::Tool(tool.clone())),
+    ]);
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(1, &before)));
+    app.apply_host_event(HostEvent::ApprovalRequired {
+        approval_id: "decision".into(),
+        call_id: Some("approval".into()),
+        tool_name: "exec_command".into(),
+        subject: Some("operator decision".into()),
+        prompt: None,
+        expires_at_ms: u64::MAX,
+    });
+    app.push_root_block(super::ScrollBlock::Error("local reload diagnostic".into()));
+    app.push_root_block(super::ScrollBlock::System("local attachment notice".into()));
+    let local = app.pane.blocks[2..].to_vec();
+    tool.state = "done".into();
+    let after = BTreeMap::from([
+        (first, before[&first].clone()),
+        (second, TranscriptRow::Tool(tool)),
+    ]);
+    app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch::between(
+        TranscriptScope::Root,
+        1,
+        2,
+        &before,
+        &after,
+    )));
+    assert_eq!(&app.pane.blocks[2..], local.as_slice());
+    assert!(app.open_approval.is_some());
+    let frame = paint(&mut app).replace('·', " ");
+    assert!(frame.contains("allow") && frame.contains("deny"), "{frame}");
+    assert!(
+        frame.contains("local reload diagnostic") && frame.contains("local attachment notice"),
+        "{frame}"
+    );
+    // A busy resync must not lose the same local blocks either.
+    app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(3, &after)));
+    assert_eq!(&app.pane.blocks[2..], local.as_slice());
+}
+
+#[test]
+fn a_settling_key_moves_its_block_and_local_followers_without_losing_focus() {
+    for (old, answer, expected_tool) in [(1_u64 << 63, 8, 0), (2, 4, 1)] {
+        let mut app = App::new(launch_basic(), true);
+        pin_clock(&mut app);
+        let preview = RowKey::new(old, Lane::Runtime, 0);
+        let committed = RowKey::new(5, Lane::Runtime, 0);
+        let answer = RowKey::new(answer, Lane::Runtime, 0);
+        let tool = TranscriptRow::Tool(tool_item("moving", "read_file"));
+        let before = BTreeMap::from([
+            (preview, tool.clone()),
+            (answer, TranscriptRow::assistant("answer")),
+        ]);
+        app.apply_host_event(HostEvent::PresentationSnapshot(snapshot(1, &before)));
+        let old_tool = usize::from(old > answer.anchor);
+        app.pane.blocks.insert(
+            old_tool + 1,
+            super::ScrollBlock::System("local follower".into()),
+        );
+        app.pane.keyed.splice(old_tool + 1, 0, 1);
+        app.mark_transcript_replaced();
+        app.toggle_tool_expand_at(old_tool);
+        let after = BTreeMap::from([
+            (committed, tool),
+            (answer, TranscriptRow::assistant("answer")),
+        ]);
+        app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch::between(
+            TranscriptScope::Root,
+            1,
+            2,
+            &before,
+            &after,
+        )));
+        assert_eq!(app.pane.focused_block, Some(expected_tool));
+        assert!(matches!(
+            &app.pane.blocks[expected_tool],
+            super::ScrollBlock::Tool { manual: true, .. }
+        ));
+        assert!(
+            matches!(&app.pane.blocks[expected_tool + 1], super::ScrollBlock::System(text) if text == "local follower")
+        );
+        assert_eq!(app.pane.blocks.len(), 3);
+    }
+}
+
+#[test]
+fn patch_block_work_depends_only_on_changed_keys_for_root_and_child() {
+    for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
+        for count in [0_u64, 2_000, 8_000] {
+            let mut app = App::new(launch_basic(), true);
+            pin_clock(&mut app);
+            if matches!(scope, TranscriptScope::Agent(_)) {
+                app.open_agent_view("c1".into(), "child".into());
+            }
+            let key = RowKey::new(count + 1, Lane::Runtime, 0);
+            let mut tool = tool_item("changed", "read_file");
+            tool.state = "running".into();
+            let mut rows: BTreeMap<_, _> = (1..=count)
+                .map(|anchor| {
+                    (
+                        RowKey::new(anchor, Lane::Runtime, 0),
+                        TranscriptRow::assistant("untouched"),
+                    )
+                })
+                .collect();
+            rows.insert(key, TranscriptRow::Tool(tool.clone()));
+            let mut baseline = snapshot(1, &rows);
+            baseline.scope = scope.clone();
+            app.apply_host_event(HostEvent::PresentationSnapshot(baseline));
+            app.push_block(super::ScrollBlock::System("local notice".into()));
+            app.pane.pending_transcript_change = super::TranscriptChange::Unchanged;
+            let work = app.pane.keyed_block_work;
+            let rebuilds = app.pane.keyed_rebuilds;
+            tool.state = "done".into();
+            app.apply_host_event(HostEvent::TranscriptPatch(TranscriptPatch {
+                scope: scope.clone(),
+                from_revision: 1,
+                to_revision: 2,
+                upserts: vec![TranscriptItem {
+                    key,
+                    row: TranscriptRow::Tool(tool),
+                }],
+                deletes: Vec::new(),
+            }));
+            assert_eq!(
+                app.pane.keyed_block_work - work,
+                1,
+                "history={count} scope={scope:?}"
+            );
+            assert_eq!(app.pane.keyed_rebuilds, rebuilds);
+            assert_eq!(
+                app.pane.pending_transcript_change,
+                super::TranscriptChange::Block(count as usize)
+            );
+            assert!(
+                matches!(app.pane.blocks.last(), Some(super::ScrollBlock::System(text)) if text == "local notice")
+            );
+        }
+    }
+}
+
+#[test]
 fn raw_streaming_never_rebuilds_keyed_history_in_root_or_child_panes() {
     use plakous_host_protocol::views::transcript::TranscriptStreamDelta;
     for scope in [TranscriptScope::Root, TranscriptScope::Agent("c1".into())] {
@@ -154,10 +309,10 @@ fn a_revision_gap_keeps_the_frame_and_requests_one_resync_until_replaced() {
     newer.to_revision = 11;
     app.apply_host_event(HostEvent::TranscriptPatch(newer.clone()));
     app.sync_agent_transcript(Some(&tx));
-    assert!(matches!(
-        rx.try_recv().unwrap().into_parts().0,
-        UserAction::ResyncTranscript { .. }
-    ));
+    assert!(
+        rx.try_recv().is_err(),
+        "new evidence does not bypass the retry floor"
+    );
     app.apply_host_event(HostEvent::TranscriptPatch(newer));
     app.sync_agent_transcript(Some(&tx));
     assert!(

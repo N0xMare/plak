@@ -1132,6 +1132,7 @@ mod image_paths;
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod instant_confirm_tests;
+mod keyed;
 mod keys;
 mod launch;
 #[cfg(test)]

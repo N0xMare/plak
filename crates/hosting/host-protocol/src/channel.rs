@@ -1135,8 +1135,21 @@ impl<P: ProtocolExtension> ObservationSender<P> {
             return Ok(());
         }
         if let SessionObservation::TranscriptPatch(next) = &event
-            && let Some((index, previous)) =
-                queue.iter().enumerate().rev().find_map(|(index, queued)| {
+            && let Some((index, previous)) = queue
+                .iter()
+                .enumerate()
+                .rev()
+                .take_while(|(_, queued)| match queued {
+                    SessionObservation::TranscriptPatch(patch) => {
+                        patch.scope != next.scope || patch.to_revision == next.from_revision
+                    }
+                    SessionObservation::PresentationSnapshot(snapshot) => {
+                        snapshot.scope != next.scope
+                    }
+                    SessionObservation::TranscriptStream { scope, .. } => *scope != next.scope,
+                    _ => false,
+                })
+                .find_map(|(index, queued)| {
                     let SessionObservation::TranscriptPatch(previous) = queued else {
                         return None;
                     };

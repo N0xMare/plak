@@ -37,6 +37,12 @@ impl App {
             use plakous_host_protocol::views::transcript::{
                 TranscriptScope, TranscriptStreamDelta,
             };
+            let TranscriptScope::Agent(id) = scope else {
+                return;
+            };
+            if self.viewed_agent_id() != Some(id.as_str()) {
+                return;
+            }
             let event = match delta {
                 TranscriptStreamDelta::Assistant(text) => HostEvent::AssistantDelta(text),
                 TranscriptStreamDelta::AssistantDone => HostEvent::AssistantDone,
@@ -47,14 +53,8 @@ impl App {
                     plakous_host_protocol::views::transcript::TranscriptRow::Tool(*tool),
                 ),
             };
-            match scope {
-                TranscriptScope::Root => self.with_root_pane(|app| app.apply_live_op(event)),
-                TranscriptScope::Agent(id) if self.viewed_agent_id() == Some(id.as_str()) => {
-                    self.semantic_revision = self.semantic_revision.saturating_add(1);
-                    self.apply_live_op(event);
-                }
-                TranscriptScope::Agent(_) => {}
-            }
+            self.semantic_revision = self.semantic_revision.saturating_add(1);
+            self.apply_live_op(event);
             return;
         }
         if self.ends_agent_view(&event) {
@@ -88,7 +88,7 @@ impl App {
         self.with_root_pane(|app| app.apply_root_host_event(event));
     }
 
-    fn install_keyed_transcript(&mut self, resume_stream: bool) {
+    fn install_keyed_transcript(&mut self, resume_stream: bool, keep_local: bool) {
         #[cfg(test)]
         {
             self.pane.keyed_rebuilds += 1;
@@ -99,6 +99,11 @@ impl App {
         }
         let streaming = resume_stream || self.pane.assistant_stream_active;
         self.pane.assistant_stream_active = false;
+        let locals = if keep_local {
+            self.local_keyed_blocks()
+        } else {
+            Vec::new()
+        };
         let rows = self
             .pane
             .presentation
@@ -108,25 +113,7 @@ impl App {
             .collect::<Vec<_>>();
         self.restore_tip_clocks(&rows);
         let full_window = rows.len() == crate::tui::presentation::MAX_SNAPSHOT_ROWS;
-        let mut blocks: Vec<_> = self
-            .pane
-            .presentation
-            .items()
-            .iter()
-            .filter_map(|(key, row)| {
-                let mut block = ScrollBlock::from_row(row.clone())?;
-                if key.anchor >= 1_u64 << 63
-                    && let ScrollBlock::Thinking {
-                        sealed,
-                        elapsed_ms: None,
-                        ..
-                    } = &mut block
-                {
-                    *sealed = false;
-                }
-                Some(block)
-            })
-            .collect();
+        let mut blocks = self.keyed_snapshot_blocks();
         let live_tools: std::collections::BTreeSet<_> = blocks
             .iter()
             .filter_map(|block| match block {
@@ -165,6 +152,7 @@ impl App {
         if root {
             self.restore_opening_note(&mut blocks, full_window);
         }
+        self.restore_local_keyed_blocks(&mut blocks, locals);
         for note in if root {
             self.take_open_notes()
         } else {
@@ -241,6 +229,9 @@ impl App {
                 {
                     return;
                 }
+                let keep_local = self.busy
+                    && self.pane.presentation_ready
+                    && self.pane.presentation.scope() == &snapshot.scope;
                 let scope = snapshot.scope.clone();
                 if let Err(error) = self.pane.presentation.replace(snapshot) {
                     self.pane.blocks.push(ScrollBlock::Error(format!(
@@ -251,7 +242,7 @@ impl App {
                     return;
                 }
                 self.presentation_replaced();
-                self.install_keyed_transcript(true);
+                self.install_keyed_transcript(true, keep_local);
             }
             HostEvent::TranscriptPatch(patch) => {
                 if self.pane.resync.is_some() {
@@ -260,12 +251,14 @@ impl App {
                 }
                 let scope = patch.scope.clone();
                 let from_revision = patch.from_revision;
+                let upserts = patch.upserts.iter().map(|item| item.key).collect();
+                let deletes = patch.deletes.clone();
                 if !self.pane.presentation_ready || self.pane.presentation.apply(patch).is_err() {
                     self.pane.resync = Some(scope);
                     self.rearm_transcript_resync(from_revision);
                     return;
                 }
-                self.install_keyed_transcript(false);
+                self.patch_keyed_blocks(upserts, deletes);
             }
             _ => {}
         }
@@ -307,10 +300,11 @@ impl App {
                             .saturating_sub(self.pane.blocks[index].retained_bytes())
                             .saturating_add(block.retained_bytes());
                         self.pane.blocks[index] = block;
+                        self.note_live_block(index);
                         self.mark_block_changed(index);
                         return;
                     }
-                    self.push_block(block);
+                    self.push_live_block(block);
                 }
             }
             HostEvent::AssistantDelta(delta) => {
@@ -326,11 +320,13 @@ impl App {
                         self.phase_started = Some(self.now());
                     }
                     self.pane.blocks.push(ScrollBlock::Assistant(delta));
+                    self.note_live_block(self.pane.blocks.len() - 1);
                     self.pane.assistant_stream_active = true;
                 } else if let Some(ScrollBlock::Assistant(text)) = self.pane.blocks.last_mut() {
                     text.push_str(&delta);
                 } else {
                     self.pane.blocks.push(ScrollBlock::Assistant(delta));
+                    self.note_live_block(self.pane.blocks.len() - 1);
                 }
                 self.enforce_transcript_retention();
                 if starts_block {
@@ -537,7 +533,7 @@ impl App {
                     }
                     return;
                 }
-                self.push_block(ScrollBlock::Tool {
+                self.push_live_block(ScrollBlock::Tool {
                     call_id,
                     parent_call_id,
                     cell_id,
@@ -580,7 +576,7 @@ impl App {
                     self.enforce_transcript_retention();
                     self.mark_block_changed(idx);
                 } else {
-                    self.push_block(ScrollBlock::Thinking {
+                    self.push_live_block(ScrollBlock::Thinking {
                         location_key,
                         text,
                         sealed: false,
@@ -719,7 +715,7 @@ impl App {
             }
             HostEvent::UserMessage { text, sent_at_ms } => {
                 self.retire_started_draft();
-                self.push_block(ScrollBlock::User { text, sent_at_ms });
+                self.push_live_block(ScrollBlock::User { text, sent_at_ms });
             }
             HostEvent::ModelRefusal { detail } => {
                 let message = detail.map_or_else(

@@ -145,7 +145,11 @@ impl Presentations {
         if sink.transcript_resnapshot_required_for(&snapshot.scope) {
             return self.snapshot(snapshot, sink);
         }
-        let Some(before) = self.states.get(&snapshot.scope) else {
+        let Some(before) = self
+            .states
+            .get(&snapshot.scope)
+            .filter(|state| state.revision() != 0)
+        else {
             return self.snapshot(snapshot, sink);
         };
         let Some(revision) = sink.next_presentation_revision() else {

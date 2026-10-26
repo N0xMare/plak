@@ -29,6 +29,23 @@ pub(crate) struct TranscriptSelection {
 }
 
 impl TranscriptSelection {
+    pub(crate) fn remap_blocks(&mut self, remap: impl Fn(usize) -> Option<usize>) {
+        let map = |anchor: Option<(usize, usize)>| {
+            anchor.and_then(|(block, row)| remap(block).map(|block| (block, row)))
+        };
+        let anchor = map(self.block_anchor);
+        let head = map(self.block_head);
+        if self.block_anchor.is_some() && anchor.is_none()
+            || self.block_head.is_some() && head.is_none()
+        {
+            self.clear();
+            return;
+        }
+        self.block_anchor = anchor;
+        self.block_head = head;
+        self.projection_revision = None;
+    }
+
     pub(crate) fn capture_blocks(&mut self, layout: &LineLayout) {
         self.block_anchor = self
             .anchor
