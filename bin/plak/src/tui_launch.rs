@@ -4,7 +4,6 @@ use std::env;
 use std::io::{self, IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use plakous::agent::ReasoningEffort;
@@ -42,7 +41,7 @@ use crate::{
 fn settle_tui_round(
     ui: Result<tui::TuiOutcome, tui::TuiError>,
     persistent_tui: &mut Option<tui::PersistentTerminal>,
-    join: thread::JoinHandle<CliResult<()>>,
+    join: plakous_hosted::runtime::HostWorkerHandle,
     host_mailbox: surface_protocol::UserActionSender,
     label: &str,
     store: &dyn store::session_records::SessionRecordStore,

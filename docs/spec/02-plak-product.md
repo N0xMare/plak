@@ -2238,6 +2238,7 @@ not have or a command that would only print help.
 | 4 | the turn was interrupted, or `SIGTERM` or `SIGHUP` stopped the process |
 | 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
 | 6 | `plak run` reached its admitted-turn or wall-clock bound |
+| 130 | quit exhausted its terminal join and selected lease-only abandonment; an idle quit or a quit whose terminal joined still exits 0 |
 | 1 | anything else, including an invalid `config.toml` |
 
 Bare `plak status` exits 0 when it has printed the table. A provider whose
@@ -3738,6 +3739,20 @@ it. Long-running host
 operations — compact, rebind, fork — poll the interrupt channel so `Esc` is not
 silently swallowed while they run.
 
+Before root-turn admission the host reports `preparing` and busy presentation;
+busy is not an admission receipt. Native authority
+refresh, wait-receipt settlement and tree projection use the same watched
+mechanism: the current step reaches its receipt, rather than dropping a
+partly committed operation. Interrupt stops at the next checkpoint, before
+scheduled compaction or root dispatch. Quit stays in the ordinary FIFO but
+also prevents preparation from starting a turn ahead of it. Stopped preparation
+leaves the exact prompt and images queued, durably pauses drain and returns
+to idle; it neither admits nor cancels or abandons a root turn. Other ordinary
+intents remain deferred in arrival order. A later explicit retry starts with
+a fresh interrupt watch. Paid canonical operations already dispatched still
+run to their own receipts. A stopped one-shot reports interruption without
+manufacturing a root-turn terminal.
+
 The UI paints one last frame reading `quitting…` and stops reading input.
 Restoration disables mouse reporting, bracketed paste, keyboard enhancement
 flags and focus events, discards queued tty input, ends raw mode, leaves the
@@ -3782,7 +3797,14 @@ An idle quit or one whose terminal joined uses normal joined release, including
 child retirement and its failures; it retains the settled terminal and pauses
 the queue. Only when no terminal joined at the bound does a host-local
 escalation flag select lease-only abandonment of the root and live children
-(chapter 01 §2.4). An unsettled cancel is reported with its timeout in ms.
+(chapter 01 §2.4). That selection records a typed, process-local quit receipt
+on the host worker handle before cleanup finishes. The TUI reads it after
+restoring the terminal without extending its release bound; JSONL receives
+the same typed outcome when joining the host. An escalated quit exits **130**;
+an idle quit, or one whose terminal joined, exits **0**. A frontend's cancel
+dialog, pending-cancel flag or elapsed exit deadline alone cannot select 130.
+The receipt is not a turn terminal, wire record or persisted state. An
+unsettled cancel is reported with its timeout in ms.
 Before release, the host stops admission; it writes no
 handoff. Whatever the runtime committed while stopping (a cancelled terminal,
 stopped-process records, the lease release) is in the feed, and the projector
@@ -4478,8 +4500,8 @@ sent the root a prompt or steer in this session (auto-continue wakes do not
 count), coarse (`9s`, then `25m`, then `3h05m`) and repainted only when that
 text changes. A narrow line drops the `last user prompt ·` words before the
 hint labels, and the clock itself before the keys. The clock lives in the
-TUI's memory and is reset by a session switch. It survives `/reload`, resume,
-fork and rebind without storing anything new: every attach of a root session
+TUI's memory and is reset by a session switch. It survives `/reload`, resume
+and rebind without storing anything new: every attach of a root session
 sends one in-process `LastUserPromptAt` observation (presentation-only,
 omitted from JSONL, never persisted) carrying the Unix milliseconds of the
 newest operator prompt or steer in the attached branch's committed canonical
@@ -4489,7 +4511,16 @@ sent since is newer, and an empty read keeps what it shows. The time is the
 one the driver stamped into the entry's `UUIDv7` identity; host wakes, mail,
 harness notes and compaction entries are skipped, and so is any entry whose
 identity is not version 7, so a session whose prompts were all compacted away
-shows no clock until the next prompt. The workspace facts
+shows no clock until the next prompt.
+
+For a fork and its later rebind successors, the projected branch lineage and
+operator rows additionally prove that the operator wrote after the fork
+boundary. Host wakes and unaccepted queued input do not qualify. A new fork
+therefore has no clock even though it carries the source's canonical history;
+exact resume restores only its own clock. This uses existing intents and views,
+not a new persisted timestamp.
+
+The workspace facts
 `~/path · branch` sit right-aligned in the composer's bottom border, styled
 like the profile id in the top border, with at least one border cell left
 after the corner. A narrow border shortens the path to its tail behind `…`
@@ -4606,6 +4637,8 @@ composer for editing and **never submits it**; typing leaves browse mode.
 History is host-authoritative, scoped to the exact session, bounded, and
 duplicate-suppressed; it survives restart and exact resume as product data and
 is never reconstructed into canonical history.
+Fork and clear successors start with an empty shelf; the source shelf stays
+unchanged. Rebind preserves the shelf of the conversation it carries.
 
 When a context-capacity stop has saved prompt history, the recovery panel says
 the prompt is saved and names the empty-composer `↑` shelf and `Enter`/`←`

@@ -636,7 +636,9 @@ fn quit_during_active_turn_waits_for_cancelled_terminal_projection() {
         let event = events
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             .unwrap();
-        if event == HostEvent::SetBusy(true) {
+        if matches!(event, HostEvent::TurnLifecycle(lifecycle)
+            if lifecycle.phase == plakous_host_protocol::TurnPhase::Admitted)
+        {
             break;
         }
     }
@@ -674,7 +676,9 @@ fn interrupt_then_quit_publishes_the_cancelled_terminal() {
         let event = events
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             .unwrap();
-        if event == HostEvent::SetBusy(true) {
+        if matches!(event, HostEvent::TurnLifecycle(lifecycle)
+            if lifecycle.phase == plakous_host_protocol::TurnPhase::Admitted)
+        {
             break;
         }
     }

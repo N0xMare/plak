@@ -132,7 +132,7 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     let _ = events.send(ContentEvent::ClearView);
     // The new session's header, as a restore of it would show.
     let _ = events.replace_transcript(project_session_snapshot(&config.session));
-    send_last_user_prompt_at(events, opened);
+    send_last_user_prompt_at(events, config, opened);
     if let Err(error) = report_context(
         executor,
         opened,
@@ -408,7 +408,7 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
     if let Some(release) = release {
         config.source_releases.track(release);
     }
-    send_last_user_prompt_at(events, opened);
+    send_last_user_prompt_at(events, config, opened);
     if let Err(error) = report_context(
         executor,
         opened,

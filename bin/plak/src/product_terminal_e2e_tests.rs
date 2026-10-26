@@ -1061,7 +1061,7 @@ fn injected_real_pty_long_work_transitions_remain_ordered_and_reopen_quiescent()
             read_evidence(&evidence).unwrap_or_default()
         )
     })?;
-    assert_eq!(forked.prompt_history, [FIRST, FOLLOW_UP, AFTER_FORK]);
+    assert_eq!(forked.prompt_history, [AFTER_FORK]);
     {
         let mut store = crate::store::ProductStore::open(&paths)?;
         let source_id = forked

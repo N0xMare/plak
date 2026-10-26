@@ -45,6 +45,49 @@ fn detached_clear_publishes_binding_before_clear_view_and_target_transcript() {
     );
 }
 
+#[test]
+fn a_shell_queue_edit_emits_exactly_one_success_receipt() {
+    let root = tempfile::tempdir().unwrap();
+    let home_dir = root.path().join("home");
+    let store = Arc::new(crate::session_store::MemoryStore::new());
+    let mut session = SessionRecord::new(root.path().to_path_buf());
+    queue::enqueue(&mut session.pending_queue, "before").unwrap();
+    store.save(&mut session).unwrap();
+    let item = session.pending_queue[0].clone();
+    let mut config = ShellHostConfig {
+        surface: test_kit::recording_surface(),
+        binding: Arc::new(test_kit::MemoryBindingDocument::empty()),
+        subscriptions: None,
+        openrouter_credentials: Arc::new(crate::agent::roots::doubles::NoOpenRouterCredential),
+        home: SessionHome::new(home_dir.join("sessions")),
+        store,
+        product_home: home_dir,
+        session,
+        cwd: root.path().to_path_buf(),
+        reason: "test".into(),
+        ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
+    };
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let sender = Sender::over(wire);
+    handle_shell_queue_edit(
+        &mut config,
+        &sender,
+        ShellQueueEdit::Edit {
+            id: item.id.clone(),
+            revision: item.revision,
+            text: "after".into(),
+        },
+    );
+    assert_eq!(
+        events
+            .try_iter()
+            .filter(|event| matches!(event, HostEvent::QueueEditApplied { id } if id == &item.id))
+            .count(),
+        1
+    );
+    assert_eq!(config.session.pending_queue[0].text, "after");
+}
+
 /// An OpenRouter root binds the wire its template names on the
 /// gateway-managed route; a direct API root binds its account's route.
 /// Effort and composition follow what a new session from that template

@@ -20,8 +20,10 @@
 //! not consume ordinary product work, and `Quit` is documented by the control
 //! mailbox as observed only after accepted ordinary work: an operation the
 //! host already admitted runs to its own receipt and the loop then ends the
-//! host. Cancelling a paid canonical operation midway is
-//! forbids.
+//! host. Cancelling a paid canonical operation midway is forbidden.
+//! Pre-turn preparation also uses this watch, but has not admitted a root
+//! turn: its checkpoints stop for either Interrupt or deferred Quit before
+//! compaction or root dispatch, after the current step reaches its receipt.
 //!
 //! That order holds across a turn boundary as well as inside the idle loop:
 //! the drive loop takes from [`InterruptWatchState::take_deferred`] before it
@@ -123,6 +125,19 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
     /// Whether an interrupt has been observed since [`Self::begin`].
     pub(crate) fn interrupted(self) -> bool {
         self.state.borrow().interrupted
+    }
+
+    /// Preparation has no admitted operation to finish after its current
+    /// receipt. Leave Quit in FIFO order, but never start a turn ahead of it.
+    pub(crate) fn preparation_stopped(self) -> bool {
+        self.poll();
+        let state = self.state.borrow();
+        state.interrupted
+            || state
+                .deferred
+                .iter()
+                .any(|delivery| matches!(&**delivery, UserAction::Quit))
+            || self.actions.abandon_and_release_requested()
     }
 
     /// Polls the mailbox first, then reports whether an interrupt is pending.

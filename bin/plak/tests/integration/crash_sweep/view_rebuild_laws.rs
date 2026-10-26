@@ -26,7 +26,18 @@ fn full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_s
         let (seed, session) = setup(shape);
         let fixture = seed.fork(&shapes::script(shape));
         let outcome = lifecycle(&fixture, &session, shape, None, None);
-        assert!(outcome.status.success(), "{shape}: {}", outcome.stderr);
+        // A deaf busy quit deliberately abandons by lease only, reporting 130.
+        let expected_exit = if *shape == "busy_quit_escalates" {
+            130
+        } else {
+            0
+        };
+        assert_eq!(
+            outcome.status.code(),
+            Some(expected_exit),
+            "{shape}: {}",
+            outcome.stderr
+        );
         summary::read_converged(&fixture);
         let paths = summary::paths(&fixture);
         let incremental = view_snapshot::snapshot(&paths);

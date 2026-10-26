@@ -409,6 +409,9 @@ pub(super) fn refuse_detached_recovery_action<P: plakous_host_protocol::Protocol
     }
 }
 
+// Shell, attached idle, and attached turn-drive are exclusive mailbox owners:
+// shell transfers its receiver on attach; HostLoop joins drive_one_turn before
+// reading again. Each delivery is removed once, and only its owner emits this.
 pub(super) fn queue_edit_applied<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     id: String,

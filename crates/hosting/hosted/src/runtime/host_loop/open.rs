@@ -401,7 +401,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             &config.session,
         ));
         emit_prompt_history(&events, &config.session);
-        super::super::info::send_last_user_prompt_at(&events, &opened);
+        super::super::info::send_last_user_prompt_at(&events, &config, &opened);
         emit_queue_snapshot(&events, &config.session);
         let mut restored_recovery_blocked = false;
         if opened.has_recovered_turn() {

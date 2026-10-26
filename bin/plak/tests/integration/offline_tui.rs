@@ -2656,7 +2656,7 @@ fn resuming_another_builds_session_carries_it_once_through_its_snapshot() {
 
 #[test]
 fn tui_exit_bound_idle_and_stalled_turn() {
-    for stalled in [false, true] {
+    for (stalled, ctrl_c) in [(false, false), (true, false), (true, true)] {
         let mut script = stalled_then_answers(30_000);
         // A deaf provider cannot settle cancellation. Exit must not join it.
         script["stall_ignores_cancellation"] = json!(true);
@@ -2668,13 +2668,23 @@ fn tui_exit_bound_idle_and_stalled_turn() {
             fixture.wait_for_provider_dispatch();
             terminal.wait_screen("waiting for model");
         }
-        terminal.send(b"\x11");
-        if stalled {
+        if ctrl_c {
+            terminal.send(b"\x03");
+            terminal.wait_screen("Stop this turn?");
+            terminal.send(b"\r");
+            terminal.wait_screen("cancelling");
+        } else {
+            terminal.send(b"\x11");
+        }
+        if stalled && !ctrl_c {
             // Mid-turn quit asks first; the bound runs from `[ Quit ]`.
             terminal.wait_screen("Quit plak?");
         }
         let started = Instant::now();
-        if stalled {
+        if ctrl_c {
+            // A stuck cancel's confirmed Ctrl+C ladder quits without a new dialog.
+            terminal.send(b"\x03\x03");
+        } else if stalled {
             terminal.send(b"\r");
         }
         while terminal.is_alive() {
@@ -2685,8 +2695,16 @@ fn tui_exit_bound_idle_and_stalled_turn() {
             std::thread::sleep(Duration::from_millis(5));
         }
         let elapsed = started.elapsed();
-        assert!(terminal.finish().success());
-        eprintln!("TUI quit stalled={stalled}: {}ms", elapsed.as_millis());
+        let status = terminal.finish();
+        assert_eq!(
+            status.exit_code(),
+            if stalled { 130 } else { 0 },
+            "stalled={stalled}, ctrl_c={ctrl_c}: {status:?}"
+        );
+        eprintln!(
+            "TUI quit stalled={stalled}, ctrl_c={ctrl_c}: {}ms",
+            elapsed.as_millis()
+        );
     }
 }
 

@@ -253,12 +253,20 @@ fn assert_target(path: &str, source_id: String, target: &SessionRecord, observed
             "fixture must exercise a nonempty target queue"
         );
     }
-    if matches!(path, "fork" | "rebind") {
+    // Rebind keeps the shelf of the conversation it carries; a fork starts
+    // with an empty shelf, and the source's UI history never leaks into it.
+    if path == "rebind" {
         assert!(
             app.prompt_history
                 .iter()
                 .any(|text| text == "source canonical history"),
-            "canonical prompt must survive: {observed:#?}"
+            "rebind keeps the carried shelf: {observed:#?}"
+        );
+    }
+    if path == "fork" {
+        assert!(
+            app.prompt_history.is_empty(),
+            "a fork starts with an empty shelf: {observed:#?}"
         );
     }
 }

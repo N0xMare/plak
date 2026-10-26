@@ -14,6 +14,8 @@ use crate::runtime::admission::{QueuePersistAction, log_queue_persist_failed};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 
+mod preparation;
+
 struct PromptInput {
     user_text: String,
     queued_delivery: Option<SessionQueueItem>,
@@ -78,7 +80,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
         let before_recovery = self.recovery_blocked;
         let before_drain = self.config.session.queue_drain_state;
+        let _ = self.events.send(ContentEvent::SetBusy(true));
         let outcome = self.run_prompt_inner(raw_text, queued_delivery, user_echoed, one_shot);
+        let _ = self.events.send(ContentEvent::SetBusy(false));
         if let Some(intent) = &wake
             && let Err(error) =
                 self.discard_undispatched_wake(intent, before_recovery, before_drain)
@@ -204,22 +208,44 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .as_ref()
             .map(|item| std::sync::Arc::clone(&item.images))
             .unwrap_or_default();
+        let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
+        watch.begin();
+        let _ = self.events.send(ContentEvent::Status {
+            phase: "preparing".into(),
+            queue_len: self.config.session.pending_queue.len(),
+            detail: None,
+        });
         if let std::ops::ControlFlow::Break(()) =
             self.prepare_prompt_authority(host_authored, transient_resume, &mut one_shot)?
         {
+            emit_terminal_status(
+                &self.events,
+                if self.recovery_blocked {
+                    TerminalPhase::RecoveryPending
+                } else {
+                    TerminalPhase::AdmissionRejected
+                },
+                self.config.session.pending_queue.len(),
+            );
             return Ok(HostStep::Continue);
         }
         let rows = self.config.topology_rows();
-        self.executor
-            .block_on(super::super::projection::project_tree(
+        preparation::run_step(
+            &self.executor,
+            InterruptWatch::new(self.actions, &self.interrupt_state),
+            preparation::Stage::Tree,
+            super::super::projection::project_tree(
                 self.opened.sessions(),
                 &rows,
                 &durable_tree_id(&rows, &self.config.session),
                 self.opened.locator().session_id(),
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
-
+            ),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map_err(CliFailure::new)?;
+        if self.stop_preparation(&mut one_shot)? {
+            return Ok(HostStep::Continue);
+        }
         // A replayed delivery's command and batch are immutable.
         let mut replayed_mail = false;
         let (canonical_command, selected_mail) = if let Some(intent) = queued_delivery
@@ -291,19 +317,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             ));
             return Ok(std::ops::ControlFlow::Break(()));
         }
+        if self.stop_preparation(one_shot)? {
+            return Ok(std::ops::ControlFlow::Break(()));
+        }
 
         // Receipts a terminal could not settle (its settlement failed, or it
         // left no authoritative result) settle from committed history before
         // anything is dispatched, and before mail selection so restored mail
         // rides this command (spec 03 section 4.4).
-        if let Err(error) = self
-            .executor
-            .block_on(super::super::result_mail::settle_waits(
+        if let Err(error) = preparation::run_step(
+            &self.executor,
+            InterruptWatch::new(self.actions, &self.interrupt_state),
+            preparation::Stage::Settle,
+            super::super::result_mail::settle_waits(
                 &self.config.topology_rows(),
                 &self.config.session,
                 &self.opened,
-            ))
-            .unwrap_or_else(|_| Err("application execution failed".to_owned()))
+            ),
+        )
+        .unwrap_or_else(|_| Err("application execution failed".to_owned()))
         {
             if let Some(state) = one_shot.as_deref_mut() {
                 state.result = Some(Err(CliFailure::new(error.clone())));
@@ -312,6 +344,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 NoticeScope::Tree,
                 format!("wait receipt settlement failed: {error}"),
             ));
+            return Ok(std::ops::ControlFlow::Break(()));
+        }
+        if self.stop_preparation(one_shot)? {
             return Ok(std::ops::ControlFlow::Break(()));
         }
 
@@ -394,6 +429,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.session.context_counters(),
             enrolled_source_bytes,
         );
+        if self.stop_preparation(&mut one_shot)? {
+            return Ok(HostStep::Continue);
+        }
         if !host_authored && pending_context.compaction_verdict().is_due() {
             if self.config.compaction_enabled {
                 // A scheduled compact is one paid round-trip the host blocks
@@ -498,6 +536,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             }
         }
 
+        if self.stop_preparation(&mut one_shot)? {
+            return Ok(HostStep::Continue);
+        }
         self.dispatch_prompt(
             PromptInput {
                 user_text,
@@ -906,12 +947,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// admission. Exact reopen owns the semantic comparison and historical
     /// obligations; ordinary rebind would publish a new branch/tree epoch.
     pub(super) fn refresh_native_authority_before_prompt(&mut self) -> CliResult<()> {
-        let changed = self
-            .executor
-            .block_on(super::super::startup::refresh_native_target(
-                &mut self.config,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))??;
+        let changed = preparation::run_step(
+            &self.executor,
+            InterruptWatch::new(self.actions, &self.interrupt_state),
+            preparation::Stage::Refresh,
+            super::super::startup::refresh_native_target(&mut self.config),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))??;
         self.reopen_after_native_authority_refresh(changed)
     }
 

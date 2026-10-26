@@ -723,6 +723,23 @@ fn successor_from_fact(
 }
 
 #[test]
+fn fork_starts_its_own_prompt_history_without_changing_the_source() {
+    let mut source = bound_session("/work/fork-history");
+    source.record_prompt("source-only prompt".into());
+    let mut fork = successor_from_fact(
+        &source,
+        "plak:fork:history",
+        locator(3),
+        SessionWorkflowKind::Fork,
+        branch_locator(8, 10),
+    );
+    assert_eq!(fork.prompt_history, [] as [String; 0]);
+    fork.record_prompt("fork-only prompt".into());
+    assert_eq!(fork.prompt_history, ["fork-only prompt"]);
+    assert_eq!(source.prompt_history, ["source-only prompt"]);
+}
+
+#[test]
 fn branch_record_preserves_presentation_but_not_pending_work() {
     let mut source = bound_session("/work/branch");
     source.target_selection = openrouter_target();

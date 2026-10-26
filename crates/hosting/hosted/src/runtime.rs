@@ -187,6 +187,7 @@ pub(crate) use resources::sample_children_rusage_cumulative;
 pub use resources::sample_process_resources;
 pub use source_release::SourceReleases;
 pub use startup::HostWorker;
+mod worker;
 pub use startup::spawn_deferred_tui_host;
 pub use startup::spawn_deferred_tui_host_with_clear_publication;
 pub use startup::spawn_host_worker;
@@ -203,6 +204,7 @@ pub use topology_state::{
     durable_tree_id as durable_topology_tree_id, epoch_rebind_refusal, install_successor_epoch,
     requires_explicit_resume, resume_tree,
 };
+pub use worker::{HostQuitOutcome, HostWorkerHandle};
 
 /// Product read-model bounds. Canonical conversation authority remains in
 /// Plakous; these limits only bound Plak's editable queue and UI projections.
@@ -249,6 +251,7 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     notices: Arc<std::sync::Mutex<VecDeque<PendingNoticeIntent>>>,
     presentations: Arc<std::sync::Mutex<projection::transcript::Presentations>>,
     session_id: Option<Arc<str>>,
+    quit_receipt: worker::QuitReceipt,
 }
 
 /// An authored notice intent the host has not committed yet.
@@ -274,6 +277,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             notices: Arc::default(),
             presentations: Arc::default(),
             session_id: None,
+            quit_receipt: worker::QuitReceipt::default(),
         }
     }
     /// A clone for a publisher that outlives the host's current step (a
@@ -285,6 +289,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             notices: Arc::clone(&self.notices),
             presentations: Arc::clone(&self.presentations),
             session_id: Some(Arc::from(session_id)),
+            quit_receipt: self.quit_receipt.clone(),
         }
     }
     /// Publish producer content; false when the driver has gone. Keyed
@@ -1275,6 +1280,9 @@ struct PendingApproval {
 /// inventing structure.
 #[derive(Debug)]
 struct TurnProjection<P: plakous_host_protocol::ProtocolExtension> {
+    /// Bounded keyed tool observations for a late child face. Canonical rows
+    /// supersede these at attach; they are never persistence authority.
+    child_tools: VecDeque<HostEvent<P>>,
     progress: events::progress::Progress,
     reasoning: HashMap<(u32, u32), ReasoningLocation>,
     /// Reasoning blocks the in-flight model response sealed, persisted once
@@ -1324,6 +1332,7 @@ struct TurnProjection<P: plakous_host_protocol::ProtocolExtension> {
 impl<P: plakous_host_protocol::ProtocolExtension> Default for TurnProjection<P> {
     fn default() -> Self {
         Self {
+            child_tools: VecDeque::new(),
             progress: events::progress::Progress::default(),
             reasoning: HashMap::new(),
             unsettled_thinking: Vec::new(),

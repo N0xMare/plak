@@ -131,7 +131,7 @@ pub fn spawn_shell_host(
 ) -> (
     crate::surface_protocol::UserActionSender,
     crate::surface_protocol::HostEventReceiver,
-    std::thread::JoinHandle<crate::CliResult<()>>,
+    plakous_hosted::runtime::HostWorkerHandle,
 ) {
     spawn_shell_host_with_clear_publication(config, None)
 }
@@ -144,12 +144,12 @@ pub fn spawn_shell_host_with_clear_publication(
 ) -> (
     crate::surface_protocol::UserActionSender,
     crate::surface_protocol::HostEventReceiver,
-    std::thread::JoinHandle<crate::CliResult<()>>,
+    plakous_hosted::runtime::HostWorkerHandle,
 ) {
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let event_tx = Sender::over(event_tx);
-    let handle = std::thread::spawn(move || {
+    let handle = plakous_hosted::runtime::HostWorkerHandle::spawn(move || {
         run_shell_host_loop(config, action_rx, event_tx, clear_publication);
         Ok(())
     });

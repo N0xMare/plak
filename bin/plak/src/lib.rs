@@ -247,12 +247,14 @@ fn local_time_zone() -> &'static jiff::tz::TimeZone {
 
 /// Run the Plak CLI with an explicit argument list (excluding argv0).
 ///
-/// Exit codes (spec 02 §3.3): 0 ok, 2 usage/limit, 3 auth, 4 cancel, 5 agent, else 1.
+/// Exit codes (spec 02 §3.3): 0 ok, 2 usage, 3 auth, 4 cancel, 5 agent,
+/// 6 run bound, 130 escalated quit, else 1.
 #[must_use]
 pub fn run_from_args(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     match run(arguments) {
         Ok(ProcessOutcome::Success) => ExitCode::SUCCESS,
         Ok(ProcessOutcome::Interrupted) => ExitCode::from(4),
+        Ok(ProcessOutcome::EscalatedQuit) => ExitCode::from(130),
         Ok(ProcessOutcome::Bounded) => ExitCode::from(6),
         Err(failure) => {
             eprintln!(

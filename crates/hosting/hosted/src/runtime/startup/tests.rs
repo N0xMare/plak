@@ -388,7 +388,7 @@ fn failed_startup_is_joined_before_error_returns() {
     let (startup_tx, startup_rx) = std::sync::mpsc::channel();
     let joined = Arc::new(AtomicBool::new(false));
     let thread_joined = Arc::clone(&joined);
-    let handle = thread::spawn(move || {
+    let handle = HostWorkerHandle::spawn(move || {
         startup_tx.send(Err("startup refused".to_owned())).unwrap();
         thread::sleep(Duration::from_millis(20));
         thread_joined.store(true, Ordering::Release);
@@ -408,7 +408,7 @@ fn failed_startup_preserves_recovery_required_class_after_join() {
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     drop(event_tx);
     let (startup_tx, startup_rx) = std::sync::mpsc::channel();
-    let handle = thread::spawn(move || {
+    let handle = HostWorkerHandle::spawn(move || {
         startup_tx.send(Err("unfinished head".to_owned())).unwrap();
         Err(CliFailure::recovery_required("unfinished head"))
     });

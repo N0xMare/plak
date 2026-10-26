@@ -7,6 +7,8 @@ pub enum ProcessOutcome {
     Success,
     /// Workflow was interrupted before completion.
     Interrupted,
+    /// Quit exhausted its terminal join and selected lease-only abandonment.
+    EscalatedQuit,
     /// The non-interactive run reached an operator bound.
     Bounded,
 }

@@ -3,6 +3,8 @@
 use crate::surface_protocol::HostEvent;
 
 #[cfg(test)]
+mod preparation_tests;
+#[cfg(test)]
 mod terminal_storage_tests;
 
 #[test]
@@ -786,6 +788,13 @@ fn busy_send_now_recovers_after_ack_projection_debt_without_waiting_for_idle() {
             ..
         }
     ));
+    assert_eq!(
+        seen.borrow()
+            .iter()
+            .filter(|event| event.starts_with("QueueEditApplied {"))
+            .count(),
+        1
+    );
     actions.send(UserAction::Quit).unwrap();
     worker.join().unwrap().unwrap();
 }

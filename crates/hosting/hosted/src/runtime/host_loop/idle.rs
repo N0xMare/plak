@@ -174,6 +174,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             },
                         );
                     }
+                    super::log_ev(
+                        self.log.as_ref(),
+                        &self.config,
+                        super::SessionEvent::new("session.quit"),
+                    );
                     return Ok(HostStep::Quit);
                 }
                 Ok(action @ (UserAction::Prompt(_) | UserAction::FollowUp(_))) => {

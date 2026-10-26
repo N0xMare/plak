@@ -462,7 +462,14 @@ fn quit_grace_fixture(deaf: bool, quit: QuitIntent, stuck_child: bool) {
         let error = result.expect_err("a settled quit must report failed child retirement");
         assert!(error.message().contains("child retirement"), "{error:?}");
     } else {
-        result.unwrap();
+        assert_eq!(
+            result.unwrap(),
+            if joined {
+                super::HostQuitOutcome::Clean
+            } else {
+                super::HostQuitOutcome::Escalated
+            }
+        );
     }
     let quit_elapsed = quit_started.elapsed();
     assert!(

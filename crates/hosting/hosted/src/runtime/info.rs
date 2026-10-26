@@ -62,11 +62,81 @@ pub fn effort_label(effort: ReasoningEffort) -> String {
 /// Seeds the idle clock of a surface after an attach (spec 02 §5.4).
 pub(super) fn send_last_user_prompt_at<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
+    config: &HostConfig<P>,
     opened: &crate::agent::AttachedCodingSession,
 ) {
-    let _ = events.send(ContentEvent::LastUserPromptAt(
+    let _ = events.send(ContentEvent::LastUserPromptAt(fork_scoped_prompt_at(
+        config.store.as_ref(),
+        &config.session,
         opened.last_operator_input_unix_ms(),
-    ));
+    )));
+}
+
+/// A fork inherits canonical history, not its source's operator clock. The
+/// projected lineage and rows prove an operator has written since that fork;
+/// rebinds preserve the boundary, and host-authored wakes create no user row.
+fn fork_scoped_prompt_at(
+    store: &dyn crate::session_store::SessionRecordStore,
+    session: &SessionRecord,
+    canonical: Option<u64>,
+) -> Option<u64> {
+    use crate::sessions::TranscriptRow;
+    use crate::sessions::projector::WorkflowSettlement;
+    let mut current = session.clone();
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        if !seen.insert(current.id.clone()) {
+            return None;
+        }
+        let (Some(source), Some(operation)) = (
+            current.source_product_session_id.as_deref(),
+            current.source_workflow_operation_id.as_deref(),
+        ) else {
+            return canonical;
+        };
+        if current.carried_forward_from().is_some() {
+            return canonical;
+        }
+        let source_intents = store.load_intents(source).ok()?;
+        let request = source_intents.workflow_request(operation)?;
+        match request.kind {
+            crate::sessions::SessionWorkflowKind::Fork => {
+                let source_views = store.load_views(source).ok()??;
+                let WorkflowSettlement::Published { target } = source_views
+                    .state
+                    .workflows
+                    .get(operation)?
+                    .settled
+                    .as_ref()?
+                else {
+                    return None;
+                };
+                let views = store.load_views(&session.id).ok()??;
+                let boundary = views
+                    .state
+                    .lineage
+                    .iter()
+                    .find(|step| step.branch_id == target.branch_id)?
+                    .from_seq;
+                return views
+                    .rows
+                    .iter()
+                    .any(|(key, row)| {
+                        key.anchor > boundary
+                            && matches!(
+                                row,
+                                TranscriptRow::User { .. } | TranscriptRow::Steer { .. }
+                            )
+                    })
+                    .then_some(canonical)
+                    .flatten();
+            }
+            crate::sessions::SessionWorkflowKind::Rebind(_) => {
+                current = store.load(source).ok()?;
+            }
+            _ => return canonical,
+        }
+    }
 }
 
 pub(super) fn send_binding<P: plakous_host_protocol::ProtocolExtension>(

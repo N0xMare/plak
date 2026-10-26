@@ -196,6 +196,29 @@ impl ChildTurnProjection {
                         };
                         projection.gap_observed |= gap;
                         let mut ops = super::child_live::transcript_ops(&event, projection);
+                        for op in &ops {
+                            if let HostEvent::ToolLine {
+                                call_id: Some(id), ..
+                            } = op
+                            {
+                                if let Some(kept) = projection.child_tools.iter_mut().find(|kept| {
+                                    matches!(kept,
+                                    HostEvent::ToolLine { call_id: Some(kept), .. } if kept == id)
+                                }) {
+                                    *kept = op.clone();
+                                } else {
+                                    projection.child_tools.push_back(op.clone());
+                                    if projection.child_tools.len() > 512 {
+                                        let oldest_settled =
+                                            projection.child_tools.iter().position(|op| {
+                                                matches!(op,
+                                            HostEvent::ToolLine { state, .. } if state != "running")
+                                            });
+                                        projection.child_tools.remove(oldest_settled.unwrap_or(0));
+                                    }
+                                }
+                            }
+                        }
                         if gap {
                             ops.insert(
                                 0,
@@ -259,6 +282,7 @@ pub(super) struct Snapshot {
     pub(super) cursor: u64,
     pub(super) progress: ChildProgress,
     pub(super) terminal: bool,
+    pub(super) tools: Vec<HostEvent<Core>>,
 }
 
 /// The only downcast of the hub's opaque host-owned observation capability.
@@ -299,6 +323,7 @@ impl ChildObservation {
             cursor: state.cursor,
             progress: state.progress.clone(),
             terminal: state.closed || state.terminal,
+            tools: Vec::new(),
         }
     }
 
@@ -308,6 +333,11 @@ impl ChildObservation {
             cursor: state.cursor,
             progress: state.progress.clone(),
             terminal: state.closed || state.terminal,
+            tools: state
+                .projection
+                .as_ref()
+                .map(|projection| projection.child_tools.iter().cloned().collect())
+                .unwrap_or_default(),
         };
         let tail = Tail {
             observation: Arc::clone(self),

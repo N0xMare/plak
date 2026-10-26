@@ -16,6 +16,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             && self.host.quit_started_at.is_some()
         {
             *self.host.quit_abandoned_turn = true;
+            self.host.events.quit_receipt.escalate();
             self.host.begin_quit_job_stops();
         }
         // Final flush of any remaining coalesced assistant text.

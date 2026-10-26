@@ -592,6 +592,15 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
         context.send_transcript(rows, replace);
         return;
     }
+    let covered_calls: std::collections::HashSet<String> = rows
+        .as_ref()
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.row.as_tool())
+        .filter(|tool| tool.state != "interrupted")
+        .map(|tool| tool.call_id.clone())
+        .collect();
     if !context.send_transcript(rows, replace) {
         return;
     }
@@ -599,12 +608,19 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
     if live.cursor > 1 {
         emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
     }
+    for tool in live.tools {
+        if matches!(&tool, HostEvent::ToolLine { call_id: Some(id), .. } if !covered_calls.contains(id))
+        {
+            emit(tool);
+        }
+    }
     #[cfg(test)]
     hooks::before_follow(&context.agent_id).await;
     follow_turn(
         observation,
         tail,
         snapshot.cursor().sequence().get(),
+        covered_calls,
         live.cursor > 1,
         emit,
     )
@@ -629,6 +645,7 @@ pub(super) async fn follow_turn(
     observation: Arc<ChildObservation>,
     mut tail: super::child_projection::Tail,
     committed_through: u64,
+    covered_calls: std::collections::HashSet<String>,
     mut gap_emitted: bool,
     emit: impl Fn(HostEvent<Core>) -> bool,
 ) {
@@ -637,6 +654,12 @@ pub(super) async fn follow_turn(
         match tail.recv().await {
             Ok(Some(update)) => {
                 if update.source_sequence <= committed_through {
+                    for op in update.ops.iter() {
+                        if matches!(op, HostEvent::ToolLine { call_id: Some(id), .. } if !covered_calls.contains(id))
+                        {
+                            emit(op.clone());
+                        }
+                    }
                     if !gap_emitted && !update.ops.is_empty() {
                         emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
                         gap_emitted = true;
@@ -657,6 +680,12 @@ pub(super) async fn follow_turn(
                 let (snapshot, next) = observation.attach();
                 if snapshot.terminal {
                     break;
+                }
+                for op in snapshot.tools {
+                    if matches!(&op, HostEvent::ToolLine { call_id: Some(id), .. } if !covered_calls.contains(id))
+                    {
+                        emit(op);
+                    }
                 }
                 tail = next;
             }
@@ -817,7 +846,7 @@ pub(super) fn transcript_ops(
                 cell_id: lineage.cell_id().map(str::to_owned),
                 kind,
                 name,
-                state: "start".into(),
+                state: "running".into(),
                 subject: text.subject,
                 detail: text.detail,
                 duration_ms: None,

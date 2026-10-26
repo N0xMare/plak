@@ -1,6 +1,7 @@
 //! Host startup: worker spawn, lifecycle phases, and session opening.
 use crate::surface_protocol::ContentEvent;
 use std::future::Future;
+#[cfg(test)]
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,7 @@ use crate::binding::TargetSelection;
 use crate::sessions::SessionRecord;
 use crate::{CliFailure, CliResult};
 
+use super::HostWorkerHandle;
 use super::host_loop::run_host_loop;
 use super::info::plan_state_authority;
 use super::models::effort_from_record;
@@ -93,7 +95,7 @@ pub(super) async fn bounded_transition_stage<T>(
 pub type HostWorker<P = plakous_host_protocol::Core> = (
     crate::surface_protocol::UserActionSender<P>,
     crate::surface_protocol::HostEventReceiver<P>,
-    thread::JoinHandle<CliResult<()>>,
+    HostWorkerHandle,
 );
 
 /// Spawn host worker thread and return channels for the TUI.
@@ -104,7 +106,9 @@ pub fn spawn_host_worker<P: plakous_host_protocol::ProtocolExtension>(
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel(1);
     let event_tx = Sender::over(event_tx);
-    let handle = thread::spawn(move || {
+    let handle = HostWorkerHandle::spawn_with_receipt(move |receipt| {
+        let mut event_tx = event_tx;
+        event_tx.quit_receipt = receipt;
         let result = run_host_loop(
             config,
             &action_rx,
@@ -134,7 +138,7 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
     startup_rx: std::sync::mpsc::Receiver<Result<(), String>>,
     action_tx: crate::surface_protocol::UserActionSender<P>,
     event_rx: crate::surface_protocol::HostEventReceiver<P>,
-    handle: thread::JoinHandle<CliResult<()>>,
+    handle: HostWorkerHandle,
 ) -> CliResult<HostWorker<P>> {
     match startup_rx.recv() {
         Ok(Ok(())) => Ok((action_tx, event_rx, handle)),
@@ -144,7 +148,7 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
                 .join()
                 .map_err(|_| CliFailure::new("plak product host failed while joining startup"))?
             {
-                Ok(()) => Err(CliFailure::new(error)),
+                Ok(_) => Err(CliFailure::new(error)),
                 Err(termination) => Err(termination),
             }
         }
@@ -154,7 +158,7 @@ pub(super) fn await_host_startup<P: plakous_host_protocol::ProtocolExtension>(
                 .join()
                 .map_err(|_| CliFailure::new("plak product host panicked during startup"))?
             {
-                Ok(()) => Err(CliFailure::new(
+                Ok(_) => Err(CliFailure::new(
                     "plak product host ended before completing startup",
                 )),
                 Err(termination) => Err(termination),
@@ -173,7 +177,7 @@ pub fn spawn_deferred_tui_host<P: plakous_host_protocol::ProtocolExtension>(
 ) -> (
     crate::surface_protocol::UserActionSender<P>,
     crate::surface_protocol::HostEventReceiver<P>,
-    thread::JoinHandle<CliResult<()>>,
+    HostWorkerHandle,
 ) {
     spawn_deferred_tui_host_with_clear_publication(prepare, None)
 }
@@ -186,12 +190,14 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
 ) -> (
     crate::surface_protocol::UserActionSender<P>,
     crate::surface_protocol::HostEventReceiver<P>,
-    thread::JoinHandle<CliResult<()>>,
+    HostWorkerHandle,
 ) {
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let event_tx = Sender::over(event_tx);
-    let handle = thread::spawn(move || {
+    let handle = HostWorkerHandle::spawn_with_receipt(move |receipt| {
+        let mut event_tx = event_tx;
+        event_tx.quit_receipt = receipt;
         let _ = event_tx.send(ContentEvent::Activity {
             label: "discovering providers and preparing session".into(),
             active: true,

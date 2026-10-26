@@ -498,6 +498,10 @@ fn run_agent_stdio_stopping_on(
     drop(actions);
     drop(stdin_rx);
     let join_result = join_worker(worker, deadline);
+    let escalated_quit = matches!(
+        &join_result,
+        Ok(plakous_hosted::runtime::HostQuitOutcome::Escalated)
+    );
     if stdin_thread.is_finished() {
         let _ = stdin_thread.join();
     }
@@ -547,8 +551,14 @@ fn run_agent_stdio_stopping_on(
     }
     combine_results(
         drive_result,
-        combine_results(combine_results(shutdown_result, join_result), bye_result),
+        combine_results(
+            combine_results(shutdown_result, join_result.map(|_| ())),
+            bye_result,
+        ),
     )?;
+    if escalated_quit {
+        return Ok(ProcessOutcome::EscalatedQuit);
+    }
     if stop_reason().is_some() || interrupted_turn {
         return Ok(ProcessOutcome::Interrupted);
     }
@@ -948,7 +958,10 @@ fn write_line(stdout: &mut dyn Write, line: &str) -> CliResult<()> {
     stdout.flush().map_err(|_| CliFailure::new("stdout failed"))
 }
 
-fn join_worker(worker: thread::JoinHandle<CliResult<()>>, deadline: Instant) -> CliResult<()> {
+fn join_worker(
+    worker: plakous_hosted::runtime::HostWorkerHandle,
+    deadline: Instant,
+) -> CliResult<plakous_hosted::runtime::HostQuitOutcome> {
     while !worker.is_finished() {
         if Instant::now() >= deadline {
             drop(worker);
@@ -1453,7 +1466,7 @@ mod tests {
     #[test]
     fn worker_join_uses_the_supplied_deadline() {
         let (release, held) = mpsc::channel();
-        let worker = thread::spawn(move || {
+        let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(move || {
             held.recv().unwrap();
             Ok(())
         });
@@ -1556,14 +1569,14 @@ mod tests {
 
     #[test]
     fn admitted_output_failure_joins_and_publishes_parent_locator() {
-        struct FailBusy(Vec<u8>, mpsc::Sender<()>);
-        impl Write for FailBusy {
+        struct FailAdmitted(Vec<u8>, mpsc::Sender<()>);
+        impl Write for FailAdmitted {
             fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
                 self.0.extend_from_slice(bytes);
                 if self
                     .0
-                    .windows(b"\"busy\":true".len())
-                    .any(|part| part == b"\"busy\":true")
+                    .windows(b"\"phase\":\"admitted\"".len())
+                    .any(|part| part == b"\"phase\":\"admitted\"")
                 {
                     self.1.send(()).unwrap();
                     Err(std::io::Error::other("injected admitted output failure"))
@@ -1593,15 +1606,17 @@ mod tests {
                     held.lock().unwrap().recv().unwrap();
                 }
             });
+        let (mut input, reader) = std::os::unix::net::UnixStream::pair().unwrap();
+        input
+            .write_all(b"{\"v\":1,\"kind\":\"prompt\",\"id\":\"p\",\"text\":\"offline effect\"}\n")
+            .unwrap();
         let command = thread::spawn(move || {
             run_agent_stdio_with_input(
                 config,
                 false,
-                &mut FailBusy(Vec::new(), output_failed),
+                &mut FailAdmitted(Vec::new(), output_failed),
                 &mut Vec::new(),
-                std::io::Cursor::new(
-                    "{\"v\":1,\"kind\":\"prompt\",\"id\":\"p\",\"text\":\"offline effect\"}\n",
-                ),
+                std::io::BufReader::new(reader),
             )
         });
         // Startup is not part of the shutdown interval. Observe the actual
@@ -1613,6 +1628,7 @@ mod tests {
             "output failure returned before parent publication"
         );
         release.send(()).unwrap();
+        drop(input);
         let error = command.join().unwrap().unwrap_err();
         assert!(error.message().contains("stdout failed"), "{error:?}");
         assert!(store.load(&id).unwrap().plakous_locator.is_some());

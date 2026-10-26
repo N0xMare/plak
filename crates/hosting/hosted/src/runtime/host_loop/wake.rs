@@ -152,6 +152,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             )
             .map_err(CliFailure::from)?;
         self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
+        let _ = self
+            .events
+            .send(crate::surface_protocol::ContentEvent::Status {
+                phase: "idle".into(),
+                queue_len: self.config.session.pending_queue.len(),
+                detail: Some("prompt not admitted; queue paused".into()),
+            });
         Ok(())
     }
 
@@ -406,7 +413,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     pub(super) fn fit_child_wake(&mut self, command: &str) -> CliResult<bool> {
+        let watch = super::InterruptWatch::new(self.actions, &self.interrupt_state);
+        watch.begin();
         self.refresh_native_authority_before_prompt()?;
+        if super::InterruptWatch::new(self.actions, &self.interrupt_state).preparation_stopped() {
+            return Ok(false);
+        }
         let command = plakous::agent::UserInput::from(command.to_owned());
         let context = super::query_context(
             &self.executor,

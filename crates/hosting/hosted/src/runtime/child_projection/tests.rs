@@ -2,6 +2,7 @@ use super::*;
 use crate::runtime::child_live::tests::tool_lifecycle_event;
 use plakous::agent::{AgentEventKind, ToolCallerLineageView};
 use plakous::model::{ModelEvent, OutputLocation, TextDelta, Usage, UsageUpdate};
+use std::collections::HashSet;
 use std::time::Duration;
 
 pub(super) fn event(turn: TurnId, kind: AgentEventKind) -> Arc<AgentEvent> {
@@ -224,6 +225,47 @@ async fn observed(observation: &ChildObservation, predicate: impl Fn(&State) -> 
     })
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn late_attach_keeps_a_running_call_after_its_event_prefix_is_evicted() {
+    let turn = TurnId::try_from(uuid::Uuid::from_u128(0xc9)).unwrap();
+    let (sender, receiver) = tokio::sync::mpsc::channel(1);
+    let owner = ChildTurnProjection::start(
+        turn,
+        None,
+        std::future::ready(Some(Source::Fixture(receiver))),
+    );
+    let observation = &owner.observation;
+    let started = tool_lifecycle_event(
+        "read_file",
+        &uuid::Uuid::from_u128(2).to_string(),
+        "ToolStarted",
+        &ToolCallerLineageView::direct(),
+        serde_json::json!({"arguments_preview":"{}","subject":"held"}),
+    );
+    publish(&sender, observation, event(turn, started.kind().clone())).await;
+    for id in 3..=516 {
+        let completed = tool_lifecycle_event(
+            "read_file",
+            &uuid::Uuid::from_u128(id).to_string(),
+            "ToolCompleted",
+            &ToolCallerLineageView::direct(),
+            serde_json::json!({"succeeded":true,"preview":"done","subject":null}),
+        );
+        let mut completed = serde_json::to_value(event(turn, completed.kind().clone())).unwrap();
+        completed["call_id"] = serde_json::json!(uuid::Uuid::from_u128(id));
+        publish(
+            &sender,
+            observation,
+            Arc::new(serde_json::from_value(completed).unwrap()),
+        )
+        .await;
+    }
+    let (snapshot, _) = observation.attach();
+    let parent = uuid::Uuid::from_u128(2).to_string();
+    assert!(snapshot.tools.iter().any(|op| matches!(op, HostEvent::ToolLine { call_id: Some(id), state, .. } if id == &parent && state == "running")));
+    assert_eq!(snapshot.tools.len(), 512);
 }
 
 #[tokio::test]
@@ -641,9 +683,14 @@ async fn fixed_burst_face_lag_resyncs_once_and_follows_the_terminal() {
     let (emitted, mut face_events) = tokio::sync::mpsc::unbounded_channel();
     let followed = observation.clone();
     let task = tokio::spawn(async move {
-        super::super::child_live::follow_turn(followed, tail, 0, false, move |op| {
-            emitted.send(op).is_ok()
-        })
+        super::super::child_live::follow_turn(
+            followed,
+            tail,
+            0,
+            HashSet::new(),
+            false,
+            move |op| emitted.send(op).is_ok(),
+        )
         .await;
     });
     let gap = tokio::time::timeout(Duration::from_secs(10), face_events.recv())

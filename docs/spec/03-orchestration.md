@@ -4204,12 +4204,25 @@ subscription or reducer. Updates at or before the history cursor cannot repeat
 canonical items, and a turn ending during the history read refreshes the committed
 baseline. The admission-created `TurnEvents` is owned by the reducer, not retained
 for later viewing. A face attachment does not replay prior uncommitted
-streaming blocks: when prior activity is not covered, or the tail loses activity
+streaming text or reasoning: when prior activity is not covered, or the tail loses activity
 or lags out, an addressed `earlier activity not shown` marker makes the gap
 explicit. Closing drops this subscription; a lagged tail reattaches, at most once
 a second, with an explicit gap. Live content uses the same keyed row reducer
 and bounded scoped publication channel as the root. A refused patch marks that
 scope for a full resync baseline, including its current previews.
+
+The admission-owned `TurnProjection` retains a bounded keyed tool read model
+(at most 512 calls, evicting settled calls before running calls), captured
+atomically with the hosted attach cursor.
+A late face shows an in-flight call as running, even when its exchange is not
+yet committed in canonical history. Its result settles the same row immediately,
+without waiting for the turn terminal. Committed settled calls supersede the
+corresponding retained observations; tool observations not covered by the
+committed baseline are still applied when their source cursor precedes the
+history attachment. Earlier streaming text is not replayed, and the gap marker
+continues to describe activity outside the retained presentation. These rows
+remain process-local observations, never checkpoint or recovery authority.
+
 Agent-scoped content occupies at most 128 of the observation mailbox's 512
 slots, leaving room for root content and terminal observations. Consecutive
 same-scope patches merge into one slot; raw assistant/reasoning appends coalesce

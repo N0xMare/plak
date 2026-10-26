@@ -458,7 +458,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         let _ = events.replace_transcript(crate::runtime::logging::project_session_snapshot(
             &config.session,
         ));
-        send_last_user_prompt_at(events, opened);
+        send_last_user_prompt_at(events, config, opened);
         report_rebind_context(executor, opened, events, config);
         install_rebind_epoch(config)?;
         Ok(())

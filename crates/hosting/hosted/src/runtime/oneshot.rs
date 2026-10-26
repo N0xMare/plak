@@ -41,7 +41,8 @@ pub enum OneShotOutcome {
         assistant: String,
         detail: Option<String>,
     },
-    /// Cancellation settled and its terminal projection was committed.
+    /// Preparation stopped before admission, or cancellation settled and its
+    /// terminal projection was committed.
     Interrupted { assistant: String },
     /// The whole run reached an operator bound after canonical settlement.
     Bounded { assistant: String, bound: String },

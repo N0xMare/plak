@@ -430,6 +430,11 @@ fn busy_quit_lifecycle(
 }
 
 fn assert_busy_quit(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    assert_eq!(
+        outcome.status.code(),
+        Some(130),
+        "lease-only quit must report interruption"
+    );
     assert!(
         outcome
             .assistant_text()

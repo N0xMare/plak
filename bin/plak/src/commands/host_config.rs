@@ -4,7 +4,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::thread;
 
 use plakous::agent::ReasoningEffort;
 
@@ -147,7 +146,7 @@ pub fn native_credential_refusal(account: Option<&str>) -> Option<String> {
 pub type HostedAgentChannels = (
     crate::surface_protocol::UserActionSender,
     crate::surface_protocol::HostEventReceiver,
-    thread::JoinHandle<crate::CliResult<()>>,
+    plakous_hosted::runtime::HostWorkerHandle,
 );
 
 pub trait TuiAttacher {

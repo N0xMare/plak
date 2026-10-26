@@ -365,7 +365,8 @@ Notes worth knowing:
   `usage: /compact  —  takes no arguments` and does nothing.
 - Closing the terminal window (`SIGHUP`) or stopping `plak` with `SIGTERM`
   quits like `Ctrl+Q`: the terminal is restored, the resume hint is printed,
-  and the session can be resumed. The exit status is 4.
+  and the session can be resumed. The exit status is 4, or 130 if the root's
+  terminal could not join and the host selected lease-only abandonment.
 
 ## Key bindings
 

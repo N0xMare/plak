@@ -36,6 +36,9 @@ impl SessionRecord {
         target.queue_commands = crate::sessions::QueueCommands::default();
         target.queue_projection_debt = false;
         target.queue_drain_state = QueueDrainState::LiveAutoDrain;
+        if request.kind == SessionWorkflowKind::Fork {
+            target.prompt_history.clear();
+        }
         if let SessionWorkflowKind::Rebind(selection) = &request.kind {
             target.account = Some(selection.account.clone());
             target.model = Some(selection.model.clone());

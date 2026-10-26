@@ -279,7 +279,19 @@ pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Co
             std::fs::write(&face_release, b"idle").unwrap();
         }
         let outcome = lifecycle(&fixture, session, shape, None, Some(&face_release));
-        assert!(outcome.status.success(), "pilot failed: {}", outcome.stderr);
+        // This shape deliberately selects lease-only abandonment rather than
+        // a joined terminal; it reports interrupted quit, not clean success.
+        let expected_exit = if shape == "busy_quit_escalates" {
+            130
+        } else {
+            0
+        };
+        assert_eq!(
+            outcome.status.code(),
+            Some(expected_exit),
+            "pilot failed: {}",
+            outcome.stderr
+        );
         let state = summary::read_converged(&fixture);
         (shapes::get(shape).assert_live)(&fixture, &outcome, &state);
         pilots.push(trace::read(&fixture.root.join("commit-trace.jsonl")));

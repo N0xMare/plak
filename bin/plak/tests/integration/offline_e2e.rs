@@ -179,8 +179,10 @@ const SIGINT: i32 = 2;
 const SIGTERM: i32 = 15;
 const SIGHUP: i32 = 1;
 const SIGKILL: i32 = 9;
-/// `ProcessOutcome::Interrupted`, which is what a signalled stop exits with.
+/// An ordinary signalled stop, without lease-only quit escalation.
 const SIGNALLED_EXIT_CODE: i32 = 4;
+/// A deaf turn whose terminal did not join the quit's bound.
+const ESCALATED_QUIT_EXIT_CODE: i32 = 130;
 
 // ---------------------------------------------------------------------------
 // CLI lifecycles
@@ -797,14 +799,15 @@ fn a_jsonl_stream_stopped_by_sigterm_mid_turn_writes_exactly_one_terminal_record
     agent.wait_for("running", |record| {
         record["kind"] == "status" && record["phase"] == "running"
     });
+    wait_for_provider_dispatch(&fixture);
     signal(agent.id(), SIGTERM);
     agent.close_stdin();
     let outcome = agent.finish();
     outcome.assert_exactly_one_terminal_record();
-    assert!(
-        matches!(outcome.status.code(), Some(0 | SIGNALLED_EXIT_CODE)),
-        "a signalled JSONL stop must exit with a code, not die silently; code was {:?}, stderr:\n{}",
+    assert_eq!(
         outcome.status.code(),
+        Some(ESCALATED_QUIT_EXIT_CODE),
+        "a deaf request must select lease-only shutdown; stderr:\n{}",
         outcome.stderr
     );
 }
@@ -818,14 +821,17 @@ fn a_jsonl_stream_stopped_by_sighup_mid_turn_writes_exactly_one_terminal_record(
     agent.wait_for("running", |record| {
         record["kind"] == "status" && record["phase"] == "running"
     });
+    wait_for_provider_dispatch(&fixture);
     signal(agent.id(), SIGHUP);
     agent.close_stdin();
     let outcome = agent.finish();
     outcome.assert_exactly_one_terminal_record();
-    assert!(matches!(
+    assert_eq!(
         outcome.status.code(),
-        Some(0 | SIGNALLED_EXIT_CODE)
-    ));
+        Some(ESCALATED_QUIT_EXIT_CODE),
+        "a deaf request must select lease-only shutdown; stderr:\n{}",
+        outcome.stderr
+    );
 }
 
 /// Commands piped back to back are each answered under their own id.
@@ -1282,8 +1288,8 @@ fn a_jsonl_session_stopped_past_the_deadline_recovers_its_interrupted_turn() {
     stopped.assert_exactly_one_terminal_record();
     assert_eq!(
         stopped.status.code(),
-        Some(SIGNALLED_EXIT_CODE),
-        "a stall longer than the stop deadline must exit hard; stderr:\n{}",
+        Some(ESCALATED_QUIT_EXIT_CODE),
+        "a stall longer than the stop deadline must select lease-only shutdown; stderr:\n{}",
         stopped.stderr
     );
 

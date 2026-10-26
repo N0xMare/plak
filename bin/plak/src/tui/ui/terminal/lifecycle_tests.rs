@@ -82,10 +82,18 @@ fn worker_failure_child() -> ! {
             .join()
             .is_err()
     );
-    let worker = std::thread::Builder::new()
-        .name("actionable-worker".into())
-        .spawn(|| -> crate::CliResult<()> { std::panic::panic_any(PRIVATE_PAYLOAD) })
-        .unwrap();
+    let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(|| {
+        let inner = std::thread::Builder::new()
+            .name("actionable-worker".into())
+            .spawn(|| -> crate::CliResult<()> { std::panic::panic_any(PRIVATE_PAYLOAD) })
+            .unwrap();
+        // resume_unwind skips the panic hook, so the recorded site stays the
+        // named inner thread while the host handle's join still fails.
+        match inner.join() {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    });
     let deadline = Instant::now() + Duration::from_secs(10);
     while !worker.is_finished() {
         assert!(Instant::now() < deadline);

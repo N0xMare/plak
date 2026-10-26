@@ -35,7 +35,7 @@ pub const TUI_ERROR_JOIN_TIMEOUT: Duration = Duration::from_secs(1);
 /// returned under the product's shutdown deadline; an overdue worker is a
 /// failure, not a quiet detach.
 pub fn join_tui_host_worker(
-    worker: thread::JoinHandle<CliResult<()>>,
+    worker: plakous_hosted::runtime::HostWorkerHandle,
     label: &str,
 ) -> CliResult<()> {
     join_host_worker_bounded(worker, TUI_ERROR_JOIN_TIMEOUT, label)
@@ -63,7 +63,7 @@ fn stop_background_processes_for_interactive_exit(
 /// the last sender is `Disconnected`, which the host also treats as Quit.
 /// A panicked join invokes the product's content-free report callback.
 pub fn exit_restored_tui(
-    worker: thread::JoinHandle<CliResult<()>>,
+    worker: plakous_hosted::runtime::HostWorkerHandle,
     host_mailbox: crate::surface_protocol::UserActionSender,
     report_worker_failure: fn(),
 ) -> ! {
@@ -73,6 +73,7 @@ pub fn exit_restored_tui(
     while !worker.is_finished() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(5));
     }
+    let outcome = worker.quit_outcome();
     if worker.is_finished() {
         if worker.join().is_err() {
             report_worker_failure();
@@ -84,7 +85,9 @@ pub fn exit_restored_tui(
     crate::tui_timing::exiting();
     // A quit the signal watcher requested reports the signalled status, the
     // same one a CLI turn stopped by `SIGTERM` or `SIGHUP` reports.
-    let code = if crate::signals::stop_reason().is_some() {
+    let code = if outcome == plakous_hosted::runtime::HostQuitOutcome::Escalated {
+        130
+    } else if crate::signals::stop_reason().is_some() {
         crate::signals::SIGNALLED_EXIT_CODE
     } else {
         0
@@ -824,7 +827,7 @@ pub fn require_locally_retired(status: CredentialState, failure: &'static str) -
 }
 
 pub fn join_host_worker_bounded(
-    worker: thread::JoinHandle<CliResult<()>>,
+    worker: plakous_hosted::runtime::HostWorkerHandle,
     timeout: Duration,
     label: &str,
 ) -> CliResult<()> {
@@ -837,7 +840,7 @@ pub const QUIT_NOTICE_DELAY: Duration = Duration::from_millis(200);
 pub const QUIT_NOTICE: &str = "quitting… releasing the session";
 
 pub fn join_host_worker_bounded_with_notice(
-    worker: thread::JoinHandle<CliResult<()>>,
+    worker: plakous_hosted::runtime::HostWorkerHandle,
     timeout: Duration,
     label: &str,
     mut notice: Option<&mut dyn io::Write>,
@@ -868,6 +871,7 @@ pub fn join_host_worker_bounded_with_notice(
     worker
         .join()
         .map_err(|_| CliFailure::new(format!("{label} worker failed")))?
+        .map(|_| ())
 }
 
 #[cfg(test)]

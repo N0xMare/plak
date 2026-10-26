@@ -2437,7 +2437,7 @@ fn session_id_prefix_resolves_uniquely_or_refuses() {
 fn slow_host_join_prints_the_quitting_notice_once_and_a_quick_one_never() {
     let mut quick = Vec::new();
     join_host_worker_bounded_with_notice(
-        thread::spawn(|| Ok(())),
+        plakous_hosted::runtime::HostWorkerHandle::spawn(|| Ok(())),
         Duration::from_secs(1),
         "quick",
         Some(&mut quick),
@@ -2447,7 +2447,7 @@ fn slow_host_join_prints_the_quitting_notice_once_and_a_quick_one_never() {
 
     let mut slow = Vec::new();
     join_host_worker_bounded_with_notice(
-        thread::spawn(|| {
+        plakous_hosted::runtime::HostWorkerHandle::spawn(|| {
             thread::sleep(QUIT_NOTICE_DELAY * 3);
             Ok(())
         }),
@@ -2461,7 +2461,9 @@ fn slow_host_join_prints_the_quitting_notice_once_and_a_quick_one_never() {
 
 #[test]
 fn host_worker_join_preserves_the_terminal_failure() {
-    let worker = thread::spawn(|| Err(CliFailure::new("owned root release refused")));
+    let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(|| {
+        Err(CliFailure::new("owned root release refused"))
+    });
     let error = join_host_worker_bounded(worker, Duration::from_secs(1), "typed").unwrap_err();
     assert_eq!(error.message(), "owned root release refused");
 }
@@ -2472,7 +2474,7 @@ fn host_worker_join_preserves_the_terminal_failure() {
 fn tui_shutdown_deadlines_are_at_most_one_second() {
     assert!(commands::support::VOLUNTARY_QUIT_GRACE <= Duration::from_secs(1));
     let started = Instant::now();
-    let worker = thread::spawn(|| {
+    let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(|| {
         thread::sleep(Duration::from_millis(1500));
         Ok(())
     });
@@ -2482,19 +2484,26 @@ fn tui_shutdown_deadlines_are_at_most_one_second() {
 
 #[test]
 fn tui_error_join_propagates_the_worker_failure() {
-    let worker = thread::spawn(|| Err(CliFailure::new("release checkpoint refused")));
+    let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(|| {
+        Err(CliFailure::new("release checkpoint refused"))
+    });
     let error = join_tui_host_worker(worker, "TUI session").unwrap_err();
     assert_eq!(error.message(), "release checkpoint refused");
 }
 
 #[test]
 fn host_worker_join_returns_within_its_deadline_and_says_it_detached() {
-    join_host_worker_bounded(thread::spawn(|| Ok(())), Duration::from_secs(1), "timely").unwrap();
+    join_host_worker_bounded(
+        plakous_hosted::runtime::HostWorkerHandle::spawn(|| Ok(())),
+        Duration::from_secs(1),
+        "timely",
+    )
+    .unwrap();
 
     let (release, held) = std::sync::mpsc::channel();
     let (entered, running) = std::sync::mpsc::channel();
     let (finished, settled) = std::sync::mpsc::channel();
-    let worker = thread::spawn(move || {
+    let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(move || {
         entered.send(()).unwrap();
         let _ = held.recv();
         finished.send(()).unwrap();

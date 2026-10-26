@@ -28,6 +28,7 @@ The binary ID identifies the executable in `/reload` and handoffs.
 | 4 | Interrupted before completion, or stopped by `SIGTERM`/`SIGHUP` |
 | 5 | Agent/runtime failure, an answer truncated at its output limit (`turn_failed:output-limit`; the answer is still printed), or explicit recovery required |
 | 6 | Run reached `--max-turns` or `--timeout` |
+| 130 | Quit escalated because the turn's terminal did not join and the host abandoned by lease only; clean idle or terminal-joined quit remains 0 |
 
 Every subscription failure ends with what to do about it, for example:
 

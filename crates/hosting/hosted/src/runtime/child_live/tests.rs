@@ -1449,12 +1449,30 @@ fn has_tool_call(agent: &Agent) -> bool {
     })
 }
 
-/// A tool exchange commits whole, so a call still in flight when the view
-/// opens is not in the attach's rows (never an `interrupted` row) and the
-/// prefix says the started tool's ops were missed; its row settles in the
-/// rows the turn's end re-sends.
+async fn wait_for_held(
+    received: &crate::surface_protocol::HostEventReceiver,
+    state: &mut plakous_host_protocol::views::transcript::TranscriptState,
+    expected: plakous_host_protocol::views::presentation::ActivityState,
+) -> plakous_host_protocol::views::transcript::RowKey {
+    loop {
+        match next_event(received).await {
+            HostEvent::PresentationSnapshot(snapshot) => state.replace(snapshot).unwrap(),
+            HostEvent::TranscriptPatch(patch) => state.apply(patch).unwrap(),
+            _ => continue,
+        }
+        if let Some((key, _)) = state.items().iter().find(|(_, row)| {
+            row.as_tool()
+                .is_some_and(|tool| tool.name == "held_tool" && tool.activity_state() == expected)
+        }) {
+            return *key;
+        }
+    }
+}
+
+/// A late face sees an in-flight call from the admission-owned reducer,
+/// then its result while the model's next response is still running.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
+async fn an_in_flight_call_attaches_running_and_settles_before_turn_end() {
     use plakous::model::{
         ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolName,
         ToolOutputContract,
@@ -1465,6 +1483,7 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
     use plakous::tools::{
         RegisteredToolId, ToolExecutorBindingIdentity, ToolExecutorId, ToolRegistration,
     };
+    use plakous_host_protocol::views::presentation::ActivityState;
     use plakous_offline_crash_harness::{BoundaryController, protocol::CrashBoundary};
     let root = tempfile::tempdir().unwrap();
     let started = Arc::new(tokio::sync::Notify::new());
@@ -1498,7 +1517,7 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
             "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
             "steps": [
                 {"output":{"tool":{"name":"held_tool","arguments":{}}},"finish":"tool_calls"},
-                {"output":{"text":"after the tool"},"finish":"stop"}
+                {"stream":[{"text":"after the tool"},{"stall":30000}],"finish":"stop"}
             ]
         }))
         .unwrap(),
@@ -1540,6 +1559,13 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
         .await
         .expect("the tool starts");
     assert!(!has_tool_call(&agent), "the exchange commits whole");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while projection.observation.snapshot().progress.tool_calls == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the admission-owned reducer sees the start before attach");
     let (wire, received) = crate::surface_protocol::host_event_channel();
     let sender: Sender = Sender::over(wire);
     let mut observations = ChildObservers::default();
@@ -1552,33 +1578,31 @@ async fn an_in_flight_call_is_not_an_attach_row_and_settles_at_turn_end() {
         Some((turn.id(), agent.clone(), projection.observation.clone())),
         &sender,
     );
-    let mut ops = Vec::new();
     let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
-    let held = |rows: &[TranscriptRow]| {
-        rows.iter()
-            .find_map(TranscriptRow::as_tool)
-            .filter(|tool| tool.name == "held_tool")
-            .map(|tool| tool.state.clone())
-    };
-    let first = next_agent_transcript(&received, &mut state, &mut ops).await;
-    assert_eq!(held(&first.rows), None, "{:?}", first.rows);
-    let gap = next_event(&received).await;
-    assert!(
-        matches!(&gap, HostEvent::TranscriptPatch(_) if carries_text(&gap, GAP)),
-        "{gap:?}"
-    );
-    if let HostEvent::TranscriptPatch(patch) = gap {
-        state.apply(patch).unwrap();
-    }
+    let running_key = wait_for_held(&received, &mut state, ActivityState::Running).await;
     release.notify_one();
-    turn.result().await.unwrap();
-    let ended = next_agent_transcript(&received, &mut state, &mut ops).await;
-    assert_eq!(
-        held(&ended.rows).as_deref(),
-        Some("succeeded"),
-        "{:?}",
-        ended.rows
+    let settled_key = wait_for_held(&received, &mut state, ActivityState::Succeeded).await;
+    let settled: Vec<_> = state
+        .items()
+        .iter()
+        .filter(|(_, row)| row.as_tool().is_some_and(|tool| tool.name == "held_tool"))
+        .collect();
+    assert_eq!(settled.len(), 1);
+    assert_eq!(settled_key, running_key);
+    let (snapshot, _) = agent
+        .attach(ViewRequest::content())
+        .await
+        .unwrap()
+        .into_parts();
+    assert!(
+        snapshot
+            .turns()
+            .iter()
+            .any(|view| view.turn_id() == turn.id() && view.state() == TurnViewState::Running),
+        "the result row must precede the turn terminal"
     );
+    turn.control().cancel().await.unwrap();
+    turn.result().await.unwrap();
     drop(observations);
     attached.release().await.unwrap();
 }
