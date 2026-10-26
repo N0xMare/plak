@@ -19,7 +19,7 @@ pub(crate) use lower::{
     messages_artifact_binding, messages_artifact_configuration_identity, messages_tool_set_identity,
 };
 pub use translate::bind_replay_payload;
-pub(crate) use translate::translate_assistant_bound;
+pub(crate) use translate::{AssistantReplayState, translate_assistant_bound};
 use translate::{
     mark_last_message_cache_breakpoint, push_message, text_block, translate_history,
     translate_reasoning, translate_tool_choice,
@@ -226,6 +226,10 @@ impl MessagesRequestPolicy {
     /// `descriptor_binding` is the full freshness-sensitive plan binding;
     /// `semantic_descriptor_binding` is the descriptor's stable behavior binding
     /// used only to validate opaque replay across refreshed observations.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "public signature; typed-parameter pass follows with the provider/hosted wave"
+    )]
     pub fn new(
         protocol: ProtocolId,
         requested_model: ModelId,

@@ -437,20 +437,24 @@ async fn execute<H: MessagesHttpHooks>(
                 };
                 let step = retry_step(
                     attempt,
-                    &hooks,
-                    redispatch,
-                    turn_rooted,
-                    &clock,
-                    hard_deadline,
-                    timeout,
+                    RetryContext {
+                        hooks: &hooks,
+                        redispatch,
+                        turn_rooted,
+                        clock: &clock,
+                        hard_deadline,
+                        hook_budget: timeout,
+                        request: &request_log,
+                    },
                     retryable
                         .with_phase(failure.phase())
                         .with_detail(format!("{failure:?}")),
-                    &mut waited,
-                    &mut long_stream_replays,
-                    &mut unreachable,
+                    RetryProgress {
+                        waited: &mut waited,
+                        long_stream_replays: &mut long_stream_replays,
+                        unreachable: &mut unreachable,
+                    },
                     physical_started.elapsed(),
-                    &request_log,
                 )
                 .await;
                 hooks = match step {
@@ -561,18 +565,22 @@ async fn execute<H: MessagesHttpHooks>(
                     }
                     retry_step(
                         attempt,
-                        &hooks,
-                        redispatch,
-                        turn_rooted,
-                        &clock,
-                        hard_deadline,
-                        timeout,
+                        RetryContext {
+                            hooks: &hooks,
+                            redispatch,
+                            turn_rooted,
+                            clock: &clock,
+                            hard_deadline,
+                            hook_budget: timeout,
+                            request: &request_log,
+                        },
                         retryable,
-                        &mut waited,
-                        &mut long_stream_replays,
-                        &mut unreachable,
+                        RetryProgress {
+                            waited: &mut waited,
+                            long_stream_replays: &mut long_stream_replays,
+                            unreachable: &mut unreachable,
+                        },
                         physical_started.elapsed(),
-                        &request_log,
                     )
                     .await
                 } else {
@@ -633,18 +641,22 @@ async fn execute<H: MessagesHttpHooks>(
                     .get_or_insert(plakous_model::ModelRetryPhase::ResponseBody);
                 let step = retry_step(
                     attempt,
-                    &hooks,
-                    redispatch,
-                    turn_rooted,
-                    &clock,
-                    hard_deadline,
-                    timeout,
+                    RetryContext {
+                        hooks: &hooks,
+                        redispatch,
+                        turn_rooted,
+                        clock: &clock,
+                        hard_deadline,
+                        hook_budget: timeout,
+                        request: &request_log,
+                    },
                     retryable,
-                    &mut waited,
-                    &mut long_stream_replays,
-                    &mut unreachable,
+                    RetryProgress {
+                        waited: &mut waited,
+                        long_stream_replays: &mut long_stream_replays,
+                        unreachable: &mut unreachable,
+                    },
                     physical_started.elapsed(),
-                    &request_log,
                 )
                 .await;
                 hooks = match step {
@@ -735,25 +747,47 @@ const fn transport_fault(failure: HttpFailure) -> Option<ModelTransportFault> {
     }
 }
 
+struct RetryContext<'a, H: MessagesHttpHooks> {
+    hooks: &'a H,
+    redispatch: Option<MessagesRedispatchFn<H>>,
+    turn_rooted: bool,
+    clock: &'a Arc<dyn Clock>,
+    hard_deadline: Option<Instant>,
+    hook_budget: Duration,
+    request: &'a (String, String, usize),
+}
+
+struct RetryProgress<'a> {
+    waited: &'a mut Duration,
+    long_stream_replays: &'a mut plakous_attempt::LongStreamReplayBudget,
+    unreachable: &'a mut plakous_attempt::UnreachableRideOut,
+}
+
 /// Applies [`RetryPolicy::TURN`] to a failed generation: announces the retry
 /// as a typed event, waits the policy's delay, then re-authorizes the next
 /// generation. A workflow retries only on typed evidence that the request
 /// was not fully sent; every resend requires a revalidation hook.
 async fn retry_step<H: MessagesHttpHooks>(
     attempt: &mut MessagesAttempt,
-    hooks: &H,
-    redispatch: Option<MessagesRedispatchFn<H>>,
-    turn_rooted: bool,
-    clock: &Arc<dyn Clock>,
-    hard_deadline: Option<Instant>,
-    hook_budget: Duration,
+    context: RetryContext<'_, H>,
     failure: Retryable,
-    waited: &mut Duration,
-    long_stream_replays: &mut plakous_attempt::LongStreamReplayBudget,
-    unreachable: &mut plakous_attempt::UnreachableRideOut,
+    progress: RetryProgress<'_>,
     elapsed: Duration,
-    request: &(String, String, usize),
 ) -> RetryStep<H> {
+    let RetryContext {
+        hooks,
+        redispatch,
+        turn_rooted,
+        clock,
+        hard_deadline,
+        hook_budget,
+        request,
+    } = context;
+    let RetryProgress {
+        waited,
+        long_stream_replays,
+        unreachable,
+    } = progress;
     let facts = attempt.terminal_facts();
     let delay = unreachable.next_delay(
         facts,
@@ -1294,18 +1328,22 @@ mod tests {
         let mut waited = Duration::ZERO;
         let step = retry_step(
             &mut attempt,
-            &UnusedHooks,
-            None,
-            false,
-            &clock,
-            hard_deadline,
-            Duration::from_secs(5),
+            RetryContext {
+                hooks: &UnusedHooks,
+                redispatch: None,
+                turn_rooted: false,
+                clock: &clock,
+                hard_deadline,
+                hook_budget: Duration::from_secs(5),
+                request: &("fixture.invalid".into(), "/messages".into(), 2),
+            },
             failure,
-            &mut waited,
-            &mut plakous_attempt::LongStreamReplayBudget::default(),
-            &mut plakous_attempt::UnreachableRideOut::default(),
+            RetryProgress {
+                waited: &mut waited,
+                long_stream_replays: &mut plakous_attempt::LongStreamReplayBudget::default(),
+                unreachable: &mut plakous_attempt::UnreachableRideOut::default(),
+            },
             Duration::from_secs(1),
-            &("fixture.invalid".into(), "/messages".into(), 2),
         )
         .await;
         assert!(matches!(step, RetryStep::End));

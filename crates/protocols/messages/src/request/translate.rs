@@ -58,12 +58,16 @@ pub(super) fn translate_history(
                     item.blocks(),
                     policy,
                     ownership,
-                    programmatic,
-                    include_native_thinking,
-                    index < completed_items,
-                    &mut container,
-                    &mut server_lineage,
-                    replay_diagnostics,
+                    AssistantProjection {
+                        programmatic,
+                        include_native_thinking,
+                        completed_turn: index < completed_items,
+                    },
+                    AssistantReplayState {
+                        container: &mut container,
+                        server_lineage: &mut server_lineage,
+                        diagnostics: replay_diagnostics,
+                    },
                     &mut historical_projection_diagnostics,
                 )?;
                 if extending {
@@ -377,46 +381,59 @@ fn translate_reasoning_block(
     }
 }
 
+pub(crate) struct AssistantReplayState<'a> {
+    pub(crate) container: &'a mut Option<String>,
+    pub(crate) server_lineage: &'a mut crate::artifact::MessagesArtifactLineage,
+    pub(crate) diagnostics: &'a mut Vec<String>,
+}
+
 pub(crate) fn translate_assistant_bound(
     blocks: &[ContentBlock],
     policy: &MessagesRequestPolicy,
     ownership: &ToolOwnership,
     programmatic: bool,
     include_native_thinking: bool,
-    container: &mut Option<String>,
-    server_lineage: &mut crate::artifact::MessagesArtifactLineage,
-    replay_diagnostics: &mut Vec<String>,
+    replay: AssistantReplayState<'_>,
 ) -> Result<(Vec<MessageBlock>, Vec<PendingTool>), MessagesRequestError> {
     translate_assistant_with_history(
         blocks,
         policy,
         ownership,
-        programmatic,
-        include_native_thinking,
-        false,
-        container,
-        server_lineage,
-        replay_diagnostics,
+        AssistantProjection {
+            programmatic,
+            include_native_thinking,
+            completed_turn: false,
+        },
+        replay,
         &mut Vec::new(),
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "historical projection adds one turn-boundary fact"
-)]
+#[derive(Clone, Copy)]
+struct AssistantProjection {
+    programmatic: bool,
+    include_native_thinking: bool,
+    completed_turn: bool,
+}
+
 fn translate_assistant_with_history(
     blocks: &[ContentBlock],
     policy: &MessagesRequestPolicy,
     ownership: &ToolOwnership,
-    programmatic: bool,
-    include_native_thinking: bool,
-    completed_turn: bool,
-    container: &mut Option<String>,
-    server_lineage: &mut crate::artifact::MessagesArtifactLineage,
-    replay_diagnostics: &mut Vec<String>,
+    projection: AssistantProjection,
+    replay: AssistantReplayState<'_>,
     historical_projection_diagnostics: &mut Vec<ModelDiagnostic>,
 ) -> Result<(Vec<MessageBlock>, Vec<PendingTool>), MessagesRequestError> {
+    let AssistantProjection {
+        programmatic,
+        include_native_thinking,
+        completed_turn,
+    } = projection;
+    let AssistantReplayState {
+        container,
+        server_lineage,
+        diagnostics: replay_diagnostics,
+    } = replay;
     let mut output = Vec::with_capacity(blocks.len());
     let mut pending = Vec::new();
     let mut remote_ids = BTreeSet::new();
@@ -457,32 +474,12 @@ fn translate_assistant_with_history(
                 if opaque.replay().protocol() == &policy.protocol
                     && opaque.replay().kind().as_str() == CODE_EXECUTION_RESULT_REPLAY_KIND =>
             {
-                if !programmatic {
-                    return Err(invalid("hosted result replay is not admitted"));
-                }
-                let raw =
-                    replay_payload(opaque.replay(), policy, CODE_EXECUTION_RESULT_REPLAY_KIND)?;
-                let value: Value = serde_json::from_str(raw.get())
-                    .map_err(|_| invalid("invalid hosted result replay"))?;
-                let object = value
-                    .as_object()
-                    .ok_or_else(|| invalid("hosted result replay must be an object"))?;
-                let tool_use_id = object
-                    .get("tool_use_id")
-                    .and_then(Value::as_str)
-                    .filter(|id| server_lineage.is_unresolved(id))
-                    .ok_or_else(|| invalid("hosted result does not match a server tool"))?;
-                let content = object
-                    .get("content")
-                    .cloned()
-                    .ok_or_else(|| invalid("hosted result requires content"))?;
-                output.push(MessageBlock::CodeExecutionToolResult {
-                    tool_use_id: tool_use_id.into(),
-                    content,
-                });
-                server_lineage.complete_next(tool_use_id).map_err(|_| {
-                    invalid("hosted results did not follow exact server-tool order")
-                })?;
+                output.push(translate_hosted_result(
+                    opaque,
+                    policy,
+                    programmatic,
+                    server_lineage,
+                )?);
             }
             ContentBlock::Opaque(opaque) => match opaque.fallback() {
                 OpaqueFallback::SemanticSummary(summary) => {
@@ -511,6 +508,40 @@ fn translate_assistant_with_history(
         }
     }
     Ok((output, pending))
+}
+
+fn translate_hosted_result(
+    opaque: &plakous_model::OpaqueBlock,
+    policy: &MessagesRequestPolicy,
+    programmatic: bool,
+    server_lineage: &mut crate::artifact::MessagesArtifactLineage,
+) -> Result<MessageBlock, MessagesRequestError> {
+    if !programmatic {
+        return Err(invalid("hosted result replay is not admitted"));
+    }
+    let raw = replay_payload(opaque.replay(), policy, CODE_EXECUTION_RESULT_REPLAY_KIND)?;
+    let value: Value =
+        serde_json::from_str(raw.get()).map_err(|_| invalid("invalid hosted result replay"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid("hosted result replay must be an object"))?;
+    let tool_use_id = object
+        .get("tool_use_id")
+        .and_then(Value::as_str)
+        .filter(|id| server_lineage.is_unresolved(id))
+        .ok_or_else(|| invalid("hosted result does not match a server tool"))?;
+    let content = object
+        .get("content")
+        .cloned()
+        .ok_or_else(|| invalid("hosted result requires content"))?;
+    let block = MessageBlock::CodeExecutionToolResult {
+        tool_use_id: tool_use_id.into(),
+        content,
+    };
+    server_lineage
+        .complete_next(tool_use_id)
+        .map_err(|_| invalid("hosted results did not follow exact server-tool order"))?;
+    Ok(block)
 }
 
 fn project_completed_thinking(
@@ -708,9 +739,11 @@ fn translate_assistant(
         &ToolOwnership::default(),
         false,
         true,
-        &mut None,
-        &mut crate::artifact::MessagesArtifactLineage::default(),
-        &mut Vec::new(),
+        AssistantReplayState {
+            container: &mut None,
+            server_lineage: &mut crate::artifact::MessagesArtifactLineage::default(),
+            diagnostics: &mut Vec::new(),
+        },
     )
 }
 

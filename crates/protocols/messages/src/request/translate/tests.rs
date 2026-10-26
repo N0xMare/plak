@@ -839,9 +839,11 @@ fn disabled_reasoning_omits_thinking_blocks_and_tool_choice_none() -> TestResult
         &ToolOwnership::default(),
         false,
         false,
-        &mut None,
-        &mut crate::artifact::MessagesArtifactLineage::default(),
-        &mut Vec::new(),
+        AssistantReplayState {
+            container: &mut None,
+            server_lineage: &mut crate::artifact::MessagesArtifactLineage::default(),
+            diagnostics: &mut Vec::new(),
+        },
     )?;
     assert!(pending.is_empty());
     assert!(blocks.iter().all(|block| !matches!(

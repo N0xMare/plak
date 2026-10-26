@@ -10,7 +10,6 @@
     clippy::doc_markdown,
     clippy::missing_errors_doc,
     clippy::must_use_candidate,
-    clippy::too_many_arguments,
     reason = "protocol vocabulary and closed family kernels"
 )]
 

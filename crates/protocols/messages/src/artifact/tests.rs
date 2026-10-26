@@ -22,15 +22,15 @@ fn artifact() -> MessagesFamilyArtifact {
         .expect("test conversation items form one valid segment")
         .canonical_item_prefix_identity(1)
         .expect("prefix");
-    MessagesFamilyArtifact::new(
-        digest(DigestDomain::ModelBinding, b"binding"),
-        digest(DigestDomain::RequestPlan, b"plan"),
-        digest(DigestDomain::Blob, b"tools"),
-        digest(DigestDomain::Blob, b"configuration"),
+    MessagesFamilyArtifact::new(MessagesArtifactProduction {
+        binding: digest(DigestDomain::ModelBinding, b"binding"),
+        producer_plan: digest(DigestDomain::RequestPlan, b"plan"),
+        tool_set: digest(DigestDomain::Blob, b"tools"),
+        configuration: digest(DigestDomain::Blob, b"configuration"),
         covered,
-        "container_1".to_owned(),
-        MessagesArtifactLineage::default(),
-        vec![
+        container: "container_1".to_owned(),
+        prior_lineage: MessagesArtifactLineage::default(),
+        assistant_blocks: vec![
             MessageBlock::ServerToolUse {
                 id: "srv_1".to_owned(),
                 name: "code_execution".to_owned(),
@@ -46,12 +46,12 @@ fn artifact() -> MessagesFamilyArtifact {
                 }),
             },
         ],
-        MessagesArtifactStop {
+        stop: MessagesArtifactStop {
             reason: "tool_use".to_owned(),
             sequence: None,
             details: None,
         },
-    )
+    })
     .expect("artifact")
 }
 

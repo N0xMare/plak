@@ -330,9 +330,11 @@ impl MessagesStreamProjector {
                 &artifact_ownership,
                 true,
                 true,
-                &mut native_container,
-                &mut artifact_lineage,
-                &mut Vec::new(),
+                crate::request::AssistantReplayState {
+                    container: &mut native_container,
+                    server_lineage: &mut artifact_lineage,
+                    diagnostics: &mut Vec::new(),
+                },
             )
             .map_err(|error| self.fail(error.to_string()))?;
             for block in &mut native_blocks {
@@ -365,21 +367,23 @@ impl MessagesStreamProjector {
                 .staged_canonical_item_prefix_identity(response.output())
                 .map_err(|error| self.fail(error.to_string()))?;
             let artifact = crate::artifact::MessagesFamilyArtifact::new(
-                binding,
-                plan.digest(),
-                tool_set,
-                configuration,
-                covered,
-                container,
-                self.prepared.active_artifact_lineage.clone(),
-                native_blocks,
-                crate::artifact::MessagesArtifactStop {
-                    reason: stop_reason.wire_name().to_owned(),
-                    sequence: self.stop_sequence.clone(),
-                    details: self
-                        .stop_details
-                        .as_ref()
-                        .map(|details| details.raw.clone()),
+                crate::artifact::MessagesArtifactProduction {
+                    binding,
+                    producer_plan: plan.digest(),
+                    tool_set,
+                    configuration,
+                    covered,
+                    container,
+                    prior_lineage: self.prepared.active_artifact_lineage.clone(),
+                    assistant_blocks: native_blocks,
+                    stop: crate::artifact::MessagesArtifactStop {
+                        reason: stop_reason.wire_name().to_owned(),
+                        sequence: self.stop_sequence.clone(),
+                        details: self
+                            .stop_details
+                            .as_ref()
+                            .map(|details| details.raw.clone()),
+                    },
                 },
             )
             .map_err(|error| self.fail(error.to_string()))?;

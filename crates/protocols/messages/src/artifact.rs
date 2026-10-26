@@ -211,18 +211,33 @@ pub struct MessagesFamilyArtifact {
     stop: MessagesArtifactStop,
 }
 
+pub(crate) struct MessagesArtifactProduction {
+    pub(crate) binding: Digest,
+    pub(crate) producer_plan: Digest,
+    pub(crate) tool_set: Digest,
+    pub(crate) configuration: Digest,
+    pub(crate) covered: CanonicalItemPrefixIdentity,
+    pub(crate) container: String,
+    pub(crate) prior_lineage: MessagesArtifactLineage,
+    pub(crate) assistant_blocks: Vec<MessageBlock>,
+    pub(crate) stop: MessagesArtifactStop,
+}
+
 impl MessagesFamilyArtifact {
     pub(crate) fn new(
-        binding: Digest,
-        producer_plan: Digest,
-        tool_set: Digest,
-        configuration: Digest,
-        covered: CanonicalItemPrefixIdentity,
-        container: String,
-        prior_lineage: MessagesArtifactLineage,
-        assistant_blocks: Vec<MessageBlock>,
-        stop: MessagesArtifactStop,
+        production: MessagesArtifactProduction,
     ) -> Result<Self, MessagesArtifactError> {
+        let MessagesArtifactProduction {
+            binding,
+            producer_plan,
+            tool_set,
+            configuration,
+            covered,
+            container,
+            prior_lineage,
+            assistant_blocks,
+            stop,
+        } = production;
         let lineage = prior_lineage.advance(&assistant_blocks)?;
         let value = Self {
             binding,

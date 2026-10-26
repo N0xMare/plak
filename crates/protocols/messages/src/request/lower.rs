@@ -18,10 +18,6 @@ use super::{
 };
 
 /// Lowers one already provider-validated canonical plan into Messages wire bytes.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one fail-closed lowering boundary keeps semantic checks ordered"
-)]
 pub fn lower_request(
     plan: &ValidatedRequestPlan,
     policy: &MessagesRequestPolicy,
@@ -296,9 +292,11 @@ pub fn lower_request_with_active_artifact(
             &ownership,
             programmatic,
             include_native_thinking,
-            &mut replay_container,
-            &mut lineage,
-            &mut replay_diagnostics,
+            crate::request::AssistantReplayState {
+                container: &mut replay_container,
+                server_lineage: &mut lineage,
+                diagnostics: &mut replay_diagnostics,
+            },
         )?;
         artifact
             .validate_reuse(
