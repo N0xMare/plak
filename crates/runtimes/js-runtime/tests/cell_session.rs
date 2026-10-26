@@ -82,7 +82,7 @@ async fn overdeep_stored_values_fail_in_cell_and_preserve_earlier_valid_writes()
     let (session, _events) = session().await;
     for depth in [40, 41, 50, 128] {
         let source = format!(
-            "let value = null; for (let n = 0; n < {depth}; n++) value = {{next: value}}; try {{ store('deep', value); text('stored'); }} catch (error) {{ text(String(error)); }}"
+            "let value = null; for (let n = 0; n < {depth}; n++) value = {{next: value}}; try {{ store('deep', value); text('stored'); }} catch (error) {{ text(error instanceof RangeError ? 'typed:' + String(error) : 'untyped'); }}"
         );
         let response = start(&session, &source)
             .await
@@ -92,7 +92,7 @@ async fn overdeep_stored_values_fail_in_cell_and_preserve_earlier_valid_writes()
         let expected = if depth == 40 {
             "stored"
         } else {
-            "stored value nests deeper than 40 levels"
+            "typed:RangeError: stored value nests deeper than 40 levels"
         };
         assert!(has_text(&response, expected), "{depth}: {response:?}");
     }

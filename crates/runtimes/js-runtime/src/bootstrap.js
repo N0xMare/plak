@@ -61,7 +61,7 @@
 
   function checkStoredDepth(value, depth) {
     if (value === null || typeof value !== "object") return;
-    if (depth >= 40) throw new Error("stored value nests deeper than 40 levels");
+    if (depth >= 40) throw new RangeError("stored value nests deeper than 40 levels");
     const keys = objectKeys(value);
     for (let index = 0; index < keys.length; index++) {
       checkStoredDepth(value[keys[index]], depth + 1);

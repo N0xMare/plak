@@ -728,6 +728,9 @@ depths 41 and 50 into catchable per-call rejections, then run another cell on
 the same session. The JavaScript suite carries a depth-40 stored value through
 the next prelude and refuses depths 41, 50 and 128 before terminal framing,
 preserving earlier valid writes after both caught and uncaught store errors.
+The stored-value protocol tests also reject depths 41 and 50 in preludes and
+both terminal variants in both serialization directions, retaining a typed
+`StoredValueDepthError`; JavaScript catches the corresponding `RangeError`.
 The private-driver scheduler additionally exercises failed read-only
 and partially effective mutating children, later successful mutation, rejected
 invalid arguments, finalized child records, and joined cancellation. Canonical

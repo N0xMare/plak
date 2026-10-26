@@ -11,6 +11,9 @@ mod process_resources;
 mod protocol;
 mod session;
 mod startup;
+mod stored;
+
+pub use stored::{StoredValueDepthError, validate_stored_values};
 
 pub use startup::CellStartupError;
 

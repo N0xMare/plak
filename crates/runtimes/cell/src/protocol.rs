@@ -144,6 +144,10 @@ pub enum CellPrelude {
     /// `QuickJS`: the visible tool declarations and the retained `store` map.
     Quickjs {
         tools: Vec<Value>,
+        #[serde(
+            serialize_with = "crate::stored::serialize",
+            deserialize_with = "crate::stored::deserialize"
+        )]
         stored: HashMap<String, Value>,
     },
     /// Monty: the session's tool wrappers, on the session's first cell only.
@@ -211,10 +215,18 @@ pub enum CellOutcome {
     Stopped { reason: CellStopReason },
     Completed {
         value: Option<String>,
+        #[serde(
+            serialize_with = "crate::stored::serialize",
+            deserialize_with = "crate::stored::deserialize"
+        )]
         stored: HashMap<String, Value>,
     },
     Failed {
         message: String,
+        #[serde(
+            serialize_with = "crate::stored::serialize",
+            deserialize_with = "crate::stored::deserialize"
+        )]
         stored: HashMap<String, Value>,
         generation_lost: bool,
     },

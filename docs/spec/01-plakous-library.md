@@ -6558,9 +6558,16 @@ and worker stop use independent atomic control and never block on queue sends.
 Terminal stored values and the facade's retained storage each have an 8 MiB
 encoded limit. Each stored value nests at most 40 containers deep. The worker's
 `store` validates the normalized JSON value before changing its retained map or
-recording a write, so an over-deep value raises a catchable cell error instead of
+recording a write, so an over-deep value raises a catchable JavaScript `RangeError` instead of
 making `CellDone` undecodable. Earlier valid writes survive; later cells can
 still load them through `CellPrelude` without losing the worker.
+`CellPrelude` and both `CellOutcome` variants validate each stored value at
+serialization and deserialization, not merely at the JavaScript helper. The
+shared validator returns `StoredValueDepthError` with the offending key and
+measured depth; the bound is the same 40-container limit as nested results.
+When multiple stored values exceed the limit, the validator reports the
+lexicographically smallest offending key. Embedded starts validate before
+enqueueing, so a refused stored prelude does not consume or lose the host.
 The facade additionally caps collected content at 8 MiB and
 4,096 items per cell; presentation truncation runs within these hard bounds.
 An empty text item is ordinary user output, not invalid output: it carries no

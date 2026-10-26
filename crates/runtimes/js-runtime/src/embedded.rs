@@ -231,6 +231,7 @@ impl EmbeddedHost {
         if source.len() > EvalLimits::DEFAULT.bytes {
             return Err("resource limit: QuickJS source".into());
         }
+        plakous_cell::validate_stored_values(&stored).map_err(|error| error.to_string())?;
         let start = StartExecution {
             execution_id,
             source: source.to_owned(),
@@ -1139,6 +1140,36 @@ fn receive_command(
 )]
 mod resource_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn overdeep_stored_start_is_refused_before_enqueue_and_host_stays_usable() {
+        let host = EmbeddedHost::spawn().expect("host");
+        let value = (0..41).fold(Value::Null, |value, _| serde_json::json!([value]));
+        let error = host
+            .start_cell(
+                1,
+                "throw new Error('refused source ran');",
+                HashMap::from([("deep".into(), value)]),
+                vec![],
+                10_000,
+            )
+            .expect_err("stored depth refused");
+        assert_eq!(
+            error,
+            "stored value \"deep\" nests 41 containers; limit is 40"
+        );
+        host.start_cell(2, "store('usable', true);", HashMap::new(), vec![], 10_000)
+            .expect("valid start");
+        let event = tokio::time::timeout(Duration::from_secs(10), host.read_event())
+            .await
+            .expect("terminal bound")
+            .expect("host remains usable");
+        assert!(
+            matches!(event, RuntimeEvent::Done { cell_id: 2, ref stored } if stored.get("usable") == Some(&Value::Bool(true))),
+            "{event:?}"
+        );
+        host.terminate().await.expect("joined");
+    }
 
     #[tokio::test]
     async fn terminate_remains_sticky_across_dequeued_start() {
