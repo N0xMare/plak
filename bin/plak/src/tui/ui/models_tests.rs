@@ -60,6 +60,8 @@ fn tui_usage_last_failed_refresh_uses_launch_home_and_fixed_zone()
         },
     ));
     app.apply_host_event(HostEvent::UsageLimits(limits));
+    app.usage_decoration.as_ref().unwrap().wait();
+    app.poll_usage_decoration();
     assert!(app.usage_refresh.pending_read);
     let body = lines_text(&app.usage_tab_lines(200));
     assert!(body.contains("refresh failed at 05:48 (generation 2): network unreachable (DNS lookup timed out); OAuth not recorded: not recorded; credential unchanged; retry when online"), "{body}");

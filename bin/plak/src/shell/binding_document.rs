@@ -89,13 +89,14 @@ impl RootBindingEdit for OpenProductRootBinding {
     fn commit(self: Box<Self>, mut draft: RootBindingDraft) -> Result<(), RootBindingSaveError> {
         let mut config = self.config;
         // A bind stages a fresh template; config.toml publishes its pointer.
-        // A bind with no account or model clears only that pointer.
         if draft.account.is_empty() || draft.model.is_empty() {
-            config.clear_root_binding();
-        } else {
-            config.root_composition = draft.composition.take();
-            apply_draft(config.root_template_mut(), draft);
+            return Err(RootBindingSaveError::BeforePublication(format!(
+                "incomplete root binding; {}",
+                crate::commands::session::RootBindingRemedy::SelectTemplate
+            )));
         }
+        config.root_composition = draft.composition.take();
+        apply_draft(config.root_template_mut(), draft);
         // Inside a trusted project the save lands in the project override —
         // the active context owns the binding — never silently flattened
         // into the global file.
@@ -121,6 +122,26 @@ impl RootBindingEdit for OpenProductRootBinding {
 #[allow(clippy::unwrap_used, reason = "isolated publication fault test")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_bind_refuses_with_a_named_remedy_and_preserves_config_bytes() {
+        let (_tmp, paths) = PlakPaths::isolated_test_home();
+        let mut config = ProductConfig::default_product();
+        config.bind_root_tuple("grok", "grok-4.6", None);
+        config.save(&paths).unwrap();
+        let before = std::fs::read(paths.config_file()).unwrap();
+        let edit = ProductRootBindingDocument::new(paths.clone())
+            .open()
+            .unwrap();
+        let mut draft = edit.current().unwrap();
+        draft.model.clear();
+        let RootBindingSaveError::BeforePublication(message) = edit.commit(draft).unwrap_err()
+        else {
+            panic!("an incomplete bind cannot publish");
+        };
+        assert!(message.contains("plak config set root.agent <template>"));
+        assert_eq!(std::fs::read(paths.config_file()).unwrap(), before);
+    }
 
     #[test]
     fn pointer_rename_failure_is_before_publication_and_preserves_active_body() {

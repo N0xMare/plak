@@ -448,9 +448,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
         ("var", (("identifier", "name"),)),
         ("var_os", (("identifier", "name"),)),
     ],
-    ("plakous-workspace", "src/workspace.rs"): [
-        ("var_os", (("string", "HOME"),)),
-    ],
     ("plakous-workspace", "src/vcs_fixtures.rs"): [
         ("var_os", (("string", "PLAK_TEST_JJ"),)),
     ],

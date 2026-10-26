@@ -8,6 +8,66 @@ use super::{
 use crate::tui::SurfaceObservation;
 
 impl App {
+    /// Retire observations and handles owned by the source session, not terminal preferences.
+    fn reset_session_state(&mut self) {
+        self.context_usage = unknown_context_usage();
+        self.last_turn_usage = None;
+        self.last_turn = None;
+        self.last_prompt_at = None;
+        self.idle_clock_painted = None;
+        self.pending_retry = None;
+        self.turn_started = None;
+        self.phase_started = None;
+        self.model_request_started = None;
+        self.request_slot_wait = None;
+        self.credential_wait = None;
+        self.cancel_pending = false;
+        self.busy = false;
+        self.phase = "idle".into();
+        self.status_detail = None;
+        self.clear_pending = false;
+        self.quit_arm = None;
+        self.esc_clear_arm = None;
+        self.open_approval = None;
+        self.pending_continuation = plakous_host_protocol::PendingContinuation::default();
+        self.local_queue.clear();
+        self.queue_len = 0;
+        self.queue_drain = crate::tui::QueueDrainState::LiveAutoDrain;
+        self.queue_focused = false;
+        self.queue_selected = 0;
+        self.cancel_queue_edit();
+        self.pending_queue_edit = None;
+        self.pending_drafts.clear();
+        self.accepted_drafts.clear();
+        self.prompt_history.clear();
+        self.recovered_drafts.clear();
+        self.history_browse = None;
+        self.prompt_history_hits.clear();
+        self.queued_steers_retired = 0;
+        self.composer_chrome = super::composer_chrome::ComposerChrome::default();
+        self.agent_tree = None;
+        self.tree_navigator = None;
+        self.agents_unavailable = None;
+        self.tree_epoch_state = None;
+        self.tree_live_descendants = 0;
+        self.tree_restored_paused = false;
+        self.pending_open_tree = self.agent_enabled;
+        self.agent_acks = super::tree::AgentAcknowledgements::default();
+        self.call_details = super::call_detail::CallDetails::default();
+        self.session_info = crate::tui::presentation::SessionInfoView::default();
+        self.session_rows.clear();
+        self.session_row_hits.clear();
+        self.tab_copy_text.clear();
+        self.info_overlay = None;
+        self.refresh_failure_notes.clear();
+        self.usage_limits = crate::tui::providers::unread_usage_limits();
+        self.subscription_usage = crate::tui::presentation::SubscriptionUsageView::Loading;
+        if let Some(reader) = &mut self.usage_decoration {
+            reader.invalidate();
+        }
+        self.mark_dirty();
+    }
+
     /// Marks the assistant text and reasoning the failed request streamed:
     /// the trailing blocks of this model call, which a replay only follows
     /// before any tool call began.
@@ -741,8 +801,7 @@ impl App {
                     // A rebind to another session retires the previous turn's
                     // lifecycle projection: its correlation is session-scoped.
                     if self.session_id.as_deref() != Some(s.as_str()) {
-                        self.last_turn = None;
-                        self.last_prompt_at = None;
+                        self.reset_session_state();
                     }
                     self.session_id = Some(s);
                 }
@@ -764,6 +823,7 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::ClearView => {
+                self.reset_session_state();
                 self.accepted_drafts.clear();
                 self.queued_steers_retired = 0;
                 self.clear_pending = false;
@@ -815,12 +875,11 @@ impl App {
                 self.subscription_usage = usage;
                 self.mark_dirty();
             }
-            HostEvent::UsageLimits(mut limits) => {
-                self.refresh_failure_notes = crate::product_subscription_usage::annotate_limits(
-                    &mut limits,
-                    self.telemetry_paths.as_ref(),
-                    self.time_zone,
-                );
+            HostEvent::UsageLimits(limits) => {
+                self.refresh_failure_notes.clear();
+                if let Some(reader) = &mut self.usage_decoration {
+                    reader.request(limits.clone());
+                }
                 self.usage_limits = limits;
                 self.mark_dirty();
             }
@@ -859,7 +918,10 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::Extension(SurfaceObservation::McpOverview(body)) => {
-                self.info_overlay = Some(("mcp".to_owned(), body));
+                self.info_overlay = Some((
+                    "mcp".to_owned(),
+                    crate::tui::surface_views::mcp_overview(&body),
+                ));
                 self.info_overlay_scroll = super::modal_chrome::ScrollState::default();
                 self.mark_dirty();
             }
@@ -961,8 +1023,8 @@ impl App {
             }
             HostEvent::Extension(SurfaceObservation::SettingsSnapshot(snapshot)) => {
                 self.settings_error = None;
-                self.persisted_theme = snapshot.theme;
-                self.theme = theme_for(snapshot.theme);
+                self.persisted_theme = snapshot.tui.theme;
+                self.theme = theme_for(snapshot.tui.theme);
                 self.settings_snapshot = Some(snapshot.clone());
                 if let Some(menu) = self.settings_menu.as_mut() {
                     menu.draft = snapshot.clone();
@@ -985,8 +1047,8 @@ impl App {
                 // not an exit. The tab stays exactly where the operator left
                 // it and only the persisted value moves under it.
                 self.settings_error = None;
-                self.persisted_theme = snapshot.theme;
-                self.theme = theme_for(snapshot.theme);
+                self.persisted_theme = snapshot.tui.theme;
+                self.theme = theme_for(snapshot.tui.theme);
                 self.settings_snapshot = Some(snapshot.clone());
                 if let Some(menu) = self.settings_menu.as_mut() {
                     menu.draft = snapshot;
@@ -1224,6 +1286,18 @@ impl App {
                 }
                 self.mark_dirty();
             }
+        }
+    }
+
+    pub(super) fn poll_usage_decoration(&mut self) {
+        if let Some((limits, notes)) = self
+            .usage_decoration
+            .as_mut()
+            .and_then(crate::config::UsageDecorationReader::poll)
+        {
+            self.usage_limits = limits;
+            self.refresh_failure_notes = notes;
+            self.mark_dirty();
         }
     }
 }

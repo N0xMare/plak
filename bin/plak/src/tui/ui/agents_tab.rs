@@ -478,6 +478,7 @@ mod tests {
     fn view() -> ProfilesView {
         let row = |id: &str, aliases: &[&str], account: &str, model: &str| ProfileRow {
             id: id.to_owned(),
+            differences: Vec::new(),
             aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
             root: role("root", account, model),
             cards: vec![role("worker", account, model)],

@@ -14,12 +14,52 @@ use plakous_host_protocol::{
     SessionObservation, intent_channel, observation_channel,
 };
 
+/// Checkout facts, not a preformatted border label or session authority.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct WorkspaceChrome {
+    pub path: std::path::PathBuf,
+    pub home: Option<std::path::PathBuf>,
+    pub branch: Option<String>,
+}
+
+/// Read-only MCP configuration and the session's frozen binding.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct McpOverview {
+    pub unavailable: Option<String>,
+    pub diagnostics: Vec<String>,
+    pub servers: Vec<McpServerView>,
+    pub omitted: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpServerView {
+    pub id: String,
+    pub configuration: Result<Option<McpServerConfiguration>, String>,
+    pub binding: McpSessionBinding,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpServerConfiguration {
+    pub transport: String,
+    pub target: String,
+    pub scope: String,
+    pub templates: Vec<String>,
+    pub missing_secrets: Vec<String>,
+    pub resources: bool,
+    pub login: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum McpSessionBinding {
+    NotBound,
+    Bound {
+        tools: usize,
+        earlier_definition: bool,
+    },
+}
+
 /// Product-authoritative editable settings.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "spec 8.1 fixes nine independent switch rows; a state machine would hide them"
-)]
 pub struct SettingsSnapshot {
     /// Default account for new sessions.
     pub default_account: Option<String>,
@@ -36,31 +76,25 @@ pub struct SettingsSnapshot {
     pub protocol: ProtocolSelection,
     /// Host-authoritative availability and effective projection for each choice.
     pub composition_options: Box<[SettingsCompositionOption]>,
-    /// Whether mouse input is enabled on the next TUI launch.
-    pub mouse: bool,
     /// Whether automatic product compaction is enabled.
     pub compaction: bool,
-    /// Transcript lines moved per wheel tick.
-    pub scroll_lines: u16,
-    /// Render reasoning blocks where the provider policy admits them.
-    pub show_thinking: bool,
-    /// Verb grouping for consecutive tool rows (§5.5).
-    pub group_tool_calls: bool,
-    /// Render edits as a one-line diffstat.
-    /// Suppress spinner, pulse and camera easing.
-    pub reduced_motion: bool,
-    /// Current supported product theme.
-    pub theme: SettingsTheme,
 }
 
-impl Default for SettingsSnapshot {
+/// Product settings and the independently owned terminal preferences edited together.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SettingsView {
+    pub product: SettingsSnapshot,
+    pub tui: crate::tui_preferences::TuiPreferences,
+}
+
+impl Default for SettingsView {
     /// The config-schema defaults, so a test fixture cannot drift from §5.5.
     fn default() -> Self {
-        let mut snapshot = crate::shell::settings::settings_snapshot(
+        let mut snapshot = crate::shell::settings::settings_view(
             &crate::product_config::ProductConfig::default_product(),
         );
         // A default snapshot has no host-resolved composition availability.
-        snapshot.composition_options = Box::default();
+        snapshot.product.composition_options = Box::default();
         snapshot
     }
 }
@@ -76,73 +110,7 @@ pub struct SettingsCompositionOption {
     pub unavailable_reason: Option<String>,
 }
 
-/// Closed set of product themes supported by this TUI build (spec 02 §5.5).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum SettingsTheme {
-    /// Plak's original high-contrast dark product theme.
-    #[default]
-    DefaultDark,
-    /// Plak's high-contrast light product theme.
-    DefaultLight,
-    /// Catppuccin's light flavor.
-    CatppuccinLatte,
-    /// Catppuccin's muted dark flavor.
-    CatppuccinFrappe,
-    /// Catppuccin's medium-contrast dark flavor.
-    CatppuccinMacchiato,
-    /// Catppuccin's darkest color-rich flavor.
-    CatppuccinMocha,
-}
-
-impl SettingsTheme {
-    /// Every theme in settings order.
-    pub const ALL: [Self; 6] = [
-        Self::DefaultDark,
-        Self::DefaultLight,
-        Self::CatppuccinLatte,
-        Self::CatppuccinFrappe,
-        Self::CatppuccinMacchiato,
-        Self::CatppuccinMocha,
-    ];
-
-    /// Stable configuration label.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::DefaultDark => "default-dark",
-            Self::DefaultLight => "default-light",
-            Self::CatppuccinLatte => "catppuccin-latte",
-            Self::CatppuccinFrappe => "catppuccin-frappe",
-            Self::CatppuccinMacchiato => "catppuccin-macchiato",
-            Self::CatppuccinMocha => "catppuccin-mocha",
-        }
-    }
-
-    /// Next theme in the control-center cycle.
-    #[must_use]
-    pub const fn next(self) -> Self {
-        match self {
-            Self::DefaultDark => Self::DefaultLight,
-            Self::DefaultLight => Self::CatppuccinLatte,
-            Self::CatppuccinLatte => Self::CatppuccinFrappe,
-            Self::CatppuccinFrappe => Self::CatppuccinMacchiato,
-            Self::CatppuccinMacchiato => Self::CatppuccinMocha,
-            Self::CatppuccinMocha => Self::DefaultDark,
-        }
-    }
-
-    /// Parses a canonical label. `dark` and `light` remain accepted aliases.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "dark" => Some(Self::DefaultDark),
-            "light" => Some(Self::DefaultLight),
-            other => Self::ALL
-                .into_iter()
-                .find(|candidate| candidate.as_str() == other),
-        }
-    }
-}
+pub use crate::tui_preferences::SettingsTheme;
 
 /// One role line in the Agents detail box.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -167,12 +135,26 @@ pub struct ProfileRole {
 pub struct ProfileRow {
     /// Built-in id or `~/.plak/profiles` file stem.
     pub id: String,
+    /// Bounded differences from the nearest saved profile; empty for an exact match.
+    pub differences: Vec<ProfileDifference>,
     /// Other names `/agents <name>` accepts for this row.
     pub aliases: Vec<String>,
     /// Root template.
     pub root: ProfileRole,
     /// Working-set cards, in order.
     pub cards: Vec<ProfileRole>,
+}
+
+/// Identity-only custom-profile detail; never contains card bodies or credentials.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProfileDifference {
+    RootAccount,
+    RootModel,
+    RootEffort,
+    RootFast,
+    WorkingSet,
+    Card(String),
+    Roster,
 }
 
 /// The product's profile list, as the Agents tab shows it.
@@ -200,7 +182,7 @@ pub enum ProfileOutcome {
 }
 
 /// Complete typed settings replacement sent to the product host.
-pub type SettingsUpdate = SettingsSnapshot;
+pub type SettingsUpdate = SettingsView;
 
 /// Plak's product traffic beside the closed host protocol: the typed settings
 /// pane and the usage overlay ride the same mailboxes as extension payloads.
@@ -307,9 +289,9 @@ impl fmt::Debug for SurfaceIntent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SurfaceObservation {
     /// Replace and open the typed product settings pane.
-    SettingsSnapshot(SettingsSnapshot),
+    SettingsSnapshot(SettingsView),
     /// Complete settings replacement was durably persisted by the product host.
-    SettingsApplied(SettingsSnapshot),
+    SettingsApplied(SettingsView),
     /// Loading typed product settings failed and is retryable.
     SettingsLoadFailed(String),
     /// Persisting typed product settings failed; the draft remains open.
@@ -331,9 +313,9 @@ pub enum SurfaceObservation {
     /// saved profile matches the complete binding and frozen roster.
     SessionProfile(ProfileRow),
     /// Fresh product-owned workspace presentation, never session authority.
-    WorkspaceChrome(String),
+    WorkspaceChrome(WorkspaceChrome),
     /// The read-only MCP view: configured servers and this session's tools.
-    McpOverview(String),
+    McpOverview(McpOverview),
     /// A profile was applied.
     ProfileApplied {
         /// Profile id.

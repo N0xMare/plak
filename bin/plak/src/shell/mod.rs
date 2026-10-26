@@ -8,6 +8,7 @@ pub mod home;
 pub mod host;
 pub mod services;
 pub mod settings;
+pub(crate) mod workspace;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]

@@ -24,11 +24,16 @@ pub(crate) fn run(
 pub(crate) fn session_overview(
     _paths: &PlakPaths,
     _session: Option<&plakous_hosted::runtime::SurfaceSession>,
-) -> String {
-    plakous_hosted::capabilities::CapabilityUnavailable {
-        id: "mcp",
-        kind: plakous_hosted::capabilities::CapabilityKind::ToolPack,
-        feature: "mcp",
+) -> crate::surface_protocol::McpOverview {
+    crate::surface_protocol::McpOverview {
+        unavailable: Some(
+            plakous_hosted::capabilities::CapabilityUnavailable {
+                id: "mcp",
+                kind: plakous_hosted::capabilities::CapabilityKind::ToolPack,
+                feature: "mcp",
+            }
+            .to_string(),
+        ),
+        ..Default::default()
     }
-    .to_string()
 }

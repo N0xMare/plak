@@ -570,13 +570,19 @@ pub fn application_state_home() -> Result<PathBuf, String> {
 /// builds and `$HOME/.local/lib/plak/release` for `just install release`.
 #[must_use]
 pub fn installed_snapshot_roots() -> Vec<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
+    user_home()
         .map(|home| {
-            let lib = PathBuf::from(home).join(".local/lib/plak");
+            let lib = home.join(".local/lib/plak");
             vec![lib.join("maintainer"), lib.join("release")]
         })
         .unwrap_or_default()
+}
+
+/// The operator home used only to shorten display paths, never a product-state default.
+pub(crate) fn user_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
 }
 
 fn resolve_xdg_state_home(

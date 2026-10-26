@@ -7,7 +7,7 @@ use super::test_support::{
 };
 use crate::tui::blocks::RenderPrefs;
 use crate::tui::theme::ThemeId;
-use crate::tui::{HostEvent, SettingsSnapshot, UserAction, user_action_channel};
+use crate::tui::{HostEvent, SettingsView, UserAction, user_action_channel};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, MouseEventKind};
 use ratatui::Terminal;
@@ -21,7 +21,7 @@ fn settings_rows_focus_on_click_and_activate_on_double_click() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -96,7 +96,7 @@ fn a_theme_choice_previews_on_click_and_applies_on_double_click() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     app.settings_menu.as_mut().unwrap().selected =
         settings_row(crate::tui::settings_registry::THEME);
@@ -123,7 +123,7 @@ fn a_theme_choice_previews_on_click_and_applies_on_double_click() {
         None
     );
     assert!(choosing(&app), "a click only focuses");
-    assert_eq!(app.settings_menu.as_ref().unwrap().draft.theme, second);
+    assert_eq!(app.settings_menu.as_ref().unwrap().draft.tui.theme, second);
     assert_eq!(app.theme.id, super::theme_for(second).id, "and previews");
 
     terminal.draw(|frame| app.draw(frame)).unwrap();
@@ -132,7 +132,7 @@ fn a_theme_choice_previews_on_click_and_applies_on_double_click() {
         Some(UserAction::Extension(SurfaceIntent::SaveSettings(_)))
     ));
     assert!(!choosing(&app), "a double-click applies like Enter");
-    assert_eq!(app.settings_menu.as_ref().unwrap().draft.theme, second);
+    assert_eq!(app.settings_menu.as_ref().unwrap().draft.tui.theme, second);
     assert_eq!(app.theme.id, super::theme_for(second).id);
 }
 
@@ -143,7 +143,7 @@ fn hovering_a_chooser_choice_leaves_no_browse_hover_behind() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     app.settings_menu.as_mut().unwrap().selected =
         settings_row(crate::tui::settings_registry::THEME);
@@ -174,7 +174,7 @@ fn a_single_click_on_the_focused_settings_row_only_keeps_focus() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let motion = settings_row(crate::tui::settings_registry::REDUCED_MOTION);
     app.settings_menu.as_mut().unwrap().selected = motion;
@@ -206,7 +206,7 @@ fn theme_preview_and_revert_cover_all_six_themes() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let theme_row = settings_row(crate::tui::settings_registry::THEME);
     app.settings_menu.as_mut().unwrap().selected = theme_row;
@@ -218,7 +218,7 @@ fn theme_preview_and_revert_cover_all_six_themes() {
     for expected in crate::tui::SettingsTheme::ALL.into_iter().skip(1) {
         app.handle_key(key(KeyCode::Down));
         assert_eq!(
-            app.settings_menu.as_ref().unwrap().draft.theme,
+            app.settings_menu.as_ref().unwrap().draft.tui.theme,
             expected,
             "the chooser previews {expected:?} on move"
         );
@@ -231,7 +231,7 @@ fn theme_preview_and_revert_cover_all_six_themes() {
     // Esc reverts to the committed value, not merely to the previous one.
     app.handle_key(key(KeyCode::Esc));
     assert_eq!(
-        app.settings_menu.as_ref().unwrap().draft.theme,
+        app.settings_menu.as_ref().unwrap().draft.tui.theme,
         crate::tui::SettingsTheme::DefaultDark
     );
     assert_eq!(app.theme, crate::tui::Theme::dark());
@@ -242,7 +242,7 @@ fn theme_preview_and_revert_cover_all_six_themes() {
     app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(
-        app.settings_menu.as_ref().unwrap().draft.theme,
+        app.settings_menu.as_ref().unwrap().draft.tui.theme,
         crate::tui::SettingsTheme::DefaultLight
     );
     assert_eq!(app.theme, crate::tui::Theme::light());
@@ -269,12 +269,15 @@ fn settings_failure_replaces_loading_and_keeps_control_center_open() {
 #[test]
 fn launch_settings_are_immediately_visible_while_host_refresh_is_pending() {
     let mut launch = launch_basic();
-    launch.settings = Some(SettingsSnapshot {
-        default_account: Some("codex".into()),
-        default_model: Some("gpt-exact".into()),
-        default_effort: Some("medium".into()),
-        default_extra: None,
-        ..SettingsSnapshot::default()
+    launch.settings = Some(SettingsView {
+        product: crate::surface_protocol::SettingsSnapshot {
+            default_account: Some("codex".into()),
+            default_model: Some("gpt-exact".into()),
+            default_effort: Some("medium".into()),
+            default_extra: None,
+            ..(SettingsView::default()).product
+        },
+        ..SettingsView::default()
     });
     let mut app = App::new(launch, true);
     assert!(app.settings_snapshot.is_some());
@@ -371,12 +374,15 @@ fn cancelled_theme_preview_restores_persisted_theme() {
     // The operator asked for the control centre; the snapshot is its reply.
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot {
-            default_account: None,
-            default_model: None,
-            default_effort: None,
-            default_extra: None,
-            ..SettingsSnapshot::default()
+        SettingsView {
+            product: crate::surface_protocol::SettingsSnapshot {
+                default_account: None,
+                default_model: None,
+                default_effort: None,
+                default_extra: None,
+                ..(SettingsView::default()).product
+            },
+            ..SettingsView::default()
         },
     )));
     app.settings_menu.as_mut().expect("settings").selected =
@@ -398,16 +404,19 @@ fn settings_rendering_rows_drive_the_renderer() {
     let mut app = App::new(launch_basic(), true);
     assert_eq!(
         RenderPrefs::default(),
-        RenderPrefs::from(&SettingsSnapshot::default())
+        RenderPrefs::from(&SettingsView::default().tui)
     );
 
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot {
-            show_thinking: false,
-            group_tool_calls: false,
-            reduced_motion: true,
-            ..SettingsSnapshot::default()
+        SettingsView {
+            tui: crate::tui_preferences::TuiPreferences {
+                show_thinking: false,
+                group_tool_calls: false,
+                reduced_motion: true,
+                ..(SettingsView::default()).tui
+            },
+            ..SettingsView::default()
         },
     )));
     assert!(!app.render_prefs.show_thinking);
@@ -435,7 +444,7 @@ fn opening_a_settings_sub_pane_paints_on_the_same_frame() {
         let mut app = App::new(launch_basic(), true);
         app.pending_open_settings = true;
         app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-            SettingsSnapshot::default(),
+            SettingsView::default(),
         )));
         app.settings_menu.as_mut().expect("settings").selected = settings_row(key_name);
 
@@ -513,7 +522,7 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
 
@@ -524,7 +533,7 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
         panic!("a switch must persist on change: {emitted:?}");
     };
-    assert!(!update.mouse);
+    assert!(!update.tui.mouse);
 
     // An enum row: the chooser previews live and commits on Enter.
     app.settings_menu.as_mut().unwrap().selected =
@@ -544,7 +553,7 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
         panic!("a committed choice must persist: {emitted:?}");
     };
-    assert_ne!(update.theme, crate::tui::SettingsTheme::DefaultDark);
+    assert_ne!(update.tui.theme, crate::tui::SettingsTheme::DefaultDark);
 
     // An int row: the stepper commits on Enter.
     app.settings_menu.as_mut().unwrap().selected =
@@ -559,7 +568,7 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
         panic!("a committed step must persist: {emitted:?}");
     };
-    assert_eq!(update.scroll_lines, 4);
+    assert_eq!(update.tui.scroll_lines, 4);
 
     // `d` then `Enter` confirms the reset at once. There is no settle.
     app.handle_key(key(KeyCode::Char('d')));
@@ -567,7 +576,7 @@ fn every_settings_row_applies_on_change_and_persists_immediately() {
     let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = emitted else {
         panic!("a reset must persist: {emitted:?}");
     };
-    assert_eq!(update.scroll_lines, 3);
+    assert_eq!(update.tui.scroll_lines, 3);
 
     terminal.draw(|frame| app.draw(frame)).unwrap();
     assert_eq!(
@@ -584,7 +593,7 @@ fn a_refused_settings_change_is_stated_inline_and_keeps_the_tab_open() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     app.apply_host_event(HostEvent::Extension(
         SurfaceObservation::SettingsSaveFailed("config.toml is read-only".into()),
@@ -598,9 +607,12 @@ fn a_refused_settings_change_is_stated_inline_and_keeps_the_tab_open() {
     terminal.draw(|frame| app.draw(frame)).unwrap();
 
     // A confirmed write leaves the operator exactly where they were.
-    let applied = SettingsSnapshot {
-        scroll_lines: 6,
-        ..SettingsSnapshot::default()
+    let applied = SettingsView {
+        tui: crate::tui_preferences::TuiPreferences {
+            scroll_lines: 6,
+            ..(SettingsView::default()).tui
+        },
+        ..SettingsView::default()
     };
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsApplied(
         applied,
@@ -611,6 +623,7 @@ fn a_refused_settings_change_is_stated_inline_and_keeps_the_tab_open() {
             .as_ref()
             .expect("settings")
             .draft
+            .tui
             .scroll_lines,
         6
     );
@@ -621,12 +634,15 @@ fn late_settings_acknowledgement_stays_inert_after_control_center_closes() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     app.close_control_center();
-    let applied = SettingsSnapshot {
-        reduced_motion: true,
-        ..SettingsSnapshot::default()
+    let applied = SettingsView {
+        tui: crate::tui_preferences::TuiPreferences {
+            reduced_motion: true,
+            ..(SettingsView::default()).tui
+        },
+        ..SettingsView::default()
     };
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsApplied(
         applied,
@@ -637,9 +653,12 @@ fn late_settings_acknowledgement_stays_inert_after_control_center_closes() {
         "authoritative value still applies"
     );
 
-    let newer = SettingsSnapshot {
-        reduced_motion: false,
-        ..SettingsSnapshot::default()
+    let newer = SettingsView {
+        tui: crate::tui_preferences::TuiPreferences {
+            reduced_motion: false,
+            ..(SettingsView::default()).tui
+        },
+        ..SettingsView::default()
     };
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
         newer,
@@ -660,6 +679,7 @@ fn late_settings_acknowledgement_stays_inert_after_control_center_closes() {
             .as_ref()
             .expect("reopened settings")
             .draft
+            .tui
             .reduced_motion,
         "reopen starts from the newest authoritative snapshot"
     );
@@ -696,12 +716,17 @@ fn settings_reset_is_taken_from_the_live_draft_at_confirm() {
         let mut app = settings_fixture();
         let row = settings_row(crate::tui::settings_registry::SCROLL_LINES);
         app.settings_menu.as_mut().unwrap().selected = row;
-        app.settings_menu.as_mut().unwrap().draft.scroll_lines = 8;
+        app.settings_menu.as_mut().unwrap().draft.tui.scroll_lines = 8;
         assert!(app.handle_key(key(KeyCode::Char('d'))).is_none());
-        let changed = SettingsSnapshot {
-            compaction: !SettingsSnapshot::default().compaction,
-            scroll_lines: 9,
-            ..SettingsSnapshot::default()
+        let changed = SettingsView {
+            product: crate::surface_protocol::SettingsSnapshot {
+                compaction: !SettingsView::default().product.compaction,
+                ..(SettingsView::default()).product
+            },
+            tui: crate::tui_preferences::TuiPreferences {
+                scroll_lines: 9,
+                ..(SettingsView::default()).tui
+            },
         };
         let observation = if applied {
             SurfaceObservation::SettingsApplied(changed.clone())
@@ -717,9 +742,9 @@ fn settings_reset_is_taken_from_the_live_draft_at_confirm() {
         let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = sent else {
             panic!("{sent:?}");
         };
-        assert_eq!(update.scroll_lines, 3, "the bound row resets");
+        assert_eq!(update.tui.scroll_lines, 3, "the bound row resets");
         assert_eq!(
-            update.compaction, changed.compaction,
+            update.product.compaction, changed.product.compaction,
             "applied={applied}: the echo was reverted"
         );
     }

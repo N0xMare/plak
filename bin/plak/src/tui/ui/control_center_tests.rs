@@ -9,7 +9,7 @@ use super::test_support::{
 use super::{App, format_turn_usage};
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ContextUsage, PreparedInputUsage};
-use crate::tui::{HostEvent, QueueDrainState, SettingsSnapshot, UserAction, user_action_channel};
+use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction, user_action_channel};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use plakous_host_protocol::topology::AttemptStatus;
@@ -129,7 +129,7 @@ fn every_control_center_tab_scrolls() {
         let mut app = App::new(launch_basic(), true);
         app.pending_open_settings = true;
         app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-            SettingsSnapshot::default(),
+            SettingsView::default(),
         )));
         app.control_tab = Some(tab);
         app.templates = (0..12)
@@ -1596,7 +1596,7 @@ fn wide_menu_details_do_not_steal_list_mouse_hits() {
         let mut app = usage_fixture();
         app.pending_open_settings = true;
         app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-            SettingsSnapshot::default(),
+            SettingsView::default(),
         )));
         app.activate_control_tab(super::ControlTab::Settings);
         let _ = menu_rows(&mut app, width, 40);

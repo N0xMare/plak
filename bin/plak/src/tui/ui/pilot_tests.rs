@@ -12,7 +12,7 @@ use super::test_support::{
 use super::{App, HostEvent, UserAction};
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::ActivityKind;
-use crate::tui::{SettingsSnapshot, SurfaceIntent, SurfaceObservation, settings_registry};
+use crate::tui::{SettingsView, SurfaceIntent, SurfaceObservation, settings_registry};
 use plakous_host_protocol::{TurnLifecycle, TurnPhase};
 
 fn action_ids(app: &App) -> Vec<String> {
@@ -105,7 +105,7 @@ fn settings_app() -> App {
     let mut app = App::new(launch_basic(), true);
     app.open_control_tab(super::ControlTab::Settings);
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     app
 }
@@ -231,7 +231,7 @@ fn settings_actions_are_derived_from_the_visible_registry_rows() {
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let ids = action_ids(&app);
     for meta in settings_registry::ROWS {
@@ -314,7 +314,7 @@ fn higher_priority_overlay_hides_settings_actions_and_private_text() {
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     app.settings_error = Some("PRIVATE_SETTINGS_ERROR".to_owned());
     app.info_overlay = Some((
@@ -338,7 +338,7 @@ fn settings_subpanes_do_not_advertise_browse_actions() {
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let row = settings_registry::ROWS
         .iter()
@@ -377,7 +377,7 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
         Some(UserAction::Extension(SurfaceIntent::OpenSettings))
     );
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     assert_eq!(app.semantic_snapshot().owner, "settings");
 
@@ -397,7 +397,7 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
     let Some(UserAction::Extension(SurfaceIntent::SaveSettings(update))) = save else {
         panic!("toggle must emit one complete settings replacement: {save:?}");
     };
-    assert!(update.reduced_motion);
+    assert!(update.tui.reduced_motion);
     assert!(
         app.render_prefs.reduced_motion,
         "preview applies immediately"
@@ -815,7 +815,7 @@ fn every_control_tab_and_terminal_owner_has_a_closed_action_table() {
         app.open_control_tab(tab);
         if tab == super::ControlTab::Settings {
             app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-                SettingsSnapshot::default(),
+                SettingsView::default(),
             )));
         }
         let actions = app.legal_pilot_actions();

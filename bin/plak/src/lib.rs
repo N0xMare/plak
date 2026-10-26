@@ -67,6 +67,8 @@ mod review_expiry;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
 pub(crate) mod terminal_application;
+#[path = "tui/preferences.rs"]
+pub(crate) mod tui_preferences;
 /// Plak's own storage home: where the XDG layout puts each file, and the
 /// credentials kept under it.
 #[doc(hidden)]
@@ -189,7 +191,6 @@ pub(crate) use plakous_hosted::runtime as product_host;
 pub(crate) use plakous_hosted::session_log as product_session_log;
 #[cfg(test)]
 pub(crate) use plakous_hosted::subscription_usage as product_usage;
-pub(crate) use plakous_hosted::workspace as product_workspace;
 
 use crate::product_config::ConfigScope;
 #[cfg(test)]

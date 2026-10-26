@@ -6,7 +6,7 @@
 
 use crate::tui::settings_registry::{self, SettingKind, SettingMeta};
 use crate::tui::text_input::is_accepted_single_line_char;
-use crate::tui::{SettingsSnapshot, SettingsTheme};
+use crate::tui::{SettingsTheme, SettingsView};
 
 /// Live-preview enum chooser opened over a settings row (spec 02 §5.5).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,7 +46,7 @@ pub enum SettingsPane {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettingsMenu {
     /// Editable draft.
-    pub draft: SettingsSnapshot,
+    pub draft: SettingsView,
     /// Selected registry row.
     pub selected: usize,
     /// Search query over label, description and keywords.
@@ -64,7 +64,7 @@ impl SettingsMenu {
 
     /// Opens the pane over an authoritative snapshot.
     #[must_use]
-    pub const fn open(snapshot: SettingsSnapshot) -> Self {
+    pub const fn open(snapshot: SettingsView) -> Self {
         Self {
             draft: snapshot,
             selected: 0,
@@ -84,11 +84,11 @@ impl SettingsMenu {
     #[must_use]
     pub fn bool_value(&self, key: &str) -> Option<bool> {
         Some(match key {
-            settings_registry::MOUSE => self.draft.mouse,
-            settings_registry::SHOW_THINKING => self.draft.show_thinking,
-            settings_registry::GROUP_TOOL_CALLS => self.draft.group_tool_calls,
-            settings_registry::AUTO_COMPACTION => self.draft.compaction,
-            settings_registry::REDUCED_MOTION => self.draft.reduced_motion,
+            settings_registry::MOUSE => self.draft.tui.mouse,
+            settings_registry::SHOW_THINKING => self.draft.tui.show_thinking,
+            settings_registry::GROUP_TOOL_CALLS => self.draft.tui.group_tool_calls,
+            settings_registry::AUTO_COMPACTION => self.draft.product.compaction,
+            settings_registry::REDUCED_MOTION => self.draft.tui.reduced_motion,
             _ => return None,
         })
     }
@@ -96,11 +96,11 @@ impl SettingsMenu {
     /// Writes a `Bool` row.
     pub fn set_bool(&mut self, key: &str, value: bool) {
         match key {
-            settings_registry::MOUSE => self.draft.mouse = value,
-            settings_registry::SHOW_THINKING => self.draft.show_thinking = value,
-            settings_registry::GROUP_TOOL_CALLS => self.draft.group_tool_calls = value,
-            settings_registry::AUTO_COMPACTION => self.draft.compaction = value,
-            settings_registry::REDUCED_MOTION => self.draft.reduced_motion = value,
+            settings_registry::MOUSE => self.draft.tui.mouse = value,
+            settings_registry::SHOW_THINKING => self.draft.tui.show_thinking = value,
+            settings_registry::GROUP_TOOL_CALLS => self.draft.tui.group_tool_calls = value,
+            settings_registry::AUTO_COMPACTION => self.draft.product.compaction = value,
+            settings_registry::REDUCED_MOTION => self.draft.tui.reduced_motion = value,
             _ => {}
         }
     }
@@ -109,7 +109,7 @@ impl SettingsMenu {
     #[must_use]
     pub fn enum_value(&self, key: &str) -> Option<&'static str> {
         Some(match key {
-            settings_registry::THEME => self.draft.theme.as_str(),
+            settings_registry::THEME => self.draft.tui.theme.as_str(),
             _ => return None,
         })
     }
@@ -119,7 +119,7 @@ impl SettingsMenu {
         if key == settings_registry::THEME
             && let Some(theme) = SettingsTheme::parse(value)
         {
-            self.draft.theme = theme;
+            self.draft.tui.theme = theme;
         }
     }
 
@@ -127,7 +127,7 @@ impl SettingsMenu {
     #[must_use]
     pub fn int_value(&self, key: &str) -> Option<u16> {
         match key {
-            settings_registry::SCROLL_LINES => Some(self.draft.scroll_lines),
+            settings_registry::SCROLL_LINES => Some(self.draft.tui.scroll_lines),
             _ => None,
         }
     }
@@ -142,7 +142,7 @@ impl SettingsMenu {
         };
         let value = value.clamp(min, max);
         if key == settings_registry::SCROLL_LINES {
-            self.draft.scroll_lines = value;
+            self.draft.tui.scroll_lines = value;
         }
     }
 
@@ -325,12 +325,12 @@ impl SettingsMenu {
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod tests {
-    use super::{SettingsMenu, SettingsPane, SettingsSnapshot, SettingsTheme};
+    use super::{SettingsMenu, SettingsPane, SettingsTheme, SettingsView};
     use crate::tui::CompositionSelection;
     use crate::tui::settings_registry::{self, SettingKind};
 
     fn menu() -> SettingsMenu {
-        SettingsMenu::open(SettingsSnapshot::default())
+        SettingsMenu::open(SettingsView::default())
     }
 
     #[test]
@@ -475,9 +475,9 @@ mod tests {
     fn reset_restores_the_schema_default() {
         let mut menu = menu();
         let row = settings_registry::index_of(settings_registry::THEME).unwrap();
-        menu.draft.theme = SettingsTheme::CatppuccinMocha;
+        menu.draft.tui.theme = SettingsTheme::CatppuccinMocha;
         assert_eq!(SettingsMenu::default_label(row), "default-dark");
         menu.reset_to_default(row);
-        assert_eq!(menu.draft.theme, SettingsTheme::DefaultDark);
+        assert_eq!(menu.draft.tui.theme, SettingsTheme::DefaultDark);
     }
 }

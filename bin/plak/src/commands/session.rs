@@ -12,8 +12,8 @@ mod recovery;
 
 pub(crate) use attached::{probe_carry_capacity, probe_prepared_capacity, run_attached_action};
 
-pub(crate) use binding::resolve_api_composition;
-pub use binding::{repair_invalid_new_session_binding, seed_new_session_binding};
+pub use binding::seed_new_session_binding;
+pub(crate) use binding::{RootBindingRemedy, resolve_api_composition};
 
 pub use delete::confirm_session_mutation;
 pub(crate) use delete::{delete_session, gc_sessions};

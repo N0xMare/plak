@@ -14,6 +14,55 @@ use ratatui::{Terminal, backend::TestBackend};
 use std::time::{Duration, Instant};
 
 #[test]
+fn custom_profile_chip_names_changed_fields_and_bounds_card_names() {
+    use crate::tui::ProfileDifference;
+    let mut app = App::new(launch_basic(), true);
+    pin_clock(&mut app);
+    let mut profile = builtin_profiles_view().rows.remove(0);
+    profile.id = "custom".into();
+    profile.differences = vec![ProfileDifference::RootModel];
+    app.composer_chrome.profile = Some(profile.clone());
+    assert!(render_to_string(&mut app, 120, 12).contains("custom: root model"));
+    profile.differences = vec![ProfileDifference::Card("worker".into())];
+    app.composer_chrome.profile = Some(profile.clone());
+    let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let actual = super::test_support::serialize_frame(terminal.backend().buffer());
+    let path = "tests/goldens/custom-profile-card-120x12.frame";
+    if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
+        std::fs::write(path, &actual).unwrap();
+    } else {
+        assert_eq!(
+            actual,
+            std::fs::read_to_string(path).expect("custom profile golden")
+        );
+    }
+    assert!(render_to_string(&mut app, 120, 12).contains("custom: worker card"));
+    profile.differences = vec![
+        ProfileDifference::Card("long-card-name-".repeat(20)),
+        ProfileDifference::RootFast,
+        ProfileDifference::WorkingSet,
+    ];
+    app.composer_chrome.profile = Some(profile);
+    let text = render_to_string(&mut app, 180, 12);
+    assert!(text.contains("root fast +1"), "{text}");
+    assert!(!text.contains(&"long-card-name-".repeat(3)));
+}
+
+#[test]
+fn returning_terminal_focus_refreshes_external_branch_changes_even_without_mouse() {
+    let mut app = App::new(launch_basic(), true);
+    app.composer_chrome.refresh_pending = false;
+    super::terminal::handle_terminal_event(
+        &mut app,
+        crossterm::event::Event::FocusGained,
+        None,
+        false,
+    );
+    assert!(app.composer_chrome.refresh_pending);
+}
+
+#[test]
 fn processes_hud_and_stop_popup_show_live_jobs() {
     let mut app = App::new(launch_basic(), true);
     app.background_processes = 2;
@@ -560,7 +609,11 @@ fn hint_width_budget_drops_labels_and_keeps_the_bare_timer_alone_on_the_right() 
             let mut app = App::new(launch_basic(), true);
             pin_clock(&mut app);
             app.theme = theme_for(theme);
-            app.workspace_chrome = "~/workspace-with-a-long-path · feature".into();
+            app.workspace_chrome = crate::tui::WorkspaceChrome {
+                path: "~/workspace-with-a-long-path".into(),
+                branch: Some("feature".into()),
+                home: None,
+            };
             app.apply_host_event(HostEvent::SetBusy(true));
             app.turn_started = app.now().checked_sub(Duration::from_secs(252));
             let text = render_to_string(&mut app, width, 24);
@@ -602,7 +655,11 @@ fn workspace_facts_sit_in_the_composer_bottom_border_and_narrow_path_first() {
         ] {
             let mut app = App::new(launch_basic(), true);
             app.theme = theme_for(theme);
-            app.workspace_chrome = "~/workspace-with-a-long-path · feature".into();
+            app.workspace_chrome = crate::tui::WorkspaceChrome {
+                path: "~/workspace-with-a-long-path".into(),
+                branch: Some("feature".into()),
+                home: None,
+            };
             let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
             terminal.draw(|frame| app.draw(frame)).unwrap();
             let inner = app.composer_inner.unwrap();
@@ -643,9 +700,20 @@ fn workspace_facts_sit_in_the_composer_bottom_border_and_narrow_path_first() {
 #[test]
 fn a_workspace_without_a_branch_keeps_its_path_tail_until_it_drops() {
     use super::composer_chrome::workspace_border_text;
-    assert_eq!(workspace_border_text("~/ws", 20), " ~/ws ");
-    assert_eq!(workspace_border_text("~/a/long/path", 10), " …ng/path ");
-    assert_eq!(workspace_border_text("~/a/long/path", 6), "");
+    let view = |path: &str| crate::tui::WorkspaceChrome {
+        path: path.into(),
+        ..Default::default()
+    };
+    assert_eq!(workspace_border_text(&view("~/ws"), 20), " ~/ws ");
+    assert_eq!(
+        workspace_border_text(&view("~/a/long/path"), 10),
+        " …ng/path "
+    );
+    assert_eq!(workspace_border_text(&view("~/a/long/path"), 6), "");
+    assert_eq!(
+        workspace_border_text(&view("~/path · not-a-branch"), 80),
+        " ~/path · not-a-branch "
+    );
 }
 
 /// The HUD's `N agents` / `N processes` buttons: the hover highlight and the
@@ -993,7 +1061,11 @@ fn turn_end_requests_fresh_product_workspace_facts() {
         UserAction::Extension(crate::tui::SurfaceIntent::RefreshComposerChrome)
     );
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::WorkspaceChrome(
-        "~/ws · new-branch".into(),
+        crate::tui::WorkspaceChrome {
+            path: "~/ws".into(),
+            branch: Some("new-branch".into()),
+            home: None,
+        },
     )));
     assert!(render_to_string(&mut app, 160, 24).contains("~/ws · new-branch"));
 }

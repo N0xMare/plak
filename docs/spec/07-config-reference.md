@@ -151,6 +151,13 @@ never in it.
 
 ## 3. `config.toml`
 
+A session-binding problem never edits configuration. An invalid stored
+account/model selection is refused with the remedy
+`plak config set root.agent <template>`; the configured pointer and file bytes
+remain unchanged. Only explicit configuration actions (including Settings and
+profile application) publish configuration changes; an incomplete bind cannot
+silently clear `[root] agent`.
+
 Ten key sections, in render order: `[root] [roster] [orchestration] [turn]
 [jobs] [api] [tui] [compaction] [telemetry] [mcp]`, plus two families of named
 tables, `[tools.<name>]` (§3.4) and `[mcp_servers.<id>]` (§3.5), twelve in

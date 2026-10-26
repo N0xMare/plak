@@ -608,7 +608,7 @@ impl App {
         menu.reset_to_default(row);
         menu.pane = super::SettingsPane::Browse;
         let update = menu.draft.clone();
-        self.theme = super::theme_for(update.theme);
+        self.theme = super::theme_for(update.tui.theme);
         self.mark_dirty();
         Some(UserAction::Extension(
             crate::tui::SurfaceIntent::SaveSettings(update),

@@ -196,7 +196,7 @@ impl App {
             .as_ref()
             .map(|menu| &menu.draft)
             .or(self.settings_snapshot.as_ref())
-            .map_or(WHEEL_NOTCH_DEFAULT, |settings| settings.scroll_lines);
+            .map_or(WHEEL_NOTCH_DEFAULT, |settings| settings.tui.scroll_lines);
         let notch = i16::try_from(configured).unwrap_or(i16::MAX).max(1);
         if fast {
             notch.saturating_add(WHEEL_FAST_BONUS)

@@ -330,6 +330,7 @@ fn row(config: &ProductConfig, resolved: &Resolved, aliases: Vec<String>) -> Pro
     .collect();
     ProfileRow {
         id: resolved.id.clone(),
+        differences: Vec::new(),
         aliases,
         root: role("root", &resolved.root.1, 0),
         cards,

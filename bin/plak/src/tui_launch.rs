@@ -15,7 +15,7 @@ use crate::commands::host_config::{
     NativeTuiAttacher, TuiAttachEligibility, TuiAttacher, build_host_config,
     deferred_attach_refusal_reason, tui_attach_eligibility,
 };
-use crate::commands::session::{repair_invalid_new_session_binding, seed_new_session_binding};
+use crate::commands::session::seed_new_session_binding;
 use crate::commands::support::{
     HOST_WORKER_JOIN_TIMEOUT, edit_config_file, exit_restored_tui, join_host_worker_bounded,
     join_tui_host_worker,
@@ -25,7 +25,7 @@ use crate::{
     CliFailure, CliFailureKind, CliResult, ProcessOutcome, TuiPresentationBundle, build_identity,
     carry, cli, commands, home, local_time_zone, openrouter_product, presentation, product_agent,
     product_config, product_host, product_onboarding, product_paths, product_session_log,
-    product_sessions, product_workspace, shell, signals, store, surface_protocol, tui, tui_timing,
+    product_sessions, shell, signals, store, surface_protocol, tui, tui_timing,
 };
 
 /// Quit ordering (§5.3). The terminal is handed back the moment the UI stops
@@ -557,7 +557,7 @@ fn prepare_tui_launch(
         });
     }
 
-    let mut initial_cfg = product_config::ProductConfig::load(&paths)
+    let initial_cfg = product_config::ProductConfig::load(&paths)
         .map_err(|error| CliFailure::new(format!("invalid product config: {error}")))?;
     for warning in &initial_cfg.warnings {
         let _ = writeln!(io::stderr().lock(), "warning: {warning}");
@@ -570,11 +570,6 @@ fn prepare_tui_launch(
             record.model.as_deref(),
             record.composition,
         )?;
-        // Never attach with a partial cross-provider tuple. Repair the complete
-        // model-dependent default set in one save so later launches are stable.
-        if repair_invalid_new_session_binding(&mut record, &mut initial_cfg) {
-            let _ = initial_cfg.save(&paths);
-        }
     }
 
     if resume {
@@ -741,7 +736,10 @@ fn run_tui_rounds(
             version: plakous::VERSION,
             session_id: Some(state.record.id.clone()),
             workspace: cwd.clone(),
-            workspace_chrome: product_workspace::workspace_label(&cwd),
+            workspace_chrome: surface_protocol::WorkspaceChrome {
+                path: cwd.clone(),
+                ..Default::default()
+            },
             open_resume_picker: false,
             account: account.clone(),
             model: model_id.clone(),
@@ -803,7 +801,7 @@ fn run_tui_rounds(
                     surface_protocol::SettingsTheme::CatppuccinMocha
                 }
             },
-            settings: Some(shell::settings::settings_snapshot(&cfg)),
+            settings: Some(shell::settings::settings_view(&cfg)),
             providers,
             telemetry_paths: Some(paths.clone()),
             time_zone: local_time_zone(),

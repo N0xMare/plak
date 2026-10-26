@@ -106,7 +106,7 @@ use crate::tui::tree_navigator::RESTORED_PAUSED_NAVIGATOR_HINT;
 use crate::tui::usage_tab;
 use crate::tui::{
     CanvasTree, HostEvent, QueueDrainState, QueueItem, ResumeMenu, ResumePickerOutcome,
-    SettingsMenu, SettingsSnapshot, SettingsTheme, TopologyNavigatorKey, TopologyNavigatorOutcome,
+    SettingsMenu, SettingsTheme, SettingsView, TopologyNavigatorKey, TopologyNavigatorOutcome,
     TreeNavigator, TuiError, TuiHandoff, TuiLaunch, TuiOutcome, UserAction,
 };
 
@@ -228,8 +228,10 @@ impl ControlTab {
 /// `reduced_motion` is the one §5.5 row here; it suppresses the spinner, the
 /// approval pulse and the Agents list's running glyphs, and never the session
 /// banner.
-fn render_prefs_for(settings: Option<&SettingsSnapshot>) -> blocks::RenderPrefs {
-    settings.map_or_else(blocks::RenderPrefs::default, blocks::RenderPrefs::from)
+fn render_prefs_for(settings: Option<&SettingsView>) -> blocks::RenderPrefs {
+    settings.map_or_else(blocks::RenderPrefs::default, |view| {
+        blocks::RenderPrefs::from(&view.tui)
+    })
 }
 
 /// A queued prompt loaded into the composer, and the draft it displaced.
@@ -414,7 +416,7 @@ pub(crate) struct App {
     )]
     pub(crate) workspace: String,
     /// Bottom-right label `~/path · branch`.
-    pub(crate) workspace_chrome: String,
+    pub(crate) workspace_chrome: crate::tui::WorkspaceChrome,
     #[allow(
         dead_code,
         reason = "resume note already injected into blocks at launch"
@@ -590,7 +592,7 @@ pub(crate) struct App {
     settings_menu: Option<SettingsMenu>,
     /// Last authoritative or launch-time settings snapshot. This remains
     /// inert until the Settings tab opens and never captures composer input.
-    settings_snapshot: Option<SettingsSnapshot>,
+    settings_snapshot: Option<SettingsView>,
     settings_error: Option<String>,
     /// Painted rows of the Settings pane for mouse selection: registry rows
     /// while browsing, the choices while a chooser is open.
@@ -794,7 +796,7 @@ pub(crate) struct App {
     reattach_note: Option<String>,
     /// The launch's zone, so every wall-clock date and send time the
     /// presentation prints is the operator's own.
-    telemetry_paths: Option<crate::product_paths::PlakPaths>,
+    usage_decoration: Option<crate::config::UsageDecorationReader>,
     refresh_failure_notes: Vec<String>,
     usage_refresh: usage_tab::RefreshActions,
     usage_refresh_hits: Vec<(String, Rect)>,
@@ -1015,7 +1017,13 @@ impl App {
             pending_open_usage: false,
             pending_open_resume: launch.open_resume_picker,
             launch_resume_picker: launch.open_resume_picker,
-            telemetry_paths: launch.telemetry_paths,
+            usage_decoration: launch.telemetry_paths.map(|paths| {
+                crate::config::UsageDecorationReader::new(
+                    paths,
+                    launch.time_zone,
+                    crate::tui::wake::wake,
+                )
+            }),
             refresh_failure_notes: Vec::new(),
             usage_refresh: usage_tab::RefreshActions::default(),
             usage_refresh_hits: Vec::new(),
@@ -1238,6 +1246,8 @@ mod provisional_tests;
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod resume_tests;
+#[cfg(test)]
+mod session_state_tests;
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

@@ -54,6 +54,34 @@ pub(super) fn clip_text(text: &str, width: usize) -> String {
     result
 }
 
+fn profile_label(profile: &ProfileRow) -> String {
+    use crate::tui::ProfileDifference as Difference;
+    if profile.differences.is_empty() {
+        return profile.id.clone();
+    }
+    let fields = profile
+        .differences
+        .iter()
+        .take(2)
+        .map(|difference| match difference {
+            Difference::RootAccount => "root account".to_owned(),
+            Difference::RootModel => "root model".to_owned(),
+            Difference::RootEffort => "root effort".to_owned(),
+            Difference::RootFast => "root fast".to_owned(),
+            Difference::WorkingSet => "working set".to_owned(),
+            Difference::Card(name) => format!("{} card", clip_text(name, 24)),
+            Difference::Roster => "roster".to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let rest = profile.differences.len().saturating_sub(2);
+    if rest == 0 {
+        format!("custom: {fields}")
+    } else {
+        format!("custom: {fields} +{rest}")
+    }
+}
+
 /// How long ago the last prompt was sent, coarsely: seconds, then whole
 /// minutes, then the shared ladder's hours and minutes.
 pub(super) fn prompt_age(age: std::time::Duration) -> String {
@@ -70,12 +98,10 @@ const MIN_PATH_TAIL: usize = 4;
 /// ` path · branch ` fitted to `width` cells: the path keeps its tail behind
 /// `…` before it is dropped, and the branch is clipped last. Empty when not
 /// even a clipped branch fits.
-pub(super) fn workspace_border_text(label: &str, width: usize) -> String {
-    // Git branch names cannot contain spaces, so the last ` · ` separates them.
-    let (path, branch) = match label.rsplit_once(" · ") {
-        Some((path, branch)) => (path, Some(branch)),
-        None => (label, None),
-    };
+pub(super) fn workspace_border_text(view: &crate::tui::WorkspaceChrome, width: usize) -> String {
+    let path = crate::tui::surface_views::workspace_path(view);
+    let path = path.as_str();
+    let branch = view.branch.as_deref();
     let framed = |path: &str| match branch {
         Some(branch) if path.is_empty() => format!(" {branch} "),
         Some(branch) => format!(" {path} · {branch} "),
@@ -255,7 +281,7 @@ impl App {
             .composer_chrome
             .profile
             .as_ref()
-            .map_or("custom", |profile| profile.id.as_str());
+            .map_or_else(|| "custom".to_owned(), profile_label);
         let profile = format!(" {profile_id} ");
         // Meter and live facts win over the profile on a narrow border.
         let profile_width = if meter.width()

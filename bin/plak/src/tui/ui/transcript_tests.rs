@@ -15,7 +15,7 @@ use super::{
 use crate::tui::blocks::RenderPrefs;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ActivityKind, ActivityState};
-use crate::tui::{HostEvent, QueueDrainState, SettingsSnapshot, UserAction, user_action_channel};
+use crate::tui::{HostEvent, QueueDrainState, SettingsView, UserAction, user_action_channel};
 use crate::tui::{SurfaceIntent, SurfaceObservation};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
@@ -1185,7 +1185,7 @@ fn toggling_group_tool_calls_replans_the_transcript_live() {
 
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let row = settings_row(crate::tui::settings_registry::GROUP_TOOL_CALLS);
     app.settings_menu.as_mut().expect("settings").selected = row;
@@ -1213,9 +1213,12 @@ fn toggling_group_tool_calls_replans_the_transcript_live() {
 
     // The applied snapshot keeps the ungrouped plan after the modal closes.
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsApplied(
-        SettingsSnapshot {
-            group_tool_calls: false,
-            ..SettingsSnapshot::default()
+        SettingsView {
+            tui: crate::tui_preferences::TuiPreferences {
+                group_tool_calls: false,
+                ..(SettingsView::default()).tui
+            },
+            ..SettingsView::default()
         },
     )));
     assert!(!app.render_prefs.group_tool_calls);
@@ -2187,7 +2190,7 @@ fn hover_reveals_without_moving_focus() {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
@@ -2213,7 +2216,13 @@ fn hover_reveals_without_moving_focus() {
         selected,
         "hover must not move focus"
     );
-    let before = app.settings_menu.as_ref().expect("settings").draft.mouse;
+    let before = app
+        .settings_menu
+        .as_ref()
+        .expect("settings")
+        .draft
+        .tui
+        .mouse;
 
     app.handle_control_mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -2226,7 +2235,12 @@ fn hover_reveals_without_moving_focus() {
         mouse_row
     );
     assert_eq!(
-        app.settings_menu.as_ref().expect("settings").draft.mouse,
+        app.settings_menu
+            .as_ref()
+            .expect("settings")
+            .draft
+            .tui
+            .mouse,
         before
     );
 
@@ -2237,7 +2251,12 @@ fn hover_reveals_without_moving_focus() {
         modifiers: KeyModifiers::NONE,
     });
     assert_ne!(
-        app.settings_menu.as_ref().expect("settings").draft.mouse,
+        app.settings_menu
+            .as_ref()
+            .expect("settings")
+            .draft
+            .tui
+            .mouse,
         before
     );
 }
@@ -2919,9 +2938,12 @@ fn the_scroll_lines_row_sets_the_wheel_notch() {
     );
 
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot {
-            scroll_lines: 7,
-            ..SettingsSnapshot::default()
+        SettingsView {
+            tui: crate::tui_preferences::TuiPreferences {
+                scroll_lines: 7,
+                ..(SettingsView::default()).tui
+            },
+            ..SettingsView::default()
         },
     )));
     app.mouse_scroll_queue = 0;
@@ -2941,9 +2963,9 @@ fn the_scroll_lines_row_sets_the_wheel_notch() {
     // The open draft previews before it is saved.
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
-    app.settings_menu.as_mut().unwrap().draft.scroll_lines = 10;
+    app.settings_menu.as_mut().unwrap().draft.tui.scroll_lines = 10;
     assert_eq!(app.wheel_notch(false), 10);
 }
 

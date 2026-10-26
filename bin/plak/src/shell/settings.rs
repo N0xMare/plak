@@ -28,6 +28,61 @@ fn send_profiles(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     let _ = events.send(ContentEvent::Extension(SurfaceObservation::Profiles(view)));
 }
 
+fn profile_differences(
+    row: &crate::surface_protocol::ProfileRow,
+    config: &ProductConfig,
+    session: &plakous_hosted::runtime::SurfaceSession,
+) -> Vec<crate::surface_protocol::ProfileDifference> {
+    use crate::surface_protocol::ProfileDifference as Difference;
+    let mut differences = Vec::new();
+    for (differs, field) in [
+        (
+            session.account.as_deref() != Some(row.root.account.as_str()),
+            Difference::RootAccount,
+        ),
+        (
+            session.model.as_deref() != Some(row.root.model.as_str()),
+            Difference::RootModel,
+        ),
+        (
+            session.effort.as_deref().unwrap_or("default") != row.root.effort,
+            Difference::RootEffort,
+        ),
+        (session.fast != row.root.fast, Difference::RootFast),
+    ] {
+        if differs {
+            differences.push(field);
+        }
+    }
+    let roster = crate::roster_input::roster_input_from_config(
+        config,
+        row.root.account.clone(),
+        row.root.model.clone(),
+        session.effort.clone(),
+    );
+    if let Some(frozen) = &session.roster {
+        if frozen.working_set != roster.working_set {
+            differences.push(Difference::WorkingSet);
+        }
+        let names = frozen
+            .roster
+            .keys()
+            .chain(roster.templates.keys())
+            .collect::<std::collections::BTreeSet<_>>();
+        for name in names {
+            if frozen.roster.get(name) != roster.templates.get(name) {
+                differences.push(Difference::Card(name.to_string()));
+            }
+        }
+        if differences.is_empty() && frozen.templates_digest != roster.templates_digest {
+            differences.push(Difference::Roster);
+        }
+    } else {
+        differences.push(Difference::Roster);
+    }
+    differences
+}
+
 fn session_profile(
     config: &ProductConfig,
     home: &std::path::Path,
@@ -36,37 +91,34 @@ fn session_profile(
     use crate::surface_protocol::{ProfileRole, ProfileRow};
     let effort = session.effort.as_deref().unwrap_or("default");
     let mut matched_order = None;
+    let mut nearest = None;
     let id = crate::profiles::list(config, home)
         .rows
         .into_iter()
-        .find(|row| {
-            if session.account.as_deref() != Some(row.root.account.as_str())
-                || session.model.as_deref() != Some(row.root.model.as_str())
-                || effort != row.root.effort
-                || session.fast != row.root.fast
-            {
-                return false;
-            }
+        .find_map(|row| {
+            use crate::surface_protocol::ProfileDifference as Difference;
             let Ok(prepared) = crate::profiles::prepare(config, home, &row.id) else {
-                return false;
+                return None;
             };
-            let roster = crate::roster_input::roster_input_from_config(
-                &prepared.config,
-                row.root.account.clone(),
-                row.root.model.clone(),
-                session.effort.clone(),
-            );
-            let matches = session.roster.as_ref().is_some_and(|frozen| {
-                frozen.templates_digest == roster.templates_digest
-                    && frozen.working_set == roster.working_set
-                    && frozen.roster == roster.templates
-            });
-            if matches {
+            let differences = profile_differences(&row, &prepared.config, session);
+            if differences.is_empty() {
                 matched_order = Some(prepared.config.working_set.names().to_vec());
+                return Some(row.id);
             }
-            matches
+            if nearest
+                .as_ref()
+                .is_none_or(|previous: &Vec<Difference>| differences.len() < previous.len())
+            {
+                nearest = Some(differences);
+            }
+            None
         })
-        .map_or_else(|| "custom".to_owned(), |row| row.id);
+        .unwrap_or_else(|| "custom".to_owned());
+    let differences = if id == "custom" {
+        nearest.unwrap_or_else(|| vec![crate::surface_protocol::ProfileDifference::Roster])
+    } else {
+        Vec::new()
+    };
     let cards = session.roster.as_ref().map_or_else(Vec::new, |snapshot| {
         let working_set = ordered_working_set(config, snapshot, matched_order.as_deref());
         crate::roster_input::nested_spawns(&working_set, |name| {
@@ -101,6 +153,7 @@ fn session_profile(
     });
     ProfileRow {
         id,
+        differences,
         aliases: Vec::new(),
         root: ProfileRole {
             label: "root".to_owned(),
@@ -157,7 +210,7 @@ fn publish_composer_chrome(
     generation: &std::sync::Mutex<u64>,
     expected: u64,
     row: crate::surface_protocol::ProfileRow,
-    label: String,
+    label: crate::surface_protocol::WorkspaceChrome,
     events: &Sender<PlakExtension>,
 ) {
     let Ok(current) = generation.lock() else {
@@ -323,78 +376,82 @@ pub(super) fn emit_template_readiness(
     let _ = events.send(ContentEvent::TemplateReadiness(rows));
 }
 
-pub fn settings_snapshot(config: &ProductConfig) -> crate::surface_protocol::SettingsSnapshot {
-    crate::surface_protocol::SettingsSnapshot {
-        default_account: config.default_account().map(str::to_owned),
-        default_model: config.default_model().map(str::to_owned),
-        default_effort: config.default_effort().map(str::to_owned),
-        default_extra: config.default_extra().map(str::to_owned),
-        composition: config.default_composition().into(),
-        composition_options: [
-            plakous_hosted::binding::CompositionSelection::Direct,
-            plakous_hosted::binding::CompositionSelection::FollowCatalog,
-            plakous_hosted::binding::CompositionSelection::NativePtc,
-            plakous_hosted::binding::CompositionSelection::JsPtc,
-            plakous_hosted::binding::CompositionSelection::PyPtc,
-            plakous_hosted::binding::CompositionSelection::PySdk,
-        ]
-        .into_iter()
-        .filter(|composition| {
-            !composition.requires_python_worker()
-                || crate::build_features::require_feature("python").is_ok()
-        })
-        .map(
-            |composition| crate::surface_protocol::SettingsCompositionOption {
-                composition: composition.into(),
-                effective_presentation: plakous_hosted::agent::effective_presentation_label(
-                    composition,
-                    config
-                        .default_account()
-                        .and_then(oauth_provider_for_account),
-                    None,
-                )
-                .to_owned(),
-                unavailable_reason: composition_conflict(
-                    composition,
-                    config.default_account(),
-                    config.default_model(),
-                    config.default_effort(),
-                ),
+pub fn settings_view(config: &ProductConfig) -> crate::surface_protocol::SettingsView {
+    crate::surface_protocol::SettingsView {
+        product: crate::surface_protocol::SettingsSnapshot {
+            default_account: config.default_account().map(str::to_owned),
+            default_model: config.default_model().map(str::to_owned),
+            default_effort: config.default_effort().map(str::to_owned),
+            default_extra: config.default_extra().map(str::to_owned),
+            composition: config.default_composition().into(),
+            composition_options: [
+                plakous_hosted::binding::CompositionSelection::Direct,
+                plakous_hosted::binding::CompositionSelection::FollowCatalog,
+                plakous_hosted::binding::CompositionSelection::NativePtc,
+                plakous_hosted::binding::CompositionSelection::JsPtc,
+                plakous_hosted::binding::CompositionSelection::PyPtc,
+                plakous_hosted::binding::CompositionSelection::PySdk,
+            ]
+            .into_iter()
+            .filter(|composition| {
+                !composition.requires_python_worker()
+                    || crate::build_features::require_feature("python").is_ok()
+            })
+            .map(
+                |composition| crate::surface_protocol::SettingsCompositionOption {
+                    composition: composition.into(),
+                    effective_presentation: plakous_hosted::agent::effective_presentation_label(
+                        composition,
+                        config
+                            .default_account()
+                            .and_then(oauth_provider_for_account),
+                        None,
+                    )
+                    .to_owned(),
+                    unavailable_reason: composition_conflict(
+                        composition,
+                        config.default_account(),
+                        config.default_model(),
+                        config.default_effort(),
+                    ),
+                },
+            )
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+            protocol: match config.default_protocol() {
+                ProtocolSelection::Auto => plakous_host_protocol::ProtocolSelection::Auto,
+                ProtocolSelection::Chat => plakous_host_protocol::ProtocolSelection::Chat,
+                ProtocolSelection::Responses => plakous_host_protocol::ProtocolSelection::Responses,
+                ProtocolSelection::Messages => plakous_host_protocol::ProtocolSelection::Messages,
             },
-        )
-        .collect::<Vec<_>>()
-        .into_boxed_slice(),
-        protocol: match config.default_protocol() {
-            ProtocolSelection::Auto => plakous_host_protocol::ProtocolSelection::Auto,
-            ProtocolSelection::Chat => plakous_host_protocol::ProtocolSelection::Chat,
-            ProtocolSelection::Responses => plakous_host_protocol::ProtocolSelection::Responses,
-            ProtocolSelection::Messages => plakous_host_protocol::ProtocolSelection::Messages,
+            compaction: config.compaction_enabled,
         },
-        mouse: config.tui_mouse,
-        compaction: config.compaction_enabled,
-        scroll_lines: config.scroll_lines,
-        show_thinking: config.show_thinking,
-        group_tool_calls: config.group_tool_calls,
-        reduced_motion: config.reduced_motion,
-        theme: match config.theme {
-            crate::product_config::ProductTheme::DefaultDark => {
-                crate::surface_protocol::SettingsTheme::DefaultDark
-            }
-            crate::product_config::ProductTheme::DefaultLight => {
-                crate::surface_protocol::SettingsTheme::DefaultLight
-            }
-            crate::product_config::ProductTheme::CatppuccinLatte => {
-                crate::surface_protocol::SettingsTheme::CatppuccinLatte
-            }
-            crate::product_config::ProductTheme::CatppuccinFrappe => {
-                crate::surface_protocol::SettingsTheme::CatppuccinFrappe
-            }
-            crate::product_config::ProductTheme::CatppuccinMacchiato => {
-                crate::surface_protocol::SettingsTheme::CatppuccinMacchiato
-            }
-            crate::product_config::ProductTheme::CatppuccinMocha => {
-                crate::surface_protocol::SettingsTheme::CatppuccinMocha
-            }
+        tui: crate::tui_preferences::TuiPreferences {
+            mouse: config.tui_mouse,
+            scroll_lines: config.scroll_lines,
+            show_thinking: config.show_thinking,
+            group_tool_calls: config.group_tool_calls,
+            reduced_motion: config.reduced_motion,
+            theme: match config.theme {
+                crate::product_config::ProductTheme::DefaultDark => {
+                    crate::surface_protocol::SettingsTheme::DefaultDark
+                }
+                crate::product_config::ProductTheme::DefaultLight => {
+                    crate::surface_protocol::SettingsTheme::DefaultLight
+                }
+                crate::product_config::ProductTheme::CatppuccinLatte => {
+                    crate::surface_protocol::SettingsTheme::CatppuccinLatte
+                }
+                crate::product_config::ProductTheme::CatppuccinFrappe => {
+                    crate::surface_protocol::SettingsTheme::CatppuccinFrappe
+                }
+                crate::product_config::ProductTheme::CatppuccinMacchiato => {
+                    crate::surface_protocol::SettingsTheme::CatppuccinMacchiato
+                }
+                crate::product_config::ProductTheme::CatppuccinMocha => {
+                    crate::surface_protocol::SettingsTheme::CatppuccinMocha
+                }
+            },
         },
     }
 }
@@ -449,7 +506,7 @@ pub(super) fn emit_settings(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     match ProductConfig::load(paths) {
         Ok(config) => {
             let _ = events.send(ContentEvent::Extension(
-                SurfaceObservation::SettingsSnapshot(settings_snapshot(&config)),
+                SurfaceObservation::SettingsSnapshot(settings_view(&config)),
             ));
         }
         Err(error) => {
@@ -471,7 +528,7 @@ pub(super) fn save_settings(
     ready_catalog: &[plakous_host_protocol::views::ProviderSection],
     events: &Sender<PlakExtension>,
 ) -> Option<ProductConfig> {
-    if update.default_account.is_some() != update.default_model.is_some() {
+    if update.product.default_account.is_some() != update.product.default_model.is_some() {
         let message = "settings: default account and model must be selected together".to_owned();
         let _ = events.send(ContentEvent::Extension(
             SurfaceObservation::SettingsSaveFailed(message.clone()),
@@ -497,9 +554,10 @@ pub(super) fn save_settings(
         }
     };
     let selected_entry = update
+        .product
         .default_account
         .as_ref()
-        .zip(update.default_model.as_ref())
+        .zip(update.product.default_model.as_ref())
         .and_then(|(account, model)| {
             ready_catalog
                 .iter()
@@ -507,33 +565,34 @@ pub(super) fn save_settings(
                 .and_then(|section| section.entries.iter().find(|entry| entry.id == *model))
         });
     let selected_composition: plakous_hosted::binding::CompositionSelection =
-        update.composition.into();
+        update.product.composition.into();
     let exact_selection = match selected_entry {
         None => {
-            update.default_account.is_none()
-                && update.default_model.is_none()
-                && update.default_effort.is_none()
-                && update.default_extra.is_none()
+            update.product.default_account.is_none()
+                && update.product.default_model.is_none()
+                && update.product.default_effort.is_none()
+                && update.product.default_extra.is_none()
         }
         Some(entry) => {
             let effort = if entry.effort_options.is_empty() {
-                update.default_effort.is_none()
+                update.product.default_effort.is_none()
             } else {
                 update
+                    .product
                     .default_effort
                     .as_ref()
                     .is_some_and(|value| entry.effort_options.contains(value))
             };
-            let extra = update
-                .default_extra
-                .as_ref()
-                .is_none_or(|value| entry.extras.iter().any(|candidate| candidate.id == *value));
+            let extra =
+                update.product.default_extra.as_ref().is_none_or(|value| {
+                    entry.extras.iter().any(|candidate| candidate.id == *value)
+                });
             entry.unavailable_reason.is_none() && effort && extra
         }
     };
     // The Settings OpenRouter-protocol row is identity-bearing: it writes the
     // file for new sessions and never repaints a live binding (spec 8.1).
-    let default_protocol = match update.protocol {
+    let default_protocol = match update.product.protocol {
         plakous_host_protocol::ProtocolSelection::Auto => ProtocolSelection::Auto,
         plakous_host_protocol::ProtocolSelection::Chat => ProtocolSelection::Chat,
         plakous_host_protocol::ProtocolSelection::Responses => ProtocolSelection::Responses,
@@ -545,12 +604,12 @@ pub(super) fn save_settings(
     // Settings edits the tuple only; the template's authority fields
     // (description, tiers, delegation, hooks) stay as the file authored them.
     let requested_root = crate::product_config::AgentTemplate {
-        account: update.default_account.clone().unwrap_or_default(),
-        model: update.default_model.clone().unwrap_or_default(),
-        effort: update.default_effort.clone(),
-        extra: update.default_extra.clone(),
+        account: update.product.default_account.clone().unwrap_or_default(),
+        model: update.product.default_model.clone().unwrap_or_default(),
+        effort: update.product.default_effort.clone(),
+        extra: update.product.default_extra.clone(),
         composition: Some(selected_composition),
-        protocol: (update.default_account.as_deref() == Some("openrouter"))
+        protocol: (update.product.default_account.as_deref() == Some("openrouter"))
             .then_some(default_protocol),
         ..current.root_template().cloned().unwrap_or_default()
     };
@@ -578,9 +637,9 @@ pub(super) fn save_settings(
         }
         if let Some(conflict) = composition_conflict(
             selected_composition,
-            update.default_account.as_deref(),
-            update.default_model.as_deref(),
-            update.default_effort.as_deref(),
+            update.product.default_account.as_deref(),
+            update.product.default_model.as_deref(),
+            update.product.default_effort.as_deref(),
         ) {
             let message = format!("settings: composition conflict: {conflict}");
             let _ = events.send(ContentEvent::Extension(
@@ -594,15 +653,20 @@ pub(super) fn save_settings(
         }
         // Commit the complete requested binding to one fresh template, then
         // publish its root pointer together with the other settings below.
-        commit_root_template(&mut config, requested_root);
+        if let Err(message) = commit_root_template(&mut config, requested_root) {
+            let _ = events.send(ContentEvent::Extension(
+                SurfaceObservation::SettingsSaveFailed(message),
+            ));
+            return None;
+        }
     }
-    config.tui_mouse = update.mouse;
-    config.compaction_enabled = update.compaction;
-    config.scroll_lines = update.scroll_lines;
-    config.show_thinking = update.show_thinking;
-    config.group_tool_calls = update.group_tool_calls;
-    config.reduced_motion = update.reduced_motion;
-    config.theme = match update.theme {
+    config.tui_mouse = update.tui.mouse;
+    config.compaction_enabled = update.product.compaction;
+    config.scroll_lines = update.tui.scroll_lines;
+    config.show_thinking = update.tui.show_thinking;
+    config.group_tool_calls = update.tui.group_tool_calls;
+    config.reduced_motion = update.tui.reduced_motion;
+    config.theme = match update.tui.theme {
         crate::surface_protocol::SettingsTheme::DefaultDark => {
             crate::product_config::ProductTheme::DefaultDark
         }
@@ -637,7 +701,7 @@ pub(super) fn save_settings(
         Ok(()) => {
             let note = settings_saved_note(&current, &config, changes_root_binding);
             let _ = events.send(ContentEvent::Extension(
-                SurfaceObservation::SettingsApplied(settings_snapshot(&config)),
+                SurfaceObservation::SettingsApplied(settings_view(&config)),
             ));
             let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                 NoticeScope::Settings,
@@ -1027,7 +1091,7 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                         let config = ProductConfig::load(&paths)
                             .unwrap_or_else(|_| ProductConfig::default_product());
                         let row = session_profile(&config, paths.home(), &session);
-                        let label = crate::product_workspace::workspace_label(&session.workspace);
+                        let label = crate::shell::workspace::read(&session.workspace);
                         publish_composer_chrome(&generation, expected, row, label, &events);
                     });
                 }
@@ -1098,16 +1162,39 @@ mod tests {
         let row = session_profile(&config, std::path::Path::new("."), &session);
         let (events, rx) = host_event_sink();
         let generation = std::sync::Mutex::new(2);
-        publish_composer_chrome(&generation, 1, row.clone(), "old".into(), &events);
+        publish_composer_chrome(
+            &generation,
+            1,
+            row.clone(),
+            crate::surface_protocol::WorkspaceChrome {
+                path: "old".into(),
+                ..Default::default()
+            },
+            &events,
+        );
         assert!(rx.try_recv().is_err());
-        publish_composer_chrome(&generation, 2, row, "current".into(), &events);
+        publish_composer_chrome(
+            &generation,
+            2,
+            row,
+            crate::surface_protocol::WorkspaceChrome {
+                path: "current".into(),
+                ..Default::default()
+            },
+            &events,
+        );
         assert!(matches!(
             rx.try_recv().unwrap(),
             HostEvent::Extension(SurfaceObservation::SessionProfile(_))
         ));
         assert_eq!(
             rx.try_recv().unwrap(),
-            HostEvent::Extension(SurfaceObservation::WorkspaceChrome("current".into()))
+            HostEvent::Extension(SurfaceObservation::WorkspaceChrome(
+                crate::surface_protocol::WorkspaceChrome {
+                    path: "current".into(),
+                    ..Default::default()
+                }
+            ))
         );
     }
     #[test]
@@ -1118,7 +1205,7 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         let paths = PlakPaths::explicit(home);
         ProductConfig::default_product().save(&paths).unwrap();
-        let expected = crate::product_workspace::workspace_label(&workspace);
+        let expected = crate::shell::workspace::read(&workspace);
         let (events, rx) = host_event_sink();
         let session = plakous_hosted::runtime::SurfaceSession {
             account: None,
@@ -1174,15 +1261,34 @@ mod tests {
         };
         let matched = session_profile(&prepared.config, dir.path(), &session);
         assert_eq!(matched.id, "claude-default");
+        assert_eq!(
+            matched.differences,
+            [] as [crate::surface_protocol::ProfileDifference; 0]
+        );
+        session.model = Some("another-root-model".into());
+        let custom_root = session_profile(&prepared.config, dir.path(), &session);
+        assert_eq!(
+            custom_root.differences,
+            [crate::surface_protocol::ProfileDifference::RootModel]
+        );
+        session.model = Some(root.model.clone());
         let working_set = |row: &crate::surface_protocol::ProfileRow| {
             row.cards.iter().filter(|card| card.depth == 0).count()
         };
         assert_eq!(working_set(&matched), 3);
         let frozen = session.roster.as_mut().unwrap();
-        frozen.roster.values_mut().next().unwrap().tuple_id = "frozen-session-model".into();
+        let (name, card) = frozen.roster.iter_mut().next().unwrap();
+        let changed_card = name.to_string();
+        card.tuple_id = "frozen-session-model".into();
         frozen.templates_digest = "different-frozen-roster".into();
         let custom = session_profile(&prepared.config, dir.path(), &session);
         assert_eq!(custom.id, "custom");
+        assert_eq!(
+            custom.differences,
+            [crate::surface_protocol::ProfileDifference::Card(
+                changed_card
+            )]
+        );
         assert_eq!(working_set(&custom), 3);
         assert!(
             custom
@@ -1429,7 +1535,7 @@ mod tests {
                 let intent = match intent_index {
                     0 => SurfaceIntent::OpenConfigFile,
                     1 => SurfaceIntent::OpenSettings,
-                    2 => SurfaceIntent::SaveSettings(settings_snapshot(&config)),
+                    2 => SurfaceIntent::SaveSettings(settings_view(&config)),
                     3 => SurfaceIntent::OpenUsage,
                     _ => unreachable!(),
                 };
@@ -1680,9 +1786,9 @@ mod tests {
         let config = ProductConfig::default_product();
         config.save(&paths).unwrap();
         let before = std::fs::read(paths.config_file()).unwrap();
-        let mut update = settings_snapshot(&config);
-        update.default_account = Some("unadmitted".into());
-        update.default_model = Some("unadmitted-model".into());
+        let mut update = settings_view(&config);
+        update.product.default_account = Some("unadmitted".into());
+        update.product.default_model = Some("unadmitted-model".into());
         let (events, received) = host_event_sink();
         let effect = ProductSurface::new(paths.clone()).dispatch(
             SurfaceIntent::SaveSettings(update),
@@ -1868,13 +1974,18 @@ mod tests {
         let catalog: Vec<plakous_host_protocol::views::ProviderSection> = Vec::new();
 
         let view_only = crate::surface_protocol::SettingsUpdate {
-            default_account: Some("grok".into()),
-            default_model: Some("grok-4.6".into()),
-            default_effort: None,
-            default_extra: None,
-            composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
-            theme: crate::surface_protocol::SettingsTheme::CatppuccinMacchiato,
-            ..crate::surface_protocol::SettingsUpdate::default()
+            product: crate::surface_protocol::SettingsSnapshot {
+                default_account: Some("grok".into()),
+                default_model: Some("grok-4.6".into()),
+                default_effort: None,
+                default_extra: None,
+                composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+                ..(crate::surface_protocol::SettingsUpdate::default()).product
+            },
+            tui: crate::tui_preferences::TuiPreferences {
+                theme: crate::surface_protocol::SettingsTheme::CatppuccinMacchiato,
+                ..(crate::surface_protocol::SettingsUpdate::default()).tui
+            },
         };
         let (events, rx) = host_event_sink();
         save_settings(&paths, view_only, &catalog, &events);
@@ -1925,11 +2036,14 @@ mod tests {
 
         // The identity rows are still validated, with the exact reason.
         let identity = crate::surface_protocol::SettingsUpdate {
-            default_account: Some("grok".into()),
-            default_model: Some("grok-4.5".into()),
-            default_effort: None,
-            default_extra: None,
-            composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+            product: crate::surface_protocol::SettingsSnapshot {
+                default_account: Some("grok".into()),
+                default_model: Some("grok-4.5".into()),
+                default_effort: None,
+                default_extra: None,
+                composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+                ..(crate::surface_protocol::SettingsUpdate::default()).product
+            },
             ..crate::surface_protocol::SettingsUpdate::default()
         };
         let (events, rx) = host_event_sink();
@@ -2049,16 +2163,15 @@ mod tests {
         config.save(&paths).unwrap();
         let mut catalog = codex_catalog();
         let (events, rx) = host_event_sink();
-        let mut update = settings_snapshot(&config);
-        update.composition = plakous_host_protocol::CompositionSelection::PySdk;
+        let mut update = settings_view(&config);
+        update.product.composition = plakous_host_protocol::CompositionSelection::PySdk;
         let config = save_settings(&paths, update, &catalog, &events)
             .unwrap_or_else(|| panic!("{:?}", rx.try_iter().collect::<Vec<_>>()));
         assert_eq!(
             ProductConfig::load(&paths).unwrap().root_composition,
             Some(crate::product_config::ProductCompositionSelection::PySdk)
         );
-        let unchanged =
-            save_settings(&paths, settings_snapshot(&config), &catalog, &events).unwrap();
+        let unchanged = save_settings(&paths, settings_view(&config), &catalog, &events).unwrap();
         assert_eq!(
             unchanged.root_agent, config.root_agent,
             "an unchanged SDK selection does not mint a template"
@@ -2389,34 +2502,40 @@ mod tests {
         });
         tx.send(UserAction::Extension(SurfaceIntent::SaveSettings(
             crate::surface_protocol::SettingsUpdate {
-                default_account: Some("codex".into()),
-                default_model: Some("gpt-exact".into()),
-                default_effort: Some("bespoke".into()),
-                default_extra: None,
-                composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
-                composition_options: vec![crate::surface_protocol::SettingsCompositionOption {
+                product: crate::surface_protocol::SettingsSnapshot {
+                    default_account: Some("codex".into()),
+                    default_model: Some("gpt-exact".into()),
+                    default_effort: Some("bespoke".into()),
+                    default_extra: None,
                     composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
-                    effective_presentation: "direct".into(),
-                    unavailable_reason: None,
-                }]
-                .into_boxed_slice(),
+                    composition_options: vec![crate::surface_protocol::SettingsCompositionOption {
+                        composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+                        effective_presentation: "direct".into(),
+                        unavailable_reason: None,
+                    }]
+                    .into_boxed_slice(),
+                    ..(crate::surface_protocol::SettingsUpdate::default()).product
+                },
                 ..crate::surface_protocol::SettingsUpdate::default()
             },
         )))
         .unwrap();
         tx.send(UserAction::Extension(SurfaceIntent::SaveSettings(
             crate::surface_protocol::SettingsUpdate {
-                default_effort: Some("medium".into()),
-                default_account: Some("codex".into()),
-                default_model: Some("gpt-unqualified".into()),
-                default_extra: None,
-                composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
-                composition_options: vec![crate::surface_protocol::SettingsCompositionOption {
+                product: crate::surface_protocol::SettingsSnapshot {
+                    default_effort: Some("medium".into()),
+                    default_account: Some("codex".into()),
+                    default_model: Some("gpt-unqualified".into()),
+                    default_extra: None,
                     composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
-                    effective_presentation: "direct".into(),
-                    unavailable_reason: None,
-                }]
-                .into_boxed_slice(),
+                    composition_options: vec![crate::surface_protocol::SettingsCompositionOption {
+                        composition: plakous_host_protocol::CompositionSelection::FollowCatalog,
+                        effective_presentation: "direct".into(),
+                        unavailable_reason: None,
+                    }]
+                    .into_boxed_slice(),
+                    ..(crate::surface_protocol::SettingsUpdate::default()).product
+                },
                 ..crate::surface_protocol::SettingsUpdate::default()
             },
         )))
@@ -2493,7 +2612,7 @@ mod tests {
 
         let mut config = current.clone();
         if settings_save_changes_root_binding(&current, &requested) {
-            commit_root_template(&mut config, requested);
+            commit_root_template(&mut config, requested).unwrap();
         }
         config.theme = crate::product_config::ProductTheme::CatppuccinMacchiato;
         assert_eq!(config.root_agent.as_deref(), Some("qa"));
@@ -2515,7 +2634,7 @@ mod tests {
         assert!(settings_save_changes_root_binding(&current, &requested));
 
         let mut config = current.clone();
-        commit_root_template(&mut config, requested);
+        commit_root_template(&mut config, requested).unwrap();
         assert_eq!(config.root_agent.as_deref(), Some("default"));
         assert_eq!(
             config

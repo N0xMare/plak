@@ -142,10 +142,10 @@ mod tests {
                 );
             }
         }
-        let snapshot = crate::shell::settings::settings_snapshot(
+        let snapshot = crate::shell::settings::settings_view(
             &crate::product_config::ProductConfig::default_product(),
         );
-        for option in snapshot.composition_options {
+        for option in snapshot.product.composition_options {
             let composition: ProductCompositionSelection = option.composition.into();
             assert!(require_composition(composition).is_ok());
         }

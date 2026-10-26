@@ -7,8 +7,7 @@ use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ActivityKind, ContextUsage};
 use crate::tui::{AuthKind, ProviderDef, ProviderState};
 use crate::tui::{
-    HostEvent, QueueDrainState, QueueItem, ResumeMenu, ResumeSessionEntry, SettingsSnapshot,
-    TuiLaunch,
+    HostEvent, QueueDrainState, QueueItem, ResumeMenu, ResumeSessionEntry, SettingsView, TuiLaunch,
 };
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -142,7 +141,11 @@ pub(super) fn launch_basic() -> TuiLaunch {
         version: "0.1.0",
         session_id: Some("s1".into()),
         workspace: PathBuf::from("/tmp/ws"),
-        workspace_chrome: "~/ws · main".into(),
+        workspace_chrome: crate::tui::WorkspaceChrome {
+            path: "~/ws".into(),
+            branch: Some("main".into()),
+            home: None,
+        },
         open_resume_picker: false,
         account: Some("acct".into()),
         model: Some("model-x".into()),
@@ -192,6 +195,7 @@ pub(super) fn builtin_profiles_view() -> crate::tui::ProfilesView {
         let [root, worker, reviewer, researcher] = roles;
         ProfileRow {
             id: id.to_owned(),
+            differences: Vec::new(),
             aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
             root,
             cards: vec![worker, reviewer, researcher],
@@ -1337,7 +1341,7 @@ pub(super) fn settings_fixture() -> App {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
     app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-        SettingsSnapshot::default(),
+        SettingsView::default(),
     )));
     // Land on an Int row so the panel shows both the current value and the
     // schema default beside the description.

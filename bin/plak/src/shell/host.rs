@@ -67,13 +67,16 @@ pub fn settings_save_changes_root_binding(
 pub fn commit_root_template(
     config: &mut ProductConfig,
     mut template: crate::product_config::AgentTemplate,
-) {
+) -> Result<(), String> {
     if template.account.is_empty() || template.model.is_empty() {
-        config.clear_root_binding();
-        return;
+        return Err(format!(
+            "incomplete root binding; {}",
+            crate::commands::session::RootBindingRemedy::SelectTemplate
+        ));
     }
     config.root_composition = template.composition.take();
     *config.root_template_mut() = template;
+    Ok(())
 }
 
 /// Plak's shell host, as the hosted startup path sees it.

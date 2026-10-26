@@ -74,6 +74,7 @@ fn a_row_names_the_profile_role_and_leaves_the_description_to_the_inspector() {
     };
     let profile = crate::tui::ProfileRow {
         id: "my-profile".into(),
+        differences: Vec::new(),
         aliases: Vec::new(),
         root: role("root"),
         cards: vec![role("staff-worker")],

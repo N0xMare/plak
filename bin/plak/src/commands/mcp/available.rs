@@ -465,31 +465,58 @@ fn probe_inputs(paths: &PlakPaths, id: &str) -> CliResult<(String, std::path::Pa
 pub(crate) fn session_overview(
     paths: &PlakPaths,
     session: Option<&plakous_hosted::runtime::SurfaceSession>,
-) -> String {
+) -> crate::surface_protocol::McpOverview {
+    use crate::surface_protocol::{
+        McpOverview, McpServerConfiguration, McpServerView, McpSessionBinding,
+    };
     let empty = plakous_hosted::runtime::SurfaceMcp::default();
     let mcp = session
         .and_then(|session| session.mcp.as_ref())
         .unwrap_or(&empty);
-    let mut lines = Vec::new();
+    let mut view = McpOverview::default();
     let config = match ProductConfig::load(paths) {
         Ok(config) => Some(config),
         Err(error) => {
-            lines.push(format!("config.toml could not be read: {error}"));
+            view.diagnostics
+                .push(format!("config.toml could not be read: {error}"));
             None
         }
     };
     if let Some(config) = &config {
-        if config.tool_sections.mcp_servers.is_empty() {
-            lines.push(NONE_CONFIGURED.to_owned());
-        } else {
-            lines.push("configured servers:".to_owned());
-        }
         for (id, server) in &config.tool_sections.mcp_servers {
-            match server_lines(paths, config, id, server) {
-                Ok(block) => lines.extend(block.into_iter().map(|line| format!("  {line}"))),
-                Err(error) => lines.push(format!("  {id}: {error}")),
-            }
-            lines.push(format!("    {}", session_state(mcp, config, id)));
+            let (transport, target) = transport_line(server);
+            let details = (|| -> CliResult<McpServerConfiguration> {
+                Ok(McpServerConfiguration {
+                    transport: transport.to_owned(),
+                    target,
+                    scope: mcp_edit::server_scope(paths, config, id)
+                        .map_err(CliFailure::new)?
+                        .as_str()
+                        .to_owned(),
+                    templates: mcp_edit::templates_reaching(config, id)
+                        .iter()
+                        .map(|reach| reach_text(std::slice::from_ref(reach)))
+                        .collect(),
+                    missing_secrets: missing_secrets(paths, server)?,
+                    resources: server.resources,
+                    login: login_line(paths, config, id),
+                })
+            })();
+            let configuration = details.map(Some).map_err(|error| error.to_string());
+            let binding = if mcp.servers.contains(id) {
+                McpSessionBinding::Bound {
+                    tools: mcp.tools.iter().filter(|(server, _)| server == id).count(),
+                    earlier_definition: mcp.definitions.get(id)
+                        != config.tool_sections.render_server(id).as_ref(),
+                }
+            } else {
+                McpSessionBinding::NotBound
+            };
+            view.servers.push(McpServerView {
+                id: id.clone(),
+                configuration,
+                binding,
+            });
         }
     }
     for id in mcp.servers.iter().filter(|id| {
@@ -497,74 +524,15 @@ pub(crate) fn session_overview(
             .as_ref()
             .is_none_or(|config| !config.tool_sections.mcp_servers.contains_key(*id))
     }) {
-        lines.push(format!(
-            "  {id}: no longer configured; this session: bound, {}",
-            tool_count(mcp, id)
-        ));
+        view.servers.push(McpServerView {
+            id: id.clone(),
+            configuration: Ok(None),
+            binding: McpSessionBinding::Bound {
+                tools: mcp.tools.iter().filter(|(server, _)| server == id).count(),
+                earlier_definition: false,
+            },
+        });
     }
-    if !mcp.omitted.is_empty() {
-        lines.push(String::new());
-        lines.push("left out when this session bound (as its transcript still shows):".to_owned());
-        lines.extend(mcp.omitted.iter().map(|line| format!("  {}", shown(line))));
-    }
-    lines.push(String::new());
-    lines.push("change it from a shell (new sessions pick it up):".to_owned());
-    lines.extend(PANEL_COMMANDS.iter().map(|command| format!("  {command}")));
-    lines.join("\n")
-}
-
-fn tool_count(mcp: &plakous_hosted::runtime::SurfaceMcp, id: &str) -> String {
-    let tools = mcp.tools.iter().filter(|(server, _)| server == id).count();
-    format!("{tools} tool{}", if tools == 1 { "" } else { "s" })
-}
-
-fn session_state(
-    mcp: &plakous_hosted::runtime::SurfaceMcp,
-    config: &ProductConfig,
-    id: &str,
-) -> String {
-    if !mcp.servers.iter().any(|server| server == id) {
-        return "this session: not bound".to_owned();
-    }
-    let count = tool_count(mcp, id);
-    if mcp.definitions.get(id) != config.tool_sections.render_server(id).as_ref() {
-        return format!(
-            "this session: bound with an earlier definition, {count}; new sessions get the current one"
-        );
-    }
-    format!("this session: bound, {count}")
-}
-
-/// The commands the `/mcp` panel names; a test walks each through the parser.
-const PANEL_COMMANDS: &[&str] = &[
-    "plak mcp add <id> -- <command> [args...]",
-    "plak mcp add <id> --url <url>",
-    "plak mcp test <id>",
-    "plak mcp enable <id> --template <name>",
-];
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn every_panel_command_is_a_plak_command() {
-        for command in super::PANEL_COMMANDS {
-            let concrete = command
-                .replace("<id>", "docs")
-                .replace("<command> [args...]", "srv --stdio")
-                .replace("<url>", "https://x.test/mcp")
-                .replace("<name>", "worker");
-            let words = concrete
-                .split_whitespace()
-                .skip(1)
-                .map(std::ffi::OsString::from)
-                .collect::<Vec<_>>();
-            assert!(
-                matches!(
-                    crate::cli::parse(words),
-                    Ok(crate::command::Command::Mcp(_))
-                ),
-                "{command} does not parse as a plak mcp command"
-            );
-        }
-    }
+    view.omitted = mcp.omitted.iter().map(|line| shown(line)).collect();
+    view
 }

@@ -11,7 +11,7 @@ use crate::command::{RunEffort, run_effort_levels, run_effort_usage};
 use crate::commands::host_config::{
     TuiAttachEligibility, build_host_config, deferred_attach_refusal_reason, tui_attach_eligibility,
 };
-use crate::commands::session::{repair_invalid_new_session_binding, seed_new_session_binding};
+use crate::commands::session::seed_new_session_binding;
 use crate::commands::support::{join_host_worker_bounded, join_tui_host_worker};
 use crate::presentation::credential_locations_text;
 use crate::tui_launch::{
@@ -1312,51 +1312,22 @@ fn run_composition_is_target_scoped_and_preserves_every_explicit_choice() {
 }
 
 #[test]
-fn invalid_new_session_default_repair_clears_the_dependent_tuple() {
+fn invalid_new_session_default_is_refused_without_rewriting_config() {
     let root = tempfile::tempdir().expect("temporary product home");
     let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
-    let mut config = root_config("grok", "gpt-5.6-sol", Some("high"));
-    config.root_template_mut().composition =
-        Some(product_config::ProductCompositionSelection::PyPtc);
+    let config = root_config("grok", "gpt-5.6-sol", Some("high"));
+    config.save(&paths).expect("save invalid defaults");
+    let before = std::fs::read(paths.config_file()).unwrap();
     let mut session = product_sessions::SessionRecord::new(PathBuf::from("/tmp/workspace"));
-    seed_new_session_binding(&mut session, &config).expect("seed new session");
-
-    assert!(repair_invalid_new_session_binding(
-        &mut session,
-        &mut config
-    ));
-    assert_eq!(session.model, None);
-    assert_eq!(session.effort, None);
-    assert_eq!(
-        session.target_selection,
-        product_config::ProductTargetSelection::Native
+    let error = seed_new_session_binding(&mut session, &config).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("plak config set root.agent <template>")
     );
-    assert_eq!(
-        session.composition,
-        product_config::ProductCompositionSelection::FollowCatalog
-    );
-    assert_eq!(config.default_account(), None);
-    assert_eq!(config.default_model(), None);
-    assert_eq!(config.default_effort(), None);
-    assert_eq!(config.default_extra(), None);
-    assert_eq!(
-        config.default_protocol(),
-        product_config::ProductProtocolSelection::Auto
-    );
-    assert_eq!(
-        config.default_composition(),
-        product_config::ProductCompositionSelection::FollowCatalog
-    );
-    config.save(&paths).expect("save repaired defaults once");
-    let mut reopened = product_config::ProductConfig::load(&paths).expect("reopen defaults");
-    let mut next = product_sessions::SessionRecord::new(PathBuf::from("/tmp/workspace"));
-    seed_new_session_binding(&mut next, &reopened).expect("seed new session");
-    assert_eq!(next.model, None);
-    assert_eq!(next.effort, None);
-    assert!(!repair_invalid_new_session_binding(
-        &mut next,
-        &mut reopened
-    ));
+    assert_eq!(std::fs::read(paths.config_file()).unwrap(), before);
+    assert_eq!(config.default_model(), Some("gpt-5.6-sol"));
+    assert_eq!(session.model.as_deref(), Some("gpt-5.6-sol"));
 }
 
 #[test]

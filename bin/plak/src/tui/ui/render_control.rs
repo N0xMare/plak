@@ -486,7 +486,7 @@ impl App {
             auto_compact_enabled: self
                 .settings_snapshot
                 .as_ref()
-                .is_none_or(|settings| settings.compaction),
+                .is_none_or(|settings| settings.product.compaction),
         };
         usage_tab::context_lines(&self.context_usage, &chrome, width, &self.theme)
     }

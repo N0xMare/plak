@@ -4470,8 +4470,10 @@ like the profile id in the top border, with at least one border cell left
 after the corner. A narrow border shortens the path to its tail behind `…`
 (at least four cells of it) before dropping it, and clips the branch last;
 it carries no hover or click. Product
-workspace facts use the session's launch workspace and are re-read off-thread
-at attach and at every observed turn end, outside the inert TUI and without
+workspace facts are typed path, home-prefix and branch fields, rendered only
+by the TUI. The workspace library supplies only the raw branch or detached
+revision; the product owns home shortening. They use the session's launch workspace and are re-read off-thread
+at attach, every observed turn end and terminal focus regain, outside the inert TUI and without
 blocking its surface handler. Profile matching shares that background refresh;
 a generation check discards stale profile/workspace pairs. Narrow hints drop label words
 while retaining keys; stop and timer are the last to disappear. Border text
@@ -4485,7 +4487,12 @@ root binding (including normalized default effort and fast lane) and the
 session's frozen roster match. The popup always uses the session's own frozen
 cards, including after resume; config edits and next-session saves cannot invent
 roles. When no saved profile matches, the product reports `custom` with the
-known root and frozen cards (no cards if the session has no frozen roster).
+known root and frozen cards (no cards if the session has no frozen roster),
+and typed differences from the nearest saved profile (fewest differing fields
+and cards; profile-list order breaks ties). The chip names at most two
+differences, such as `custom: root model` or `custom: worker card`, with a
+count for any others. Card names are cell-bounded; no template body, model
+value or credential enters these labels.
 The inert TUI performs no profile matching.
 
 The queue panel is absent when the durable queue, admitted, unapplied steers
@@ -4700,6 +4707,26 @@ every registry default to the schema default. Eight rows ship, in order:
 Theme, Mouse capture, Scroll lines, Show thinking blocks,
 Group tool calls, Auto compaction, Reduced motion, and
 the Edit raw config action.
+
+Product `SettingsSnapshot` contains only binding defaults and compaction
+policy. Mouse, scroll lines, thinking visibility, tool grouping, reduced motion
+and theme belong to TUI-owned preferences; the typed settings view carries
+both values for the one explicit save. The product persists them; the TUI
+does not read configuration, SQLite or credential storage to render Settings,
+Session, Usage or catalog rows. Usage refresh-failure decoration runs on one
+latest-only background reader; stale results cannot overwrite a newer read or
+a switched session, and completion wakes the terminal loop. The read-only MCP
+overview similarly carries configured-server and frozen-binding facts, not a
+preformatted panel. These product observations are not JSONL v1 wire values.
+
+A confirmed session switch (clear or a binding naming a different session,
+including fork, resume and rebind) retires source-session turn usage, context,
+clocks, waits, retry and cancel state, approval handles, pending draft/queue
+correlations, tree state, item-detail caches and Session-tab facts. A queue
+edit restores its displaced draft; source prompt history, recovered drafts and
+history-browse state are retired. Terminal preferences and an ordinary
+unsent draft remain. An attempted open or a same-session binding is not a
+confirmed switch and preserves the source observations.
 
 **Every row applies on change.** There is no Save row and no draft: a toggle, a
 committed chooser or stepper, and a confirmed reset each persist immediately

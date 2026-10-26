@@ -4,15 +4,19 @@
 
 pub(crate) use crate::capabilities::usage_verticals;
 pub(crate) use crate::product_config::{DEFAULT_SCROLL_LINES, MAX_SCROLL_LINES, MIN_SCROLL_LINES};
+pub(crate) use crate::tui_preferences::TuiPreferences;
+mod usage_decoration;
 pub(crate) use crate::surface_protocol::{
-    AgentAcknowledgement, HostEvent, HostEventReceiver, ProfileOutcome, ProfileRole, ProfileRow,
-    ProfilesView, SettingsSnapshot, SettingsTheme, SurfaceIntent, SurfaceObservation, UserAction,
-    UserActionSendError, UserActionSender,
+    AgentAcknowledgement, HostEvent, HostEventReceiver, McpOverview, McpSessionBinding,
+    ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsTheme,
+    SettingsView, SurfaceIntent, SurfaceObservation, UserAction, UserActionSendError,
+    UserActionSender, WorkspaceChrome,
 };
 #[cfg(all(test, feature = "tui"))]
 pub(crate) use crate::surface_protocol::{host_event_channel, user_action_channel};
 /// Reading, sniffing and chips of the image files a draft attaches.
 pub(crate) use plakous_hosted::attachments as image_attachments;
+pub(crate) use usage_decoration::UsageDecorationReader;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
@@ -27,7 +31,8 @@ mod tests {
     #[test]
     fn settings_registry_defaults_match_the_config_schema() {
         let schema = ProductConfig::default_product();
-        let snapshot = crate::shell::settings::settings_snapshot(&schema);
+        let snapshot = crate::shell::settings::settings_view(&schema);
+        assert_eq!(snapshot.tui, super::TuiPreferences::default());
         let menu = SettingsMenu::open(snapshot);
         let mut checked = 0usize;
         for row in settings_registry::ROWS {

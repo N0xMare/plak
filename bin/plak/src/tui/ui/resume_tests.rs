@@ -8,7 +8,7 @@ use super::test_support::{
 use super::{App, DisplayMode};
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::ActivityKind;
-use crate::tui::{HostEvent, ResumeMenu, ResumeSessionEntry, SettingsSnapshot, UserAction};
+use crate::tui::{HostEvent, ResumeMenu, ResumeSessionEntry, SettingsView, UserAction};
 use crate::tui::{ResumeRow as _, SurfaceObservation};
 use crossterm::event::{KeyCode, MouseEventKind};
 use plakous_host_protocol::views::transcript::{NoticeScope, ToolItem, TranscriptRow};
@@ -787,7 +787,7 @@ fn every_control_center_tab_matches_reviewable_goldens_at_both_sizes() {
             let mut app = usage_fixture();
             app.pending_open_settings = true;
             app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-                SettingsSnapshot::default(),
+                SettingsView::default(),
             )));
             app.providers = provider_rows();
             app.activate_control_tab(tab);

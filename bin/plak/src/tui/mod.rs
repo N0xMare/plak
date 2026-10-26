@@ -6,15 +6,17 @@
 //! vocabulary (`crate::config`), and nothing else of the product; agent wiring
 //! lives in the host.
 
+pub(crate) use crate::config::TuiPreferences;
 use std::fmt;
 use std::path::PathBuf;
 
 // The product's settings vocabulary and its extension of the host protocol,
 // re-exported so the module reads them as `crate::tui::*`.
 pub(crate) use crate::config::{
-    AgentAcknowledgement, HostEvent, HostEventReceiver, ProfileOutcome, ProfileRole, ProfileRow,
-    ProfilesView, SettingsSnapshot, SettingsTheme, SurfaceIntent, SurfaceObservation, UserAction,
-    UserActionSendError, UserActionSender,
+    AgentAcknowledgement, HostEvent, HostEventReceiver, McpOverview, McpSessionBinding,
+    ProfileDifference, ProfileOutcome, ProfileRole, ProfileRow, ProfilesView, SettingsTheme,
+    SettingsView, SurfaceIntent, SurfaceObservation, UserAction, UserActionSendError,
+    UserActionSender, WorkspaceChrome,
 };
 #[cfg(test)]
 pub(crate) use crate::config::{host_event_channel, user_action_channel};
@@ -53,6 +55,7 @@ mod settings_tests;
 mod slash;
 #[cfg(test)]
 mod stability;
+mod surface_views;
 mod text_input;
 mod theme;
 mod tree_navigator;
@@ -129,7 +132,7 @@ pub struct TuiLaunch {
     /// Workspace root associated with this session (display only in shell).
     pub workspace: PathBuf,
     /// Fully interpreted workspace label for terminal chrome.
-    pub workspace_chrome: String,
+    pub workspace_chrome: WorkspaceChrome,
     /// When true, the first frame owns an outstanding `/resume` request so the
     /// host's cwd-scoped session list opens the picker (`plak resume`).
     pub open_resume_picker: bool,
@@ -154,7 +157,7 @@ pub struct TuiLaunch {
     /// Product-selected color theme.
     pub theme: SettingsTheme,
     /// Product-loaded settings shown immediately while host preparation continues.
-    pub settings: Option<SettingsSnapshot>,
+    pub settings: Option<SettingsView>,
     /// Product-interpreted provider rows for `/login`.
     pub providers: Vec<ProviderDef>,
     /// Resolved product home for read-only refresh display telemetry.
@@ -181,7 +184,10 @@ impl Default for TuiLaunch {
             version: "",
             session_id: None,
             workspace: PathBuf::from("."),
-            workspace_chrome: ".".to_owned(),
+            workspace_chrome: WorkspaceChrome {
+                path: PathBuf::from("."),
+                ..Default::default()
+            },
             open_resume_picker: false,
             account: None,
             model: None,
@@ -630,7 +636,10 @@ mod tests_entry {
             version: "0.1.0",
             session_id: Some("test-session".into()),
             workspace: PathBuf::from("/tmp"),
-            workspace_chrome: "/tmp".into(),
+            workspace_chrome: super::WorkspaceChrome {
+                path: "/tmp".into(),
+                ..Default::default()
+            },
             open_resume_picker: false,
             account: None,
             model: None,

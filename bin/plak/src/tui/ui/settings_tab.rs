@@ -118,7 +118,7 @@ impl App {
             menu.set_enum(meta.key, choice);
         }
         if meta.key == settings_registry::THEME
-            && let Some(theme) = self.settings_menu.as_ref().map(|menu| menu.draft.theme)
+            && let Some(theme) = self.settings_menu.as_ref().map(|menu| menu.draft.tui.theme)
         {
             self.theme = theme_for(theme);
         }
@@ -170,7 +170,7 @@ impl App {
                         }
                         if meta.key == settings_registry::THEME
                             && let Some(theme) =
-                                self.settings_menu.as_ref().map(|menu| menu.draft.theme)
+                                self.settings_menu.as_ref().map(|menu| menu.draft.tui.theme)
                         {
                             self.theme = theme_for(theme);
                         }
@@ -189,7 +189,7 @@ impl App {
                         }
                         if meta.key == settings_registry::THEME
                             && let Some(theme) =
-                                self.settings_menu.as_ref().map(|menu| menu.draft.theme)
+                                self.settings_menu.as_ref().map(|menu| menu.draft.tui.theme)
                         {
                             self.theme = theme_for(theme);
                         }

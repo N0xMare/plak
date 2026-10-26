@@ -50,7 +50,7 @@ impl DisplayMode {
 
 /// The §5.5 rows that steer transcript rendering.
 ///
-/// These have no representation in `crate::tui::SettingsSnapshot` yet, so
+/// These have no representation in `crate::tui::SettingsView` yet, so
 /// the renderer carries its own defaults. The struct is the single place the
 /// settings registry has to reach once those rows land.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -147,10 +147,10 @@ impl PromptClock {
     }
 }
 
-impl From<&crate::tui::SettingsSnapshot> for RenderPrefs {
+impl From<&crate::tui::TuiPreferences> for RenderPrefs {
     /// The settings snapshot is the only authority for these rendering rows; the
     /// renderer holds no second copy of a default that could drift from §5.5.
-    fn from(snapshot: &crate::tui::SettingsSnapshot) -> Self {
+    fn from(snapshot: &crate::tui::TuiPreferences) -> Self {
         Self {
             show_thinking: snapshot.show_thinking,
             group_tool_calls: snapshot.group_tool_calls,
@@ -164,7 +164,7 @@ impl Default for RenderPrefs {
     /// Derived from the config-schema defaults, so the renderer and the
     /// Settings tab cannot disagree about what a row's default is.
     fn default() -> Self {
-        Self::from(&crate::tui::SettingsSnapshot::default())
+        Self::from(&crate::tui::TuiPreferences::default())
     }
 }
 

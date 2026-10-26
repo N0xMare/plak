@@ -821,12 +821,12 @@ class LayerPolicyTests(unittest.TestCase):
             "tui": {
                 "forbid-crates": ("plakous", "plakous-*"),
                 "allow-crates": ("plakous-host-protocol",),
-                "may-use": ("crate::tui", "crate::config::SettingsSnapshot"),
+                "may-use": ("crate::tui", "crate::config::SettingsView"),
             }
         }
         sources = {
             "src/main.rs": "use plakous::agent::Agent;",
-            "src/tui/mod.rs": "use std::io;\nuse ratatui::Frame;\nuse crate::tui::theme::Theme;\nuse crate::config::SettingsSnapshot;\nuse plakous_host_protocol::SessionIntent;",
+            "src/tui/mod.rs": "use std::io;\nuse ratatui::Frame;\nuse crate::tui::theme::Theme;\nuse crate::config::SettingsView;\nuse plakous_host_protocol::SessionIntent;",
             "src/tui/bad.rs": "use plakous::agent::Agent;\nuse crate::runtime::Host;\nfn f() { plakous_model::x(); }",
         }
         errors = workspace_policy.validate_module_rules(package, sources, rules)
@@ -850,7 +850,7 @@ class LayerPolicyTests(unittest.TestCase):
             "tui": {
                 "forbid-crates": ("plakous", "plakous-*", "plakous-hosted"),
                 "allow-crates": ("plakous-host-protocol",),
-                "may-use": ("crate::tui", "crate::config::SettingsSnapshot"),
+                "may-use": ("crate::tui", "crate::config::SettingsView"),
             }
         }
         sources = {
@@ -860,7 +860,7 @@ class LayerPolicyTests(unittest.TestCase):
             # No `use` declares this one.
             "src/tui/bare.rs": "fn f() { plakous_hosted::surface_protocol::x(); }",
             "src/tui/door.rs": (
-                "use crate::{config::SettingsSnapshot, tui::theme::Theme};\n"
+                "use crate::{config::SettingsView, tui::theme::Theme};\n"
                 "use plakous_host_protocol::{SessionIntent, views::presentation::UsageVertical};\n"
                 "fn g() { crate::tui::theme::dark(); }"
             ),
@@ -1640,7 +1640,6 @@ fn shims() {
 """,
                 "src/workspace.rs": """
 fn workspace() {
-    let _ = std::env::var_os("HOME");
 }
 """,
                 "src/occupancy_vcs/git.rs": """

@@ -378,10 +378,13 @@ pub(super) fn handle_terminal_event(
             app.reset_composer_drag();
             app.mark_dirty();
         }
-        Event::FocusGained if mouse_enabled => {
-            let _ = stdout().execute(EnableMouseCapture);
+        Event::FocusGained => {
+            app.composer_chrome.refresh_pending = true;
+            if mouse_enabled {
+                let _ = stdout().execute(EnableMouseCapture);
+            }
         }
-        Event::FocusGained | Event::FocusLost => {}
+        Event::FocusLost => {}
     }
 }
 
@@ -521,6 +524,7 @@ pub(super) fn run_app(
         app.refresh_launch_binary_id();
         app.maybe_flush_pending_prompt_after_attach(actions);
         app.poll_attachments();
+        app.poll_usage_decoration();
         if let Some(cause) = app.pending_rebind.take() {
             request_terminal_handoff(&mut app, actions, TuiHandoff::Rebind { cause });
         }
