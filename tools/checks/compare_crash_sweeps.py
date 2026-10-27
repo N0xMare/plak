@@ -49,6 +49,12 @@ def outcome(row):
     return row["outcome"], row.get("invariants")
 
 
+def failed(row):
+    return (row.get("invariants") is not True
+            or row["outcome"] in ("DIVERGENT", "UNCLASSIFIED")
+            or row["outcome"].startswith("REFUSED"))
+
+
 def reference(row):
     return {key: row[key] for key in ("shape", "store", "store_ordinal", "repeat",
                                     "outcome", "invariants") if key in row}
@@ -56,13 +62,19 @@ def reference(row):
 
 def compare(left, right):
     report = {name: [] for name in ("matching", "floating", "changed", "only_left",
-                                  "only_right", "unpaired", "uncomparable")}
+                                  "only_right", "unpaired", "uncomparable", "regressed")}
     groups = [defaultdict(list), defaultdict(list)]
     for rows, grouped in zip((left, right), groups):
         for row in rows:
             grouped[cut_key(row)].append(row)
     for key in sorted(groups[0].keys() | groups[1].keys()):
         sides = [list(grouped.get(key, [])) for grouped in groups]
+        # Failure evidence must not disappear behind a different (or absent)
+        # prefix. Keep its input classification too, but always surface it.
+        baseline_failed = any(failed(row) for row in sides[0])
+        report["regressed"].extend(
+            {"cut": reference(row), "baseline_failed": baseline_failed}
+            for row in sides[1] if failed(row))
         if not all(sides):
             side = 0 if sides[0] else 1
             report[("only_left", "only_right")[side]].extend(map(reference, sides[side]))
@@ -119,7 +131,10 @@ def main():
         print(" ".join(f"{name}={count}" for name, count in report["counts"].items()))
         for change in report["changed"]:
             print(json.dumps(change, sort_keys=True))
-    return int(bool(report["changed"]))
+        for regression in report["regressed"]:
+            print(json.dumps(regression, sort_keys=True))
+    return int(bool(report["changed"]) or any(
+        not row["baseline_failed"] for row in report["regressed"]))
 
 
 if __name__ == "__main__":

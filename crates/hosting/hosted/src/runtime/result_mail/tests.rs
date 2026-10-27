@@ -1001,6 +1001,70 @@ async fn consumed_result_before_first_observation_still_publishes_once_after_fin
     );
     crate::topology_runtime::force_release(&session.id).await;
 }
+#[tokio::test]
+async fn a_fresh_host_does_not_reannounce_a_recorded_consumed_result() {
+    use crate::runtime::test_kit::TestExtension;
+    use crate::runtime::{Sender, TreeSnapshotPush};
+    use crate::surface_protocol::HostEvent;
+
+    let dir = tempfile::tempdir().unwrap();
+    let rows = MemoryRows::new();
+    let mut session = SessionRecord::new(dir.path().to_owned());
+    let mut tree = completed_tree(&session);
+    let result = tree.pending_result_mail("root").pop().unwrap();
+    tree.acknowledge_mail(&result.message_id).unwrap();
+    let _runtime = crate::topology_runtime::insert_root(session.id.clone(), tree, None).unwrap();
+    let (sender, receiver) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(sender);
+    let home = crate::session_home::SessionHome::new(dir.path().join("sessions"));
+    let mut push = TreeSnapshotPush::default();
+    crate::runtime::tree::emit_tree_snapshot_if_revision_advanced(
+        &rows,
+        rows.records(),
+        &home,
+        &mut session,
+        &mut push,
+        &events,
+        false,
+    );
+    assert_eq!(
+        receiver
+            .try_iter()
+            .filter(|event| matches!(event,
+                HostEvent::ToolLine { name, .. } if name == "child_result"
+            ))
+            .count(),
+        1,
+        "the first host commits the consumed result's notice"
+    );
+
+    let mut restored = rows.records().load(&session.id).unwrap();
+    let mut fresh_push = TreeSnapshotPush::default();
+    for _ in 0..2 {
+        crate::runtime::tree::emit_tree_snapshot_if_revision_advanced(
+            &rows,
+            rows.records(),
+            &home,
+            &mut restored,
+            &mut fresh_push,
+            &events,
+            false,
+        );
+    }
+    assert_eq!(
+        receiver
+            .try_iter()
+            .filter(|event| matches!(event,
+                HostEvent::ToolLine { name, .. } if name == "child_result"
+            ))
+            .count(),
+        0,
+        "a restored notice is not a new live result"
+    );
+    assert_eq!(restored.transcript, session.transcript);
+    crate::topology_runtime::force_release(&session.id).await;
+}
+
 #[test]
 fn one_shot_admits_one_explicit_prompt_with_result_context_through_real_runtime() {
     let dir = tempfile::tempdir().unwrap();

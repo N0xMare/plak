@@ -604,7 +604,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/secret_input.rs"): {"select"},
     # The SIGTERM/SIGHUP watcher thread waits on two signal streams at once.
     ("plak", "src/signals.rs"): {"select"},
-    ("plakous-hosted", "src/runtime/turn_drive/mod.rs"): {"pin", "select"},
+    ("plakous-hosted", "src/runtime/turn_drive/mod.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/network_watch.rs"): {"select"},
     ("plakous-hosted", "src/driver/transient.rs"): {"pin", "select", "debug_assert"},
     ("plakous-hosted", "src/runtime/turn_drive/admission.rs"): {"thread_local"},

@@ -8651,7 +8651,8 @@ reads are `feed_page`, `subscribe_feed`, `feed_items`, `feed_call` and
 `feed_terminal` with their request and outcome types, and with
 `sessions-sqlite` their `inspect_feed_sqlite`, `inspect_feed_items_sqlite`,
 `inspect_feed_call_sqlite` and `inspect_feed_terminal_sqlite` twins; the
-accessors are `CommandAck::feed_seq`, `TurnResult::feed_seq` and the compact,
+accessors are `CommandAck::feed_seq`, `TurnResult::feed_seq`,
+`AgentEvent::feed_seq` (the `ModelStarted` committed prefix), and the compact,
 fork and rebind outcomes' `feed_seq`. All of it is supported inventory, pinned
 by the external `tests/fixtures/facade-consumer`. It is the only public surface the feed adds:
 the store port's feed methods and the SQLite table remain store mechanics.

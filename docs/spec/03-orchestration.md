@@ -916,13 +916,18 @@ prefix captured by that round's `ModelStarted` event, even when the runtime
 has advanced before the host observes it. Observation latency cannot coalesce
 later rounds into an earlier cursor publication. A prefix behind retention is
 deferred to the between-turn refold rather than seeded from a newer head.
-The post-admission pass likewise stops at the command acknowledgement's
-publication sequence; an already-running first round cannot extend it.
+The post-acknowledgement pass likewise stops at the command acknowledgement's
+publication sequence; an already-running first round cannot extend it, and
+this bounded pass never refolds.
 A root wait in model history therefore
 retires by the next round; a nested wait (from a Code Mode cell) and an
 operator `invoke_tool` await hold their receipts until the caller's terminal.
 That running-turn pass applies only the records past the cursor; a page that
-would need a refold is left for the next prompt's admission pass. The rules:
+would need a refold is left for the end-of-turn `project_tree` pass or the
+next prompt's pre-submission pass, both of which own unbounded refolding.
+A round without a committed prefix skips the running pass and logs projection
+debt once per turn; durable product rounds assert that their prefix exists.
+The rules:
 
 - A `HistoryAppended` fact whose committed call ids include a receipt's call id
   retires that receipt; its acknowledgements stand. What a later compaction

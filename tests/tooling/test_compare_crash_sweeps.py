@@ -83,6 +83,55 @@ class CompareCrashSweepsTests(unittest.TestCase):
         del base["global_order"]
         self.assertEqual(COMPARE.compare([base], [base])["counts"]["matching"], 1)
 
+    def test_bad_tip_rows_regress_even_with_different_or_missing_inputs(self):
+        extra_commit = row(outcome="UNCLASSIFIED")
+        extra_commit["global_order"].append(
+            {"store": "tree", "store_ordinal": 1, "label": "cursor", "tables": []})
+        extra_commit["invariants"] = False
+        pilot = dict(row(outcome="DIVERGENT"), store="pilot", store_ordinal=0)
+        refused = dict(row("dispatched", "REFUSED: recovery"), invariants=False)
+        no_evidence = dict(row(), invariants=False)
+        del no_evidence["global_order"]
+        del no_evidence["before"]
+        for tip in (extra_commit, pilot, refused, no_evidence):
+            with self.subTest(tip=tip), tempfile.TemporaryDirectory() as directory:
+                report = COMPARE.compare([row()], [tip])
+                self.assertEqual(report["counts"]["regressed"], 1)
+                self.assertFalse(report["regressed"][0]["baseline_failed"])
+                base_path, tip_path = (Path(directory) / name for name in ("base", "tip"))
+                base_path.write_text(json.dumps(row()) + "\n")
+                tip_path.write_text(json.dumps(tip) + "\n")
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), str(base_path), str(tip_path), "--json"],
+                    capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["counts"]["regressed"], 1)
+
+    def test_preexisting_failure_is_reported_without_a_new_regression_exit(self):
+        base = dict(row(), invariants=False)
+        tip = dict(row("dispatched"), invariants=False)
+        report = COMPARE.compare([base], [tip])
+        self.assertEqual(report["counts"]["regressed"], 1)
+        self.assertTrue(report["regressed"][0]["baseline_failed"])
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("base", "tip")]
+            for path, sample in zip(paths, (base, tip)):
+                path.write_text(json.dumps(sample) + "\n")
+            result = subprocess.run([sys.executable, str(SCRIPT), *map(str, paths)],
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("regressed=1", result.stdout)
+
+    def test_bad_outcomes_are_findings_even_with_true_invariants(self):
+        for state in ("DIVERGENT", "UNCLASSIFIED", "REFUSED", "REFUSED_STORE"):
+            with self.subTest(outcome=state):
+                report = COMPARE.compare([], [row(outcome=state)])
+                self.assertEqual(report["counts"]["regressed"], 1)
+        for invariant in (None, False, 1):
+            with self.subTest(invariants=invariant):
+                report = COMPARE.compare([], [dict(row(), invariants=invariant)])
+                self.assertEqual(report["counts"]["regressed"], 1)
+
     def test_cli_exit_status_distinguishes_real_changes_and_malformed_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             base, tip = (Path(directory) / name for name in ("base.jsonl", "tip.jsonl"))

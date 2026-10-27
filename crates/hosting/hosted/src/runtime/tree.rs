@@ -426,7 +426,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     let next_progress_snapshot = &mut push.next_progress_snapshot;
     let notified_results = &mut push.notified_results;
     let announced_abandoned = &mut push.announced_abandoned_turns;
-    let (milestones, results) = runtime
+    let (milestones, result_ids, results) = runtime
         .read(|tree| {
             let mut rows = Vec::new();
             for node in tree.nodes().values() {
@@ -453,6 +453,14 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
                     mail.to == tree.root_agent_id
                         && mail.purpose == crate::agent_tree_protocol::MessagePurpose::Result
                 })
+                .collect::<Vec<_>>();
+            let result_ids = results
+                .iter()
+                .map(|mail| mail.message_id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            let results = results
+                .into_iter()
+                .filter(|mail| !notified_results.contains(&mail.message_id))
                 .map(|mail| {
                     (
                         format!("tree:{}:result:{}", tree.tree_id, mail.message_id),
@@ -460,7 +468,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
                     )
                 })
                 .collect::<Vec<_>>();
-            (rows, results)
+            (rows, result_ids, results)
         })
         .unwrap_or_default();
     // No session feed fact implies a tree milestone, so each is an operator
@@ -468,9 +476,11 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     for (id, row) in milestones {
         let _ = publish_notice_once(store, home, session, events, &mut notice_ids, &id, row);
     }
-    notified_results.retain(|id| results.iter().any(|(_, mail)| &mail.message_id == id));
+    notified_results.retain(|id| result_ids.contains(id));
     for (notice_id, mail) in results {
-        if notified_results.contains(&mail.message_id) {
+        let recorded = notice_ids.contains(&notice_id);
+        if recorded && mail.durable != crate::agent_tree::MailDurableState::Accepted {
+            notified_results.insert(mail.message_id);
             continue;
         }
         let call_id = format!("child-result:{}", mail.message_id);
@@ -494,7 +504,6 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
             cell_id: None,
             wait: None,
         };
-        let recorded = notice_ids.contains(&notice_id);
         if !recorded {
             let committed =
                 super::admission::commit_session_update(store, home, session, |candidate| {

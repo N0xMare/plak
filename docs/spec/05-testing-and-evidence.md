@@ -2053,16 +2053,23 @@ output are not inputs. An artifact with only ledger evidence can be compared
 to another ledger-only artifact; absent evidence is never an equal input.
 Matching outcomes and invariants are reported separately from genuine changes
 under equal inputs. Samples at the same ordinal with different inputs are
-floating cuts, not outcome regressions. Unequal sampling of an equal input,
+floating cuts, not by themselves outcome regressions. Unequal sampling of an equal input,
 missing cut keys and rows without input evidence are reported separately. Equal outcomes
 are paired before differing outcomes so repeat reordering is inert. JSON output
 includes the input fingerprints for floating cuts and genuine changes. Exit 1
-means genuine changes, exit 2 means invalid input, and exit 0 means no genuine
-changes among comparable samples; it does not certify floating or missing cuts.
+means genuine changes or a newly failing tip key, exit 2 means invalid input,
+and exit 0 does not certify floating or missing cuts. Every tip sample whose
+invariants are not exactly true, or whose outcome is `DIVERGENT`, `UNCLASSIFIED`
+or starts with `REFUSED`, is also reported as `regressed`, irrespective of
+its input evidence or pairing. A failing sample makes the exit status 1 when
+the base has no failing sample for that key; pre-existing failures remain
+visible with `baseline_failed: true`.
 
-The running-root projection regression supplies two committed rounds before
-the first round's observation is processed and requires two bounded cursor
-advances, not a coalesced pass. The lease-only process-exit regression holds
+The running-root projection regression holds the host after acknowledgement
+until a real scripted two-round turn reaches its second stream, then requires
+two bounded cursor advances, not a coalesced pass. A separate admission law
+requires the post-ack pass to stop at the acknowledgement even when the first
+round has committed. The lease-only process-exit regression holds
 each dispatched child on its own explicit provider gate until after batched
 release. It retains the one-second shutdown bound and exact single-transaction
 assertion, then releases both late actors and requires no further publication;
@@ -2071,7 +2078,8 @@ A result-observation regression acknowledges the child's result before the
 host's first read, then requires one durable result activity after its finished
 milestone, including across a repeated observation. Milestones and retained
 results share one tree read, so a concurrent completion cannot place a result
-before its finished notice or erase it by consumption.
+before its finished notice or erase it by consumption. A fresh-host law
+requires no live result line for a recorded, consumed result.
 The attachment's exact one-cold-load assertion remains unchanged. A forced
 queue refresh must not load transcript views, and the SQLite queue-join law
 still succeeds when unrelated transcript rows cannot be decoded. These cover
@@ -2079,6 +2087,8 @@ the timing-dependent extra full-view read of a delayed queue projection,
 without changing the allowed number of attachment cold loads.
 Unstored attachments also defer background passes until the product session
 exists, rather than racing a refused pre-storage pass against the first prompt.
+A counted-read law drains the idle ticks without requesting an extra pass:
+zero view reads before storage, exactly one cold load after the first prompt.
 The lagged-face fixture gates its 256 deltas in 16-event batches, requiring
 the shared reducer to consume each batch before the next. Only the face's
 128-update buffer is intentionally overrun, not the core feed serving the

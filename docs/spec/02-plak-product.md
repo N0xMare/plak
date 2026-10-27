@@ -4639,6 +4639,9 @@ consumed it before the host's first observation. The host captures lifecycle
 milestones and retained result messages in one tree read and publishes the
 start and finished milestones before the result activity. Observation cadence
 and unread-mail transitions cannot suppress the notice or create another one.
+A live result line is sent when the attachment commits the notice or the
+mail remains unread. A fresh attachment marks already-recorded, consumed
+results as observed without replaying their live activity lines.
 
 Queue refresh reads the submission/delivery join through
 `SessionRecordStore::load_queue_commands`, in one store snapshot without

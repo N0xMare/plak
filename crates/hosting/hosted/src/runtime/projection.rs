@@ -730,11 +730,12 @@ pub(crate) async fn project_tree(
 /// When a tree pass runs, which decides how much work it may do.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TreePass {
-    /// Between root turns (open, wake, prompt admission and the host loop's
-    /// tick): a page that needs a refold rereads the feed from its start.
+    /// Between root turns (open, wake, pre-submission, end-of-turn and the
+    /// idle tick): a page that needs a refold rereads the feed from its start.
     BetweenTurns,
-    /// Inside a running root turn, once per model round: only the in-process
-    /// tree, only the records past the cursor, and never a refold.
+    /// After command acknowledgement and once per model round: only the
+    /// in-process tree and records past its cursor through the captured
+    /// committed prefix, and never a refold.
     RunningTurn { through: u64 },
 }
 
@@ -747,7 +748,7 @@ pub(crate) enum TreePassOutcome {
     /// The records past the cursor were applied and the tree published.
     Applied,
     /// The page needs a refold or has a gap. A running turn leaves it, cursor
-    /// and receipts untouched, for the next prompt's admission pass.
+    /// and receipts untouched, for the end-of-turn or pre-submission pass.
     Deferred(String),
 }
 

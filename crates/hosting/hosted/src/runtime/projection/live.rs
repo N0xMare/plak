@@ -152,6 +152,13 @@ impl LiveProjector {
         self.task.is_finished()
     }
 
+    #[cfg(test)]
+    pub(in crate::runtime) async fn drain_ticks(&mut self) {
+        while self.applied.borrow_and_update().generation < self.generation {
+            self.applied.changed().await.unwrap();
+        }
+    }
+
     /// Replaces a stopped task with a fresh one, which loads the views
     /// again and reconciles every retained settled row once. Call it inside
     /// the host's executor.

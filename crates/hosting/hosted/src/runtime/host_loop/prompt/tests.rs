@@ -356,6 +356,48 @@ impl crate::runtime::fault_store::StoreFaults for CapacityWriteFault {
 }
 
 #[test]
+fn an_unstored_attachment_never_reads_views_before_its_first_prompt() {
+    use crate::runtime::Sender;
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let store = Arc::new(crate::session_store::MemoryStore::new());
+    config.store = store.clone();
+    let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (sender, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = HostLoop::open(config, &receiver, Sender::over(sender), None).unwrap();
+    assert_eq!(host.config.session.store_revision, 0);
+    assert_eq!(store.view_read_count(), 0);
+    for _ in 0..3 {
+        host.project();
+        host.executor
+            .block_on(host.live.as_mut().unwrap().drain_ticks())
+            .unwrap();
+        assert_eq!(
+            store.view_read_count(),
+            0,
+            "an idle attachment has nothing to cold-load"
+        );
+    }
+    crate::runtime::test_support::send_attached_action(
+        &actions,
+        crate::surface_protocol::UserAction::Prompt("first stored prompt".into()),
+    );
+    let HostStep::Prompt {
+        text,
+        queued_delivery,
+        user_echoed,
+    } = host.next_prompt(None).unwrap()
+    else {
+        panic!("first prompt must be queued");
+    };
+    host.run_prompt(text, queued_delivery, user_echoed, None)
+        .unwrap();
+    assert!(host.config.session.store_revision > 0);
+    assert_eq!(store.view_read_count(), 1);
+    host.release().unwrap();
+}
+
+#[test]
 fn enospc_during_busy_follow_up_preserves_the_committed_queue_and_rejects_only_the_new_draft() {
     assert_busy_follow_up_storage_full(false);
 }

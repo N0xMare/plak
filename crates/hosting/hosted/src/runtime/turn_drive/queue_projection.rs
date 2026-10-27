@@ -100,7 +100,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
     /// one feed read past the cursor and, for a round that committed
     /// anything, one tree save, concurrent with the model stream; it never
     /// refolds (see [`TreePass::RunningTurn`]). A refused or deferred pass is
-    /// projection debt the next round or the next prompt's admission pass
+    /// projection debt the next round, end-of-turn or pre-submission pass
     /// applies, logged once per distinct cause in a turn.
     ///
     /// [`TreePass::RunningTurn`]: super::super::projection::TreePass::RunningTurn
@@ -122,6 +122,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             Ok(_) => return,
             Err(error) => String::from(error),
         };
+        self.log_tree_projection_debt(debt);
+    }
+
+    pub(super) fn log_tree_projection_debt(&mut self, debt: String) {
         if self.tree_debt_logged.as_deref() == Some(debt.as_str()) {
             return;
         }

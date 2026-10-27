@@ -121,6 +121,7 @@ struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
     steering_projection_due: bool,
     /// The last running-turn tree debt this turn logged.
     tree_debt_logged: Option<String>,
+    missing_tree_prefix_logged: bool,
     queue_wait_noted: bool,
     mail_batch_notified: bool,
     mail_repeat_notified: bool,
@@ -138,6 +139,8 @@ pub(in crate::runtime) use admission::{stub_ingress_backpressure, stub_start_ref
 mod control;
 mod delivery;
 mod finish;
+#[cfg(test)]
+mod prefix_tests;
 mod queue_projection;
 #[cfg(test)]
 pub(in crate::runtime) mod quit_trace;
@@ -181,6 +184,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             root_tree_pass_due: None,
             steering_projection_due: false,
             tree_debt_logged: None,
+            missing_tree_prefix_logged: false,
             queue_wait_noted: false,
             mail_batch_notified: false,
             mail_repeat_notified: false,
@@ -201,6 +205,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             self.poll_queue_projection().await;
             if let Some(through) = self.root_tree_pass_due.take() {
                 self.project_running_root_tree(through).await;
+                #[cfg(test)]
+                prefix_tests::after_round_pass(&self.host.live_target, through);
             }
             super::events::commit_notice_intents(
                 self.host.events,
@@ -284,6 +290,11 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                                 }
                                 AgentEventKind::ModelStarted => {
                                     self.root_tree_pass_due = event.feed_seq().map(plakous::sessions::feed::FeedSeq::get);
+                                    debug_assert!(self.host.session.store_revision == 0 || self.root_tree_pass_due.is_some(), "a durable product round must name its committed prefix");
+                                    if self.root_tree_pass_due.is_none() && !self.missing_tree_prefix_logged {
+                                        self.log_tree_projection_debt("model round has no committed feed prefix; running tree pass skipped".into());
+                                        self.missing_tree_prefix_logged = true;
+                                    }
                                     self.live_occupancy.round_started();
                                     self.last_context_refresh_bytes = 0;
                                     true
