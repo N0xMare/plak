@@ -1010,9 +1010,7 @@ fn eviction_index<P: ProtocolExtension>(
             })
     } else if admission_event(event) {
         queue.iter().position(|queued| {
-            !admission_event(queued)
-                && !terminal_error_event(queued)
-                && !matches!(queued, SessionObservation::PendingContinuation { .. })
+            !admission_event(queued) && !terminal_error_event(queued) && !latest_state_event(queued)
         })
     } else {
         None

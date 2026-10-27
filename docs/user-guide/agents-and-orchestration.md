@@ -407,6 +407,10 @@ Interrupt and close return once the request is saved and cancellation is
 dispatched. Session release finishes in the background; the child cannot take
 new work while it is still releasing. A cleanup failure remains visible as
 `recovery_required`, rather than making the screen wait for the release deadline.
+The initial answer always acknowledges the saved intent once cancellation is
+dispatched, even when release fails immediately. A retirement failure then adds
+one tree notice; it does not change that initial answer. Headless exit also joins
+the background job cleanup and operation receipt within its shutdown allowance.
 
 ## git and jj
 

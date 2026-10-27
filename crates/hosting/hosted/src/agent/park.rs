@@ -970,7 +970,7 @@ async fn rejoin_turn(
     match (begun, admitted) {
         (true, Ok(_)) => {}
         (false, _) => {
-            let _ = child.cancel_and_release(driver.clone()).await;
+            let _ = child.cancel_and_release(driver.clone(), None).await;
             project_cancelled(runtime, agent_id, &sessions, session_id).await;
             return Ok(Reopened::HoldEnded);
         }
@@ -1000,12 +1000,12 @@ async fn rejoin_turn(
     match occupied {
         Ok(_) => {}
         Err((child, Some(refusal))) if refusal == REOPEN_HOLD_ENDED => {
-            let _ = child.cancel_and_release(driver.clone()).await;
+            let _ = child.cancel_and_release(driver.clone(), None).await;
             project_cancelled(runtime, agent_id, &sessions, session_id).await;
             return Ok(Reopened::HoldEnded);
         }
         Err((child, refusal)) => {
-            let _ = child.cancel_and_release(driver.clone()).await;
+            let _ = child.cancel_and_release(driver.clone(), None).await;
             return Err(refusal.unwrap_or_else(|| {
                 "the child's live slot is taken or the topology hub is closed".to_owned()
             }));

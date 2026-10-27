@@ -3624,8 +3624,11 @@ reads are limited to the tree observation interval. A failed read skips the
 observation and pause-row updates rather than publishing old facts or treating
 the tree as unpaused. A refused observation is retried on the next eligible
 check, even when the facts have not changed. The indicator's last accepted
-zero cannot be evicted by admission or lifecycle traffic: only a newer
-pending-continuation snapshot supersedes it. This keeps a
+zero cannot be evicted by admission or lifecycle traffic. The same protection
+applies to every latest-state observation, including `SetBusy`, `Status`,
+`QueueSnapshot` and `TopologyNavigatorSnapshot`: only a newer observation of
+the same kind supersedes its accepted value. Coalescing retains one value per
+kind within the unchanged 512-slot mailbox. This keeps a
 consumed child result from remaining displayed when the host has no changed
 facts to send. On an interactive face, pausing
 auto-continue or the tree also writes one typed `tree` warning as a notice

@@ -12,6 +12,74 @@ use crate::runtime::test_support::*;
 use crate::sessions::SessionRecord;
 
 #[tokio::test]
+async fn navigator_retirement_failures_reach_the_transcript_once_from_the_owner() {
+    for action in ["close", "interrupt", "stop-all", "root-interrupt"] {
+        let root = tempfile::tempdir().unwrap();
+        let paths = MemoryRows::new();
+        let mut session = SessionRecord::new(root.path().to_path_buf());
+        let runtime = test_kit::install_failing_child_shutdown(&session.id, root.path()).await;
+        let child = runtime
+            .read(|tree| {
+                tree.nodes()
+                    .values()
+                    .find(|node| node.parent_agent_id.is_some())
+                    .unwrap()
+                    .agent_id
+                    .clone()
+            })
+            .unwrap();
+        let (wire, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let events = Sender::over(wire);
+        let home = SessionHome::new(root.path().join("sessions"));
+        let mut push = TreeSnapshotPush::default();
+        emit_tree_snapshot_if_revision_advanced(
+            &paths,
+            paths.records(),
+            &home,
+            &mut session,
+            &mut push,
+            &events,
+            false,
+        );
+        let intent = match action {
+            "close" => UserAction::CloseTopologyNode {
+                agent_id: child.clone(),
+            },
+            "interrupt" => UserAction::InterruptTopologyNode {
+                agent_id: child.clone(),
+            },
+            "stop-all" => UserAction::StopAllTopology,
+            _ => UserAction::Interrupt,
+        };
+        if action == "root-interrupt" {
+            topology_state::mark_root_interrupted(&session.id)
+                .await
+                .unwrap();
+        } else {
+            crate::topology_navigator::dispatch_topology_navigator_action(
+                &paths, &session, &events, &intent,
+            )
+            .await;
+        }
+        let _ = runtime.cancel_live(&child).await;
+        for _ in 0..2 {
+            emit_tree_snapshot_if_revision_advanced(
+                &paths,
+                paths.records(),
+                &home,
+                &mut session,
+                &mut push,
+                &events,
+                false,
+            );
+        }
+        let notices = received.try_iter().filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(row)) if row.text.contains("recover_agent required"))).count();
+        assert_eq!(notices, 1, "{action}");
+        crate::topology_runtime::force_release(&session.id).await;
+    }
+}
+
+#[tokio::test]
 async fn a_child_finished_before_the_first_observation_keeps_its_notices_once() {
     use crate::agent_tree::{FakeVcs, ProductAgentTree};
     use crate::agent_tree_protocol::{

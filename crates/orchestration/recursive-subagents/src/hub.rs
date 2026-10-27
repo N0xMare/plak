@@ -131,9 +131,12 @@ pub trait LiveChildHandle: Send + Sync {
     /// releases the session, and reports the released head and the first
     /// failure. Never fails as a whole: a cancel that did not settle and a
     /// release that did are both facts the hub records.
+    /// When supplied, `dispatched` is sent only after issuing the exact turn's
+    /// cancellation, not when constructing or first polling this future.
     fn cancel_and_release(
         self: Box<Self>,
         driver: TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>>;
 }
 
@@ -215,21 +218,15 @@ impl LiveChildTable {
             let release_driver = driver.clone();
             let release = async move {
                 if cancel {
-                    child.cancel_and_release(release_driver).await
+                    child
+                        .cancel_and_release(release_driver, Some(dispatched))
+                        .await
                 } else {
+                    let _ = dispatched.send(());
                     child.release(release_driver).await
                 }
             };
             let result = std::panic::AssertUnwindSafe(async {
-                tokio::pin!(release);
-                let mut dispatched = Some(dispatched);
-                let release = std::future::poll_fn(|context| {
-                    let result = release.as_mut().poll(context);
-                    if let Some(dispatched) = dispatched.take() {
-                        let _ = dispatched.send(());
-                    }
-                    result
-                });
                 tokio::pin!(release);
                 let released = tokio::select! {
                     released = &mut release => released,
@@ -253,7 +250,11 @@ impl LiveChildTable {
                     &driver,
                     &worker_id,
                     expected_attempt.as_ref(),
-                    RetirementFaultSource::Owner,
+                    if fault_recorded {
+                        RetirementFaultSource::OwnerAlreadyReported
+                    } else {
+                        RetirementFaultSource::Owner
+                    },
                     error,
                 );
                 fault_recorded = true;
@@ -266,7 +267,20 @@ impl LiveChildTable {
                     .is_some_and(|retirement| retirement.turn == turn)
                 {
                     live.retiring.remove(&worker_id);
-                    let _ = driver.mutate(|tree| tree.release_turn_owner(&worker_id));
+                    let _ = driver.mutate(|tree| {
+                        tree.release_turn_owner(&worker_id);
+                        if result.is_ok()
+                            && tree.node(&worker_id).is_ok_and(|node| {
+                                node.status == crate::protocol::NodeStatus::Closed
+                            })
+                        {
+                            tree.try_emit_tree_node_detached(
+                                driver.observer(),
+                                &worker_id,
+                                crate::tree::NodeDetach::Closed,
+                            );
+                        }
+                    });
                 }
             }
             tracing::info!(target: "plak.topology", agent_id = %worker_id,
@@ -469,6 +483,7 @@ fn retirement_needs_recovery(driver: &TreeDriver, agent_id: &str) -> bool {
 
 enum RetirementFaultSource {
     Owner,
+    OwnerAlreadyReported,
     Joiner,
 }
 
@@ -489,7 +504,7 @@ fn record_retirement_fault(
             // the retiring slot still excludes startup. Fence it rather than
             // allowing rollback to erase the owner's release failure.
             let fenced = match source {
-                RetirementFaultSource::Owner => tree
+                RetirementFaultSource::Owner | RetirementFaultSource::OwnerAlreadyReported => tree
                     .record_host_retirement(agent_id, error.to_owned())
                     .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value))
                     .map(|()| true),
@@ -505,6 +520,25 @@ fn record_retirement_fault(
             if let Err(error) = driver.save(tree) {
                 tracing::error!(target: "plak.topology", agent_id, error = %error.message,
                 "child retirement fault could not be persisted");
+            }
+            if matches!(source, RetirementFaultSource::Owner) {
+                tree.try_emit_tree_node_detached(
+                    driver.observer(),
+                    agent_id,
+                    crate::tree::NodeDetach::RecoveryRequired,
+                );
+                let closed = tree.attempt(agent_id).is_some_and(|attempt| {
+                    attempt.status == crate::protocol::AttemptStatus::Closed
+                });
+                let prefix = if closed {
+                    "close applied; live cancel failed"
+                } else {
+                    "child retirement failed"
+                };
+                let _ = driver.retirement_faults.send((
+                    agent_id.to_owned(),
+                    format!("{prefix} for {agent_id}: {error}; recover_agent required"),
+                ));
             }
         })
     }));
@@ -792,6 +826,11 @@ impl ProductTopologyRuntime {
     /// This tree's telemetry port, when one was installed.
     pub fn observer(&self) -> Option<Arc<dyn TopologyObserver>> {
         self.observer.as_ref().map(Arc::clone)
+    }
+
+    /// Observes owner-confirmed retirement failures, independently of their initiator.
+    pub fn observe_retirement_faults(&self) -> tokio::sync::broadcast::Receiver<(String, String)> {
+        self.driver.retirement_faults.subscribe()
     }
 
     /// Parks the host's rejoin spec on the hub for this tree's lifetime.
@@ -1653,12 +1692,24 @@ async fn shutdown_runtime(
     };
     // Shutdown bounds the join, not owned release. Only explicit process-exit
     // abandonment may abort a retirement while it still owns runtime authority.
-    let results = match tokio::time::timeout(HOST_SHUTDOWN_RELEASE_TIMEOUT, completions()).await {
-        Ok(results) => results,
-        Err(_) => retirements
+    let results = if let Ok(results) = tokio::time::timeout(HOST_SHUTDOWN_RELEASE_TIMEOUT, async {
+        let results = completions().await;
+        if let Err(error) = runtime.driver.join_retirement_tasks().await {
+            failure.tree_failure.get_or_insert(error);
+        }
+        results
+    })
+    .await
+    {
+        results
+    } else {
+        failure.tree_failure.get_or_insert_with(|| {
+            "retirement completion exceeded the shutdown bound; owner retained".to_owned()
+        });
+        retirements
             .iter()
             .map(|_| Err("child retirement exceeded the shutdown bound; owner retained".to_owned()))
-            .collect(),
+            .collect()
     };
     for ((agent_id, retirement), result) in retirements.into_iter().zip(results) {
         if let Err(error) = result {
@@ -2568,6 +2619,94 @@ mod tests {
         entered: Arc<tokio::sync::Notify>,
         finish: Arc<tokio::sync::Notify>,
     }
+
+    #[derive(Default)]
+    struct DetachObserver(Mutex<Vec<crate::tree::NodeDetach>>);
+
+    impl TopologyObserver for DetachObserver {
+        fn turn_usage(&self, _: crate::tree::ProjectedChildTurnUsage) {}
+        fn node_spawned(&self, _: &str, _: &str, _: Option<&str>, _: &str) {}
+        fn node_detached(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            status: crate::tree::NodeDetach,
+        ) {
+            self.0.lock().unwrap().push(status);
+        }
+        fn epoch_advanced(&self, _: &str) {}
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retirement_owner_emits_one_recovery_detach_and_notice_despite_late_failure_and_joiners()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let observer = Arc::new(DetachObserver::default());
+        let runtime = ProductTopologyRuntime::new(
+            bootstrap("retirement-observer", root.path().to_path_buf()),
+            memory_store(),
+            Arc::new(plakous_workspace::occupancy_vcs::fake::FakeVcs::new()),
+            Some(observer.clone()),
+        );
+        let id = runtime
+            .mutate_then_emit(false, |tree| {
+                Ok(tree
+                    .spawn_agent(
+                        "root",
+                        &crate::protocol::SpawnAgentRequest::test_review(),
+                        None,
+                    )
+                    .unwrap()
+                    .agent_id)
+            })
+            .unwrap();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let finish = Arc::new(tokio::sync::Notify::new());
+        assert!(
+            runtime
+                .try_occupy_live(
+                    id.clone(),
+                    Box::new(BarrierChild {
+                        panic_on_release: false,
+                        failure: Some("release refused".into()),
+                        turn: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
+                        entered: entered.clone(),
+                        finish: finish.clone()
+                    })
+                )
+                .await
+                .is_ok()
+        );
+        let mut faults = runtime.observe_retirement_faults();
+        let first = runtime
+            .begin_cancel_live_many(std::slice::from_ref(&id))
+            .await;
+        let second = runtime
+            .begin_cancel_live_many(std::slice::from_ref(&id))
+            .await;
+        entered.notified().await;
+        tokio::time::advance(HOST_RETIRE_JOIN_TIMEOUT + Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        let (agent, message) = tokio::time::timeout(Duration::from_secs(1), faults.recv())
+            .await
+            .expect("owner fault notice")
+            .unwrap();
+        assert_eq!(agent, id);
+        assert!(message.contains("recover_agent required"));
+        finish.notify_one();
+        assert!(!first.await.is_clean());
+        assert!(!second.await.is_clean());
+        // Join the actual completion, not the expired bounded joiners.
+        while runtime.live.lock().await.contains_key(&id) {
+            tokio::task::yield_now().await;
+        }
+        assert!(faults.try_recv().is_err());
+        assert_eq!(
+            *observer.0.lock().unwrap(),
+            [crate::tree::NodeDetach::RecoveryRequired]
+        );
+    }
     impl LiveChildHandle for BarrierChild {
         fn agent(&self) -> Option<Agent> {
             None
@@ -2602,12 +2741,16 @@ mod tests {
             self: Box<Self>,
             driver: TreeDriver,
         ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
-            self.cancel_and_release(driver)
+            self.cancel_and_release(driver, None)
         }
         fn cancel_and_release(
             self: Box<Self>,
             _driver: TreeDriver,
+            dispatched: Option<tokio::sync::oneshot::Sender<()>>,
         ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
+            if let Some(dispatched) = dispatched {
+                let _ = dispatched.send(());
+            }
             Box::pin(async move {
                 self.entered.notify_one();
                 self.finish.notified().await;

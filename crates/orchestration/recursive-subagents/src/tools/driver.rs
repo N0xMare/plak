@@ -25,6 +25,8 @@ pub struct TreeDriver {
     pub(super) vcs: Arc<dyn VcsOps>,
     pub(super) job_host: Arc<Mutex<Option<Arc<dyn plakous::tools::JobHost>>>>,
     retirement_recovery: Arc<Mutex<Option<RetirementRecovery>>>,
+    retirement_tasks: Arc<Mutex<tokio::task::JoinSet<()>>>,
+    pub(crate) retirement_faults: tokio::sync::broadcast::Sender<(String, String)>,
     pub(super) observer: Option<Arc<dyn TopologyObserver>>,
     next_reclaim_probe: Arc<Mutex<u64>>,
     storage_waiting: Arc<std::sync::atomic::AtomicBool>,
@@ -156,6 +158,8 @@ impl TreeDriver {
             vcs,
             job_host: Arc::new(Mutex::new(None)),
             retirement_recovery: Arc::new(Mutex::new(None)),
+            retirement_tasks: Arc::default(),
+            retirement_faults: tokio::sync::broadcast::channel(64).0,
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
             storage_waiting: Arc::default(),
@@ -318,6 +322,43 @@ impl TreeDriver {
             .retirement_recovery
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(recovery);
+    }
+
+    pub(crate) fn observer(&self) -> Option<&Arc<dyn TopologyObserver>> {
+        self.observer.as_ref()
+    }
+
+    pub(super) fn spawn_retirement(&self, work: impl Future<Output = ()> + Send + 'static) {
+        let mut tasks = self
+            .retirement_tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while tasks.try_join_next().is_some() {}
+        tasks.spawn(work);
+    }
+
+    /// Joins tool-side receipt, job-stop and effect settlement after child release.
+    /// Cancellation of the join retains the independently owned tasks.
+    ///
+    /// # Errors
+    /// Reports a panicked or aborted retirement completion task.
+    pub async fn join_retirement_tasks(&self) -> Result<(), String> {
+        let mut failed = false;
+        loop {
+            let next = std::future::poll_fn(|cx| {
+                self.retirement_tasks
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .poll_join_next(cx)
+            })
+            .await;
+            match next {
+                None if failed => return Err("retirement completion task failed".into()),
+                None => return Ok(()),
+                Some(Ok(())) => {}
+                Some(Err(_)) => failed = true,
+            }
+        }
     }
 
     /// Requests a pass after caller-layer retirement evidence is published.

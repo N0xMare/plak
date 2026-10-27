@@ -159,7 +159,7 @@ impl ProductMailDeliverer {
                         &agent_id,
                         &startup,
                         Box::new(child)
-                            .cancel_and_release(self.runtime.driver().clone())
+                            .cancel_and_release(self.runtime.driver().clone(), None)
                             .await,
                     )
                     .await;

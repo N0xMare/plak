@@ -88,28 +88,27 @@ impl TopologyTool {
         };
         let canceller = canceller.clone();
         let payload_text = payload.to_string();
-        let completed = self
-            .run_retirement(move |tool, signalled| async move {
-                let cancellation = canceller
-                    .cancel_agents(vec![request.agent_id.clone()], signalled)
-                    .await;
-                tool.finish_cancel_receipt(
-                    &operation_id,
-                    &caller,
-                    "interrupt_agent",
-                    &request,
-                    &status,
-                    &cancellation,
-                )?;
-                match cancellation {
-                    Ok(_) => ToolOutcome::success_text(payload.to_string()),
-                    Err(failure) => {
-                        tool.fail_closed_cancel(failure, std::slice::from_ref(&request.agent_id))
-                    }
+        self.run_retirement(move |tool, signalled| async move {
+            let cancellation = canceller
+                .cancel_agents(vec![request.agent_id.clone()], signalled)
+                .await;
+            tool.finish_cancel_receipt(
+                &operation_id,
+                &caller,
+                "interrupt_agent",
+                &request,
+                &status,
+                &cancellation,
+            )?;
+            match cancellation {
+                Ok(_) => ToolOutcome::success_text(payload.to_string()),
+                Err(failure) => {
+                    tool.fail_closed_cancel(failure, std::slice::from_ref(&request.agent_id))
                 }
-            })
-            .await?;
-        completed.map_or_else(|| ToolOutcome::success_text(payload_text), Ok)
+            }
+        })
+        .await?;
+        ToolOutcome::success_text(payload_text)
     }
 
     pub(super) async fn close_with(
@@ -180,98 +179,96 @@ impl TopologyTool {
             return ToolOutcome::success_text(payload.to_string());
         }
         let payload_text = payload.to_string();
-        let completed = self
-            .run_retirement(move |tool, signalled| async move {
-                let mut cancellation = match tool.canceller() {
-                    Some(canceller) => canceller.cancel_agents(ids.clone(), signalled).await,
-                    None => Ok(LiveCancelOutcome {
-                        cancelled_ids: Vec::new(),
-                        not_live_ids: ids.clone(),
-                    }),
-                };
-                let stop = tool.driver.stop_agent_jobs(&ids).await;
-                // Closing owns these effects even if cancellation or process cleanup failed.
-                let settled = tool.settle(effects).await;
-                if let Err(error) = stop {
-                    let failed_ids = tool
-                        .driver
-                        .read(|tree| {
-                            ids.iter()
-                                .filter(|id| {
-                                    tree.node(id).is_ok_and(|node| {
-                                        node.status == crate::protocol::NodeStatus::RecoveryRequired
-                                    })
+        self.run_retirement(move |tool, signalled| async move {
+            let mut cancellation = if let Some(canceller) = tool.canceller() {
+                canceller.cancel_agents(ids.clone(), signalled).await
+            } else {
+                let _ = signalled.send(());
+                Ok(LiveCancelOutcome {
+                    cancelled_ids: Vec::new(),
+                    not_live_ids: ids.clone(),
+                })
+            };
+            let stop = tool.driver.stop_agent_jobs(&ids).await;
+            // Closing owns these effects even if cancellation or process cleanup failed.
+            let settled = tool.settle(effects).await;
+            if let Err(error) = stop {
+                let failed_ids = tool
+                    .driver
+                    .read(|tree| {
+                        ids.iter()
+                            .filter(|id| {
+                                tree.node(id).is_ok_and(|node| {
+                                    node.status == crate::protocol::NodeStatus::RecoveryRequired
                                 })
-                                .cloned()
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_else(|_| ids.clone());
-                    cancellation = Err(match cancellation {
-                        Ok(report) => LiveCancelFailure {
-                            message: error.message,
-                            failed_ids,
-                            joiner_expired_ids: Vec::new(),
-                            owner_failures: Vec::new(),
-                            cancelled_ids: report.cancelled_ids,
-                            not_live_ids: report.not_live_ids,
-                        },
-                        Err(mut failure) => {
-                            failure.message.push_str(&format!("; {}", error.message));
-                            failure.failed_ids.extend(failed_ids);
-                            failure
-                        }
-                    });
-                }
-                {
-                    let mut tree = tool.driver.lock().map_err(|_| {
-                        ToolRuntimeError::new(
-                            ToolRuntimeErrorKind::Execution,
-                            "topology tree lock is poisoned",
-                        )
-                    })?;
-                    for (agent_id, status) in &closed {
-                        let detach =
-                            NodeDetach::from_node_status(*status).unwrap_or(NodeDetach::Closed);
-                        tree.try_emit_tree_node_detached(tool.observer.as_ref(), agent_id, detach);
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|_| ids.clone());
+                cancellation = Err(match cancellation {
+                    Ok(report) => LiveCancelFailure {
+                        message: error.message,
+                        failed_ids,
+                        joiner_expired_ids: Vec::new(),
+                        owner_failures: Vec::new(),
+                        cancelled_ids: report.cancelled_ids,
+                        not_live_ids: report.not_live_ids,
+                    },
+                    Err(mut failure) => {
+                        failure.message.push_str(&format!("; {}", error.message));
+                        failure.failed_ids.extend(failed_ids);
+                        failure
                     }
+                });
+            }
+            {
+                let mut tree = tool.driver.lock().map_err(|_| {
+                    ToolRuntimeError::new(
+                        ToolRuntimeErrorKind::Execution,
+                        "topology tree lock is poisoned",
+                    )
+                })?;
+                for (agent_id, status) in &closed {
+                    let detach =
+                        NodeDetach::from_node_status(*status).unwrap_or(NodeDetach::Closed);
+                    tree.try_emit_tree_node_detached(tool.observer.as_ref(), agent_id, detach);
                 }
-                tool.finish_cancel_receipt(
-                    &operation_id,
-                    &caller,
-                    "close_agent",
-                    &request,
-                    &closed,
-                    &cancellation,
-                )?;
-                settled?;
-                match cancellation {
-                    Ok(_) => ToolOutcome::success_text(payload.to_string()),
-                    Err(failure) => tool.fail_closed_cancel(failure, &ids),
-                }
-            })
-            .await?;
-        completed.map_or_else(|| ToolOutcome::success_text(payload_text), Ok)
+            }
+            tool.finish_cancel_receipt(
+                &operation_id,
+                &caller,
+                "close_agent",
+                &request,
+                &closed,
+                &cancellation,
+            )?;
+            settled?;
+            match cancellation {
+                Ok(_) => ToolOutcome::success_text(payload.to_string()),
+                Err(failure) => tool.fail_closed_cancel(failure, &ids),
+            }
+        })
+        .await?;
+        ToolOutcome::success_text(payload_text)
     }
 
     /// The independently owned join settles the prepared receipt, not the
     /// requesting tool future. A returned intent is not a release receipt.
-    async fn run_retirement<F, Fut>(&self, work: F) -> Result<Option<ToolOutcome>, ToolRuntimeError>
+    async fn run_retirement<F, Fut>(&self, work: F) -> Result<(), ToolRuntimeError>
     where
         F: FnOnce(Self, tokio::sync::oneshot::Sender<()>) -> Fut,
         Fut: Future<Output = Result<ToolOutcome, ToolRuntimeError>> + Send + 'static,
     {
         let (signal, signalled) = tokio::sync::oneshot::channel();
-        let mut task = tokio::spawn(work(self.clone(), signal));
-        tokio::select! {
-            biased;
-            result = &mut task => result
-                .map_err(|_| ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "retirement completion task failed"))?
-                .map(Some),
-            result = signalled => {
-                result.map_err(|_| ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "retirement signal failed"))?;
-                Ok(None)
-            }
-        }
+        let work = work(self.clone(), signal);
+        self.driver.spawn_retirement(async move {
+            // Completion cannot replace the dispatched intent acknowledgement.
+            let _ = work.await;
+        });
+        signalled.await.map_err(|_| {
+            ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "retirement signal failed")
+        })
     }
 
     /// `recover_agent`: authority under the lock, then the host's exact

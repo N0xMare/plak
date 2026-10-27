@@ -135,11 +135,12 @@ async fn close_stops_child_jobs_but_interrupt_preserves_them() {
         .unwrap();
     assert_eq!(interrupted.kind(), ToolOutcomeKind::Success);
     assert_eq!(jobs.jobs()[0].status, plakous::tools::JobStatus::Running);
-    let closed = close_tool(driver, None)
+    let closed = close_tool(driver.clone(), None)
         .close_with("close-job".into(), &json!({"agent_id": child.agent_id}))
         .await
         .unwrap();
     assert_eq!(closed.kind(), ToolOutcomeKind::Success);
+    driver.join_retirement_tasks().await.unwrap();
     assert_eq!(
         jobs.jobs()[0].status,
         plakous::tools::JobStatus::Stopped(plakous::tools::JobStopReason::AttemptEnded)

@@ -853,12 +853,16 @@ impl crate::topology_runtime::LiveChildHandle for RetiringChild {
         self: Box<Self>,
         driver: crate::agent_tree_tools::TreeDriver,
     ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
-        self.cancel_and_release(driver)
+        self.cancel_and_release(driver, None)
     }
     fn cancel_and_release(
         self: Box<Self>,
         _driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
         Box::pin(async move {
             self.entered.notify_one();
             self.finish.notified().await;

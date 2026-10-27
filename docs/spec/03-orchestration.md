@@ -984,8 +984,16 @@ is `attempt_mismatch`.
 `interrupt_agent` returns `{ agent_id, status }`. `close_agent` returns
 `{ agents: [{ agent_id, status }, …] }` for the node and its descendants. A
 successful initial response acknowledges the durable intent and cancellation
-dispatch, not completed release. Release and the operation receipt settle in
-the background; replay while they are pending refuses rather than dispatching
+dispatch, not completed release. Dispatch is acknowledged only after the exact
+live owner's cancellation request has been issued, never merely because its
+release future was first polled; a pending delivery barrier cannot produce an
+early acknowledgement. Once dispatch is signalled, the initial answer is always
+the intent acknowledgement, even if release fails before that answer is polled.
+Such a failure appears only through `recovery_required` and the owner's retirement
+notice, not as a scheduling-dependent initial tool failure. A close with no live
+canceller explicitly acknowledges its intent as well. Release and the operation
+receipt settle in the background; replay while they are pending refuses rather
+than dispatching
 again. The navigator's close, interrupt and stop-all have the same prompt-return
 contract. A
 `recovery_required` node whose session outcome is unresolved is not closed:
@@ -4507,8 +4515,12 @@ Shutdown closes admission (no recovery pass starts after that), then gives a
 running recovery pass its
 own two-second allowance; at expiry it aborts the pass and joins it for at most
 250 ms, so no reopen of a child session outlives the leases released next. It
-then starts active releases, and joins them together with existing retirements within
-one two-second allowance. At expiry it returns a bounded failure and retains
+then starts active releases, and joins them together with existing retirements
+and tracked tool-side retirement tasks within one two-second allowance. Those
+tasks own job stops, effect settlement and operation-receipt completion even
+after the live slot clears. Headless run exit joins both kinds of owner under
+the same allowance, including when no live child remains. At expiry it returns
+a bounded failure and retains
 fault evidence, while release workers retain ownership until they return and
 may publish their released locator afterward. No new recovery pass starts on
 the closed hub. Explicit process-exit abandonment, not ordinary joined shutdown,
@@ -4523,7 +4535,12 @@ a successful parent locator available for final publication even when a child fa
 Tool interrupt/close receipts remain prepared until cancellation, release, and
 locator publication have joined successfully in the independently owned
 background task. The caller returns after the intent is saved and exact owners
-are signalled; it does not wait for the 65-second release deadline. Replaying
+are signalled; it does not wait for the 65-second release deadline. The release
+owner emits one recovery-required detach and one transcript notice for its fault,
+regardless of whether a tool, navigator action or root interrupt initiated it;
+concurrent joiners and a late failure after deadline evidence do not repeat them.
+Navigator close detaches are deferred until the release owner establishes their
+outcome, so an eager closed observation cannot hide a retirement failure. Replaying
 a prepared cancellation
 returns `operation_recovery_required` without another dispatch; failed retirement
 records a failed receipt. Completed receipts replay without touching any later

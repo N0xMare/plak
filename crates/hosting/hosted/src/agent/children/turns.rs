@@ -182,14 +182,7 @@ pub(in crate::agent) async fn start_child_turn_as(
                     });
                 }
             });
-            runtime.record_then_apply(agent_id, |tree| {
-                tree.record_host_retirement_for_attempt(
-                    agent_id,
-                    expected_attempt.as_ref(),
-                    error.clone(),
-                )
-                .map(|_| ())
-            })?;
+            record_start_failure(runtime, agent_id, expected_attempt.as_ref(), &error)?;
             return Err(error.into());
         }
     };
@@ -211,6 +204,18 @@ pub(in crate::agent) async fn start_child_turn_as(
         .await
     });
     await_child_start(caller, task, deadline).await
+}
+
+pub(super) fn record_start_failure(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+    expected: Option<&crate::agent_tree_protocol::AttemptId>,
+    error: &str,
+) -> Result<(), String> {
+    runtime.record_then_apply(agent_id, |tree| {
+        tree.record_host_retirement_for_attempt(agent_id, expected, error.to_owned())
+            .map(|_| ())
+    })
 }
 
 pub(super) async fn await_child_start(
@@ -611,7 +616,9 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
             .finish_startup(
                 agent_id,
                 startup,
-                child.cancel_and_release(runtime.driver().clone()).await,
+                child
+                    .cancel_and_release(runtime.driver().clone(), None)
+                    .await,
             )
             .await;
         return Err(error.into());
@@ -640,7 +647,9 @@ pub(in crate::agent) async fn start_child_turn_owned_with_ack(
                 .finish_startup(
                     agent_id,
                     startup,
-                    loser.cancel_and_release(runtime.driver().clone()).await,
+                    loser
+                        .cancel_and_release(runtime.driver().clone(), None)
+                        .await,
                 )
                 .await;
             Err("child startup cancelled or hub closed; late acknowledgement reconciled through cancellation and release".into())
@@ -894,16 +903,21 @@ pub(in crate::agent) async fn end_attempt_work(
     .await;
     if let Err(error) = &result {
         retire_live_child(driver, live, agent_id, identity.turn).await;
-        mutate_child(driver, agent_id, |tree| {
-            let _ = tree
-                .record_host_retirement_for_attempt(
-                    agent_id,
-                    Some(&identity.attempt),
-                    error.clone(),
-                )
-                .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value));
-            persist_or_fault(driver, tree, agent_id);
-        });
+        record_attempt_end_failure(driver, agent_id, identity, error);
     }
     result
+}
+
+pub(super) fn record_attempt_end_failure(
+    driver: &TreeDriver,
+    agent_id: &str,
+    identity: &ChildTurnIdentity,
+    error: &str,
+) {
+    mutate_child(driver, agent_id, |tree| {
+        let _ = tree
+            .record_host_retirement_for_attempt(agent_id, Some(&identity.attempt), error.to_owned())
+            .and_then(|value| driver.apply_recorded(tree, agent_id).map(|()| value));
+        persist_or_fault(driver, tree, agent_id);
+    });
 }

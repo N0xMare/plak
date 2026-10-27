@@ -465,11 +465,20 @@ impl LiveChildHandle for ProductLiveChild {
     fn cancel_and_release(
         self: Box<Self>,
         driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
         Box::pin(async move {
             let _delivery = Arc::clone(&self.delivery).write_owned().await;
             let cancel = match crate::interrupt::settle_cancel(
-                self.control.cancel(),
+                async {
+                    let cancellation = self.control.request_cancel().await;
+                    if let Some(dispatched) = dispatched {
+                        let _ = dispatched.send(());
+                    }
+                    let status = cancellation?;
+                    self.control.wait_until_settled().await;
+                    Ok::<_, plakous::agent::ControlError>(status)
+                },
                 plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
             )
             .await

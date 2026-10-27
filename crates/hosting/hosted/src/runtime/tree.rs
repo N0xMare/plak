@@ -102,6 +102,7 @@ impl TreeSnapshotPush {
             self.child_live = super::child_live::ChildObservers::default();
             self.session_id = Some(session.id.clone());
             self.tree_id = None;
+            self.retirement_faults = None;
             self.last_revision = None;
             self.notified_results.clear();
         }
@@ -109,6 +110,8 @@ impl TreeSnapshotPush {
             .tree_id
             .get_or_insert_with(|| durable_tree_id(rows, session));
         if let Some(runtime) = crate::topology_runtime::lookup(cached) {
+            self.retirement_faults
+                .get_or_insert_with(|| runtime.observe_retirement_faults());
             return Some(runtime);
         }
         // A tree minted for this session *after* the lineage walk resolved an
@@ -116,6 +119,7 @@ impl TreeSnapshotPush {
         let runtime = crate::topology_runtime::lookup(&session.id)?;
         session.id.clone_into(cached);
         self.last_revision = None;
+        self.retirement_faults = Some(runtime.observe_retirement_faults());
         Some(runtime)
     }
 
@@ -389,6 +393,11 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     let Some(runtime) = push.runtime(rows, session) else {
         return;
     };
+    if let Some(faults) = &mut push.retirement_faults {
+        while let Ok((_, message)) = faults.try_recv() {
+            let _ = events.notice(TranscriptRow::error(NoticeScope::Tree, message));
+        }
+    }
     if tokio::runtime::Handle::try_current().is_ok() {
         push.child_live.sync(&runtime);
     }

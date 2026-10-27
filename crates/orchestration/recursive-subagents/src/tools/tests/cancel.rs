@@ -3,6 +3,62 @@
 use super::*;
 
 #[tokio::test]
+async fn fast_cancel_failure_has_a_deterministic_initial_answer() {
+    for close in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (store, mut tree) = persist_fixture(&root);
+        tree.spawn_agent("root", &spawn_request(), None).unwrap();
+        tree.set_active_turn("c1", true).unwrap();
+        let driver = driver_on(tree, store);
+        let canceller = Some(Arc::new(StubCanceller::fail()) as Arc<dyn ChildController>);
+        let outcome = if close {
+            close_tool(driver.clone(), canceller)
+                .close_with("fast-failure".into(), &agent_id_request("c1"))
+                .await
+        } else {
+            interrupt_tool(driver.clone(), canceller)
+                .interrupt_with("fast-failure".into(), &agent_id_request("c1"))
+                .await
+        }
+        .unwrap();
+        assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+        driver.join_retirement_tasks().await.unwrap();
+        driver
+            .read(|tree| {
+                assert_eq!(
+                    tree.node("c1").unwrap().status,
+                    NodeStatus::RecoveryRequired
+                );
+                assert!(tree.operations()["fast-failure"].terminal_code.is_some());
+            })
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn close_without_a_canceller_acknowledges_intent_and_settles_its_receipt() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, mut tree) = persist_fixture(&root);
+    tree.spawn_agent("root", &spawn_request(), None).unwrap();
+    let driver = driver_on(tree, store);
+    let outcome = close_tool(driver.clone(), None)
+        .close_with("no-live-canceller".into(), &agent_id_request("c1"))
+        .await
+        .unwrap();
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    driver.join_retirement_tasks().await.unwrap();
+    driver
+        .read(|tree| {
+            assert!(
+                tree.operations()["no-live-canceller"]
+                    .terminal_response
+                    .is_some()
+            );
+        })
+        .unwrap();
+}
+
+#[tokio::test]
 async fn retirement_fault_law_rejects_another_tree_attempt_or_turn() {
     struct Report(LiveCancelFailure);
     impl ChildController for Report {
@@ -72,7 +128,8 @@ async fn retirement_fault_law_rejects_another_tree_attempt_or_turn() {
             )
             .await
             .unwrap();
-        assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+        assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+        driver.join_retirement_tasks().await.unwrap();
         driver
             .read(|tree| {
                 assert_eq!(
@@ -175,7 +232,8 @@ async fn interrupt_cancel_failure_is_fail_closed() {
     .interrupt_with("op-interrupt-fail".into(), &agent_id_request("c1"))
     .await
     .unwrap();
-    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    driver.join_retirement_tasks().await.unwrap();
     assert_eq!(
         tree.lock().unwrap().node("c1").unwrap().status,
         NodeStatus::RecoveryRequired
@@ -238,7 +296,8 @@ async fn close_cancel_failure_keeps_close_intent_and_recovery_evidence() {
     .close_with("op-close-fail".into(), &agent_id_request("c1"))
     .await
     .unwrap();
-    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    driver.join_retirement_tasks().await.unwrap();
     assert_eq!(
         tree.lock().unwrap().node("c1").unwrap().status,
         NodeStatus::RecoveryRequired
@@ -263,7 +322,8 @@ async fn close_cancel_failure_without_ids_keeps_closed() {
     .close_with("op-close-empty".into(), &agent_id_request("c1"))
     .await
     .unwrap();
-    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    driver.join_retirement_tasks().await.unwrap();
     assert_eq!(
         tree.lock().unwrap().node("c1").unwrap().status,
         NodeStatus::Closed

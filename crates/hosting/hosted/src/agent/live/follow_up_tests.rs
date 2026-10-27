@@ -20,6 +20,199 @@ type Queue = std::collections::VecDeque<(
     crate::runtime::child_projection::ChildTurnProjection,
 )>;
 
+struct Canceller {
+    runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,
+    returned: Arc<tokio::sync::Notify>,
+    finish: Option<Arc<tokio::sync::Notify>>,
+}
+
+impl crate::agent_tree_tools::ChildController for Canceller {
+    fn services(&self) -> crate::agent_tree_tools::ChildServices {
+        crate::agent_tree_tools::ChildServices::CANCEL
+    }
+    fn cancel_agents(
+        &self,
+        ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        crate::agent_tree_tools::LiveCancelOutcome,
+                        crate::agent_tree_tools::LiveCancelFailure,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move {
+            let join = self.runtime.begin_cancel_live_many(&ids).await;
+            let _ = signalled.send(());
+            let report = join.await;
+            assert!(report.is_clean());
+            self.returned.notify_one();
+            if let Some(finish) = &self.finish {
+                finish.notified().await;
+            }
+            Ok(crate::agent_tree_tools::LiveCancelOutcome {
+                cancelled_ids: report.cancelled,
+                not_live_ids: report.not_live,
+            })
+        })
+    }
+}
+
+async fn close(
+    fixture: &Fixture,
+    finish: Option<Arc<tokio::sync::Notify>>,
+    returned: Arc<tokio::sync::Notify>,
+) -> plakous::tools::ToolOutcome {
+    crate::agent_tree_tools::invoke_granted_topology_tool_on(
+        fixture.runtime.driver().clone(),
+        "root".into(),
+        "close_agent",
+        &serde_json::json!({"agent_id": fixture.child}),
+        "fixture:close".into(),
+        crate::agent_tree_tools::TopologyHostPorts {
+            controller: Some(Arc::new(Canceller {
+                runtime: fixture.runtime.clone(),
+                returned,
+                finish,
+            })),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn close_acknowledges_actual_cancel_after_delivery_lock_and_stops_the_child() {
+    let fixture = Fixture::new().await;
+    let control = fixture
+        .runtime
+        .live
+        .lock()
+        .await
+        .get(&fixture.child)
+        .unwrap()
+        .turn_control();
+    let barrier = fixture
+        .runtime
+        .live
+        .lock()
+        .await
+        .get(&fixture.child)
+        .unwrap()
+        .follow_up_barrier()
+        .unwrap();
+    let delivery = barrier.clone().read_owned().await;
+    let returned = Arc::new(tokio::sync::Notify::new());
+    let mut closing = Box::pin(close(&fixture, None, returned.clone()));
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(closing.as_mut().poll(cx).is_pending()))
+            .await
+    );
+    while barrier.try_read().is_ok() {
+        tokio::task::yield_now().await;
+    }
+    tokio::task::yield_now().await;
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(closing.as_mut().poll(cx).is_pending()))
+            .await
+    );
+    drop(delivery);
+    assert_eq!(
+        closing.await.kind(),
+        plakous::tools::ToolOutcomeKind::Success
+    );
+    assert!(
+        control.is_cancelled(),
+        "the actor must have received cancel before acknowledgement"
+    );
+    let result = fixture.first.clone().result().await.unwrap();
+    assert!(matches!(
+        result.outcome(),
+        plakous::agent::TurnResultOutcome::Cancelled(_)
+    ));
+    returned.notified().await;
+    fixture
+        .runtime
+        .driver()
+        .join_retirement_tasks()
+        .await
+        .unwrap();
+    assert!(fixture.runtime.live.lock().await.is_empty());
+    crate::topology_runtime::force_release(
+        &fixture.runtime.read(|tree| tree.tree_id.clone()).unwrap(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn headless_exit_joins_tool_receipt_after_the_live_owner_has_retired() {
+    assert_exit_joins_tool_receipt(false).await;
+}
+
+#[tokio::test]
+async fn shutdown_joins_tool_receipt_after_the_live_owner_has_retired() {
+    assert_exit_joins_tool_receipt(true).await;
+}
+
+async fn assert_exit_joins_tool_receipt(shutdown: bool) {
+    let fixture = Fixture::new().await;
+    let finish = Arc::new(tokio::sync::Notify::new());
+    let returned = Arc::new(tokio::sync::Notify::new());
+    assert_eq!(
+        close(&fixture, Some(finish.clone()), returned.clone())
+            .await
+            .kind(),
+        plakous::tools::ToolOutcomeKind::Success
+    );
+    returned.notified().await;
+    assert!(fixture.runtime.live.lock().await.is_empty());
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.operations()["fixture:close"]
+                .terminal_response
+                .is_none())
+            .unwrap()
+    );
+    let tree_id = fixture.runtime.read(|tree| tree.tree_id.clone()).unwrap();
+    let mut exiting = Box::pin(async {
+        if shutdown {
+            crate::topology_runtime::force_release(&tree_id).await;
+        } else {
+            crate::runtime::mark_root_interrupted_for_run(&tree_id)
+                .await
+                .unwrap();
+        }
+    });
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(exiting.as_mut().poll(cx).is_pending()))
+            .await
+    );
+    // Shutdown also joins an empty startup worker. Let that unrelated join
+    // finish before proving the receipt owner still keeps exit pending.
+    tokio::task::yield_now().await;
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(exiting.as_mut().poll(cx).is_pending()))
+            .await
+    );
+    finish.notify_one();
+    exiting.await;
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.operations()["fixture:close"]
+                .terminal_response
+                .is_some())
+            .unwrap()
+    );
+    crate::topology_runtime::force_release(&tree_id).await;
+}
+
 struct Fixture {
     _root: tempfile::TempDir,
     runtime: Arc<crate::topology_runtime::ProductTopologyRuntime>,

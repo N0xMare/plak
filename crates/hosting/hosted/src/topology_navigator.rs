@@ -355,7 +355,6 @@ async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
     agent_id: &str,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
-    let writer = runtime.observer();
     let Some(closed) = mutate_tree(runtime, send, "close failed", |tree| {
         let root = tree.root_agent_id.clone();
         let closed = tree
@@ -368,11 +367,6 @@ async fn close_node<P: plakous_host_protocol::ProtocolExtension>(
                 Some(&operation_id),
             )
             .map_err(|error| error.message)?;
-        for (id, status) in &closed {
-            let detach = crate::agent_tree::NodeDetach::from_node_status(*status)
-                .unwrap_or(crate::agent_tree::NodeDetach::Closed);
-            tree.try_emit_tree_node_detached(writer.as_ref(), id, detach);
-        }
         Ok(closed)
     }) else {
         return;
@@ -388,17 +382,11 @@ async fn stop_all<P: plakous_host_protocol::ProtocolExtension>(
     send: impl Fn(ContentEvent<P>) + Copy,
 ) {
     let operation_id = uuid::Uuid::new_v4().to_string();
-    let writer = runtime.observer();
     let Some(closed) = mutate_tree(runtime, send, "stop-all failed", |tree| {
         let root = tree.root_agent_id.clone();
         let closed = tree
             .stop_all(&root, Some(&operation_id))
             .map_err(|error| error.message)?;
-        for (id, status) in &closed {
-            let detach = crate::agent_tree::NodeDetach::from_node_status(*status)
-                .unwrap_or(crate::agent_tree::NodeDetach::Closed);
-            tree.try_emit_tree_node_detached(writer.as_ref(), id, detach);
-        }
         Ok(closed)
     }) else {
         return;

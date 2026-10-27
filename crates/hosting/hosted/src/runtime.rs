@@ -153,6 +153,8 @@ mod thinking_settle_tests;
 mod tool_facts;
 mod tools;
 mod topology_state;
+#[cfg(test)]
+pub(crate) use topology_state::mark_root_interrupted_for_run;
 mod transcript_rows;
 pub(crate) use transcript_rows::{Derived, item_rows, projected_tool_row, settle_tool_row};
 mod tree;
@@ -1123,6 +1125,7 @@ struct RebindBefore<'a> {
 /// silently stopped for the rest of the attach.
 #[derive(Default)]
 struct TreeSnapshotPush {
+    retirement_faults: Option<tokio::sync::broadcast::Receiver<(String, String)>>,
     child_live: child_live::ChildObservers,
     /// `session.id` the cached `tree_id` was resolved for.
     session_id: Option<String>,

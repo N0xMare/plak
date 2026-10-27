@@ -181,19 +181,24 @@ async fn cancel_interrupted_children(
     interrupted: &[String],
     exiting: bool,
 ) -> Result<(), String> {
-    if interrupted.is_empty() {
+    if interrupted.is_empty() && !exiting {
         return Ok(());
     }
-    let join = runtime.begin_cancel_live_many(interrupted).await;
     if exiting {
-        let report =
-            tokio::time::timeout(crate::topology_runtime::HOST_SHUTDOWN_RELEASE_TIMEOUT, join)
-                .await
-                .map_err(|_| {
-                    "child retirement exceeded the run-exit bound; owner retained".to_owned()
-                })?;
+        let report = tokio::time::timeout(
+            crate::topology_runtime::HOST_SHUTDOWN_RELEASE_TIMEOUT,
+            async {
+                let join = runtime.begin_cancel_live_many(interrupted).await;
+                let report = join.await;
+                runtime.driver().join_retirement_tasks().await?;
+                Ok::<_, String>(report)
+            },
+        )
+        .await
+        .map_err(|_| "child retirement exceeded the run-exit bound; owner retained".to_owned())??;
         return report.first_failure.map_or(Ok(()), Err);
     }
+    let join = runtime.begin_cancel_live_many(interrupted).await;
     tokio::spawn(async move {
         if let Some(error) = join.await.first_failure {
             tracing::error!(target: "plak.topology", error, "interrupted child retirement failed");
@@ -371,13 +376,17 @@ mod tests {
             driver: crate::agent_tree_tools::TreeDriver,
         ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>>
         {
-            self.cancel_and_release(driver)
+            self.cancel_and_release(driver, None)
         }
         fn cancel_and_release(
             self: Box<Self>,
             _driver: crate::agent_tree_tools::TreeDriver,
+            dispatched: Option<tokio::sync::oneshot::Sender<()>>,
         ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>>
         {
+            if let Some(dispatched) = dispatched {
+                let _ = dispatched.send(());
+            }
             Box::pin(async move {
                 self.1.notified().await;
                 self.0.store(true, std::sync::atomic::Ordering::SeqCst);

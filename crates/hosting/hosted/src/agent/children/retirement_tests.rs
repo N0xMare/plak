@@ -48,12 +48,16 @@ impl LiveChildHandle for CleanupChild {
         self: Box<Self>,
         driver: TreeDriver,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
-        self.cancel_and_release(driver)
+        self.cancel_and_release(driver, None)
     }
     fn cancel_and_release(
         self: Box<Self>,
         _driver: TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
         Box::pin(async move {
             LiveRelease {
                 feed: None,
@@ -975,7 +979,11 @@ impl LiveChildHandle for EndingChild {
     fn cancel_and_release(
         self: Box<Self>,
         _driver: TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
         panic!("terminal retirement must win cancellation")
     }
 }
@@ -2526,7 +2534,8 @@ async fn cancelled_startup_rejects_late_ack_owner_without_dropping_it() {
         .unwrap();
     assert_eq!(rejected.turn_id(), turn);
     let release_driver = runtime.driver().clone();
-    let release = tokio::spawn(async move { rejected.cancel_and_release(release_driver).await });
+    let release =
+        tokio::spawn(async move { rejected.cancel_and_release(release_driver, None).await });
     entered.notified().await;
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     finish.notify_one();
@@ -2699,7 +2708,11 @@ impl LiveChildHandle for CountedCancellation {
     fn cancel_and_release(
         self: Box<Self>,
         driver: TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Box::new(self.child).release(driver)
     }
@@ -2867,6 +2880,267 @@ async fn exact_operation_replay_never_claims_pending_cancel_or_cancels_replaceme
 /// The product's live canceller as a cancel-only controller, for a tool call
 /// that exercises cancellation alone.
 struct CancelOnly(ProductLiveCanceller);
+
+#[tokio::test]
+async fn fast_release_failure_acknowledges_intent_and_emits_one_owner_notice_for_tools() {
+    for name in ["interrupt_agent", "close_agent"] {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime(root.path());
+        let child = runtime
+            .mutate_then_emit(false, |tree| {
+                Ok(tree
+                    .spawn_agent(
+                        "root",
+                        &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                        None,
+                    )
+                    .unwrap()
+                    .agent_id)
+            })
+            .unwrap();
+        let turn = "00000000-0000-0000-0000-000000000001".parse().unwrap();
+        assert!(
+            runtime
+                .try_occupy_live(
+                    child.clone(),
+                    Box::new(CleanupChild {
+                        turn,
+                        failure: true
+                    })
+                )
+                .await
+                .is_ok()
+        );
+        let mut faults = runtime.observe_retirement_faults();
+        let outcome = crate::agent_tree_tools::invoke_granted_topology_tool_on(
+            runtime.driver().clone(),
+            "root".into(),
+            name,
+            &serde_json::json!({"agent_id": child}),
+            "fast-failure".into(),
+            crate::agent_tree_tools::TopologyHostPorts {
+                controller: Some(Arc::new(CancelOnly(ProductLiveCanceller {
+                    runtime: runtime.clone(),
+                }))),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.kind(), plakous::tools::ToolOutcomeKind::Success);
+        runtime.driver().join_retirement_tasks().await.unwrap();
+        let (id, notice) = faults.try_recv().expect("owner fault notice");
+        assert_eq!(id, child);
+        assert!(notice.contains("recover_agent required"));
+        assert!(faults.try_recv().is_err());
+        runtime
+            .read(|tree| {
+                assert_eq!(
+                    tree.node(&child).unwrap().status,
+                    crate::agent_tree_protocol::NodeStatus::RecoveryRequired
+                );
+                assert!(tree.operations()["fast-failure"].terminal_code.is_some());
+            })
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn stale_startup_caller_cannot_fault_a_new_turn_on_the_same_attempt() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = runtime(root.path());
+    let child = runtime
+        .mutate_then_emit(false, |tree| {
+            Ok(tree
+                .spawn_agent(
+                    "root",
+                    &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                    None,
+                )
+                .unwrap()
+                .agent_id)
+        })
+        .unwrap();
+    let startup = runtime.reserve_startup(&child).await.unwrap();
+    let caller = StartupCaller::new(runtime.clone(), child.clone(), startup.clone());
+    let first = "00000000-0000-0000-0000-000000000001".parse().unwrap();
+    assert!(
+        runtime
+            .occupy_started_child(
+                child.clone(),
+                &startup,
+                Box::new(CleanupChild {
+                    turn: first,
+                    failure: false
+                })
+            )
+            .await
+            .is_ok()
+    );
+    runtime
+        .mutate_then_emit(false, |tree| {
+            tree.bind_attempt_turn(&child, first.to_string())
+                .map_err(|error| error.message)
+        })
+        .unwrap();
+    runtime.cancel_live(&child).await.unwrap();
+    let second: TurnId = "00000000-0000-0000-0000-000000000002".parse().unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    assert!(
+        runtime
+            .try_occupy_live(
+                child.clone(),
+                Box::new(CountedCancellation {
+                    child: EndingChild {
+                        turn: second,
+                        entered: Arc::default(),
+                        finish: Arc::default(),
+                        failure: false
+                    },
+                    calls: calls.clone(),
+                })
+            )
+            .await
+            .is_ok()
+    );
+    runtime
+        .mutate_then_emit(false, |tree| {
+            tree.bind_attempt_turn(&child, second.to_string())
+                .map_err(|error| error.message)
+        })
+        .unwrap();
+    let snapshot = |tree: &crate::agent_tree::ProductAgentTree| {
+        (
+            tree.revision,
+            tree.node(&child).unwrap().clone(),
+            tree.attempt(&child).unwrap().clone(),
+            tree.operations().clone(),
+        )
+    };
+    let before = runtime.read(snapshot).unwrap();
+    assert_eq!(
+        runtime
+            .read(|tree| tree.attempt(&child).unwrap().attempt_id.clone())
+            .unwrap(),
+        *startup.attempt_id().unwrap()
+    );
+    drop(caller);
+    runtime.cancel_startup(&child, &startup).await;
+    assert_eq!(runtime.read(snapshot).unwrap(), before);
+    assert_eq!(
+        runtime.live.lock().await.get(&child).unwrap().turn_id(),
+        second
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        !runtime
+            .read(|tree| tree
+                .operations()
+                .values()
+                .any(|receipt| receipt.tool_name == "host_decision"))
+            .unwrap()
+    );
+}
+
+fn assert_late_caller_fault_is_scoped(site: &str) {
+    use crate::agent_tree_protocol::{MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest};
+    let root = tempfile::tempdir().unwrap();
+    let runtime = runtime(root.path());
+    let (child, identity) = runtime
+        .mutate_then_emit(false, |tree| {
+            let child = tree
+                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .unwrap()
+                .agent_id;
+            let turn = "00000000-0000-0000-0000-000000000001"
+                .parse::<TurnId>()
+                .unwrap();
+            tree.bind_attempt_turn(&child, turn.to_string()).unwrap();
+            let identity = ChildTurnIdentity {
+                attempt: tree.attempt(&child).unwrap().attempt_id.clone(),
+                turn,
+            };
+            tree.record_turn_completed(&child).unwrap();
+            tree.send_agent_message(
+                "root",
+                &SendAgentMessageRequest {
+                    agent_id: child.clone(),
+                    message: "replacement assignment".into(),
+                    purpose: Some(MessagePurpose::Followup),
+                    priority: None,
+                    in_reply_to: None,
+                    output_schema_json: None,
+                    refresh: None,
+                },
+                None,
+            )
+            .unwrap();
+            Ok((child, identity))
+        })
+        .unwrap();
+    let snapshot = |tree: &crate::agent_tree::ProductAgentTree| {
+        (
+            tree.revision,
+            tree.node(&child).unwrap().clone(),
+            tree.attempt(&child).unwrap().clone(),
+            tree.operations().clone(),
+        )
+    };
+    let before = runtime.read(snapshot).unwrap();
+    assert_ne!(
+        runtime
+            .read(|tree| tree.attempt(&child).unwrap().attempt_id.clone())
+            .unwrap(),
+        identity.attempt
+    );
+    match site {
+        "start" => turns::record_start_failure(
+            &runtime,
+            &child,
+            Some(&identity.attempt),
+            "late start failure",
+        )
+        .unwrap(),
+        "end" => turns::record_attempt_end_failure(
+            runtime.driver(),
+            &child,
+            &identity,
+            "late attempt-end failure",
+        ),
+        "reopen" => reopen::record_reopen_failure(
+            &runtime,
+            &child,
+            Some(&identity.attempt),
+            "late reopen failure",
+        )
+        .unwrap(),
+        _ => unreachable!(),
+    }
+    assert_eq!(runtime.read(snapshot).unwrap(), before);
+    assert!(
+        !runtime
+            .read(|tree| tree
+                .operations()
+                .values()
+                .any(|receipt| receipt.tool_name == "host_decision"))
+            .unwrap()
+    );
+}
+
+#[test]
+fn start_failure_cannot_fault_a_followup_attempt() {
+    assert_late_caller_fault_is_scoped("start");
+}
+
+#[test]
+fn attempt_end_failure_cannot_fault_a_followup_attempt() {
+    assert_late_caller_fault_is_scoped("end");
+}
+
+#[test]
+fn reopen_failure_cannot_fault_a_followup_attempt() {
+    assert_late_caller_fault_is_scoped("reopen");
+}
 
 #[tokio::test]
 async fn stale_startup_caller_is_scoped_to_its_tree_and_attempt() {

@@ -845,7 +845,11 @@ impl crate::topology_runtime::LiveChildHandle for LateReleaseChild {
     fn cancel_and_release(
         self: Box<Self>,
         driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
         self.release(driver)
     }
 }

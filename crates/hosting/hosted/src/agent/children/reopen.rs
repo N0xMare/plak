@@ -47,7 +47,7 @@ pub(in crate::agent) async fn rejoin_recovered_start(
             let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
                 attached, turn, control,
             ))
-            .cancel_and_release(runtime.driver().clone())
+            .cancel_and_release(runtime.driver().clone(), None)
             .await;
             return Err(error.into());
         }
@@ -85,7 +85,7 @@ pub(in crate::agent) async fn rejoin_recovered_start(
             let _ = Box::new(crate::agent::live::ProductLiveChild::without_observation(
                 attached, turn, control,
             ))
-            .cancel_and_release(runtime.driver().clone())
+            .cancel_and_release(runtime.driver().clone(), None)
             .await;
             return Err(error.into());
         }
@@ -1053,7 +1053,7 @@ pub(super) async fn reconcile_reopened_child_results(
                 recovered.turn_id(),
                 recovered.control(),
             ))
-            .cancel_and_release(runtime.driver().clone())
+            .cancel_and_release(runtime.driver().clone(), None)
             .await
         } else {
             match session.release_opened().await {
@@ -1076,15 +1076,20 @@ pub(super) async fn reconcile_reopened_child_results(
             return Err(error);
         }
         crate::agent::ledger::project_feed(runtime, agent_id, &sessions, session_id).await?;
-        runtime.record_then_apply(agent_id, |tree| {
-            tree.record_host_retirement_for_attempt(
-                agent_id,
-                expected_attempt.as_ref(),
-                error.clone(),
-            )
-            .map(|_| ())
-        })?;
+        record_reopen_failure(runtime, agent_id, expected_attempt.as_ref(), &error)?;
         return Err(error);
     }
     Ok(ChildReopen::Attached { session, recovered })
+}
+
+pub(super) fn record_reopen_failure(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_id: &str,
+    expected: Option<&crate::agent_tree_protocol::AttemptId>,
+    error: &str,
+) -> Result<(), String> {
+    runtime.record_then_apply(agent_id, |tree| {
+        tree.record_host_retirement_for_attempt(agent_id, expected, error.to_owned())
+            .map(|_| ())
+    })
 }

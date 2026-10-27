@@ -39,6 +39,27 @@ const READY: &str = "CHILD_CUT_READY";
 
 type LiveFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+struct CancelOnly(crate::agent::children::ProductLiveCanceller);
+
+impl crate::agent_tree_tools::ChildController for CancelOnly {
+    fn services(&self) -> crate::agent_tree_tools::ChildServices {
+        crate::agent_tree_tools::ChildServices::CANCEL
+    }
+    fn cancel_agents(
+        &self,
+        ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
+    ) -> LiveFuture<
+        '_,
+        Result<
+            crate::agent_tree_tools::LiveCancelOutcome,
+            crate::agent_tree_tools::LiveCancelFailure,
+        >,
+    > {
+        self.0.cancel_agents(ids, signalled)
+    }
+}
+
 /// Holds a real runtime's release result before the hub can publish its feed.
 struct UnpublishedRelease {
     inner: Box<dyn crate::topology_runtime::LiveChildHandle>,
@@ -83,9 +104,10 @@ impl crate::topology_runtime::LiveChildHandle for UnpublishedRelease {
     fn cancel_and_release(
         self: Box<Self>,
         driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> LiveFuture<'static, crate::topology_runtime::LiveRelease> {
         Box::pin(async move {
-            let release = self.inner.cancel_and_release(driver).await;
+            let release = self.inner.cancel_and_release(driver, dispatched).await;
             assert!(release.failure.is_none());
             self.released.notify_one();
             std::future::pending().await
@@ -367,7 +389,7 @@ impl Fixture {
         let live: Box<dyn crate::topology_runtime::LiveChildHandle> = Box::new(
             crate::agent::live::ProductLiveChild::new(attached, turn, control),
         );
-        let live = if mode == "retire-unpublished" {
+        let live = if matches!(mode, "retire-unpublished" | "retire-tool") {
             Box::new(UnpublishedRelease {
                 inner: live,
                 released: released.clone(),
@@ -381,6 +403,35 @@ impl Fixture {
             .map_err(|_| "live slot")
             .unwrap();
         if mode.starts_with("retire-") {
+            if mode == "retire-tool" {
+                let outcome = crate::agent_tree_tools::invoke_granted_topology_tool_on(
+                    self.runtime.driver().clone(),
+                    "root".into(),
+                    "close_agent",
+                    &json!({"agent_id": id}),
+                    "retirement-cut".into(),
+                    crate::agent_tree_tools::TopologyHostPorts {
+                        controller: Some(Arc::new(CancelOnly(
+                            crate::agent::children::ProductLiveCanceller {
+                                runtime: self.runtime.clone(),
+                            },
+                        ))),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                assert_eq!(outcome.kind(), plakous::tools::ToolOutcomeKind::Success);
+                released.notified().await;
+                self.runtime
+                    .read(|tree| {
+                        let receipt = &tree.operations()["retirement-cut"];
+                        assert!(receipt.terminal_response.is_none());
+                        assert!(receipt.terminal_code.is_none());
+                    })
+                    .unwrap();
+                cut_ready(&id).await;
+            }
             let request = crate::agent_tree_protocol::AttemptScopedRequest {
                 agent_id: id.clone(),
                 expected_attempt_id: Some(identity.attempt.clone()),
@@ -906,7 +957,12 @@ fn child_rejoin_preserves_certified_decision_and_settles_waits() {
 
 #[test]
 fn child_retirement_sigkill_cuts_recover_closed_once_without_redispatch() {
-    for mode in ["retire-intent", "retire-unpublished", "retire-returned"] {
+    for mode in [
+        "retire-intent",
+        "retire-unpublished",
+        "retire-returned",
+        "retire-tool",
+    ] {
         let root = tempfile::tempdir().unwrap();
         let id = kill_owner(root.path(), mode);
         tokio::runtime::Runtime::new().unwrap().block_on(async {

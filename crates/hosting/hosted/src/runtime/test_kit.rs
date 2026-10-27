@@ -570,7 +570,11 @@ impl crate::topology_runtime::LiveChildHandle for FailedShutdownChild {
     fn cancel_and_release(
         self: Box<Self>,
         driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
         self.release(driver)
     }
 }
@@ -653,7 +657,11 @@ impl crate::topology_runtime::LiveChildHandle for HangingShutdownChild {
     fn cancel_and_release(
         self: Box<Self>,
         driver: crate::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> std::pin::Pin<Box<dyn Future<Output = crate::topology_runtime::LiveRelease> + Send>> {
+        if let Some(dispatched) = dispatched {
+            let _ = dispatched.send(());
+        }
         self.release(driver)
     }
 }

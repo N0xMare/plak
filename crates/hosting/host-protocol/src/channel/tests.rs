@@ -622,6 +622,31 @@ fn final_state_displaces_saturated_diagnostics() {
 }
 
 #[test]
+fn admission_saturation_preserves_final_latest_state() {
+    let (tx, rx) = observation_channel::<Core>();
+    tx.send(SessionObservation::SetBusy(false)).unwrap();
+    let status = SessionObservation::Status {
+        phase: "idle".into(),
+        queue_len: 0,
+        detail: Some("final".into()),
+    };
+    tx.send(status.clone()).unwrap();
+    for _ in 2..OBSERVATION_QUEUE_CAPACITY {
+        tx.send(SessionObservation::Row(TranscriptRow::assistant("fill")))
+            .unwrap();
+    }
+    for _ in 0..OBSERVATION_QUEUE_CAPACITY {
+        let _ = tx.send(SessionObservation::DraftAccepted(SessionIntent::Prompt(
+            "next".into(),
+        )));
+    }
+    let events = rx.try_iter().collect::<Vec<_>>();
+    assert!(events.contains(&SessionObservation::SetBusy(false)));
+    assert!(events.contains(&status));
+    assert!(events.len() <= OBSERVATION_QUEUE_CAPACITY + 1);
+}
+
+#[test]
 fn terminal_error_survives_saturation_and_final_recovery_state() {
     let (sender, receiver) = observation_channel::<Core>();
     for _ in 0..OBSERVATION_QUEUE_CAPACITY {

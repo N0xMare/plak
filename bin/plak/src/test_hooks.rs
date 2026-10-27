@@ -597,16 +597,23 @@ impl plakous_hosted::topology_runtime::LiveChildHandle for ProcessChild {
     fn cancel_and_release(
         self: Box<Self>,
         driver: plakous_hosted::agent_tree_tools::TreeDriver,
+        dispatched: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Pin<Box<dyn Future<Output = plakous_hosted::topology_runtime::LiveRelease> + Send>> {
         Box::pin(async move {
-            let failure = if self.control.is_settled() {
-                None
+            let cancellation = if self.control.is_settled() {
+                Ok(())
             } else {
-                self.control
-                    .cancel()
-                    .await
-                    .err()
-                    .map(|error| error.to_string())
+                self.control.request_cancel().await.map(|_| ())
+            };
+            if let Some(dispatched) = dispatched {
+                let _ = dispatched.send(());
+            }
+            let failure = match cancellation {
+                Ok(()) => {
+                    self.control.wait_until_settled().await;
+                    None
+                }
+                Err(error) => Some(error.to_string()),
             };
             let mut released =
                 plakous_hosted::topology_runtime::LiveChildHandle::release(self, driver).await;
