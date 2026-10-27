@@ -674,6 +674,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Presentation-only invariants and the per-frame tracing span.
     ("plak", "src/tui/tree_navigator.rs"): {"debug_assert_eq"},
     ("plak", "src/tui/ui/render.rs"): {"debug_span"},
+    # Background panic: thread name and source location only, never payload.
+    ("plak", "src/tui/ui/terminal_panic.rs"): {"warn"},
 }
 # Rust keywords that may legally precede `!` without naming a macro (`if !x`).
 _NOT_MACRO_KEYWORDS = {"else", "if", "in", "match", "return", "while"}

@@ -3670,6 +3670,16 @@ exactly-once acknowledgement across reopen.
 
 ### 5.3 Interrupt and quit
 
+While the TUI owns the terminal, only a panic on its owning thread restores
+terminal modes and the screen, then invokes the previous panic hook to print.
+A panic on any other thread, caught or uncaught, leaves the terminal intact
+and reports only thread name and source location through tracing, never the
+payload or terminal output. With no terminal owned, the previous panic hook
+retains its normal behavior. Normal exit and error returns still restore through
+the terminal guard; in-process session handoffs keep its ownership and alternate
+screen. Terminal initialization does not install an unconditional library panic
+hook that could bypass this owner-thread boundary.
+
 `Esc` is the interrupt key and **`Esc` never quits.** In precedence order: a
 modal, dropdown, secret field, search, history shelf, or selection consumes it
 first; an agent transcript consumes it next: it goes back to Activity > Agents

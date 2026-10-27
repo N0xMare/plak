@@ -4,7 +4,6 @@ use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::io::stdout;
 use std::path::Path;
-use std::sync::Once;
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show as ShowCursor;
@@ -1170,6 +1169,7 @@ mod scrollbar;
 mod settings_tab;
 mod state;
 mod terminal;
+mod terminal_panic;
 mod transcript;
 mod tree;
 #[cfg(test)]

@@ -4,7 +4,7 @@ use super::{
     App, BeginSynchronizedUpdate, ControlTab, DefaultTerminal, DisableBracketedPaste,
     DisableFocusChange, DisableMouseCapture, Duration, EnableBracketedPaste, EnableFocusChange,
     EnableMouseCapture, EndSynchronizedUpdate, Event, FrameWork, HostEvent, Instant,
-    KeyboardEnhancementFlags, MAX_HOST_EVENTS_PER_FRAME, MAX_INPUT_DRAIN_PER_FRAME, Once, Path,
+    KeyboardEnhancementFlags, MAX_HOST_EVENTS_PER_FRAME, MAX_INPUT_DRAIN_PER_FRAME, Path,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags, RedrawSchedule, ScrollBlock,
     SettingsMenu, ShowCursor, TuiError, TuiHandoff, TuiLaunch, TuiOutcome, UserAction, event,
     local_echo_line, stdout,
@@ -142,6 +142,7 @@ impl TerminalRestoration {
         if let Err(error) = stdout().execute(ShowCursor) {
             errors.push(format!("cursor: {error}"));
         }
+        super::terminal_panic::release();
         drop(held);
         errors
     }
@@ -197,6 +198,7 @@ pub(crate) fn force_restore_terminal() {
         }
     }
     let _ = crossterm::terminal::disable_raw_mode();
+    super::terminal_panic::release();
 }
 
 /// Bound on queued terminal events discarded at restore, so a pathological
@@ -226,19 +228,14 @@ impl Drop for TerminalRestoration {
 }
 
 pub(super) fn install_terminal_panic_hook() {
-    static INSTALL: Once = Once::new();
-    INSTALL.call_once(|| {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let mut out = stdout();
-            let _ = out.execute(DisableMouseCapture);
-            let _ = out.execute(DisableBracketedPaste);
-            let _ = out.execute(PopKeyboardEnhancementFlags);
-            let _ = out.execute(DisableFocusChange);
-            let _ = ratatui::try_restore();
-            let _ = out.execute(ShowCursor);
-            previous(info);
-        }));
+    super::terminal_panic::install(|| {
+        let mut out = stdout();
+        let _ = out.execute(DisableMouseCapture);
+        let _ = out.execute(DisableBracketedPaste);
+        let _ = out.execute(PopKeyboardEnhancementFlags);
+        let _ = out.execute(DisableFocusChange);
+        let _ = ratatui::try_restore();
+        let _ = out.execute(ShowCursor);
     });
 }
 
@@ -275,8 +272,16 @@ impl PersistentTerminal {
             return Err(TuiError::NotATty);
         }
         install_terminal_panic_hook();
-        let terminal = ratatui::try_init().map_err(|error| from_io(&error))?;
         let mut restoration = TerminalRestoration::new();
+        super::terminal_panic::claim();
+        // ratatui::try_init installs an unconditional restore hook, which would
+        // bypass the owner-thread gate on a caught background panic.
+        crossterm::terminal::enable_raw_mode().map_err(|error| from_io(&error))?;
+        stdout()
+            .execute(crossterm::terminal::EnterAlternateScreen)
+            .map_err(|error| from_io(&error))?;
+        let terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(stdout()))
+            .map_err(|error| from_io(&error))?;
         enable_terminal_modes(&mut restoration, mouse_enabled);
         *TERMINAL_HELD
             .lock()
@@ -831,6 +836,29 @@ pub(super) fn display_workspace(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::forced_restore_sequence;
+
+    #[test]
+    fn terminal_restoration_guard_runs_on_normal_exit_and_error_return() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let restored = Arc::new(AtomicUsize::new(0));
+        let exit = |fail| -> Result<(), &'static str> {
+            let observed = Arc::clone(&restored);
+            let _guard = super::TerminalRestoration::with_test_hook(move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+            });
+            if fail {
+                return Err("injected terminal error return");
+            }
+            Ok(())
+        };
+        assert_eq!(exit(false), Ok(()));
+        assert_eq!(restored.load(Ordering::SeqCst), 1);
+        assert!(exit(true).is_err());
+        assert_eq!(restored.load(Ordering::SeqCst), 2);
+    }
 
     /// The forced exit hands back every mode the UI takes, in the same order
     /// the ordinary restore uses: input modes off before the alternate screen

@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
 const COMPLETED: &str = "background decoration completed";
+const PANIC_PAYLOAD: &str = "BACKGROUND_PANIC_PAYLOAD_MUST_NOT_BE_PRINTED";
 
 #[test]
 fn usage_decoration_wake_child() {
@@ -20,6 +21,16 @@ fn usage_decoration_wake_child() {
                 assert!(Instant::now() < deadline, "reader was never released");
                 std::thread::sleep(Duration::from_millis(5));
             }
+            assert!(std::panic::catch_unwind(|| std::panic::panic_any(PANIC_PAYLOAD)).is_err());
+            assert!(
+                std::thread::spawn(|| std::panic::panic_any(PANIC_PAYLOAD))
+                    .join()
+                    .is_err()
+            );
+            assert!(
+                crossterm::terminal::is_raw_mode_enabled().unwrap(),
+                "background panic disabled raw mode"
+            );
             vec![COMPLETED.into()]
         },
         crate::tui::wake::wake,
@@ -74,6 +85,7 @@ fn run_app_paints_usage_decoration_through_the_wake_pipe() {
         }
     });
     let mut screen = vt100::Parser::new(35, 120, 0);
+    let mut output = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !root.path().join("entered").exists() || !screen.screen().contents().contains("Usage") {
         assert!(
@@ -82,6 +94,7 @@ fn run_app_paints_usage_decoration_through_the_wake_pipe() {
             screen.screen().contents()
         );
         if let Ok(bytes) = received.recv_timeout(Duration::from_millis(20)) {
+            output.extend_from_slice(&bytes);
             screen.process(&bytes);
         }
     }
@@ -94,9 +107,20 @@ fn run_app_paints_usage_decoration_through_the_wake_pipe() {
             screen.screen().contents()
         );
         if let Ok(bytes) = received.recv_timeout(Duration::from_millis(20)) {
+            output.extend_from_slice(&bytes);
             screen.process(&bytes);
         }
     }
+    assert!(
+        !String::from_utf8_lossy(&output).contains(PANIC_PAYLOAD),
+        "background panic payload leaked to the terminal"
+    );
+    assert!(
+        !output
+            .windows(b"\x1b[?1049l".len())
+            .any(|bytes| bytes == b"\x1b[?1049l"),
+        "background panic left the alternate screen"
+    );
     pair.master
         .take_writer()
         .unwrap()
