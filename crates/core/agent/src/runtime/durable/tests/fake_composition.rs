@@ -238,7 +238,10 @@ impl LocalCompositionIntegration for FakeComposition {
                 Box::pin(async move {
                     Ok(LocalCompositionSessionBundle {
                         session: Box::new(FakeSession::Neutral(session)),
-                        events: Box::new(FakeEvents::Neutral(PendingCompositionEvents(events))),
+                        events: Box::new(FakeEvents::Neutral(PendingCompositionEvents(
+                            events,
+                            Arc::clone(&fixture.evidence),
+                        ))),
                     })
                 })
             }
@@ -584,6 +587,20 @@ impl LocalCompositionSession for FakeSession {
                                 initial_response: Box::pin(std::future::pending()),
                             });
                         }
+                        "ready after event" => {
+                            let evidence = Arc::clone(&fixture.evidence);
+                            return Ok(LocalCompositionStartedCell {
+                                cell_id: "C".to_owned(),
+                                initial_response: Box::pin(async move {
+                                    wait_for_scheduler_fact(&evidence.terminal_ready).await;
+                                    Ok(LocalCompositionResponse::Result {
+                                        cell_id: "C".into(),
+                                        items: Vec::new(),
+                                        error: None,
+                                    })
+                                }),
+                            });
+                        }
                         "yield once" => LocalCompositionResponse::Yielded {
                             cell_id: "C".to_owned(),
                             items: vec![LocalCompositionContentItem::Text("yielded".to_owned())],
@@ -855,6 +872,30 @@ impl LocalCompositionSession for FakeSession {
     ) -> LocalCompositionFuture<'_, LocalCompositionWaitOutcome> {
         match self {
             Self::Neutral(fixture) => {
+                fixture
+                    .evidence
+                    .wait_observations
+                    .fetch_add(1, Ordering::AcqRel);
+                let retained = lock_mutex(&fixture.evidence.retained_terminal).clone();
+                if let Some(mut terminal) = retained {
+                    return Box::pin(async move {
+                        if !fixture
+                            .evidence
+                            .retained_resume_started
+                            .swap(true, Ordering::AcqRel)
+                        {
+                            fixture.evidence.waits.fetch_add(1, Ordering::AcqRel);
+                            fixture.evidence.wait_entered.notify_one();
+                        }
+                        let response = terminal
+                            .wait_for(Option::is_some)
+                            .await
+                            .map_err(|_| "retained terminal closed".to_owned())?
+                            .clone()
+                            .ok_or("retained terminal absent")?;
+                        Ok(LocalCompositionWaitOutcome::Live(response))
+                    });
+                }
                 fixture.evidence.waits.fetch_add(1, Ordering::AcqRel);
                 lock_mutex(&fixture.evidence.order).push("wait");
                 Box::pin(async move {
@@ -1136,7 +1177,16 @@ enum FakeEvents {
 impl LocalCompositionEventReceiver for FakeEvents {
     fn receive(&mut self) -> LocalCompositionSessionFuture<'_, Option<LocalCompositionEvent>> {
         match self {
-            Self::Neutral(fixture) => Box::pin(async move { Ok(fixture.0.recv().await) }),
+            Self::Neutral(fixture) => Box::pin(async move {
+                let event = fixture.0.recv().await;
+                if event.is_some()
+                    && let Some(control) = lock_mutex(&fixture.1.notice_on_event).take()
+                {
+                    let _ = futures_util::FutureExt::now_or_never(control.notice());
+                    fixture.1.terminal_ready.store(true, Ordering::Release);
+                }
+                Ok(event)
+            }),
             Self::Scheduler(fixture) => {
                 Box::pin(async move {
                     assert!(

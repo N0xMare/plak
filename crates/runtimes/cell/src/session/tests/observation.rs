@@ -251,3 +251,82 @@ async fn expedite_rearms_the_same_resume_with_zero_window() {
         }))
     );
 }
+
+#[tokio::test]
+async fn expedite_racing_an_unpublished_yield_coalesces_the_extra_step() {
+    let directory = tempfile::tempdir().expect("directory");
+    let program = scripted_worker(
+        directory.path(),
+        &[
+            Step::Read(vec![configure(), start(1)]),
+            Step::Write(vec![WorkerFrame::Yielded { cell: 1 }]),
+            Step::ReadExact(vec![HostFrame::Resume {
+                cell: 1,
+                window: WINDOW,
+            }]),
+            Step::Write(vec![nested_call(1, 7)]),
+            Step::ReadExact(vec![nested_result(7)]),
+            Step::Write(vec![
+                WorkerFrame::Delivery {
+                    cell: 1,
+                    call: 7,
+                    verdict: DeliveryVerdict::Accepted,
+                },
+                text("already parked"),
+                WorkerFrame::Yielded { cell: 1 },
+            ]),
+            Step::ReadExact(vec![HostFrame::Resume { cell: 1, window: 0 }]),
+            Step::Write(vec![
+                text("zero-window step"),
+                WorkerFrame::Yielded { cell: 1 },
+                done(1),
+            ]),
+        ],
+    );
+    let (_, session, mut events) = session(&program).await;
+    execute(&session)
+        .await
+        .initial
+        .await
+        .expect("initial yield");
+    let mut wait = Box::pin(session.wait("1", WINDOW));
+    assert!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(wait.as_mut().poll(cx)))
+            .await
+            .is_pending()
+    );
+    drop(wait);
+    let Some(CellSessionEvent::NestedCall { responder, .. }) = events.receive().await else {
+        panic!("nested gate");
+    };
+    // Hold publication while the worker has already parked and is awaiting
+    // its next frame. Resume(0) may then advance one unobserved step.
+    let publication = session.completions.lock().await;
+    assert_eq!(
+        responder.resolve(serde_json::json!(7)).await,
+        NestedDeliveryOutcome::Accepted
+    );
+    session
+        .expedite("1")
+        .await
+        .expect("expedite before publication");
+    drop(publication);
+    abandonment::finish_pump(&session).await;
+    let response = session.wait("1", WINDOW).await;
+    let _ = session.shutdown().await;
+    assert_eq!(
+        response,
+        WaitOutcome::Live(CellResponse::Result {
+            cell: 1,
+            items: vec![
+                OutputItem::Text {
+                    text: "already parked".into()
+                },
+                OutputItem::Text {
+                    text: "zero-window step".into()
+                }
+            ],
+            error: None,
+        })
+    );
+}

@@ -1,5 +1,6 @@
 use super::*;
 
+mod expedite;
 pub(super) mod terminal;
 
 #[derive(Default)]
@@ -17,6 +18,12 @@ pub(super) struct FakeCompositionEvidence {
     pub(super) wait_release: Notify,
     pub(super) abandoned_waits: AtomicUsize,
     pub(super) expedites: AtomicUsize,
+    pub(super) retained_terminal:
+        Mutex<Option<tokio::sync::watch::Receiver<Option<LocalCompositionResponse>>>>,
+    pub(super) retained_resume_started: AtomicBool,
+    pub(super) wait_observations: AtomicUsize,
+    pub(super) notice_on_event: Mutex<Option<crate::TurnControl>>,
+    pub(super) terminal_ready: AtomicBool,
     pub(super) events: Mutex<Option<tokio::sync::mpsc::UnboundedSender<LocalCompositionEvent>>>,
     pub(super) fail_wait: AtomicBool,
     pub(super) lose_terminate: AtomicBool,
@@ -53,6 +60,7 @@ const FOREVER_YIELD_SCRIPTED_WAITS: usize = 40;
 
 pub(super) struct PendingCompositionEvents(
     pub(super) tokio::sync::mpsc::UnboundedReceiver<LocalCompositionEvent>,
+    pub(super) Arc<FakeCompositionEvidence>,
 );
 
 struct FalseCompositionResponder;

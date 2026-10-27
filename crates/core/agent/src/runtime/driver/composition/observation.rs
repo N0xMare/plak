@@ -51,6 +51,16 @@ impl LocalCompositionObservation<'_> {
         }
     }
 
+    fn yielded(&self, notice_reason: Option<String>) -> LocalCompositionResponse {
+        LocalCompositionResponse::Yielded {
+            cell_id: self.cell_id().to_owned(),
+            items: notice_reason
+                .map(LocalCompositionContentItem::Text)
+                .into_iter()
+                .collect(),
+        }
+    }
+
     async fn receive(
         &mut self,
         resume_in_flight: &mut bool,
@@ -60,13 +70,7 @@ impl LocalCompositionObservation<'_> {
         poll_response: bool,
     ) -> ObservedResponse {
         if yield_requested && !*resume_in_flight {
-            let yielded = LocalCompositionResponse::Yielded {
-                cell_id: self.cell_id().to_owned(),
-                items: notice_reason
-                    .map(LocalCompositionContentItem::Text)
-                    .into_iter()
-                    .collect(),
-            };
+            let yielded = self.yielded(notice_reason);
             if poll_response && let Self::Execute { response, .. } = self {
                 // Execute has already started. Prefer its buffered terminal;
                 // unlike a wait, polling it cannot issue a new Resume.
@@ -98,7 +102,8 @@ impl LocalCompositionObservation<'_> {
             Self::Execute { response, .. } => ObservedResponse::Execute(response.await),
             Self::Wait { response, .. } => {
                 // Polling may issue Resume before returning Pending. From this
-                // point the observation owns that resume until its answer.
+                // point the session retains that resume even if this
+                // observation later yields synthetically after expedite.
                 *resume_in_flight = wait_resumes_cell;
                 ObservedResponse::Wait(response.await)
             }
@@ -184,15 +189,14 @@ impl Driver {
                 );
             if steer_pending && resume_in_flight && !expedited {
                 let deadline = tokio::time::Instant::now() + EXPEDITED_OBSERVATION_BOUND;
-                tokio::time::timeout_at(
+                let expedited_result = tokio::time::timeout_at(
                     deadline,
                     session.expedite(observation.cell_id().to_owned()),
                 )
-                .await
-                .map_err(|_| {
-                    local_composition_started_error("cell expedite exceeded its bounded deadline")
-                })?
-                .map_err(|loss| local_composition_session_loss_error(state, &loss))?;
+                .await;
+                if let Ok(result) = expedited_result {
+                    result.map_err(|loss| local_composition_session_loss_error(state, &loss))?;
+                }
                 expedited = true;
                 response_deadline.as_mut().reset(deadline);
             }
@@ -224,6 +228,9 @@ impl Driver {
                 && (matches!(observation, LocalCompositionObservation::Wait { .. })
                     || !state.has_active_nested());
             let yield_ready = steer_pending && executions_settled && state.deliveries_are_empty();
+            let held_nested = expedited && yield_ready && !state.pending_is_empty();
+            let deadline_ready =
+                executions_settled && (!steer_pending || steer_settlement_started || expedited);
             let poll_response = response_ready || state.pending_is_empty();
             let notice_reason = self
                 .tool_preempt
@@ -246,22 +253,32 @@ impl Driver {
                     };
                     Box::pin(self.handle_control(Some(command), control)).await;
                 }
-                () = &mut response_deadline, if executions_settled && (!steer_pending || steer_settlement_started || expedited) => break Err(local_composition_started_error(
-                    observation.deadline_error(),
-                )),
+                () = &mut response_deadline, if deadline_ready => {
+                    break if expedited && state.deliveries_are_empty() {
+                        Ok(observation.yielded(notice_reason))
+                    } else {
+                        Err(local_composition_started_error(observation.deadline_error()))
+                    };
+                },
                 // Never drop a nested execution: the driver retains mutation
                 // settlement authority and drains an admitted read-only group.
                 response = async {
+                    if held_nested {
+                        // The pump cannot publish its answer until these held
+                        // calls are delivered. Retain the resume in the session
+                        // and let the next wait dispatch them instead.
+                        return ObservedResponse::Yielded(observation.yielded(notice_reason.clone()));
+                    }
                     if yield_ready && !resume_in_flight && poll_response
                         && matches!(observation, LocalCompositionObservation::Wait { .. })
                     {
                         match session.buffered(observation.cell_id().to_owned()).await {
-                            Ok(Some(buffered)) => return ObservedResponse::Wait(Ok(buffered)).with_notice(notice_reason),
+                            Ok(Some(buffered)) => return ObservedResponse::Wait(Ok(buffered)).with_notice(notice_reason.clone()),
                             Err(loss) => return ObservedResponse::Wait(Err(loss)),
                             Ok(None) => {}
                         }
                     }
-                    observation.receive(&mut resume_in_flight, yield_ready, notice_reason.clone(), wait_resumes_cell, poll_response).await.with_notice(notice_reason)
+                    observation.receive(&mut resume_in_flight, yield_ready, notice_reason.clone(), wait_resumes_cell, poll_response).await.with_notice(notice_reason.clone())
                 },
                     if response_ready || yield_ready => break response.resolve(state),
                 _ = job_changes.changed() => self.preempt_for_job_terminals(),

@@ -215,7 +215,7 @@ fixtures abandon initial observations and polled resumes, coalesce multiple
 orphaned yields, and require the buffered terminal with ordered bounded output
 rather than stale running answers or queue loss. Host-window fixtures abandon
 observations and require the same retained terminal. Notice fixtures distinguish
-pre-resume preemption from an in-flight resume that must finish its window,
+pre-resume preemption from an in-flight resume that is expedited once and retained,
 while host-window observations remain promptly preemptible after polling and
 prefer their buffered terminal over a notice.
 Session probes pin first-terminal-wins ordering, shutdown/stop wakeups,
@@ -224,6 +224,12 @@ same bounded truncation within and across yields. Driver fixtures expedite
 600-second parked-cell waits on steer and unread-mail Notice without creating
 a second wait; both complete within one second of paused-clock time, under
 the five-second runtime observation/delivery bound.
+Expedited-wait fixtures retain the original resume across a held nested call
+and a six-second computation: the former yields before its blocked answer,
+the latter yields at five seconds and completes through its next observation.
+A queued-call fixture prevents terminal preference from bypassing pending
+nested dispatch; an exact-frame worker pins the extra zero-window step when
+expedite races an unpublished yield.
 A hosted waiter warning fixture pins content-free recovery diagnostics to
 the agent id, attempt id, turn id and error kind before recycling. A nested
 mutation fixture proves steer never injects the Steer/Background variants

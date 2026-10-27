@@ -414,17 +414,23 @@ through the existing single consumer, independently of this yield signal.
 
 Local cell observations (`exec`, `exec_js`, and their non-terminating outer waits) return an
 ordinary successful yield on steer at a nested-quiescent boundary. A parked
-cell's outer wait may yield synthetically only before its first poll, after
+cell's outer wait may yield synthetically before its first poll, after
 a non-resuming peek gives any buffered terminal precedence. Once that wait
 may have issued its Resume, steer or Notice rearms the same observation once
 with a zero-millisecond yield deadline. The worker parks at its next idle
-boundary; the driver retains the original wait rather than issuing another
-observation or abandoning the resume. The expedited observation and delivery
-have a five-second bound after already-admitted nested work settles, independent
-of the model's requested window (including 600 seconds). A cell that cannot
-answer within that bound fails closed under the existing unknown-outcome rule.
+boundary. The expedited observation answers within five seconds after
+already-admitted nested work and deliveries settle, or yields synthetically
+while the session retains the in-flight resume, output and terminal. Held
+nested calls trigger that synthetic yield immediately, so the pump never waits
+behind a call the driver is withholding. The next wait dispatches those queued
+calls and observes the outstanding answer without sending another Resume.
+This bound is independent of the model's requested window (including 600
+seconds); expiration is not a worker loss and does not fence the turn.
+Resume(0) may race a worker whose prior Yielded is still in the pipe and
+advance one extra zero-window step; its output and yield coalesce safely in
+the mailbox, with terminal precedence unchanged.
 They never cancel or join the cell. A computing cell with no nested work yields
-at the next driver poll, or its next idle boundary for an in-flight resume.
+at the next driver poll, or within the expedited bound for an in-flight resume.
 Host-window waits send no Resume and remain notice/steer-preemptible after
 polling; their buffered terminal still takes precedence over a synthetic yield.
 An already dispatched serial mutation or read-only group
