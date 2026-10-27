@@ -133,6 +133,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     pub(super) fn pause_unrecorded(&mut self, reason: String) -> CliResult<()> {
+        self.pause_queue(reason)?;
+        let _ = self
+            .events
+            .send(crate::surface_protocol::ContentEvent::Status {
+                phase: "idle".into(),
+                queue_len: self.config.session.pending_queue.len(),
+                detail: Some("prompt not admitted; queue paused".into()),
+            });
+        Ok(())
+    }
+
+    pub(super) fn pause_queue(&mut self, reason: String) -> CliResult<()> {
         if self.storage_interrupted && self.config.store.storage_unavailable() {
             self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
             return Ok(());
@@ -152,13 +164,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             )
             .map_err(CliFailure::from)?;
         self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
-        let _ = self
-            .events
-            .send(crate::surface_protocol::ContentEvent::Status {
-                phase: "idle".into(),
-                queue_len: self.config.session.pending_queue.len(),
-                detail: Some("prompt not admitted; queue paused".into()),
-            });
         Ok(())
     }
 
@@ -396,9 +401,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     fn preflight_child_wake(&mut self, command: &str) -> CliResult<bool> {
-        let outcome = self.fit_child_wake(command)?;
-        if outcome {
-            return Ok(true);
+        match self.fit_child_wake(command)? {
+            WakeFit::Fits => return Ok(true),
+            WakeFit::Stopped(stopped) => {
+                let _ = stopped;
+                self.child_wake.park();
+                return Ok(false);
+            }
+            WakeFit::DoesNotFit => {}
         }
         self.suppress_child_wake(Some(
             "Sub-agent auto-continue preflight did not fit".to_owned(),
@@ -412,12 +422,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         Ok(false)
     }
 
-    pub(super) fn fit_child_wake(&mut self, command: &str) -> CliResult<bool> {
+    pub(super) fn fit_child_wake(&mut self, command: &str) -> CliResult<WakeFit> {
         let watch = super::InterruptWatch::new(self.actions, &self.interrupt_state);
         watch.begin();
         self.refresh_native_authority_before_prompt()?;
-        if super::InterruptWatch::new(self.actions, &self.interrupt_state).preparation_stopped() {
-            return Ok(false);
+        if let Some(stopped) = self.stop_preparation(&mut None)? {
+            return Ok(WakeFit::Stopped(stopped));
         }
         let command = plakous::agent::UserInput::from(command.to_owned());
         let context = super::query_context(
@@ -425,9 +435,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             &self.opened,
             super::ContextQuery::WithPendingUserInput(command.clone()),
         )?;
+        if let Some(stopped) = self.stop_preparation(&mut None)? {
+            return Ok(WakeFit::Stopped(stopped));
+        }
         if !context.compaction_verdict().is_due() {
             self.child_wake.prepared_context = Some(context);
-            return Ok(true);
+            return Ok(WakeFit::Fits);
         }
         if !self.config.compaction_enabled {
             if context.compaction_verdict().overflow() {
@@ -436,7 +449,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 )));
             }
             self.child_wake.prepared_context = Some(context);
-            return Ok(true);
+            return Ok(WakeFit::Fits);
         }
         self.config.session.queue_drain_state = super::SessionQueueDrainState::LiveAutoDrain;
         super::observe_compact(&self.events, 0, true);
@@ -452,6 +465,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             None,
         );
         super::observe_compact(&self.events, 0, false);
+        if let Some(stopped) = self.stop_preparation(&mut None)? {
+            return Ok(WakeFit::Stopped(stopped));
+        }
         // A wake that does not fit would be withheld by its turn after its
         // admission acknowledged the mail it carries; it waits instead. A
         // wake has no bare prompt to fall back to: its batch is the point.
@@ -469,8 +485,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 super::ContextQuery::WithPendingUserInput(command),
             )?);
         }
-        Ok(sends)
+        Ok(if sends {
+            WakeFit::Fits
+        } else {
+            WakeFit::DoesNotFit
+        })
     }
+}
+
+pub(super) enum WakeFit {
+    Fits,
+    DoesNotFit,
+    Stopped(super::prompt::preparation::Stopped),
 }
 
 #[cfg(test)]

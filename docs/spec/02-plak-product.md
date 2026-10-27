@@ -2238,7 +2238,7 @@ not have or a command that would only print help.
 | 4 | the turn was interrupted, or `SIGTERM` or `SIGHUP` stopped the process |
 | 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
 | 6 | `plak run` reached its admitted-turn or wall-clock bound |
-| 130 | quit exhausted its terminal join and selected lease-only abandonment; an idle quit or a quit whose terminal joined still exits 0 |
+| 130 | quit exhausted its terminal join and selected lease-only abandonment, including when `SIGTERM`/`SIGHUP` requested the stop; an idle quit or a quit whose terminal joined still exits 0 |
 | 1 | anything else, including an invalid `config.toml` |
 
 Bare `plak status` exits 0 when it has printed the table. A provider whose
@@ -3752,6 +3752,14 @@ intents remain deferred in arrival order. A later explicit retry starts with
 a fresh interrupt watch. Paid canonical operations already dispatched still
 run to their own receipts. A stopped one-shot reports interruption without
 manufacturing a root-turn terminal.
+
+An operator stop of a child wake preserves the paused drain for operator
+items behind it, including after undispatched-wake cleanup. It is not a
+capacity-preflight failure and records no `WakePreflightFailed` cause or fit
+warning. Every undispatched preparation returns a terminal idle/error status;
+all stop checkpoints publish the same stop detail. A prompt publishes only
+one final busy-false observation, whether it stops before dispatch or finishes
+an admitted turn.
 
 The UI paints one last frame reading `quitting…` and stops reading input.
 Restoration disables mouse reporting, bracketed paste, keyboard enhancement

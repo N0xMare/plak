@@ -5,6 +5,9 @@ use plakous::model::{ModelEvent, OutputLocation, TextDelta, Usage, UsageUpdate};
 use std::collections::HashSet;
 use std::time::Duration;
 
+#[cfg(test)]
+mod attach_fences;
+
 pub(super) fn event(turn: TurnId, kind: AgentEventKind) -> Arc<AgentEvent> {
     let base = tool_lifecycle_event(
         "read_file",

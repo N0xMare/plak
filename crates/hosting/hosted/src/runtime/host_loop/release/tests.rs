@@ -332,6 +332,8 @@ fn child_retirement_failure_releases_without_a_product_save() {
     let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+    // A stale cache cannot select abandonment instead of the clean receipt.
+    host.quit_abandoned_turn = true;
     host.config.store.save(&mut host.config.session).unwrap();
     let store = host.config.store.clone();
     let id = host.config.session.id.clone();

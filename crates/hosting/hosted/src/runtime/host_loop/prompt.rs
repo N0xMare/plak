@@ -14,7 +14,13 @@ use crate::runtime::admission::{QueuePersistAction, log_queue_persist_failed};
 use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 
-mod preparation;
+pub(super) mod preparation;
+
+enum PromptOutcome {
+    Stopped(preparation::Stopped),
+    Refused,
+    Dispatched(HostStep),
+}
 
 struct PromptInput {
     user_text: String,
@@ -82,10 +88,27 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let before_drain = self.config.session.queue_drain_state;
         let _ = self.events.send(ContentEvent::SetBusy(true));
         let outcome = self.run_prompt_inner(raw_text, queued_delivery, user_echoed, one_shot);
-        let _ = self.events.send(ContentEvent::SetBusy(false));
+        let stopped = match &outcome {
+            Ok(PromptOutcome::Stopped(stopped)) => Some(*stopped),
+            _ => None,
+        };
+        if !matches!(outcome, Ok(PromptOutcome::Dispatched(_))) && !self.events.root_boundary().1 {
+            emit_terminal_status(
+                &self.events,
+                if self.recovery_blocked {
+                    TerminalPhase::RecoveryPending
+                } else {
+                    TerminalPhase::AdmissionRejected
+                },
+                self.config.session.pending_queue.len(),
+            );
+        }
+        if self.events.root_boundary().0 {
+            let _ = self.events.send(ContentEvent::SetBusy(false));
+        }
         if let Some(intent) = &wake
             && let Err(error) =
-                self.discard_undispatched_wake(intent, before_recovery, before_drain)
+                self.discard_undispatched_wake(intent, before_recovery, before_drain, stopped)
         {
             self.suppress_child_wake(None)?;
             let _ = self.events.notice(TranscriptRow::error(
@@ -104,7 +127,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             ));
             return Ok(HostStep::Continue);
         }
-        outcome
+        outcome.map(|outcome| match outcome {
+            PromptOutcome::Dispatched(step) => step,
+            PromptOutcome::Stopped(_) | PromptOutcome::Refused => HostStep::Continue,
+        })
     }
 
     fn discard_undispatched_wake(
@@ -112,7 +138,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         intent: &sessions::projector::Submission,
         before_recovery: bool,
         before_drain: SessionQueueDrainState,
+        stopped: Option<preparation::Stopped>,
     ) -> CliResult<()> {
+        let restored_drain = if stopped.is_some() {
+            SessionQueueDrainState::RestoredPaused
+        } else {
+            before_drain
+        };
         if !self
             .config
             .store
@@ -122,7 +154,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .iter()
             .any(|submission| submission.command_id == intent.command_id)
         {
-            self.config.session.queue_drain_state = before_drain;
+            self.config.session.queue_drain_state = restored_drain;
             self.recovery_blocked = before_recovery || self.opened.agent().is_none();
             emit_queue_snapshot(&self.events, &self.config.session);
             return Ok(());
@@ -144,8 +176,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.session.pending_queue.retain(|item| {
                 item.id != intent.queue_item_id || item.revision != intent.queue_item_revision
             });
-            self.suppress_child_wake(None)?;
-            self.config.session.queue_drain_state = before_drain;
+            self.config.session.queue_drain_state = restored_drain;
+            if stopped.is_none() {
+                self.suppress_child_wake(None)?;
+            }
             self.recovery_blocked = before_recovery || self.opened.agent().is_none();
             if let Err(error) = self.config.store.discard_submission(
                 &mut self.config.session,
@@ -168,10 +202,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         queued_delivery: Option<SessionQueueItem>,
         user_echoed: bool,
         mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
-    ) -> CliResult<HostStep> {
+    ) -> CliResult<PromptOutcome> {
         if self.config.session.queue_projection_debt {
             emit_queue_snapshot(&self.events, &self.config.session);
-            return Ok(HostStep::Continue);
+            return Ok(PromptOutcome::Refused);
         }
         let host_authored = queued_delivery
             .as_ref()
@@ -215,19 +249,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             queue_len: self.config.session.pending_queue.len(),
             detail: None,
         });
-        if let std::ops::ControlFlow::Break(()) =
-            self.prepare_prompt_authority(host_authored, transient_resume, &mut one_shot)?
-        {
-            emit_terminal_status(
-                &self.events,
-                if self.recovery_blocked {
-                    TerminalPhase::RecoveryPending
-                } else {
-                    TerminalPhase::AdmissionRejected
-                },
-                self.config.session.pending_queue.len(),
-            );
-            return Ok(HostStep::Continue);
+        match self.prepare_prompt_authority(host_authored, transient_resume, &mut one_shot)? {
+            std::ops::ControlFlow::Break(preparation::End::Stopped(stopped)) => {
+                return Ok(PromptOutcome::Stopped(stopped));
+            }
+            std::ops::ControlFlow::Break(preparation::End::Refused) => {
+                return Ok(PromptOutcome::Refused);
+            }
+            std::ops::ControlFlow::Continue(()) => {}
         }
         let rows = self.config.topology_rows();
         preparation::run_step(
@@ -243,8 +272,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         )
         .map_err(|_| CliFailure::new("application execution failed"))?
         .map_err(CliFailure::new)?;
-        if self.stop_preparation(&mut one_shot)? {
-            return Ok(HostStep::Continue);
+        if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
+            return Ok(PromptOutcome::Stopped(stopped));
         }
         // A replayed delivery's command and batch are immutable.
         let mut replayed_mail = false;
@@ -257,11 +286,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             replayed_mail = intent.canonical_command != user_text;
             (intent.canonical_command.clone(), None)
         } else {
-            match super::super::result_mail::select(
+            let selected = super::super::result_mail::select(
                 &self.config.topology_rows(),
                 &self.config.session,
                 &user_text,
-            ) {
+            );
+            #[cfg(test)]
+            let selected = preparation::hooks::MAIL_ERROR
+                .with(|slot| slot.borrow_mut().take())
+                .map_or(selected, Err);
+            match selected {
                 Ok(selected) => selected,
                 Err(error) => {
                     if let Some(state) = one_shot.as_deref_mut() {
@@ -271,7 +305,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         NoticeScope::Tree,
                         format!("child mail preparation failed: {error}"),
                     ));
-                    return Ok(HostStep::Continue);
+                    return Ok(PromptOutcome::Refused);
                 }
             }
         };
@@ -299,7 +333,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         host_authored: bool,
         transient_resume: bool,
         one_shot: &mut Option<&mut super::super::oneshot::OneShotState>,
-    ) -> CliResult<std::ops::ControlFlow<()>> {
+    ) -> CliResult<std::ops::ControlFlow<preparation::End>> {
         if (!host_authored || transient_resume)
             && let Err(error) = self.refresh_native_authority_before_prompt()
         {
@@ -315,10 +349,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     error.message()
                 ),
             ));
-            return Ok(std::ops::ControlFlow::Break(()));
+            return Ok(std::ops::ControlFlow::Break(preparation::End::Refused));
         }
-        if self.stop_preparation(one_shot)? {
-            return Ok(std::ops::ControlFlow::Break(()));
+        if let Some(stopped) = self.stop_preparation(one_shot)? {
+            return Ok(std::ops::ControlFlow::Break(preparation::End::Stopped(
+                stopped,
+            )));
         }
 
         // Receipts a terminal could not settle (its settlement failed, or it
@@ -344,10 +380,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 NoticeScope::Tree,
                 format!("wait receipt settlement failed: {error}"),
             ));
-            return Ok(std::ops::ControlFlow::Break(()));
+            return Ok(std::ops::ControlFlow::Break(preparation::End::Refused));
         }
-        if self.stop_preparation(one_shot)? {
-            return Ok(std::ops::ControlFlow::Break(()));
+        if let Some(stopped) = self.stop_preparation(one_shot)? {
+            return Ok(std::ops::ControlFlow::Break(preparation::End::Stopped(
+                stopped,
+            )));
         }
 
         Ok(std::ops::ControlFlow::Continue(()))
@@ -358,7 +396,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         input: PromptInput,
         mail: PromptMail,
         mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
-    ) -> CliResult<HostStep> {
+    ) -> CliResult<PromptOutcome> {
         let PromptInput {
             user_text,
             queued_delivery,
@@ -398,7 +436,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             error.message()
                         ),
                     ));
-                    return Ok(HostStep::Continue);
+                    return Ok(PromptOutcome::Refused);
                 }
                 if let Some(state) = one_shot.as_deref_mut() {
                     state.result = Some(Err(error.clone()));
@@ -419,7 +457,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         "context query failed; the prompt remains queued and drain stays paused",
                     ));
                 }
-                return Ok(HostStep::Continue);
+                return Ok(PromptOutcome::Refused);
             }
         };
         let enrolled_source_bytes = last_enrolled_source_bytes(&self.opened);
@@ -429,8 +467,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.config.session.context_counters(),
             enrolled_source_bytes,
         );
-        if self.stop_preparation(&mut one_shot)? {
-            return Ok(HostStep::Continue);
+        preparation::run_step(
+            &self.executor,
+            InterruptWatch::new(self.actions, &self.interrupt_state),
+            preparation::Stage::Context,
+            std::future::ready(()),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))?;
+        if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
+            return Ok(PromptOutcome::Stopped(stopped));
         }
         if !host_authored && pending_context.compaction_verdict().is_due() {
             if self.config.compaction_enabled {
@@ -438,7 +483,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 // on; without the busy row the TUI paints idle while every
                 // prompt is silently deferred (the 2026-09-03 "freeze").
                 observe_compact(&self.events, self.config.session.pending_queue.len(), true);
-                match run_scheduled_compaction_until_fits(
+                let compacted = run_scheduled_compaction_until_fits(
                     &self.executor,
                     InterruptWatch::new(self.actions, &self.interrupt_state),
                     &mut self.config,
@@ -451,7 +496,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         .is_some()
                         .then(|| pending_input(&user_text))
                         .as_ref(),
-                ) {
+                );
+                if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
+                    if let Err(error) = &compacted {
+                        let _ = self.events.notice(TranscriptRow::error(
+                            NoticeScope::Compaction,
+                            format!("compact: {}", error.message()),
+                        ));
+                    }
+                    return Ok(PromptOutcome::Stopped(stopped));
+                }
+                match compacted {
                     Ok(ScheduledPrompt::Send {
                         over_window,
                         drop_mail,
@@ -467,10 +522,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 self.config.session.pending_queue.len(),
                                 false,
                             );
-                            return self.park_prompt(
-                                one_shot.as_deref_mut(),
-                                REPLAYED_MAIL_OVER_WINDOW_NOTE,
-                            );
+                            return self
+                                .park_prompt(
+                                    one_shot.as_deref_mut(),
+                                    REPLAYED_MAIL_OVER_WINDOW_NOTE,
+                                )
+                                .map(|_| PromptOutcome::Refused);
                         }
                     },
                     Ok(ScheduledPrompt::Parked) => {
@@ -479,7 +536,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             self.config.session.pending_queue.len(),
                             false,
                         );
-                        return Ok(HostStep::Continue);
+                        return Ok(PromptOutcome::Refused);
                     }
                     Err(error) => {
                         if let Some(state) = one_shot.as_deref_mut() {
@@ -505,7 +562,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         // good; name it now instead of echoing and queueing
                         // every later prompt before refusing it.
 
-                        return Ok(HostStep::Continue);
+                        return Ok(PromptOutcome::Refused);
                     }
                 }
             } else if pending_context.compaction_verdict().overflow()
@@ -532,12 +589,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         scheduled_compaction_disabled_note(pending_context.disposition()),
                     ));
                 }
-                return Ok(HostStep::Continue);
+                return Ok(PromptOutcome::Refused);
             }
         }
 
-        if self.stop_preparation(&mut one_shot)? {
-            return Ok(HostStep::Continue);
+        preparation::run_step(
+            &self.executor,
+            InterruptWatch::new(self.actions, &self.interrupt_state),
+            preparation::Stage::Dispatch,
+            std::future::ready(()),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))?;
+        if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
+            return Ok(PromptOutcome::Stopped(stopped));
         }
         self.dispatch_prompt(
             PromptInput {
@@ -557,6 +621,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             enrolled_source_bytes,
             one_shot,
         )
+        .map(PromptOutcome::Dispatched)
     }
 
     fn dispatch_prompt(
@@ -613,7 +678,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     host_wakes: self.config.prompt_host_facts().host_wakes
                         && !self.config.session.child_wake_suppressed,
                     quit_started_at: &mut self.quit_started_at,
-                    quit_abandoned_turn: &mut self.quit_abandoned_turn,
                     quit_job_stops: &mut self.quit_job_stops,
                     actions: self.actions,
                     deferred: &self.interrupt_state,

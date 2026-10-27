@@ -4219,7 +4219,11 @@ yet committed in canonical history. Its result settles the same row immediately,
 without waiting for the turn terminal. Committed settled calls supersede the
 corresponding retained observations; tool observations not covered by the
 committed baseline are still applied when their source cursor precedes the
-history attachment. Earlier streaming text is not replayed, and the gap marker
+history attachment. A canonical `interrupted` placeholder does not cover a live
+call: its retained running observation overrides it immediately at the same row
+key. Reattachment after lag repeats the retained running state, and a result
+arriving during the history read still settles that key. A start and its result
+occupy one retained call slot, not two. Earlier streaming text is not replayed, and the gap marker
 continues to describe activity outside the retained presentation. These rows
 remain process-local observations, never checkpoint or recovery authority.
 
@@ -4313,9 +4317,9 @@ unparented rows with no cell identity (so they cannot be mistaken for a yield);
 a cell always keeps the state of its own result, and known
 nested failures contribute to its displayed failure tally. These rows have
 no durations because history carries no timestamps; a call without a committed result is
-`interrupted`. A tool exchange commits whole, so a live turn's call still in
-flight at the attach has no row: its start precedes the cursor, the gap notice
-says so, and the read at the turn's end shows it settled. One read projects at most the newest 512 items, newest first,
+`interrupted` in the canonical baseline. A live call still in flight is shown
+by the retained running observation described above and settles at its result.
+One read projects at most the newest 512 items, newest first,
 each string over at most the history redaction window (chapter 01), as
 synchronous work on the blocking pool behind one permit per host face. Rows are
 bounded like stored rows and the newest that fit the presentation bounds are

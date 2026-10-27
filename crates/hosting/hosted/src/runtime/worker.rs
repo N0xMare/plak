@@ -24,7 +24,7 @@ impl QuitReceipt {
         self.0.store(true, Ordering::Release);
     }
 
-    fn outcome(&self) -> HostQuitOutcome {
+    pub(super) fn outcome(&self) -> HostQuitOutcome {
         if self.0.load(Ordering::Acquire) {
             HostQuitOutcome::Escalated
         } else {

@@ -144,6 +144,44 @@ fn idle_escape_suppresses_wake_until_user_prompt() {
     });
 }
 
+#[test]
+fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
+    with_host(0, |host, _, actions, events| {
+        use super::super::prompt::preparation::{Stage, hooks};
+        let controls = actions.clone();
+        hooks::HOOK.with(|slot| {
+            *slot.borrow_mut() = Some((
+                Stage::Refresh,
+                Box::pin(async move {
+                    controls.send(UserAction::Interrupt).unwrap();
+                }),
+            ));
+        });
+        assert!(!host.preflight_child_wake("host wake").unwrap());
+        let intents = host
+            .config
+            .store
+            .load_intents(&host.config.session.id)
+            .unwrap();
+        assert!(matches!(&intents.pause_causes.last().unwrap().value,
+            crate::sessions::projector::HostPauseCause::UnrecordedRefusal {reason} if reason.contains("preparation stopped")));
+        assert!(!intents.pause_causes.iter().any(|cause| matches!(
+            cause.value,
+            crate::sessions::projector::HostPauseCause::WakePreflightFailed { .. }
+        )));
+        assert_eq!(
+            host.config.session.queue_drain_state,
+            QueueDrainState::RestoredPaused
+        );
+        let observed: Vec<_> = events.try_iter().collect();
+        assert!(
+            !observed
+                .iter()
+                .any(|event| format!("{event:?}").contains("preflight paused until"))
+        );
+    });
+}
+
 fn completed_run(max_turns: u8) -> super::super::super::oneshot::OneShotState {
     super::super::super::oneshot::OneShotState {
         attempted: true,

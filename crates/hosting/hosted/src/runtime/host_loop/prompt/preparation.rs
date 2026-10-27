@@ -1,4 +1,5 @@
 //! Pre-dispatch checkpoints: finish the current receipt, never start a turn after stop.
+//! The checkpoint is the fence; watching only drains the mailbox for latency.
 
 use super::{CliResult, ContentEvent, HostLoop, InterruptWatch};
 use crate::interrupt::run_watched;
@@ -6,10 +7,20 @@ use plakous::application::{ApplicationExecutor, ApplicationExecutorError};
 use std::future::Future;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Stage {
+pub(in crate::runtime::host_loop) enum Stage {
     Refresh,
     Settle,
     Tree,
+    Context,
+    Dispatch,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::runtime::host_loop) struct Stopped;
+
+pub(super) enum End {
+    Stopped(Stopped),
+    Refused,
 }
 
 pub(super) fn run_step<F: Future, P: plakous_host_protocol::ProtocolExtension>(
@@ -40,29 +51,28 @@ pub(super) fn run_step<F: Future, P: plakous_host_protocol::ProtocolExtension>(
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
-    pub(super) fn stop_preparation(
+    pub(in crate::runtime::host_loop) fn stop_preparation(
         &mut self,
         one_shot: &mut Option<&mut crate::runtime::oneshot::OneShotState>,
-    ) -> CliResult<bool> {
+    ) -> CliResult<Option<Stopped>> {
         let watch = InterruptWatch::new(self.actions, &self.interrupt_state);
         if !watch.preparation_stopped() {
-            return Ok(false);
+            return Ok(None);
         }
-        self.pause_unrecorded("prompt preparation stopped; prompt remains queued".to_owned())?;
+        self.pause_queue("prompt preparation stopped; prompt remains queued".to_owned())?;
         if let Some(state) = one_shot.as_deref_mut() {
             state.result = Some(Ok(crate::runtime::oneshot::OneShotOutcome::Interrupted {
                 assistant: String::new(),
             }));
         }
-        let _ = self.events.send(ContentEvent::SetBusy(false));
         let _ = self.events.send(ContentEvent::Status {
             phase: "idle".into(),
             queue_len: self.config.session.pending_queue.len(),
             detail: Some("prompt preparation stopped; prompt remains queued".into()),
         });
-        Ok(true)
+        Ok(Some(Stopped))
     }
 }
 
 #[cfg(test)]
-pub(super) mod hooks;
+pub(in crate::runtime::host_loop) mod hooks;

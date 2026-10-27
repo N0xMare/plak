@@ -5,6 +5,8 @@ use super::{CliFailure, CliResult, HostLoop, delete_unpublished_runtime};
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     pub(super) fn release(mut self) -> CliResult<()> {
         self.pending_resume = None;
+        self.quit_abandoned_turn =
+            self.events.quit_receipt.outcome() == super::super::HostQuitOutcome::Escalated;
         let abandon = self.quit_abandoned_turn;
         self.opened.close_admission();
         let published = self.config.session.store_revision != 0;

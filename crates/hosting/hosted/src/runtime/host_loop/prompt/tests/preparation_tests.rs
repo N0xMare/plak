@@ -30,7 +30,11 @@ fn one_shot_preparation_stop_reports_interruption_without_a_turn_terminal() {
     stopped_preparation(preparation::Stage::Refresh, false, true);
 }
 
-fn stopped_preparation(stage: preparation::Stage, quit: bool, one_shot: bool) {
+pub(super) fn stopped_preparation(
+    stage: preparation::Stage,
+    quit: bool,
+    one_shot: bool,
+) -> Vec<HostEvent<TestExtension>> {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.attached_one_shot = one_shot;
@@ -171,6 +175,7 @@ fn stopped_preparation(stage: preparation::Stage, quit: bool, one_shot: bool) {
         assert!(!host.recovery_blocked);
     }
     host.release().unwrap();
+    observed
 }
 
 #[test]

@@ -251,7 +251,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     super::wake::WAKE_PROMPT,
                 )
                 .map_err(CliFailure::new)?;
-                if !self.fit_child_wake(&command)? {
+                if !matches!(self.fit_child_wake(&command)?, super::wake::WakeFit::Fits) {
                     if let Some(Ok(
                         OneShotOutcome::Completed { assistant }
                         | OneShotOutcome::Truncated { assistant },

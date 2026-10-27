@@ -592,15 +592,7 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
         context.send_transcript(rows, replace);
         return;
     }
-    let covered_calls: std::collections::HashSet<String> = rows
-        .as_ref()
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.row.as_tool())
-        .filter(|tool| tool.state != "interrupted")
-        .map(|tool| tool.call_id.clone())
-        .collect();
+    let covered_calls = rows.as_deref().map(covered_tool_calls).unwrap_or_default();
     if !context.send_transcript(rows, replace) {
         return;
     }
@@ -608,12 +600,7 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
     if live.cursor > 1 {
         emit(HostEvent::Row(TranscriptRow::info(NoticeScope::Tree, GAP)));
     }
-    for tool in live.tools {
-        if matches!(&tool, HostEvent::ToolLine { call_id: Some(id), .. } if !covered_calls.contains(id))
-        {
-            emit(tool);
-        }
-    }
+    emit_retained_tools(live.tools, &covered_calls, &emit);
     #[cfg(test)]
     hooks::before_follow(&context.agent_id).await;
     follow_turn(
@@ -627,6 +614,26 @@ async fn serve_agent<P: plakous_host_protocol::ProtocolExtension>(
     .await;
     let rows = context.committed_rows(&agent).await;
     context.send_transcript(rows, false);
+}
+
+pub(super) fn covered_tool_calls(rows: &[TranscriptItem]) -> std::collections::HashSet<String> {
+    rows.iter()
+        .filter_map(|item| item.row.as_tool())
+        .filter(|tool| tool.state != "interrupted")
+        .map(|tool| tool.call_id.clone())
+        .collect()
+}
+
+pub(super) fn emit_retained_tools(
+    tools: Vec<HostEvent<Core>>,
+    covered: &std::collections::HashSet<String>,
+    emit: &impl Fn(HostEvent<Core>) -> bool,
+) {
+    for tool in tools {
+        if matches!(&tool, HostEvent::ToolLine {call_id: Some(id), ..} if !covered.contains(id)) {
+            emit(tool);
+        }
+    }
 }
 
 /// Reduces one agent observation through the root's keyed row projector.
@@ -681,12 +688,7 @@ pub(super) async fn follow_turn(
                 if snapshot.terminal {
                     break;
                 }
-                for op in snapshot.tools {
-                    if matches!(&op, HostEvent::ToolLine { call_id: Some(id), .. } if !covered_calls.contains(id))
-                    {
-                        emit(op);
-                    }
-                }
+                emit_retained_tools(snapshot.tools, &covered_calls, &emit);
                 tail = next;
             }
         }

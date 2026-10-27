@@ -336,6 +336,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .presentations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &value {
+            HostEvent::SetBusy(busy) => {
+                presentations.root_busy = *busy;
+                if *busy {
+                    presentations.root_terminal_status = false;
+                }
+            }
+            HostEvent::Status { phase, .. } => {
+                presentations.root_terminal_status =
+                    matches!(phase.as_str(), "idle" | "interrupted" | "error");
+            }
+            _ => {}
+        }
         if matches!(
             value,
             HostEvent::AssistantDelta(_) | HostEvent::ReasoningDelta { .. }
@@ -357,6 +370,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             presentations.resync_gaps(&self.inner);
         }
         sent
+    }
+
+    fn root_boundary(&self) -> (bool, bool) {
+        let state = self
+            .presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (state.root_busy, state.root_terminal_status)
     }
 
     pub(crate) fn publish_transcript(

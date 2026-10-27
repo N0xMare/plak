@@ -59,6 +59,8 @@ pub(in crate::runtime) struct Presentations {
     // monotonic across replacements, so a retired serve cannot share a baseline.
     states: BTreeMap<TranscriptScope, TranscriptState>,
     live: BTreeMap<TranscriptScope, live::LiveRows>,
+    pub(in crate::runtime) root_busy: bool,
+    pub(in crate::runtime) root_terminal_status: bool,
 }
 
 impl Presentations {

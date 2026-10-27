@@ -115,10 +115,15 @@ impl LiveRows {
             ..
         } = event
         {
-            let existing = self.calls.contains_key(call_id.as_deref().unwrap_or(name));
+            let unchanged_state = self
+                .calls
+                .get(call_id.as_deref().unwrap_or(name))
+                .and_then(|key| self.pending.get(key).or_else(|| rows.get(key)))
+                .and_then(TranscriptRow::as_tool)
+                .is_some_and(|tool| tool.state == *state);
             let (key, row) = self.tool(event, rows)?;
             self.pending.insert(key, crate::sessions::bound_row(row));
-            if existing && matches!(state.as_str(), "running" | "waiting") {
+            if unchanged_state && matches!(state.as_str(), "running" | "waiting") {
                 return None;
             }
             return Some(LiveChange {
