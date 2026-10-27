@@ -12,6 +12,8 @@ pub(crate) struct UsageDecorationReader {
 #[derive(Default)]
 struct DecorationState {
     generation: u64,
+    #[cfg(test)]
+    reading: bool,
     pending: Option<(u64, UsageLimitsView)>,
     ready: Option<(u64, UsageLimitsView, Vec<String>)>,
     closed: bool,
@@ -48,11 +50,20 @@ impl UsageDecorationReader {
                 let Some((generation, mut view)) = state.pending.take() else {
                     continue;
                 };
+                #[cfg(test)]
+                {
+                    state.reading = true;
+                }
                 drop(state);
                 let notes = read(&mut view);
                 let mut state = lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(test)]
+                {
+                    state.reading = false;
+                    changed.notify_all();
+                }
                 if state.closed {
                     return;
                 }
@@ -98,6 +109,23 @@ impl UsageDecorationReader {
             .ready
             .take()
             .map(|(_, view, notes)| (view, notes))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wait_idle(&self) {
+        let (lock, changed) = &*self.shared;
+        let state = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let result = changed
+            .wait_timeout_while(state, std::time::Duration::from_secs(5), |state| {
+                state.reading || state.pending.is_some()
+            })
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(
+            !result.1.timed_out(),
+            "usage decoration did not become idle"
+        );
     }
 
     #[cfg(test)]

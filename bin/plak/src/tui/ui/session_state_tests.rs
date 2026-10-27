@@ -119,6 +119,39 @@ fn blocked_usage_io_does_not_block_typing_or_publish_after_a_session_switch() {
 }
 
 #[test]
+fn session_switch_invalidates_a_blocked_read_without_a_successor_usage_request() {
+    let (entered, seen) = std::sync::mpsc::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let mut launch = launch_basic();
+    launch.usage_decoration = Some(crate::config::UsageDecorationReader::with_reader(
+        move |_| {
+            entered.send(()).unwrap();
+            blocked.recv().unwrap();
+            vec!["source account decoration".into()]
+        },
+        || {},
+    ));
+    let mut app = App::new(launch, true);
+    app.apply_host_event(binding("source"));
+    app.apply_host_event(HostEvent::UsageLimits(
+        crate::tui::providers::unread_usage_limits(),
+    ));
+    seen.recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let mut successor = binding("successor");
+    if let HostEvent::Binding { account, .. } = &mut successor {
+        *account = Some("claude".into());
+    }
+    app.apply_host_event(successor);
+    assert_eq!(app.account.as_deref(), Some("claude"));
+    // No successor UsageLimits request may mask a missing boundary fence.
+    release.send(()).unwrap();
+    let reader = app.usage_decoration.as_mut().unwrap();
+    reader.wait_idle();
+    assert_eq!(reader.poll(), None);
+}
+
+#[test]
 fn same_session_clear_view_preserves_published_queue_and_history() {
     let mut app = App::new(launch_basic(), true);
     app.prompt_history = vec!["target history".into()];

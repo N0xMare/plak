@@ -648,6 +648,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Static WAL-checkpoint contention warning; no SQL, paths, or session data.
     ("plak", "src/telemetry_store.rs"): {"params", "warn"},
     ("plak", "src/telemetry_sink.rs"): {"warn"},
+    # Static panic notice; no payload, path or session data.
+    ("plak", "src/shell/chrome_refresh.rs"): {"warn"},
     # A refused tree publish (the store's compare-and-swap found another
     # writer) is reported through the tracing boundary, like the
     # credential-refresh warning above; typed fields only.

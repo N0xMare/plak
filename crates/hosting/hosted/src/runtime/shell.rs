@@ -207,10 +207,10 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
                 ));
                 return ShellStep::Continue;
             }
+            send_shell_binding(events, config);
             let _ = events.send(ContentEvent::ClearView);
             let _ = events.replace_transcript(project_session_snapshot(&config.session));
             emit_shell_empty_state(events, config);
-            send_shell_binding(events, config);
             let _ = events.notice(TranscriptRow::info(
                 NoticeScope::Session,
                 format!("new session {} (still not ready)", config.session.id),
@@ -1033,8 +1033,8 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
 }
 
 /// Writes a pre-attach shell binding into the `[root] agent` template. A
-/// partial tuple is not an expressible template, so it
-/// drops the root bind instead of persisting half a construction.
+/// partial tuple is refused by the binding document without changing the
+/// configured root template.
 pub(super) fn commit_shell_binding_candidate<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut ShellHostConfig<P>,
     events: &Sender<P>,

@@ -15,6 +15,36 @@ use crate::sessions::SessionRecord;
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeProvider;
 
+#[test]
+fn detached_clear_publishes_binding_before_clear_view_and_target_transcript() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture = test_kit::shell_host_on_doubles::<TestExtension>(
+        root.path(),
+        SessionRecord::new(root.path().to_path_buf()),
+        None,
+    );
+    let source_id = fixture.config.session.id.clone();
+    let (actions, input) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    actions.send(UserAction::ClearSession).unwrap();
+    drop(actions);
+    let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    run_shell_host_loop(fixture.config, input, Sender::over(tx), None);
+    let observed = rx.try_iter().collect::<Vec<_>>();
+    let boundary = observed.iter().position(|event| matches!(event, HostEvent::Binding { session_id: Some(id), .. } if id != &source_id)).unwrap();
+    let clear = observed
+        .iter()
+        .position(|event| matches!(event, HostEvent::ClearView))
+        .unwrap();
+    let transcript = observed
+        .iter()
+        .rposition(|event| matches!(event, HostEvent::PresentationSnapshot(_)))
+        .unwrap();
+    assert!(
+        boundary < clear && clear < transcript,
+        "target binding must survive presentation clear: {observed:#?}"
+    );
+}
+
 /// An OpenRouter root binds the wire its template names on the
 /// gateway-managed route; a direct API root binds its account's route.
 /// Effort and composition follow what a new session from that template

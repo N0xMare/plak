@@ -2931,6 +2931,16 @@ is a **closed projection** of the same user actions and host events, not a
 second control plane, and it owns no session or tree authority of its own.
 Stdio is the only pipe; there is no `plak agent stdio` subcommand.
 
+**Session boundary.** In the underlying host observation stream, a session
+switch's `binding` precedes the target's
+snapshots, including its `session_info`, prompt-history and queue observations.
+Consumers retire source-session state at that binding. `clear_view` clears
+transcript presentation only: it does not reset the binding or discard target
+state already published. This contract also holds for the not-ready shell.
+The chrome observations `binding`, `prompt_history`, `session_info` and
+`clear_view` have no JSONL v1 line; queue snapshots retain their existing wire
+projection. JSONL v1 encodings and event kinds are unchanged.
+
 The wire types — the envelope, the command and event kinds, and the topology
 tool request, receipt, and row shapes — live in the published-internal
 `plakous-host-protocol` crate, so a `plak agent` client can depend on them
@@ -4718,7 +4728,9 @@ Session, Usage or catalog rows. Usage refresh-failure decoration runs on one
 latest-only background reader constructed by the launcher and passed into the
 TUI as an endpoint; stale results cannot overwrite a newer read or
 a switched session, and completion wakes the terminal loop. Focus-triggered
-composer refreshes use one worker with at most one latest follow-up read. The read-only MCP
+composer refreshes use one worker with at most one latest follow-up read. An
+unwinding read panic produces a content-free warning and does not strand
+pending or future refreshes. The read-only MCP
 overview similarly carries configured-server and frozen-binding facts, not a
 preformatted panel. Unreadable configuration does not imply empty configuration;
 bound servers absent from the current configuration have their own heading.
