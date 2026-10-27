@@ -424,7 +424,7 @@ printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account g
 
 Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume_tree`, `tree`,
 `interrupt_node`, `close_node`, `stop_all`, `clear`,
-`invoke_tool`, `fork`, `recover`, `background`, `quit`.
+`invoke_tool`, `fork`, `recover`, `background`, `resolve_approval`, `quit`.
 A `prompt` may carry `"images": ["shot.png", "~/..."]`: paths to png, jpeg,
 gif or webp files (relative ones resolve against the agent's working
 directory; `~` is not expanded), read with the same limits as `plak run
@@ -437,8 +437,25 @@ Closing the control stream uses the same quit grace. Final projection stages
 share one second from quit start; any remaining projection debt is applied on
 the next open.
 
+An `approval` event offers an opaque `approval_id`. Answer it once, choosing
+`allow` or `deny`:
+
+```json
+{"v":1,"kind":"resolve_approval","id":"decision-1","approval_id":"<handle from approval>","choice":"allow"}
+```
+
+Acceptance returns a `status` note with that command's `id` and
+`detail: "approval accepted: allow"` (or `deny`); `approval_resolved` reports
+the decision's resolution with the original turn's correlation when known.
+Allow authorizes the exact call once; deny never dispatches it. A stale,
+expired, reused, or foreign handle returns a nonfatal `error`, as does an
+invalid choice. Keep reading and send a corrected command, interrupt, or quit.
+After a crash, `--session` emits `hello` before re-offering a pending approval;
+answer the newly offered handle, not one retained from the old process.
+`plak run` still denies approvals because it has no inbound command channel.
+
 Stdout events: `hello`, `ready`, `status`, `busy`, `assistant`,
-`assistant_done`, `tool`, `error`, `turn`, `tree`, `queue`, `bye`.
+`assistant_done`, `tool`, `approval`, `approval_resolved`, `error`, `turn`, `tree`, `queue`, `bye`.
 
 Each command's answer (`error`, a `status` note) carries that command's `id`,
 even when commands are piped back to back; a manual `compact` always answers

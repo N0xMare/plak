@@ -87,6 +87,9 @@ pub struct ScriptPlan {
     /// The tool policy the scripted binding is built with.
     #[serde(default)]
     pub tool_policy: ScriptToolPolicy,
+    /// Override the operator decision deadline for expiry cells.
+    #[serde(default)]
+    pub effect_decision_timeout_ms: Option<u64>,
     /// Make a `stall_ms` deaf to the call's cancellation token.
     ///
     /// **This changes the state a cut lands on, which is the whole point.** A

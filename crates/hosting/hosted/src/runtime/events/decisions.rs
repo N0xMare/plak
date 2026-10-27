@@ -11,10 +11,11 @@ use plakous::agent::{AgentEventKind, EffectDecisionResolution, TurnControl};
 
 /// Maps one typed approval intent back onto the runtime decision handle.
 ///
-/// Decision authority stays in Plakous. The TUI only
-/// ever names a host-minted `approval_id`; the `EffectDecisionRef` and the
+/// Decision authority stays in Plakous. Surfaces only
+/// ever name a host-minted `approval_id`; the `EffectDecisionRef` and the
 /// audit id are held here, and an unknown or already-submitted handle is
 /// refused without contacting the runtime at all.
+/// Returns true only after the runtime accepted the durable decision.
 pub(in crate::runtime) async fn resolve_approval_intent<
     P: plakous_host_protocol::ProtocolExtension,
 >(
@@ -23,13 +24,13 @@ pub(in crate::runtime) async fn resolve_approval_intent<
     projection: &mut TurnProjection<P>,
     approval_id: &str,
     choice: plakous_host_protocol::ApprovalChoice,
-) {
+) -> bool {
     let Some(pending) = take_pending_approval(projection, approval_id) else {
         let _ = events.notice(TranscriptRow::error(
             NoticeScope::Approval,
             APPROVAL_REFUSED_NOTE,
         ));
-        return;
+        return false;
     };
     // The decision→handle map survives the intent so the runtime's own
     // resolution event still retires the row truthfully.
@@ -41,7 +42,7 @@ pub(in crate::runtime) async fn resolve_approval_intent<
                     NoticeScope::Approval,
                     "approval refused: the host decision identity was not portable",
                 ));
-                return;
+                return false;
             };
             control.allow_effect(pending.decision, audit).await
         }
@@ -59,7 +60,9 @@ pub(in crate::runtime) async fn resolve_approval_intent<
             NoticeScope::Approval,
             format!("approval was not applied: {error}"),
         ));
+        return false;
     }
+    true
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {

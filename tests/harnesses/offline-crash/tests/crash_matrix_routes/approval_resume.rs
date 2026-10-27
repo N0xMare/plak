@@ -1,6 +1,8 @@
 //! Real-face approval recovery, including decisions after a killed owner.
 
 use super::*;
+#[path = "approval_resume/jsonl.rs"]
+mod jsonl;
 use plakous::sessions::feed::{FeedCursor, FeedFact, FeedPage, FeedPageRequest};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::Read;

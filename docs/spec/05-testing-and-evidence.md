@@ -1664,7 +1664,8 @@ whether a semantic-summary request is answered or refused, and a refused fold is
 what drops the compaction ladder onto its offline placeholder rung. This is the same
 `LoopbackModel`, descriptor, runtime authority, tool registry and boundary
 controller the Rust loopback builders use; only the round-by-round shape comes
-from data.
+from data. `effect_decision_timeout_ms` overrides the scripted runtime's
+decision deadline for expiry/refusal cells without changing production defaults.
 
 The scripted runtimes compile their own registries, so the root's optional
 tools reach them through the product's own binder: the session's frozen tools

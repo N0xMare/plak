@@ -121,7 +121,7 @@ pub enum SessionIntent<P: ProtocolExtension = Core> {
     ///
     /// `approval_id` is the host-minted handle carried by
     /// [`SessionObservation::ApprovalRequired`](crate::observation::SessionObservation::ApprovalRequired).
-    /// The TUI never sees, constructs or
+    /// Surfaces never see, construct or
     /// forwards a runtime `EffectDecisionRef`; an unknown or already-retired
     /// handle is refused by the host without contacting the runtime, so this
     /// intent carries a decision *request* and never a grant.

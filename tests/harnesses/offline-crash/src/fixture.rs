@@ -2803,8 +2803,11 @@ fn scripted_tool_policy(script: &ScriptPlan) -> Arc<dyn ToolPolicy> {
 }
 
 fn scripted_agent_config(script: &ScriptPlan) -> plakous::agent::AgentConfig {
-    plakous::agent::AgentConfig::default()
-        .with_observation_budget_cap_bytes(script.observation_budget_cap_bytes)
+    let config = plakous::agent::AgentConfig::default()
+        .with_observation_budget_cap_bytes(script.observation_budget_cap_bytes);
+    script.effect_decision_timeout_ms.map_or(config, |timeout| {
+        config.with_effect_decision_timeout(std::time::Duration::from_millis(timeout))
+    })
 }
 
 /// The scripted binding that attaches a real Code Mode profile.

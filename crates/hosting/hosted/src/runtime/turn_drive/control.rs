@@ -57,6 +57,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         // `Quit` (or an earlier `FollowUp`) is invisible for the whole turn.
         if self.takes_actions() {
             let mut acknowledgement = None;
+            let mut command_reply = false;
             let received = self
                 .host
                 .deferred
@@ -65,6 +66,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 .map_or_else(|| self.host.actions.try_recv(), Ok)
                 .map(|delivery| {
                     if let Some(started) = delivery.started() {
+                        command_reply = matches!(&started, ContentEvent::IntentStarted(Some(_)));
                         let _ = self.host.events.send(started);
                     }
                     let (action, guard) = delivery.into_parts();
@@ -381,7 +383,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     approval_id,
                     choice,
                 }) => {
-                    resolve_approval_intent(
+                    let applied = resolve_approval_intent(
                         &self.control,
                         self.host.events,
                         &mut self.projection,
@@ -389,6 +391,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         choice,
                     )
                     .await;
+                    if applied && command_reply {
+                        let choice = match choice {
+                            plakous_host_protocol::ApprovalChoice::Allow => "allow",
+                            plakous_host_protocol::ApprovalChoice::Deny => "deny",
+                        };
+                        let _ = self.host.events.notice(TranscriptRow::info(
+                            NoticeScope::Approval,
+                            format!("approval accepted: {choice}"),
+                        ));
+                    }
                 }
                 Ok(UserAction::EditQueued { id, revision, text }) => {
                     let mut refusal = None;

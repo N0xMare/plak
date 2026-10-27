@@ -2653,10 +2653,9 @@ Its early bounded receiver retains the restored decision event. Launch,
 in-process session switch and in-place recovery all drive a restored turn
 before another prompt. The TUI asks for the pending approval again;
 JSONL emits `hello` before the approval,
-and remains responsive to interrupt and quit. JSONL v1 has no inbound approval
-resolution command; its approval observations do not themselves grant a way
-to answer. A restored decision is not an abandonment or a replay of the
-provider request or tool effect.
+and remains responsive to `resolve_approval`, interrupt and quit. JSONL clients
+answer the newly offered opaque handle under §4.3.1. A restored decision is not
+an abandonment or a replay of the provider request or tool effect.
 
 The tree projector applies root batch acknowledgements and withheld-mail returns
 from the same feed before another batch is selected. Product delivery bookkeeping
@@ -3102,6 +3101,7 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 | `background` | — (promotes in-flight top-level foreground commands; no-op otherwise) |
 | `compact` | — |
 | `recover` | — (idle only; recovers a fenced session now, or answers with a `nothing to recover` note) |
+| `resolve_approval` | `approval_id` (the non-empty opaque handle offered by `approval`), `choice` (`"allow"` or `"deny"`) |
 | `resume_queue` | — |
 | `clear` | — |
 | `quit` | — |
@@ -3113,6 +3113,28 @@ after a gap; a fresh attachment starts with clean prompt provenance.
 `resume_tree`, `tree`, `interrupt_node`, `close_node`, `stop_all`, and
 `invoke_tool` are the topology commands; chapter 03 §15 owns their semantics
 and their refusals.
+
+`resolve_approval` uses the same single-use `ResolveApproval` intent as the
+TUI. The handle belongs to the offered decision in the currently attached
+session and turn; it is not a call id or durable runtime decision address.
+On reopen, clients must use the newly offered handle, after `hello`.
+Both choices record the durable `EffectDecision` before an effect can run;
+`allow` permits that exact call once, and `deny` dispatches no effect.
+Acceptance answers with the existing command-correlated `status` note
+(`phase: "note"`, `queue_len: 0`, `detail: "approval accepted: allow"` or
+`"approval accepted: deny"`). The subsequent `approval_resolved` observation
+retains its originating turn correlation, not the resolution command's id.
+Unknown, retired, already-used, expired, or foreign-session/turn handles
+answer with a command-correlated `error` whose message is
+`approval refused: no pending decision with that identity`; these cases are
+deliberately indistinguishable and do not contact the runtime or change a
+pending decision. A missing, empty or non-string handle is a codec `error`
+(`resolve_approval requires a non-empty approval_id from an approval event`),
+as is a missing or malformed choice (`resolve_approval choice must be allow or deny`).
+A decision that expires while the control is being applied is refused with
+the runtime's diagnostic. Refusals are nonfatal; interrupt, quit and later
+commands remain usable. Other unknown `kind` values remain nonfatal codec
+diagnostics. This command adds no record kind and does not change v1 envelopes.
 
 **The queue law is the TUI's, expressed on a pipe.** A `prompt` with no steer
 flag is a root prompt when idle and a durable follow-up when busy. A `prompt`
@@ -3169,7 +3191,7 @@ closes. This does not change the v1 command or event encoding.
 | `model_refusal` | `message`, optional bounded sanitized `detail`; published refusal terminal, with the originating turn id when known |
 | `tool` | `name`, `state`, `activity_kind`, and where known `parent_call_id`, `cell_id`, `call_id`, `subject`, `detail` |
 | `reasoning` | `location` and either `text` or `sealed: true` |
-| `approval` / `approval_resolved` | the decision's id, name, expiry, subject and prompt; then its resolution |
+| `approval` / `approval_resolved` | the decision's opaque `approval_id` handle, name, expiry, subject and prompt; then that handle and its resolution. Answer `approval` with `resolve_approval` (§4.3.1) |
 | `steer_ack` | `state`, optional `position` |
 | `model_request_queued` | `account` — the root's next model request waits for a slot in that account's request budget (chapter 03 §10.4); the request proceeds when one frees |
 | `credential_wait` | nullable `account` — a native login wait starts for this account, or clears when null; carries the originating turn-scoped command `id` when proven (idle workflow waits omit it) |

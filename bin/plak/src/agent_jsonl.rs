@@ -36,6 +36,11 @@ pub enum AgentCommand {
     Recover {
         id: String,
     },
+    ResolveApproval {
+        id: String,
+        approval_id: String,
+        choice: plakous_host_protocol::ApprovalChoice,
+    },
     ResumeQueue {
         id: String,
     },
@@ -85,6 +90,7 @@ impl AgentCommand {
             Self::Background { .. } => "background",
             Self::Compact { .. } => "compact",
             Self::Recover { .. } => "recover",
+            Self::ResolveApproval { .. } => "resolve_approval",
             Self::ResumeQueue { .. } => "resume_queue",
             Self::ResumeTree { .. } => "resume_tree",
             Self::Tree { .. } => "tree",
@@ -113,6 +119,7 @@ impl AgentCommand {
             | Self::Background { id }
             | Self::Compact { id }
             | Self::Recover { id }
+            | Self::ResolveApproval { id, .. }
             | Self::ResumeQueue { id }
             | Self::ResumeTree { id }
             | Self::Tree { id }
@@ -155,6 +162,14 @@ impl AgentCommand {
             Self::Background { .. } => Some(UserAction::Background),
             Self::Compact { .. } => Some(UserAction::Compact),
             Self::Recover { .. } => Some(UserAction::Recover),
+            Self::ResolveApproval {
+                approval_id,
+                choice,
+                ..
+            } => Some(UserAction::ResolveApproval {
+                approval_id,
+                choice,
+            }),
             Self::ResumeQueue { .. } => Some(UserAction::ResumeQueueDrain),
             Self::ResumeTree { .. } => Some(UserAction::ResumeTopologyTree),
             Self::Tree { .. } => Some(UserAction::OpenTopologyNavigator),
@@ -260,6 +275,7 @@ pub fn parse_command_line(line: &str) -> ParseOutcome {
         "background" => ParseOutcome::Command(AgentCommand::Background { id }),
         "compact" => ParseOutcome::Command(AgentCommand::Compact { id }),
         "recover" => ParseOutcome::Command(AgentCommand::Recover { id }),
+        "resolve_approval" => parse_resolve_approval(id, &value),
         "resume_queue" => ParseOutcome::Command(AgentCommand::ResumeQueue { id }),
         "resume_tree" => ParseOutcome::Command(AgentCommand::ResumeTree { id }),
         "tree" => ParseOutcome::Command(AgentCommand::Tree { id }),
@@ -278,6 +294,31 @@ pub fn parse_command_line(line: &str) -> ParseOutcome {
             ),
         },
     }
+}
+
+fn parse_resolve_approval(id: String, value: &Map<String, Value>) -> ParseOutcome {
+    let Some(approval_id) = string_field(value, "approval_id").filter(|id| !id.is_empty()) else {
+        return ParseOutcome::Diagnostic {
+            id: Some(id),
+            message: "resolve_approval requires a non-empty approval_id from an approval event"
+                .into(),
+        };
+    };
+    let choice = match value.get("choice").and_then(Value::as_str) {
+        Some("allow") => plakous_host_protocol::ApprovalChoice::Allow,
+        Some("deny") => plakous_host_protocol::ApprovalChoice::Deny,
+        _ => {
+            return ParseOutcome::Diagnostic {
+                id: Some(id),
+                message: "resolve_approval choice must be allow or deny".into(),
+            };
+        }
+    };
+    ParseOutcome::Command(AgentCommand::ResolveApproval {
+        id,
+        approval_id,
+        choice,
+    })
 }
 
 #[cfg(test)]
