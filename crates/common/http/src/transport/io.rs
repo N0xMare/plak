@@ -20,6 +20,8 @@ impl AsyncRead for WireStream {
         match self.get_mut() {
             Self::Tls(stream) => Pin::new(stream.as_mut()).poll_read(cx, buf),
             Self::Plain(stream) => Pin::new(stream).poll_read(cx, buf),
+            #[cfg(test)]
+            Self::Duplex(stream) => Pin::new(stream).poll_read(cx, buf),
         }
     }
 }
@@ -33,6 +35,8 @@ impl AsyncWrite for WireStream {
         match self.get_mut() {
             Self::Tls(stream) => Pin::new(stream.as_mut()).poll_write(cx, buf),
             Self::Plain(stream) => Pin::new(stream).poll_write(cx, buf),
+            #[cfg(test)]
+            Self::Duplex(stream) => Pin::new(stream).poll_write(cx, buf),
         }
     }
 
@@ -40,6 +44,8 @@ impl AsyncWrite for WireStream {
         match self {
             Self::Tls(stream) => stream.is_write_vectored(),
             Self::Plain(stream) => stream.is_write_vectored(),
+            #[cfg(test)]
+            Self::Duplex(stream) => stream.is_write_vectored(),
         }
     }
 
@@ -51,6 +57,8 @@ impl AsyncWrite for WireStream {
         match self.get_mut() {
             Self::Tls(stream) => Pin::new(stream.as_mut()).poll_write_vectored(cx, bufs),
             Self::Plain(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+            #[cfg(test)]
+            Self::Duplex(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
         }
     }
 
@@ -58,6 +66,8 @@ impl AsyncWrite for WireStream {
         match self.get_mut() {
             Self::Tls(stream) => Pin::new(stream.as_mut()).poll_flush(cx),
             Self::Plain(stream) => Pin::new(stream).poll_flush(cx),
+            #[cfg(test)]
+            Self::Duplex(stream) => Pin::new(stream).poll_flush(cx),
         }
     }
 
@@ -65,6 +75,8 @@ impl AsyncWrite for WireStream {
         match self.get_mut() {
             Self::Tls(stream) => Pin::new(stream.as_mut()).poll_shutdown(cx),
             Self::Plain(stream) => Pin::new(stream).poll_shutdown(cx),
+            #[cfg(test)]
+            Self::Duplex(stream) => Pin::new(stream).poll_shutdown(cx),
         }
     }
 }

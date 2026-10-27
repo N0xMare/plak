@@ -919,6 +919,8 @@ struct RequestIo {
 enum WireStream {
     Tls(Box<TlsStream<TcpStream>>),
     Plain(TcpStream),
+    #[cfg(test)]
+    Duplex(tokio::io::DuplexStream),
 }
 
 impl RequestIo {
@@ -1333,3 +1335,6 @@ fn fixed_phase_deadline(
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests;
+
+#[cfg(test)]
+mod steady_write_tests;
