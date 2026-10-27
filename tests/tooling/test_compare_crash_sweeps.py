@@ -132,6 +132,31 @@ class CompareCrashSweepsTests(unittest.TestCase):
                 report = COMPARE.compare([], [dict(row(), invariants=invariant)])
                 self.assertEqual(report["counts"]["regressed"], 1)
 
+    def test_floating_failures_cannot_hide_increasing_counts_or_new_kinds(self):
+        base = [dict(row(), invariants=False)]
+        duplicate = dict(row("dispatched"), invariants=False)
+        for tip in ([duplicate, dict(duplicate, repeat=2)],
+                    [row("dispatched", "DIVERGENT")],
+                    [dict(row("dispatched", "REFUSED_STORE"), invariants=False)]):
+            with self.subTest(tip=tip), tempfile.TemporaryDirectory() as directory:
+                report = COMPARE.compare(base, tip)
+                self.assertFalse(report["changed"])
+                paths = [Path(directory) / name for name in ("base", "tip")]
+                for path, samples in zip(paths, (base, tip)):
+                    path.write_text("".join(json.dumps(sample) + "\n" for sample in samples))
+                result = subprocess.run([sys.executable, str(SCRIPT), *map(str, paths)],
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertTrue(any(not r["baseline_failed"] for r in report["regressed"]))
+
+    def test_fewer_same_kind_failures_are_not_a_new_regression(self):
+        base = [dict(row(repeat=i), invariants=False) for i in range(2)]
+        tip = [dict(row("dispatched"), invariants=False)]
+        report = COMPARE.compare(base, tip)
+        self.assertEqual(report["counts"]["regressed"], 1)
+        self.assertTrue(report["regressed"][0]["baseline_failed"])
+        self.assertFalse(report["changed"])
+
     def test_cli_exit_status_distinguishes_real_changes_and_malformed_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             base, tip = (Path(directory) / name for name in ("base.jsonl", "tip.jsonl"))

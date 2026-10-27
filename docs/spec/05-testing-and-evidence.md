@@ -2057,17 +2057,25 @@ floating cuts, not by themselves outcome regressions. Unequal sampling of an equ
 missing cut keys and rows without input evidence are reported separately. Equal outcomes
 are paired before differing outcomes so repeat reordering is inert. JSON output
 includes the input fingerprints for floating cuts and genuine changes. Exit 1
-means genuine changes or a newly failing tip key, exit 2 means invalid input,
+means genuine changes or worsening tip failures, exit 2 means invalid input,
 and exit 0 does not certify floating or missing cuts. Every tip sample whose
 invariants are not exactly true, or whose outcome is `DIVERGENT`, `UNCLASSIFIED`
 or starts with `REFUSED`, is also reported as `regressed`, irrespective of
-its input evidence or pairing. A failing sample makes the exit status 1 when
-the base has no failing sample for that key; pre-existing failures remain
-visible with `baseline_failed: true`.
+its input evidence or pairing. For each cut key, failing samples are counted
+by their exact outcome string. Each baseline failure covers at most one tip
+failure of the same kind, irrespective of the input fingerprint. An additional
+failure or a new failure kind makes the exit status 1 even when the base
+already failed that key. Covered pre-existing samples remain visible with
+`baseline_failed: true`; unmatched samples have it false. Fewer failures of
+the same kinds do not themselves make the exit status 1.
 
 Admission regressions hold the live tree mutex on another thread while pause
 readers run. A live tree stays unpaused, an actual restored pause stays visible,
 and guarded and detached resume transitions update the same lock-free predicate.
+Capacity-refused resume publication pins the live state and atomic predicate
+while the guard is detached and parked, then requires both to return to paused
+on rollback. A non-quiescent restored tree must read paused immediately after
+insertion, before any later observation or mutation.
 The one-shot drive holds that mutex through its initial admission check and
 releases it at the following storage probe, then requires a completed turn
 rather than a restored-pause hint; no elapsed-time race releases the lock.

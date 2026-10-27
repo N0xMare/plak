@@ -2,7 +2,7 @@
 """Compare crash sweeps only at equal cuts with equal recorded pre-cut inputs."""
 
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 import json
 from pathlib import Path
 
@@ -71,10 +71,16 @@ def compare(left, right):
         sides = [list(grouped.get(key, [])) for grouped in groups]
         # Failure evidence must not disappear behind a different (or absent)
         # prefix. Keep its input classification too, but always surface it.
-        baseline_failed = any(failed(row) for row in sides[0])
-        report["regressed"].extend(
-            {"cut": reference(row), "baseline_failed": baseline_failed}
-            for row in sides[1] if failed(row))
+        baseline_failures = Counter(row["outcome"] for row in sides[0] if failed(row))
+        for row in sides[1]:
+            if not failed(row):
+                continue
+            # One baseline sample covers only one failure of the same kind,
+            # not every future failure at this key or under a floating input.
+            matched = baseline_failures[row["outcome"]] > 0
+            if matched:
+                baseline_failures[row["outcome"]] -= 1
+            report["regressed"].append({"cut": reference(row), "baseline_failed": matched})
         if not all(sides):
             side = 0 if sides[0] else 1
             report[("only_left", "only_right")[side]].extend(map(reference, sides[side]))
