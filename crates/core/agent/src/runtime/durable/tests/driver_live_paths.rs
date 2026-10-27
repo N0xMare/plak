@@ -170,7 +170,7 @@ async fn sibling_failure_after_a_yielded_cell_fails_without_recovery() -> TestRe
     Ok(())
 }
 
-/// A store failure while accepting an operator decision must leave the
+/// A definite settlement-admission refusal of an operator receipt leaves the
 /// decision answerable: the retry is accepted and the effect runs, instead of
 /// the retry being refused as stale and the turn waiting out its expiry.
 #[tokio::test]
@@ -211,7 +211,12 @@ async fn live_decision_is_answerable_after_an_acceptance_write_fails() -> TestRe
         }
     })
     .await??;
-    *lock_mutex(&store.reject_next_commit) = Some(SessionStoreError::BackendUnavailable);
+    *lock_mutex(&store.reject_next_commit) = Some(SessionStoreError::admission_capacity(
+        StoreCapacityBound::Objects,
+        101,
+        100,
+        StoreAdmission::Settlement,
+    ));
     let first = turn
         .control()
         .allow_effect(
@@ -219,7 +224,7 @@ async fn live_decision_is_answerable_after_an_acceptance_write_fails() -> TestRe
             EffectDecisionAuditId::new("test:retried-approval:1")?,
         )
         .await;
-    assert!(first.is_err(), "{first:?}");
+    assert_eq!(first.unwrap_err().kind(), ControlErrorKind::StoragePressure);
     let retry = turn
         .control()
         .allow_effect(

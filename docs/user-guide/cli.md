@@ -450,8 +450,9 @@ the decision's resolution with the original turn's correlation when known.
 Allow authorizes the exact call once; deny never dispatches it. A stale,
 expired, reused, or foreign handle returns a nonfatal `error`, as does an
 invalid choice. Keep reading and send a corrected command, interrupt, or quit.
-Backpressure and decision-receipt capacity refusals leave the offered handle
+Backpressure and definite decision-receipt capacity refusals leave the offered handle
 pending; retry that handle after capacity is available. Acceptance consumes it.
+Ambiguous writes stay fenced and cannot be retried in place.
 After a crash, `--session` emits `hello` before re-offering a pending approval;
 answer the newly offered handle, not one retained from the old process.
 `plak run` still denies approvals because it has no inbound command channel.

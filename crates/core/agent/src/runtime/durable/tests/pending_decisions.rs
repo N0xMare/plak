@@ -1,5 +1,190 @@
 use super::*;
 
+#[tokio::test]
+async fn pending_decision_lost_receipt_ack_capacity_recovery_stays_fenced() -> TestResult {
+    for failure in [
+        SessionStoreError::capacity(StoreCapacityBound::SqliteInteger, u64::MAX, 0),
+        SessionStoreError::admission_capacity(
+            StoreCapacityBound::Objects,
+            101,
+            100,
+            StoreAdmission::Settlement,
+        ),
+        SessionStoreError::admission_capacity(
+            StoreCapacityBound::Objects,
+            101,
+            100,
+            StoreAdmission::Ordinary,
+        ),
+    ] {
+        decision_receipt_failure(true, failure).await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn pending_decision_unclassified_capacity_failure_stays_fenced() -> TestResult {
+    decision_receipt_failure(
+        false,
+        SessionStoreError::capacity(StoreCapacityBound::SqliteInteger, u64::MAX, 0),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn pending_decision_unavailable_receipt_failure_stays_fenced() -> TestResult {
+    decision_receipt_failure(false, SessionStoreError::BackendUnavailable).await
+}
+
+async fn decision_receipt_failure(lost_ack: bool, failure: SessionStoreError) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            86_000,
+            false,
+        )
+        .with_tool_first(),
+    );
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let original = sessions
+        .create(
+            "create:decision-receipt-capacity",
+            durable_decision_builder(workspace, Arc::clone(&model), one_mutating_tool_registry()?)?,
+        )
+        .await?;
+    let mut turn = original
+        .start(
+            CommandId::new("root:decision-receipt-capacity")?,
+            "await decision",
+        )
+        .await?
+        .into_turn()
+        .ok_or("root unexpectedly duplicated")?;
+    let mut events = turn.take_events()?;
+    let decision = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let AgentEventKind::EffectDecisionRequired { decision, .. } =
+                events.recv().await?.kind()
+            {
+                break Ok::<_, Box<dyn std::error::Error>>(decision.clone());
+            }
+        }
+    })
+    .await??;
+    let before = store.commit_calls.load(Ordering::Acquire);
+    let recoveries = store.recover_commit_calls.load(Ordering::Acquire);
+    if lost_ack {
+        store.lose_commit_ack_on(before + 1);
+        *lock_mutex(&store.recover_commit_error) = Some(failure);
+    } else {
+        *lock_mutex(&store.reject_next_commit) = Some(failure);
+    }
+    let control = turn.control();
+    let receipt_id = CommandId::new("decision:lost-ack-capacity")?;
+    let reply = original
+        .command(TurnCommand::ResolveEffectDecision {
+            command_id: receipt_id.clone(),
+            reference: decision.clone(),
+            decision: crate::EffectDecisionChoice::Allow(EffectDecisionAuditId::new(
+                "test:lost-ack-capacity",
+            )?),
+        })
+        .await?;
+    let refusal = reply
+        .acknowledgement()
+        .rejection()
+        .ok_or("ambiguous decision was accepted")?;
+    assert_ne!(
+        refusal.kind(),
+        ControlErrorKind::StoragePressure,
+        "{refusal:?}"
+    );
+    assert!(
+        !original.inner.accepting.load(Ordering::Acquire),
+        "decision did not retain its recovery gate"
+    );
+    assert_eq!(
+        store.lost_commit_acks.load(Ordering::Acquire),
+        usize::from(lost_ack)
+    );
+    assert_eq!(
+        store.recover_commit_calls.load(Ordering::Acquire) > recoveries,
+        lost_ack || failure == SessionStoreError::BackendUnavailable
+    );
+    let immediate_retry = control
+        .allow_effect(
+            decision.clone(),
+            EffectDecisionAuditId::new("test:immediate-retry-after-fence")?,
+        )
+        .await;
+    assert!(
+        immediate_retry.is_err(),
+        "fenced decision handle was re-armed"
+    );
+    let result = tokio::time::timeout(Duration::from_secs(3), turn.result()).await?;
+    if let Ok(result) = result {
+        assert!(!matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    }
+    assert_eq!(model.calls.load(Ordering::Acquire), 1);
+    assert_receipt_capacity_evidence(&store, &receipt_id, lost_ack);
+    let commits = store.commit_calls.load(Ordering::Acquire);
+    let retry = control
+        .allow_effect(
+            decision,
+            EffectDecisionAuditId::new("test:retry-lost-ack-capacity")?,
+        )
+        .await;
+    assert!(retry.is_err(), "ambiguous decision handle was re-armed");
+    assert_eq!(
+        store.commit_calls.load(Ordering::Acquire),
+        commits,
+        "retry reached the store instead of its recovery fence"
+    );
+    let _ = original.shutdown().await;
+    Ok(())
+}
+
+fn assert_receipt_capacity_evidence(
+    store: &TestCreateStore,
+    receipt_id: &CommandId,
+    committed: bool,
+) {
+    let checkpoints = lock_mutex(&store.accepted_commits);
+    assert_eq!(
+        checkpoints.iter().any(|(checkpoint, _)| checkpoint
+            .manifest()
+            .ledger()
+            .commands()
+            .iter()
+            .any(|command| command.command_id() == receipt_id.as_str()
+                && command.disposition() == DurableCommandDisposition::Accepted)),
+        committed,
+        "lost acknowledgement must follow a durably accepted decision receipt"
+    );
+    assert!(
+        !checkpoints.iter().any(|(checkpoint, _)| checkpoint
+            .manifest()
+            .ledger()
+            .operations()
+            .iter()
+            .any(
+                |operation| matches!(operation.kind(), DurableOperationKind::Effect { .. })
+                    && matches!(operation.state(), DurableOperationState::Dispatched)
+            )),
+        "ambiguous decision dispatched an effect"
+    );
+}
+
 pub(super) fn durable_decision_builder(
     workspace: Arc<WorkspacePolicy>,
     model: Arc<ArtifactModel>,

@@ -8,6 +8,7 @@ use crate::runtime::continuation::{
 };
 use crate::runtime::control::{command_binding, command_canonical_bytes, event_error};
 use crate::runtime::driver::ToolDispatchOrigin;
+use crate::runtime::driver::commands::settlement_capacity_refusal;
 use crate::runtime::driver::execution::{
     canonicalize_observed_tool_execution, drain_tool_progress, publish_observation_clip,
     publish_tool_progress,
@@ -790,17 +791,18 @@ impl Driver {
                             ).await {
                                 Ok(receipt) => receipt,
                                 Err(error) => {
-                                    pending = Some(pending_capability);
                                     // No authorization exists until this receipt commits.
-                                    // A definite capacity refusal leaves the decision
-                                    // pending, even though its receipt uses the reserve.
-                                    let response = if let Some(capacity) = error.store_error().and_then(|error| error.capacity_refusal()) {
-                                        self.unrecorded_rejection(command_id, Some(decision_ref.turn_id()), ControlError::storage_pressure(capacity))
-                                    } else {
-                                        self.command_persistence_failure(command_id, Some(decision_ref.turn_id()), &error)
-                                    };
+                                    // Only a definite settlement-admission refusal can
+                                    // re-arm the decision; lost-ack recovery must fence.
+                                    if let Some(capacity) = settlement_capacity_refusal(&error) {
+                                        pending = Some(pending_capability);
+                                        let response = self.unrecorded_rejection(command_id, Some(decision_ref.turn_id()), ControlError::storage_pressure(capacity));
+                                        let _ = reply.send(response);
+                                        continue;
+                                    }
+                                    let response = self.command_persistence_failure(command_id, Some(decision_ref.turn_id()), &error);
                                     let _ = reply.send(response);
-                                    continue;
+                                    return Err(error);
                                 }
                             };
                             let resolved = self.tools.resolve_effect_decision(pending_capability, recorded_decision);

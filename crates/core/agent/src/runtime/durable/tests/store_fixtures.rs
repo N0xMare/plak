@@ -75,6 +75,7 @@ pub(super) struct TestCreateStore {
     pub(super) commits_blocked: AtomicBool,
     pub(super) commits_halted: AtomicBool,
     pub(super) force_recover_commit_not_found: AtomicBool,
+    pub(super) recover_commit_error: Mutex<Option<SessionStoreError>>,
     pub(super) reject_next_commit: Mutex<Option<SessionStoreError>>,
     pub(super) full_after_completed_round: AtomicBool,
     pub(super) full_until: Mutex<Option<tokio::time::Instant>>,
@@ -1266,6 +1267,9 @@ impl SessionStore for TestCreateStore {
             }
             if self.force_recover_commit_not_found.load(Ordering::Acquire) {
                 return Err(SessionStoreError::NotFound);
+            }
+            if let Some(error) = *lock_mutex(&self.recover_commit_error) {
+                return Err(error);
             }
             if lock_mutex(&self.pruned_commits).contains(&checkpoint) {
                 return Err(SessionStoreError::Pruned);

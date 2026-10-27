@@ -3132,8 +3132,9 @@ pending decision. A missing, empty or non-string handle is a codec `error`
 (`resolve_approval requires a non-empty approval_id from an approval event`),
 as is a missing or malformed choice (`resolve_approval choice must be allow or deny`).
 A decision that expires while the control is being applied is refused with
-the runtime's diagnostic. A definite ingress-backpressure, ledger-capacity or
-decision-receipt storage-capacity refusal leaves the decision pending and retains the
+the runtime's diagnostic. A definite ingress-backpressure or ledger-capacity
+refusal, or the store's rolled-back settlement-admission refusal of the decision
+receipt, leaves the decision pending and retains the
 same offered handle: clients may retry `resolve_approval` with that handle
 once capacity is available. Acceptance consumes it; stale, expired, cancelled
 or ambiguous outcomes do not re-arm it. Refusals are nonfatal; interrupt, quit and later

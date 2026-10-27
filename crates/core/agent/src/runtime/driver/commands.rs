@@ -1493,9 +1493,23 @@ impl Driver {
 
 /// The store error of a commit refused at the ordinary admission threshold.
 pub(super) fn ordinary_capacity_refusal(error: &AgentError) -> Option<SessionStoreError> {
+    if error.kind() == AgentErrorKind::OutcomeUnknown {
+        return None;
+    }
     let store_error = error.store_error()?;
     let capacity = store_error.capacity_refusal()?;
     (capacity.admission == Some(StoreAdmission::Ordinary)).then_some(store_error)
+}
+
+/// Only the store's rolled-back settlement-admission refusal can be retried.
+pub(super) fn settlement_capacity_refusal(
+    error: &AgentError,
+) -> Option<crate::SessionStoreCapacity> {
+    if error.kind() == AgentErrorKind::OutcomeUnknown {
+        return None;
+    }
+    let capacity = error.store_error()?.capacity_refusal()?;
+    (capacity.admission == Some(StoreAdmission::Settlement)).then_some(capacity)
 }
 
 fn storage_pressure_rejection(refusal: &SessionStoreError) -> ControlError {
