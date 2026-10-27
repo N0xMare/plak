@@ -367,6 +367,15 @@ mod tests {
 
     #[test]
     fn in_place_recovery_drives_a_retained_approval_after_owner_loss() {
+        retained_approval_after_owner_loss(false);
+    }
+
+    #[test]
+    fn session_switch_drives_a_retained_approval_without_idle_or_ready() {
+        retained_approval_after_owner_loss(true);
+    }
+
+    fn retained_approval_after_owner_loss(switch: bool) {
         let root = tempfile::tempdir().unwrap();
         let script = std::sync::Arc::new(serde_json::from_value(serde_json::json!({
             "version": 1, "tool_policy": "decision_required", "steps": [
@@ -374,11 +383,13 @@ mod tests {
                 {"output":{"text":"retained approval completed"}}
             ]
         })).unwrap());
-        let (config, evidence) = scripted_host_with(root.path(), script);
+        let (config, evidence) = scripted_host_with(root.path(), std::sync::Arc::clone(&script));
         let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
-        let mut host =
-            HostLoop::open(config, &actions, super::super::Sender::over(sent), None).unwrap();
+        let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut emitter = super::super::Sender::over(sent);
+        emitter.recorded = Some(recorded.clone());
+        let mut host = HostLoop::open(config, &actions, emitter.clone(), None).unwrap();
         let turn_id = host
             .executor
             .block_on(async {
@@ -412,15 +423,27 @@ mod tests {
                 id
             })
             .unwrap();
+        let target = host.config.session.id.clone();
+        if switch {
+            host.config.store.save(&mut host.config.session).unwrap();
+            let (mut source, _) = scripted_host_with(root.path(), script);
+            source.store = host.config.store.clone();
+            source.runtime_factory = host.config.runtime_factory.clone();
+            host = HostLoop::open(source, &actions, emitter, None).unwrap();
+        }
         observed.try_iter().for_each(drop);
+        recorded.lock().unwrap().clear();
         let responder = controls.clone();
         let approval_worker = std::thread::spawn(move || {
             let mut offered = false;
+            let mut before_offer = Vec::new();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             while std::time::Instant::now() < deadline {
-                if let Ok(HostEvent::ApprovalRequired { approval_id, .. }) =
-                    observed.recv_timeout(std::time::Duration::from_millis(20))
-                {
+                if let Ok(event) = observed.recv_timeout(std::time::Duration::from_millis(20)) {
+                    let HostEvent::ApprovalRequired { approval_id, .. } = event else {
+                        before_offer.push(event);
+                        continue;
+                    };
                     responder
                         .send(crate::surface_protocol::UserAction::ResolveApproval {
                             approval_id,
@@ -431,10 +454,22 @@ mod tests {
                     break;
                 }
             }
-            (offered, observed)
+            (offered, observed, before_offer)
         });
         host.recovery_blocked = true;
-        let outcome = host.recover_session(RecoveryTrigger::Explicit);
+        let outcome = if switch {
+            crate::runtime::clear::resume_session_switch(
+                &host.executor,
+                &mut host.config,
+                &mut host.opened,
+                &mut host.stderr_buf,
+                &host.events,
+                &target,
+            )
+            .and_then(|()| host.drive_restored_turn())
+        } else {
+            host.recover_session(RecoveryTrigger::Explicit)
+        };
         let pending = host.opened.has_recovered_turn();
         let feed = host
             .executor
@@ -446,7 +481,36 @@ mod tests {
             .unwrap()
             .unwrap();
         host.release().unwrap();
-        let (offered, observed) = approval_worker.join().unwrap();
+        let (offered, observed, before_offer) = approval_worker.join().unwrap();
+        let published = recorded.lock().unwrap();
+        let offer = published
+            .iter()
+            .position(|event| matches!(event, ContentEvent::ApprovalRequired { .. }))
+            .expect("restored decision publication");
+        assert!(
+            !published[..offer]
+                .iter()
+                .any(|event| matches!(event, ContentEvent::SetBusy(false))
+                    || matches!(event, ContentEvent::Status { phase, .. } if phase == "idle")),
+            "restored decision publication was announced idle: {:?}",
+            &published[..offer]
+        );
+        drop(published);
+        assert!(
+            !before_offer
+                .iter()
+                .any(|event| matches!(event, HostEvent::SetBusy(false))
+                    || matches!(event, HostEvent::Status { phase, .. } if phase == "idle")),
+            "restored decision was announced idle: {before_offer:?}"
+        );
+        let tail = observed.try_iter().collect::<Vec<_>>();
+        assert!(
+            !tail.iter().any(|event| matches!(event,
+                HostEvent::Row(TranscriptRow::Notice(notice))
+                    if notice.text.contains("approval accepted")
+            )),
+            "uncorrelated decision received a command reply: {tail:?}"
+        );
         assert!(outcome.is_ok(), "{:?}", outcome.as_ref().err());
         assert!(
             offered && !pending,
@@ -456,8 +520,7 @@ mod tests {
             plakous::sessions::feed::FeedFact::TurnTerminal { turn_id: id, outcome: plakous::sessions::feed::FeedTurnOutcome::Completed { .. }, .. } if *id == turn_id
         )).count(), 1);
         assert_eq!(
-            observed
-                .try_iter()
+            tail.iter()
                 .filter(|event| matches!(event, HostEvent::TurnLifecycle(_)))
                 .count(),
             1

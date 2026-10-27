@@ -252,6 +252,9 @@ pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_pro
     presentations: Arc<std::sync::Mutex<projection::transcript::Presentations>>,
     session_id: Option<Arc<str>>,
     quit_receipt: worker::QuitReceipt,
+    /// Unit laws inspect publication order before latest-state coalescing.
+    #[cfg(test)]
+    recorded: Option<Arc<std::sync::Mutex<Vec<ContentEvent<P>>>>>,
 }
 
 /// An authored notice intent the host has not committed yet.
@@ -278,6 +281,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             presentations: Arc::default(),
             session_id: None,
             quit_receipt: worker::QuitReceipt::default(),
+            #[cfg(test)]
+            recorded: None,
         }
     }
     /// A clone for a publisher that outlives the host's current step (a
@@ -290,6 +295,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             presentations: Arc::clone(&self.presentations),
             session_id: Some(Arc::from(session_id)),
             quit_receipt: self.quit_receipt.clone(),
+            #[cfg(test)]
+            recorded: self.recorded.clone(),
         }
     }
     /// Publish producer content; false when the driver has gone. Keyed
@@ -324,6 +331,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
     /// }));
     /// ```
     pub fn send(&self, value: ContentEvent<P>) -> bool {
+        #[cfg(test)]
+        if let Some(recorded) = &self.recorded {
+            recorded.lock().unwrap().push(value.clone());
+        }
         let value: HostEvent<P> = value.into();
         if matches!(value, HostEvent::ClearView | HostEvent::SessionOpening) {
             self.presentations

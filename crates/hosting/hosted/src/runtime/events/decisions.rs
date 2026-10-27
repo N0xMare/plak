@@ -44,18 +44,28 @@ pub(in crate::runtime) async fn resolve_approval_intent<
                 ));
                 return false;
             };
-            control.allow_effect(pending.decision, audit).await
+            control.allow_effect(pending.decision.clone(), audit).await
         }
         plakous_host_protocol::ApprovalChoice::Deny => {
             control
                 .deny_tool(
-                    pending.decision,
+                    pending.decision.clone(),
                     plakous::tools::ToolPolicyDenial::new("operator denied this tool"),
                 )
                 .await
         }
     };
     if let Err(error) = outcome {
+        if matches!(
+            error.kind(),
+            plakous::agent::ControlErrorKind::Backpressure
+                | plakous::agent::ControlErrorKind::LedgerFull
+                | plakous::agent::ControlErrorKind::StoragePressure
+        ) {
+            // These definite refusals leave the runtime decision pending. Do
+            // not strand the offered handle; success still consumes it once.
+            projection.approvals.insert(approval_id.to_owned(), pending);
+        }
         let _ = events.notice(TranscriptRow::error(
             NoticeScope::Approval,
             format!("approval was not applied: {error}"),
@@ -64,6 +74,9 @@ pub(in crate::runtime) async fn resolve_approval_intent<
     }
     true
 }
+
+#[cfg(test)]
+mod tests;
 
 impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
     /// An effect that waits for the operator's decision.

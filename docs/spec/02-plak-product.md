@@ -3132,7 +3132,11 @@ pending decision. A missing, empty or non-string handle is a codec `error`
 (`resolve_approval requires a non-empty approval_id from an approval event`),
 as is a missing or malformed choice (`resolve_approval choice must be allow or deny`).
 A decision that expires while the control is being applied is refused with
-the runtime's diagnostic. Refusals are nonfatal; interrupt, quit and later
+the runtime's diagnostic. A definite ingress-backpressure, ledger-capacity or
+decision-receipt storage-capacity refusal leaves the decision pending and retains the
+same offered handle: clients may retry `resolve_approval` with that handle
+once capacity is available. Acceptance consumes it; stale, expired, cancelled
+or ambiguous outcomes do not re-arm it. Refusals are nonfatal; interrupt, quit and later
 commands remain usable. Other unknown `kind` values remain nonfatal codec
 diagnostics. This command adds no record kind and does not change v1 envelopes.
 
@@ -3191,7 +3195,7 @@ closes. This does not change the v1 command or event encoding.
 | `model_refusal` | `message`, optional bounded sanitized `detail`; published refusal terminal, with the originating turn id when known |
 | `tool` | `name`, `state`, `activity_kind`, and where known `parent_call_id`, `cell_id`, `call_id`, `subject`, `detail` |
 | `reasoning` | `location` and either `text` or `sealed: true` |
-| `approval` / `approval_resolved` | the decision's opaque `approval_id` handle, name, expiry, subject and prompt; then that handle and its resolution. Answer `approval` with `resolve_approval` (§4.3.1) |
+| `approval` / `approval_resolved` | the decision's opaque `approval_id` handle, name, expiry, subject, prompt and `call_id` when known; then that handle and its resolution. Answer `approval` with `resolve_approval` (§4.3.1) |
 | `steer_ack` | `state`, optional `position` |
 | `model_request_queued` | `account` — the root's next model request waits for a slot in that account's request budget (chapter 03 §10.4); the request proceeds when one frees |
 | `credential_wait` | nullable `account` — a native login wait starts for this account, or clears when null; carries the originating turn-scoped command `id` when proven (idle workflow waits omit it) |

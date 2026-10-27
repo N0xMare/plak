@@ -203,6 +203,8 @@ fn run(fixture: &FaceFixture, arguments: &[&str]) -> TestResult<std::process::Ou
 
 fn assert_denied(fixture: &FaceFixture, output: &std::process::Output, turns: usize) -> TestResult {
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("approval accepted"), "{stderr}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("approval accepted"));
     assert!(output.status.success(), "{stderr}");
     assert!(
         stderr.contains("denied approval for loopback_effect: run is non-interactive"),

@@ -791,7 +791,14 @@ impl Driver {
                                 Ok(receipt) => receipt,
                                 Err(error) => {
                                     pending = Some(pending_capability);
-                                    let response = self.command_persistence_failure(command_id, Some(decision_ref.turn_id()), &error);
+                                    // No authorization exists until this receipt commits.
+                                    // A definite capacity refusal leaves the decision
+                                    // pending, even though its receipt uses the reserve.
+                                    let response = if let Some(capacity) = error.store_error().and_then(|error| error.capacity_refusal()) {
+                                        self.unrecorded_rejection(command_id, Some(decision_ref.turn_id()), ControlError::storage_pressure(capacity))
+                                    } else {
+                                        self.command_persistence_failure(command_id, Some(decision_ref.turn_id()), &error)
+                                    };
                                     let _ = reply.send(response);
                                     continue;
                                 }

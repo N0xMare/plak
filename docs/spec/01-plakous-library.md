@@ -709,6 +709,12 @@ commits named:
 9. A control command (cancellation status, effect decision, shutdown) and an
    effect-decision outcome: its evidence and its finalization.
 
+A definite capacity refusal before an effect-decision command receipt commits
+returns unrecorded `StoragePressure` and leaves the exact decision pending for
+retry after capacity is available. No authorization exists at that point.
+This exception does not apply to a failed decision-outcome publication, other
+unpublished settlements or ambiguous writes: those retain their recovery gate.
+
 The round-limit failure is not one commit, and need not be. It is a failure
 with no provider decision (item 2): the turn enters a round past the cap with
 its wrap-up already taken, before any attempt is prepared. When the previous
