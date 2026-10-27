@@ -149,6 +149,60 @@ async fn close_acknowledges_actual_cancel_after_delivery_lock_and_stops_the_chil
     .await;
 }
 
+struct DispatchWake {
+    control: TurnControl,
+    observed: std::sync::atomic::AtomicU8,
+    fired: tokio::sync::Notify,
+}
+
+impl std::task::Wake for DispatchWake {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.observed.store(
+            if self.control.is_cancelled() { 2 } else { 1 },
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.fired.notify_one();
+    }
+}
+
+#[tokio::test]
+async fn dispatch_signal_observes_actor_cancellation_at_the_instant_it_fires() {
+    let (fixture, live) = Fixture::unoccupied().await;
+    let probe = Arc::new(DispatchWake {
+        control: live.turn_control(),
+        observed: std::sync::atomic::AtomicU8::new(0),
+        fired: tokio::sync::Notify::new(),
+    });
+    assert!(!probe.control.is_cancelled());
+    let (signal, mut signalled) = tokio::sync::oneshot::channel();
+    let waker = std::task::Waker::from(probe.clone());
+    assert!(
+        Pin::new(&mut signalled)
+            .poll(&mut std::task::Context::from_waker(&waker))
+            .is_pending()
+    );
+    let release = tokio::spawn(
+        Box::new(live).cancel_and_release(fixture.runtime.driver().clone(), Some(signal)),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(2), probe.fired.notified())
+        .await
+        .expect("dispatch must wake its registered receiver");
+    assert_eq!(
+        probe.observed.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "cancel must precede the signal, not merely the tool's eventual return"
+    );
+    assert!(signalled.await.is_ok());
+    assert!(release.await.unwrap().failure.is_none());
+    crate::topology_runtime::force_release(
+        &fixture.runtime.read(|tree| tree.tree_id.clone()).unwrap(),
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn headless_exit_joins_tool_receipt_after_the_live_owner_has_retired() {
     assert_exit_joins_tool_receipt(false).await;
@@ -225,6 +279,18 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
+        let (fixture, live) = Self::unoccupied().await;
+        assert!(
+            fixture
+                .runtime
+                .try_occupy_live(fixture.child.clone(), Box::new(live))
+                .await
+                .is_ok()
+        );
+        fixture
+    }
+
+    async fn unoccupied() -> (Self, ProductLiveChild) {
         let root = tempfile::tempdir().unwrap();
         let tree_id = uuid::Uuid::new_v4().to_string();
         let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
@@ -329,22 +395,19 @@ impl Fixture {
             submission.turn().unwrap().control(),
         );
         let queued = Arc::clone(&live.follow_ups);
-        assert!(
-            runtime
-                .try_occupy_live(child.clone(), Box::new(live))
-                .await
-                .is_ok()
-        );
         gate.entered().await;
-        Self {
-            _root: root,
-            runtime,
-            agent,
-            child,
-            first,
-            gate,
-            queued,
-        }
+        (
+            Self {
+                _root: root,
+                runtime,
+                agent,
+                child,
+                first,
+                gate,
+                queued,
+            },
+            live,
+        )
     }
 
     fn identity(&self) -> ChildTurnIdentity {

@@ -88,6 +88,12 @@ pub(super) fn continuation_parent_call_id<P: plakous_host_protocol::ProtocolExte
 }
 
 impl TreeSnapshotPush {
+    pub(super) fn registered(rows: &dyn TopologyRows, session: &SessionRecord) -> Self {
+        let mut push = Self::default();
+        let _ = push.runtime(rows, session);
+        push
+    }
+
     /// The topology runtime this session's canvas is watching, if any.
     ///
     /// Resolution is at most one lineage walk per bound session. Both recovery
@@ -394,8 +400,19 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
         return;
     };
     if let Some(faults) = &mut push.retirement_faults {
-        while let Ok((_, message)) = faults.try_recv() {
-            let _ = events.notice(TranscriptRow::error(NoticeScope::Tree, message));
+        loop {
+            match faults.try_recv() {
+                Ok((_, message)) => {
+                    let _ = events.notice(TranscriptRow::error(NoticeScope::Tree, message));
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(count)) => {
+                    tracing::warn!(target: "plak.topology", count, "retirement notice observer lagged");
+                }
+                Err(
+                    tokio::sync::broadcast::error::TryRecvError::Empty
+                    | tokio::sync::broadcast::error::TryRecvError::Closed,
+                ) => break,
+            }
         }
     }
     if tokio::runtime::Handle::try_current().is_ok() {

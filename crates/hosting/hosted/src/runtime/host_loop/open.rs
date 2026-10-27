@@ -68,6 +68,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         let mut opened = executor
             .block_on(build_session_from_config(&mut config, &mut stderr_buf))
             .map_err(|_| CliFailure::new("application execution failed"))??;
+        // Observe owner faults before attachment hooks can retire children;
+        // the face's first snapshot may be much later.
+        let last_tree_revision =
+            TreeSnapshotPush::registered(&config.topology_rows(), &config.session);
         if let Some(agent) = opened.agent() {
             agent.set_storage_interrupt(storage_interrupt);
         }
@@ -530,7 +534,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
 
         // Disk-loaded queues are deliberately paused until the operator resumes them.
         let pending_start: Option<SessionQueueItem> = None;
-        let last_tree_revision = TreeSnapshotPush::default();
         let last_tree_observed_at = Instant::now();
         let recovery_blocked = restored_recovery_blocked
             || query_context(&executor, &opened, ContextQuery::Current).is_ok_and(|projection| {

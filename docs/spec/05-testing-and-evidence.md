@@ -4037,6 +4037,15 @@ tool acknowledgement; receipt laws empty the live table before headless exit
 or shutdown and require both paths to join the remaining tool-side settlement.
 Owner observation laws require one recovery detach and transcript notice across
 concurrent joiners, late release failure and each navigator cancellation entry point.
+Idle bound-node laws cover navigator close and stop-all, alone and beside a
+blocked retiring sibling: the idle detach is immediate and the live outcome
+remains owner-published. A synchronous oneshot waker samples the actor's cancelled
+state at the dispatch signal itself, rather than after a requesting task resumes.
+Virtual-time laws require a saved cancellation intent to be acknowledged when
+dispatch exceeds its own allowance or its sender disappears, while its receipt
+remains prepared until the independently owned work finishes. A face registers
+its retirement-notice subscription before its first observation, and an overflow
+law drains the retained notices after the logged lag instead of deferring them.
 
 Tree fold metadata laws cover immutable first recording, distinct insert orders
 for all existing host intent kinds, unbound anchor 0 and cold recording at the

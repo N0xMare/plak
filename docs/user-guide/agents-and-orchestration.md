@@ -411,6 +411,9 @@ The initial answer always acknowledges the saved intent once cancellation is
 dispatched, even when release fails immediately. A retirement failure then adds
 one tree notice; it does not change that initial answer. Headless exit also joins
 the background job cleanup and operation receipt within its shutdown allowance.
+If dispatch cannot be confirmed within five seconds, the tool still acknowledges
+the saved intent while cancellation and release remain owned in the background;
+that answer does not claim the child has stopped.
 
 ## git and jj
 

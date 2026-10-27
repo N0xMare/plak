@@ -633,8 +633,10 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/hub.rs"): {"error", "info", "pin", "select", "warn"},
     # Bounded VCS refusal detail, once per workspace/detail change; never file content.
     ("plakous-recursive-subagents", "src/tree/dormancy.rs"): {"info", "warn"},
-    # Select the signal acknowledgement without cancelling the owned retirement join.
-    ("plakous-recursive-subagents", "src/tools/cancel.rs"): {"json", "select"},
+    # Completion failure logs carry only captured agent/attempt ids and the typed error kind.
+    ("plakous-recursive-subagents", "src/tools/cancel.rs"): {"error", "json"},
+    # Retirement-notice overflow logs carry only the number of missed observations.
+    ("plakous-hosted", "src/runtime/tree.rs"): {"warn"},
     ("plakous-hosted", "src/topology_navigator.rs"): {"error"},
     ("plakous-hosted", "src/runtime/topology_state.rs"): {"error"},
     ("plakous-recursive-subagents", "src/tools/jobs.rs"): {"json"},

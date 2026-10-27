@@ -984,10 +984,12 @@ is `attempt_mismatch`.
 `interrupt_agent` returns `{ agent_id, status }`. `close_agent` returns
 `{ agents: [{ agent_id, status }, …] }` for the node and its descendants. A
 successful initial response acknowledges the durable intent and cancellation
-dispatch, not completed release. Dispatch is acknowledged only after the exact
-live owner's cancellation request has been issued, never merely because its
-release future was first polled; a pending delivery barrier cannot produce an
-early acknowledgement. Once dispatch is signalled, the initial answer is always
+dispatch when observed, not completed release. The dispatch signal fires only
+after the exact live owner's cancellation request has been issued, never merely
+because its release future was first polled. The tool waits at most the five-second
+cancel-settle allowance for that signal. Expiry or a dropped signal sender still
+acknowledges the saved intent, without claiming dispatch or completed cancellation;
+the owner continues release and publishes any fault. Once dispatch is signalled, the initial answer is always
 the intent acknowledgement, even if release fails before that answer is polled.
 Such a failure appears only through `recovery_required` and the owner's retirement
 notice, not as a scheduling-dependent initial tool failure. A close with no live
@@ -4539,8 +4541,14 @@ are signalled; it does not wait for the 65-second release deadline. The release
 owner emits one recovery-required detach and one transcript notice for its fault,
 regardless of whether a tool, navigator action or root interrupt initiated it;
 concurrent joiners and a late failure after deadline evidence do not repeat them.
-Navigator close detaches are deferred until the release owner establishes their
-outcome, so an eager closed observation cannot hide a retirement failure. Replaying
+Navigator close detaches for live, starting or retiring children are deferred
+until their release owner establishes the outcome, so an eager closed observation
+cannot hide a retirement failure. A bound child without a live owner instead
+emits its terminal detach at cancellation admission, including when live siblings
+are still retiring. Faces subscribe to owner notices when they register the
+runtime, before the first snapshot; overflow logs its lost-observation count.
+Background tool errors log only captured agent/attempt ids and the typed error
+kind, never error content. Replaying
 a prepared cancellation
 returns `operation_recovery_required` without another dispatch; failed retirement
 records a failed receipt. Completed receipts replay without touching any later

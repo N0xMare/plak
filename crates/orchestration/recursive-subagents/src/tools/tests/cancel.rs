@@ -2,6 +2,117 @@
 
 use super::*;
 
+struct HeldCanceller {
+    started: tokio::sync::Notify,
+    finish: tokio::sync::Notify,
+    drop_signal: bool,
+}
+
+impl ChildController for HeldCanceller {
+    fn services(&self) -> ChildServices {
+        ChildServices::CANCEL
+    }
+    fn cancel_agents(
+        &self,
+        ids: Vec<String>,
+        signalled: tokio::sync::oneshot::Sender<()>,
+    ) -> Pin<Box<dyn Future<Output = Result<LiveCancelOutcome, LiveCancelFailure>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let signal = (!self.drop_signal).then_some(signalled);
+            self.started.notify_one();
+            self.finish.notified().await;
+            if let Some(signal) = signal {
+                let _ = signal.send(());
+            }
+            Ok(LiveCancelOutcome {
+                cancelled_ids: ids,
+                not_live_ids: Vec::new(),
+            })
+        })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn saved_cancel_intent_is_acknowledged_when_dispatch_expires() {
+    assert_saved_cancel_ack(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn saved_cancel_intent_is_acknowledged_when_dispatch_sender_disappears() {
+    assert_saved_cancel_ack(true).await;
+}
+
+async fn assert_saved_cancel_ack(drop_signal: bool) {
+    for close in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (store, mut tree) = persist_fixture(&root);
+        tree.spawn_agent("root", &spawn_request(), None).unwrap();
+        tree.set_active_turn("c1", true).unwrap();
+        let driver = driver_on(tree, store);
+        let canceller = Arc::new(HeldCanceller {
+            started: tokio::sync::Notify::new(),
+            finish: tokio::sync::Notify::new(),
+            drop_signal,
+        });
+        let tool = if close {
+            close_tool(driver.clone(), Some(canceller.clone()))
+        } else {
+            interrupt_tool(driver.clone(), Some(canceller.clone()))
+        };
+        let arguments = agent_id_request("c1");
+        let mut invocation = Box::pin(async {
+            if close {
+                tool.close_with("held-dispatch".into(), &arguments).await
+            } else {
+                tool.interrupt_with("held-dispatch".into(), &arguments)
+                    .await
+            }
+        });
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(
+                invocation.as_mut().poll(cx).is_pending()
+            ))
+            .await
+        );
+        canceller.started.notified().await;
+        let outcome = tokio::time::timeout(
+            plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT
+                + std::time::Duration::from_secs(1),
+            invocation,
+        )
+        .await;
+        assert!(
+            outcome.is_ok(),
+            "dispatch acknowledgement must have its own bound"
+        );
+        let outcome = outcome.unwrap();
+        assert!(
+            outcome.is_ok(),
+            "a saved intent is acknowledged after a dropped sender"
+        );
+        assert_eq!(outcome.unwrap().kind(), ToolOutcomeKind::Success);
+        driver
+            .read(|tree| {
+                let receipt = &tree.operations()["held-dispatch"];
+                assert!(receipt.terminal_response.is_none());
+                assert!(receipt.terminal_code.is_none());
+            })
+            .unwrap();
+        canceller.finish.notify_one();
+        driver.join_retirement_tasks().await.unwrap();
+        driver
+            .read(|tree| {
+                assert!(
+                    tree.operations()["held-dispatch"]
+                        .terminal_response
+                        .is_some()
+                );
+            })
+            .unwrap();
+    }
+}
+
 #[tokio::test]
 async fn fast_cancel_failure_has_a_deterministic_initial_answer() {
     for close in [false, true] {

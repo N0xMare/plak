@@ -12,6 +12,35 @@ use crate::runtime::test_support::*;
 use crate::sessions::SessionRecord;
 
 #[tokio::test]
+async fn retirement_notice_overflow_drains_retained_notices_in_the_same_observation() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = MemoryRows::new();
+    let mut session = SessionRecord::new(root.path().to_path_buf());
+    let _runtime = test_kit::install_idle_topology_hub(&session.id, root.path());
+    let mut push = TreeSnapshotPush::registered(&paths, &session);
+    let (notices, faults) = tokio::sync::broadcast::channel(64);
+    push.retirement_faults = Some(faults);
+    for index in 0..65 {
+        notices
+            .send(("c1".to_owned(), format!("retirement-notice-{index}")))
+            .unwrap();
+    }
+    let (wire, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let events = Sender::over(wire);
+    emit_tree_snapshot_if_revision_advanced(
+        &paths,
+        paths.records(),
+        &SessionHome::new(root.path().join("sessions")),
+        &mut session,
+        &mut push,
+        &events,
+        false,
+    );
+    assert_eq!(received.try_iter().filter(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(row)) if row.text.starts_with("retirement-notice-"))).count(), 64);
+    crate::topology_runtime::force_release(&session.id).await;
+}
+
+#[tokio::test]
 async fn navigator_retirement_failures_reach_the_transcript_once_from_the_owner() {
     for action in ["close", "interrupt", "stop-all", "root-interrupt"] {
         let root = tempfile::tempdir().unwrap();
@@ -31,16 +60,7 @@ async fn navigator_retirement_failures_reach_the_transcript_once_from_the_owner(
         let (wire, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let events = Sender::over(wire);
         let home = SessionHome::new(root.path().join("sessions"));
-        let mut push = TreeSnapshotPush::default();
-        emit_tree_snapshot_if_revision_advanced(
-            &paths,
-            paths.records(),
-            &home,
-            &mut session,
-            &mut push,
-            &events,
-            false,
-        );
+        let mut push = TreeSnapshotPush::registered(&paths, &session);
         let intent = match action {
             "close" => UserAction::CloseTopologyNode {
                 agent_id: child.clone(),

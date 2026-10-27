@@ -422,21 +422,38 @@ mod tests {
                 .unwrap()
                 .is_ok()
         );
-        assert_eq!(
-            executor
-                .block_on(super::mark_root_interrupted(&tree_id))
-                .unwrap()
-                .unwrap(),
-            1
+        let interrupted = executor
+            .block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    super::mark_root_interrupted(&tree_id),
+                )
+                .await
+            })
+            .unwrap();
+        assert!(
+            interrupted.is_ok(),
+            "root interrupt must return before blocked release settles"
         );
+        assert_eq!(interrupted.unwrap().unwrap(), 1);
         assert!(
             !cancelled.load(std::sync::atomic::Ordering::SeqCst),
             "interrupt returns before release settles"
         );
         finish.notify_one();
-        executor
-            .block_on(crate::topology_runtime::force_release(&tree_id))
+        let released = executor
+            .block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    crate::topology_runtime::force_release(&tree_id),
+                )
+                .await
+            })
             .unwrap();
+        assert!(
+            released.is_ok(),
+            "shutdown must join the signalled release within its bound"
+        );
         assert!(cancelled.load(std::sync::atomic::Ordering::SeqCst));
     }
 

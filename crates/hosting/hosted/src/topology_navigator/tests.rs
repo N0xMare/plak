@@ -66,6 +66,130 @@ fn spawn_req() -> SpawnAgentRequest {
     SpawnAgentRequest::test_review()
 }
 
+#[derive(Default)]
+struct Detaches(std::sync::Mutex<Vec<(String, crate::agent_tree::NodeDetach)>>);
+
+impl crate::agent_tree::TopologyObserver for Detaches {
+    fn turn_usage(&self, _: crate::agent_tree::ProjectedChildTurnUsage) {}
+    fn node_spawned(&self, _: &str, _: &str, _: Option<&str>, _: &str) {}
+    fn epoch_advanced(&self, _: &str) {}
+    fn node_detached(
+        &self,
+        _: &str,
+        id: &str,
+        _: Option<&str>,
+        status: crate::agent_tree::NodeDetach,
+    ) {
+        self.0.lock().unwrap().push((id.to_owned(), status));
+    }
+}
+
+#[tokio::test]
+async fn navigator_close_emits_closed_detach_for_idle_bound_child() {
+    assert_idle_detach(false).await;
+}
+
+#[tokio::test]
+async fn navigator_stop_all_emits_closed_detach_for_idle_and_retiring_children() {
+    assert_idle_detach(true).await;
+}
+
+async fn assert_idle_detach(stop: bool) {
+    use crate::agent_tree::NodeDetach;
+    for sibling in [false, true] {
+        let (root, mut tree) = tree();
+        let idle = tree
+            .spawn_agent("root", &spawn_req(), None)
+            .unwrap()
+            .agent_id;
+        tree.bind_session_locator(&idle, "sess/idle").unwrap();
+        if stop {
+            // Stop-all targets open nodes, including an interrupted attempt
+            // whose previous turn has ended but whose session remains bound.
+            tree.bind_attempt_turn(&idle, "00000000-0000-0000-0000-000000000002")
+                .unwrap();
+            tree.interrupt_agent(
+                "root",
+                &AttemptScopedRequest {
+                    agent_id: idle.clone(),
+                    expected_attempt_id: None,
+                },
+                None,
+            )
+            .unwrap();
+            tree.release_attempt_turn(&idle).unwrap();
+        } else {
+            tree.record_turn_completed(&idle).unwrap();
+        }
+        let active = sibling.then(|| {
+            let id = tree
+                .spawn_agent("root", &spawn_req(), None)
+                .unwrap()
+                .agent_id;
+            tree.bind_session_locator(&id, "sess/live").unwrap();
+            tree.set_active_turn(&id, true).unwrap();
+            id
+        });
+        let observer = Arc::new(Detaches::default());
+        let runtime = ProductTopologyRuntime::new(
+            tree,
+            crate::topology_runtime::test_support::memory_store(),
+            Arc::new(crate::occupancy_vcs::fake::FakeVcs::new()),
+            Some(observer.clone()),
+        );
+        let finish = Arc::new(tokio::sync::Notify::new());
+        let join = if let Some(id) = &active {
+            let entered = Arc::new(tokio::sync::Notify::new());
+            assert!(
+                runtime
+                    .try_occupy_live(
+                        id.clone(),
+                        Box::new(RetiringChild {
+                            entered: entered.clone(),
+                            finish: finish.clone()
+                        })
+                    )
+                    .await
+                    .is_ok()
+            );
+            let join = runtime
+                .begin_cancel_live_many(std::slice::from_ref(id))
+                .await;
+            entered.notified().await;
+            Some(join)
+        } else {
+            None
+        };
+        let session = session_for("navtree", root.path().to_path_buf());
+        for _ in 0..2 {
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                if stop {
+                    stop_all::<TestExtension>(&session, &runtime, |_| {}).await;
+                } else {
+                    close_node::<TestExtension>(&session, &runtime, |_| {}, &idle).await;
+                }
+            })
+            .await
+            .expect("navigator must not join the live sibling");
+        }
+        assert_eq!(
+            *observer.0.lock().unwrap(),
+            [(idle.clone(), NodeDetach::Closed)]
+        );
+        if let Some(join) = join {
+            finish.notify_one();
+            assert!(!join.await.is_clean());
+            assert_eq!(
+                *observer.0.lock().unwrap(),
+                [
+                    (idle, NodeDetach::Closed),
+                    (active.unwrap(), NodeDetach::RecoveryRequired)
+                ]
+            );
+        }
+    }
+}
+
 /// Plan §F trap 1, host half: the TUI's glyph table is keyed on the strings
 /// this module produces, so a status added to any of the three enums with
 /// no glyph arm silently paints a dot. Every label crosses the crate

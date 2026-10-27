@@ -397,6 +397,19 @@ async fn stop_all<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 async fn signal_retirement(runtime: &ProductTopologyRuntime, ids: &[String]) {
+    {
+        let live = runtime.live.lock().await;
+        let _ =
+            runtime.driver().mutate(|tree| {
+                for id in ids.iter().filter(|id| !live.contains_key(id)) {
+                    if let Some(status) = tree.node(id).ok().and_then(|node| {
+                        crate::agent_tree::NodeDetach::from_node_status(node.status)
+                    }) {
+                        tree.try_emit_tree_node_detached(runtime.observer().as_ref(), id, status);
+                    }
+                }
+            });
+    }
     let join = runtime.begin_cancel_live_many(ids).await;
     tokio::spawn(async move {
         let report = join.await;

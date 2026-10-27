@@ -88,25 +88,28 @@ impl TopologyTool {
         };
         let canceller = canceller.clone();
         let payload_text = payload.to_string();
-        self.run_retirement(move |tool, signalled| async move {
-            let cancellation = canceller
-                .cancel_agents(vec![request.agent_id.clone()], signalled)
-                .await;
-            tool.finish_cancel_receipt(
-                &operation_id,
-                &caller,
-                "interrupt_agent",
-                &request,
-                &status,
-                &cancellation,
-            )?;
-            match cancellation {
-                Ok(_) => ToolOutcome::success_text(payload.to_string()),
-                Err(failure) => {
-                    tool.fail_closed_cancel(failure, std::slice::from_ref(&request.agent_id))
+        self.run_retirement(
+            vec![request.agent_id.clone()],
+            move |tool, signalled| async move {
+                let cancellation = canceller
+                    .cancel_agents(vec![request.agent_id.clone()], signalled)
+                    .await;
+                tool.finish_cancel_receipt(
+                    &operation_id,
+                    &caller,
+                    "interrupt_agent",
+                    &request,
+                    &status,
+                    &cancellation,
+                )?;
+                match cancellation {
+                    Ok(_) => ToolOutcome::success_text(payload.to_string()),
+                    Err(failure) => {
+                        tool.fail_closed_cancel(failure, std::slice::from_ref(&request.agent_id))
+                    }
                 }
-            }
-        })
+            },
+        )
         .await?;
         ToolOutcome::success_text(payload_text)
     }
@@ -179,7 +182,7 @@ impl TopologyTool {
             return ToolOutcome::success_text(payload.to_string());
         }
         let payload_text = payload.to_string();
-        self.run_retirement(move |tool, signalled| async move {
+        self.run_retirement(ids.clone(), move |tool, signalled| async move {
             let mut cancellation = if let Some(canceller) = tool.canceller() {
                 canceller.cancel_agents(ids.clone(), signalled).await
             } else {
@@ -255,20 +258,45 @@ impl TopologyTool {
 
     /// The independently owned join settles the prepared receipt, not the
     /// requesting tool future. A returned intent is not a release receipt.
-    async fn run_retirement<F, Fut>(&self, work: F) -> Result<(), ToolRuntimeError>
+    async fn run_retirement<F, Fut>(
+        &self,
+        target_ids: Vec<String>,
+        work: F,
+    ) -> Result<(), ToolRuntimeError>
     where
         F: FnOnce(Self, tokio::sync::oneshot::Sender<()>) -> Fut,
         Fut: Future<Output = Result<ToolOutcome, ToolRuntimeError>> + Send + 'static,
     {
         let (signal, signalled) = tokio::sync::oneshot::channel();
+        let owners = self
+            .driver
+            .read(|tree| {
+                target_ids
+                    .iter()
+                    .map(|id| {
+                        (
+                            id.clone(),
+                            tree.attempt(id).map(|attempt| attempt.attempt_id.clone()),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|_| target_ids.into_iter().map(|id| (id, None)).collect());
         let work = work(self.clone(), signal);
         self.driver.spawn_retirement(async move {
-            // Completion cannot replace the dispatched intent acknowledgement.
-            let _ = work.await;
+            if let Err(error) = work.await {
+                tracing::error!(target: "plak.topology", agent_attempts = ?owners,
+                    error_kind = ?error.kind(), "retirement completion failed");
+            }
         });
-        signalled.await.map_err(|_| {
-            ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "retirement signal failed")
-        })
+        // The saved intent is acknowledged even if dispatch is still pending;
+        // only the owner can establish release or publish its failure.
+        let _ = tokio::time::timeout(
+            plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
+            signalled,
+        )
+        .await;
+        Ok(())
     }
 
     /// `recover_agent`: authority under the lock, then the host's exact
