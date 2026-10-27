@@ -61,7 +61,13 @@ fn settle_tui_round(
             })
         ) {
             drop(host_mailbox);
-            join_host_worker_bounded(join, HOST_WORKER_JOIN_TIMEOUT, label)?;
+            if let Err(error) = join_host_worker_bounded(join, HOST_WORKER_JOIN_TIMEOUT, label) {
+                if let Some(terminal) = persistent_tui.take() {
+                    let _ = terminal.close();
+                }
+                tui::report_background_panic();
+                return Err(error);
+            }
             return Ok(ui);
         }
     }
@@ -92,7 +98,9 @@ fn settle_tui_round(
         let _ = writeln!(stdout, "reloading…");
         let _ = stdout.flush();
         host_mailbox.request_abandon_and_release();
-        let _ = join_host_worker_bounded(join, tui_timing::remaining_exit_budget(), label);
+        if join_host_worker_bounded(join, tui_timing::remaining_exit_budget(), label).is_err() {
+            tui::report_background_panic();
+        }
         tui_timing::exiting();
         return restoration.map(|()| ui);
     }
@@ -108,11 +116,15 @@ fn settle_tui_round(
     if matches!(&ui, Ok(tui::TuiOutcome::Exited { .. })) {
         // Restoration problems were already written to stderr. Returning
         // would join host release and hold the cooked shell.
-        exit_restored_tui(join, host_mailbox);
+        exit_restored_tui(join, host_mailbox, tui::report_background_panic);
     }
     host_mailbox.request_abandon_and_release();
     drop(host_mailbox);
-    let cleanup = combine_cleanup(join_tui_host_worker(join, label), restoration);
+    let joined = join_tui_host_worker(join, label);
+    if joined.is_err() {
+        tui::report_background_panic();
+    }
+    let cleanup = combine_cleanup(joined, restoration);
     match (ui, cleanup) {
         (ui, Ok(())) => Ok(ui),
         (Ok(_), Err(cleanup)) => Err(cleanup),

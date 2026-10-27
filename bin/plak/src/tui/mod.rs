@@ -79,6 +79,7 @@ mod perf_gate_tests;
 pub(crate) use highlight::warm_in_background as warm_highlighting;
 pub use ui::PersistentTerminal;
 pub(crate) use ui::force_restore_terminal;
+pub(crate) use ui::report_background_panic;
 
 #[cfg(test)]
 use blocks::LineLayout;

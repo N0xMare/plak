@@ -61,9 +61,11 @@ fn stop_background_processes_for_interactive_exit(
 ///
 /// The mailbox is forgotten rather than dropped when the grace wins: dropping
 /// the last sender is `Disconnected`, which the host also treats as Quit.
+/// A panicked join invokes the product's content-free report callback.
 pub fn exit_restored_tui(
     worker: thread::JoinHandle<CliResult<()>>,
     host_mailbox: crate::surface_protocol::UserActionSender,
+    report_worker_failure: fn(),
 ) -> ! {
     stop_background_processes_for_interactive_exit(&host_mailbox);
     host_mailbox.request_abandon_and_release();
@@ -72,7 +74,9 @@ pub fn exit_restored_tui(
         thread::sleep(Duration::from_millis(5));
     }
     if worker.is_finished() {
-        let _ = worker.join();
+        if worker.join().is_err() {
+            report_worker_failure();
+        }
     } else {
         std::mem::forget(worker);
     }

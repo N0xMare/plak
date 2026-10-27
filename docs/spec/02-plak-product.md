@@ -3673,8 +3673,13 @@ exactly-once acknowledgement across reopen.
 While the TUI owns the terminal, only a panic on its owning thread restores
 terminal modes and the screen, then invokes the previous panic hook to print.
 A panic on any other thread, caught or uncaught, leaves the terminal intact
-and reports only thread name and source location through tracing, never the
-payload or terminal output. With no terminal owned, the previous panic hook
+and reports only thread name and source location to the diagnostics log when
+one is enabled, never the payload or terminal output. The most recent such
+site is also retained in memory without requiring diagnostics configuration.
+After restoration, a failed worker join reports that site as one exit line
+without replacing its original typed failure; the payload is never retained
+or printed.
+With no terminal owned, the previous panic hook
 retains its normal behavior. Normal exit and error returns still restore through
 the terminal guard; in-process session handoffs keep its ownership and alternate
 screen. Terminal initialization does not install an unconditional library panic

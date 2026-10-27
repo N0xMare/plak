@@ -252,6 +252,32 @@ pub(super) fn enable_terminal_modes(restoration: &mut TerminalRestoration, mouse
     restoration.focus_change = stdout().execute(EnableFocusChange).is_ok();
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InitStep {
+    RawMode,
+    AlternateScreen,
+}
+
+fn initialize_terminal(
+    #[cfg(test)] mut after_step: impl FnMut(InitStep) -> Result<(), TuiError>,
+) -> Result<(DefaultTerminal, TerminalRestoration), TuiError> {
+    let restoration = TerminalRestoration::new();
+    super::terminal_panic::claim();
+    // The library's init helper installs an unconditional panic hook.
+    crossterm::terminal::enable_raw_mode().map_err(|error| from_io(&error))?;
+    #[cfg(test)]
+    after_step(InitStep::RawMode)?;
+    stdout()
+        .execute(crossterm::terminal::EnterAlternateScreen)
+        .map_err(|error| from_io(&error))?;
+    #[cfg(test)]
+    after_step(InitStep::AlternateScreen)?;
+    let terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(stdout()))
+        .map_err(|error| from_io(&error))?;
+    Ok((terminal, restoration))
+}
+
 /// Owns one initialized terminal across TUI handoffs so resume stays in the
 /// alternate screen instead of flashing the host shell.
 pub struct PersistentTerminal {
@@ -272,16 +298,10 @@ impl PersistentTerminal {
             return Err(TuiError::NotATty);
         }
         install_terminal_panic_hook();
-        let mut restoration = TerminalRestoration::new();
-        super::terminal_panic::claim();
-        // ratatui::try_init installs an unconditional restore hook, which would
-        // bypass the owner-thread gate on a caught background panic.
-        crossterm::terminal::enable_raw_mode().map_err(|error| from_io(&error))?;
-        stdout()
-            .execute(crossterm::terminal::EnterAlternateScreen)
-            .map_err(|error| from_io(&error))?;
-        let terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(stdout()))
-            .map_err(|error| from_io(&error))?;
+        let (terminal, mut restoration) = initialize_terminal(
+            #[cfg(test)]
+            |_| Ok(()),
+        )?;
         enable_terminal_modes(&mut restoration, mouse_enabled);
         *TERMINAL_HELD
             .lock()
@@ -604,6 +624,10 @@ pub(super) fn run_app(
         let reason = RedrawSchedule::reason(work);
         if reason.paints() || app.copy_selection_after_draw {
             draw_frame(terminal, &mut app)?;
+            #[cfg(test)]
+            if let Some(after_draw) = app.after_draw.take() {
+                after_draw();
+            }
             if let Some(actions) = actions {
                 actions.mark_promptable();
             }
@@ -832,6 +856,9 @@ pub(super) fn send_user_action(
 pub(super) fn display_workspace(path: &Path) -> String {
     path.display().to_string()
 }
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {

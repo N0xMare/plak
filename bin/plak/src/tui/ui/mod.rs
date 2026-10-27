@@ -408,6 +408,8 @@ type LastTurnUsage = (u64, u64, u64, u64, u64, Option<u64>, Option<u64>);
     reason = "independent session/UI flags, not one state machine"
 )]
 pub(crate) struct App {
+    #[cfg(test)]
+    after_draw: Option<fn()>,
     pub(crate) session_id: Option<String>,
     #[allow(
         dead_code,
@@ -832,6 +834,8 @@ impl App {
         let mut pane = pane::TranscriptPane::new(blocks);
         pane.presentation_session.clone_from(&launch.session_id);
         Self {
+            #[cfg(test)]
+            after_draw: None,
             session_id: launch.session_id,
             workspace: display_workspace(&launch.workspace),
             workspace_chrome,
@@ -1083,6 +1087,7 @@ pub use self::terminal::PersistentTerminal;
 pub(crate) use self::terminal::force_restore_terminal;
 #[cfg(test)]
 pub(crate) use self::terminal::run_hosted;
+pub(crate) use self::terminal_panic::report_background_panic;
 
 mod agent_view;
 #[cfg(test)]
