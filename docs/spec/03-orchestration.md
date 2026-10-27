@@ -4543,8 +4543,10 @@ regardless of whether a tool, navigator action or root interrupt initiated it;
 concurrent joiners and a late failure after deadline evidence do not repeat them.
 Navigator close detaches for live, starting or retiring children are deferred
 until their release owner establishes the outcome, so an eager closed observation
-cannot hide a retirement failure. A bound child without a live owner instead
-emits its terminal detach at cancellation admission, including when live siblings
+cannot hide a retirement failure. The startup owner emits the closed detach after
+successful release publication, using the same detach dedupe as the tool path.
+A bound child without a live owner instead emits its terminal detach at
+cancellation admission, including when live siblings
 are still retiring. Faces subscribe to owner notices when they register the
 runtime, before the first snapshot; overflow logs its lost-observation count.
 Background tool errors log only captured agent/attempt ids and the typed error

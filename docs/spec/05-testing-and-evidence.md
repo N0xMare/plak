@@ -4039,7 +4039,11 @@ Owner observation laws require one recovery detach and transcript notice across
 concurrent joiners, late release failure and each navigator cancellation entry point.
 Idle bound-node laws cover navigator close and stop-all, alone and beside a
 blocked retiring sibling: the idle detach is immediate and the live outcome
-remains owner-published. A synchronous oneshot waker samples the actor's cancelled
+remains owner-published.
+Startup-reserved children closed through either navigator action emit no early
+detach, then exactly one closed detach after successful startup release, including
+when another detach producer runs afterward.
+A synchronous oneshot waker samples the actor's cancelled
 state at the dispatch signal itself, rather than after a requesting task resumes.
 Virtual-time laws require a saved cancellation intent to be acknowledged when
 dispatch exceeds its own allowance or its sender disappears, while its receipt

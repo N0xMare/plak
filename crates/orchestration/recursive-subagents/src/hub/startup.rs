@@ -343,7 +343,20 @@ impl ProductTopologyRuntime {
                 .is_some_and(|entry| entry.same_owner(startup))
             {
                 live.starting.remove(agent_id);
-                let _ = self.driver.mutate(|tree| tree.release_turn_owner(agent_id));
+                let _ = self.driver.mutate(|tree| {
+                    tree.release_turn_owner(agent_id);
+                    if result.is_ok()
+                        && tree
+                            .node(agent_id)
+                            .is_ok_and(|node| node.status == crate::protocol::NodeStatus::Closed)
+                    {
+                        tree.try_emit_tree_node_detached(
+                            self.driver.observer(),
+                            agent_id,
+                            crate::tree::NodeDetach::Closed,
+                        );
+                    }
+                });
             }
             live.retirement_recovery.clone()
         };

@@ -94,6 +94,66 @@ async fn navigator_stop_all_emits_closed_detach_for_idle_and_retiring_children()
     assert_idle_detach(true).await;
 }
 
+#[tokio::test]
+async fn navigator_close_of_starting_child_emits_closed_detach() {
+    use crate::agent_tree::NodeDetach;
+    for stop in [false, true] {
+        let (root, mut tree) = tree();
+        let id = tree
+            .spawn_agent("root", &spawn_req(), None)
+            .unwrap()
+            .agent_id;
+        tree.bind_session_locator(&id, "sess/starting").unwrap();
+        let observer = Arc::new(Detaches::default());
+        let runtime = ProductTopologyRuntime::new(
+            tree,
+            crate::topology_runtime::test_support::memory_store(),
+            Arc::new(crate::occupancy_vcs::fake::FakeVcs::new()),
+            Some(observer.clone()),
+        );
+        let startup = runtime.reserve_startup(&id).await.unwrap();
+        let session = session_for("navtree", root.path().to_path_buf());
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            if stop {
+                stop_all::<TestExtension>(&session, &runtime, |_| {}).await;
+            } else {
+                close_node::<TestExtension>(&session, &runtime, |_| {}, &id).await;
+            }
+        })
+        .await
+        .expect("navigator must not join the startup release");
+        assert!(startup.is_cancelled());
+        assert!(observer.0.lock().unwrap().is_empty());
+        for _ in 0..2 {
+            runtime
+                .finish_startup(
+                    &id,
+                    &startup,
+                    crate::topology_runtime::LiveRelease::default(),
+                )
+                .await;
+            assert_eq!(
+                *observer.0.lock().unwrap(),
+                [(id.clone(), NodeDetach::Closed)]
+            );
+            let _ = runtime
+                .driver()
+                .mutate(|tree| {
+                    tree.try_emit_tree_node_detached(
+                        runtime.observer().as_ref(),
+                        &id,
+                        NodeDetach::Closed,
+                    );
+                })
+                .unwrap();
+            assert_eq!(
+                *observer.0.lock().unwrap(),
+                [(id.clone(), NodeDetach::Closed)]
+            );
+        }
+    }
+}
+
 async fn assert_idle_detach(stop: bool) {
     use crate::agent_tree::NodeDetach;
     for sibling in [false, true] {
