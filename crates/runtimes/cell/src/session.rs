@@ -1156,7 +1156,7 @@ mod tests {
                         .collect();
                     let _ = writeln!(
                         body,
-                        "head -c {} | cmp - \"$0.{}\" || exit 1",
+                        "dd bs=1 count={} 2>/dev/null | cmp - \"$0.{}\" || exit 1",
                         bytes.len(),
                         writes.len()
                     );
@@ -1167,7 +1167,7 @@ mod tests {
                         .iter()
                         .map(|frame| encode_frame(frame).expect("host frame").len())
                         .sum();
-                    let _ = writeln!(body, "head -c {bytes} >/dev/null");
+                    let _ = writeln!(body, "dd bs=1 count={bytes} >/dev/null 2>&1");
                 }
                 Step::Write(frames) => {
                     let _ = writeln!(body, "cat \"$0.{}\"", writes.len());
