@@ -382,8 +382,8 @@ finishes normally; model streams and provider-hosted operations are unchanged.
 Nested waits receive Notice but not the Steer or Background variants; an
 accepted steer forwards Notice to their active receivers and seeds it for
 nested dispatch while steering remains pending. An outer cell yields
-only after nested settlement and, for a parked cell, before its outer wait
-has been polled; its
+only after nested settlement; an in-flight parked-cell resume is expedited
+rather than abandoned. Its
 observation deadline stays suspended during the nested hold. Host mail signals
 name the checkpoint at observation; a
 boundary or consumer commit advancing that checkpoint makes the signal stale.
@@ -414,22 +414,25 @@ through the existing single consumer, independently of this yield signal.
 
 Local cell observations (`exec`, `exec_js`, and their non-terminating outer waits) return an
 ordinary successful yield on steer at a nested-quiescent boundary. A parked
-cell's outer wait yields only before its first poll. Once that wait may have
-issued its Resume, the driver
-retains the observation until it answers within its requested window (plus
-the five-second delivery allowance); notices and steer ride the next boundary
-instead of abandoning that resume. Notice delivery is therefore delayed by at
-most that observation window, apart from the nested settlement bounds below.
+cell's outer wait may yield synthetically only before its first poll, after
+a non-resuming peek gives any buffered terminal precedence. Once that wait
+may have issued its Resume, steer or Notice rearms the same observation once
+with a zero-millisecond yield deadline. The worker parks at its next idle
+boundary; the driver retains the original wait rather than issuing another
+observation or abandoning the resume. The expedited observation and delivery
+have a five-second bound after already-admitted nested work settles, independent
+of the model's requested window (including 600 seconds). A cell that cannot
+answer within that bound fails closed under the existing unknown-outcome rule.
 They never cancel or join the cell. A computing cell with no nested work yields
-at the next driver poll unless its parked-cell resume is already in flight.
+at the next driver poll, or its next idle boundary for an in-flight resume.
 Host-window waits send no Resume and remain notice/steer-preemptible after
 polling; their buffered terminal still takes precedence over a synthetic yield.
 An already dispatched serial mutation or read-only group
 finishes and settles through the sole driver, including nested delivery
-acknowledgements, before the outer observation yields. Before a parked-cell wait is
-in flight, no further nested call is admitted while steer is pending; queued
-requests remain with the cell for its next wait. An in-flight resume continues
-servicing its cell until its observation boundary. The delay is the remaining running nested calls' own execution
+acknowledgements, before the outer observation yields. No further nested call
+is admitted while steer or Notice is pending, including during an expedited
+resume; queued requests remain with the cell for its next wait. The delay is
+the remaining running nested calls' own execution
 budget plus durable settlement and delivery, not a new steer deadline. For a
 nested process start the foreground hint is at most 600 seconds; a nested empty
 `write_stdin` poll retains its first 5..300-second window, or its repeat quiet
@@ -441,8 +444,8 @@ Outer execute and wait observation deadlines suspend during dispatched nested
 execution and durable settlement, for both serial mutating calls and parallel
 read-only calls, with or without steer. On the transition to nested quiescence
 they re-arm from now: the model-operation timeout for execute and for steer
-settlement, or requested yield plus five seconds for a non-steered wait or
-an in-flight parked-cell resume even when notice or steer arrives.
+settlement, requested yield plus five seconds for a non-steered wait, or five
+seconds for an expedited parked-cell resume.
 Delivery acknowledgements remain bounded by that fresh window.
 A computing cell with no nested work retains its ordinary deadline. An outer
 deadline that elapsed inside nested execution cannot turn a steer yield into
@@ -6491,8 +6494,13 @@ A cell's terminal is never lost to observation abandonment. Engine-parked
 cells retain one coalesced pending yield and a separate terminal slot; a
 buffered terminal takes precedence over the pending yield and carries its
 output in order. Coalesced output retains at most 8 MiB and 4,096 items;
-overflow retains a bounded prefix with an explicit omission warning, without
-discarding the terminal. Dropping a wait does not forget its in-flight Resume.
+overflow within one yield or across coalesced yields uses the same bounded
+prefix and omission warning, without discarding the terminal. The first
+terminal is immutable: neither a later loss, result nor yield replaces it or
+appends output. Dropping a wait does not forget its in-flight Resume. A later
+wait consumes an empty buffered yield and resumes for a real observation
+window instead of returning an instant empty running answer. Shutdown and
+stop release an in-flight observation with `cell worker stopped`.
 Host-window cells likewise retain output and their watch-based terminal
 independently of abandoned observations. True worker or host loss remains
 outcome-unknown; this does not change recovery classification.

@@ -416,6 +416,11 @@ impl CellSession {
     /// Observes `cell` for another `window`: a buffered response first,
     /// otherwise a resume of its parked yield or another host window.
     pub async fn wait(&self, cell: &str, window: u64) -> WaitOutcome {
+        if let Some(buffered) = self.try_take(cell).await
+            && !matches!(&buffered, WaitOutcome::Live(CellResponse::Yielded { items, .. }) if items.is_empty())
+        {
+            return buffered;
+        }
         let Ok(cell) = cell.parse::<u64>() else {
             return WaitOutcome::Missing {
                 error: Some("invalid cell id".into()),
@@ -450,6 +455,58 @@ impl CellSession {
             Ok(response) => WaitOutcome::Live(response),
             Err(loss) => WaitOutcome::Lost(loss),
         }
+    }
+
+    /// Takes a buffered observation without issuing Resume or waiting for output.
+    pub async fn try_take(&self, cell: &str) -> Option<WaitOutcome> {
+        let cell = cell.parse::<u64>().ok()?;
+        if !matches!(self.mode, ObservationMode::EngineParked) {
+            if !self.terminal_ready(cell).await {
+                return None;
+            }
+            return Some(
+                match observe_window(Arc::clone(&self.windows), cell, 0).await {
+                    Ok(response) => WaitOutcome::Live(response),
+                    Err(loss) => WaitOutcome::Lost(loss),
+                },
+            );
+        }
+        let mut streams = self.streams.lock().await;
+        let response = streams.get(&cell)?.take(cell)?;
+        if !matches!(response, Ok(CellResponse::Yielded { .. })) {
+            streams.remove(&cell);
+        }
+        Some(match response {
+            Ok(response) => WaitOutcome::Live(response),
+            Err(loss) => WaitOutcome::Lost(loss),
+        })
+    }
+
+    /// Rearms an in-flight parked observation for the next worker idle boundary.
+    ///
+    /// # Errors
+    /// Invalid cell ids or resume-admission failures. A disconnected worker
+    /// is observed through its outstanding wait. Window-only observers need no rearm.
+    pub async fn expedite(&self, cell: &str) -> Result<(), String> {
+        if !matches!(self.mode, ObservationMode::EngineParked) {
+            return Ok(());
+        }
+        let cell = cell
+            .parse::<u64>()
+            .map_err(|_| "invalid cell id".to_owned())?;
+        // The pump still drains a terminal sent before transport loss.
+        if self
+            .streams
+            .lock()
+            .await
+            .get(&cell)
+            .is_some_and(|entry| entry.resuming())
+            && let Err(loss) = self.client.resume(cell, 0)
+            && !self.client.is_lost()
+        {
+            return Err(loss);
+        }
+        Ok(())
     }
 
     /// Stops the session's cell and shuts its worker down.
@@ -604,10 +661,7 @@ async fn pump_parked(pump: Pump) {
                 }
             }
             CellEvent::Output { item, .. } => {
-                if let Err(error) = collected.append(item, false) {
-                    pump.lose(error).await;
-                    break;
-                }
+                collected.append_truncated(item);
             }
             CellEvent::Waiting { .. } => {
                 pump.lose("cell worker waited inside an engine-parked cell".into())
@@ -616,10 +670,14 @@ async fn pump_parked(pump: Pump) {
             }
             CellEvent::Yielded { .. } => {
                 if let Some(entry) = pump.completions.lock().await.get(&pump.cell) {
-                    entry.publish(Ok(CellResponse::Yielded {
-                        cell: pump.cell,
-                        items: std::mem::take(&mut collected.items),
-                    }));
+                    let output = std::mem::take(&mut collected);
+                    entry.publish_collected(
+                        Ok(CellResponse::Yielded {
+                            cell: pump.cell,
+                            items: output.items,
+                        }),
+                        output.truncated,
+                    );
                 }
             }
             CellEvent::Done { outcome, .. } => {
@@ -632,7 +690,7 @@ async fn pump_parked(pump: Pump) {
                         message, stored, ..
                     } => (stored, Some(message)),
                 };
-                pump.finish(stored, collected.items, error).await;
+                pump.finish(stored, collected, error).await;
                 break;
             }
         }
@@ -752,9 +810,29 @@ async fn sleep_until(deadline: Option<tokio::time::Instant>) {
 struct CollectedOutput {
     items: Vec<OutputItem>,
     bytes: usize,
+    truncated: bool,
 }
 
 impl CollectedOutput {
+    fn append_truncated(&mut self, item: OutputItem) {
+        if self.truncated {
+            return;
+        }
+        if self.append(item, false).is_ok() {
+            return;
+        }
+        // The same bounded prefix and warning apply within and across yields.
+        let warning = OutputItem::Text {
+            text: "Warning: cell output omitted: collected output limit".into(),
+        };
+        while self.append(warning.clone(), false).is_err() {
+            if let Some(item) = self.items.pop() {
+                self.bytes -= output_bytes(&item);
+            }
+        }
+        self.truncated = true;
+    }
+
     /// Buffers one item; with `merge_text`, consecutive text joins one item.
     fn append(&mut self, item: OutputItem, merge_text: bool) -> Result<(), String> {
         let bytes = output_bytes(&item);
@@ -871,7 +949,7 @@ impl Pump {
     async fn finish(
         &self,
         stored: HashMap<String, Value>,
-        items: Vec<OutputItem>,
+        output: CollectedOutput,
         error: Option<String>,
     ) {
         let mut retained = self.stored.lock().await;
@@ -885,11 +963,14 @@ impl Pump {
         }
         drop(retained);
         if let Some(entry) = self.completions.lock().await.remove(&self.cell) {
-            entry.publish(Ok(CellResponse::Result {
-                cell: self.cell,
-                items,
-                error,
-            }));
+            entry.publish_collected(
+                Ok(CellResponse::Result {
+                    cell: self.cell,
+                    items: output.items,
+                    error,
+                }),
+                output.truncated,
+            );
         }
     }
 }
@@ -980,6 +1061,7 @@ mod tests {
     use std::{fmt::Write as _, os::unix::fs::PermissionsExt as _, path::PathBuf};
 
     mod abandonment;
+    mod observation;
 
     const SOURCE: &str = "text('scripted')";
     const WINDOW: u64 = 10_000;
@@ -988,6 +1070,8 @@ mod tests {
     enum Step {
         /// Consume exactly these host frames.
         Read(Vec<HostFrame>),
+        /// Consume and compare these exact host frames.
+        ReadExact(Vec<HostFrame>),
         /// Write these worker frames.
         Write(Vec<WorkerFrame>),
     }
@@ -1065,6 +1149,19 @@ mod tests {
         let mut body = String::from("#!/bin/sh\ncat \"$0.0\"\n");
         for step in steps {
             match step {
+                Step::ReadExact(frames) => {
+                    let bytes: Vec<_> = frames
+                        .iter()
+                        .flat_map(|frame| encode_frame(frame).expect("host frame"))
+                        .collect();
+                    let _ = writeln!(
+                        body,
+                        "head -c {} | cmp - \"$0.{}\" || exit 1",
+                        bytes.len(),
+                        writes.len()
+                    );
+                    writes.push(bytes);
+                }
                 Step::Read(frames) => {
                     let bytes: usize = frames
                         .iter()

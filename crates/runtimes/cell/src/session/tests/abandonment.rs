@@ -1,6 +1,6 @@
 use super::*;
 
-async fn finish_pump(session: &CellSession) {
+pub(super) async fn finish_pump(session: &CellSession) {
     let mut pump = session.pump.lock().await.take().expect("pump");
     tokio::time::timeout(Duration::from_secs(5), pump.0.take().expect("task"))
         .await

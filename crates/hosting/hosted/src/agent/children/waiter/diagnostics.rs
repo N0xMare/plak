@@ -36,10 +36,12 @@ impl tracing::Subscriber for Warnings {
 fn recovery_warning_identifies_the_turn_without_content() {
     let warnings = Warnings::default();
     let attempt = crate::agent_tree_protocol::AttemptId::new("child-test", 1);
+    let turn: TurnId = "00000000-0000-0000-0000-000000000102".parse().unwrap();
     tracing::subscriber::with_default(warnings.clone(), || {
         warn_recovery_required(
             "child-test",
             &attempt,
+            turn,
             plakous::agent::AgentErrorKind::OutcomeUnknown,
         );
     });
@@ -48,10 +50,11 @@ fn recovery_warning_identifies_the_turn_without_content() {
     assert!(events[0].contains("agent_id=\"child-test\""));
     assert!(events[0].contains(&format!("attempt_id={attempt}")));
     assert!(events[0].contains("error_kind=OutcomeUnknown"));
+    assert!(events[0].contains(&format!("turn_id={turn}")));
     assert!(!events[0].contains("error="));
     assert_eq!(
         events[0].split('=').count(),
-        5,
-        "only message and three identity fields"
+        6,
+        "only message and four identity fields"
     );
 }

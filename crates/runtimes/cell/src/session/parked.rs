@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{CellCompletion, CellResponse, CollectedOutput, OutputItem, ParkedCells, output_bytes};
+use super::{CellCompletion, CellResponse, CollectedOutput, ParkedCells};
 use tokio::sync::Notify;
 
 pub(super) struct ParkedCell {
@@ -15,7 +15,6 @@ struct Mailbox {
     output: CollectedOutput,
     yielded: bool,
     terminal: Option<Result<Option<String>, String>>,
-    truncated: bool,
     resume_in_flight: bool,
 }
 
@@ -45,10 +44,17 @@ impl ParkedCell {
     }
 
     pub(super) fn publish(&self, response: CellCompletion) {
+        self.publish_collected(response, false);
+    }
+
+    pub(super) fn publish_collected(&self, response: CellCompletion, truncated: bool) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.terminal.is_some() {
+            return;
+        }
         let items = match response {
             Ok(CellResponse::Yielded { items, .. }) => {
                 state.yielded = true;
@@ -65,28 +71,23 @@ impl ParkedCell {
             }
         };
         for item in items {
-            if state.truncated {
-                break;
-            }
-            if state.output.append(item, false).is_err() {
-                // Keep the bounded prefix and explicitly mark omitted output.
-                // The terminal has its own slot even when the output is full.
-                let warning = OutputItem::Text {
-                    text: "Warning: cell output omitted: collected output limit".into(),
-                };
-                while state.output.append(warning.clone(), false).is_err() {
-                    if let Some(item) = state.output.items.pop() {
-                        state.output.bytes -= output_bytes(&item);
-                    }
-                }
-                state.truncated = true;
-            }
+            state.output.append_truncated(item);
         }
+        // A truncated producer batch stays truncated while later yields coalesce.
+        state.output.truncated |= truncated;
         drop(state);
         self.changed.notify_one();
     }
 
-    fn take(&self, cell: u64) -> Option<CellCompletion> {
+    pub(super) fn resuming(&self) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.resume_in_flight && !state.yielded && state.terminal.is_none()
+    }
+
+    pub(super) fn take(&self, cell: u64) -> Option<CellCompletion> {
         let mut state = self
             .state
             .lock()
@@ -96,7 +97,6 @@ impl ParkedCell {
         }
         let items = std::mem::take(&mut state.output).items;
         state.yielded = false;
-        state.truncated = false;
         Some(match state.terminal.take() {
             Some(Ok(error)) => Ok(CellResponse::Result { cell, items, error }),
             Some(Err(loss)) => Err(loss),
@@ -128,7 +128,9 @@ pub(super) async fn observe_parked(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{MAX_COLLECTED_OUTPUT_BYTES, MAX_COLLECTED_OUTPUT_ITEMS};
+    use super::super::{
+        MAX_COLLECTED_OUTPUT_BYTES, MAX_COLLECTED_OUTPUT_ITEMS, OutputItem, output_bytes,
+    };
     use super::*;
 
     #[test]
@@ -189,5 +191,44 @@ mod tests {
             !entry.begin_resume(),
             "a cancelled waiter still owns its resume"
         );
+    }
+
+    fn terminal() -> CellResponse {
+        CellResponse::Result {
+            cell: 1,
+            items: vec![OutputItem::Text {
+                text: "terminal".into(),
+            }],
+            error: None,
+        }
+    }
+
+    #[test]
+    fn loss_after_terminal_keeps_the_result() {
+        let entry = ParkedCell::default();
+        entry.publish(Ok(terminal()));
+        entry.publish(Err("late loss".into()));
+        assert_eq!(entry.take(1), Some(Ok(terminal())));
+    }
+
+    #[test]
+    fn terminal_after_loss_keeps_the_loss() {
+        let entry = ParkedCell::default();
+        entry.publish(Err("first loss".into()));
+        entry.publish(Ok(terminal()));
+        assert_eq!(entry.take(1), Some(Err("first loss".into())));
+    }
+
+    #[test]
+    fn yield_after_terminal_keeps_the_terminal_output_exactly() {
+        let entry = ParkedCell::default();
+        entry.publish(Ok(terminal()));
+        entry.publish(Ok(CellResponse::Yielded {
+            cell: 1,
+            items: vec![OutputItem::Text {
+                text: "late yield".into(),
+            }],
+        }));
+        assert_eq!(entry.take(1), Some(Ok(terminal())));
     }
 }

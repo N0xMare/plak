@@ -16,6 +16,7 @@ pub(super) struct FakeCompositionEvidence {
     pub(super) wait_entered: Notify,
     pub(super) wait_release: Notify,
     pub(super) abandoned_waits: AtomicUsize,
+    pub(super) expedites: AtomicUsize,
     pub(super) events: Mutex<Option<tokio::sync::mpsc::UnboundedSender<LocalCompositionEvent>>>,
     pub(super) fail_wait: AtomicBool,
     pub(super) lose_terminate: AtomicBool,

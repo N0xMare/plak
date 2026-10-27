@@ -630,7 +630,7 @@ impl Driver {
                 command,
                 attempt_id,
                 state,
-                events,
+                (session, events),
                 &mut nested_executions,
                 &mut observation,
             )
@@ -760,7 +760,7 @@ impl Driver {
                 command,
                 attempt_id,
                 state,
-                events,
+                (session, events),
                 &mut nested_executions,
                 &mut observation,
             )

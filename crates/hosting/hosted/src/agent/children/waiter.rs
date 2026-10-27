@@ -19,9 +19,10 @@ mod diagnostics;
 fn warn_recovery_required(
     agent_id: &str,
     attempt: &crate::agent_tree_protocol::AttemptId,
+    turn_id: TurnId,
     error_kind: plakous::agent::AgentErrorKind,
 ) {
-    tracing::warn!(target: "plak.topology", agent_id, attempt_id = %attempt,
+    tracing::warn!(target: "plak.topology", agent_id, attempt_id = %attempt, %turn_id,
         ?error_kind, "child turn requires recovery; recycling child");
 }
 
@@ -131,7 +132,7 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
             if let Ok(result) = &terminal
                 && let TurnResultOutcome::RecoveryRequired(error) = result.outcome()
             {
-                warn_recovery_required(&agent_id, &attempt, error.kind());
+                warn_recovery_required(&agent_id, &attempt, completed_turn, error.kind());
                 project_turn_end(&driver, feed.as_ref(), &agent_id).await;
                 if driver
                     .read(|tree| identity.still_owns(tree, &agent_id))

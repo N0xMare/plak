@@ -147,6 +147,11 @@ fn job_notices_preserve_the_resumed_cell_observation() -> TestResult {
         turn.control().notice().await?;
         progress.store(5, Ordering::Release);
         assert_eq!(
+            evidence.expedites.load(Ordering::Acquire),
+            1,
+            "repeated notices rearm the existing observation only once"
+        );
+        assert_eq!(
             evidence.abandoned_waits.load(Ordering::Acquire),
             0,
             "notice abandoned an in-flight resume and returned stale running state"

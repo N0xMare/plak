@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "composition_steer_tests/observation.rs"]
+mod observation;
+
 #[derive(Default)]
 struct GroupSteerTool {
     dispatches: AtomicUsize,

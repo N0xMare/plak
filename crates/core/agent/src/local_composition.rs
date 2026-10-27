@@ -426,6 +426,13 @@ pub trait LocalCompositionSession: Send + Sync {
         &self,
         cell_id: String,
     ) -> Pin<Box<dyn Future<Output = LocalCompositionTerminateResult> + Send + '_>>;
+    /// Takes buffered output or a terminal without starting another observation.
+    fn buffered(
+        &self,
+        cell_id: String,
+    ) -> LocalCompositionFuture<'_, Option<LocalCompositionWaitOutcome>>;
+    /// Rearms an already-resumed cell to yield at its next idle boundary.
+    fn expedite(&self, cell_id: String) -> LocalCompositionSessionFuture<'_, ()>;
     fn shutdown(&self)
     -> Pin<Box<dyn Future<Output = LocalCompositionShutdownResult> + Send + '_>>;
 

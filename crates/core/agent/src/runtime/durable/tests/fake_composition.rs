@@ -502,6 +502,43 @@ enum FakeSession {
     Lineage(LineageSession),
 }
 impl LocalCompositionSession for FakeSession {
+    fn buffered(
+        &self,
+        cell_id: String,
+    ) -> LocalCompositionFuture<'_, Option<LocalCompositionWaitOutcome>> {
+        Box::pin(async move {
+            if let Self::Cancel(fixture) = self
+                && fixture.evidence.buffered_wait.load(Ordering::Acquire)
+                && fixture.evidence.release_cell.load(Ordering::Acquire)
+            {
+                return Ok(Some(LocalCompositionWaitOutcome::Live(
+                    LocalCompositionResponse::Result {
+                        cell_id,
+                        items: vec![LocalCompositionContentItem::Text("buffered result".into())],
+                        error: None,
+                    },
+                )));
+            }
+            Ok(None)
+        })
+    }
+
+    fn expedite(&self, _cell_id: String) -> LocalCompositionSessionFuture<'_, ()> {
+        Box::pin(async move {
+            match self {
+                Self::Cancel(fixture) => {
+                    fixture.evidence.expedites.fetch_add(1, Ordering::AcqRel);
+                    fixture.evidence.expedited.notify_one();
+                }
+                Self::Neutral(fixture) => {
+                    fixture.evidence.expedites.fetch_add(1, Ordering::AcqRel);
+                }
+                Self::Scheduler(_) | Self::Lineage(_) => {}
+            }
+            Ok(())
+        })
+    }
+
     fn execute(
         &self,
         request: LocalCompositionExecuteRequest,
@@ -872,6 +909,26 @@ impl LocalCompositionSession for FakeSession {
             }
             Self::Cancel(fixture) => {
                 fixture.evidence.wait_count.fetch_add(1, Ordering::AcqRel);
+                if let Some(control) = lock_mutex(&fixture.evidence.steer_on_wait).take() {
+                    let _ = futures_util::FutureExt::now_or_never(control.steer("new instruction"));
+                }
+                if fixture.evidence.expedite_fixture.load(Ordering::Acquire) {
+                    return Box::pin(async move {
+                        fixture.evidence.wait_started.store(true, Ordering::Release);
+                        tokio::select! {
+                            () = tokio::time::sleep(Duration::from_millis(request.yield_time_ms)) => {},
+                            () = fixture.evidence.expedited.notified() => {},
+                        }
+                        Ok(LocalCompositionWaitOutcome::Live(
+                            LocalCompositionResponse::Yielded {
+                                cell_id: request.cell_id,
+                                items: vec![LocalCompositionContentItem::Text(
+                                    "expedited window".into(),
+                                )],
+                            },
+                        ))
+                    });
+                }
                 if fixture.evidence.steer_fixture.load(Ordering::Acquire)
                     || fixture.evidence.long_wait_fixture.load(Ordering::Acquire)
                     || fixture

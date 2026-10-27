@@ -287,6 +287,42 @@ impl SessionCore {
 }
 
 impl LocalCompositionSession for CellSessionAdapter {
+    fn buffered(
+        &self,
+        cell_id: String,
+    ) -> LocalCompositionFuture<'_, Option<LocalCompositionWaitOutcome>> {
+        Box::pin(async move {
+            Ok(self
+                .core
+                .session
+                .try_take(&cell_id)
+                .await
+                .map(|outcome| match outcome {
+                    WaitOutcome::Live(live) => LocalCompositionWaitOutcome::Live(response(live)),
+                    WaitOutcome::Lost(loss) => {
+                        LocalCompositionWaitOutcome::Lost(self.core.loss(loss))
+                    }
+                    WaitOutcome::Missing { error } => {
+                        LocalCompositionWaitOutcome::Missing(LocalCompositionResponse::Result {
+                            cell_id,
+                            items: Vec::new(),
+                            error,
+                        })
+                    }
+                }))
+        })
+    }
+
+    fn expedite(&self, cell_id: String) -> LocalCompositionSessionFuture<'_, ()> {
+        Box::pin(async move {
+            self.core
+                .session
+                .expedite(&cell_id)
+                .await
+                .map_err(|loss| self.core.loss(loss))
+        })
+    }
+
     fn execute(
         &self,
         request: LocalCompositionExecuteRequest,

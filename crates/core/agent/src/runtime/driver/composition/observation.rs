@@ -7,8 +7,11 @@
 
 use super::*;
 use crate::local_composition::{
-    LocalCompositionEventReceiver, LocalCompositionFuture, LocalCompositionSessionFuture,
+    LocalCompositionEventReceiver, LocalCompositionFuture, LocalCompositionSession,
+    LocalCompositionSessionFuture,
 };
+
+const EXPEDITED_OBSERVATION_BOUND: Duration = Duration::from_secs(5);
 
 pub(super) enum LocalCompositionObservation<'a> {
     Execute {
@@ -54,6 +57,7 @@ impl LocalCompositionObservation<'_> {
         yield_requested: bool,
         notice_reason: Option<String>,
         wait_resumes_cell: bool,
+        poll_response: bool,
     ) -> ObservedResponse {
         if yield_requested && !*resume_in_flight {
             let yielded = LocalCompositionResponse::Yielded {
@@ -63,7 +67,7 @@ impl LocalCompositionObservation<'_> {
                     .into_iter()
                     .collect(),
             };
-            if let Self::Execute { response, .. } = self {
+            if poll_response && let Self::Execute { response, .. } = self {
                 // Execute has already started. Prefer its buffered terminal;
                 // unlike a wait, polling it cannot issue a new Resume.
                 return std::future::poll_fn(|cx| {
@@ -74,7 +78,10 @@ impl LocalCompositionObservation<'_> {
                 })
                 .await;
             }
-            if !wait_resumes_cell && let Self::Wait { response, .. } = self {
+            if poll_response
+                && !wait_resumes_cell
+                && let Self::Wait { response, .. } = self
+            {
                 // A watch-only observation cannot resume anything, so it is
                 // safe to prefer its terminal before yielding to the notice.
                 return std::future::poll_fn(|cx| {
@@ -106,6 +113,20 @@ enum ObservedResponse {
 }
 
 impl ObservedResponse {
+    fn with_notice(mut self, reason: Option<String>) -> Self {
+        let response = match &mut self {
+            Self::Execute(Ok(response))
+            | Self::Wait(Ok(LocalCompositionWaitOutcome::Live(response))) => Some(response),
+            _ => None,
+        };
+        if let Some(LocalCompositionResponse::Yielded { items, .. }) = response
+            && let Some(reason) = reason
+        {
+            items.push(LocalCompositionContentItem::Text(reason));
+        }
+        self
+    }
+
     fn resolve(self, state: &mut CompositionOwner) -> Result<LocalCompositionResponse, AgentError> {
         match self {
             Self::Yielded(response) => Ok(response),
@@ -132,10 +153,14 @@ impl Driver {
         command: &PromptCommand,
         attempt_id: AttemptId,
         state: &mut CompositionOwner,
-        events: &mut dyn LocalCompositionEventReceiver,
+        io: (
+            &dyn LocalCompositionSession,
+            &mut dyn LocalCompositionEventReceiver,
+        ),
         nested_executions: &mut FuturesUnordered<LocalCompositionNestedFuture>,
         observation: &mut LocalCompositionObservation<'_>,
     ) -> Result<LocalCompositionResponse, AgentError> {
+        let (session, events) = io;
         let operation_timeout = state
             .integration()
             .foreground_budget()
@@ -147,16 +172,30 @@ impl Driver {
         let mut steer_settlement_started = false;
         let mut nested_was_settled = true;
         let mut resume_in_flight = false;
+        let mut expedited = false;
         let wait_resumes_cell = state.integration().runtime_contract().wait_resumes_cell;
         let mut job_changes = self.job_sessions.job_terminal_changes();
         job_changes.mark_changed();
         loop {
-            let steer_pending = !resume_in_flight
-                && state.integration().runtime_contract().supports_yield
+            let steer_pending = state.integration().runtime_contract().supports_yield
                 && matches!(
                     *self.tool_preempt.borrow(),
                     plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
                 );
+            if steer_pending && resume_in_flight && !expedited {
+                let deadline = tokio::time::Instant::now() + EXPEDITED_OBSERVATION_BOUND;
+                tokio::time::timeout_at(
+                    deadline,
+                    session.expedite(observation.cell_id().to_owned()),
+                )
+                .await
+                .map_err(|_| {
+                    local_composition_started_error("cell expedite exceeded its bounded deadline")
+                })?
+                .map_err(|loss| local_composition_session_loss_error(state, &loss))?;
+                expedited = true;
+                response_deadline.as_mut().reset(deadline);
+            }
             let executions_settled = nested_executions.is_empty()
                 && !state.has_active_nested()
                 && state.completed_is_empty();
@@ -164,11 +203,16 @@ impl Driver {
             // delivery acknowledgements afresh rather than joining on an old
             // outer observation deadline that expired inside the nested call.
             if executions_settled
-                && (!nested_was_settled || (steer_pending && !steer_settlement_started))
+                && (!nested_was_settled
+                    || (steer_pending && !steer_settlement_started && !expedited))
             {
                 response_deadline.as_mut().reset(
                     tokio::time::Instant::now()
-                        + observation.timeout(operation_timeout, steer_pending),
+                        + if expedited {
+                            EXPEDITED_OBSERVATION_BOUND
+                        } else {
+                            observation.timeout(operation_timeout, steer_pending)
+                        },
                 );
                 steer_settlement_started = steer_pending;
             }
@@ -180,6 +224,7 @@ impl Driver {
                 && (matches!(observation, LocalCompositionObservation::Wait { .. })
                     || !state.has_active_nested());
             let yield_ready = steer_pending && executions_settled && state.deliveries_are_empty();
+            let poll_response = response_ready || state.pending_is_empty();
             let notice_reason = self
                 .tool_preempt
                 .borrow()
@@ -201,12 +246,23 @@ impl Driver {
                     };
                     Box::pin(self.handle_control(Some(command), control)).await;
                 }
-                () = &mut response_deadline, if executions_settled && (!steer_pending || steer_settlement_started) => break Err(local_composition_started_error(
+                () = &mut response_deadline, if executions_settled && (!steer_pending || steer_settlement_started || expedited) => break Err(local_composition_started_error(
                     observation.deadline_error(),
                 )),
                 // Never drop a nested execution: the driver retains mutation
                 // settlement authority and drains an admitted read-only group.
-                response = observation.receive(&mut resume_in_flight, yield_ready, notice_reason, wait_resumes_cell),
+                response = async {
+                    if yield_ready && !resume_in_flight && poll_response
+                        && matches!(observation, LocalCompositionObservation::Wait { .. })
+                    {
+                        match session.buffered(observation.cell_id().to_owned()).await {
+                            Ok(Some(buffered)) => return ObservedResponse::Wait(Ok(buffered)).with_notice(notice_reason),
+                            Err(loss) => return ObservedResponse::Wait(Err(loss)),
+                            Ok(None) => {}
+                        }
+                    }
+                    observation.receive(&mut resume_in_flight, yield_ready, notice_reason.clone(), wait_resumes_cell, poll_response).await.with_notice(notice_reason)
+                },
                     if response_ready || yield_ready => break response.resolve(state),
                 _ = job_changes.changed() => self.preempt_for_job_terminals(),
                 delivery = state.next_delivery(), if !state.deliveries_are_empty() => {
@@ -273,6 +329,23 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn notice_does_not_poll_a_terminal_past_queued_nested_calls() {
+        let mut in_flight = false;
+        let mut observation = LocalCompositionObservation::Execute {
+            cell_id: "cell".into(),
+            response: Box::pin(async {
+                panic!("queued nested calls prohibit a terminal-preferring poll")
+            }),
+        };
+        assert!(matches!(
+            observation
+                .receive(&mut in_flight, true, None, true, false)
+                .await,
+            ObservedResponse::Yielded(_)
+        ));
+    }
+
+    #[tokio::test]
     async fn notice_before_resume_preempts_without_polling_the_wait() {
         let mut observation = LocalCompositionObservation::Wait {
             cell_id: "cell".into(),
@@ -281,7 +354,9 @@ mod tests {
         };
         let mut in_flight = false;
         assert!(matches!(
-            observation.receive(&mut in_flight, true, None, true).await,
+            observation
+                .receive(&mut in_flight, true, None, true, true)
+                .await,
             ObservedResponse::Yielded(LocalCompositionResponse::Yielded { .. })
         ));
         assert!(!in_flight);
@@ -306,18 +381,21 @@ mod tests {
         };
         let mut in_flight = false;
         {
-            let mut receive = Box::pin(observation.receive(&mut in_flight, false, None, true));
+            let mut receive =
+                Box::pin(observation.receive(&mut in_flight, false, None, true, true));
             assert!(futures_util::poll!(receive.as_mut()).is_pending());
         }
         // A new notice must not replace the outstanding observation with a
         // synthetic running answer, even while its response remains pending.
         {
-            let mut receive = Box::pin(observation.receive(&mut in_flight, true, None, true));
+            let mut receive = Box::pin(observation.receive(&mut in_flight, true, None, true, true));
             assert!(futures_util::poll!(receive.as_mut()).is_pending());
         }
         assert!(done.send(()).is_ok());
         assert!(matches!(
-            observation.receive(&mut in_flight, true, None, true).await,
+            observation
+                .receive(&mut in_flight, true, None, true, true)
+                .await,
             ObservedResponse::Wait(Ok(LocalCompositionWaitOutcome::Live(
                 LocalCompositionResponse::Result { .. }
             )))
@@ -333,10 +411,11 @@ mod tests {
         };
         let mut in_flight = false;
         {
-            let mut receive = Box::pin(observation.receive(&mut in_flight, false, None, false));
+            let mut receive =
+                Box::pin(observation.receive(&mut in_flight, false, None, false, true));
             assert!(futures_util::poll!(receive.as_mut()).is_pending());
         }
-        let mut receive = Box::pin(observation.receive(&mut in_flight, true, None, false));
+        let mut receive = Box::pin(observation.receive(&mut in_flight, true, None, false, true));
         assert!(matches!(
             futures_util::poll!(receive.as_mut()),
             std::task::Poll::Ready(ObservedResponse::Yielded(
@@ -362,7 +441,9 @@ mod tests {
             observation_timeout: Duration::from_secs(1),
         };
         assert!(matches!(
-            observation.receive(&mut in_flight, true, None, false).await,
+            observation
+                .receive(&mut in_flight, true, None, false, true)
+                .await,
             ObservedResponse::Wait(Ok(LocalCompositionWaitOutcome::Live(
                 LocalCompositionResponse::Result { .. }
             )))
