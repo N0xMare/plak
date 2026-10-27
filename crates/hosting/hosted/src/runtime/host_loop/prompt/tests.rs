@@ -5,6 +5,8 @@ use crate::surface_protocol::HostEvent;
 #[cfg(test)]
 mod preparation_compaction_tests;
 #[cfg(test)]
+mod preparation_failure_tests;
+#[cfg(test)]
 mod preparation_fence_tests;
 #[cfg(test)]
 mod preparation_tests;

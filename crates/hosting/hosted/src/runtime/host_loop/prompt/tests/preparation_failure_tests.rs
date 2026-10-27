@@ -1,0 +1,68 @@
+use super::*;
+use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+use crate::surface_protocol::UserAction;
+
+struct PauseWriteFailure;
+
+impl StoreFaults for PauseWriteFailure {
+    fn before(&self, call: StoreCall, _: Option<&SessionRecord>) -> Result<(), String> {
+        if call == StoreCall::WriteHostControls {
+            Err("injected pause write failure".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn stopped_preparation_publishes_stop_status_even_when_the_pause_write_fails() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+    let item = host.config.session.enqueue_live("keep queued").unwrap();
+    host.config.store.save(&mut host.config.session).unwrap();
+    host.config.store = Arc::new(FaultStore::new(
+        host.config.store.clone(),
+        PauseWriteFailure,
+    ));
+    events.try_iter().for_each(drop);
+    preparation::hooks::HOOK.with(|slot| {
+        *slot.borrow_mut() = Some((
+            preparation::Stage::Settle,
+            Box::pin(async move {
+                actions.send(UserAction::Interrupt).unwrap();
+            }),
+        ));
+    });
+    let error = host
+        .run_prompt(item.text.clone(), Some(item), true, None)
+        .err()
+        .expect("pause persistence must fail");
+    assert!(error.message().contains("injected pause write failure"));
+    let statuses: Vec<_> = events
+        .try_iter()
+        .filter_map(|event| {
+            if let HostEvent::Status { phase, detail, .. } = event {
+                Some((phase, detail))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        statuses.last(),
+        Some(&(
+            "idle".into(),
+            Some("prompt preparation stopped; prompt remains queued".into())
+        ))
+    );
+    assert!(
+        !statuses
+            .iter()
+            .any(|(_, detail)| detail.as_deref() == Some("prompt not admitted"))
+    );
+    host.release().unwrap();
+}

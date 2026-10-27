@@ -3754,12 +3754,22 @@ run to their own receipts. A stopped one-shot reports interruption without
 manufacturing a root-turn terminal.
 
 An operator stop of a child wake preserves the paused drain for operator
-items behind it, including after undispatched-wake cleanup. It is not a
+items behind it, including after undispatched-wake cleanup, and suppresses
+automatic wakes until the next user prompt, just like an idle Escape. It is not a
 capacity-preflight failure and records no `WakePreflightFailed` cause or fit
 warning. Every undispatched preparation returns a terminal idle/error status;
 all stop checkpoints publish the same stop detail. A prompt publishes only
 one final busy-false observation, whether it stops before dispatch or finishes
 an admitted turn.
+
+Preparation checkpoints skip subsequent work, not only turn admission: a stop
+after authority refresh skips wait settlement, one after settlement skips tree
+projection, one after tree projection skips the context query, and one after
+the context query skips scheduled compaction. A genuine preparation error takes
+precedence over a concurrent stop, including compaction errors: its pause cause
+and one-shot failure remain the error, and idle then observes the deferred stop.
+An interrupt of compaction itself remains an ordinary parked result. A stop
+status is published even when persisting its queue pause fails.
 
 The UI paints one last frame reading `quitting…` and stops reading input.
 Restoration disables mouse reporting, bracketed paste, keyboard enhancement

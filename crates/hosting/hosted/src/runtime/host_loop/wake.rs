@@ -133,7 +133,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     }
 
     pub(super) fn pause_unrecorded(&mut self, reason: String) -> CliResult<()> {
-        self.pause_queue(reason)?;
+        self.pause_queue(reason, false)?;
         let _ = self
             .events
             .send(crate::surface_protocol::ContentEvent::Status {
@@ -144,7 +144,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         Ok(())
     }
 
-    pub(super) fn pause_queue(&mut self, reason: String) -> CliResult<()> {
+    pub(super) fn pause_queue(&mut self, reason: String, suppress_wakes: bool) -> CliResult<()> {
+        if suppress_wakes {
+            self.config.session.child_wake_suppressed = true;
+            self.child_wake.park();
+        }
+        self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
         if self.storage_interrupted && self.config.store.storage_unavailable() {
             self.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
             return Ok(());
@@ -159,7 +164,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .store
             .write_host_controls(
                 &self.config.session.id,
-                false,
+                suppress_wakes,
                 Some(crate::sessions::projector::HostPauseCause::UnrecordedRefusal { reason }),
             )
             .map_err(CliFailure::from)?;

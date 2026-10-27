@@ -107,6 +107,7 @@ pub(super) fn stopped_preparation(
         result: None,
         run: None,
     };
+    preparation::hooks::CALLED.with(|calls| calls.borrow_mut().clear());
     host.run_prompt(
         text.clone(),
         queued_delivery.clone(),
@@ -115,6 +116,24 @@ pub(super) fn stopped_preparation(
     )
     .unwrap();
     control.join().unwrap();
+    let skipped = match stage {
+        preparation::Stage::Refresh => Some(preparation::Stage::Settle),
+        preparation::Stage::Settle => Some(preparation::Stage::Tree),
+        preparation::Stage::Tree => Some(preparation::Stage::Query),
+        _ => None,
+    };
+    if let Some(skipped) = skipped {
+        preparation::hooks::CALLED.with(|calls| {
+            assert!(
+                !calls.borrow().contains(&skipped),
+                "stop at {stage:?} must skip {skipped:?}"
+            );
+            assert!(
+                !calls.borrow().contains(&preparation::Stage::Compact),
+                "stop at {stage:?} must skip scheduled compaction"
+            );
+        });
+    }
     assert_eq!(host.config.session.pending_queue, before);
     assert_eq!(
         host.config.session.queue_drain_state,

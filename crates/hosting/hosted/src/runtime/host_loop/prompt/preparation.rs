@@ -6,11 +6,15 @@ use crate::interrupt::run_watched;
 use plakous::application::{ApplicationExecutor, ApplicationExecutorError};
 use std::future::Future;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::runtime::host_loop) enum Stage {
     Refresh,
     Settle,
     Tree,
+    #[cfg(test)]
+    Query,
+    #[cfg(test)]
+    Compact,
     Context,
     Dispatch,
 }
@@ -45,6 +49,7 @@ pub(super) fn run_step<F: Future, P: plakous_host_protocol::ProtocolExtension>(
         }) {
             hook.await;
         }
+        hooks::CALLED.with(|calls| calls.borrow_mut().push(stage));
         future.await
     };
     run_watched(executor, watch, future)
@@ -59,7 +64,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if !watch.preparation_stopped() {
             return Ok(None);
         }
-        self.pause_queue("prompt preparation stopped; prompt remains queued".to_owned())?;
+        let paused = self.pause_queue("preparation stopped; queue paused".to_owned(), true);
         if let Some(state) = one_shot.as_deref_mut() {
             state.result = Some(Ok(crate::runtime::oneshot::OneShotOutcome::Interrupted {
                 assistant: String::new(),
@@ -70,6 +75,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             queue_len: self.config.session.pending_queue.len(),
             detail: Some("prompt preparation stopped; prompt remains queued".into()),
         });
+        paused?;
         Ok(Some(Stopped))
     }
 }

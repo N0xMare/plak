@@ -419,6 +419,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .take()
                 .ok_or_else(|| CliFailure::new("child wake preflight is unavailable"))
         } else {
+            #[cfg(test)]
+            preparation::hooks::CALLED
+                .with(|calls| calls.borrow_mut().push(preparation::Stage::Query));
             query_context(
                 &self.executor,
                 &self.opened,
@@ -483,6 +486,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 // on; without the busy row the TUI paints idle while every
                 // prompt is silently deferred (the 2026-09-03 "freeze").
                 observe_compact(&self.events, self.config.session.pending_queue.len(), true);
+                #[cfg(test)]
+                preparation::hooks::CALLED
+                    .with(|calls| calls.borrow_mut().push(preparation::Stage::Compact));
                 let compacted = run_scheduled_compaction_until_fits(
                     &self.executor,
                     InterruptWatch::new(self.actions, &self.interrupt_state),
@@ -497,13 +503,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         .then(|| pending_input(&user_text))
                         .as_ref(),
                 );
-                if let Some(stopped) = self.stop_preparation(&mut one_shot)? {
-                    if let Err(error) = &compacted {
-                        let _ = self.events.notice(TranscriptRow::error(
-                            NoticeScope::Compaction,
-                            format!("compact: {}", error.message()),
-                        ));
-                    }
+                if compacted.is_ok()
+                    && let Some(stopped) = self.stop_preparation(&mut one_shot)?
+                {
                     return Ok(PromptOutcome::Stopped(stopped));
                 }
                 match compacted {

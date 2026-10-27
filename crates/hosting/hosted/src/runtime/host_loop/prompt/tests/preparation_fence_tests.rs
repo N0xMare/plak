@@ -114,6 +114,8 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
         SessionQueueDrainState::RestoredPaused
     );
     let stored = host.config.store.load(&host.config.session.id).unwrap();
+    assert!(host.config.session.child_wake_suppressed);
+    assert!(stored.child_wake_suppressed);
     assert_eq!(stored.pending_queue, [operator]);
     assert_eq!(
         stored.queue_drain_state,
@@ -124,6 +126,10 @@ fn stopped_host_wake_keeps_operator_items_behind_it_durably_paused() {
         .store
         .load_intents(&host.config.session.id)
         .unwrap();
+    assert!(
+        !intents.wake_suppressions.is_empty(),
+        "the host-controls row suppresses wakes"
+    );
     assert!(
         matches!(&intents.pause_causes.last().unwrap().value, sessions::projector::HostPauseCause::UnrecordedRefusal { reason } if reason.contains("preparation stopped"))
     );

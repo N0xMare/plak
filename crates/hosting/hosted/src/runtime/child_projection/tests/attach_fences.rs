@@ -43,9 +43,9 @@ fn fixture() -> (
     )
 }
 
-fn baseline() -> Vec<TranscriptItem> {
+fn baseline(state: &str) -> Vec<TranscriptItem> {
     vec![TranscriptItem {key: RowKey::new(77, Lane::Runtime, 0), row: serde_json::from_value(serde_json::json!({
-        "kind":"tool", "call_id":uuid::Uuid::from_u128(2).to_string(), "name":"read_file", "activity_kind":"tool", "state":"interrupted"
+        "kind":"tool", "call_id":uuid::Uuid::from_u128(2).to_string(), "name":"read_file", "activity_kind":"tool", "state":state
     })).unwrap()}]
 }
 
@@ -87,7 +87,7 @@ async fn interrupted_attach(result_during_history: bool) {
     if result_during_history {
         tool(&source, &owner.observation, turn, "ToolCompleted").await;
     }
-    let rows = baseline();
+    let rows = baseline("interrupted");
     let expected_key = rows[0].key;
     let covered = covered_tool_calls(&rows);
     let (wire, events) = crate::surface_protocol::host_event_channel();
@@ -118,6 +118,29 @@ async fn interrupted_attach(result_during_history: bool) {
     .await;
     apply(&events, &mut state);
     assert_eq!(assert_call(&state, ActivityState::Succeeded), expected_key);
+}
+
+#[tokio::test]
+async fn settled_history_covers_a_stale_retained_running_call_at_the_same_key() {
+    let (turn, source, owner) = fixture();
+    tool(&source, &owner.observation, turn, "ToolStarted").await;
+    let (snapshot, _) = owner.observation.attach();
+    let rows = baseline("succeeded");
+    let key = rows[0].key;
+    let covered = covered_tool_calls(&rows);
+    let (wire, events) = crate::surface_protocol::host_event_channel();
+    let publisher: crate::runtime::Sender = crate::runtime::Sender::over(wire);
+    publisher.replace_transcript(PresentationSnapshot {
+        scope: TranscriptScope::Agent("child".into()),
+        items: rows,
+        ..PresentationSnapshot::default()
+    });
+    emit_retained_tools(snapshot.tools, &covered, &|op| {
+        publisher.observe_agent("child", &op)
+    });
+    let mut state = TranscriptState::default();
+    apply(&events, &mut state);
+    assert_eq!(assert_call(&state, ActivityState::Succeeded), key);
 }
 
 #[tokio::test]

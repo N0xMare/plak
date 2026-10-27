@@ -164,7 +164,7 @@ fn stopped_wake_preflight_persists_operator_stop_not_capacity_failure() {
             .load_intents(&host.config.session.id)
             .unwrap();
         assert!(matches!(&intents.pause_causes.last().unwrap().value,
-            crate::sessions::projector::HostPauseCause::UnrecordedRefusal {reason} if reason.contains("preparation stopped")));
+            crate::sessions::projector::HostPauseCause::UnrecordedRefusal {reason} if reason == "preparation stopped; queue paused"));
         assert!(!intents.pause_causes.iter().any(|cause| matches!(
             cause.value,
             crate::sessions::projector::HostPauseCause::WakePreflightFailed { .. }

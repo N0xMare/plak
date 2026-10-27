@@ -33,6 +33,71 @@ fn explicit_replacement_installs_a_keyed_baseline() {
 }
 
 #[test]
+fn root_waiting_to_running_publishes_the_transition_exactly_once() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let sender = crate::runtime::Sender::over(sink);
+    sender.replace_transcript(snapshot(TranscriptScope::Root, &[]));
+    receiver.try_iter().for_each(drop);
+    let line = |state: &str| ContentEvent::ToolLine {
+        call_id: Some("root-call".into()),
+        parent_call_id: None,
+        cell_id: None,
+        kind: plakous_host_protocol::views::ActivityKind::Tool,
+        name: "read_file".into(),
+        state: state.into(),
+        subject: None,
+        detail: None,
+        duration_ms: None,
+        started_at_ms: Some(100),
+        finished_at_ms: None,
+        wait: None,
+    };
+    sender.send(line("waiting"));
+    let waiting: Vec<_> = receiver
+        .try_iter()
+        .filter_map(|event| {
+            if let HostEvent::TranscriptPatch(patch) = event {
+                Some(patch)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(waiting.len(), 1);
+    let key = waiting[0].upserts[0].key;
+    sender.send(line("running"));
+    let running: Vec<_> = receiver
+        .try_iter()
+        .filter_map(|event| {
+            if let HostEvent::TranscriptPatch(patch) = event {
+                Some(patch)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        running.len(),
+        1,
+        "one root transition, not a suppressed or duplicate patch"
+    );
+    assert_eq!(running[0].scope, TranscriptScope::Root);
+    assert_eq!(running[0].upserts.len(), 1);
+    assert_eq!(running[0].upserts[0].key, key);
+    assert_eq!(
+        running[0].upserts[0].row.as_tool().unwrap().state,
+        "running"
+    );
+    sender.send(line("running"));
+    assert!(
+        !receiver
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::TranscriptPatch(_))),
+        "a duplicate running observation must not publish another transition"
+    );
+}
+
+#[test]
 fn streaming_cost_is_constant_in_history_rows_and_does_not_copy_accumulated_text() {
     for scope in [
         TranscriptScope::Root,

@@ -69,21 +69,7 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
     let (wire, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
         HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
-    for text in ["older intent", "latest intent"] {
-        host.executor
-            .block_on(async {
-                host.opened
-                    .agent()
-                    .unwrap()
-                    .prompt(text)
-                    .await
-                    .unwrap()
-                    .result()
-                    .await
-                    .unwrap()
-            })
-            .unwrap();
-    }
+    seed_compactable_history(&host);
     let source = host.opened.locator();
     let item = host
         .config
@@ -149,6 +135,131 @@ fn stop_during_paid_scheduled_compaction_finishes_its_receipt_without_a_root_dis
             .filter(|event| matches!(event, HostEvent::SetBusy(false)))
             .count(),
         1
+    );
+    host.release().unwrap();
+}
+
+fn seed_compactable_history(host: &HostLoop<'_, TestExtension>) {
+    for text in ["older intent", "latest intent"] {
+        host.executor
+            .block_on(async {
+                host.opened
+                    .agent()
+                    .unwrap()
+                    .prompt(text)
+                    .await
+                    .unwrap()
+                    .result()
+                    .await
+                    .unwrap()
+            })
+            .unwrap();
+    }
+}
+
+#[test]
+fn context_stop_skips_a_due_paid_compaction_and_preserves_the_locator() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, evidence) = compacting_config(root.path());
+    let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+    seed_compactable_history(&host);
+    let source = host.opened.locator();
+    let item = host
+        .config
+        .session
+        .enqueue_live("p".repeat(50_000))
+        .unwrap();
+    host.config.store.save(&mut host.config.session).unwrap();
+    preparation::hooks::CALLED.with(|calls| calls.borrow_mut().clear());
+    preparation::hooks::HOOK.with(|slot| {
+        *slot.borrow_mut() = Some((
+            preparation::Stage::Context,
+            Box::pin(async move {
+                actions.send(UserAction::Interrupt).unwrap();
+            }),
+        ));
+    });
+    host.run_prompt(item.text.clone(), Some(item), true, None)
+        .unwrap();
+    preparation::hooks::CALLED.with(|calls| {
+        assert!(!calls.borrow().contains(&preparation::Stage::Compact),
+            "stop before scheduled compaction must not enter the workflow, even if its own guard would refuse dispatch");
+    });
+    assert_eq!(
+        host.opened.locator(),
+        source,
+        "stopping before the fold keeps its source"
+    );
+    assert_eq!(
+        read_evidence(&evidence)
+            .unwrap()
+            .iter()
+            .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
+            .count(),
+        2,
+        "only the two seeded turns may dispatch; no scheduled fold"
+    );
+    host.release().unwrap();
+}
+
+#[test]
+fn compaction_error_wins_over_a_deferred_quit_and_keeps_its_pause_cause() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = compacting_config(root.path());
+    config.attached_one_shot = true;
+    let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let previous = crate::runtime::test_kit::scripted(&config);
+    let runtime = previous.runtime.clone();
+    config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
+        rebind_target: previous.rebind_target.clone(),
+        runtime: Arc::new(move |role| {
+            if role == crate::runtime::RuntimeRole::Compact {
+                actions.send(UserAction::Quit).unwrap();
+                Err("injected compaction failure with pending quit".into())
+            } else {
+                runtime(role)
+            }
+        }),
+        observe: Arc::new(|_, _| {}),
+        child_runtime: None,
+        rebind_builds: Mutex::new(Vec::new()),
+    });
+    let (wire, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host =
+        HostLoop::open(config, &receiver, crate::runtime::Sender::over(wire), None).unwrap();
+    seed_compactable_history(&host);
+    let item = host
+        .config
+        .session
+        .enqueue_live("p".repeat(50_000))
+        .unwrap();
+    host.config.store.save(&mut host.config.session).unwrap();
+    let mut invocation = crate::runtime::oneshot::OneShotState {
+        attempted: true,
+        resume_tree: false,
+        result: None,
+        run: None,
+    };
+    host.run_prompt(item.text.clone(), Some(item), true, Some(&mut invocation))
+        .unwrap();
+    let error = invocation
+        .result
+        .unwrap()
+        .expect_err("compaction error is not an interrupted one-shot");
+    assert!(error.message().contains("injected compaction failure"));
+    let intents = host
+        .config
+        .store
+        .load_intents(&host.config.session.id)
+        .unwrap();
+    assert!(matches!(&intents.pause_causes.last().unwrap().value,
+        sessions::projector::HostPauseCause::UnrecordedRefusal {reason} if reason.contains("injected compaction failure")));
+    assert!(
+        matches!(host.next_prompt(None).unwrap(), HostStep::Quit),
+        "idle still observes the deferred quit"
     );
     host.release().unwrap();
 }
