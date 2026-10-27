@@ -13,6 +13,18 @@ use super::{
     submit_harness_prompt,
 };
 
+#[cfg(test)]
+mod diagnostics;
+
+fn warn_recovery_required(
+    agent_id: &str,
+    attempt: &crate::agent_tree_protocol::AttemptId,
+    error_kind: plakous::agent::AgentErrorKind,
+) {
+    tracing::warn!(target: "plak.topology", agent_id, attempt_id = %attempt,
+        ?error_kind, "child turn requires recovery; recycling child");
+}
+
 /// A turn waiter's registration on the tree. It is taken before the turn
 /// it watches is bound or occupies the live slot, so a bound turn some
 /// waiter will release always reads as watched; the waiter task holds it for
@@ -117,8 +129,9 @@ pub(in crate::agent) fn spawn_topology_turn_waiter(
             // which abandons the turn exactly as a crash reattach would. The
             // attempt then ends as an ordinary failure the parent can re-task.
             if let Ok(result) = &terminal
-                && matches!(result.outcome(), TurnResultOutcome::RecoveryRequired(_))
+                && let TurnResultOutcome::RecoveryRequired(error) = result.outcome()
             {
+                warn_recovery_required(&agent_id, &attempt, error.kind());
                 project_turn_end(&driver, feed.as_ref(), &agent_id).await;
                 if driver
                     .read(|tree| identity.still_owns(tree, &agent_id))

@@ -228,6 +228,7 @@ impl LocalCompositionIntegration for FakeComposition {
                 lock_mutex(&fixture.evidence.generations).push(generation);
                 lock_mutex(&fixture.evidence.order).push("create-session");
                 let (state_events, events) = tokio::sync::mpsc::unbounded_channel();
+                *lock_mutex(&fixture.evidence.events) = Some(state_events.clone());
                 let session = FakeCompositionSession {
                     state_events,
                     evidence: Arc::clone(&fixture.evidence),
@@ -526,6 +527,26 @@ impl LocalCompositionSession for FakeSession {
                     }
                     let mut started_cell_id = "C";
                     let response = match request.source.as_str() {
+                        "seed job" => {
+                            let evidence = Arc::clone(&fixture.evidence);
+                            return Ok(LocalCompositionStartedCell {
+                                cell_id: "C".to_owned(),
+                                initial_response: Box::pin(async move {
+                                    evidence.source_release.notified().await;
+                                    Ok(LocalCompositionResponse::Result {
+                                        cell_id: "C".to_owned(),
+                                        items: Vec::new(),
+                                        error: None,
+                                    })
+                                }),
+                            });
+                        }
+                        "await notice" => {
+                            return Ok(LocalCompositionStartedCell {
+                                cell_id: "C".to_owned(),
+                                initial_response: Box::pin(std::future::pending()),
+                            });
+                        }
                         "yield once" => LocalCompositionResponse::Yielded {
                             cell_id: "C".to_owned(),
                             items: vec![LocalCompositionContentItem::Text("yielded".to_owned())],
@@ -800,6 +821,15 @@ impl LocalCompositionSession for FakeSession {
                 fixture.evidence.waits.fetch_add(1, Ordering::AcqRel);
                 lock_mutex(&fixture.evidence.order).push("wait");
                 Box::pin(async move {
+                    if fixture.evidence.hold_wait.load(Ordering::Acquire) {
+                        let mut observation = terminal::WaitObservation {
+                            evidence: &fixture.evidence,
+                            finished: false,
+                        };
+                        fixture.evidence.wait_entered.notify_one();
+                        fixture.evidence.wait_release.notified().await;
+                        observation.finished = true;
+                    }
                     if request.cell_id == "named" {
                         return Ok(LocalCompositionWaitOutcome::Live(
                             LocalCompositionResponse::Result {
@@ -841,7 +871,6 @@ impl LocalCompositionSession for FakeSession {
                 Box::pin(async { Err("scheduler fixture does not wait".to_owned()) })
             }
             Self::Cancel(fixture) => {
-                fixture.evidence.wait_started.store(true, Ordering::Release);
                 fixture.evidence.wait_count.fetch_add(1, Ordering::AcqRel);
                 if fixture.evidence.steer_fixture.load(Ordering::Acquire)
                     || fixture.evidence.long_wait_fixture.load(Ordering::Acquire)
@@ -851,6 +880,7 @@ impl LocalCompositionSession for FakeSession {
                         .load(Ordering::Acquire)
                 {
                     return Box::pin(async move {
+                        fixture.evidence.wait_started.store(true, Ordering::Release);
                         wait_for_scheduler_fact(&fixture.evidence.release_cell).await;
                         Ok(LocalCompositionWaitOutcome::Live(
                             LocalCompositionResponse::Result {
@@ -863,7 +893,10 @@ impl LocalCompositionSession for FakeSession {
                         ))
                     });
                 }
-                Box::pin(std::future::pending())
+                Box::pin(async move {
+                    fixture.evidence.wait_started.store(true, Ordering::Release);
+                    std::future::pending().await
+                })
             }
             Self::Lineage(_) => Box::pin(async { Err("lineage fixture does not wait".to_owned()) }),
         }

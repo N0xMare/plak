@@ -75,9 +75,7 @@ impl Presentation for SdkPresentation {
         self.api.python_sdk_stubs()
     }
     fn runtime_contract(&self) -> LocalCompositionRuntimeContract {
-        LocalCompositionRuntimeContract {
-            supports_yield: false,
-        }
+        LocalCompositionRuntimeContract::FOREGROUND
     }
     fn lifecycle(&self) -> LocalCompositionLifecycle {
         LocalCompositionLifecycle::AgentIncarnationPersistent

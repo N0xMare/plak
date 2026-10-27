@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) mod terminal;
+
 #[derive(Default)]
 pub(super) struct FakeCompositionEvidence {
     pub(super) counters: CompositionCounters,
@@ -10,6 +12,11 @@ pub(super) struct FakeCompositionEvidence {
     pub(super) source_waiting: Notify,
     pub(super) source_release: Notify,
     pub(super) waits: AtomicUsize,
+    pub(super) hold_wait: AtomicBool,
+    pub(super) wait_entered: Notify,
+    pub(super) wait_release: Notify,
+    pub(super) abandoned_waits: AtomicUsize,
+    pub(super) events: Mutex<Option<tokio::sync::mpsc::UnboundedSender<LocalCompositionEvent>>>,
     pub(super) fail_wait: AtomicBool,
     pub(super) lose_terminate: AtomicBool,
     pub(super) lose_session_shutdown: AtomicBool,

@@ -28,6 +28,9 @@ use crate::protocol::{
     CellOutcome, CellPrelude, CellValue, MAX_CELL_VALUE_DEPTH, OutputItem, json_depth,
 };
 
+mod parked;
+use parked::{ParkedCell, observe_parked};
+
 /// Output a cell may buffer before its next observation.
 pub const MAX_COLLECTED_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 /// Output items a cell may buffer before its next observation.
@@ -98,8 +101,7 @@ pub enum CellSessionEvent {
     },
 }
 
-type CompletionSenders = Arc<Mutex<HashMap<u64, mpsc::Sender<CellCompletion>>>>;
-type CellResponseStream = Arc<Mutex<mpsc::Receiver<CellCompletion>>>;
+type ParkedCells = Arc<Mutex<HashMap<u64, Arc<ParkedCell>>>>;
 type Windows = Arc<Mutex<HashMap<u64, Arc<WindowCell>>>>;
 
 /// The session's state; cheap to share with its event receiver.
@@ -109,8 +111,8 @@ pub struct CellSession {
     next_cell: AtomicU64,
     stored: Arc<Mutex<HashMap<String, Value>>>,
     events_tx: mpsc::Sender<CellSessionEvent>,
-    completions: CompletionSenders,
-    streams: Arc<Mutex<HashMap<u64, CellResponseStream>>>,
+    completions: ParkedCells,
+    streams: ParkedCells,
     windows: Windows,
     generation_lost: Arc<AtomicBool>,
     pump: Mutex<Option<PumpTask>>,
@@ -332,9 +334,8 @@ impl CellSession {
         admit: impl Future<Output = Result<(), E>>,
         pump: &mut Option<PumpTask>,
     ) -> Result<StartedCell, CellStartError<E>> {
-        let (tx, rx) = mpsc::channel(2);
-        let rx = Arc::new(Mutex::new(rx));
-        self.completions.lock().await.insert(cell, tx);
+        let rx = Arc::new(ParkedCell::default());
+        self.completions.lock().await.insert(cell, Arc::clone(&rx));
         self.streams.lock().await.insert(cell, Arc::clone(&rx));
         let started = match admit.await {
             Err(error) => Err(CellStartError::Refused(error)),
@@ -354,18 +355,7 @@ impl CellSession {
         let streams = Arc::clone(&self.streams);
         Ok(StartedCell {
             cell,
-            initial: Box::pin(async move {
-                let response = rx
-                    .lock()
-                    .await
-                    .recv()
-                    .await
-                    .unwrap_or_else(|| Err("cell ended".into()));
-                if !matches!(response, Ok(CellResponse::Yielded { .. })) {
-                    streams.lock().await.remove(&cell);
-                }
-                response
-            }),
+            initial: Box::pin(observe_parked(streams, cell, rx)),
         })
     }
 
@@ -446,37 +436,19 @@ impl CellSession {
         let Some(rx) = self.streams.lock().await.get(&cell).cloned() else {
             return WaitOutcome::Missing { error: None };
         };
-        let mut rx = rx.lock().await;
-        let response = match rx.try_recv() {
-            Ok(response) => Some(response),
-            Err(mpsc::error::TryRecvError::Disconnected) => None,
-            Err(mpsc::error::TryRecvError::Empty) => {
-                // A lost worker cannot resume, but the pump still answers with
-                // the terminal the worker sent before it ended, or the loss.
-                if let Err(error) = self.client.resume(cell, window)
-                    && !self.client.is_lost()
-                {
-                    self.streams.lock().await.remove(&cell);
-                    return WaitOutcome::Lost(error);
-                }
-                rx.recv().await
-            }
-        };
-        match response {
-            Some(Ok(response)) => {
-                if !matches!(response, CellResponse::Yielded { .. }) {
-                    self.streams.lock().await.remove(&cell);
-                }
-                WaitOutcome::Live(response)
-            }
-            Some(Err(loss)) => {
+        if rx.begin_resume() {
+            // A lost worker cannot resume, but the pump still answers with
+            // the terminal the worker sent before it ended, or the loss.
+            if let Err(error) = self.client.resume(cell, window)
+                && !self.client.is_lost()
+            {
                 self.streams.lock().await.remove(&cell);
-                WaitOutcome::Lost(loss)
+                return WaitOutcome::Lost(error);
             }
-            None => {
-                self.streams.lock().await.remove(&cell);
-                WaitOutcome::Lost("cell completion closed".into())
-            }
+        }
+        match observe_parked(Arc::clone(&self.streams), cell, rx).await {
+            Ok(response) => WaitOutcome::Live(response),
+            Err(loss) => WaitOutcome::Lost(loss),
         }
     }
 
@@ -491,8 +463,7 @@ impl CellSession {
             task.abort();
             let _ = task.await;
         }
-        self.completions.lock().await.clear();
-        self.streams.lock().await.clear();
+        self.end_parked().await;
         end_windows(&self.windows).await;
         self.client.terminate().await
     }
@@ -509,10 +480,16 @@ impl CellSession {
             task.abort();
             let _ = task.await;
         }
-        self.completions.lock().await.clear();
-        self.streams.lock().await.clear();
+        self.end_parked().await;
         end_windows(&self.windows).await;
         self.client.stop().await
+    }
+
+    async fn end_parked(&self) {
+        for (_, entry) in self.completions.lock().await.drain() {
+            entry.publish(Err("cell worker stopped".into()));
+        }
+        self.streams.lock().await.clear();
     }
 }
 
@@ -582,7 +559,7 @@ struct Pump {
     client: Arc<CellClient>,
     cell: u64,
     events_tx: mpsc::Sender<CellSessionEvent>,
-    completions: CompletionSenders,
+    completions: ParkedCells,
     stored: Arc<Mutex<HashMap<String, Value>>>,
 }
 
@@ -638,22 +615,11 @@ async fn pump_parked(pump: Pump) {
                 break;
             }
             CellEvent::Yielded { .. } => {
-                let sent = pump
-                    .completions
-                    .lock()
-                    .await
-                    .get(&pump.cell)
-                    .is_some_and(|tx| {
-                        tx.try_send(Ok(CellResponse::Yielded {
-                            cell: pump.cell,
-                            items: std::mem::take(&mut collected.items),
-                        }))
-                        .is_ok()
-                    });
-                if !sent {
-                    pump.lose("resource limit: cell completion queue".into())
-                        .await;
-                    break;
+                if let Some(entry) = pump.completions.lock().await.get(&pump.cell) {
+                    entry.publish(Ok(CellResponse::Yielded {
+                        cell: pump.cell,
+                        items: std::mem::take(&mut collected.items),
+                    }));
                 }
             }
             CellEvent::Done { outcome, .. } => {
@@ -791,10 +757,7 @@ struct CollectedOutput {
 impl CollectedOutput {
     /// Buffers one item; with `merge_text`, consecutive text joins one item.
     fn append(&mut self, item: OutputItem, merge_text: bool) -> Result<(), String> {
-        let bytes = match &item {
-            OutputItem::Text { text } | OutputItem::Notify { text } => text.len(),
-            OutputItem::Image { url, .. } | OutputItem::Audio { url } => url.len(),
-        };
+        let bytes = output_bytes(&item);
         if bytes > MAX_COLLECTED_OUTPUT_BYTES.saturating_sub(self.bytes)
             || self.items.len() >= MAX_COLLECTED_OUTPUT_ITEMS
         {
@@ -810,6 +773,13 @@ impl CollectedOutput {
         }
         self.items.push(item);
         Ok(())
+    }
+}
+
+fn output_bytes(item: &OutputItem) -> usize {
+    match item {
+        OutputItem::Text { text } | OutputItem::Notify { text } => text.len(),
+        OutputItem::Image { url, .. } | OutputItem::Audio { url } => url.len(),
     }
 }
 
@@ -835,8 +805,8 @@ impl Pump {
     }
 
     async fn lose(&self, reason: String) {
-        if let Some(tx) = self.completions.lock().await.remove(&self.cell) {
-            let _ = tx.try_send(Err(reason));
+        if let Some(entry) = self.completions.lock().await.remove(&self.cell) {
+            entry.publish(Err(reason));
         }
         let _ = self.client.terminate().await;
     }
@@ -914,8 +884,8 @@ impl Pump {
             return;
         }
         drop(retained);
-        if let Some(tx) = self.completions.lock().await.remove(&self.cell) {
-            let _ = tx.try_send(Ok(CellResponse::Result {
+        if let Some(entry) = self.completions.lock().await.remove(&self.cell) {
+            entry.publish(Ok(CellResponse::Result {
                 cell: self.cell,
                 items,
                 error,
@@ -1008,6 +978,8 @@ mod tests {
         WorkerFrame,
     };
     use std::{fmt::Write as _, os::unix::fs::PermissionsExt as _, path::PathBuf};
+
+    mod abandonment;
 
     const SOURCE: &str = "text('scripted')";
     const WINDOW: u64 = 10_000;
@@ -1165,20 +1137,30 @@ mod tests {
         );
         let (client, session, _events) = session(&program).await;
         let started = execute(&session).await;
-        assert!(matches!(
-            started.initial.await,
-            Ok(CellResponse::Yielded { cell: 1, .. })
-        ));
+        // Either observation may win the terminal race, but a buffered
+        // terminal takes precedence over an unconsumed yield.
+        let initial = started.initial.await;
         // The worker ended after its terminal: no resume can reach it.
         let _ = client.wait_loss().await;
-        assert!(matches!(
-            session.wait("1", WINDOW).await,
-            WaitOutcome::Live(CellResponse::Result {
-                cell: 1,
-                error: None,
-                ..
-            })
-        ));
+        if matches!(initial, Ok(CellResponse::Yielded { .. })) {
+            assert!(matches!(
+                session.wait("1", WINDOW).await,
+                WaitOutcome::Live(CellResponse::Result {
+                    cell: 1,
+                    error: None,
+                    ..
+                })
+            ));
+        } else {
+            assert!(matches!(
+                initial,
+                Ok(CellResponse::Result {
+                    cell: 1,
+                    error: None,
+                    ..
+                })
+            ));
+        }
         assert_eq!(
             session.wait("1", WINDOW).await,
             WaitOutcome::Missing { error: None }

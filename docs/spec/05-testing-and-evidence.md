@@ -210,7 +210,16 @@ model-visible end-turn reason. Automatic notices are gated on earned host wakes.
 Cell wait contract fixtures pin the shared 600-second schema ceiling and
 pre-validation hint clamp without changing cell-id normalization or invalid
 hint shapes. Driver fixtures steer during the initial cell observation and
-an outer wait, then resume the same un-joined cell to completion. A nested
+an outer wait, then resume the same un-joined cell to completion. Parked-cell
+fixtures abandon initial observations and polled resumes, coalesce multiple
+orphaned yields, and require the buffered terminal with ordered bounded output
+rather than stale running answers or queue loss. Host-window fixtures abandon
+observations and require the same retained terminal. Notice fixtures distinguish
+pre-resume preemption from an in-flight resume that must finish its window,
+while host-window observations remain promptly preemptible after polling and
+prefer their buffered terminal over a notice.
+A hosted waiter warning fixture pins content-free recovery diagnostics to
+the agent id, attempt id and error kind before recycling. A nested
 mutation fixture proves steer never injects the Steer/Background variants
 into nested work, waits for non-waiting settlement and one accepted result
 delivery, then yields; the exact yielded

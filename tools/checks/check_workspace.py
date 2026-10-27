@@ -655,7 +655,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # credential-refresh warning above; typed fields only.
     ("plakous-hosted", "src/agent/children/bind.rs"): {"error"},
     ("plakous-hosted", "src/agent/children/turns.rs"): {"error"},
-    ("plakous-hosted", "src/agent/children/waiter.rs"): {"error"},
+    ("plakous-hosted", "src/agent/children/waiter.rs"): {"error", "warn"},
     # Background recovery reports only typed child ids and closed recovery
     # dispositions after the pass has settled; it never logs prompt content.
     ("plakous-hosted", "src/agent/recovery.rs"): {"info"},

@@ -53,16 +53,25 @@ pub enum LocalCompositionResultProjection {
 pub struct LocalCompositionRuntimeContract {
     /// Observation may yield without terminating the live cell.
     pub supports_yield: bool,
+    /// Polling a wait can resume a parked cell, rather than only watch it.
+    pub(crate) wait_resumes_cell: bool,
 }
 
 impl LocalCompositionRuntimeContract {
     /// `QuickJS` host contract.
     pub const JAVASCRIPT: Self = Self {
         supports_yield: true,
+        wait_resumes_cell: true,
     };
     /// Monty host contract.
     pub const PYTHON: Self = Self {
         supports_yield: true,
+        wait_resumes_cell: false,
+    };
+    /// One foreground terminal, without parked-cell resumes or notice yields.
+    pub const FOREGROUND: Self = Self {
+        supports_yield: false,
+        wait_resumes_cell: false,
     };
 }
 

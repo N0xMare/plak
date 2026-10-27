@@ -205,7 +205,7 @@ fn steer_notifies_nested_process_starts_and_empty_polls() -> TestResult {
 }
 
 #[test]
-fn steer_yields_initial_cell_response_and_outer_wait_without_joining() -> TestResult {
+fn steer_yields_host_windows_but_retains_an_in_flight_resume() -> TestResult {
     run_cancel_cell_scenario(|| async {
         for (python, mode) in [
             (true, CancelCellMode::InitialResponsePending),
@@ -226,7 +226,7 @@ fn steer_yields_initial_cell_response_and_outer_wait_without_joining() -> TestRe
             })
             .await;
             turn.control().steer("new instruction").await?;
-            let expected_waits = if mode == CancelCellMode::WaitWindow {
+            let expected_waits = if python && mode == CancelCellMode::WaitWindow {
                 2
             } else {
                 1
@@ -241,6 +241,11 @@ fn steer_yields_initial_cell_response_and_outer_wait_without_joining() -> TestRe
                 let _ = agent.shutdown().await;
             }
             assert!(yielded.is_ok(), "steer did not yield a computing cell");
+            assert_eq!(
+                evidence.wait_count.load(Ordering::Acquire),
+                expected_waits,
+                "an in-flight wait must not yield a stale running answer"
+            );
             assert_eq!(evidence.counters.terminates.load(Ordering::Acquire), 0);
             assert_eq!(
                 evidence.counters.session_shutdowns.load(Ordering::Acquire),

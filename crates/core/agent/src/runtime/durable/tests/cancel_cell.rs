@@ -407,7 +407,9 @@ pub(super) fn cancel_cell_builder(
     if evidence.mixed_tool_fixture.load(Ordering::Acquire) {
         scripted.push((1, "nested_block", "{}".into()));
         scripted.push((2, "nested_done", "{}".into()));
-    } else if evidence.steer_fixture.load(Ordering::Acquire) {
+    } else if evidence.steer_fixture.load(Ordering::Acquire)
+        && (mode != CancelCellMode::WaitWindow || evidence.python_fixture.load(Ordering::Acquire))
+    {
         scripted.push((
             if mode == CancelCellMode::WaitWindow {
                 2
