@@ -223,13 +223,16 @@ non-resuming buffered-terminal peeks, empty-yield resume behavior, and the
 same bounded truncation within and across yields. Driver fixtures expedite
 600-second parked-cell waits on steer and unread-mail Notice without creating
 a second wait; both complete within one second of paused-clock time, under
-the five-second runtime observation/delivery bound.
+the five-second runtime observation bound after nested settlement.
 Expedited-wait fixtures retain the original resume across a held nested call
 and a six-second computation: the former yields before its blocked answer,
 the latter yields at five seconds and completes through its next observation.
 A queued-call fixture prevents terminal preference from bypassing pending
 nested dispatch; an exact-frame worker pins the extra zero-window step when
 expedite races an unpublished yield.
+Delayed-acknowledgement fixtures complete the same eight-second delivery with
+and without Notice; a twenty-second delivery still reaches the ordinary
+fifteen-second failure bound rather than an expedited five-second failure.
 A hosted waiter warning fixture pins content-free recovery diagnostics to
 the agent id, attempt id, turn id and error kind before recycling. A nested
 mutation fixture proves steer never injects the Steer/Background variants

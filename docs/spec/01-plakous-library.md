@@ -449,10 +449,13 @@ mutations still settle under their own budgets.
 Outer execute and wait observation deadlines suspend during dispatched nested
 execution and durable settlement, for both serial mutating calls and parallel
 read-only calls, with or without steer. On the transition to nested quiescence
-they re-arm from now: the model-operation timeout for execute and for steer
-settlement, requested yield plus five seconds for a non-steered wait, or five
-seconds for an expedited parked-cell resume.
-Delivery acknowledgements remain bounded by that fresh window.
+they re-arm from now: the model-operation timeout for execute and for ordinary
+steer settlement, or requested yield plus five seconds for a non-steered wait.
+Expediting a parked-cell resume preserves that ordinary acknowledgement bound;
+a notice never shortens the budget of an already-admitted delivery. Only after
+both nested executions and delivery acknowledgements have settled does the
+five-second expedited observation window arm. Its expiration yields
+synthetically; only the ordinary delivery bound may fail closed.
 A computing cell with no nested work retains its ordinary deadline. An outer
 deadline that elapsed inside nested execution cannot turn a steer yield into
 a joined failure; a genuine delivery loss or timeout still fails closed.

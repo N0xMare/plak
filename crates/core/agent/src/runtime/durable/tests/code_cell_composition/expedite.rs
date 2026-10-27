@@ -216,3 +216,128 @@ fn notice_does_not_resolve_a_ready_terminal_past_a_queued_call() -> TestResult {
         Ok(())
     })
 }
+
+struct DelayedAcknowledgement {
+    started: Arc<Notify>,
+    acknowledged: Arc<AtomicBool>,
+    terminal: tokio::sync::watch::Sender<Option<LocalCompositionResponse>>,
+    delay: Duration,
+}
+
+impl crate::local_composition::LocalCompositionNestedResponder for DelayedAcknowledgement {
+    fn resolve(
+        self: Box<Self>,
+        _value: serde_json::Value,
+    ) -> LocalCompositionFuture<'static, crate::local_composition::LocalCompositionNestedDelivery>
+    {
+        Box::pin(async move {
+            self.started.notify_one();
+            tokio::time::sleep(self.delay).await;
+            self.acknowledged.store(true, Ordering::Release);
+            self.terminal.send_replace(Some(completed()));
+            Ok(crate::local_composition::LocalCompositionNestedDelivery::Accepted)
+        })
+    }
+
+    fn reject(
+        self: Box<Self>,
+        reason: String,
+    ) -> LocalCompositionFuture<'static, crate::local_composition::LocalCompositionNestedDelivery>
+    {
+        Box::pin(async move { Err(format!("unexpected delivery rejection: {reason}")) })
+    }
+}
+
+async fn pending_delivery(notice: bool, delay: Duration) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let evidence = Arc::new(FakeCompositionEvidence::default());
+    let (terminal, receiver) = tokio::sync::watch::channel(None);
+    *lock_mutex(&evidence.retained_terminal) = Some(receiver);
+    let agent = fixture(directory.path(), evidence.clone(), "yield once").await?;
+    let turn = agent.prompt("observe delayed result acceptance").await?;
+    evidence.wait_entered.notified().await;
+    let started = Arc::new(Notify::new());
+    let acknowledged = Arc::new(AtomicBool::new(false));
+    lock_mutex(&evidence.events)
+        .as_ref()
+        .ok_or("events")?
+        .send(LocalCompositionEvent::NestedCall {
+            call: crate::local_composition::LocalCompositionNestedCall {
+                cell_id: "C".into(),
+                runtime_call_id: "DELAYED".into(),
+                tool_name: "exec_command".into(),
+                input: Some(json!({"cmd":"printf delayed", "yield_time_ms":1000})),
+            },
+            responder: Box::new(DelayedAcknowledgement {
+                started: started.clone(),
+                acknowledged: acknowledged.clone(),
+                terminal,
+                delay,
+            }),
+        })?;
+    started.notified().await;
+    // Pause only after the real nested process has finished, leaving solely
+    // the worker's acknowledgement and driver deadlines on the virtual clock.
+    tokio::time::pause();
+    let began = tokio::time::Instant::now();
+    if notice {
+        turn.control().notice().await?;
+    }
+    let result = turn.result().await?;
+    let elapsed = began.elapsed();
+    tokio::time::resume();
+    agent.shutdown().await?;
+    if delay < Duration::from_secs(15) {
+        assert_completed(&result);
+        assert!(acknowledged.load(Ordering::Acquire));
+        assert_eq!(
+            evidence.wait_observations.load(Ordering::Acquire),
+            1,
+            "do not yield an admitted delivery before its acknowledgement"
+        );
+        assert!(
+            (Duration::from_secs(7)..Duration::from_secs(9)).contains(&elapsed),
+            "{elapsed:?}"
+        );
+    } else {
+        assert!(
+            matches!(result.outcome(), TurnResultOutcome::RecoveryRequired(_)),
+            "{:?}",
+            result.outcome()
+        );
+        assert!(!acknowledged.load(Ordering::Acquire));
+        assert!(
+            (Duration::from_secs(14)..Duration::from_secs(19)).contains(&elapsed),
+            "{elapsed:?}"
+        );
+    }
+    assert_eq!(
+        evidence.waits.load(Ordering::Acquire),
+        1,
+        "one physical resume"
+    );
+    assert_eq!(
+        evidence.expedites.load(Ordering::Acquire),
+        usize::from(notice)
+    );
+    Ok(())
+}
+
+#[test]
+fn review_notice_during_pending_delivery_completes() -> TestResult {
+    run_cancel_cell_scenario(|| pending_delivery(true, Duration::from_secs(8)))
+}
+
+#[test]
+fn review_pending_delivery_without_notice_completes() -> TestResult {
+    run_cancel_cell_scenario(|| pending_delivery(false, Duration::from_secs(8)))
+}
+
+#[test]
+fn pending_delivery_keeps_its_ordinary_deadline_after_notice() -> TestResult {
+    run_cancel_cell_scenario_with_timeout(
+        RUNTIME_EXECUTOR_STACK_BYTES,
+        Duration::from_secs(40),
+        || pending_delivery(true, Duration::from_secs(20)),
+    )
+}

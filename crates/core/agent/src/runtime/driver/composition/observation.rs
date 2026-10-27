@@ -178,6 +178,7 @@ impl Driver {
         let mut nested_was_settled = true;
         let mut resume_in_flight = false;
         let mut expedited = false;
+        let mut expedited_deadline_started = false;
         let wait_resumes_cell = state.integration().runtime_contract().wait_resumes_cell;
         let mut job_changes = self.job_sessions.job_terminal_changes();
         job_changes.mark_changed();
@@ -198,7 +199,6 @@ impl Driver {
                     result.map_err(|loss| local_composition_session_loss_error(state, &loss))?;
                 }
                 expedited = true;
-                response_deadline.as_mut().reset(deadline);
             }
             let executions_settled = nested_executions.is_empty()
                 && !state.has_active_nested()
@@ -212,15 +212,21 @@ impl Driver {
             {
                 response_deadline.as_mut().reset(
                     tokio::time::Instant::now()
-                        + if expedited {
-                            EXPEDITED_OBSERVATION_BOUND
-                        } else {
-                            observation.timeout(operation_timeout, steer_pending)
-                        },
+                        + observation.timeout(operation_timeout, steer_pending && !expedited),
                 );
                 steer_settlement_started = steer_pending;
             }
             nested_was_settled = executions_settled;
+            if expedited
+                && executions_settled
+                && state.deliveries_are_empty()
+                && !expedited_deadline_started
+            {
+                response_deadline
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + EXPEDITED_OBSERVATION_BOUND);
+                expedited_deadline_started = true;
+            }
             let response_ready = state.pending_is_empty()
                 && nested_executions.is_empty()
                 && state.completed_is_empty()
@@ -254,7 +260,7 @@ impl Driver {
                     Box::pin(self.handle_control(Some(command), control)).await;
                 }
                 () = &mut response_deadline, if deadline_ready => {
-                    break if expedited && state.deliveries_are_empty() {
+                    break if expedited_deadline_started {
                         Ok(observation.yielded(notice_reason))
                     } else {
                         Err(local_composition_started_error(observation.deadline_error()))
