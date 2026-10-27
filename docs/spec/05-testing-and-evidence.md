@@ -1334,6 +1334,19 @@ work is released, with a thirty-second scheduling watchdog. Empty-output poll,
 empty first-terminal await and steered Grok await run in parallel with a
 120-second requested window and a thirty-second return bound. They test wakeup
 versus waiting out the window, not a subsecond latency budget.
+
+Four cleanup-contention probes run in parallel with scheduling slack rather
+than short latency budgets. `contended_operation_does_not_stall_joined_proof_probe`
+waits for its response while the operation lock remains held, with a
+thirty-second hang watchdog; a probe blocked on that lock cannot return before
+the guard is dropped. `terminal_status_without_joined_owner_is_not_durable_proof`
+uses a sixty-second backend cleanup duration and a thirty-second probe bound
+to detect waiting on an unfinished supervisor. The retirement checks
+`promoted_short_job_is_retired_without_observer_polling` and
+`promoted_monitor_exits_on_owner_drop_without_terminal_publication` use
+thirty-second hang watchdogs: they prove eventual retirement without observer
+polling and monitor exit after owner drop, not subsecond latency.
+
 CPU-time redaction checks also stay parallel:
 they measure process CPU, not scheduler delay. Real-clock lower-bound-only
 assertions (wake consumption, retry delay and progressing streams) do not fail
@@ -2525,6 +2538,8 @@ machine with no seed row reports `no baseline` and its numbers, then passes.
 Every seed metric also records its `profile`; a missing profile or a profile
 mismatch is refused, including for informational metrics. The baseline document
 may contain no machines: comparisons require an explicit idle-host reseed.
+Profile mismatches use `perf smoke: incompatible baseline`, not the
+`perf smoke regression:` prefix reserved for comparable timing regressions.
 
 The six short product metrics are measured. `tui_transcript_20k_layout_ms`,
 `growth_turn_peak_rss_mb`, `jsonl_bulk_throughput_mb_per_s`, and

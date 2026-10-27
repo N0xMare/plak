@@ -119,6 +119,7 @@ def main() -> int:
 
     tolerance = float(document.get("tolerance", 0.5))
     failures = []
+    incompatible = []
     measured = set()
     for row in rows:
         metric = str(row["metric"])
@@ -128,8 +129,8 @@ def main() -> int:
             print(f"  {metric}: {row['value']} {row['unit']} (no seed)")
             continue
         if seed.get("profile") != row["profile"]:
-            failures.append(f"{metric}: profile mismatch (measurement {row['profile']}, "
-                            f"seed {seed.get('profile')!r})")
+            incompatible.append(f"{metric}: profile mismatch (measurement {row['profile']}, "
+                                f"seed {seed.get('profile')!r})")
             continue
         if metric not in GATED_METRICS:
             # Printed, never judged. The word "regression" is deliberately
@@ -151,7 +152,9 @@ def main() -> int:
         print(f"  {metric}: no measurement on this run")
     for message in failures:
         print(f"perf smoke regression: {message}")
-    return 1 if failures else 0
+    for message in incompatible:
+        print(f"perf smoke: incompatible baseline: {message}")
+    return 1 if failures or incompatible else 0
 
 
 if __name__ == "__main__":

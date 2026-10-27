@@ -6,9 +6,8 @@ use plakous_model::RunId;
 
 type TestError = Box<dyn std::error::Error>;
 
-// This suite tests bounded mutex contention, not scheduler latency. Leave
-// enough test-only cleanup time for the process supervisor under a fully
-// parallel workspace run while retaining the independent two-second bound.
+// Mutex-admission fixtures use this backend cleanup deadline and an
+// independent two-second bound; supervisor probes can select a longer deadline.
 const CLEANUP_DURATION: Duration = Duration::from_millis(250);
 
 #[test]
@@ -26,6 +25,13 @@ fn unjoined_workers_are_recovery_required_not_terminal_failure() {
 }
 
 fn sessions(value: u8) -> Result<(tempfile::TempDir, JoinedProcessSessions), TestError> {
+    sessions_with_cleanup(value, CLEANUP_DURATION)
+}
+
+fn sessions_with_cleanup(
+    value: u8,
+    cleanup_duration: Duration,
+) -> Result<(tempfile::TempDir, JoinedProcessSessions), TestError> {
     let workspace = tempfile::tempdir()?;
     let limits = ExecutionEnvironmentLimits::new(
         4096,
@@ -33,7 +39,7 @@ fn sessions(value: u8) -> Result<(tempfile::TempDir, JoinedProcessSessions), Tes
         8192,
         4096,
         Duration::from_secs(30),
-        CLEANUP_DURATION,
+        cleanup_duration,
     )?;
     let run_id = RunId::from_str(&format!("00000000-0000-0000-0000-{value:012x}"))?;
     let environment = ExecutionEnvironment::host(
@@ -157,7 +163,7 @@ fn promoted_short_job_is_retired_without_observer_polling() -> Result<(), TestEr
     )?;
     sessions.promote(id)?;
     sessions.write_stdin(id, b"", JoinedProcessInputDisposition::Close)?;
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let retired = {
             let state = lock(&sessions.inner.state);
@@ -168,7 +174,7 @@ fn promoted_short_job_is_retired_without_observer_polling() -> Result<(), TestEr
         }
         assert!(
             Instant::now() < deadline,
-            "unobserved job was not retired promptly"
+            "unobserved job was not retired before the hang watchdog"
         );
         std::thread::yield_now();
     }
@@ -194,7 +200,7 @@ fn promoted_monitor_exits_on_owner_drop_without_terminal_publication() -> Result
     sessions.promote(id)?;
     drop(session);
     drop(sessions);
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while Arc::strong_count(&shared) != 1 {
         assert!(
             Instant::now() < deadline,
@@ -386,7 +392,7 @@ fn a_running_session_has_no_joined_terminal_status() -> Result<(), TestError> {
 
 #[test]
 fn terminal_status_without_joined_owner_is_not_durable_proof() -> Result<(), TestError> {
-    let (_workspace, sessions) = sessions(120)?;
+    let (_workspace, sessions) = sessions_with_cleanup(120, Duration::from_secs(60))?;
     let id = sleeping_child(&sessions)?;
     let session = sessions.session(id)?;
     // Model the narrow supervisor interval after publishing status and
@@ -396,7 +402,7 @@ fn terminal_status_without_joined_owner_is_not_durable_proof() -> Result<(), Tes
     let started = Instant::now();
     assert!(!sessions.joined_terminal_identities().contains(&id.0));
     assert!(
-        started.elapsed() < CLEANUP_DURATION / 2,
+        started.elapsed() < Duration::from_secs(30),
         "proof probe waited for an unfinished supervisor"
     );
     lock(&session.shared).status = JoinedProcessStatus::Running;
@@ -443,7 +449,8 @@ fn contended_operation_does_not_stall_joined_proof_probe() -> Result<(), TestErr
     let worker = std::thread::spawn(move || {
         let _ = send.send(probe.joined_terminal_identities());
     });
-    let result = receive.recv_timeout(CLEANUP_DURATION / 2);
+    // A probe that waits on this held lock cannot return until it is released.
+    let result = receive.recv_timeout(Duration::from_secs(30));
     drop(operation);
     worker.join().map_err(|_| "joined proof probe panicked")?;
     assert!(

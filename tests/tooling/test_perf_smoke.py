@@ -68,6 +68,8 @@ class BaselineTests(unittest.TestCase):
                     )
                     self.assertEqual(code, 1)
                     self.assertIn("profile mismatch", self.printed)
+                    self.assertIn("perf smoke: incompatible baseline:", self.printed)
+                    self.assertNotIn("perf smoke regression:", self.printed)
 
     def test_a_measurement_without_a_profile_is_refused_even_without_a_baseline(self):
         self.assertEqual(self.run_check(machine="aaaaaaaaaaaa", seeded={}, profile=None), 1)
