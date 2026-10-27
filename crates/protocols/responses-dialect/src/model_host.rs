@@ -50,6 +50,74 @@ use crate::{
 pub type ResponsesModelErrorHook =
     fn(&ResponsesAttemptError, &ResolvedModelDescriptor) -> Option<ModelError>;
 
+impl ResponsesAttemptError {
+    /// Returns the default contextual HTTP error, or `None` for other failures.
+    ///
+    /// Dialect hooks can reuse its kind and context when customizing only the
+    /// operator-facing message, without duplicating attribution or retry policy.
+    pub fn contextual_http_error(
+        &self,
+        descriptor: &ResolvedModelDescriptor,
+    ) -> Option<ModelError> {
+        let Self::HttpStatus {
+            status,
+            class,
+            provider,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let retryability = retryability_from_facts(self.facts(), self.retry_class());
+        let kind = match class {
+            ResponsesHttpStatusClass::Authentication => ModelErrorKind::Authentication,
+            ResponsesHttpStatusClass::Authorization
+                if provider.as_ref().is_some_and(|provider| {
+                    provider.class() == crate::ResponsesProviderErrorClass::ContentRefusal
+                }) =>
+            {
+                ModelErrorKind::Policy
+            }
+            ResponsesHttpStatusClass::Authorization => ModelErrorKind::Authorization,
+            ResponsesHttpStatusClass::RateLimited => ModelErrorKind::RateLimited,
+            ResponsesHttpStatusClass::Quota => ModelErrorKind::QuotaExceeded,
+            ResponsesHttpStatusClass::ContextLimit => ModelErrorKind::ContextLimit,
+            ResponsesHttpStatusClass::Rejected
+                if provider.as_ref().is_some_and(|provider| {
+                    plakous_model::provider_rejection_is_context_overflow(
+                        provider.code(),
+                        provider.message().unwrap_or_default(),
+                    )
+                }) =>
+            {
+                ModelErrorKind::ContextLimit
+            }
+            ResponsesHttpStatusClass::Rejected => ModelErrorKind::InvalidRequest,
+            ResponsesHttpStatusClass::Server => ModelErrorKind::Unavailable,
+            ResponsesHttpStatusClass::Unknown => ModelErrorKind::Protocol,
+        };
+        // A terminal credential rejection needs new credentials, and a
+        // content refusal a different request, not a caller retry of the
+        // exhausted attempt.
+        let retryability = if matches!(
+            kind,
+            ModelErrorKind::Authentication | ModelErrorKind::Policy
+        ) && retryability == ModelRetryability::Exhausted
+        {
+            ModelRetryability::Permanent
+        } else {
+            retryability
+        };
+        Some(contextual_http_error(
+            descriptor,
+            kind,
+            retryability,
+            status.as_u16(),
+            provider.clone(),
+        ))
+    }
+}
+
 /// Invalid shared model-lifecycle construction.
 #[derive(Clone, Copy, Debug, Eq, thiserror::Error, PartialEq)]
 #[non_exhaustive]
@@ -1010,6 +1078,9 @@ fn model_error_from_attempt_without_summary(
     if let Some(error) = hook.and_then(|hook| hook(&error, descriptor)) {
         return error;
     }
+    if let Some(error) = error.contextual_http_error(descriptor) {
+        return error;
+    }
     let facts = error.facts();
     let retryability = retryability_from_facts(facts, error.retry_class());
     match error {
@@ -1027,53 +1098,6 @@ fn model_error_from_attempt_without_summary(
             retryability,
             progress.deadline_message(Instant::now()),
         ),
-        ResponsesAttemptError::HttpStatus {
-            status,
-            class,
-            provider,
-            ..
-        } => {
-            let kind = match class {
-                ResponsesHttpStatusClass::Authentication => ModelErrorKind::Authentication,
-                ResponsesHttpStatusClass::Authorization
-                    if provider.as_ref().is_some_and(|provider| {
-                        provider.class() == crate::ResponsesProviderErrorClass::ContentRefusal
-                    }) =>
-                {
-                    ModelErrorKind::Policy
-                }
-                ResponsesHttpStatusClass::Authorization => ModelErrorKind::Authorization,
-                ResponsesHttpStatusClass::RateLimited => ModelErrorKind::RateLimited,
-                ResponsesHttpStatusClass::Quota => ModelErrorKind::QuotaExceeded,
-                ResponsesHttpStatusClass::ContextLimit => ModelErrorKind::ContextLimit,
-                ResponsesHttpStatusClass::Rejected
-                    if provider.as_ref().is_some_and(|provider| {
-                        plakous_model::provider_rejection_is_context_overflow(
-                            provider.code(),
-                            provider.message().unwrap_or_default(),
-                        )
-                    }) =>
-                {
-                    ModelErrorKind::ContextLimit
-                }
-                ResponsesHttpStatusClass::Rejected => ModelErrorKind::InvalidRequest,
-                ResponsesHttpStatusClass::Server => ModelErrorKind::Unavailable,
-                ResponsesHttpStatusClass::Unknown => ModelErrorKind::Protocol,
-            };
-            // A terminal credential rejection needs new credentials, and a
-            // content refusal a different request, not a caller retry of the
-            // exhausted attempt.
-            let retryability = if matches!(
-                kind,
-                ModelErrorKind::Authentication | ModelErrorKind::Policy
-            ) && retryability == ModelRetryability::Exhausted
-            {
-                ModelRetryability::Permanent
-            } else {
-                retryability
-            };
-            contextual_http_error(descriptor, kind, retryability, status.as_u16(), provider)
-        }
         ResponsesAttemptError::Preflight { rejection, .. } => dispatch_rejection_error(
             descriptor,
             rejection,

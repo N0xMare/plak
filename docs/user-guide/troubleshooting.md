@@ -90,10 +90,6 @@ cost a duplicate inference:
 - the response stream broke (a reset, an early end, a stall, or an in-stream
   overload or rate-limit error), including after a local tool call began streaming. No tool from that incomplete response ran.
 
-OpenRouter Chat also retries one in-band upstream timeout (`408` or `504`)
-within the existing budget; a second ends the turn as a timeout. Partial output
-is discarded, and a request with a possible hosted effect is never replayed.
-
 The last two apply only when the request can do nothing on the provider's side
 beyond inference: no provider-hosted tool (web or X search, code interpreter),
 no server-side conversation or background mode. A request with any of those, a
@@ -102,12 +98,17 @@ never re-sent. `x-should-retry: false` forbids retry; `true` does not grant it.
 Compaction is a separate operation and retries only when typed transport proof
 says the server could not have received the complete request, never after any
 HTTP response or possible acceptance.
+
 One such proof is `peer_rejected_record`: on HTTP/1.1 with TLS 1.3, the server sent TLS
 `bad_record_mac` (alert 20) before any response byte, rejecting a record of
 the request. Plak retries this automatically, including during `/compact`,
 within the same budget below. Other TLS alerts, a locally detected decrypt
 failure, alert 20 after response bytes, TLS 1.2, and HTTP/2 do not gain this unsent-only
 retry permission.
+
+OpenRouter Chat also retries one in-band upstream timeout (`408` or `504`)
+within the existing budget; a second ends the turn as a timeout. Partial output
+is discarded, and a request with a possible hosted effect is never replayed.
 
 Plak makes at most four ordinary requests, honoring the provider's `Retry-After` (a
 longer wait is shortened to 60 seconds) and otherwise waiting about 1, 2 and 4
