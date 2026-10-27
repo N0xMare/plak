@@ -47,6 +47,9 @@ use plakous_responses_dialect::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "native-auth")]
+mod usage_limit;
+
 use crate::OPENAI_RESPONSES_ADAPTER_REVISION;
 #[cfg(feature = "native-auth")]
 use crate::config::OPENAI_RESPONSES_DIALECT_REVISION;
@@ -1288,7 +1291,7 @@ impl LanguageModel for OpenAiLanguageModel {
             Arc::clone(&clock),
             self.descriptor.clone(),
             self.config.event_channel_capacity(),
-            None,
+            Some(usage_limit::model_error),
         )
         .map_err(|_| {
             preparation_rejection(

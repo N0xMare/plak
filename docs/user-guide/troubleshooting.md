@@ -90,6 +90,10 @@ cost a duplicate inference:
 - the response stream broke (a reset, an early end, a stall, or an in-stream
   overload or rate-limit error), including after a local tool call began streaming. No tool from that incomplete response ran.
 
+OpenRouter Chat also retries one in-band upstream timeout (`408` or `504`)
+within the existing budget; a second ends the turn as a timeout. Partial output
+is discarded, and a request with a possible hosted effect is never replayed.
+
 The last two apply only when the request can do nothing on the provider's side
 beyond inference: no provider-hosted tool (web or X search, code interpreter),
 no server-side conversation or background mode. A request with any of those, a

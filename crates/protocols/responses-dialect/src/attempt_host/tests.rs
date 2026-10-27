@@ -5219,7 +5219,7 @@ async fn terminal_retry_advice_and_quota_bodies_never_replay() -> TestResult {
             assert_eq!(error.retry_class(), RetryClass::Never);
             assert!(
                 matches!(&error, ResponsesAttemptError::HttpStatus { class: ResponsesHttpStatusClass::Quota, provider: Some(provider), retry_disabled: true, .. }
-                if provider.usage_limit_resets_at() == Some(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_012)))
+                if provider.usage_limit_resets_at() == Some(std::time::UNIX_EPOCH + Duration::from_secs(4_102_444_812)))
             );
         }
         assert_eq!(peer.await??.len(), 1);

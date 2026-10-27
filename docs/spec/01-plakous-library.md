@@ -9398,8 +9398,10 @@ well as status: `insufficient_quota`, `quota_exceeded`, `payment_required`,
 `usage_limit_reached` is typed quota exhaustion, not a retryable rate limit.
 Its optional `error.resets_at` Unix-seconds value is exposed on the bounded
 provider error and rendered in UTC with advice to wait or review plan/credits.
-Missing or invalid reset values keep the quota classification and omit the
-timestamp. Ordinary
+Missing, past or invalid reset values keep the quota classification and omit the
+timestamp. Dates beyond year 9999 are invalid. The shared dialect's message
+is provider-neutral; the Codex route alone adds its ChatGPT plan/credits URL.
+Ordinary
 `rate_limit_exceeded`, `rate_limit_error`, and overloaded 529 remain retryable.
 An OpenRouter numeric `402` is typed quota evidence; its native value is
 retained without synthesizing a provider code label.
@@ -9644,7 +9646,8 @@ deadline still bounds preparation and stream start. Its single-dispatch
 semantics are unchanged; a billed body may outlive that start budget.
 Cancellation stops a stream at once; the single-dispatch paid-compaction
 workflow is unchanged. Fresh TCP connections race all admitted resolved
-addresses, interleaving IPv6 and IPv4 while preserving resolver order within
+addresses, deduplicating exact repeated answers before interleaving IPv6 and
+IPv4 while preserving resolver order within
 each family and the first answer's family preference. Attempts start 250 ms
 apart; an immediate failure with no pending attempt advances immediately.
 The first successful TCP connection wins and drops all losing socket futures.
@@ -9744,7 +9747,8 @@ they share the residual race with a server closing a connection after the idle
 check but before the request reached it, which ends them `MayHaveTransmitted`
 without the turn kernel's replay. Pooling is part of the transport behavior
 identity: the identity carries a pooled or one-shot frame, and the transport
-behavior revision is 3.
+behavior revision is 5. Family-interleaved, staggered connection racing is
+part of that revision-bound transport behavior.
 
 Responses operation deadline diagnostics aggregate the existing bounded, lossy
 protocol observation channel: fixed last phase, observed event and argument delta/done

@@ -500,6 +500,7 @@ async fn loopback(
 struct HoldOneReply {
     index: usize,
     release: Arc<Notify>,
+    body_prefix: Option<usize>,
 }
 
 /// The same loopback with an explicit status line per reply.
@@ -557,8 +558,13 @@ async fn loopback_with_status_holding(
                 let header_end = response
                     .find("\r\n\r\n")
                     .map_or(0, |offset| offset.saturating_add(4));
-                let split = header_end
-                    .max(response.len().saturating_sub(8))
+                let split = hold
+                    .as_ref()
+                    .and_then(|hold| hold.body_prefix)
+                    .map_or_else(
+                        || header_end.max(response.len().saturating_sub(8)),
+                        |prefix| header_end + prefix,
+                    )
                     .min(response.len());
                 stream.write_all(&response.as_bytes()[..split]).await?;
                 if let Some(hold) = hold.as_ref() {
@@ -1677,6 +1683,10 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
             &format!("{content}data: {{\"error\""),
             1,
         );
+        let body_prefix = interrupted
+            .find("data: {\"error\"")
+            .ok_or("error boundary")?;
+        let release = Arc::new(Notify::new());
         let mut replies = discovery_replies();
         replies.extend([
             (
@@ -1690,7 +1700,20 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
                 "x-request-id: req-after\r\n",
             ),
         ]);
-        let (client, origin, peer) = loopback(b"openrouter-in-band-refusal-v1", replies).await?;
+        let replies = replies
+            .into_iter()
+            .map(|(content_type, body, headers)| ("200 OK", content_type, body, headers))
+            .collect();
+        let (client, origin, peer) = loopback_with_status_holding(
+            b"openrouter-in-band-refusal-v1",
+            replies,
+            Some(HoldOneReply {
+                index: 2,
+                release: Arc::clone(&release),
+                body_prefix: Some(body_prefix),
+            }),
+        )
+        .await?;
         let chat = discovered_chat_model(client, origin).await?;
         let workspace_dir = tempfile::tempdir()?;
         let workspace = Arc::new(WorkspacePolicy::host(workspace_dir.path(), ".")?);
@@ -1707,7 +1730,8 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
                 )
                 .build()?;
 
-        let result = agent.prompt("hello").await?.result().await?;
+        let result =
+            assert_discarded_generation(agent.prompt("hello").await?, &release, code).await?;
         assert!(result.error().is_none(), "HTTP {code} in band: {result:?}");
         assert_eq!(result.response().ok_or("response")?.output_text(), "chat");
         agent.shutdown().await?;
@@ -1720,6 +1744,57 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
         assert_eq!(requests[2], requests[3], "replay keeps the exact request");
     }
     Ok(())
+}
+
+async fn assert_discarded_generation(
+    mut turn: plakous_agent::Turn,
+    release: &Notify,
+    code: u16,
+) -> TestResult<plakous_agent::TurnResult> {
+    let mut events = turn.take_events()?;
+    let mut visible = Vec::new();
+    let mut retries = Vec::new();
+    while let Ok(event) = events.recv().await {
+        match event.kind().model_event() {
+            Some(ModelEvent::TextDelta(delta)) => {
+                visible.extend_from_slice(delta.bytes());
+                release.notify_one();
+            }
+            Some(ModelEvent::Retry(retry)) => {
+                if retry.output_discarded() {
+                    visible.clear();
+                }
+                retries.push(retry.clone());
+            }
+            _ => {}
+        }
+        if let AgentEventKind::ConversationCommitted {
+            items: Some(items), ..
+        } = event.kind()
+        {
+            assert!(items.iter().all(|item| {
+                !item
+                    .display_text()
+                    .unwrap_or_default()
+                    .contains("discarded")
+            }));
+        }
+        if matches!(
+            event.kind(),
+            AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
+        ) {
+            break;
+        }
+    }
+    let result = turn.result().await?;
+    assert_eq!(retries.len(), 1);
+    assert!(
+        retries[0].output_discarded(),
+        "HTTP {code} must discard the interrupted generation"
+    );
+    assert!(!String::from_utf8(visible)?.contains("discarded"));
+    assert!(result.conversation().items().iter().flat_map(ConversationItem::blocks).all(|block| !matches!(block, ContentBlock::Text(text) if text.text().contains("discarded"))));
+    Ok(result)
 }
 
 /// Chat buffers streamed tool calls until the terminal flush, so no tool-call
@@ -1814,6 +1889,7 @@ async fn chat_replay_wait_gets_a_fresh_generation_head_budget() -> TestResult {
             // Discovery is the first two replies. This is the cut generation.
             index: 2,
             release: Arc::clone(&release),
+            body_prefix: None,
         }),
     )
     .await?;
@@ -1977,7 +2053,11 @@ async fn an_in_band_504_is_the_providers_timeout_with_its_status() -> TestResult
         )
         .build()?;
 
-    let result = agent.prompt("hello").await?.result().await?;
+    let result = timeout(
+        Duration::from_secs(5),
+        agent.prompt("hello").await?.result(),
+    )
+    .await??;
     let error = result
         .error()
         .ok_or("failed turn error")?

@@ -1,5 +1,5 @@
 //! Connect-path tests for [`AddressPolicy`] with a scripted resolver: the
-//! policy decides the exact address that is connected, on every connection.
+//! policy admits every address a fresh connection is allowed to race.
 
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -105,7 +105,7 @@ async fn public_only_refuses_a_private_resolution_without_connecting() -> TestRe
 }
 
 #[tokio::test]
-async fn the_first_admitted_address_is_the_one_connected() -> TestResult {
+async fn only_admitted_addresses_are_connected() -> TestResult {
     let (peer, accepted) = counting_peer().await?;
     let (resolver, _) = scripted(vec![vec![private(peer.port()), peer]]);
     let client = client(resolver, Some(AddressPolicy::only(LOOPBACK)))?;
@@ -163,7 +163,7 @@ async fn refused_host_names_are_never_resolved() -> TestResult {
 }
 
 #[tokio::test]
-async fn without_a_policy_the_first_resolved_address_is_connected() -> TestResult {
+async fn without_a_policy_resolved_addresses_are_eligible_for_connection() -> TestResult {
     let (peer, accepted) = counting_peer().await?;
     let (resolver, _) = scripted(vec![vec![peer, private(peer.port())]]);
     let client = client(resolver, None)?;

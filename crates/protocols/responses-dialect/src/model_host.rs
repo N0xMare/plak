@@ -1285,14 +1285,8 @@ fn responses_http_error_message(provider: Option<&crate::ResponsesProviderError>
 }
 
 fn operator_provider_detail(provider: &crate::ResponsesProviderError) -> Option<String> {
-    if [provider.code(), provider.kind()].contains(&Some("usage_limit_reached")) {
-        let reset = provider.usage_limit_resets_at().map_or_else(
-            || "Try again after your usage resets".to_owned(),
-            |time| format!("Try again after {}", httpdate::fmt_http_date(time)),
-        );
-        return Some(format!(
-            "Codex usage limit reached. {reset}, or check your plan and credits at https://chatgpt.com/settings/usage."
-        ));
+    if let Some(detail) = provider.usage_limit_detail() {
+        return Some(detail);
     }
     let raw = provider.message()?;
     let collapsed: String = raw

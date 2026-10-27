@@ -201,6 +201,8 @@ async fn a_connect_fault_fails_like_a_refused_connection() -> TestResult {
     let reserved = tokio::net::TcpStream::connect(reservation.local_addr()?).await?;
     let (_peer, _) = reservation.accept().await?;
     let refused = Origin::parse(&format!("https://{}", reserved.local_addr()?))?;
+    // BSD SO_REUSEADDR permits listening on an established socket's local port.
+    #[cfg(target_os = "linux")]
     assert_eq!(
         TcpListener::bind(reserved.local_addr()?)
             .await
@@ -235,6 +237,11 @@ async fn a_connect_fault_fails_like_a_refused_connection() -> TestResult {
         (real.phase(), real.transmission(), real.kind())
     );
     assert_eq!(injected.cause(), real.cause());
+    assert_eq!(injected.connect_attempts(), None);
+    assert_eq!(
+        real.connect_attempts(),
+        Some(plakous_http::ConnectAttempts { ipv4: 1, ipv6: 0 })
+    );
     assert_eq!(server.accepted.load(Ordering::SeqCst), 0);
     Ok(())
 }

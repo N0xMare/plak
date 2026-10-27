@@ -506,7 +506,7 @@ pub struct ResponsesProviderError {
 }
 
 impl ResponsesProviderError {
-    /// Subscription usage-limit reset, when the provider supplies Unix seconds.
+    /// Future usage-limit reset, when the provider supplies representable Unix seconds.
     #[must_use]
     pub fn usage_limit_resets_at(&self) -> Option<std::time::SystemTime> {
         if ![self.code(), self.kind()].contains(&Some("usage_limit_reached")) {
@@ -517,7 +517,25 @@ impl ResponsesProviderError {
         if seconds > 253_402_300_799 {
             return None;
         }
-        std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(seconds))
+        let time = std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(seconds))?;
+        (time > std::time::SystemTime::now()).then_some(time)
+    }
+
+    /// Provider-neutral usage-limit advice with an optional validated reset date.
+    #[must_use]
+    pub fn usage_limit_detail(&self) -> Option<String> {
+        if ![self.code(), self.kind()].contains(&Some("usage_limit_reached")) {
+            return None;
+        }
+        Some(self.usage_limit_resets_at().map_or_else(
+            || "usage limit reached; try again after usage resets".to_owned(),
+            |time| {
+                format!(
+                    "usage limit reached; try again after {}",
+                    httpdate::fmt_http_date(time)
+                )
+            },
+        ))
     }
 
     /// Safe allowlisted error classification.

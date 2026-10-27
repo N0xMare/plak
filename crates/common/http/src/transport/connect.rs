@@ -11,6 +11,31 @@ use crate::{ErrorKind, Failure, Phase, TransmissionFact};
 
 const ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 
+#[derive(Clone, Default)]
+pub(super) enum Connector {
+    #[default]
+    System,
+    #[cfg(test)]
+    Scripted(ScriptedConnector),
+}
+
+#[cfg(test)]
+type ScriptedConnector = std::sync::Arc<
+    dyn Fn(SocketAddr) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<TcpStream>> + Send>>
+        + Send
+        + Sync,
+>;
+
+impl Connector {
+    async fn connect(&self, address: SocketAddr) -> std::io::Result<TcpStream> {
+        match self {
+            Self::System => TcpStream::connect(address).await,
+            #[cfg(test)]
+            Self::Scripted(script) => script(address).await,
+        }
+    }
+}
+
 pub(super) fn interleave(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
     let ipv6_first = addresses.first().is_some_and(SocketAddr::is_ipv6);
     let (first, second): (Vec<_>, Vec<_>) = addresses
@@ -27,9 +52,13 @@ pub(super) fn interleave(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
     }
 }
 
-pub(super) async fn connect(addresses: Vec<SocketAddr>) -> Result<TcpStream, Failure> {
+pub(super) async fn connect(
+    addresses: Vec<SocketAddr>,
+    connector: Connector,
+) -> Result<TcpStream, Failure> {
+    let connector = &connector;
     race(addresses, |address| async move {
-        let stream = TcpStream::connect(address).await?;
+        let stream = connector.connect(address).await?;
         // HEADERS and DATA must not wait for the peer's delayed ACK.
         stream.set_nodelay(true)?;
         Ok(stream)

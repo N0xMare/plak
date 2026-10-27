@@ -99,7 +99,15 @@ impl ChatHttpHooks for FakeHooks {
     }
 
     fn classify_stream_error(&self, error: ChatStreamError) -> ChatAttemptProtocolError {
-        ChatAttemptProtocolError::new(error.message())
+        let protocol = ChatAttemptProtocolError::new(error.message());
+        let Some(status) = error.http_status() else {
+            return protocol;
+        };
+        let protocol = protocol.with_http_status(status);
+        match plakous_attempt::ProviderRefusal::from_http_status(status) {
+            Some(refusal) => protocol.with_refusal(refusal),
+            None => protocol,
+        }
     }
 }
 
@@ -116,6 +124,10 @@ where
 }
 
 fn fixture_operation(label: &[u8]) -> TestResult<PreparedChatHttpOperation> {
+    fixture_operation_with_body(label, b"{}")
+}
+
+fn fixture_operation_with_body(label: &[u8], body: &[u8]) -> TestResult<PreparedChatHttpOperation> {
     let plan = digest(DigestDomain::RequestPlan, label)?;
     let protocol = ProtocolId::new("chat-completions.test")?;
     let model = ModelId::new("model-literal")?;
@@ -141,7 +153,7 @@ fn fixture_operation(label: &[u8]) -> TestResult<PreparedChatHttpOperation> {
         ChatStreamLimits::default(),
     );
     let lowered_digest = digest(DigestDomain::ProviderOperation, label)?;
-    let lowered = LoweredChatRequest::test_fixture(b"{}".to_vec(), lowered_digest);
+    let lowered = LoweredChatRequest::test_fixture(body.to_vec(), lowered_digest);
     let binding = ChatOperationBinding::new(
         digest(DigestDomain::ModelBinding, label)?,
         plan,
@@ -232,10 +244,17 @@ async fn loopback_responses_with_hold(
                     ));
                 }
                 request.extend_from_slice(&buffer[..read]);
-                if request.windows(4).any(|window| window == b"\r\n\r\n")
-                    && request.ends_with(b"{}")
-                {
-                    break;
+                if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&request[..end]);
+                    let length = head
+                        .lines()
+                        .filter_map(|line| line.split_once(':'))
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+                        .ok_or_else(|| io::Error::other("fixture request content-length"))?;
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
                 }
             }
             seen.fetch_add(1, Ordering::SeqCst);
@@ -282,6 +301,166 @@ fn successful_sse() -> Vec<u8> {
     ]
     .concat()
     .into_bytes()
+}
+
+fn deadline_sse() -> Vec<u8> {
+    b"data: {\"error\":{\"code\":504,\"message\":\"upstream timeout\"}}\n\n".to_vec()
+}
+
+#[tokio::test]
+async fn a_second_in_band_deadline_stops_before_a_third_scripted_reply() -> TestResult {
+    let operation = fixture_operation(b"deadline-cap")?;
+    let (attempt, _receiver) = fixture_attempt(operation.binding().clone())?;
+    let (client, origin, dispatches) = loopback_responses(vec![
+        (200, deadline_sse(), false),
+        (200, deadline_sse(), false),
+        (200, successful_sse(), false),
+    ])
+    .await?;
+    let mut service = ChatHttpAttemptService::new(
+        client,
+        origin,
+        operation,
+        FakeHooks::default(),
+        clock(),
+        ids(),
+        Duration::from_secs(30),
+        1024,
+    )
+    .with_turn_retry();
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        call_chat_operation(&mut service, attempt),
+    )
+    .await?;
+    assert_eq!(
+        dispatches.load(Ordering::SeqCst),
+        2,
+        "a missing cap dispatched the third scripted reply"
+    );
+    let error = result.expect_err("the second provider deadline is terminal");
+    assert_eq!(error.facts().ok_or("facts")?.physical_attempts(), 2);
+    assert_eq!(
+        error.facts().ok_or("facts")?.summary().decline,
+        Some(plakous_attempt::AttemptRetryDecline::Budget)
+    );
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_transport_idle_stall_does_not_spend_the_provider_deadline_replay() -> TestResult {
+    let (_keep_clock, clock_held) = std::sync::mpsc::channel::<()>();
+    tokio::task::spawn_blocking(move || {
+        let _ = clock_held.recv();
+    });
+    let operation = fixture_operation(b"idle-then-deadline")?;
+    let (attempt, mut receiver) = fixture_attempt(operation.binding().clone())?;
+    let complete = String::from_utf8(successful_sse())?;
+    let boundary = complete
+        .match_indices("\n\n")
+        .nth(1)
+        .ok_or("prefix boundary")?
+        .0
+        + 2;
+    let (release, holds) = tokio::sync::mpsc::channel(1);
+    let mut release = Some(release);
+    let (client, origin, dispatches) = loopback_responses_with_hold(
+        vec![
+            (200, complete.as_bytes()[..boundary].to_vec(), true),
+            (200, deadline_sse(), false),
+            (200, successful_sse(), false),
+        ],
+        Some(holds),
+    )
+    .await?;
+    let client = client.with_limits(Limits {
+        response_body_timeout: Duration::from_secs(1),
+        ..client.limits().clone()
+    })?;
+    let mut service = ChatHttpAttemptService::new(
+        client,
+        origin,
+        operation,
+        FakeHooks::default(),
+        clock(),
+        ids(),
+        Duration::from_secs(30),
+        1024,
+    )
+    .with_turn_retry();
+    let execution = tokio::spawn(async move { call_chat_operation(&mut service, attempt).await });
+    let mut stalled = false;
+    let mut retries = 0;
+    while let Some(event) = receiver.next().await {
+        match event? {
+            ModelEvent::TextDelta(_) if !stalled => {
+                stalled = true;
+                tokio::time::advance(Duration::from_secs(2)).await;
+            }
+            ModelEvent::Retry(retry) => {
+                assert_eq!(retry.loss().declined_reason, None, "{retry:?}");
+                assert_eq!(
+                    retry.cause(),
+                    ModelRetryCause::StreamInterrupted {
+                        fault: ModelTransportFault::Timeout
+                    }
+                );
+                retries += 1;
+                drop(release.take());
+                tokio::time::advance(retry.delay() + Duration::from_millis(2)).await;
+            }
+            _ => {}
+        }
+    }
+    let response = execution.await??;
+    assert_eq!(response.facts().physical_attempts(), 3);
+    assert_eq!(dispatches.load(Ordering::SeqCst), 3);
+    assert_eq!(retries, 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_server_effect_chat_body_never_replays_an_in_band_deadline() -> TestResult {
+    let operation = fixture_operation_with_body(
+        b"effect-deadline",
+        br#"{"plugins":[{"id":"web","enabled":true}]}"#,
+    )?;
+    assert_eq!(
+        operation.binding().replay_safety(),
+        plakous_attempt::ReplaySafety::ServerEffect
+    );
+    let (attempt, mut receiver) = fixture_attempt(operation.binding().clone())?;
+    let (client, origin, dispatches) = loopback_responses(vec![
+        (200, deadline_sse(), false),
+        (200, successful_sse(), false),
+    ])
+    .await?;
+    let mut service = ChatHttpAttemptService::new(
+        client,
+        origin,
+        operation,
+        FakeHooks::default(),
+        clock(),
+        ids(),
+        Duration::from_secs(30),
+        1024,
+    )
+    .with_turn_retry();
+    let error = call_chat_operation(&mut service, attempt)
+        .await
+        .expect_err("server effect forbids replay");
+    assert_eq!(error.facts().ok_or("facts")?.physical_attempts(), 1);
+    assert_eq!(dispatches.load(Ordering::SeqCst), 1);
+    let mut declined = 0;
+    while let Some(event) = receiver.next().await {
+        if let Ok(ModelEvent::Retry(retry)) = event {
+            assert_eq!(retry.loss().declined_reason, Some(Decline::ServerEffect));
+            assert!(!retry.output_discarded());
+            declined += 1;
+        }
+    }
+    assert_eq!(declined, 1);
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

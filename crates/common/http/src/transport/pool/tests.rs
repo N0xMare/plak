@@ -592,11 +592,36 @@ async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestRe
         assert_eq!(pool(&derived)?.idle_count(), 1);
         drop(derived);
         assert_eq!(
-            peer.read(&mut byte).await?,
+            tokio::time::timeout(Duration::from_secs(5), peer.read(&mut byte)).await??,
             0,
             "last owner closes the socket"
         );
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn dropping_the_last_pooled_hyper_h1_client_closes_its_socket() -> TestResult {
+    let server = Server::start(H1).await?;
+    let client = server.pooled_client(Limits::default())?;
+    let derived = client.with_limits(Limits::for_streaming_inference())?;
+    assert_eq!(
+        exchange(&client, &server.origin, "/ok").await?,
+        ConnectionUse::Fresh
+    );
+    assert_eq!(
+        pool(&client)?.idle_count(),
+        1,
+        "the real Hyper connection was retained"
+    );
+    drop(client);
+    assert_eq!(
+        exchange(&derived, &server.origin, "/ok").await?,
+        ConnectionUse::Reused
+    );
+    assert_eq!(server.closed(), 0);
+    drop(derived);
+    assert!(eventually(|| server.closed() == 1).await);
     Ok(())
 }
 

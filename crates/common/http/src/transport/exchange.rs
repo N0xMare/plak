@@ -213,9 +213,10 @@ impl Client {
         )
         .await?;
 
+        let connector = self.inner.connector.clone();
         let stream = wait_task(
             TaskGuard::new(tokio::spawn(async move {
-                super::connect::connect(addresses).await
+                super::connect::connect(addresses, connector).await
             })),
             control,
             self.inner.limits.connect_timeout,

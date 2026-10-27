@@ -16,7 +16,10 @@ fn codex_usage_limit_is_terminal_and_carries_reset_without_provider_prose()
         "../../tests/fixtures/codex-usage-limit.json"
     ))?;
     for reset in [
+        Some(serde_json::json!(4_102_444_812_u64)),
         Some(serde_json::json!(1_700_000_012_u64)),
+        Some(serde_json::json!(253_402_300_799_u64)),
+        Some(serde_json::json!(253_402_300_800_u64)),
         None,
         Some(serde_json::json!(-1)),
         Some(serde_json::json!(u64::MAX)),
@@ -36,8 +39,11 @@ fn codex_usage_limit_is_terminal_and_carries_reset_without_provider_prose()
             crate::ResponsesProviderErrorPolicy::OpenAiCompatible,
         )?;
         assert_eq!(provider.class(), crate::ResponsesProviderErrorClass::Quota);
-        let expected = (reset == Some(serde_json::json!(1_700_000_012_u64)))
-            .then_some(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_012));
+        let expected = reset
+            .as_ref()
+            .and_then(serde_json::Value::as_u64)
+            .filter(|seconds| matches!(seconds, 4_102_444_812 | 253_402_300_799))
+            .map(|seconds| std::time::UNIX_EPOCH + Duration::from_secs(seconds));
         assert_eq!(provider.usage_limit_resets_at(), expected);
         let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
             physical_attempts: 1,
@@ -66,14 +72,13 @@ fn codex_usage_limit_is_terminal_and_carries_reset_without_provider_prose()
             error.context().map(ModelErrorContext::retryability),
             Some(ModelRetryability::Permanent)
         );
-        assert!(error.message().contains("Codex usage limit reached"));
-        assert!(
-            error
-                .message()
-                .contains("https://chatgpt.com/settings/usage")
-        );
-        if expected.is_some() {
-            assert!(error.message().contains("Tue, 14 Nov 2023 22:13:32 GMT"));
+        assert!(error.message().contains("usage limit reached"));
+        assert!(!error.message().contains("Codex"));
+        assert!(!error.message().contains("chatgpt.com"));
+        if let Some(time) = expected {
+            assert!(error.message().contains(&httpdate::fmt_http_date(time)));
+        } else {
+            assert!(!error.message().contains("GMT"));
         }
     }
     Ok(())

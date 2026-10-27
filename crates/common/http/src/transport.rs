@@ -184,6 +184,7 @@ struct ClientInner {
     pool: Option<Arc<Pool>>,
     address_policy: Option<AddressPolicy>,
     resolver: Resolver,
+    connector: connect::Connector,
 }
 
 /// How a fresh connection resolves its origin host.
@@ -231,9 +232,11 @@ async fn resolve(
     if addresses.is_empty() {
         return Err(resolution_failure(ErrorKind::Resolution));
     }
+    let mut seen = std::collections::HashSet::new();
     let addresses: Vec<_> = addresses
         .into_iter()
         .filter(|address| policy.is_none_or(|policy| policy.admits(address.ip())))
+        .filter(|address| seen.insert(*address))
         .collect();
     if addresses.is_empty() {
         return Err(resolution_failure(ErrorKind::AddressRefused));
@@ -365,6 +368,7 @@ impl Client {
                 pool: None,
                 address_policy: None,
                 resolver: Resolver::System,
+                connector: connect::Connector::default(),
             }),
         })
     }
@@ -402,6 +406,7 @@ impl Client {
                 pool: inner.pool.clone(),
                 address_policy: inner.address_policy,
                 resolver: inner.resolver.clone(),
+                connector: inner.connector.clone(),
             }),
         })
     }
@@ -410,12 +415,12 @@ impl Client {
     /// fresh connection may use, keeping TLS, limits, observer and any pool.
     ///
     /// The policy is applied on every connection, to the exact address then
-    /// connected: the first resolved address it admits is used, and a refused
+    /// connected: only admitted resolved addresses are raced, and a refused
     /// host name or a resolution with no admitted address fails
     /// [`ErrorKind::AddressRefused`] in [`Phase::Resolution`] before any
     /// connection is attempted. Pooled connections are kept per policy. A
     /// caller following redirects sends each hop through this client, so every
-    /// hop is checked. `None` restores connecting to the first resolved address.
+    /// hop is checked. `None` races every resolved address.
     #[must_use]
     pub fn with_address_policy(&self, policy: Option<AddressPolicy>) -> Self {
         let inner = &self.inner;
@@ -440,6 +445,7 @@ impl Client {
                 pool: inner.pool.clone(),
                 address_policy: policy,
                 resolver: inner.resolver.clone(),
+                connector: inner.connector.clone(),
             }),
         }
     }
@@ -466,6 +472,7 @@ impl Client {
                 pool: inner.pool.clone(),
                 address_policy: inner.address_policy,
                 resolver,
+                connector: inner.connector.clone(),
             }),
         }
     }
@@ -505,6 +512,7 @@ impl Client {
                 pool: Some(Arc::new(Pool::default())),
                 address_policy: inner.address_policy,
                 resolver: inner.resolver.clone(),
+                connector: inner.connector.clone(),
             }),
         }
     }

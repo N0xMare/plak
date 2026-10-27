@@ -538,6 +538,41 @@ async fn production_http_rejection_never_becomes_completion() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+async fn platform_usage_limit_never_suggests_a_chatgpt_subscription_plan() -> TestResult {
+    let body =
+        serde_json::json!({"error":{"type":"usage_limit_reached","resets_at":4_102_444_812_u64}})
+            .to_string();
+    let response = format!(
+        "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let (client, origin, peer) = endpoint(response.into_bytes()).await?;
+    let authority = authority(OpenAiPlatformModelFacts::Gpt56Luna)?;
+    let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
+    let model = Arc::new(OpenAiPlatformModel::with_local_transport(
+        authority, selected, client, origin,
+    )?);
+    let events = execute(model, ReasoningEffort::Low).await?;
+    let error = events
+        .iter()
+        .find_map(|event| event.as_ref().err())
+        .ok_or("quota refusal")?;
+    assert_eq!(error.kind(), ModelErrorKind::QuotaExceeded);
+    assert_eq!(
+        error
+            .context()
+            .map(plakous_model::ModelErrorContext::retryability),
+        Some(ModelRetryability::Permanent)
+    );
+    assert!(error.message().contains("usage limit reached"));
+    assert!(error.message().contains("2100"));
+    assert!(!error.message().contains("Codex"));
+    assert!(!error.message().contains("chatgpt.com"));
+    peer.await??;
+    Ok(())
+}
+
 fn sse_response(events: Vec<serde_json::Value>) -> Vec<u8> {
     let mut body = String::new();
     for (index, mut event) in events.into_iter().enumerate() {
