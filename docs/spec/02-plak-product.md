@@ -2459,6 +2459,8 @@ interrupted continuations end the run without retry.
 tool and says `run is non-interactive`; it never waits for approval input. The
 model receives the denial and continues under the normal turn rules. A
 restored turn finishes before the caller's new prompt is admitted.
+Repeated observations of the same offered approval id print and send its denial
+only once; a distinct id for the same tool is a new decision.
 
 If capacity refuses an automatic continuation and storage remains unavailable,
 the run emits `plak: run stopped at storage unavailable`, maps a completed or
@@ -2602,15 +2604,6 @@ in the same turn is admitted; only a submission with no fact yet refuses another
 **Reopen is projection, runtime open, projection, then resubmission.** Opening
 a session, in any face and after any crash, runs these steps and nothing else:
 
-A turn restored at a pending decision is driven only after surface attachment,
-through the same `TurnDrive` as live work, with its original identity and result.
-Its early bounded receiver retains the restored decision event. The TUI asks
-for the pending approval again; JSONL emits `hello` first, then the approval,
-and remains responsive to interrupt and quit. JSONL v1 has no inbound approval
-resolution command; its approval observations do not themselves grant a way
-to answer. A restored decision is not an abandonment or a replay of the
-provider request or tool effect.
-
 An in-process switch back first joins any tracked release of that session's
 old attachment (§2.6). It performs no source-finalization reconciliation.
 
@@ -2653,6 +2646,17 @@ old attachment (§2.6). It performs no source-finalization reconciliation.
    withdrawal. The notice is `compaction did not start; run /compact again`,
    `fork did not start; run /fork again`, `clear did not start; run /clear
    again`, or `model change did not start; choose the model again`.
+
+A turn restored at a pending decision is driven only after surface attachment,
+through the same `TurnDrive` as live work, with its original identity and result.
+Its early bounded receiver retains the restored decision event. Launch,
+in-process session switch and in-place recovery all drive a restored turn
+before another prompt. The TUI asks for the pending approval again;
+JSONL emits `hello` before the approval,
+and remains responsive to interrupt and quit. JSONL v1 has no inbound approval
+resolution command; its approval observations do not themselves grant a way
+to answer. A restored decision is not an abandonment or a replay of the
+provider request or tool effect.
 
 The tree projector applies root batch acknowledgements and withheld-mail returns
 from the same feed before another batch is selected. Product delivery bookkeeping

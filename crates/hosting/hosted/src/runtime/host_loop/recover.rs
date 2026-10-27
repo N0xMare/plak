@@ -11,9 +11,10 @@ use plakous::agent::AbandonedTurnReport;
 use plakous::sessions::feed::FeedSeq;
 
 use super::{
-    CliFailure, CliResult, ContextQuery, HostLoop, SessionEvent, build_session_from_config,
-    durable_tree_id, emit_queue_snapshot, emit_restored_paused_note, emit_unavailable_context,
-    log_ev, native_compact_facet, query_context, report_context, restored_paused_status_suffix,
+    CliFailure, CliResult, ContextQuery, HostLoop, HostStep, SessionEvent,
+    build_session_from_config, durable_tree_id, emit_queue_snapshot, emit_restored_paused_note,
+    emit_unavailable_context, log_ev, native_compact_facet, query_context, report_context,
+    restored_paused_status_suffix,
 };
 use crate::context::ContextDisposition;
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -38,7 +39,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// On failure the old attachment stays released and `recovery_blocked`
     /// stays set, so the next action tries again; nothing is lost and nothing
     /// ends in `/clear`.
-    pub(super) fn recover_session(&mut self, trigger: RecoveryTrigger) -> CliResult<()> {
+    pub(super) fn recover_session(&mut self, trigger: RecoveryTrigger) -> CliResult<HostStep> {
         let _ = self.events.send(ContentEvent::SetBusy(true));
         let _ = self.events.send(ContentEvent::Status {
             phase: "running".into(),
@@ -46,7 +47,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             detail: Some("recovering the interrupted turn".into()),
         });
         let recovered = self.reopen_in_place();
-        let _ = self.events.send(ContentEvent::SetBusy(false));
+        let restored_working = recovered.is_ok() && self.opened.has_recovered_turn();
+        if !restored_working {
+            let _ = self.events.send(ContentEvent::SetBusy(false));
+        }
         let ReopenedTurn {
             abandoned: report,
             terminal_published,
@@ -101,7 +105,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 )));
             }
         }
-        if report.is_none() {
+        if report.is_none() && !restored_working {
             let _ = self.events.send(ContentEvent::Row(TranscriptRow::info(NoticeScope::Recovery,
                 if terminal_published {
                     "plak: reopened the session and published the saved turn's result; the conversation continues from its saved state".to_owned()
@@ -145,6 +149,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             &self.config.session,
             self.config.interactive,
         );
+        if restored_working {
+            return self.drive_restored_turn();
+        }
         let ready = format!("ready · {}", self.config.model_id);
         let _ = self.events.send(ContentEvent::Status {
             phase: "idle".into(),
@@ -156,7 +163,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 },
             ),
         });
-        Ok(())
+        Ok(HostStep::Continue)
     }
 
     /// Starts this tree's one child recovery pass in the background. It never
@@ -357,6 +364,122 @@ mod tests {
     use crate::runtime::test_kit::TestExtension;
     use crate::sessions;
     use crate::surface_protocol::HostEvent;
+
+    #[test]
+    fn in_place_recovery_drives_a_retained_approval_after_owner_loss() {
+        let root = tempfile::tempdir().unwrap();
+        let script = std::sync::Arc::new(serde_json::from_value(serde_json::json!({
+            "version": 1, "tool_policy": "decision_required", "steps": [
+                {"output":{"tool":{"name":"loopback_effect","arguments":{}}},"finish":"tool_calls"},
+                {"output":{"text":"retained approval completed"}}
+            ]
+        })).unwrap());
+        let (config, evidence) = scripted_host_with(root.path(), script);
+        let (controls, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let (sent, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let mut host =
+            HostLoop::open(config, &actions, super::super::Sender::over(sent), None).unwrap();
+        let turn_id = host
+            .executor
+            .block_on(async {
+                let mut turn = host
+                    .opened
+                    .agent()
+                    .unwrap()
+                    .prompt("retain this decision")
+                    .await
+                    .unwrap();
+                let mut events = turn.take_events().unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    loop {
+                        if matches!(
+                            events.recv().await.unwrap().kind(),
+                            plakous::agent::AgentEventKind::EffectDecisionRequired { .. }
+                        ) {
+                            break;
+                        }
+                    }
+                })
+                .await
+                .unwrap();
+                let id = turn.id();
+                host.opened
+                    .agent()
+                    .unwrap()
+                    .abandon_and_release()
+                    .await
+                    .unwrap();
+                id
+            })
+            .unwrap();
+        observed.try_iter().for_each(drop);
+        let responder = controls.clone();
+        let approval_worker = std::thread::spawn(move || {
+            let mut offered = false;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while std::time::Instant::now() < deadline {
+                if let Ok(HostEvent::ApprovalRequired { approval_id, .. }) =
+                    observed.recv_timeout(std::time::Duration::from_millis(20))
+                {
+                    responder
+                        .send(crate::surface_protocol::UserAction::ResolveApproval {
+                            approval_id,
+                            choice: plakous_host_protocol::ApprovalChoice::Allow,
+                        })
+                        .unwrap();
+                    offered = true;
+                    break;
+                }
+            }
+            (offered, observed)
+        });
+        host.recovery_blocked = true;
+        let outcome = host.recover_session(RecoveryTrigger::Explicit);
+        let pending = host.opened.has_recovered_turn();
+        let feed = host
+            .executor
+            .block_on(crate::agent::read_tree_feed(
+                host.opened.sessions(),
+                host.opened.locator().session_id(),
+                0,
+            ))
+            .unwrap()
+            .unwrap();
+        host.release().unwrap();
+        let (offered, observed) = approval_worker.join().unwrap();
+        assert!(outcome.is_ok(), "{:?}", outcome.as_ref().err());
+        assert!(
+            offered && !pending,
+            "in-place recovery left its decision unobserved"
+        );
+        assert_eq!(feed.records.iter().flat_map(plakous::sessions::feed::FeedRecord::facts).filter(|fact| matches!(fact,
+            plakous::sessions::feed::FeedFact::TurnTerminal { turn_id: id, outcome: plakous::sessions::feed::FeedTurnOutcome::Completed { .. }, .. } if *id == turn_id
+        )).count(), 1);
+        assert_eq!(
+            observed
+                .try_iter()
+                .filter(|event| matches!(event, HostEvent::TurnLifecycle(_)))
+                .count(),
+            1
+        );
+        let evidence = plakous_offline_crash_harness::evidence::read_evidence(evidence).unwrap();
+        assert_eq!(
+            evidence
+                .iter()
+                .filter(|row| row.kind
+                    == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched)
+                .count(),
+            2
+        );
+        assert_eq!(
+            evidence
+                .iter()
+                .filter(|row| row.kind
+                    == plakous_offline_crash_harness::evidence::EvidenceKind::EffectDispatched)
+                .count(),
+            1
+        );
+    }
 
     fn assert_one_jsonl_recovery_note(events: &[HostEvent<TestExtension>], with_submission: bool) {
         let jsonl: Vec<serde_json::Value> = events

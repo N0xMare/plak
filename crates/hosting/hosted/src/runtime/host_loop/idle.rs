@@ -103,7 +103,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             let received = match received {
                 Ok(action) if self.recovery_blocked && recovery_blocked_action(&action) => {
                     match self.recover_session(RecoveryTrigger::Action) {
-                        Ok(()) => {
+                        Ok(HostStep::Quit) => return Ok(HostStep::Quit),
+                        Ok(_) => {
                             // The recovery reported on this session; store
                             // that before the action can switch to another.
                             self.commit_notice_intents();
@@ -140,11 +141,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 }
                 Ok(UserAction::Recover) => {
                     if self.recovery_blocked {
-                        if let Err(failure) = self.recover_session(RecoveryTrigger::Explicit) {
-                            let _ = self.events.notice(TranscriptRow::error(
-                                NoticeScope::Session,
-                                failure.message().to_owned(),
-                            ));
+                        match self.recover_session(RecoveryTrigger::Explicit) {
+                            Ok(HostStep::Quit) => return Ok(HostStep::Quit),
+                            Ok(_) => {}
+                            Err(failure) => {
+                                let _ = self.events.notice(TranscriptRow::error(
+                                    NoticeScope::Session,
+                                    failure.message().to_owned(),
+                                ));
+                            }
                         }
                     } else {
                         let nothing = (!self.recovered_at_open).then(|| {
@@ -605,7 +610,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         &self.events,
                         &id,
                     ) {
-                        Ok(()) => None,
+                        Ok(()) => {
+                            if matches!(self.drive_restored_turn()?, HostStep::Quit) {
+                                return Ok(HostStep::Quit);
+                            }
+                            None
+                        }
                         Err(err) => {
                             let _ = self.events.notice(TranscriptRow::error(
                                 NoticeScope::Session,

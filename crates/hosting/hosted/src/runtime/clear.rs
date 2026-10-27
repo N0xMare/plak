@@ -427,12 +427,14 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
             error.message().to_owned(),
         )));
     }
-    let _ = events.send(ContentEvent::SetBusy(false));
-    let _ = events.send(ContentEvent::Status {
-        phase: "idle".into(),
-        queue_len: config.session.pending_queue.len(),
-        detail: Some(format!("ready · {}", config.model_id)),
-    });
+    if !opened.has_recovered_turn() {
+        let _ = events.send(ContentEvent::SetBusy(false));
+        let _ = events.send(ContentEvent::Status {
+            phase: "idle".into(),
+            queue_len: config.session.pending_queue.len(),
+            detail: Some(format!("ready · {}", config.model_id)),
+        });
+    }
     Ok(())
 }
 

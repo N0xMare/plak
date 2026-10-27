@@ -641,6 +641,7 @@ pub(crate) fn run_config(
         .map_err(application_execution_failure)?;
     let mut delivered_signals = 0;
     let mut output_error = None;
+    let mut denied_approvals = std::collections::BTreeSet::new();
     let observe = |event: Option<&HostEvent>,
                    controls: &crate::surface_protocol::UserActionSender| {
         // Ctrl-C is counted here; a supervisor's stop, or a closed terminal, is
@@ -663,10 +664,7 @@ pub(crate) fn run_config(
             let _ = controls.send(action);
         }
         if let Some(HostEvent::ApprovalRequired { approval_id, .. }) = event {
-            let _ = controls.send(UserAction::ResolveApproval {
-                approval_id: approval_id.clone(),
-                choice: plakous_host_protocol::ApprovalChoice::Deny,
-            });
+            deny_run_approval(approval_id, &mut denied_approvals, controls);
         }
         // Every stderr line this face writes is decided in `face`, so the text
         // a user reads is pinned by tests rather than by a live provider.
@@ -795,6 +793,19 @@ pub(crate) fn api_run_record(
 }
 
 mod face;
+
+fn deny_run_approval(
+    approval_id: &str,
+    denied: &mut std::collections::BTreeSet<String>,
+    controls: &crate::surface_protocol::UserActionSender,
+) {
+    if denied.insert(approval_id.to_owned()) {
+        let _ = controls.send(crate::surface_protocol::UserAction::ResolveApproval {
+            approval_id: approval_id.to_owned(),
+            choice: plakous_host_protocol::ApprovalChoice::Deny,
+        });
+    }
+}
 
 #[cfg(test)]
 mod tests;

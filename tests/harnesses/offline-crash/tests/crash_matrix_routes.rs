@@ -2374,10 +2374,13 @@ impl Drop for FaceAgent {
 
 impl FaceAgent {
     fn start(fixture: &FaceFixture, arguments: &[&str]) -> TestResult<Self> {
-        let mut child = fixture
-            .command()
-            .arg("agent")
-            .args(arguments)
+        let mut command = fixture.command();
+        command.arg("agent").args(arguments);
+        Self::start_command(command)
+    }
+
+    fn start_command(mut command: Command) -> TestResult<Self> {
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

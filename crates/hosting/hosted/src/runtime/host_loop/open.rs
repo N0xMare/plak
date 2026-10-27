@@ -435,7 +435,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             let _ = events.send(ContentEvent::Status {
                 phase: "running".into(),
                 queue_len: config.session.pending_queue.len(),
-                detail: Some("restoring the original admitted turn".into()),
+                detail: Some(with_pause("restoring the original admitted turn".into())),
             });
         } else {
             let _ = events.send(ContentEvent::Status {
@@ -447,7 +447,12 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         let _ = events.send(ContentEvent::SetBusy(restored_working));
         let _ = events.send(ContentEvent::AgentAttached(true));
         let _ = events.send(ContentEvent::Activity {
-            label: "agent ready".into(),
+            label: if restored_working {
+                "agent restoring"
+            } else {
+                "agent ready"
+            }
+            .into(),
             active: false,
         });
         if let Some(startup) = startup {

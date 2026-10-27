@@ -1910,6 +1910,8 @@ driver starts. Hosts drive its events, decisions, controls and original result
 through the same path as a newly admitted turn; taking it admits no command and
 allocates no new turn identity. Independent result and control observers remain
 available on the recovered handle.
+Restoration seeds `TurnStarted` for this process's observation view before
+publishing the restored decision or tail.
 An effect-decision restoration republishes `EffectDecisionRequired` from the
 recorded frame with the original decision address, call, prompt and expiry;
 this is an observation, not a new decision operation or dispatch admission.

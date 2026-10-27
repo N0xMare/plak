@@ -169,6 +169,7 @@ not (
   | test(durability::)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
   | test(approval_resume::)
+  | test(in_place_recovery_drives_a_retained_approval_after_owner_loss)
   | test(crash_sweep::durability_subset)
   | test(cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance)
   | test(real_cell_worker_crash_recovery_boundaries)
@@ -310,6 +311,7 @@ slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
   | test(approval_resume::)
+  | test(in_place_recovery_drives_a_retained_approval_after_owner_loss)
   | test(crash_sweep::durability_subset)
   | test(cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance)
   | test(real_cell_worker_crash_recovery_boundaries)

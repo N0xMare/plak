@@ -84,6 +84,7 @@ pub(crate) struct CliFace {
     announced_session: bool,
     announced_delegation: bool,
     announced_truncation: Vec<String>,
+    announced_approvals: std::collections::BTreeSet<String>,
     failed_tools: usize,
 }
 
@@ -96,6 +97,7 @@ impl CliFace {
             announced_session: false,
             announced_delegation: false,
             announced_truncation: Vec::new(),
+            announced_approvals: std::collections::BTreeSet::new(),
             failed_tools: 0,
         }
     }
@@ -112,9 +114,18 @@ impl CliFace {
     /// decision pure, so a test pins the text a user reads without a host.
     pub(crate) fn lines(&mut self, event: &HostEvent) -> Vec<String> {
         match event {
-            HostEvent::ApprovalRequired { tool_name, .. } => vec![prefixed(&format!(
-                "denied approval for {tool_name}: run is non-interactive"
-            ))],
+            HostEvent::ApprovalRequired {
+                approval_id,
+                tool_name,
+                ..
+            } => {
+                if !self.announced_approvals.insert(approval_id.clone()) {
+                    return Vec::new();
+                }
+                vec![prefixed(&format!(
+                    "denied approval for {tool_name}: run is non-interactive"
+                ))]
+            }
             HostEvent::Row(TranscriptRow::Notice(notice))
                 if notice.placement() != NoticePlacement::SessionLog =>
             {
@@ -424,6 +435,35 @@ fn tool_policy_explanation(policy: &str) -> &'static str {
 mod tests {
     use super::*;
     use plakous_host_protocol::views::presentation::{ActivityKind, SessionInfoView};
+
+    #[test]
+    fn approval_denial_names_the_tool_and_does_not_repeat_an_offered_id() {
+        let mut face = face();
+        let mut approval = HostEvent::ApprovalRequired {
+            approval_id: "approval-one".into(),
+            call_id: Some("call-one".into()),
+            tool_name: "loopback_effect".into(),
+            subject: None,
+            prompt: None,
+            expires_at_ms: 123,
+        };
+        assert_eq!(
+            face.lines(&approval),
+            ["plak: denied approval for loopback_effect: run is non-interactive"]
+        );
+        assert!(
+            face.lines(&approval).is_empty(),
+            "a repeated offer must not print another denial"
+        );
+        if let HostEvent::ApprovalRequired { approval_id, .. } = &mut approval {
+            *approval_id = "approval-two".into();
+        }
+        assert_eq!(
+            face.lines(&approval).len(),
+            1,
+            "a new decision on the same tool is still denied"
+        );
+    }
 
     fn tool_line(state: &str, detail: Option<&str>, duration_ms: Option<u64>) -> HostEvent {
         HostEvent::ToolLine {

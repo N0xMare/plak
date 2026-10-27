@@ -56,25 +56,38 @@ fn feed(fixture: &FaceFixture) -> TestResult<Vec<FeedFact>> {
         &database,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )?;
-    let session: String =
-        connection.query_row("SELECT session_id FROM sessions", [], |row| row.get(0))?;
-    let mut cursor = FeedCursor::start(session.parse()?);
+    let sessions = connection
+        .prepare("SELECT session_id FROM sessions")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
     let mut facts = Vec::new();
-    loop {
-        let FeedPage::Records { records, tail, .. } =
-            AgentSessions::inspect_feed_sqlite(&database, FeedPageRequest::after(cursor))?
-        else {
-            return Err("fixture feed was pruned".into());
-        };
-        for record in records {
-            cursor = FeedCursor::new(cursor.session_id(), record.header().seq);
-            facts.extend_from_slice(record.facts());
-        }
-        if cursor.applied() == tail {
-            break;
+    for session in sessions {
+        let mut cursor = FeedCursor::start(session.parse()?);
+        loop {
+            let FeedPage::Records { records, tail, .. } =
+                AgentSessions::inspect_feed_sqlite(&database, FeedPageRequest::after(cursor))?
+            else {
+                return Err("fixture feed was pruned".into());
+            };
+            for record in records {
+                cursor = FeedCursor::new(cursor.session_id(), record.header().seq);
+                facts.extend_from_slice(record.facts());
+            }
+            if cursor.applied() == tail {
+                break;
+            }
         }
     }
     Ok(facts)
+}
+
+fn assert_same_approval(original: &Value, restored: &Value) {
+    for field in ["call_id", "name", "expires_at_ms", "prompt"] {
+        assert_eq!(
+            restored[field], original[field],
+            "restored approval changed {field}"
+        );
+    }
 }
 
 pub(super) fn assert_terminals(fixture: &FaceFixture, count: usize) -> TestResult {
@@ -133,7 +146,7 @@ fn jsonl_restored_approval_accepts_interrupt_after_hello() -> TestResult {
         agent.records().first().map(|record| &record["kind"]),
         Some(&json!("hello"))
     );
-    assert_eq!(restored["call_id"], approval["call_id"]);
+    assert_same_approval(&approval, &restored);
     assert_eq!(
         evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
         1
@@ -153,6 +166,10 @@ fn jsonl_restored_approval_accepts_interrupt_after_hello() -> TestResult {
         1
     );
     assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        1
+    );
     assert_terminals(&fixture, 1)
 }
 
@@ -212,7 +229,12 @@ fn run_denies_new_approval_without_waiting_for_input() -> TestResult {
             "perform the loopback effect",
         ],
     )?;
-    assert_denied(&fixture, &output, 1)
+    assert_denied(&fixture, &output, 1)?;
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        2
+    );
+    Ok(())
 }
 
 #[test]
@@ -332,10 +354,22 @@ impl Terminal {
     }
 }
 
-fn tui_decision(allow: bool) -> TestResult {
+fn tui_decision(allow: bool, in_process: bool) -> TestResult {
     let fixture = FaceFixture::new(&script())?;
     let (session, _) = cut(&fixture)?;
-    let mut terminal = Terminal::start(&fixture, &session)?;
+    let mut terminal = if in_process {
+        let mut source = FaceAgent::start(&fixture, &[])?;
+        let hello = source.wait_for("source hello", |record| record["kind"] == "hello")?;
+        let source_id = hello["session_id"].as_str().ok_or("source session id")?;
+        source.wait_for("source ready", |record| record["kind"] == "ready")?;
+        source.sigkill()?;
+        let mut terminal = Terminal::start(&fixture, source_id)?;
+        terminal.wait_for("/ commands")?;
+        terminal.send(format!("/resume {session}\r").as_bytes())?;
+        terminal
+    } else {
+        Terminal::start(&fixture, &session)?
+    };
     terminal.wait_for("awaiting decision")?;
     assert_eq!(
         evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
@@ -381,10 +415,100 @@ fn tui_decision(allow: bool) -> TestResult {
 
 #[test]
 fn tui_resume_approval_allow_has_one_terminal() -> TestResult {
-    tui_decision(true)
+    tui_decision(true, false)
 }
 
 #[test]
 fn tui_resume_approval_deny_has_one_terminal() -> TestResult {
-    tui_decision(false)
+    tui_decision(false, false)
+}
+
+#[test]
+fn tui_in_process_resume_approval_allow_has_one_terminal() -> TestResult {
+    tui_decision(true, true)
+}
+
+#[test]
+fn tui_in_process_resume_approval_deny_has_one_terminal() -> TestResult {
+    tui_decision(false, true)
+}
+
+#[test]
+fn jsonl_repeated_approval_sigkill_keeps_the_original_decision() -> TestResult {
+    let fixture = FaceFixture::new(&script())?;
+    let (session, original) = cut(&fixture)?;
+    let mut again = FaceAgent::start(&fixture, &["--session", &session])?;
+    let restored = again.wait_for("first restored approval", |row| row["kind"] == "approval")?;
+    assert_same_approval(&original, &restored);
+    again.sigkill()?;
+    let mut again = FaceAgent::start(&fixture, &["--session", &session])?;
+    let restored = again.wait_for("second restored approval", |row| row["kind"] == "approval")?;
+    assert_same_approval(&original, &restored);
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        1
+    );
+    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
+    again.send(&json!({"v":1,"kind":"interrupt"}))?;
+    again.wait_for("cancelled terminal", |row| {
+        row["kind"] == "turn_lifecycle" && row["phase"] == "cancelled"
+    })?;
+    again.send(&quit_frame())?;
+    let (success, _, stderr) = again.finish()?;
+    assert!(success, "{stderr}");
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        1
+    );
+    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
+    assert_terminals(&fixture, 1)
+}
+
+#[test]
+fn run_denial_commits_before_a_continuation_cut_is_abandoned() -> TestResult {
+    let fixture = FaceFixture::new(&script())?;
+    let (session, _) = cut(&fixture)?;
+    let mut continuation = script();
+    continuation["steps"] =
+        json!([{"gate":{"file":"release-denied-continuation"},"output":{"text":ANSWER}}]);
+    fixture.write_script(&continuation)?;
+    let mut command = fixture.command();
+    command.args(["run", "--session", &session, "--", "continue after the cut"]);
+    let mut runner = FaceAgent::start_command(command)?;
+    let deadline = Instant::now() + FACE_WAIT;
+    while evidence_count(&fixture, EvidenceKind::ProviderDispatched)? != 2 {
+        if Instant::now() >= deadline {
+            return Err("run never reached its continuation provider step".into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    runner.sigkill()?;
+    let mut again = face_reopen(&fixture, &session)?;
+    again.send(&quit_frame())?;
+    let (success, records, stderr) = again.finish()?;
+    assert!(success, "{stderr}");
+    assert!(!records.iter().any(|row| row["kind"] == "approval"));
+    assert_eq!(evidence_count(&fixture, EvidenceKind::EffectDispatched)?, 0);
+    assert_eq!(
+        evidence_count(&fixture, EvidenceKind::ProviderDispatched)?,
+        2
+    );
+    let kinds = fixture.session_log_kinds()?;
+    let resolved = kinds
+        .iter()
+        .position(|kind| kind == "effect.decision.resolved")
+        .ok_or("decision resolution not logged")?;
+    let abandoned = kinds
+        .iter()
+        .position(|kind| kind == "turn.abandoned")
+        .ok_or("continuation abandonment not logged")?;
+    assert!(resolved < abandoned, "{kinds:?}");
+    assert_eq!(
+        feed(&fixture)?
+            .iter()
+            .filter(|fact| matches!(fact, FeedFact::TurnTerminal { .. }))
+            .count(),
+        1
+    );
+    Ok(())
 }

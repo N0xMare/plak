@@ -6,6 +6,26 @@ use plakous_offline_crash_harness::protocol::CrashBoundary;
 use plakous_offline_crash_harness::{BoundaryController, text_runtime_binding};
 
 #[test]
+fn reemitted_run_approval_sends_one_denial_per_offered_id() {
+    use crate::surface_protocol::{UserAction, user_action_channel};
+    let (controls, received) = user_action_channel();
+    let mut denied = std::collections::BTreeSet::new();
+    for id in ["approval-one", "approval-one", "approval-two"] {
+        deny_run_approval(id, &mut denied, &controls);
+    }
+    for id in ["approval-one", "approval-two"] {
+        let (action, _ack) = received.try_recv().unwrap().into_parts();
+        assert!(
+            matches!(action, UserAction::ResolveApproval { approval_id, choice: plakous_host_protocol::ApprovalChoice::Deny } if approval_id == id)
+        );
+    }
+    assert!(
+        received.try_recv().is_err(),
+        "a repeated approval sent a second denial"
+    );
+}
+
+#[test]
 fn expired_run_timeout_precedes_authentication_preparation() {
     let home = tempfile::tempdir().unwrap();
     let mut app = PlakousApplication::for_test_accounts(home.path().join("state")).unwrap();

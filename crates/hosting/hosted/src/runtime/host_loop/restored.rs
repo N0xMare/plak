@@ -12,6 +12,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let Some(recovered) = self.opened.take_recovered_turn() else {
             return Ok(HostStep::Continue);
         };
+        let _ = self.events.send(ContentEvent::SetBusy(true));
+        let detail = "restoring the original admitted turn";
+        let suffix = super::restored_paused_status_suffix(
+            &self.config.topology_rows(),
+            &self.config.session,
+        );
+        let _ = self.events.send(ContentEvent::Status {
+            phase: "running".into(),
+            queue_len: self.config.session.pending_queue.len(),
+            detail: Some(suffix.map_or_else(
+                || detail.to_owned(),
+                |suffix| format!("{detail} · {suffix}"),
+            )),
+        });
+        let _ = self.events.send(ContentEvent::Activity {
+            label: "agent restoring".into(),
+            active: false,
+        });
         let turn = recovered
             .take_turn()
             .ok_or_else(|| CliFailure::new("restored turn was already taken"))?;
