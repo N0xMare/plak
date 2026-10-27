@@ -5,6 +5,7 @@ struct CountingReads {
     inner: MemorySessionStore,
     branches: AtomicUsize,
     checkpoints: AtomicUsize,
+    receipts: AtomicUsize,
     pruned: AtomicBool,
     lease: Mutex<Option<plakous_agent::internal::BranchLease>>,
 }
@@ -15,6 +16,7 @@ impl CountingReads {
             inner: MemorySessionStore::new(MemoryStoreLimits::default())?,
             branches: AtomicUsize::new(0),
             checkpoints: AtomicUsize::new(0),
+            receipts: AtomicUsize::new(0),
             pruned: AtomicBool::new(false),
             lease: Mutex::new(None),
         })
@@ -23,7 +25,41 @@ impl CountingReads {
     fn reset(&self) {
         self.branches.store(0, Ordering::SeqCst);
         self.checkpoints.store(0, Ordering::SeqCst);
+        self.receipts.store(0, Ordering::SeqCst);
     }
+}
+
+#[tokio::test]
+async fn facade_placeholder_suffix_is_refused_before_any_receipt_read() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(CountingReads::new()?);
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        store.clone(),
+        RuntimeDurability::Disabled,
+    ))?;
+    let source = SessionLocator::new(
+        SessionId::try_from(Uuid::from_u128(1))?,
+        BranchId::try_from(Uuid::from_u128(2))?,
+        CheckpointId::try_from(Uuid::from_u128(3))?,
+    );
+    for reason in [CompactReason::Manual, CompactReason::Scheduled] {
+        let error = sessions
+            .compact(CompactSessionRequest::new(
+                SessionOperationId::new("x:placeholders")?,
+                source,
+                reason,
+                runtime_binding_for(Arc::clone(&workspace), descriptor()?, b"suffix-read-probe")?,
+            ))
+            .await
+            .expect_err("the facade must refuse the reserved suffix itself");
+        assert_eq!(error.kind(), AgentSessionsErrorKind::InvalidInput);
+        assert!(error.to_string().contains(":placeholders"));
+    }
+    assert_eq!(store.receipts.load(Ordering::SeqCst), 0);
+    assert_eq!(store.branches.load(Ordering::SeqCst), 0);
+    assert_eq!(store.checkpoints.load(Ordering::SeqCst), 0);
+    Ok(())
 }
 
 impl SessionStore for CountingReads {
@@ -109,6 +145,7 @@ impl SessionStore for CountingReads {
         checkpoint: CheckpointId,
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CommittedCheckpoint>
     {
+        self.receipts.fetch_add(1, Ordering::SeqCst);
         self.inner.recover_commit(checkpoint)
     }
 

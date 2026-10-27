@@ -30,6 +30,9 @@ pub(super) struct TestCreateStore {
     pub(super) feed_read_budgets: Mutex<Vec<usize>>,
     pub(super) feed_read_ranges: Mutex<Vec<(u64, usize)>>,
     pub(super) checkpoint_loads: AtomicUsize,
+    pub(super) pause_branch_load_after: AtomicUsize,
+    pub(super) branch_load_started: Notify,
+    pub(super) branch_load_release: Notify,
     pub(super) pruned_commits: Mutex<BTreeSet<CheckpointId>>,
     /// The feed facts of every create and commit request, in call order.
     pub(super) feed_facts: Mutex<Vec<Vec<crate::feed::FeedFact>>>,
@@ -420,6 +423,15 @@ impl SessionStore for TestCreateStore {
                 .clone()
                 .filter(|loaded| loaded.head().session() == session)
                 .ok_or(SessionStoreError::NotFound)?;
+            if self.pause_branch_load_after.try_update(
+                Ordering::AcqRel,
+                Ordering::Acquire,
+                |remaining| remaining.checked_sub(1),
+            ) == Ok(1)
+            {
+                self.branch_load_started.notify_one();
+                self.branch_load_release.notified().await;
+            }
             Ok(match *lock_mutex(&self.horizon) {
                 Some(horizon) => loaded.with_horizon(horizon),
                 None => loaded,

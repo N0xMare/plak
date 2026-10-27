@@ -231,6 +231,19 @@ impl Driver {
             return Err(AgentSessionEndpointError::Busy);
         }
         let checkpoint = self.authority.checkpoint();
+        let topology = checkpoint.manifest().topology();
+        if (
+            topology.session_id,
+            topology.branch_id,
+            topology.checkpoint_id,
+        ) != (request.session_id, request.branch_id, request.checkpoint_id)
+        {
+            return Err(AgentSessionEndpointError::Stale {
+                session_id: topology.session_id,
+                branch_id: topology.branch_id,
+                checkpoint_id: topology.checkpoint_id,
+            });
+        }
         if let Some((operation_id, source)) = &request.fallback_of {
             let identity = DurableCompactionIdentity::new(operation_id, *source)
                 .map_err(|_| AgentSessionEndpointError::InvalidInput)?;
@@ -244,19 +257,6 @@ impl Driver {
             {
                 return Err(AgentSessionEndpointError::InvalidInput);
             }
-        }
-        let topology = checkpoint.manifest().topology();
-        if (
-            topology.session_id,
-            topology.branch_id,
-            topology.checkpoint_id,
-        ) != (request.session_id, request.branch_id, request.checkpoint_id)
-        {
-            return Err(AgentSessionEndpointError::Stale {
-                session_id: topology.session_id,
-                branch_id: topology.branch_id,
-                checkpoint_id: topology.checkpoint_id,
-            });
         }
         let working_empty = checkpoint
             .manifest()

@@ -7316,9 +7316,11 @@ offline omission of unbound replay (`ReplayOmissionV1`). **No provider, model, a
 subscription name implies the native facet.**
 
 External compaction operation IDs must not end in `:placeholders`. That suffix
-is reserved for the driver's derived unpaid continuation; the facade and
-endpoint refuse it with typed invalid input naming the suffix, before any
-ledger write. Hosted manual, scheduled and capacity-recovery passes generate
+is reserved for the driver's derived unpaid continuation. The facade refuses
+it with `AgentSessionsErrorKind::InvalidInput`; the endpoint returns
+`AgentSessionEndpointError::Rejected { reason }`. Both name the reserved
+suffix, before any receipt read or driver ingress respectively, and neither
+writes the ledger. Hosted manual, scheduled and capacity-recovery passes generate
 their own operation IDs; their CLI and JSONL commands do not accept one.
 
 The acting strategies form one **ladder**, tried in order against the
@@ -7616,6 +7618,10 @@ Retry and recovery read those same receipts first. If only the failure receipt
 committed, the existing driver (or the ordinary source runtime reopened as its
 sole owner) may finish only that derived unpaid rung. No recovery path repeats
 the paid dispatch or republishes an already committed placeholder successor.
+A turn admitted after the continuation reads the failed head makes its request
+stale, not corrupt. The driver checks topology before fallback evidence; the
+continuation returns the unchanged original `Failed` result without changing
+the newer head.
 The next independently permitted harness fold uses the Tight instruction when
 the branch's newest finalized harness-fold provider record carrying a decoded
 `Completed` response stopped for `Length`; a `Completed` non-`Length` response

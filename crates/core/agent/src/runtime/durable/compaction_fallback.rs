@@ -15,8 +15,9 @@ use crate::runtime::compaction::{
 };
 use crate::{
     AgentCompactSessionOutcome, AgentCompactSessionRequest, AgentCompactionReason, AgentError,
-    AgentErrorKind, AgentSessionEndpoint, DurableOperationKind, DurableOperationState,
-    ReconstructiveComponent, RuntimeCheckpoint, SessionStoreError, StoredCheckpoint,
+    AgentErrorKind, AgentSessionEndpoint, AgentSessionEndpointError, DurableOperationKind,
+    DurableOperationState, ReconstructiveComponent, RuntimeCheckpoint, SessionStoreError,
+    StoredCheckpoint,
 };
 
 pub(in crate::runtime) fn failed_endpoint_request(
@@ -210,7 +211,8 @@ impl DurableSessionRuntime {
                     _ => Err(AgentError::from_store(SessionStoreError::corrupt())),
                 }
             }
-            Ok(AgentCompactSessionOutcome::NoEligibleRange) => Ok(unchanged),
+            Ok(AgentCompactSessionOutcome::NoEligibleRange)
+            | Err(AgentSessionEndpointError::Stale { .. }) => Ok(unchanged),
             _ => Err(AgentError::new(
                 AgentErrorKind::Session,
                 "unpaid compaction continuation did not return an exact receipt",
