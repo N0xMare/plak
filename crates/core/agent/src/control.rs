@@ -584,6 +584,8 @@ pub struct AgentCompactSessionRequest {
     pub(crate) reason: AgentCompactionReason,
     pub(crate) pending_user_input: Option<UserInput>,
     pub(crate) runtime: Option<AgentBuilder>,
+    /// Ephemeral authority to run only the derived unpaid continuation.
+    pub(crate) fallback_of: Option<(String, crate::internal::DurableSessionAddress)>,
 }
 
 impl AgentCompactSessionRequest {
@@ -629,6 +631,7 @@ impl AgentCompactSessionRequest {
             reason,
             pending_user_input,
             runtime: Some(runtime),
+            fallback_of: None,
         }
     }
 }
@@ -869,6 +872,11 @@ impl AgentSessionEndpoint {
         &self,
         request: AgentCompactSessionRequest,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        if request.fallback_of.is_none() && request.operation_id.ends_with(":placeholders") {
+            return Err(AgentSessionEndpointError::Rejected {
+                reason: "compaction operation ID suffix :placeholders is reserved".to_owned(),
+            });
+        }
         let (reply, receiver) = oneshot::channel();
         self.controls
             .try_send(ActorControl::CompactSession {
@@ -1356,7 +1364,27 @@ mod endpoint_tests {
             reason: AgentCompactionReason::Manual,
             pending_user_input: None,
             runtime: None,
+            fallback_of: None,
         })
+    }
+
+    #[tokio::test]
+    async fn external_placeholder_suffix_is_refused_before_endpoint_ingress()
+    -> Result<(), Box<dyn Error>> {
+        let (controls, mut receiver) = mpsc::channel(1);
+        let endpoint = AgentSessionEndpoint::new(controls);
+        let mut request = compact_endpoint_request()?;
+        request.operation_id = "x:placeholders".to_owned();
+        let result =
+            tokio::time::timeout(Duration::from_secs(1), endpoint.compact_session(request)).await?;
+        assert!(
+            matches!(result, Err(AgentSessionEndpointError::Rejected { reason }) if reason.contains(":placeholders"))
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        Ok(())
     }
 
     #[tokio::test]

@@ -3,6 +3,7 @@ mod carry_replay;
 
 #[path = "tests/command_ancestry.rs"]
 mod command_ancestry;
+mod compaction_fallback;
 
 use plakous_agent::internal::{RuntimeDurability, SessionStoreError};
 use std::collections::{BTreeMap, VecDeque};

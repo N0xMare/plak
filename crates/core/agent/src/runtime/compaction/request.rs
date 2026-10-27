@@ -532,7 +532,20 @@ pub(in crate::runtime) fn admitted_compaction_runtime(
     builder: AgentBuilder,
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<ExactCompactionRuntime, AgentError> {
-    validate_durable_builder(&builder)?;
+    validate_compaction_builder(&builder, checkpoint)?;
+    Ok(ExactCompactionRuntime {
+        model: builder.model,
+        provider_configuration: builder.provider_configuration,
+        clock: builder.clock,
+        model_operation_timeout: builder.config.model_operation_timeout,
+    })
+}
+
+pub(in crate::runtime) fn validate_compaction_builder(
+    builder: &AgentBuilder,
+    checkpoint: &RuntimeCheckpoint,
+) -> Result<(), AgentError> {
+    validate_durable_builder(builder)?;
     let manifest = checkpoint.manifest();
     validate_compaction_provider_configuration(
         &builder.provider_configuration,
@@ -587,12 +600,7 @@ pub(in crate::runtime) fn admitted_compaction_runtime(
             "compaction source scope is not recoverable by this build",
         )
     })?;
-    Ok(ExactCompactionRuntime {
-        model: builder.model,
-        provider_configuration: builder.provider_configuration,
-        clock: builder.clock,
-        model_operation_timeout: builder.config.model_operation_timeout,
-    })
+    Ok(())
 }
 
 /// One offline native successor measurement.

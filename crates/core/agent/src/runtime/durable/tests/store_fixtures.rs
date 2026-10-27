@@ -119,6 +119,7 @@ pub(super) struct TestCreateStore {
     pub(super) lose_dispatched_ack: AtomicBool,
     pub(super) compaction_ack_only: AtomicBool,
     pub(super) delay_dispatched_ack: AtomicBool,
+    pub(super) pause_after_checkpoint: Mutex<Option<CheckpointId>>,
     pub(super) delayed_recovery_started: Notify,
     pub(super) delayed_recovery_release: Notify,
     pub(super) delay_recovery_once: AtomicBool,
@@ -975,7 +976,8 @@ impl SessionStore for TestCreateStore {
                 }
             }
             let delay_ack = self.provider_dispatched.load(Ordering::Acquire)
-                && self.delay_dispatched_ack.swap(false, Ordering::AcqRel);
+                && self.delay_dispatched_ack.swap(false, Ordering::AcqRel)
+                || *lock_mutex(&self.pause_after_checkpoint) == Some(checkpoint.id());
             let result =
                 (|| {
                     let mut state = lock_mutex(&self.state);

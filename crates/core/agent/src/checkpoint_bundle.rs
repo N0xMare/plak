@@ -130,15 +130,25 @@ pub struct CheckpointObjectBundle {
     trim_floor: usize,
 }
 
-/// Layers a bundle may chain before a trim is due whatever its size. Dropping
-/// the chain releases one layer per frame, so an unbounded chain is an
-/// unbounded stack.
+/// Layers a bundle may chain before a trim is due whatever its size.
 const MAX_LAYER_DEPTH: usize = 256;
 
 #[derive(Eq, PartialEq)]
 struct ObjectLayer {
     prior: Option<Arc<Self>>,
     objects: Arc<[RuntimeObject]>,
+}
+
+impl Drop for ObjectLayer {
+    fn drop(&mut self) {
+        let mut prior = self.prior.take();
+        while let Some(link) = prior {
+            let Some(mut node) = Arc::into_inner(link) else {
+                break;
+            };
+            prior = node.prior.take();
+        }
+    }
 }
 
 /// Persistent Patricia index used only to prove CAS membership/reversion

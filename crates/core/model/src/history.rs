@@ -629,7 +629,7 @@ impl Drop for CanonicalHistoryInner {
     fn drop(&mut self) {
         let mut parent = self.parent.take();
         while let Some(link) = parent {
-            let Ok(mut node) = Arc::try_unwrap(link) else {
+            let Some(mut node) = Arc::into_inner(link) else {
                 break;
             };
             parent = node.parent.take();

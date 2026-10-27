@@ -71,7 +71,7 @@ impl Driver {
             (plan, None)
         } else {
             match self
-                .harness_compaction_request(attempt, runtime, measured)
+                .harness_compaction_request(attempt, runtime, measured, committed_detail)
                 .await?
             {
                 CompactionPhase::Next((plan, cut)) => (plan, Some(cut)),
@@ -149,6 +149,7 @@ impl Driver {
         attempt: &CompactionAttempt<'_>,
         runtime: &ExactCompactionRuntime,
         measured: &MeasuredSource,
+        committed_detail: &mut CompactionDetail,
     ) -> Result<
         CompactionPhase<(CompactionRequestPlan, SemanticCompactionCut)>,
         AgentSessionEndpointError,
@@ -167,8 +168,14 @@ impl Driver {
                 // refusing; `NoEligibleRange` still comes back when even
                 // that cannot fit, keeping the existing refusal.
                 return Ok(CompactionPhase::Done(
-                    self.compaction_source_placeholders(attempt, runtime, measured, false)
-                        .await,
+                    self.compaction_source_placeholders(
+                        attempt,
+                        runtime,
+                        measured,
+                        false,
+                        committed_detail,
+                    )
+                    .await,
                 ));
             }
             Err(error) => return Err(compact_runtime_endpoint_rejected(error)),
@@ -203,8 +210,14 @@ impl Driver {
                 .await
         {
             return Ok(CompactionPhase::Done(
-                self.compaction_source_placeholders(attempt, runtime, measured, false)
-                    .await,
+                self.compaction_source_placeholders(
+                    attempt,
+                    runtime,
+                    measured,
+                    false,
+                    committed_detail,
+                )
+                .await,
             ));
         }
         let prefix = harness_compaction_prefix(
@@ -315,6 +328,7 @@ impl Driver {
         runtime: &ExactCompactionRuntime,
         measured: &MeasuredSource,
         native_protected_history: bool,
+        committed_detail: &mut CompactionDetail,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
         Box::pin(self.replace_protected_tool_results(
             attempt.active,
@@ -328,6 +342,7 @@ impl Driver {
             measured.before,
             measured.occupancy_before,
             native_protected_history,
+            &mut committed_detail.no_eligible_detail,
         ))
         .await
     }
@@ -522,7 +537,7 @@ impl Driver {
         let preparation_refusal =
             format!("{rung} preparation failed: {}", compact_diagnostic(&error));
         committed_detail.diagnostic = Some(preparation_refusal.clone());
-        self.compaction_source_placeholders(attempt, runtime, measured, native_protected_history)
+        self.compaction_source_placeholders(attempt, runtime, measured, native_protected_history, committed_detail)
             .await
             .and_then(|outcome| match outcome {
                 // Placeholders could not act either; report the original
@@ -537,9 +552,9 @@ impl Driver {
                     } else {
                         "; compaction cannot proceed within capacity; no summary was dispatched and the source is unchanged; when the session runs out of headroom, start a new session or fork with a handoff"
                     };
-                    let reason = format!(
-                        "{preparation_refusal}; no fitting offline successor (tool-result placeholders or replay omission){guidance}"
-                    );
+                    let offline_detail = committed_detail.no_eligible_detail
+                        .unwrap_or("no qualifying offline successor");
+                    let reason = format!("{preparation_refusal}; {offline_detail}{guidance}");
                     committed_detail.diagnostic = Some(reason.clone());
                     Err(compact_runtime_endpoint_rejected(reason))
                 }

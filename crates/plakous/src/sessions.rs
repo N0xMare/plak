@@ -1032,6 +1032,7 @@ impl AgentSessions {
             locator,
             runtime,
         } = request;
+        validate_compaction_operation_id(&operation_id)?;
         let recovery_head = match self
             .runtime
             .compaction_receipt(operation_id.as_str(), locator.durable())
@@ -1045,13 +1046,13 @@ impl AgentSessions {
                     target,
                 });
             }
-            Ok(DurableCompactionReceipt::Failed { source, target }) => {
-                let (source, target) = validate_compaction_publication(locator, source, target)?;
-                return Ok(RecoverSessionOutcome::Failed {
-                    operation_id,
-                    source,
-                    target,
-                });
+            Ok(DurableCompactionReceipt::Failed { .. }) => {
+                let recovered = self
+                    .continue_failed_compaction(&operation_id, locator, runtime)
+                    .await?;
+                return self
+                    .present_compaction_recovery(operation_id, locator, recovered)
+                    .await;
             }
             Ok(DurableCompactionReceipt::Abandoned { source, target }) => {
                 let (source, target) = validate_compaction_publication(locator, source, target)?;
@@ -1564,6 +1565,7 @@ impl AgentSessions {
             qualification,
             runtime,
         } = request;
+        validate_compaction_operation_id(&operation_id)?;
         let pending_user_input = compaction_pending_user_input(reason, qualification)?;
         match self
             .runtime
@@ -1583,14 +1585,10 @@ impl AgentSessions {
                     feed_seq: None,
                 });
             }
-            Ok(DurableCompactionReceipt::Failed { source, target }) => {
-                let (source, target) = validate_compaction_publication(locator, source, target)?;
-                return Ok(CompactSessionOutcome::Failed {
-                    operation_id,
-                    source,
-                    target,
-                    diagnostic: None,
-                });
+            Ok(DurableCompactionReceipt::Failed { .. }) => {
+                return self
+                    .finish_failed_compact(operation_id, locator, runtime)
+                    .await;
             }
             Ok(DurableCompactionReceipt::Abandoned { source, target }) => {
                 let (source, target) = validate_compaction_publication(locator, source, target)?;
@@ -1650,6 +1648,76 @@ impl AgentSessions {
             .await
     }
 
+    async fn finish_failed_compact(
+        &self,
+        operation_id: SessionOperationId,
+        locator: SessionLocator,
+        runtime: SessionRuntimeBinding,
+    ) -> Result<CompactSessionOutcome, AgentSessionsError> {
+        Ok(
+            match self
+                .continue_failed_compaction(&operation_id, locator, runtime)
+                .await?
+            {
+                DurableCompactionRecoveryOutcome::Compacted { source, target } => {
+                    let (source, target) =
+                        validate_compaction_publication(locator, source, target)?;
+                    CompactSessionOutcome::Compacted {
+                        operation_id,
+                        source,
+                        target,
+                        summary: None,
+                        feed_seq: None,
+                    }
+                }
+                DurableCompactionRecoveryOutcome::Failed { source, target } => {
+                    let (source, target) =
+                        validate_compaction_publication(locator, source, target)?;
+                    CompactSessionOutcome::Failed {
+                        operation_id,
+                        source,
+                        target,
+                        diagnostic: None,
+                    }
+                }
+                DurableCompactionRecoveryOutcome::RecoveryRequired(address) => {
+                    CompactSessionOutcome::RecoveryRequired {
+                        operation_id,
+                        recovery: self
+                            .load_recovery_required(SessionLocator::from_durable(address))
+                            .await?,
+                        diagnostic: None,
+                    }
+                }
+                _ => {
+                    return Err(AgentSessionsError::new(
+                        AgentSessionsErrorKind::Integrity,
+                        "unpaid continuation lost its finalized compaction receipt",
+                    ));
+                }
+            },
+        )
+    }
+
+    async fn continue_failed_compaction(
+        &self,
+        operation_id: &SessionOperationId,
+        locator: SessionLocator,
+        runtime: SessionRuntimeBinding,
+    ) -> Result<DurableCompactionRecoveryOutcome, AgentSessionsError> {
+        let endpoint = self
+            .drivers
+            .endpoint(SessionBranchKey::new(locator.session_id, locator.branch_id));
+        Box::pin(self.runtime.continue_failed_compaction(
+            operation_id.as_str(),
+            locator.durable(),
+            runtime.builder,
+            endpoint,
+        ))
+        .await
+        .map_err(|error| runtime_error(&error))
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "one closed mapping preserves every compaction outcome and endpoint refusal"
@@ -1668,11 +1736,25 @@ impl AgentSessions {
                 feed_seq,
                 ..
             }) => {
-                let (source, target) = validate_compaction_publication(
-                    locator,
-                    DurableSessionAddress::new(locator.session_id, locator.branch_id, source),
-                    DurableSessionAddress::new(locator.session_id, locator.branch_id, target),
-                )?;
+                let raw_source =
+                    DurableSessionAddress::new(locator.session_id, locator.branch_id, source);
+                let raw_target =
+                    DurableSessionAddress::new(locator.session_id, locator.branch_id, target);
+                let source = if source == locator.checkpoint_id {
+                    raw_source
+                } else {
+                    self.runtime
+                        .joined_compaction_source(
+                            operation_id.as_str(),
+                            locator.durable(),
+                            raw_source,
+                            raw_target,
+                        )
+                        .await
+                        .map_err(|error| runtime_error(&error))?
+                };
+                let (source, target) =
+                    validate_compaction_publication(locator, source, raw_target)?;
                 CompactSessionOutcome::Compacted {
                     operation_id,
                     source,
@@ -1981,6 +2063,18 @@ fn compaction_pending_user_input(
             "pending-input compaction qualification requires the scheduled reason",
         )),
     }
+}
+
+fn validate_compaction_operation_id(
+    operation_id: &SessionOperationId,
+) -> Result<(), AgentSessionsError> {
+    if operation_id.as_str().ends_with(":placeholders") {
+        return Err(AgentSessionsError::new(
+            AgentSessionsErrorKind::InvalidInput,
+            "compaction operation ID suffix :placeholders is reserved",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_compaction_source(

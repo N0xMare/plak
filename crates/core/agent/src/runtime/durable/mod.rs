@@ -21,6 +21,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::Duration;
 pub(in crate::runtime) mod branch;
+pub(in crate::runtime) mod compaction_fallback;
 mod compaction_inspection;
 pub(in crate::runtime) mod compaction_recovery;
 pub(in crate::runtime) use compaction_inspection::checkpoint_can_abandon_compaction;

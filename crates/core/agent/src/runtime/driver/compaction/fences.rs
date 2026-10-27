@@ -447,7 +447,7 @@ impl Driver {
             )
             .is_empty()
         {
-            self.last_compaction_diagnostic = Some("last compaction: rung=placeholders/replay_omission outcome=NoEligibleRange refusal=None".into());
+            self.last_compaction_diagnostic = Some("last compaction: rung=placeholders/replay_omission outcome=NoEligibleRange refusal=None; no consumed tool-result candidates".into());
             return Ok(TurnCompactionOutcome::Exhausted {
                 outcome: CompactionEventOutcome::NoEligibleRange,
                 refusal: None,
@@ -466,6 +466,7 @@ impl Driver {
             reason: AgentCompactionReason::Scheduled,
             pending_user_input,
             runtime: None,
+            fallback_of: None,
         };
         let workflow_id = DurableCompactionIdentity::new(
             &request.operation_id,
@@ -501,7 +502,8 @@ impl Driver {
             outcome.as_ref().err().map(compaction_refusal_reason),
             committed_detail
                 .diagnostic
-                .as_ref()
+                .as_deref()
+                .or(committed_detail.no_eligible_detail)
                 .map_or(String::new(), |detail| format!("; {detail}")),
         ));
         let elapsed_ms = u64::try_from(compact_started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -594,7 +596,7 @@ impl Driver {
                     workflow_id,
                     CompactionEventOutcome::NoEligibleRange,
                     None,
-                    Some("no offline successor meets the 5% reduction minimum and fits".to_owned()),
+                    committed_detail.no_eligible_detail.map(str::to_owned),
                     None,
                 );
                 Ok(TurnCompactionOutcome::Exhausted {

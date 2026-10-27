@@ -300,6 +300,18 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         return Err(AgentError::from_store(SessionStoreError::corrupt()));
     }
 
+    if matches!(
+        crate::runtime::durable::compaction_recovery::decode_compaction_operations(
+            checkpoint, identity
+        )?,
+        crate::runtime::durable::DecodedCompactionWorkflow::OfflinePlaceholders { .. }
+    ) {
+        if !successful || previous_stored.reference() != source_stored.reference() {
+            return Err(AgentError::from_store(SessionStoreError::corrupt()));
+        }
+        return super::placeholder_receipt::validate(checkpoint, source_checkpoint, identity);
+    }
+
     let operations = decode_paid_compaction_operations(checkpoint, identity)?;
     let previous_operations =
         decode_paid_compaction_operations(previous_stored.checkpoint(), identity)?;

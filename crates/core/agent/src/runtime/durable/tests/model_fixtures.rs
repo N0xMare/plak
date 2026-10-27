@@ -1724,6 +1724,7 @@ pub(super) enum CompactionFixtureOutcome {
     EmptySummary,
     InvalidSummary,
     DefiniteFailure(ModelError),
+    ProviderError(ModelError),
     AmbiguousFailure(ModelError),
     /// The start fails before anything is sent, as final revalidation does.
     DispatchRejected(ModelError),
@@ -1863,7 +1864,9 @@ impl LanguageModel for RecoveryCompactionModel {
                 while let Some(event) = inert_stream.next().await {
                     event?;
                 }
-                if let CompactionFixtureOutcome::AmbiguousFailure(error) = &fixture.outcome {
+                if let CompactionFixtureOutcome::AmbiguousFailure(error)
+                | CompactionFixtureOutcome::ProviderError(error) = &fixture.outcome
+                {
                     return Ok(
                         Box::pin(futures_util::stream::iter([Err(error.clone())])) as ModelStream
                     );
@@ -1925,6 +1928,7 @@ impl LanguageModel for RecoveryCompactionModel {
                     CompactionFixtureOutcome::LengthSummary => FinishReason::Length,
                     CompactionFixtureOutcome::InvalidSummary => FinishReason::ToolCalls,
                     CompactionFixtureOutcome::AmbiguousFailure(_)
+                    | CompactionFixtureOutcome::ProviderError(_)
                     | CompactionFixtureOutcome::DispatchRejected(_) => unreachable!(),
                 };
                 let plan_digest = match &fixture.outcome {
@@ -1945,6 +1949,7 @@ impl LanguageModel for RecoveryCompactionModel {
                     | CompactionFixtureOutcome::EmptySummary
                     | CompactionFixtureOutcome::InvalidSummary => plan.digest(),
                     CompactionFixtureOutcome::AmbiguousFailure(_)
+                    | CompactionFixtureOutcome::ProviderError(_)
                     | CompactionFixtureOutcome::DispatchRejected(_) => unreachable!(),
                 };
                 let response = ModelResponse::new(

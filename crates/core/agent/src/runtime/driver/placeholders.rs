@@ -70,6 +70,18 @@ enum SourceAudit {
 }
 
 impl SourceAudit {
+    fn no_eligible_detail(self, has_candidates: bool) -> &'static str {
+        match self {
+            Self::UnboundRescue { .. } => {
+                "no unbound-replay rescue successor prepares below the landing fence"
+            }
+            Self::Fresh { .. } if !has_candidates => {
+                "no consumed tool-result candidates or replay-omission successor"
+            }
+            Self::Fresh { .. } => "no offline successor meets the 5% reduction minimum and fits",
+        }
+    }
+
     fn measurements(self) -> (ContextEvaluationAudit, Option<u64>) {
         match self {
             Self::Fresh { audit, occupancy } | Self::UnboundRescue { audit, occupancy } => {
@@ -170,6 +182,7 @@ impl Driver {
         before: ContextEvaluationAudit,
         occupancy_before: Option<u64>,
         native_protected_history: bool,
+        no_eligible_detail: &mut Option<&'static str>,
     ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
         // Placeholders keep every segment, so they never relieve segment pressure.
         if origin.segment_pressure_only() {
@@ -213,6 +226,7 @@ impl Driver {
         let (before, occupancy_before) = source_audit.measurements();
         let mut history = source_history.clone();
         let mut candidates = collect_placeholder_candidates(&history);
+        let mut has_candidates = !candidates.is_empty();
         let unprojected = self
             .search_placeholder_depth(runtime, identity, &history, &candidates, source_audit)
             .await;
@@ -256,6 +270,7 @@ impl Driver {
             if portable_history.identity() == source_history.identity() {
                 unprojected?
             } else {
+                has_candidates = true;
                 let portable_candidates = collect_placeholder_candidates(&portable_history);
                 let portable = self
                     .search_placeholder_depth(
@@ -307,6 +322,7 @@ impl Driver {
             unprojected?
         };
         let Some(accepted) = accepted else {
+            *no_eligible_detail = Some(source_audit.no_eligible_detail(has_candidates));
             return Ok(AgentCompactSessionOutcome::NoEligibleRange);
         };
         self.publish_placeholders(
@@ -857,6 +873,24 @@ mod tests {
             audit: ContextEvaluationAudit::new(measurement, digest, 1_000)?,
             occupancy: Some(1_000),
         };
+        assert_eq!(
+            source.no_eligible_detail(false),
+            "no consumed tool-result candidates or replay-omission successor"
+        );
+        assert_eq!(
+            source.no_eligible_detail(true),
+            "no offline successor meets the 5% reduction minimum and fits"
+        );
+        let rescue = SourceAudit::UnboundRescue {
+            audit: ContextEvaluationAudit::new(measurement, digest, 1_000)?,
+            occupancy: Some(1_000),
+        };
+        for has_candidates in [false, true] {
+            assert_eq!(
+                rescue.no_eligible_detail(has_candidates),
+                "no unbound-replay rescue successor prepares below the landing fence"
+            );
+        }
         for (after, eligible) in [(951, false), (950, true)] {
             let candidate = AcceptedPlaceholders {
                 count: 1,

@@ -63,6 +63,15 @@ impl DurableSessionRuntime {
         operation_id: &str,
         source: DurableSessionAddress,
     ) -> Result<DurableCompactionReceipt, AgentError> {
+        let receipt = self.direct_compaction_receipt(operation_id, source).await?;
+        self.joined_fallback_receipt(operation_id, receipt).await
+    }
+
+    pub(super) async fn direct_compaction_receipt(
+        &self,
+        operation_id: &str,
+        source: DurableSessionAddress,
+    ) -> Result<DurableCompactionReceipt, AgentError> {
         let identity = DurableCompactionIdentity::new(operation_id, source)?;
         let mut finalized = Vec::new();
         for (checkpoint_id, kind) in [
@@ -166,6 +175,10 @@ impl DurableSessionRuntime {
         builder: AgentBuilder,
     ) -> Result<DurableCompactionRecoveryOutcome, AgentError> {
         let receipt = self.compaction_receipt(operation_id, source).await?;
+        if matches!(receipt, DurableCompactionReceipt::Failed { .. }) {
+            return Box::pin(self.continue_failed_compaction(operation_id, source, builder, None))
+                .await;
+        }
         if let Some(outcome) = finalized_outcome(receipt) {
             return Ok(outcome);
         }

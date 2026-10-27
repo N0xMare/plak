@@ -266,7 +266,7 @@ enum LoopbackScenario {
     Scripted(Arc<ScriptPlan>),
     /// The summary half of a scripted binding: it answers a fold request the
     /// way the script's [`FoldDisposition`] says, and nothing else.
-    ScriptedSummary(Arc<ScriptPlan>),
+    ScriptedSummary(Arc<ScriptPlan>, FinishReason),
 }
 
 impl LoopbackModel {
@@ -439,7 +439,7 @@ impl LanguageModel for LoopbackModel {
             .limits()
             .max_output_tokens()
             .unwrap_or(default_output_tokens);
-        if let LoopbackScenario::Scripted(script) | LoopbackScenario::ScriptedSummary(script) =
+        if let LoopbackScenario::Scripted(script) | LoopbackScenario::ScriptedSummary(script, _) =
             &self.scenario
             && is_summary_request
             && script.fold == FoldDisposition::Refuse
@@ -457,7 +457,7 @@ impl LanguageModel for LoopbackModel {
             // request itself stays on the identity projection below.
             LoopbackScenario::Compaction
             | LoopbackScenario::ContentSensitiveEffect
-            | LoopbackScenario::ScriptedSummary(_) => true,
+            | LoopbackScenario::ScriptedSummary(_, _) => true,
             // Turn scripts opt in. Otherwise a host pass compares identity-sized
             // counts and no placeholder successor can shrink.
             LoopbackScenario::Scripted(script) => script.content_sensitive_projection,
@@ -628,7 +628,7 @@ impl LanguageModel for LoopbackModel {
                     .pause_at_selected_boundary_until_cancelled(pause, &cancellation)
                     .await;
                 if let LoopbackScenario::Scripted(script)
-                | LoopbackScenario::ScriptedSummary(script) = &self.scenario
+                | LoopbackScenario::ScriptedSummary(script, _) = &self.scenario
                     && is_summary_request
                 {
                     match script.fold {
@@ -954,7 +954,7 @@ fn scripted_stream(
 /// Whether this scenario's stalls ignore cancellation.
 fn scripted_stall_is_deaf(scenario: &LoopbackScenario) -> bool {
     match scenario {
-        LoopbackScenario::Scripted(script) | LoopbackScenario::ScriptedSummary(script) => {
+        LoopbackScenario::Scripted(script) | LoopbackScenario::ScriptedSummary(script, _) => {
             script.stall_ignores_cancellation
         }
         _ => false,
@@ -1026,8 +1026,8 @@ fn loopback_response(
             script.hosted_tool_call_final,
         );
     }
-    if let LoopbackScenario::ScriptedSummary(_) = scenario {
-        return scripted_summary_response(round, plan, identity_namespace);
+    if let LoopbackScenario::ScriptedSummary(_, finish) = scenario {
+        return scripted_summary_response(round, plan, identity_namespace, *finish);
     }
     let block = if let LoopbackScenario::Text { terminal: "", .. } = *scenario {
         ContentBlock::Reasoning(
@@ -1573,6 +1573,7 @@ fn scripted_summary_response(
     round: u64,
     plan: &ValidatedRequestPlan,
     identity_namespace: u128,
+    finish: FinishReason,
 ) -> Result<ModelResponse, ModelError> {
     let output = ConversationItem::new(
         EntryId::try_from(Uuid::from_u128(
@@ -1591,7 +1592,7 @@ fn scripted_summary_response(
     .map_err(invalid_model_fixture)?;
     Ok(ModelResponse::new(
         vec![output],
-        FinishDetails::new(FinishReason::Stop, None),
+        FinishDetails::new(finish, None),
         None,
         None,
         plan.digest(),
@@ -3084,7 +3085,7 @@ fn scripted_local_composition_attachment(
 enum ScriptedOperation {
     Turn(Arc<AtomicU64>),
     ArtifactTurn(Arc<AtomicU64>),
-    Compact,
+    Compact(FinishReason),
 }
 
 impl ScriptedOperation {
@@ -3106,8 +3107,8 @@ impl ScriptedOperation {
                 model.scenario = LoopbackScenario::Scripted(Arc::clone(script));
                 model = model.with_shared_round(cursor);
             }
-            Self::Compact => {
-                model.scenario = LoopbackScenario::ScriptedSummary(Arc::clone(script));
+            Self::Compact(finish) => {
+                model.scenario = LoopbackScenario::ScriptedSummary(Arc::clone(script), finish);
             }
         }
         if let Some(namespace) = script.identity_namespace {
@@ -3139,12 +3140,37 @@ pub fn scripted_compaction_runtime_binding(
     sidecar: Option<&Path>,
     extensions: Vec<ToolRegistration>,
 ) -> HarnessResult<SessionRuntimeBinding> {
+    scripted_compaction_runtime_binding_with_finish(
+        workspace,
+        controller,
+        script,
+        tree_tools,
+        sidecar,
+        extensions,
+        FinishReason::Stop,
+    )
+}
+
+/// Builds the scripted summary twin with an explicit terminal reason.
+///
+/// # Errors
+///
+/// Returns an error when the scripted source binding or summary limit is invalid.
+pub fn scripted_compaction_runtime_binding_with_finish(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: &Arc<ScriptPlan>,
+    tree_tools: Option<Vec<ToolRegistration>>,
+    sidecar: Option<&Path>,
+    extensions: Vec<ToolRegistration>,
+    finish: FinishReason,
+) -> HarnessResult<SessionRuntimeBinding> {
     let runtime = if let Some(tree_tools) = tree_tools {
         scripted_topology_runtime_binding_inner(
             workspace,
             controller,
             script,
-            ScriptedOperation::Compact,
+            ScriptedOperation::Compact(finish),
             tree_tools,
             Arc::new(FixedClock::new(fixture_time()?)),
         )?
@@ -3153,7 +3179,7 @@ pub fn scripted_compaction_runtime_binding(
             workspace,
             controller,
             script,
-            ScriptedOperation::Compact,
+            ScriptedOperation::Compact(finish),
             sidecar.ok_or("scripted Code Mode compaction needs its source sidecar")?,
             None,
             extensions,
@@ -3163,7 +3189,7 @@ pub fn scripted_compaction_runtime_binding(
             workspace,
             controller,
             script,
-            ScriptedOperation::Compact,
+            ScriptedOperation::Compact(finish),
             extensions,
         )?
     };

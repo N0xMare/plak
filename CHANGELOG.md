@@ -56,6 +56,12 @@ one cross-build carrier (a build imports its own and the previous version).
 - Messages artifact decoding preserves raw Thinking and RedactedThinking blocks
   instead of refusing their signed or redacted replay payloads.
 
+- Offline folds require at least a 5 % fresh-input reduction. A summary that
+  overruns its output bound selects the Tight instruction for the next permitted
+  fold; response-free failures do not reset it. Idle `/compact` and scheduled
+  passes take the free placeholder rung after a definite paid failure, and a
+  free commit after that failure cannot start a paid scheduled follow-on.
+
 - Atomic attachment now exposes only the cursor, source/turn lifecycles and
   pending decisions. Presentation counters, usage, conversation summaries and
   `ToolActivityView` are removed from the snapshot API. `AgentViewReducer`

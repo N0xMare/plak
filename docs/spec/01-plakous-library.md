@@ -755,7 +755,8 @@ Every branch has a quiescent safe head and may also have one mutable,
 non-authoritative, non-forkable working turn. Ledger nodes and large content
 may be shared or content-addressed; sharing never aliases mutable branch
 authority. Releasing uniquely owned command-ledger links, operation-mutation
-links and canonical-history ancestry is iterative, stopping at a shared link;
+links, canonical-history ancestry and checkpoint object layers is iterative,
+stopping at a shared link, even when object-layer trimming fails;
 session length does not turn their destruction into an unbounded call stack.
 
 Live publication and compaction recovery share one pure successor-candidate
@@ -3711,8 +3712,9 @@ a model.
 `5163763e703c319e4554c2f455535c5adb6e51e8`'s 80 % rows as the **compact
 trigger** (`auto_compact_input` = 80 % of the catalog window), not a send cap.
 Compaction must land far below the trigger (paid fold replaces history with a
-summary; placeholders prefer the shallowest net-shrinking successor below 50 %
-of the window, else the smallest measured fitting successor). `grok-4.7` and
+summary; placeholders prefer the shallowest successor meeting the 5 % reduction
+minimum below 50 % of the window, else the smallest measured fitting successor
+meeting that minimum). `grok-4.7` and
 `grok-4.7-build-fast` assert no
 model-specific trigger; the ceiling-minus-headroom policy applies.
 `grok-build-0.1` remains unavailable because its 85 % value is only a fallback
@@ -7313,6 +7315,12 @@ placeholders inside the protected tail (`ToolResultPlaceholdersV1`), followed by
 offline omission of unbound replay (`ReplayOmissionV1`). **No provider, model, account, or
 subscription name implies the native facet.**
 
+External compaction operation IDs must not end in `:placeholders`. That suffix
+is reserved for the driver's derived unpaid continuation; the facade and
+endpoint refuse it with typed invalid input naming the suffix, before any
+ledger write. Hosted manual, scheduled and capacity-recovery passes generate
+their own operation IDs; their CLI and JSONL commands do not accept one.
+
 The acting strategies form one **ladder**, tried in order against the
 same live head:
 
@@ -7404,6 +7412,10 @@ compaction-finished detail still records that preparation refusal; a free
 commit must not hide why the paid rung could not run.
 An ordinary `NoEligibleRange` at the turn fence likewise records that no
 qualifying offline successor fits.
+Its detail distinguishes an empty set of consumed tool results and replay
+successors, comparable candidates that do not both fit and meet the 5 %
+reduction minimum, and an unbound-replay rescue that cannot prepare below the
+landing fence. The rescue detail does not claim a percentage shrink proof.
 Withheld or clipped tool output is not itself a terminal capacity refusal.
 After a non-committed pressure fold, the driver continues on the retained head
 when the next round fits. A structurally exhausted ladder fails proactively
@@ -7594,16 +7606,29 @@ placeholder rung over the unchanged source, including idle manual and scheduled
 passes; cancellation and ambiguous outcomes do not fall back. A placeholder
 commit keeps the paid failure visible and does not authorize a paid follow-on
 at the same fence. If no offline successor qualifies, the paid failure stands.
+An endpoint pass joins only the exact original `Failed` receipt and its
+derived `{operation_id}:placeholders` success receipt. The latter must be an
+actual offline request for that derived operation, over exactly the former's
+failure checkpoint, with the same source history, projection and harness
+plan; a suffix alone, a paid request or another source is an integrity refusal.
+The facade reports the original request source and the free successor target.
+Retry and recovery read those same receipts first. If only the failure receipt
+committed, the existing driver (or the ordinary source runtime reopened as its
+sole owner) may finish only that derived unpaid rung. No recovery path repeats
+the paid dispatch or republishes an already committed placeholder successor.
 The next independently permitted harness fold uses the Tight instruction when
-the branch's newest finalized harness-fold provider operation completed with
-`Length`. This selection is read from the ledger, not transient driver state;
-the newest harness fold and its provider evidence survive quiescent pruning,
-ordinary rounds and reopen. Native folds and unpaid rungs do not change that
-selection. Tight keeps the same sections, constraints and exact values, but
+the branch's newest finalized harness-fold provider record carrying a decoded
+`Completed` response stopped for `Length`; a `Completed` non-`Length` response
+selects Standard. Newer failures without a response leave the selection
+unchanged. This selection is read from the ledger, not transient driver state;
+the deciding finalized harness fold and its provider evidence survive quiescent
+pruning, ordinary rounds and reopen. Native folds and unpaid rungs do not
+change that selection. Tight keeps the same sections, constraints and exact
+values, but
 quotes only the newest non-in-progress request, merges all earlier requests
 into at most five lines, lists only changed files and open failures under Work
-done, and aims under about 800 words. A subsequent successful harness fold
-returns selection to Standard. Existing backoff, admission and per-turn failure
+done, and aims under about 800 words. Existing backoff, admission and per-turn
+failure
 caps still decide whether another fold is permitted: **one paid dispatch per
 fold, never an immediate tighter retry**. Recovery checks membership in the two
 exact closed texts at every depth and never re-selects an instruction.
@@ -8323,7 +8348,8 @@ segment is corrupt.
 **A failed paid fold falls to the placeholder rung with round backoff.** A definite
 paid-fold failure mid-turn changed nothing, so the ladder continues with the
 free placeholder rung over the unchanged source, under its own workflow
-identity, and the turn goes on under the window when a useful older result is
+identity (idle manual and scheduled endpoint passes take it too, §10.2),
+and the turn goes on under the window when a useful older result is
 eligible. A cancelled fold is not retried in any form. After a paid fold in a
 root turn fails to commit, scheduled compaction uses placeholders during the
 escalating round backoff above. Later eligible work may start a new paid workflow

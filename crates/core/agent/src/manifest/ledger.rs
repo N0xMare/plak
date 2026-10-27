@@ -20,7 +20,7 @@ impl<T> Drop for LedgerNode<T> {
     fn drop(&mut self) {
         let mut previous = self.previous.take();
         while let Some(link) = previous {
-            let Ok(mut node) = Arc::try_unwrap(link) else {
+            let Some(mut node) = Arc::into_inner(link) else {
                 break;
             };
             previous = node.previous.take();
@@ -85,7 +85,7 @@ impl Drop for OperationLedgerMutation {
     fn drop(&mut self) {
         let mut previous = self.previous.take();
         while let Some(link) = previous {
-            let Ok(mut node) = Arc::try_unwrap(link) else {
+            let Some(mut node) = Arc::into_inner(link) else {
                 break;
             };
             previous = node.previous.take();

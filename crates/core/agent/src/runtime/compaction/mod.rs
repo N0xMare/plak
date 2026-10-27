@@ -22,6 +22,7 @@ pub(in crate::runtime) mod continuation;
 pub(in crate::runtime) mod fold;
 
 pub(in crate::runtime) mod placeholder;
+pub(super) mod placeholder_receipt;
 
 #[cfg(test)]
 mod tests;

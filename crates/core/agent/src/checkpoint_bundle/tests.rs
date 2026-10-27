@@ -40,6 +40,25 @@ use uuid::Uuid;
 
 pub(super) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn million_untrimmed_object_layers_drop_on_a_small_stack() -> TestResult {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut tail = None;
+            for _ in 0..1_000_000 {
+                tail = Some(Arc::new(ObjectLayer {
+                    prior: tail,
+                    objects: Arc::new([]),
+                }));
+            }
+            drop(tail);
+        })?
+        .join()
+        .map_err(|_| "object-layer drop thread panicked")?;
+    Ok(())
+}
+
 pub(super) fn replace_supplied(bundle: &mut CheckpointObjectBundle, objects: Vec<RuntimeObject>) {
     let objects: Arc<[RuntimeObject]> = objects.into();
     bundle.objects = objects.clone();

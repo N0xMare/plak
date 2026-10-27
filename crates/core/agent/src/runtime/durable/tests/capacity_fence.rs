@@ -772,7 +772,8 @@ async fn unbound_rescue_landing_case(fresh: bool, replaceable: bool) -> TestResu
         assert!(provenance.after_audit().input_tokens() < provenance.before_audit().input_tokens());
     } else {
         assert!(
-            !matches!(outcome, Ok(AgentCompactSessionOutcome::Compacted { .. })),
+            matches!(&outcome, Err(AgentSessionEndpointError::Rejected { reason })
+                if reason.contains("no unbound-replay rescue successor prepares below the landing fence")),
             "an unbound rescue must clear the landing fence: {outcome:?}"
         );
         assert_eq!(
@@ -927,7 +928,7 @@ async fn preparable_native_placeholder_case(protected: bool, tiny_replay: bool) 
     if tiny_replay {
         assert!(
             matches!(&outcome, Err(AgentSessionEndpointError::Rejected { reason })
-                if reason.contains("no fitting offline successor")),
+                if reason.contains("no offline successor meets the 5% reduction minimum and fits")),
             "a near-null saving must not consume a fold: {outcome:?}"
         );
         assert_eq!(agent.checkpoint().id(), source.checkpoint_id);
@@ -1313,7 +1314,7 @@ async fn exhausted_native_ladder_reports_the_actual_unavailable_rung() -> TestRe
     assert!(
         matches!(outcome, Err(AgentSessionEndpointError::Rejected { ref reason })
         if reason.contains("native facet preparation failed")
-            && reason.contains("no fitting offline successor")),
+            && reason.contains("no offline successor meets the 5% reduction minimum and fits")),
         "{outcome:?}"
     );
     assert_eq!(model.calls.load(Ordering::Acquire), 2);

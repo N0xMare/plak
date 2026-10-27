@@ -247,6 +247,10 @@ release and recover it with `parse::<SessionLocator>()` on restart. Keep the
 backend and immutable runtime binding consistent. `SessionOperationId` is an
 idempotency key: reuse it for an identical logical operation's retry, never for
 different inputs.
+Compaction operation IDs must not end in `:placeholders`: that suffix is
+reserved for the runtime's unpaid continuation of a failed fold. External
+compaction submissions with it return a typed invalid-input refusal before
+writing the ledger.
 
 Take a turn's `TurnEvents` to stream observations; the final `TurnResult`, not
 an event, is terminal authority. Observation loss must not replace the result.

@@ -25,28 +25,22 @@ impl CompactionInstruction {
     }
 
     pub(in crate::runtime) fn for_ledger(ledger: &RuntimeOperationLedger) -> Self {
-        let overran = latest_harness_fold(ledger).is_some_and(|(_, provider)| {
-            provider
-                .transitions()
-                .iter()
-                .rev()
-                .find_map(|transition| {
-                    let DurableOperationState::Completed(evidence) = transition.state() else {
-                        return None;
-                    };
-                    serde_json::from_slice::<ModelResponse>(evidence.bytes()).ok()
-                })
-                .is_some_and(|response| response.finish().reason() == FinishReason::Length)
-        });
+        let overran = latest_harness_fold(ledger)
+            .is_some_and(|(_, _, finish)| finish == FinishReason::Length);
         if overran { Self::Tight } else { Self::Standard }
     }
 }
 
-/// Keep this pair through quiescent pruning: ordinary rounds must not erase
-/// the next fold's instruction selection, and native folds do not select it.
+/// The newest finalized harness fold carrying a completed response decides
+/// the next instruction. Keep this pair through pruning; response-free errors,
+/// ordinary rounds and native folds do not change that decision.
 pub(in crate::runtime) fn latest_harness_fold(
     ledger: &RuntimeOperationLedger,
-) -> Option<(&DurableOperationRecord, &DurableOperationRecord)> {
+) -> Option<(
+    &DurableOperationRecord,
+    &DurableOperationRecord,
+    FinishReason,
+)> {
     let operations = ledger.operations();
     for compaction in operations.iter().rev() {
         let DurableOperationKind::Compaction { workflow_id } = compaction.kind() else {
@@ -63,21 +57,145 @@ pub(in crate::runtime) fn latest_harness_fold(
         if request.version != 2 {
             continue;
         }
-        if let Some(provider) = operations.iter().rev().find(|record| {
+        let Some(provider) = operations.iter().rev().find(|record| {
             matches!(record.kind(), DurableOperationKind::Provider {
                 root: ModelOperationRoot::SessionWorkflow(root), ..
             } if root == workflow_id)
                 && matches!(record.state(), DurableOperationState::Finalized(_))
-        }) {
-            return Some((compaction, provider));
-        }
+        }) else {
+            continue;
+        };
+        let Some(response) = provider.transitions().iter().rev().find_map(|transition| {
+            let DurableOperationState::Completed(evidence) = transition.state() else {
+                return None;
+            };
+            serde_json::from_slice::<ModelResponse>(evidence.bytes()).ok()
+        }) else {
+            continue;
+        };
+        return Some((compaction, provider, response.finish().reason()));
     }
     None
 }
 
 #[cfg(test)]
 mod tests {
-    use super::CompactionInstruction;
+    use super::*;
+    use crate::runtime::compaction::record::compaction_operation_component;
+    use crate::{DurableOperationTransition, RuntimeComponentKind, SessionWorkflowId};
+    use plakous_model::{
+        AttemptId, CanonicalHistory, CheckpointId, Digest, DigestDomain, FinishDetails,
+        ModelRequest, RequestMetadata, RunId, Timestamp,
+    };
+    use uuid::Uuid;
+
+    type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+    fn request(workflow_id: SessionWorkflowId) -> TestResult<DurableCompactionRequestRecord> {
+        let checkpoint = crate::checkpoint_bundle::tests::fixture_with_history(
+            CanonicalHistory::new(Vec::new())?,
+            10,
+            false,
+        )?;
+        let manifest = checkpoint.manifest();
+        let topology = manifest.topology();
+        let digest = Digest::sha256(DigestDomain::RequestPlan, 1, &[b"instruction-selection"])?;
+        Ok(DurableCompactionRequestRecord {
+            version: 2,
+            workflow_id,
+            turn_fence: false,
+            operation_id: "instruction-selection".to_owned(),
+            source_session: topology.session_id,
+            source_branch: topology.branch_id,
+            source_checkpoint: checkpoint.id(),
+            source_history: manifest.canonical().history().identity(),
+            cut: digest,
+            request: ModelRequest::from_parts(
+                manifest.canonical().stable_prefix().clone(),
+                manifest.canonical().projection(),
+                RequestMetadata::for_session_workflow(
+                    RunId::try_from(Uuid::from_u128(11))?,
+                    workflow_id,
+                    AttemptId::try_from(Uuid::from_u128(12))?,
+                    Timestamp::new(1, 0)?,
+                ),
+            )?,
+            provider_configuration: manifest.provider_configuration().clone(),
+            source_harness_plan: digest,
+            before_measurement: digest,
+            before_status: digest,
+            before_input_tokens: 1,
+            target_affinity_entropy: [0; 32],
+        })
+    }
+
+    #[test]
+    fn latest_harness_fold_requires_finalized_compaction_record() -> TestResult {
+        let workflow = SessionWorkflowId::try_from([1; 32])?;
+        let request = request(workflow)?;
+        let checkpoint = request.source_checkpoint;
+        let dispatched = CheckpointId::try_from(Uuid::from_u128(14))?;
+        let completed = CheckpointId::try_from(Uuid::from_u128(15))?;
+        let finalization = CheckpointId::try_from(Uuid::from_u128(16))?;
+        let response = compaction_operation_component(&ModelResponse::new(
+            Vec::new(),
+            FinishDetails::new(FinishReason::Length, None),
+            None,
+            None,
+            Digest::sha256(DigestDomain::RequestPlan, 1, &[b"response"])?,
+        ))?;
+        assert_eq!(response.kind(), RuntimeComponentKind::Operation);
+        let transitions = vec![
+            DurableOperationTransition::new(checkpoint, DurableOperationState::Prepared),
+            DurableOperationTransition::new(dispatched, DurableOperationState::Dispatched),
+            DurableOperationTransition::new(
+                completed,
+                DurableOperationState::Completed(response.clone()),
+            ),
+        ];
+        let mut finalized = transitions.clone();
+        finalized.push(DurableOperationTransition::new(
+            finalization,
+            DurableOperationState::Finalized(response.clone()),
+        ));
+        let ledger = RuntimeOperationLedger::new(
+            Vec::new(),
+            vec![
+                DurableOperationRecord::new(
+                    1,
+                    DurableOperationKind::Compaction {
+                        workflow_id: workflow,
+                    },
+                    compaction_operation_component(&request)?,
+                    transitions,
+                )?,
+                DurableOperationRecord::new(
+                    2,
+                    DurableOperationKind::Provider {
+                        root: ModelOperationRoot::SessionWorkflow(workflow),
+                        attempt_id: AttemptId::try_from(Uuid::from_u128(12))?,
+                    },
+                    compaction_operation_component(&request)?,
+                    finalized,
+                )?,
+            ],
+        )?;
+        assert!(latest_harness_fold(&ledger).is_none());
+        let ledger = ledger.transition_operation(
+            1,
+            DurableOperationTransition::new(
+                finalization,
+                DurableOperationState::Finalized(response),
+            ),
+        )?;
+        let (compaction, provider, finish) =
+            latest_harness_fold(&ledger).ok_or("finalized pair missing")?;
+        assert_eq!(
+            (compaction.operation_id(), provider.operation_id(), finish),
+            (1, 2, FinishReason::Length)
+        );
+        Ok(())
+    }
 
     #[test]
     fn tight_instruction_pin() {

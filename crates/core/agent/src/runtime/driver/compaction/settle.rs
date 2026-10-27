@@ -237,6 +237,7 @@ impl Driver {
             measured.before,
             measured.occupancy_before,
             native_protected_history,
+            &mut committed_detail.no_eligible_detail,
         ))
         .await
         {

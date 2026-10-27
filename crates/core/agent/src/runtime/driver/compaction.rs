@@ -43,6 +43,7 @@ const COMMITTED_PRESSURE_FOLD_CAP: usize = 3;
 #[derive(Default)]
 struct CompactionDetail {
     diagnostic: Option<String>,
+    no_eligible_detail: Option<&'static str>,
     exhausted: bool,
     rung: Option<&'static str>,
 }
@@ -230,6 +231,20 @@ impl Driver {
             return Err(AgentSessionEndpointError::Busy);
         }
         let checkpoint = self.authority.checkpoint();
+        if let Some((operation_id, source)) = &request.fallback_of {
+            let identity = DurableCompactionIdentity::new(operation_id, *source)
+                .map_err(|_| AgentSessionEndpointError::InvalidInput)?;
+            let original = crate::runtime::durable::compaction_fallback::failed_endpoint_request(
+                &checkpoint,
+                identity,
+            )
+            .map_err(|error| compact_runtime_endpoint_error(&error))?;
+            if request.operation_id != format!("{operation_id}:placeholders")
+                || original.is_none_or(|original| original.operation_id != *operation_id)
+            {
+                return Err(AgentSessionEndpointError::InvalidInput);
+            }
+        }
         let topology = checkpoint.manifest().topology();
         if (
             topology.session_id,
@@ -293,12 +308,16 @@ impl Driver {
         let identity = DurableCompactionIdentity::new(&request.operation_id, source)
             .map_err(|_| AgentSessionEndpointError::InvalidInput)?;
         let runtime = match (origin, request.runtime.take()) {
-            (CompactOrigin::TurnFence { .. }, None) => ExactCompactionRuntime {
-                model: Arc::clone(&self.model),
-                provider_configuration: Arc::clone(&self.provider_configuration),
-                clock: Arc::clone(&self.clock),
-                model_operation_timeout: self.config.model_operation_timeout,
-            },
+            (CompactOrigin::TurnFence { .. } | CompactOrigin::Endpoint, None)
+                if origin.is_turn_fence() || request.fallback_of.is_some() =>
+            {
+                ExactCompactionRuntime {
+                    model: Arc::clone(&self.model),
+                    provider_configuration: Arc::clone(&self.provider_configuration),
+                    clock: Arc::clone(&self.clock),
+                    model_operation_timeout: self.config.model_operation_timeout,
+                }
+            }
             (CompactOrigin::Endpoint, Some(builder)) => {
                 let (authority, checked_at) = self
                     .request_authority(Arc::clone(&builder.model), builder.clock.now())
@@ -424,9 +443,17 @@ impl Driver {
                     committed_detail,
                 )
                 .await?;
-            if origin.is_turn_fence() && !self.paid_fold_admissible(origin.pressure_forced()) {
+            if request.fallback_of.is_some()
+                || (origin.is_turn_fence() && !self.paid_fold_admissible(origin.pressure_forced()))
+            {
                 return self
-                    .compaction_source_placeholders(&attempt, &runtime, &measured, false)
+                    .compaction_source_placeholders(
+                        &attempt,
+                        &runtime,
+                        &measured,
+                        false,
+                        committed_detail,
+                    )
                     .await;
             }
             let plan = match self

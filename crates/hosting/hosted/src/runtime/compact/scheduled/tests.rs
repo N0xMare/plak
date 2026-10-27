@@ -27,6 +27,173 @@ use std::sync::Arc;
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 
 #[test]
+fn scheduled_length_failure_uses_live_paid_flag_after_a_real_placeholder_commit() {
+    use plakous::agent::{CommandId, TurnResultOutcome};
+    use plakous::model::FinishReason;
+    use plakous::sessions::ContextQuery;
+    use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
+    use plakous_offline_crash_harness::script::{SCRIPT_VERSION, ScriptPlan};
+
+    let root = tempfile::tempdir().unwrap();
+    let script: ScriptPlan = serde_json::from_value(serde_json::json!({
+        "version": SCRIPT_VERSION,
+        "maximum_projected_input": 100_000,
+        "content_sensitive_projection": true,
+        "tool_result_bytes": 20_000,
+        "steps": [
+            {"output": {"text": "x".repeat(60_000)}},
+            {"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
+            {"output": {"text": "latest protected answer"}}
+        ]
+    })).unwrap();
+    let script = Arc::new(script);
+    let (mut config, evidence) =
+        recover_tests::scripted_host_with(root.path(), Arc::clone(&script));
+    let controller = plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+        plakous_offline_crash_harness::protocol::CrashBoundary::None,
+        evidence.clone(),
+    )
+    .unwrap();
+    let workspace = config.cwd.clone();
+    let cursor = Arc::new(std::sync::atomic::AtomicU64::new(1));
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
+        rebind_target: test_kit::scripted(&config).rebind_target.clone(),
+        runtime: Arc::new(move |role| {
+            if role == RuntimeRole::Compact {
+                plakous_offline_crash_harness::scripted_compaction_runtime_binding_with_finish(
+                    &workspace,
+                    controller.clone(),
+                    &script,
+                    None,
+                    None,
+                    Vec::new(),
+                    FinishReason::Length,
+                )
+            } else {
+                plakous_offline_crash_harness::scripted_runtime_binding_with_cursor(
+                    &workspace,
+                    controller.clone(),
+                    Arc::clone(&script),
+                    Arc::clone(&cursor),
+                )
+            }
+            .map_err(|error| error.to_string())
+        }),
+        observe: Arc::new(|_, _| {}),
+        child_runtime: None,
+        rebind_builds: std::sync::Mutex::new(Vec::new()),
+    });
+    config.compaction_enabled = true;
+    let executor = ApplicationExecutor::new().unwrap();
+    let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary).unwrap();
+    let opened = executor
+        .block_on(crate::agent::build_or_open_bound_session(
+            config.state_roots.runtime_sessions().unwrap(),
+            None,
+            None,
+            SessionOperationId::new("scheduled-length:create").unwrap(),
+            runtime,
+        ))
+        .unwrap()
+        .unwrap_or_else(|error| panic!("{}", error.failure.message()));
+    for (index, prompt) in ["older intent", "latest intent"].into_iter().enumerate() {
+        let result = executor
+            .block_on(async {
+                opened
+                    .agent()
+                    .unwrap()
+                    .start(
+                        CommandId::new(format!("scheduled-length:seed:{index}")).unwrap(),
+                        prompt,
+                    )
+                    .await
+                    .unwrap()
+                    .into_turn()
+                    .unwrap()
+                    .result()
+                    .await
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(
+            matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+            "{:?}",
+            result.outcome()
+        );
+    }
+    config
+        .session
+        .bind_plakous_locator(opened.locator())
+        .unwrap();
+    let source = opened.locator();
+    let user_text = "p".repeat(50_000);
+    let pending = UserInput::from(user_text.clone());
+    queue::enqueue(&mut config.session.pending_queue, user_text).unwrap();
+    config.session.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
+    let dispatches = || {
+        read_evidence(&evidence)
+            .unwrap()
+            .iter()
+            .filter(|row| row.kind == EvidenceKind::ProviderDispatched)
+            .count()
+    };
+    let before = dispatches();
+    let (events, rx) = host_event_sink();
+    let (_actions, actions_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let interrupt_state = RefCell::new(InterruptWatchState::default());
+    let watch = InterruptWatch::new(&actions_rx, &interrupt_state);
+    let admitted = super::run_scheduled_compaction_until_fits(
+        &executor,
+        watch,
+        &mut config,
+        &opened,
+        &mut Vec::new(),
+        &events,
+        None,
+        &pending,
+        None,
+    )
+    .unwrap();
+    assert_ne!(opened.locator(), source, "the unpaid successor must commit");
+    assert!(opened.paid_fold_failed_since_last_round());
+    assert_eq!(
+        dispatches() - before,
+        1,
+        "no second paid dispatch at this fence"
+    );
+    let after = crate::runtime::usage::query_context(
+        &executor,
+        &opened,
+        ContextQuery::WithPendingUserInput(pending),
+    )
+    .unwrap();
+    assert!(after.compaction_verdict().is_due());
+    assert!(
+        after.compaction_verdict().observation_headroom()
+            || after.disposition() != ContextDisposition::Fits
+    );
+    let failed_note = rx.try_iter().any(|event| {
+        matches!(event,
+            HostEvent::Row(TranscriptRow::Notice(notice))
+                if notice.text.contains("paid summary failed; offline compaction committed")
+        )
+    });
+    assert!(
+        failed_note || admitted == ScheduledPrompt::Parked,
+        "the real scheduled pass must apply Failed send/park policy"
+    );
+    assert_eq!(
+        config
+            .store
+            .load(&config.session.id)
+            .unwrap()
+            .compaction_count,
+        1
+    );
+    executor.block_on(opened.release()).unwrap().unwrap();
+}
+
+#[test]
 fn a_free_commit_after_a_paid_failure_never_pays_for_a_scheduled_follow_on() {
     let due = ContextProjection::test_fits(
         PreparedInputCount::UpperBound(99_000),

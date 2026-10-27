@@ -91,7 +91,8 @@ async fn fold_once(
 }
 
 #[tokio::test]
-async fn overrun_uses_tight_on_next_fold_across_reopen_and_resets_after_success() -> TestResult {
+async fn response_free_tight_failure_keeps_length_selection_across_reopen_and_retention()
+-> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let sessions = DurableSessionRuntime::current(
@@ -113,6 +114,20 @@ async fn overrun_uses_tight_on_next_fold_across_reopen_and_resets_after_success(
             "compact:overrun-standard",
             CompactionFixtureOutcome::LengthSummary,
             CompactionInstruction::Standard,
+        )
+        .await?,
+        AgentCompactSessionOutcome::Failed { .. }
+    ));
+    assert!(matches!(
+        fold_once(
+            &agent,
+            Arc::clone(&workspace),
+            "compact:tight-rate-limited",
+            CompactionFixtureOutcome::ProviderError(ModelError::new(
+                ModelErrorKind::RateLimited,
+                "fixture dispatched 429",
+            )),
+            CompactionInstruction::Tight,
         )
         .await?,
         AgentCompactSessionOutcome::Failed { .. }
@@ -155,15 +170,15 @@ async fn overrun_uses_tight_on_next_fold_across_reopen_and_resets_after_success(
             &agent,
             Arc::clone(&workspace),
             "compact:overrun-tight",
-            CompactionFixtureOutcome::Summary,
+            CompactionFixtureOutcome::EmptySummary,
             CompactionInstruction::Tight,
         )
         .await?,
-        AgentCompactSessionOutcome::Compacted { .. }
+        AgentCompactSessionOutcome::Failed { .. }
     ));
     assert!(matches!(
         agent
-            .prompt("work after successful tight fold")
+            .prompt("work after completed non-Length failure")
             .await?
             .result()
             .await?
@@ -187,6 +202,29 @@ async fn overrun_uses_tight_on_next_fold_across_reopen_and_resets_after_success(
 
 #[tokio::test]
 async fn endpoint_overrun_falls_to_placeholders_without_a_second_paid_dispatch() -> TestResult {
+    endpoint_failed_fold_falls_to_placeholders(
+        CompactionFixtureOutcome::LengthSummary,
+        CompactionInstruction::Tight,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn endpoint_provider_error_commits_placeholders_and_keeps_paid_failure_flag() -> TestResult {
+    endpoint_failed_fold_falls_to_placeholders(
+        CompactionFixtureOutcome::ProviderError(ModelError::new(
+            ModelErrorKind::RateLimited,
+            "fixture dispatched 429",
+        )),
+        CompactionInstruction::Standard,
+    )
+    .await
+}
+
+async fn endpoint_failed_fold_falls_to_placeholders(
+    fixture: CompactionFixtureOutcome,
+    next_instruction: CompactionInstruction,
+) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let store = Arc::new(TestCreateStore::default());
@@ -223,7 +261,7 @@ async fn endpoint_overrun_falls_to_placeholders_without_a_second_paid_dispatch()
             &agent,
             Arc::clone(&workspace),
             "compact:endpoint-overrun",
-            CompactionFixtureOutcome::LengthSummary,
+            fixture,
             CompactionInstruction::Standard,
         )
         .await?,
@@ -248,7 +286,7 @@ async fn endpoint_overrun_falls_to_placeholders_without_a_second_paid_dispatch()
             workspace,
             "compact:endpoint-after-overrun",
             CompactionFixtureOutcome::Summary,
-            CompactionInstruction::Tight,
+            next_instruction,
         )
         .await?,
         AgentCompactSessionOutcome::Compacted { .. }
