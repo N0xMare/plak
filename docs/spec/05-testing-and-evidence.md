@@ -2065,6 +2065,13 @@ its input evidence or pairing. A failing sample makes the exit status 1 when
 the base has no failing sample for that key; pre-existing failures remain
 visible with `baseline_failed: true`.
 
+Admission regressions hold the live tree mutex on another thread while pause
+readers run. A live tree stays unpaused, an actual restored pause stays visible,
+and guarded and detached resume transitions update the same lock-free predicate.
+The one-shot drive holds that mutex through its initial admission check and
+releases it at the following storage probe, then requires a completed turn
+rather than a restored-pause hint; no elapsed-time race releases the lock.
+
 The running-root projection regression holds the host after acknowledgement
 until a real scripted two-round turn reaches its second stream, then requires
 two bounded cursor advances, not a coalesced pass. A separate admission law

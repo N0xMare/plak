@@ -3168,6 +3168,13 @@ a checkpoint.
 A restored tree opens `restored_paused` and does not dispatch until the user
 resumes it; a tool call meanwhile is `tree_restored_paused`. Root rebind
 follows the settled-tree predicate.
+An attached runtime mirrors whether its last installed admission state is
+`restored_paused` in an atomic predicate. Initialization and every live-tree
+mutation guard publish that predicate before unlocking, including installation
+of a detached mutation or rollback. Pause and hello gates read it without
+taking the tree mutex: contention never means paused, and a real pause remains
+visible while the mutex is held. A missing hub remains distinct from a live
+one, so the JSONL resume handshake still waits for attachment.
 `paused` is a presentation overlay on a folded `running` node, accessed through
 `NodeRecord::presentation_status`; restore and resume change tree admission,
 not child statuses. Interrupted, sealing and terminal statuses are never hidden.

@@ -612,6 +612,87 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn one_shot_drive_does_not_refuse_a_live_tree_under_contention() {
+        use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+        use std::sync::{Arc, Mutex, mpsc};
+
+        struct ReleaseAfterGate(Mutex<Option<mpsc::Sender<()>>>);
+        impl StoreFaults for ReleaseAfterGate {
+            fn storage_unavailable(&self) -> bool {
+                if let Some(release) = self.0.lock().unwrap().take() {
+                    release.send(()).unwrap();
+                }
+                false
+            }
+            fn before(
+                &self,
+                _: StoreCall,
+                _: Option<&sessions::SessionRecord>,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let (config, _) = fresh_injected_attached_host(root.path());
+        let id = config.session.id.clone();
+        let tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+            &id,
+            "root",
+            "owner",
+            config.cwd.clone(),
+            "selected-tuple",
+            crate::agent_tree_protocol::WriterMode::SingleLease,
+        )
+        .unwrap();
+        let runtime = crate::topology_runtime::insert_root(id, tree, None).unwrap();
+        let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let (sender, _events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let mut host = HostLoop::open(config, &receiver, Sender::over(sender), None).unwrap();
+        send_attached_action(
+            &actions,
+            UserAction::Prompt("one shot with a busy tree".into()),
+        );
+        let mut state = super::super::oneshot::OneShotState {
+            attempted: false,
+            resume_tree: false,
+            result: None,
+            run: None,
+        };
+        std::thread::scope(|scope| {
+            let (locked, ready) = mpsc::channel();
+            let (release, released) = mpsc::channel::<()>();
+            let runtime = Arc::clone(&runtime);
+            let holder = scope.spawn(move || {
+                runtime
+                    .read(|_| {
+                        locked.send(()).unwrap();
+                        released.recv_timeout(Duration::from_secs(30)).unwrap();
+                    })
+                    .unwrap();
+            });
+            ready.recv_timeout(Duration::from_secs(30)).unwrap();
+            // The first storage probe in drive's loop follows its one-shot
+            // admission check. Release there, before later tree projections.
+            host.config.store = Arc::new(FaultStore::new(
+                host.config.store.clone(),
+                ReleaseAfterGate(Mutex::new(Some(release))),
+            ));
+            host.drive(Some(&mut state)).unwrap();
+            holder.join().unwrap();
+        });
+        assert!(
+            matches!(
+                state.result,
+                Some(Ok(super::super::oneshot::OneShotOutcome::Completed { .. }))
+            ),
+            "a busy live tree is not restored-paused: {:?}",
+            state.result
+        );
+        host.release().unwrap();
+    }
+
+    #[test]
     fn unavailable_session_workflows_never_guess_or_mutate() {
         let (events, received) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let events = Sender::over(events);

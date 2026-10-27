@@ -78,8 +78,8 @@ pub fn durable_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> Stri
 
 /// Whether the tree must be resumed explicitly before it admits work.
 ///
-/// Fails closed: a contended hub lock reads as paused, because a gate that
-/// admits work must not admit on "busy".
+/// Attached trees expose their last installed admission state without taking
+/// the tree mutex. A busy tree is not a paused tree.
 pub fn requires_explicit_resume(rows: &dyn TreeRows, tree_id: &str) -> bool {
     if is_restored_paused(tree_id) {
         return true;
@@ -92,16 +92,11 @@ pub fn requires_explicit_resume(rows: &dyn TreeRows, tree_id: &str) -> bool {
 
 /// Whether the host has *observed* this tree paused, for operator copy.
 ///
-/// [`requires_explicit_resume`] deliberately reads a contended hub lock as
-/// paused. A note or the HUD must not, because it would tell the operator
-/// their tree is paused whenever the hub is merely busy — which is exactly what
-/// a fresh attach that spawns a subagent looks like. Contention here means "not
-/// observed", so nothing is claimed.
+/// The same lock-free state used by admission: observation cadence and a busy
+/// tree mutex cannot hide a real pause or invent one.
 pub(crate) fn observed_restored_paused(rows: &dyn TreeRows, tree_id: &str) -> bool {
-    if let Some(runtime) = lookup(tree_id) {
-        return runtime
-            .try_read(|tree| tree.state == TreeAdmissionState::RestoredPaused)
-            .unwrap_or(false);
+    if let Some(paused) = crate::topology_runtime::hub_tree_is_restored_paused(tree_id) {
+        return paused;
     }
     matches!(
         rows.tree(tree_id),

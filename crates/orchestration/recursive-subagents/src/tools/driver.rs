@@ -30,6 +30,9 @@ pub struct TreeDriver {
     pub(super) observer: Option<Arc<dyn TopologyObserver>>,
     next_reclaim_probe: Arc<Mutex<u64>>,
     storage_waiting: Arc<std::sync::atomic::AtomicBool>,
+    // Readers must not infer admission state from a busy tree mutex. Every
+    // mutation guard installs this predicate before releasing the live tree.
+    restored_paused: Arc<std::sync::atomic::AtomicBool>,
     mutation_owner: Arc<Mutex<()>>,
     storage_parking: Arc<storage::StorageParking>,
     publication_owner: Option<String>,
@@ -152,6 +155,11 @@ impl TreeDriver {
                 guard.complete(completed);
             }
         }
+        let restored_paused = tree
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .state
+            == crate::tree::TreeAdmissionState::RestoredPaused;
         Self {
             tree,
             store,
@@ -163,6 +171,7 @@ impl TreeDriver {
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
             storage_waiting: Arc::default(),
+            restored_paused: Arc::new(std::sync::atomic::AtomicBool::new(restored_paused)),
             mutation_owner: Arc::default(),
             storage_parking: Arc::default(),
             publication_owner: None,
@@ -484,8 +493,13 @@ impl TreeDriver {
     ///
     /// Refuses when the tree mutex is poisoned.
     pub(crate) fn lock(&self) -> Result<storage::TreeMutationGuard<'_>, TopologyError> {
-        storage::TreeMutationGuard::lock(&self.tree, &self.mutation_owner)
+        storage::TreeMutationGuard::lock(&self.tree, &self.mutation_owner, &self.restored_paused)
             .map_err(|()| Self::lock_poisoned())
+    }
+
+    pub(crate) fn is_restored_paused(&self) -> bool {
+        self.restored_paused
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Binds subsequent publication waits to the agent that owns this work.

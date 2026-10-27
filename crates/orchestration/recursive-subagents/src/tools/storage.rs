@@ -19,6 +19,7 @@ pub(crate) struct TreeMutationGuard<'a> {
     live: &'a Mutex<ProductAgentTree>,
     locked: Option<MutexGuard<'a, ProductAgentTree>>,
     candidate: Option<ProductAgentTree>,
+    restored_paused: &'a std::sync::atomic::AtomicBool,
     _owner: MutexGuard<'a, ()>,
 }
 
@@ -26,6 +27,7 @@ impl<'a> TreeMutationGuard<'a> {
     pub(super) fn lock(
         live: &'a Mutex<ProductAgentTree>,
         owner: &'a Mutex<()>,
+        restored_paused: &'a std::sync::atomic::AtomicBool,
     ) -> Result<Self, ()> {
         let owner = blocking(|| owner.lock()).map_err(|_| ())?;
         let locked = blocking(|| live.lock()).map_err(|_| ())?;
@@ -33,6 +35,7 @@ impl<'a> TreeMutationGuard<'a> {
             live,
             locked: Some(locked),
             candidate: None,
+            restored_paused,
             _owner: owner,
         })
     }
@@ -40,7 +43,15 @@ impl<'a> TreeMutationGuard<'a> {
     pub(super) fn detach(&mut self) {
         if let Some(locked) = self.locked.take() {
             self.candidate = Some(locked.clone());
+            self.publish_admission(&locked);
         }
+    }
+
+    fn publish_admission(&self, tree: &ProductAgentTree) {
+        self.restored_paused.store(
+            tree.state == crate::tree::TreeAdmissionState::RestoredPaused,
+            std::sync::atomic::Ordering::Release,
+        );
     }
 }
 
@@ -66,13 +77,14 @@ impl DerefMut for TreeMutationGuard<'_> {
 impl Drop for TreeMutationGuard<'_> {
     fn drop(&mut self) {
         if let Some(candidate) = &mut self.candidate {
-            std::mem::swap(
-                &mut *self
-                    .live
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner),
-                candidate,
-            );
+            let mut live = self
+                .live
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::mem::swap(&mut *live, candidate);
+            self.publish_admission(&live);
+        } else if let Some(locked) = &self.locked {
+            self.publish_admission(locked);
         }
     }
 }

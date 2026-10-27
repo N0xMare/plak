@@ -602,14 +602,6 @@ impl Drop for RecyclingGuard {
 /// by tree id, so a second attach shares this one rather than opening the
 /// store twice.
 pub struct ProductTopologyRuntime {
-    /// The tree, under the one mutex every mutation takes.
-    ///
-    /// `pub(crate)` and not `pub`, for the reason [`TreeDriver`]'s handle is:
-    /// a caller above this crate that locked it could mutate and drop the
-    /// guard without taking the [`crate::tree::Effects`] the mutation queued.
-    /// Outside callers get [`Self::read`], [`Self::try_read`] and
-    /// [`Self::mutate_and_settle`].
-    tree: Arc<Mutex<ProductAgentTree>>,
     /// Live child turns, keyed by agent id. Its lock is separate from the
     /// tree's on purpose: admission and the shutdown drain must be one lock,
     /// and neither may be taken while the tree's is held.
@@ -644,9 +636,8 @@ impl ProductTopologyRuntime {
         observer: Option<Arc<dyn TopologyObserver>>,
     ) -> Self {
         let tree = Arc::new(Mutex::new(tree));
-        let driver = TreeDriver::new(Arc::clone(&tree), store, vcs, observer.clone());
+        let driver = TreeDriver::new(tree, store, vcs, observer.clone());
         Self {
-            tree,
             live: Arc::new(tokio::sync::Mutex::new(LiveChildTable::default())),
             driver,
             closed: AtomicBool::new(false),
@@ -668,7 +659,7 @@ impl ProductTopologyRuntime {
     #[must_use]
     #[cfg(any(test, feature = "test-support"))]
     pub fn tree_handle_for_test(&self) -> &Arc<Mutex<ProductAgentTree>> {
-        &self.tree
+        self.driver.tree_handle_for_test()
     }
 
     /// Reads this tree under its mutex.
@@ -1568,17 +1559,12 @@ pub fn is_restored_paused(tree_id: &str) -> bool {
 /// `None` while the hub is not registered yet. `--resume-tree` must Wait on
 /// that gap instead of treating a missing hub as Live.
 ///
-/// Uses `try_lock` so the JSONL thread cannot deadlock against ResumeTree's
-/// tree mutex.
+/// Reads the driver's atomic mirror of the last installed tree state, so the
+/// JSONL thread cannot deadlock against ResumeTree's tree mutex. Contention
+/// never manufactures a paused state.
 pub fn hub_tree_is_restored_paused(tree_id: &str) -> Option<bool> {
     let runtime = lookup(tree_id)?;
-    Some(match runtime.tree.try_lock() {
-        Ok(tree) => tree.state == crate::tree::TreeAdmissionState::RestoredPaused,
-        Err(std::sync::TryLockError::WouldBlock) => true,
-        Err(std::sync::TryLockError::Poisoned(poisoned)) => {
-            poisoned.into_inner().state == crate::tree::TreeAdmissionState::RestoredPaused
-        }
-    })
+    Some(runtime.driver.is_restored_paused())
 }
 
 /// Removes a hub entry that never acquired a root lease (failed root attach).
@@ -1846,12 +1832,18 @@ pub mod test_support {
                 |_| Err(TreeRuntimeError::new("a hub hit must not load a tree")),
             )
             .unwrap();
-            assert!(Arc::ptr_eq(&runtime.tree, &resolved.tree));
+            assert!(Arc::ptr_eq(
+                runtime.tree_handle_for_test(),
+                resolved.tree_handle_for_test()
+            ));
         }
         assert!(!opened.load(Ordering::SeqCst));
         force_release(&tree_id).await;
     }
 }
+
+#[cfg(test)]
+mod admission_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
@@ -2007,7 +1999,10 @@ mod tests {
         )
         .unwrap();
         let second = lookup(&tree_id).expect("hub should occupy after insert");
-        assert!(Arc::ptr_eq(&first.tree, &second.tree));
+        assert!(Arc::ptr_eq(
+            first.tree_handle_for_test(),
+            second.tree_handle_for_test()
+        ));
         assert!(Arc::ptr_eq(&first.live, &second.live));
         force_release(&tree_id).await;
         assert!(lookup(&tree_id).is_none());
@@ -2047,9 +2042,12 @@ mod tests {
         )
         .unwrap();
         assert!(!loaded.load(Ordering::SeqCst));
-        assert!(Arc::ptr_eq(&runtime.tree, &resolved.tree));
+        assert!(Arc::ptr_eq(
+            runtime.tree_handle_for_test(),
+            resolved.tree_handle_for_test()
+        ));
         {
-            let tree = resolved.tree.lock().unwrap();
+            let tree = resolved.tree_handle_for_test().lock().unwrap();
             assert_eq!(tree.host_generation, generation);
             assert_eq!(tree.state, state);
         }
@@ -2168,7 +2166,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(loads.load(Ordering::SeqCst), 1);
-        assert!(Arc::ptr_eq(&first.tree, &second.tree));
+        assert!(Arc::ptr_eq(
+            first.tree_handle_for_test(),
+            second.tree_handle_for_test()
+        ));
         force_release(&tree_id).await;
     }
 
