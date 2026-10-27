@@ -104,7 +104,7 @@ fn queue_app() -> App {
 fn settings_app() -> App {
     let mut app = App::new(launch_basic(), true);
     app.open_control_tab(super::ControlTab::Settings);
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
         SettingsView::default(),
     )));
     app
@@ -230,7 +230,7 @@ fn settings_actions_are_derived_from_the_visible_registry_rows() {
     let mut app = App::new(launch_basic(), true);
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
         SettingsView::default(),
     )));
     let ids = action_ids(&app);
@@ -313,7 +313,7 @@ fn higher_priority_overlay_hides_settings_actions_and_private_text() {
     let mut app = App::new(launch_basic(), true);
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
         SettingsView::default(),
     )));
     app.settings_error = Some("PRIVATE_SETTINGS_ERROR".to_owned());
@@ -337,7 +337,7 @@ fn settings_subpanes_do_not_advertise_browse_actions() {
     let mut app = App::new(launch_basic(), true);
     app.dispatch_pilot_action(PilotAction::OpenSettings)
         .unwrap();
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
         SettingsView::default(),
     )));
     let row = settings_registry::ROWS
@@ -376,7 +376,7 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
         open,
         Some(UserAction::Extension(SurfaceIntent::OpenSettings))
     );
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
         SettingsView::default(),
     )));
     assert_eq!(app.semantic_snapshot().owner, "settings");
@@ -403,9 +403,9 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
         "preview applies immediately"
     );
 
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsApplied(
-        update,
-    )));
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::SettingsViewApplied(update),
+    ));
     let applied = app.semantic_snapshot();
     assert_eq!(
         serde_json::to_value(&applied).unwrap(),
@@ -814,7 +814,7 @@ fn every_control_tab_and_terminal_owner_has_a_closed_action_table() {
         let mut app = App::new(launch_basic(), true);
         app.open_control_tab(tab);
         if tab == super::ControlTab::Settings {
-            app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+            app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
                 SettingsView::default(),
             )));
         }

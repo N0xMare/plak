@@ -505,9 +505,9 @@ fn native_ptc_conflict(account: &str, model: &str) -> Option<&'static str> {
 pub(super) fn emit_settings(paths: &PlakPaths, events: &Sender<PlakExtension>) {
     match ProductConfig::load(paths) {
         Ok(config) => {
-            let _ = events.send(ContentEvent::Extension(
-                SurfaceObservation::SettingsSnapshot(settings_view(&config)),
-            ));
+            let _ = events.send(ContentEvent::Extension(SurfaceObservation::SettingsView(
+                settings_view(&config),
+            )));
         }
         Err(error) => {
             let message = format!("settings could not be loaded: {error}");
@@ -701,7 +701,7 @@ pub(super) fn save_settings(
         Ok(()) => {
             let note = settings_saved_note(&current, &config, changes_root_binding);
             let _ = events.send(ContentEvent::Extension(
-                SurfaceObservation::SettingsApplied(settings_view(&config)),
+                SurfaceObservation::SettingsViewApplied(settings_view(&config)),
             ));
             let _ = events.send(ContentEvent::Row(TranscriptRow::info(
                 NoticeScope::Settings,
@@ -851,6 +851,7 @@ fn send_agent_acknowledgements(paths: &PlakPaths, tree_id: &str, events: &Sender
 /// product has a configuration file at all.
 pub struct ProductSurface {
     paths: PlakPaths,
+    chrome_refresh: crate::shell::chrome_refresh::ChromeRefresh,
     chrome_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_accounts_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_refreshing: std::sync::Arc<std::sync::Mutex<bool>>,
@@ -887,6 +888,7 @@ impl ProductSurface {
             state_home: crate::home::paths::application_state_home(),
             usage_refreshing: std::sync::Arc::new(std::sync::Mutex::new(false)),
             paths,
+            chrome_refresh: crate::shell::chrome_refresh::ChromeRefresh::default(),
             chrome_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
             usage_accounts_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
         }
@@ -1087,7 +1089,7 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                     let paths = self.paths.clone();
                     let generation = std::sync::Arc::clone(&self.chrome_generation);
                     let events = events.clone();
-                    std::thread::spawn(move || {
+                    self.chrome_refresh.request(move || {
                         let config = ProductConfig::load(&paths)
                             .unwrap_or_else(|_| ProductConfig::default_product());
                         let row = session_profile(&config, paths.home(), &session);
@@ -1147,6 +1149,96 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use crate::surface_protocol::HostEvent;
+
+    #[test]
+    fn settings_cannot_clear_an_existing_root_with_an_incomplete_binding() {
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        let mut config = ProductConfig::default_product();
+        config.bind_root_tuple("grok", "grok-4.6", None);
+        config.save(&paths).unwrap();
+        let before = std::fs::read(paths.config_file()).unwrap();
+        let mut update = settings_view(&config);
+        update.product.default_account = None;
+        update.product.default_model = None;
+        update.product.default_effort = None;
+        update.product.default_extra = None;
+        let (events, observed) = host_event_sink();
+        assert!(save_settings(&paths, update, &[], &events).is_none());
+        assert!(observed.try_iter().any(|event| matches!(event,
+            HostEvent::Extension(SurfaceObservation::SettingsSaveFailed(message))
+                if message.contains("plak config set root.agent <template>")
+        )));
+        assert_eq!(std::fs::read(paths.config_file()).unwrap(), before);
+    }
+
+    #[test]
+    fn nearest_profile_ties_keep_the_first_profile_list_row() {
+        use crate::surface_protocol::ProfileDifference;
+        let (_root, paths) = PlakPaths::isolated_test_home();
+        paths.ensure_layout().unwrap();
+        let prepared = crate::profiles::prepare(
+            &ProductConfig::default_product(),
+            paths.home(),
+            "claude-default",
+        )
+        .unwrap();
+        prepared.config.save(&paths).unwrap();
+        let working = prepared
+            .config
+            .working_set
+            .names()
+            .iter()
+            .map(|name| format!("\"{name}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        std::fs::create_dir_all(paths.home().join("profiles")).unwrap();
+        for (name, model, effort) in [
+            ("a-tie", prepared.root.model.as_str(), "high"),
+            ("b-tie", "claude-other", "low"),
+        ] {
+            std::fs::write(
+                paths.user_agents_dir().join(format!("{name}.toml")),
+                format!("account = \"claude\"\nmodel = \"{model}\"\neffort = \"{effort}\"\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                paths.home().join(format!("profiles/{name}.toml")),
+                format!("root = \"{name}\"\nworking_set = [{working}]\n"),
+            )
+            .unwrap();
+        }
+        let config = ProductConfig::load(&paths).unwrap();
+        let list = crate::profiles::list(&config, paths.home());
+        let a = list
+            .rows
+            .iter()
+            .position(|row| row.id == "a-tie")
+            .unwrap_or_else(|| panic!("{list:#?}"));
+        let b = list
+            .rows
+            .iter()
+            .position(|row| row.id == "b-tie")
+            .unwrap_or_else(|| panic!("{list:#?}"));
+        assert!(a < b);
+        let session = plakous_hosted::runtime::SurfaceSession {
+            account: Some("claude".into()),
+            model: Some("claude-other".into()),
+            effort: Some("high".into()),
+            fast: false,
+            workspace: paths.home().to_path_buf(),
+            mcp: None,
+            roster: Some(crate::roster_input::snapshot_from_config(
+                &prepared.config,
+                "claude",
+                "claude-other",
+                Some("high".into()),
+            )),
+        };
+        assert_eq!(
+            session_profile(&config, paths.home(), &session).differences,
+            [ProfileDifference::RootModel]
+        );
+    }
     #[test]
     fn stale_composer_refresh_cannot_publish_profile_or_workspace() {
         let config = ProductConfig::default_product();
@@ -1574,9 +1666,7 @@ mod tests {
                     }
                     SurfaceIntent::OpenSettings => assert!(matches!(
                         observed.as_slice(),
-                        [HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
-                            _
-                        ))]
+                        [HostEvent::Extension(SurfaceObservation::SettingsView(_))]
                     )),
                     SurfaceIntent::SaveSettings(_) => {
                         let saved = ProductConfig::load(&paths).unwrap();
@@ -1586,7 +1676,7 @@ mod tests {
                         );
                         assert!(observed.iter().any(|event| matches!(
                             event,
-                            HostEvent::Extension(SurfaceObservation::SettingsApplied(_))
+                            HostEvent::Extension(SurfaceObservation::SettingsViewApplied(_))
                         )));
                     }
                     SurfaceIntent::OpenUsage
@@ -1603,7 +1693,7 @@ mod tests {
                         assert!(matches!(
                             observed.as_slice(),
                             [
-                                HostEvent::Extension(SurfaceObservation::SettingsSnapshot(_)),
+                                HostEvent::Extension(SurfaceObservation::SettingsView(_)),
                                 HostEvent::Extension(SurfaceObservation::OpenUsageOverlay),
                             ]
                         ));
@@ -1993,7 +2083,7 @@ mod tests {
         assert!(
             observed.iter().any(|event| matches!(
                 event,
-                HostEvent::Extension(SurfaceObservation::SettingsApplied(_))
+                HostEvent::Extension(SurfaceObservation::SettingsViewApplied(_))
             )),
             "a view-only save always succeeds: {observed:?}"
         );
@@ -2545,7 +2635,7 @@ mod tests {
         let observed = rx.try_iter().collect::<Vec<_>>();
         assert!(observed.iter().any(|event| matches!(
             event,
-            HostEvent::Extension(SurfaceObservation::SettingsApplied(_))
+            HostEvent::Extension(SurfaceObservation::SettingsViewApplied(_))
         )));
         assert!(observed.iter().any(|event| matches!(
             event,

@@ -18,7 +18,7 @@ fn binding(session: &str) -> HostEvent {
 
 #[test]
 fn session_switch_retires_source_usage_waits_queue_and_tree_but_keeps_preferences() {
-    for clear in [true, false] {
+    {
         let mut app = App::new(launch_basic(), true);
         app.apply_host_event(binding("source"));
         app.last_turn_usage = Some((1, 2, 3, 4, 5, Some(1), Some(1)));
@@ -40,11 +40,14 @@ fn session_switch_retires_source_usage_waits_queue_and_tree_but_keeps_preference
         app.history_browse = Some(0);
         app.input = "ordinary unsent draft".into();
         let prefs = app.render_prefs;
-        app.apply_host_event(if clear {
-            HostEvent::ClearView
-        } else {
-            binding("successor")
-        });
+        app.capacity_recovery = Some(crate::tui::ContextCapacityRecovery::Compactable);
+        app.capacity_recovery_action = Some(ratatui::layout::Rect::new(1, 1, 4, 1));
+        app.usage_limits.stale_age_seconds = Some(37);
+        app.subscription_usage = crate::tui::presentation::SubscriptionUsageView::Read;
+        app.refresh_failure_notes = vec!["account-level refresh failed".into()];
+        let limits = app.usage_limits.clone();
+        let subscription = app.subscription_usage.clone();
+        app.apply_host_event(binding("successor"));
         assert!(app.last_turn_usage.is_none());
         assert!(app.last_prompt_at.is_none());
         assert!(app.context_usage.total_window.is_none());
@@ -64,6 +67,11 @@ fn session_switch_retires_source_usage_waits_queue_and_tree_but_keeps_preference
         assert!(app.history_browse.is_none());
         assert_eq!(app.input, "ordinary unsent draft");
         assert_eq!(app.render_prefs, prefs);
+        assert!(app.capacity_recovery.is_none());
+        assert!(app.capacity_recovery_action.is_none());
+        assert_eq!(app.usage_limits, limits);
+        assert_eq!(app.subscription_usage, subscription);
+        assert_eq!(app.refresh_failure_notes, ["account-level refresh failed"]);
     }
 }
 
@@ -83,16 +91,18 @@ fn blocked_usage_io_does_not_block_typing_or_publish_after_a_session_switch() {
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let mut app = App::new(launch_basic(), true);
     app.usage_decoration = Some(crate::config::UsageDecorationReader::with_reader(
-        move |_| {
-            entered_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-            vec!["old source failure".into()]
+        move |view| {
+            if view.stale_age_seconds == Some(1) {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            }
+            vec![view.stale_age_seconds.unwrap().to_string()]
         },
         || {},
     ));
-    app.apply_host_event(HostEvent::UsageLimits(
-        crate::tui::providers::unread_usage_limits(),
-    ));
+    let mut limits = crate::tui::providers::unread_usage_limits();
+    limits.stale_age_seconds = Some(1);
+    app.apply_host_event(HostEvent::UsageLimits(limits.clone()));
     entered_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
@@ -100,8 +110,27 @@ fn blocked_usage_io_does_not_block_typing_or_publish_after_a_session_switch() {
     app.handle_key(key(KeyCode::Char('x')));
     assert_eq!(app.input, "x");
     app.apply_host_event(binding("successor"));
+    limits.stale_age_seconds = Some(2);
+    app.apply_host_event(HostEvent::UsageLimits(limits));
     release_tx.send(()).unwrap();
     app.usage_decoration.as_ref().unwrap().wait();
     app.poll_usage_decoration();
-    assert_eq!(app.refresh_failure_notes, [] as [String; 0]);
+    assert_eq!(app.refresh_failure_notes, ["2"]);
+}
+
+#[test]
+fn same_session_clear_view_preserves_published_queue_and_history() {
+    let mut app = App::new(launch_basic(), true);
+    app.prompt_history = vec!["target history".into()];
+    app.queue_drain = crate::tui::QueueDrainState::RestoredPaused;
+    app.local_queue = vec![super::test_support::queue_item(
+        "target-id",
+        1,
+        "target queued",
+    )];
+    let queue = app.local_queue.clone();
+    app.apply_host_event(HostEvent::ClearView);
+    assert_eq!(app.local_queue, queue);
+    assert_eq!(app.queue_drain, crate::tui::QueueDrainState::RestoredPaused);
+    assert_eq!(app.prompt_history, ["target history"]);
 }

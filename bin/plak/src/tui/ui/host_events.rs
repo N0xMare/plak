@@ -59,9 +59,8 @@ impl App {
         self.session_row_hits.clear();
         self.tab_copy_text.clear();
         self.info_overlay = None;
-        self.refresh_failure_notes.clear();
-        self.usage_limits = crate::tui::providers::unread_usage_limits();
-        self.subscription_usage = crate::tui::presentation::SubscriptionUsageView::Loading;
+        self.capacity_recovery = None;
+        self.capacity_recovery_action = None;
         if let Some(reader) = &mut self.usage_decoration {
             reader.invalidate();
         }
@@ -823,7 +822,6 @@ impl App {
                 self.mark_dirty();
             }
             HostEvent::ClearView => {
-                self.reset_session_state();
                 self.accepted_drafts.clear();
                 self.queued_steers_retired = 0;
                 self.clear_pending = false;
@@ -1021,7 +1019,7 @@ impl App {
                 self.templates = rows;
                 self.mark_dirty();
             }
-            HostEvent::Extension(SurfaceObservation::SettingsSnapshot(snapshot)) => {
+            HostEvent::Extension(SurfaceObservation::SettingsView(snapshot)) => {
                 self.settings_error = None;
                 self.persisted_theme = snapshot.tui.theme;
                 self.theme = theme_for(snapshot.tui.theme);
@@ -1042,7 +1040,7 @@ impl App {
                 self.slash_open = false;
                 self.mark_dirty();
             }
-            HostEvent::Extension(SurfaceObservation::SettingsApplied(snapshot)) => {
+            HostEvent::Extension(SurfaceObservation::SettingsViewApplied(snapshot)) => {
                 // Every row applies on change, so a confirmed write is
                 // not an exit. The tab stays exactly where the operator left
                 // it and only the persisted value moves under it.

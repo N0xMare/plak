@@ -119,7 +119,6 @@ pub(crate) use plakous_host_protocol::{
 };
 
 /// Launch options for the interactive TUI.
-#[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(
     clippy::struct_excessive_bools,
     reason = "inert launch DTO keeps independent host-selected presentation flags explicit"
@@ -160,8 +159,8 @@ pub struct TuiLaunch {
     pub settings: Option<SettingsView>,
     /// Product-interpreted provider rows for `/login`.
     pub providers: Vec<ProviderDef>,
-    /// Resolved product home for read-only refresh display telemetry.
-    pub telemetry_paths: Option<crate::product_paths::PlakPaths>,
+    /// Product-constructed endpoint for asynchronous usage display decoration.
+    pub(crate) usage_decoration: Option<crate::config::UsageDecorationReader>,
     /// The zone every wall-clock date and send time the presentation prints
     /// is read in: the system zone, read once at startup, in production; a
     /// fixed zone in tests. Nothing inside the TUI asks the environment.
@@ -201,7 +200,7 @@ impl Default for TuiLaunch {
             theme: SettingsTheme::DefaultDark,
             settings: None,
             providers: Vec::new(),
-            telemetry_paths: None,
+            usage_decoration: None,
             time_zone: &UTC_ZONE,
             opening_note: None,
         }
@@ -632,7 +631,7 @@ mod tests_entry {
 
         use crossterm::tty::IsTty;
 
-        let launch = TuiLaunch {
+        let launch = || TuiLaunch {
             version: "0.1.0",
             session_id: Some("test-session".into()),
             workspace: PathBuf::from("/tmp"),
@@ -653,17 +652,17 @@ mod tests_entry {
             theme: SettingsTheme::DefaultDark,
             settings: None,
             providers: Vec::new(),
-            telemetry_paths: None,
+            usage_decoration: None,
             time_zone: &super::UTC_ZONE,
             opening_note: None,
         };
-        assert_eq!(launch.session_id.as_deref(), Some("test-session"));
+        assert_eq!(launch().session_id.as_deref(), Some("test-session"));
 
         if !stdout().is_tty() {
             assert_eq!(run(), Err(TuiError::NotATty));
-            assert_eq!(run_with(launch.clone()), Err(TuiError::NotATty));
-            assert_eq!(run_session(launch.clone()), Err(TuiError::NotATty));
-            assert_eq!(run_hosted(launch, None, None), Err(TuiError::NotATty));
+            assert_eq!(run_with(launch()), Err(TuiError::NotATty));
+            assert_eq!(run_session(launch()), Err(TuiError::NotATty));
+            assert_eq!(run_hosted(launch(), None, None), Err(TuiError::NotATty));
         }
     }
 

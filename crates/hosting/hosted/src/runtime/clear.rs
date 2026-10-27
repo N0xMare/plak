@@ -126,10 +126,12 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     persist(&*config.store, &mut config.session);
     emit_agent_plan_notes(events, config, stderr_buf);
 
+    send_binding(events, config);
+    emit_prompt_history(events, &config.session);
+    emit_queue_snapshot(events, &config.session);
     let _ = events.send(ContentEvent::ClearView);
     // The new session's header, as a restore of it would show.
     let _ = events.replace_transcript(project_session_snapshot(&config.session));
-    send_binding(events, config);
     send_last_user_prompt_at(events, opened);
     if let Err(error) = report_context(
         executor,
@@ -446,10 +448,10 @@ pub(super) fn publish_restored_frame_before_source_release<
     // before joining the unrelated idle source; attachment release retains
     // its own durable locator and reports any ambiguity without rolling the
     // active target back.
+    send_binding(events, config);
     let _ = events.replace_transcript(project_session_snapshot(&config.session));
     emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
-    send_binding(events, config);
     emit_agent_plan_notes(events, config, stderr_buf);
     release_source();
 }

@@ -283,9 +283,10 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         HostWorkflow::Fork,
         HostBoundary::ProductCommitted,
     );
+    send_binding(events, config);
+    super::admission::emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
     let _ = events.replace_transcript(super::logging::project_session_snapshot(&config.session));
-    send_binding(events, config);
     send_last_user_prompt_at(events, opened);
     note_reread_instructions(events, instructions_before, opened);
     if watch.observe_now() {

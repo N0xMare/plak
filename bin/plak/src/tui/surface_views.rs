@@ -31,43 +31,41 @@ pub(super) fn mcp_overview(view: &McpOverview) -> String {
         return reason.clone();
     }
     let mut lines = view.diagnostics.clone();
-    if view.servers.is_empty() {
-        lines.push("no MCP servers configured; add one with `plak mcp add <id> -- <command> [args...]` or `plak mcp add <id> --url <url>`".to_owned());
-    } else {
-        lines.push("configured servers:".to_owned());
+    let configured = view
+        .servers
+        .iter()
+        .filter(|server| !matches!(server.configuration, Ok(None)))
+        .collect::<Vec<_>>();
+    if configured.is_empty() && view.config_readable {
+        lines.push(McpOverview::NONE_CONFIGURED.to_owned());
     }
-    for server in &view.servers {
-        if let Ok(Some(config)) = &server.configuration {
-            lines.push(format!(
-                "  {}  {}  {}  {}",
-                server.id, config.transport, config.scope, config.target
-            ));
-            lines.push(format!(
-                "    templates: {}",
-                if config.templates.is_empty() {
-                    "none".to_owned()
-                } else {
-                    config.templates.join(", ")
-                }
-            ));
-            if !config.missing_secrets.is_empty() {
-                lines.push(format!(
-                    "    missing secrets: {} (plak secret set <name>)",
-                    config.missing_secrets.join(", ")
-                ));
-            }
-            if config.resources {
-                lines.push("    resources: enabled".to_owned());
-            }
-            if let Some(login) = &config.login {
-                lines.push(format!("    {login}"));
-            }
-        } else if let Err(error) = &server.configuration {
-            lines.push(format!("  {}: {error}", server.id));
-        } else {
-            lines.push(format!("  {}: no longer configured", server.id));
+    let orphaned = view
+        .servers
+        .iter()
+        .filter(|server| matches!(server.configuration, Ok(None)))
+        .collect::<Vec<_>>();
+    for (heading, servers) in [
+        ("configured servers:", configured),
+        ("bound servers no longer configured:", orphaned),
+    ] {
+        if servers.is_empty() {
+            continue;
         }
-        lines.push(match server.binding {
+        lines.push(heading.to_owned());
+        for server in servers {
+            if let Ok(Some(config)) = &server.configuration {
+                lines.extend(
+                    config
+                        .lines(&server.id)
+                        .into_iter()
+                        .map(|line| format!("  {line}")),
+                );
+            } else if let Err(error) = &server.configuration {
+                lines.push(format!("  {}: {error}", server.id));
+            } else {
+                lines.push(format!("  {}: no longer configured", server.id));
+            }
+            lines.push(match server.binding {
             McpSessionBinding::NotBound => "    this session: not bound".to_owned(),
             McpSessionBinding::Bound { tools, earlier_definition } => {
                 let count = format!("{tools} tool{}", if tools == 1 { "" } else { "s" });
@@ -75,6 +73,7 @@ pub(super) fn mcp_overview(view: &McpOverview) -> String {
                 else { format!("    this session: bound, {count}") }
             }
         });
+        }
     }
     if !view.omitted.is_empty() {
         lines.push(String::new());
@@ -137,6 +136,65 @@ mod tests {
         assert!(text.contains("removed: no longer configured"));
         assert!(text.contains("bound, 2 tools"));
         assert!(text.contains("optional server unavailable at bind"));
+    }
+
+    #[test]
+    fn unreadable_config_does_not_claim_that_no_servers_are_configured() {
+        let text = super::mcp_overview(&crate::surface_protocol::McpOverview {
+            diagnostics: vec!["MCP configuration could not be read".into()],
+            ..Default::default()
+        });
+        assert!(text.contains("could not be read"));
+        assert!(!text.contains("no MCP servers configured"));
+    }
+
+    #[test]
+    fn orphaned_servers_have_their_own_heading() {
+        use crate::surface_protocol::{McpOverview, McpServerView, McpSessionBinding};
+        let text = super::mcp_overview(&McpOverview {
+            servers: vec![McpServerView {
+                id: "removed".into(),
+                configuration: Ok(None),
+                binding: McpSessionBinding::Bound {
+                    tools: 1,
+                    earlier_definition: false,
+                },
+            }],
+            ..Default::default()
+        });
+        assert!(text.contains("bound servers no longer configured:\n  removed:"));
+        assert!(!text.contains("\nconfigured servers:"));
+        assert!(!text.contains("no MCP servers configured"));
+    }
+
+    #[test]
+    #[cfg(feature = "mcp")]
+    fn cli_and_panel_share_configured_server_lines() {
+        use crate::commands::mcp::{McpCommand, run, session_overview};
+        let (_root, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        paths.ensure_layout().unwrap();
+        std::fs::write(paths.config_file(), "[mcp_servers.fixture]\ntransport = \"stdio\"\ncommand = \"fixture-server\"\nargs = [\"--stdio\"]\n").unwrap();
+        let mut output = Vec::new();
+        run(
+            &paths,
+            McpCommand::List,
+            &mut std::io::Cursor::new(Vec::<u8>::new()),
+            &mut output,
+            &mut Vec::new(),
+            &mut crate::commands::login_flow::SystemLoginUi,
+        )
+        .unwrap();
+        let cli = String::from_utf8(output).unwrap();
+        assert!(cli.contains("fixture"));
+        let panel = super::mcp_overview(&session_overview(&paths, None));
+        for line in cli.lines().filter(|line| !line.trim().is_empty()) {
+            assert!(
+                panel
+                    .lines()
+                    .any(|row| row.strip_prefix("  ") == Some(line)),
+                "CLI line {line:?} missing from panel:\n{panel}"
+            );
+        }
     }
 
     #[test]

@@ -738,6 +738,7 @@ fn run_tui_rounds(
             workspace: cwd.clone(),
             workspace_chrome: surface_protocol::WorkspaceChrome {
                 path: cwd.clone(),
+                home: home::paths::user_home(),
                 ..Default::default()
             },
             open_resume_picker: false,
@@ -803,7 +804,11 @@ fn run_tui_rounds(
             },
             settings: Some(shell::settings::settings_view(&cfg)),
             providers,
-            telemetry_paths: Some(paths.clone()),
+            usage_decoration: Some(crate::config::UsageDecorationReader::new(
+                paths.clone(),
+                local_time_zone(),
+                tui::wake::wake,
+            )),
             time_zone: local_time_zone(),
             // This round only: the note explains the round the product started
             // on the operator's behalf, and must not reappear on the next one.

@@ -7,11 +7,11 @@ use plakous_host_protocol::views::presentation::UsageLimitsView;
 /// One latest-only display reader; neither mailbox lock is held across I/O.
 pub(crate) struct UsageDecorationReader {
     shared: std::sync::Arc<(std::sync::Mutex<DecorationState>, std::sync::Condvar)>,
-    generation: u64,
 }
 
 #[derive(Default)]
 struct DecorationState {
+    generation: u64,
     pending: Option<(u64, UsageLimitsView)>,
     ready: Option<(u64, UsageLimitsView, Vec<String>)>,
     closed: bool,
@@ -56,36 +56,36 @@ impl UsageDecorationReader {
                 if state.closed {
                     return;
                 }
+                if state.generation != generation {
+                    continue;
+                }
                 state.ready = Some((generation, view, notes));
                 changed.notify_all();
                 drop(state);
                 wake();
             }
         });
-        Self {
-            shared,
-            generation: 0,
-        }
+        Self { shared }
     }
 
     pub(crate) fn request(&mut self, view: UsageLimitsView) {
-        self.generation = self.generation.wrapping_add(1);
         let (lock, changed) = &*self.shared;
         let mut state = lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.pending = Some((self.generation, view));
+        state.generation = state.generation.wrapping_add(1);
+        state.pending = Some((state.generation, view));
         state.ready = None;
         changed.notify_one();
     }
 
     pub(crate) fn invalidate(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
         let mut state = self
             .shared
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.generation = state.generation.wrapping_add(1);
         state.pending = None;
         state.ready = None;
     }
@@ -97,7 +97,6 @@ impl UsageDecorationReader {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .ready
             .take()
-            .filter(|(generation, _, _)| *generation == self.generation)
             .map(|(_, view, notes)| (view, notes))
     }
 
@@ -125,5 +124,69 @@ impl Drop for UsageDecorationReader {
         state.closed = true;
         state.pending = None;
         changed.notify_one();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(marker: u64) -> UsageLimitsView {
+        UsageLimitsView {
+            verticals: Vec::new(),
+            session: plakous_host_protocol::views::presentation::SessionLedgerView::default(),
+            stale_age_seconds: Some(marker),
+        }
+    }
+
+    fn latest_read(ready_before_request: bool) {
+        let (entered, seen) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let mut reader = UsageDecorationReader::with_reader(
+            move |view| {
+                let marker = view.stale_age_seconds.unwrap();
+                entered.send(marker).unwrap();
+                blocked.recv().unwrap();
+                vec![marker.to_string()]
+            },
+            || {},
+        );
+        reader.request(view(1));
+        assert_eq!(
+            seen.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap(),
+            1
+        );
+        if ready_before_request {
+            release.send(()).unwrap();
+            reader.wait();
+        }
+        reader.request(view(2));
+        if !ready_before_request {
+            release.send(()).unwrap();
+        }
+        assert_eq!(
+            seen.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            reader.poll(),
+            None,
+            "A must not remain publishable after B was requested"
+        );
+        release.send(()).unwrap();
+        reader.wait();
+        assert_eq!(reader.poll(), Some((view(2), vec!["2".into()])));
+    }
+
+    #[test]
+    fn in_flight_read_is_superseded_before_its_completion() {
+        latest_read(false);
+    }
+
+    #[test]
+    fn completed_ready_slot_is_retired_when_another_read_is_requested() {
+        latest_read(true);
     }
 }

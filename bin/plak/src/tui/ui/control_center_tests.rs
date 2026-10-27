@@ -128,7 +128,7 @@ fn every_control_center_tab_scrolls() {
     for tab in super::ControlTab::ALL {
         let mut app = App::new(launch_basic(), true);
         app.pending_open_settings = true;
-        app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+        app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
             SettingsView::default(),
         )));
         app.control_tab = Some(tab);
@@ -1595,7 +1595,7 @@ fn wide_menu_details_do_not_steal_list_mouse_hits() {
     for width in [140, 220] {
         let mut app = usage_fixture();
         app.pending_open_settings = true;
-        app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+        app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
             SettingsView::default(),
         )));
         app.activate_control_tab(super::ControlTab::Settings);

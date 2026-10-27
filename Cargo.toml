@@ -343,7 +343,6 @@ may-use = [
     "crate::config::ProfileRole",
     "crate::config::ProfileRow",
     "crate::config::ProfilesView",
-    "crate::config::SettingsCompositionOption",
     "crate::config::SettingsView",
     "crate::config::SettingsTheme",
     "crate::config::SurfaceIntent",
@@ -354,12 +353,9 @@ may-use = [
     "crate::config::UserActionSender",
     "crate::config::UsageDecorationReader",
     "crate::config::WorkspaceChrome",
-    "crate::config::oauth_accounts",
     "crate::config::usage_verticals",
-    "crate::config::effort",
     "crate::config::image_attachments",
     "crate::config::host_event_channel",
-    "crate::config::product_recommended_effort",
     "crate::config::user_action_channel",
 ]
 

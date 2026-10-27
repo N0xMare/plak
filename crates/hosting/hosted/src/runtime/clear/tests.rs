@@ -51,9 +51,26 @@ fn restored_frame_is_published_before_source_release_latency_boundary() {
     let release_observed = std::cell::Cell::new(false);
 
     publish_restored_frame_before_source_release(&events, &config, &[], || {
+        let frame = rx.try_iter().collect::<Vec<_>>();
         assert!(
-            matches!(rx.try_recv(), Ok(HostEvent::PresentationSnapshot(_))),
+            matches!(frame.first(), Some(HostEvent::Binding { session_id: Some(id), .. }) if id == &config.session.id),
+            "the target binding must precede its restored state"
+        );
+        assert!(
+            frame
+                .iter()
+                .any(|event| matches!(event, HostEvent::PresentationSnapshot(_))),
             "first restored frame must cross the UI boundary before source release starts"
+        );
+        assert!(
+            frame
+                .iter()
+                .any(|event| matches!(event, HostEvent::PromptHistorySnapshot(_)))
+        );
+        assert!(
+            frame
+                .iter()
+                .any(|event| matches!(event, HostEvent::QueueSnapshot { .. }))
         );
         release_observed.set(true);
     });

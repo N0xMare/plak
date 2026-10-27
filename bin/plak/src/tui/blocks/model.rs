@@ -50,9 +50,8 @@ impl DisplayMode {
 
 /// The §5.5 rows that steer transcript rendering.
 ///
-/// These have no representation in `crate::tui::SettingsView` yet, so
-/// the renderer carries its own defaults. The struct is the single place the
-/// settings registry has to reach once those rows land.
+/// Projected from terminal-owned preferences carried by `SettingsView`;
+/// rendering never reads product configuration or storage.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(
     clippy::struct_excessive_bools,
@@ -148,8 +147,7 @@ impl PromptClock {
 }
 
 impl From<&crate::tui::TuiPreferences> for RenderPrefs {
-    /// The settings snapshot is the only authority for these rendering rows; the
-    /// renderer holds no second copy of a default that could drift from §5.5.
+    /// Terminal-owned preferences supply the renderer's reading and motion rows.
     fn from(snapshot: &crate::tui::TuiPreferences) -> Self {
         Self {
             show_thinking: snapshot.show_thinking,

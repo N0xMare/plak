@@ -1,4 +1,4 @@
-//! The binding a new session is seeded or repaired with.
+//! The binding a new session is seeded with.
 
 use crate::product_config;
 use crate::store::sessions as product_sessions;
@@ -84,10 +84,7 @@ fn validate_new_session_binding(record: &product_sessions::SessionRecord) -> Cli
         crate::commands::support::admit_account_model(account, model).map_err(|error| {
             CliFailure::classified(
                 CliFailureKind::Usage,
-                format!(
-                    "invalid root binding: {error}; {}",
-                    RootBindingRemedy::SelectTemplate
-                ),
+                format!("invalid root binding: {error}; {}", ROOT_BINDING_REMEDY),
             )
         })?;
     }
@@ -95,19 +92,7 @@ fn validate_new_session_binding(record: &product_sessions::SessionRecord) -> Cli
 }
 
 /// A construction refusal never grants permission to edit the user's defaults.
-pub(crate) enum RootBindingRemedy {
-    SelectTemplate,
-}
-
-impl std::fmt::Display for RootBindingRemedy {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SelectTemplate => formatter.write_str(
-                "select a valid root template with `plak config set root.agent <template>`; config.toml was not changed",
-            ),
-        }
-    }
-}
+pub(crate) const ROOT_BINDING_REMEDY: &str = "select a valid root template with `plak config set root.agent <template>`; config.toml was not changed";
 
 #[cfg(test)]
 mod vcs_selection_tests {

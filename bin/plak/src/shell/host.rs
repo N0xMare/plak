@@ -71,7 +71,7 @@ pub fn commit_root_template(
     if template.account.is_empty() || template.model.is_empty() {
         return Err(format!(
             "incomplete root binding; {}",
-            crate::commands::session::RootBindingRemedy::SelectTemplate
+            crate::commands::session::ROOT_BINDING_REMEDY
         ));
     }
     config.root_composition = template.composition.take();

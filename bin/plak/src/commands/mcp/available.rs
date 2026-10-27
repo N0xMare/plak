@@ -205,29 +205,30 @@ fn server_lines(
     id: &str,
     server: &McpServerConfig,
 ) -> CliResult<Vec<String>> {
+    Ok(server_configuration(paths, config, id, server)?.lines(id))
+}
+
+fn server_configuration(
+    paths: &PlakPaths,
+    config: &ProductConfig,
+    id: &str,
+    server: &McpServerConfig,
+) -> CliResult<crate::surface_protocol::McpServerConfiguration> {
     let (transport, target) = transport_line(server);
     let scope = mcp_edit::server_scope(paths, config, id).map_err(CliFailure::new)?;
-    let mut lines = vec![format!("{id}  {transport}  {}  {target}", scope.as_str())];
     let reaching = mcp_edit::templates_reaching(config, id);
-    lines.push(if reaching.is_empty() {
-        "  templates: none".to_owned()
-    } else {
-        format!("  templates: {}", reach_text(&reaching))
-    });
-    let missing = missing_secrets(paths, server)?;
-    if !missing.is_empty() {
-        lines.push(format!(
-            "  missing secrets: {} (plak secret set <name>)",
-            missing.join(", ")
-        ));
-    }
-    if server.resources {
-        lines.push("  resources: enabled".to_owned());
-    }
-    if let Some(login) = login_line(paths, config, id) {
-        lines.push(format!("  {login}"));
-    }
-    Ok(lines)
+    Ok(crate::surface_protocol::McpServerConfiguration {
+        transport: transport.to_owned(),
+        target,
+        scope: scope.as_str().to_owned(),
+        templates: reaching
+            .iter()
+            .map(|reach| reach_text(std::slice::from_ref(reach)))
+            .collect(),
+        missing_secrets: missing_secrets(paths, server)?,
+        resources: server.resources,
+        login: login_line(paths, config, id),
+    })
 }
 
 /// An OAuth server's stored login, read without contacting the server;
@@ -288,13 +289,14 @@ fn lifetime(seconds: u64) -> String {
     }
 }
 
-const NONE_CONFIGURED: &str = "no MCP servers configured; add one with `plak mcp add <id> -- <command> [args...]` or `plak mcp add <id> --url <url>`";
-
 fn list(paths: &PlakPaths) -> CliResult<String> {
     let config = load(paths)?;
     let lines = overview_lines(paths, &config)?;
     if lines.is_empty() {
-        return Ok(format!("{NONE_CONFIGURED}\n"));
+        return Ok(format!(
+            "{}\n",
+            crate::surface_protocol::McpOverview::NONE_CONFIGURED
+        ));
     }
     Ok(lines.iter().map(|line| format!("{line}\n")).collect())
 }
@@ -466,9 +468,7 @@ pub(crate) fn session_overview(
     paths: &PlakPaths,
     session: Option<&plakous_hosted::runtime::SurfaceSession>,
 ) -> crate::surface_protocol::McpOverview {
-    use crate::surface_protocol::{
-        McpOverview, McpServerConfiguration, McpServerView, McpSessionBinding,
-    };
+    use crate::surface_protocol::{McpOverview, McpServerView, McpSessionBinding};
     let empty = plakous_hosted::runtime::SurfaceMcp::default();
     let mcp = session
         .and_then(|session| session.mcp.as_ref())
@@ -483,25 +483,9 @@ pub(crate) fn session_overview(
         }
     };
     if let Some(config) = &config {
+        view.config_readable = true;
         for (id, server) in &config.tool_sections.mcp_servers {
-            let (transport, target) = transport_line(server);
-            let details = (|| -> CliResult<McpServerConfiguration> {
-                Ok(McpServerConfiguration {
-                    transport: transport.to_owned(),
-                    target,
-                    scope: mcp_edit::server_scope(paths, config, id)
-                        .map_err(CliFailure::new)?
-                        .as_str()
-                        .to_owned(),
-                    templates: mcp_edit::templates_reaching(config, id)
-                        .iter()
-                        .map(|reach| reach_text(std::slice::from_ref(reach)))
-                        .collect(),
-                    missing_secrets: missing_secrets(paths, server)?,
-                    resources: server.resources,
-                    login: login_line(paths, config, id),
-                })
-            })();
+            let details = server_configuration(paths, config, id, server);
             let configuration = details.map(Some).map_err(|error| error.to_string());
             let binding = if mcp.servers.contains(id) {
                 McpSessionBinding::Bound {

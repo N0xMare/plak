@@ -1017,13 +1017,7 @@ impl App {
             pending_open_usage: false,
             pending_open_resume: launch.open_resume_picker,
             launch_resume_picker: launch.open_resume_picker,
-            usage_decoration: launch.telemetry_paths.map(|paths| {
-                crate::config::UsageDecorationReader::new(
-                    paths,
-                    launch.time_zone,
-                    crate::tui::wake::wake,
-                )
-            }),
+            usage_decoration: launch.usage_decoration,
             refresh_failure_notes: Vec::new(),
             usage_refresh: usage_tab::RefreshActions::default(),
             usage_refresh_hits: Vec::new(),
@@ -1263,6 +1257,8 @@ mod settings_tests;
 )]
 mod shell_tests;
 #[cfg(test)]
+mod switch_stream_tests;
+#[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -1306,3 +1302,5 @@ mod typing_sweep_tests;
     reason = "unit tests may assert with unwrap/expect"
 )]
 mod typing_timed_tests;
+#[cfg(test)]
+mod usage_wake_tests;

@@ -67,7 +67,6 @@ mod review_expiry;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
 pub(crate) mod terminal_application;
-#[path = "tui/preferences.rs"]
 pub(crate) mod tui_preferences;
 /// Plak's own storage home: where the XDG layout puts each file, and the
 /// credentials kept under it.

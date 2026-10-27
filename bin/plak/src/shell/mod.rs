@@ -4,6 +4,7 @@
 pub mod binding_document;
 #[cfg(feature = "tui")]
 pub mod catalog_refresh;
+mod chrome_refresh;
 pub mod home;
 pub mod host;
 pub mod services;

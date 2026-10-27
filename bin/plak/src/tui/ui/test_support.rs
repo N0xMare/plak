@@ -159,7 +159,7 @@ pub(super) fn launch_basic() -> TuiLaunch {
         theme: crate::tui::SettingsTheme::DefaultDark,
         settings: None,
         providers: provider_rows(),
-        telemetry_paths: None,
+        usage_decoration: None,
         time_zone: &crate::tui::UTC_ZONE,
         opening_note: None,
     }
@@ -1340,7 +1340,7 @@ pub(super) fn transcript_scenario(scenario: &str) -> App {
 pub(super) fn settings_fixture() -> App {
     let mut app = App::new(launch_basic(), true);
     app.pending_open_settings = true;
-    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+    app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
         SettingsView::default(),
     )));
     // Land on an Int row so the panel shows both the current value and the

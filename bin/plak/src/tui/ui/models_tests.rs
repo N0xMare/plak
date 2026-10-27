@@ -34,7 +34,11 @@ fn tui_usage_last_failed_refresh_uses_launch_home_and_fixed_zone()
         (1720000100000000000, 'claude', 'restored', 'timeout', 'resolution', 2);",
     )?;
     let mut launch = launch_basic();
-    launch.telemetry_paths = Some(paths);
+    launch.usage_decoration = Some(crate::config::UsageDecorationReader::new(
+        paths,
+        &ZONE,
+        crate::tui::wake::wake,
+    ));
     launch.time_zone = &ZONE;
     let mut app = App::new(launch, true);
     let limits = usage::project_limits(

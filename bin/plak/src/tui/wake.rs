@@ -4,7 +4,7 @@
 //! wait, so waiting on the terminal descriptor misses no event crossterm has
 //! already parsed. Everything else that must wake a parked loop writes one
 //! byte to the pipe: the host mailbox's notifier, the stop-signal watcher,
-//! `SIGWINCH`, and the background binary hash.
+//! `SIGWINCH`, the background binary hash, and usage-decoration completion.
 //!
 //! Crossterm's reader is edge-triggered and returns after the first event of
 //! each 1 KiB chunk it reads, so a burst larger than that (a long unbracketed

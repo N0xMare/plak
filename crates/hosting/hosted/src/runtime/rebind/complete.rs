@@ -452,11 +452,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
             "rebind",
             config.runtime_factory.clone(),
         ));
+        send_binding(events, config);
+        crate::runtime::admission::emit_prompt_history(events, &config.session);
         emit_queue_snapshot(events, &config.session);
         let _ = events.replace_transcript(crate::runtime::logging::project_session_snapshot(
             &config.session,
         ));
-        send_binding(events, config);
         send_last_user_prompt_at(events, opened);
         report_rebind_context(executor, opened, events, config);
         install_rebind_epoch(config)?;

@@ -14,6 +14,9 @@ use plakous_host_protocol::{
     SessionObservation, intent_channel, observation_channel,
 };
 
+#[cfg(any(feature = "mcp", feature = "tui"))]
+mod mcp_lines;
+
 /// Checkout facts, not a preformatted border label or session authority.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkspaceChrome {
@@ -25,6 +28,7 @@ pub struct WorkspaceChrome {
 /// Read-only MCP configuration and the session's frozen binding.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct McpOverview {
+    pub config_readable: bool,
     pub unavailable: Option<String>,
     pub diagnostics: Vec<String>,
     pub servers: Vec<McpServerView>,
@@ -289,9 +293,9 @@ impl fmt::Debug for SurfaceIntent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SurfaceObservation {
     /// Replace and open the typed product settings pane.
-    SettingsSnapshot(SettingsView),
+    SettingsView(SettingsView),
     /// Complete settings replacement was durably persisted by the product host.
-    SettingsApplied(SettingsView),
+    SettingsViewApplied(SettingsView),
     /// Loading typed product settings failed and is retryable.
     SettingsLoadFailed(String),
     /// Persisting typed product settings failed; the draft remains open.
@@ -360,8 +364,8 @@ impl ObservationExtension for SurfaceObservation {
 
     fn kind_label(&self) -> &'static str {
         match self {
-            Self::SettingsSnapshot(_) => "settings_snapshot",
-            Self::SettingsApplied(_) => "settings_applied",
+            Self::SettingsView(_) => "settings_view",
+            Self::SettingsViewApplied(_) => "settings_view_applied",
             Self::SettingsLoadFailed(_) => "settings_load_failed",
             Self::SettingsSaveFailed(_) => "settings_save_failed",
             Self::OpenUsageOverlay => "usage_overlay",

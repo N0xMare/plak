@@ -4471,7 +4471,8 @@ after the corner. A narrow border shortens the path to its tail behind `…`
 (at least four cells of it) before dropping it, and clips the branch last;
 it carries no hover or click. Product
 workspace facts are typed path, home-prefix and branch fields, rendered only
-by the TUI. The workspace library supplies only the raw branch or detached
+by the TUI. Path and home-prefix are supplied at launch; only the branch arrives
+asynchronously. The workspace library supplies only the raw branch or detached
 revision; the product owns home shortening. They use the session's launch workspace and are re-read off-thread
 at attach, every observed turn end and terminal focus regain, outside the inert TUI and without
 blocking its surface handler. Profile matching shares that background refresh;
@@ -4714,18 +4715,37 @@ and theme belong to TUI-owned preferences; the typed settings view carries
 both values for the one explicit save. The product persists them; the TUI
 does not read configuration, SQLite or credential storage to render Settings,
 Session, Usage or catalog rows. Usage refresh-failure decoration runs on one
-latest-only background reader; stale results cannot overwrite a newer read or
-a switched session, and completion wakes the terminal loop. The read-only MCP
+latest-only background reader constructed by the launcher and passed into the
+TUI as an endpoint; stale results cannot overwrite a newer read or
+a switched session, and completion wakes the terminal loop. Focus-triggered
+composer refreshes use one worker with at most one latest follow-up read. The read-only MCP
 overview similarly carries configured-server and frozen-binding facts, not a
-preformatted panel. These product observations are not JSONL v1 wire values.
+preformatted panel. Unreadable configuration does not imply empty configuration;
+bound servers absent from the current configuration have their own heading.
+Configured-server lines share one product formatter with `plak mcp list`.
+These product observations are not JSONL v1 wire values.
 
-A confirmed session switch (clear or a binding naming a different session,
-including fork, resume and rebind) retires source-session turn usage, context,
-clocks, waits, retry and cancel state, approval handles, pending draft/queue
-correlations, tree state, item-detail caches and Session-tab facts. A queue
+A binding naming a different session is the session boundary, including open,
+clear, fork, exact resume and rebind. The host publishes it before every target
+transcript, prompt-history and queue snapshot; fork and rebind publish prompt
+history explicitly. The TUI retires source state at that binding, so every
+subsequent target publication survives. Opening a target must succeed before
+this boundary; exact resume still publishes the restored frame before releasing
+the source, preserving failed-open fallback. `ClearView` clears transcript
+presentation, not session queue or history, including when the session is unchanged.
+
+The boundary retires source-session turn usage, context and capacity-recovery
+state and action, prompt/phase/request clocks, credential and request-slot waits,
+retry and cancel state, busy/phase/status detail and clear/quit/escape arms,
+approval handles, pending continuation,
+draft/queue correlations and queue UI selection, steer counters, composer chrome,
+tree state, acknowledgement/item-detail caches, Session-tab facts and cached
+copy/overlay text and hit targets. A queue
 edit restores its displaced draft; source prompt history, recovered drafts and
-history-browse state are retired. Terminal preferences and an ordinary
-unsent draft remain. An attempted open or a same-session binding is not a
+history-browse state are retired. Terminal preferences, account-level usage limits,
+subscription usage and refresh-failure decoration, and an ordinary
+unsent draft remain. Outstanding decoration reads are invalidated at the boundary.
+An attempted open or a same-session binding is not a
 confirmed switch and preserves the source observations.
 
 **Every row applies on change.** There is no Save row and no draft: a toggle, a

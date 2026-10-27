@@ -786,7 +786,7 @@ fn every_control_center_tab_matches_reviewable_goldens_at_both_sizes() {
         for (width, height) in sizes {
             let mut app = usage_fixture();
             app.pending_open_settings = true;
-            app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+            app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsView(
                 SettingsView::default(),
             )));
             app.providers = provider_rows();

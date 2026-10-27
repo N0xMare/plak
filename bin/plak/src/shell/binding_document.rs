@@ -92,7 +92,7 @@ impl RootBindingEdit for OpenProductRootBinding {
         if draft.account.is_empty() || draft.model.is_empty() {
             return Err(RootBindingSaveError::BeforePublication(format!(
                 "incomplete root binding; {}",
-                crate::commands::session::RootBindingRemedy::SelectTemplate
+                crate::commands::session::ROOT_BINDING_REMEDY
             )));
         }
         config.root_composition = draft.composition.take();
