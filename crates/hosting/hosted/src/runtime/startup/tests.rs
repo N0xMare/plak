@@ -92,7 +92,7 @@ use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::NativeProvider;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn root_template(tools: &[&str]) -> crate::binding::RootTemplateFact {
     crate::binding::RootTemplateFact {
@@ -346,18 +346,16 @@ fn exact_openrouter_resume_binds_selected_and_resolved_wire() {
     ));
 }
 
-#[test]
-fn delayed_transition_stage_times_out_without_detaching_source() {
-    let executor = ApplicationExecutor::new().unwrap();
-    let started = Instant::now();
-    let outcome = executor
-        .block_on(bounded_transition_stage(Duration::from_millis(20), async {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            "late"
-        }))
-        .unwrap();
+#[tokio::test(start_paused = true)]
+async fn delayed_transition_stage_times_out_without_detaching_source() {
+    let started = tokio::time::Instant::now();
+    let outcome = bounded_transition_stage(Duration::from_millis(20), async {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        "late"
+    })
+    .await;
     assert_eq!(outcome, Err(()));
-    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(started.elapsed(), Duration::from_millis(20));
 }
 
 #[test]

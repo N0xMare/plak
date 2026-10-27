@@ -10,7 +10,8 @@ _profiling:
     cargo build --locked --profile profiling -p plak
 
 # Offline performance smoke over the scripted model, not in any gate tier. It reports
-# six metrics and compares them against this machine's seed row in
+# six short product metrics, four worker timings and six long-lineage metrics.
+# --check compares four metrics against matching machine/profile seed rows in
 # tests/performance/baselines/offline-perf-smoke.json. See docs/spec/05.
 [doc("offline performance smoke against this machine's seed row; not a gate")]
 smoke *ARGS:

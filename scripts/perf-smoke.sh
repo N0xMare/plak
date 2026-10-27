@@ -73,7 +73,9 @@ chmod 700 "$root/home" "$root/home/agents"
 chmod 600 "$root/home/config.toml" "$root/home/agents/lead.toml"
 
 echo "== building the release scripted binary and sidecars ==" >&2
-cargo build --release --locked --workspace --all-features >&2
+# Match build-plak.sh: artifact isolation is proved from the raw symbols.
+export CARGO_PROFILE_RELEASE_STRIP=debuginfo
+cargo build --release --locked -p plak -p plakous-js-runtime -p plakous-py-worker --features plak/test-hooks,plak/test-support >&2
 # Keep the measured executable and its matching workers together, away from
 # later builds that could replace a configured target's artifacts.
 cargo_target_dir="${CARGO_TARGET_DIR:-$PWD/target}"
@@ -113,7 +115,7 @@ measurements="$root/measurements.jsonl"
 emit() {
   "$PY" -c '
 import json, sys
-print(json.dumps({"metric": sys.argv[1], "value": float(sys.argv[2]),
+print(json.dumps({"metric": sys.argv[1], "value": float(sys.argv[2]), "profile": "release",
                   "unit": sys.argv[3], "machine": sys.argv[4]}, sort_keys=True))
 ' "$1" "$2" "$3" "$machine" >>"$measurements"
 }
@@ -276,7 +278,7 @@ emit jsonl_bulk_throughput_mb_per_s "$throughput" mb_per_s
 # ---------------------------------------------------------------------------
 # 5. TUI layout over a 20,000-block transcript.
 # ---------------------------------------------------------------------------
-redraw="$(cargo bench --locked -q -p plak --bench tui_render --all-features 2>/dev/null || true)"
+redraw="$(cargo bench --profile release --locked -q -p plak --bench tui_render --features test-hooks,test-support 2>/dev/null || true)"
 redraw_ms="$(printf '%s\n' "$redraw" | awk -F'  +' '/20k blocks/ {print $3}' | head -1)"
 if [[ -n "$redraw_ms" ]]; then
   emit tui_transcript_20k_layout_ms "$redraw_ms" ms
@@ -347,11 +349,11 @@ fi
 
 # Worker spawn plus one nested call, and warm per-cell cost on that same worker.
 "$PY" tools/perf/cell_round_trip.py \
-  "$root" "$machine" >>"$measurements"
+  "$root" "$machine" release >>"$measurements"
 
 # Informational long histories: sequential prompts retain the entire lineage;
 # the final request reports it back so truncation cannot look like a speedup.
-"$PY" tools/perf/long_lineage.py "$plak_bin" "$root/lineage" "$machine" >>"$measurements"
+"$PY" tools/perf/long_lineage.py "$plak_bin" "$root/lineage" "$machine" release >>"$measurements"
 
 if [[ -n "$out" ]]; then
   cp "$measurements" "$out"

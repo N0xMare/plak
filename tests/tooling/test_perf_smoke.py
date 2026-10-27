@@ -48,12 +48,35 @@ class BaselineTests(unittest.TestCase):
         document = json.loads(CHECKER.BASELINE.read_text())
         self.assertEqual(document["version"], 1)
         self.assertGreater(float(document["tolerance"]), 0.0)
-        self.assertTrue(document["machines"], "the baseline names no machine")
+        self.assertIsInstance(document["machines"], dict)
         for machine, metrics in document["machines"].items():
             self.assertRegex(machine, r"^[0-9a-f]{12}$")
             for name, row in metrics.items():
                 self.assertIn("value", row, name)
                 self.assertIn("unit", row, name)
+                self.assertIsInstance(row["profile"], str, name)
+                self.assertTrue(row["profile"], name)
+
+    def test_a_different_or_missing_seed_profile_is_refused(self):
+        for metric in ("growth_turn_peak_rss_mb", "cold_start_to_ready_ms"):
+            for profile in ("debug", None):
+                with self.subTest(metric=metric, profile=profile):
+                    code = self.run_check(
+                        machine="aaaaaaaaaaaa", metric=metric,
+                        seeded={"aaaaaaaaaaaa": {metric: {
+                            "value": 1.0, "unit": "mb", "profile": profile}}},
+                    )
+                    self.assertEqual(code, 1)
+                    self.assertIn("profile mismatch", self.printed)
+
+    def test_a_measurement_without_a_profile_is_refused_even_without_a_baseline(self):
+        self.assertEqual(self.run_check(machine="aaaaaaaaaaaa", seeded={}, profile=None), 1)
+        self.assertIn("no build profile", self.printed)
+
+    def test_seeding_records_the_measured_profile(self):
+        self.assertEqual(self.run_check(machine="aaaaaaaaaaaa", seeded={}, seed=True), 0)
+        row = self.written["machines"]["aaaaaaaaaaaa"]["growth_turn_peak_rss_mb"]
+        self.assertEqual(row["profile"], "release")
 
     def test_an_unseeded_machine_reports_and_passes(self):
         exit_code = self.run_check(machine="ffffffffffff", seeded={})
@@ -136,6 +159,7 @@ class BaselineTests(unittest.TestCase):
                         "value": 100.0,
                         "unit": "ms",
                         "machine": "aaaaaaaaaaaa",
+                        "profile": "release",
                     }
                 )
                 + "\n"
@@ -148,8 +172,8 @@ class BaselineTests(unittest.TestCase):
                         "tolerance": 0.5,
                         "machines": {
                             "aaaaaaaaaaaa": {
-                                "cold_start_to_ready_ms": {"value": 100.0, "unit": "ms"},
-                                "growth_turn_peak_rss_mb": {"value": 50.0, "unit": "mb"},
+                                "cold_start_to_ready_ms": {"value": 100.0, "unit": "ms", "profile": "release"},
+                                "growth_turn_peak_rss_mb": {"value": 50.0, "unit": "mb", "profile": "release"},
                             }
                         },
                     }
@@ -173,7 +197,8 @@ class BaselineTests(unittest.TestCase):
         self.assertNotIn("regression", printed)
 
     def run_check(
-        self, machine, seeded, value=1.0, metric="growth_turn_peak_rss_mb", unit="mb"
+        self, machine, seeded, value=1.0, metric="growth_turn_peak_rss_mb", unit="mb",
+        profile="release", seed=False,
     ):
         """Run the checker over one measurement and return its exit code."""
         with tempfile.TemporaryDirectory() as directory:
@@ -185,13 +210,16 @@ class BaselineTests(unittest.TestCase):
                         "value": value,
                         "unit": unit,
                         "machine": machine,
+                        **({"profile": profile} if profile is not None else {}),
                     }
                 )
                 + "\n"
             )
             baseline = Path(directory) / "baseline.json"
             baseline.write_text(
-                json.dumps({"version": 1, "tolerance": 0.5, "machines": seeded})
+                json.dumps({"version": 1, "tolerance": 0.5, "machines": {
+                    name: {metric: {"profile": "release", **row} for metric, row in metrics.items()}
+                    for name, metrics in seeded.items()}})
             )
             argv = sys.argv
             stdout = sys.stdout
@@ -201,10 +229,13 @@ class BaselineTests(unittest.TestCase):
                 "--baseline",
                 str(baseline),
             ]
+            if seed:
+                sys.argv.append("--seed")
             sys.stdout = io.StringIO()
             try:
                 code = CHECKER.main()
                 self.printed = sys.stdout.getvalue()
+                self.written = json.loads(baseline.read_text())
                 return code
             finally:
                 sys.argv = argv

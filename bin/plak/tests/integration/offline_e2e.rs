@@ -1506,12 +1506,23 @@ fn corrupt_tree_store_never_counts_as_an_absent_tree() {
 /// Bounded reproduction probe for the CAS diagnostic that had
 /// no counted provider exchange. Each home is new, each completed first turn
 /// commits its product session, and the next process reopens that exact row.
-/// Six independent homes keep the serial gate bounded while repeating the
+/// The default six independent homes keep the serial gate bounded while repeating the
 /// first-turn commit and exact-reopen boundary rather than sampling it once.
+fn cas_probe_samples() -> usize {
+    let samples = std::env::var_os("PLAK_TEST_CAS_SAMPLES").map_or(6, |value| {
+        value
+            .to_str()
+            .expect("PLAK_TEST_CAS_SAMPLES must be UTF-8")
+            .parse::<usize>()
+            .expect("PLAK_TEST_CAS_SAMPLES must be a positive integer")
+    });
+    assert!(samples > 0, "PLAK_TEST_CAS_SAMPLES must be positive");
+    samples
+}
+
 #[test]
 fn isolated_jsonl_startups_and_reopens_preserve_product_revision() {
-    const SAMPLES: usize = 6;
-    for sample in 0..SAMPLES {
+    for sample in 0..cas_probe_samples() {
         let fixture = Fixture::new(&json!({
             "version": 1,
             "repeat_last_step": true,
@@ -1561,8 +1572,7 @@ fn isolated_jsonl_startups_and_reopens_preserve_product_revision() {
 /// exercises that narrower boundary with and without the home-owned tree gate.
 #[test]
 fn isolated_idle_jsonl_quits_and_reopens_preserve_product_revision() {
-    const SAMPLES: usize = 6;
-    for sample in 0..SAMPLES {
+    for sample in 0..cas_probe_samples() {
         let fixture = Fixture::new(&recovery_answer_script());
         if sample % 2 == 1 {
             write_private(

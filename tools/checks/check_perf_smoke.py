@@ -3,8 +3,9 @@
 
 A number measured on one machine says nothing about another, so every seed row
 is keyed by a machine id and a run whose machine has no seed row reports that
-and exits zero. Within a machine, a metric that moved further than its recorded
-tolerance is a regression and exits non-zero.
+and exits zero. Each measurement and seed row names its build profile; absent
+or mismatched profiles are refused. Within a machine/profile, a metric that
+moved further than its recorded tolerance is a regression and exits non-zero.
 
 Usage: tools/checks/check_perf_smoke.py <measurements.jsonl> [--baseline <file>]
        tools/checks/check_perf_smoke.py <measurements.jsonl> --seed
@@ -88,6 +89,10 @@ def main() -> int:
         print(f"perf smoke: measurements span {len(machines)} machines")
         return 1
     machine = machines.pop()
+    for row in rows:
+        if not isinstance(row.get("profile"), str) or not row["profile"]:
+            print(f"perf smoke: {row['metric']} has no build profile")
+            return 1
 
     document = (
         json.loads(arguments.baseline.read_text())
@@ -97,7 +102,8 @@ def main() -> int:
 
     if arguments.seed:
         document.setdefault("machines", {})[machine] = {
-            str(row["metric"]): {"value": row["value"], "unit": row["unit"]} for row in rows
+            str(row["metric"]): {"value": row["value"], "unit": row["unit"],
+                                 "profile": row["profile"]} for row in rows
         }
         arguments.baseline.parent.mkdir(parents=True, exist_ok=True)
         arguments.baseline.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
@@ -120,6 +126,10 @@ def main() -> int:
         seed = seeds.get(metric)
         if seed is None:
             print(f"  {metric}: {row['value']} {row['unit']} (no seed)")
+            continue
+        if seed.get("profile") != row["profile"]:
+            failures.append(f"{metric}: profile mismatch (measurement {row['profile']}, "
+                            f"seed {seed.get('profile')!r})")
             continue
         if metric not in GATED_METRICS:
             # Printed, never judged. The word "regression" is deliberately

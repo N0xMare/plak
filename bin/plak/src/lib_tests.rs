@@ -2520,23 +2520,40 @@ fn tui_error_join_propagates_the_worker_failure() {
 fn host_worker_join_returns_within_its_deadline_and_says_it_detached() {
     join_host_worker_bounded(thread::spawn(|| Ok(())), Duration::from_secs(1), "timely").unwrap();
 
+    let (release, held) = std::sync::mpsc::channel();
+    let (entered, running) = std::sync::mpsc::channel();
+    let (finished, settled) = std::sync::mpsc::channel();
     let worker = thread::spawn(move || {
-        thread::sleep(Duration::from_secs(5));
+        entered.send(()).unwrap();
+        let _ = held.recv();
+        finished.send(()).unwrap();
         Ok(())
     });
-    let started = Instant::now();
-    let error = join_host_worker_bounded(worker, Duration::from_millis(5), "stuck").unwrap_err();
+    running.recv_timeout(Duration::from_secs(30)).unwrap();
+    let (completed, detached) = std::sync::mpsc::channel();
+    let joiner = thread::spawn(move || {
+        completed
+            .send(join_host_worker_bounded(
+                worker,
+                Duration::from_millis(5),
+                "stuck",
+            ))
+            .unwrap();
+    });
+    // An unbounded join cannot return while the original worker is held.
+    let result = detached.recv_timeout(Duration::from_secs(30));
+    release.send(()).unwrap();
+    settled.recv_timeout(Duration::from_secs(30)).unwrap();
+    joiner.join().unwrap();
+    let error = result
+        .expect("join waited on the unreleased worker")
+        .unwrap_err();
     assert!(
         error
             .message()
             .contains("exceeded its 5ms shutdown deadline")
     );
     assert!(error.message().contains("detached"));
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "the deadline is the bound, not a label: {:?}",
-        started.elapsed()
-    );
 }
 
 #[test]

@@ -114,12 +114,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
     parser.add_argument("machine")
+    parser.add_argument("profile")
     args = parser.parse_args()
     for engine, binary in [("quickjs", "plakous-js-host"), ("monty", "plakous-py-host")]:
         cold, warm = measure((args.directory / binary).resolve(strict=True), engine)
         for phase, value in [("spawn_round_trip", cold), ("per_cell", warm)]:
             print(json.dumps({"metric": f"cell_{engine}_{phase}_ms", "value": value,
-                              "unit": "ms", "machine": args.machine}, sort_keys=True))
+                              "unit": "ms", "machine": args.machine,
+                              "profile": args.profile}, sort_keys=True))
 
 
 if __name__ == "__main__":

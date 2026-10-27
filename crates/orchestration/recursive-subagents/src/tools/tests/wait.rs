@@ -114,7 +114,7 @@ async fn cancelled_topology_wait_does_not_acknowledge_ready_mail() {
 
 /// A child completing settles a pending `wait_agent` within one
 /// poll interval, not at the timeout.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn child_completion_settles_a_pending_wait_within_a_poll_interval() {
     let root = tempfile::tempdir().unwrap();
     let (store, tree) = persist_fixture(&root);
@@ -280,7 +280,7 @@ async fn bare_waits_return_each_result_once_then_refuse() {
 /// A child that cannot start is terminal with a reason at once, so
 /// a `wait_agent` on it returns instead of parking behind a `running` node
 /// nothing is driving.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_child_that_cannot_start_is_faulted_with_a_reason_and_settles_waits() {
     let root = tempfile::tempdir().unwrap();
     let (store, tree) = persist_fixture(&root);

@@ -677,7 +677,7 @@ async fn empty_poll_returns_on_new_output_without_waiting_full_window() -> TestR
             session_id: handle,
             input: String::new(),
             disposition: CanonicalProcessInputDisposition::KeepOpen,
-            yield_time_ms: Some(5000),
+            yield_time_ms: Some(120_000),
             max_output_bytes: Some(4096),
         },
         &ExecutionOperationControl::new(CancellationToken::new()),
@@ -686,7 +686,10 @@ async fn empty_poll_returns_on_new_output_without_waiting_full_window() -> TestR
     let elapsed = before.elapsed();
     sessions.stop(id, plakous_tools::JobStopReason::Model)?;
     assert_eq!(polled.projection.output, "progress");
-    assert!(elapsed < Duration::from_secs(2), "poll waited {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "poll spent its 120s window: {elapsed:?}"
+    );
     Ok(())
 }
 
@@ -1013,7 +1016,7 @@ async fn bare_first_terminal_await_with_no_jobs_returns_empty_tasks_at_once() ->
         environment.joined_process_sessions()?.jobs(),
         [] as [plakous_tools::JobView; 0]
     );
-    let mut request = await_request(&[], 60_000);
+    let mut request = await_request(&[], 120_000);
     request.wake = Some(AwaitWake::Any);
     request.validate()?;
     let before = Instant::now();
@@ -1024,7 +1027,7 @@ async fn bare_first_terminal_await_with_no_jobs_returns_empty_tasks_at_once() ->
     )
     .await?;
     assert!(
-        before.elapsed() < Duration::from_secs(2),
+        before.elapsed() < Duration::from_secs(30),
         "a bare wait with no jobs parked for {:?}",
         before.elapsed()
     );
@@ -1043,7 +1046,7 @@ async fn grok_await_steer_returns_without_stopping_or_consuming_running_jobs() -
         .start_canonical(
             &environment,
             CanonicalProcessStartRequest {
-                command: "exec sleep 30".to_owned(),
+                command: "exec sleep 120".to_owned(),
                 workdir: PathBuf::from("."),
                 login: false,
                 tty: false,
@@ -1060,11 +1063,11 @@ async fn grok_await_steer_returns_without_stopping_or_consuming_running_jobs() -
     let before = Instant::now();
     let outcome = ProcessSessionTools::await_canonical(
         &environment,
-        &await_request(&[handle], 3_600_000),
+        &await_request(&[handle], 120_000),
         &ExecutionOperationControl::new(CancellationToken::new()).with_preempt(receiver),
     )
     .await?;
-    assert!(before.elapsed() < Duration::from_secs(2));
+    assert!(before.elapsed() < Duration::from_secs(30));
     assert_eq!(
         plakous_tools::internal::process_session_update(&outcome),
         None

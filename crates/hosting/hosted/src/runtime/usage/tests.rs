@@ -890,18 +890,16 @@ fn busy_store_fence_read_is_retried_after_writer_lease_clears()
     Ok(())
 }
 
-#[test]
-fn subscription_refresh_timeout_has_a_terminal_outcome() {
-    let executor = ApplicationExecutor::new().unwrap();
-    let started = Instant::now();
-    let outcome = executor
-        .block_on(bounded_subscription_refresh(
-            tokio::time::Instant::now() + Duration::from_millis(20),
-            std::future::pending::<()>(),
-        ))
-        .unwrap();
+#[tokio::test(start_paused = true)]
+async fn subscription_refresh_timeout_has_a_terminal_outcome() {
+    let started = tokio::time::Instant::now();
+    let outcome = bounded_subscription_refresh(
+        tokio::time::Instant::now() + Duration::from_millis(20),
+        std::future::pending::<()>(),
+    )
+    .await;
     assert_eq!(outcome, None);
-    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(started.elapsed(), Duration::from_millis(20));
 }
 
 fn native_usage_fixture(meter: &str, used: f64) -> plakous::model::SubscriptionUsageRead {
@@ -1057,10 +1055,17 @@ fn concurrent_native_success_preserves_the_existing_usage_projection() {
 /// worker owns no durable state, so teardown is bounded and detaches.
 #[test]
 fn dropping_the_usage_refresh_is_bounded_even_while_a_read_is_running() {
+    use std::sync::mpsc::channel;
+
+    let (entered, running) = channel();
+    let (release, held) = channel();
+    let (finished, settled) = channel();
     let (tx, _rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let events = Sender::over(tx);
-    let refresh = SubscriptionUsageRefresh::new_with_projector(&events, |_| {
-        thread::sleep(Duration::from_secs(10));
+    let refresh = SubscriptionUsageRefresh::new_with_projector(&events, move |_| {
+        entered.send(()).unwrap();
+        let _ = held.recv();
+        finished.send(()).unwrap();
         (
             plakous_host_protocol::views::presentation::SubscriptionUsageView::Unavailable {
                 reason: "stuck".to_owned(),
@@ -1069,15 +1074,18 @@ fn dropping_the_usage_refresh_is_bounded_even_while_a_read_is_running() {
         )
     });
     refresh.request(None);
-    // Let the worker pick the request up and park inside the projector.
-    thread::sleep(Duration::from_millis(50));
-    let started = Instant::now();
-    drop(refresh);
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed < Duration::from_secs(2),
-        "teardown waited {elapsed:?} on a usage read"
-    );
+    running.recv_timeout(Duration::from_secs(30)).unwrap();
+    let (dropped, detached) = channel();
+    let teardown = thread::spawn(move || {
+        drop(refresh);
+        dropped.send(()).unwrap();
+    });
+    // Drop must finish while the projector is still held, not after its read.
+    let result = detached.recv_timeout(Duration::from_secs(30));
+    release.send(()).unwrap();
+    settled.recv_timeout(Duration::from_secs(30)).unwrap();
+    teardown.join().unwrap();
+    result.expect("teardown joined a read that had not been released");
 }
 
 #[test]

@@ -1291,47 +1291,50 @@ lists the tests whose subject is a wall-clock measurement rather than a schedule
 outcome. The tables below group the members by kind; `.config/nextest.toml` is
 the exact list.
 
-Short real-clock checks run in this lane too: executor shutdown and application
+Short real-clock checks in this lane cover executor shutdown and application
 result/observation ordering, worker stdin/cancel and SIGTERM escalation, callback
-writer and private-store lock deadlines, unfinished-upload closure, empty and
-steered job waits, child completion/start-failure waits, subscription refresh
-timeout/drop, transition-stage timeout, host-worker join and detached-writer
-cleanup. Their existing bounds are unchanged. The whole cleanup-contention
-module is serial because its shared helper asserts a two-second mutex-admission
-bound. The 64/128-process capacity probes and pre-spawn refusal cleanup also run
-serially; parallel process pressure must not masquerade as a cleanup regression.
-The post-acceptance OpenRouter deadline fixture and real-PTY resize fixture use
-the same lane. A 240-second runner allowance is a hang watchdog, not a replacement
-for any local assertion.
+writer and private-store lock deadlines, unfinished-upload closure and
+detached-writer cleanup. Two cleanup-contention tests assert a two-second
+mutex-admission bound. The 64/128-process capacity probes and pre-spawn refusal
+cleanup are serial because parallel process pressure must not masquerade as a
+cleanup regression. A 240-second runner allowance is a hang watchdog, not a
+replacement for any local assertion. Individual predicates identify these
+tests; an `application::` substring would also match unrelated prefixed modules.
 
 The steered job-await fixture uses a process that survives stdin EOF until
 explicit stop. Closing stdin during termination must not race a `read` command's
 natural exit and obscure the stop attribution being asserted; natural-exit
 preservation remains covered separately.
 
-The bounded product-revision CAS probes each use six independent homes in the
-serial lane (twelve process launches each). Idle quit/reopen alternates the
-home-owned tree gate on and off, retaining three samples of each. The obsolete
-ignored navigator placeholder-label test is removed: its actor-label helper and
-textual placeholder UI no longer exist. The active
+The product-revision CAS probes run serially with `PLAK_TEST_CAS_SAMPLES`
+independent homes each (positive integer, default 6, two process launches per
+home). `PLAK_TEST_CAS_SAMPLES=30` selects a thirty-home qualification probe.
+Idle quit/reopen alternates the home-owned tree gate on and off. The
 `a_mid_session_compaction_renders_its_note_and_the_session_carries_on` PTY test
-instead requires a Compact row, ordered before the answer, no placeholder essay
-or forged user prompt, and a successful subsequent turn.
+requires a Compact row ordered before the answer, no placeholder essay or
+forged user prompt, and a successful subsequent turn.
 
 Four real-JSONL-face SIGKILL cells run in the durability lane: idle before a
 turn, inside the model request, inside a running tool and after the answer.
 The approval-cut cell specifies the restored-decision contract (same call/tool,
 no redispatch or abandonment), but remains explicitly ignored under
 `JSONL-APPROVAL-RESUME` until the production reopen hang is fixed. Its durability
-predicate is retained so unignoring it enrolls it without changing lanes.
+predicate enrolls the cell when it is enabled.
 The workspace/all-features prerequisite builds the
 test-hooks product and matching sidecars; the fixture locates `plak` beside the
 test executable's `deps` directory, or uses an explicit `PLAK_TEST_BINARY`.
-All five are excluded from the parallel lane. The four active cells no longer
-require an ignored-test invocation; fixture-owned hosts are reaped on failure.
+All five are excluded from the parallel lane. Fixture-owned hosts are reaped
+on failure.
 
 Paused-Tokio elapsed checks stay parallel, including the quiet-poll repeat-hold
-tests and protocol-terminal close. CPU-time redaction checks also stay parallel:
+tests, protocol-terminal close, transition-stage and subscription-refresh
+timeouts, and child completion/start-failure waits. Host-worker join and usage
+refresh drop use channel-held workers: teardown must complete before the held
+work is released, with a thirty-second scheduling watchdog. Empty-output poll,
+empty first-terminal await and steered Grok await run in parallel with a
+120-second requested window and a thirty-second return bound. They test wakeup
+versus waiting out the window, not a subsecond latency budget.
+CPU-time redaction checks also stay parallel:
 they measure process CPU, not scheduler delay. Real-clock lower-bound-only
 assertions (wake consumption, retry delay and progressing streams) do not fail
 because the runner was descheduled and stay parallel. Pure duration-value
@@ -1344,7 +1347,15 @@ assertions do not measure elapsed time and need no budget lane.
 | Observation parity | `observation_parity_tests::` — the whole module, 10 tests: plain turn, tool error, capacity block, clear, rebind, interrupt then second prompt, escape then quit, compaction, the cancelled-tool terminal, the JSONL terminal tool line |
 | Process spawn, drain and cancellation windows | `exec_command_with_zero_yield_returns_the_joined_output`, `host_process_bounds_live_output_and_enforces_timeout`, `joined_process_pty_cancellation_and_timeout_join_the_group`, `cancel_during_a_cell_running_a_real_process_command_joins_inside_the_settle_window` |
 | Python worker request deadline | `a_stuck_worker_request_is_killed_and_reported_as_session_loss` — isolates bundle setup from parallel load without weakening the stuck-request kill and fail-closed loss assertions |
-| Nonblocking joined-proof probes | `terminal_status_without_joined_owner_is_not_durable_proof`, `contended_operation_does_not_stall_joined_proof_probe` — routine reconciliation must not spend the cleanup deadline on a busy owner |
+| Cleanup mutex admission | `terminate_contention_is_bounded_and_preserves_correlated_owner`, `join_all_handles_free_children_and_retains_contended_child_for_retry` — the two users of the two-second `assert_bounded` helper |
+| Executor/application ordering | `executor_drop_does_not_wait_out_spawn_blocking`, `result_before_terminal_event_returns_without_drain_or_hang`, `event_before_result_is_presented_without_becoming_terminal_authority`, `observation_error_before_result_is_non_authoritative_and_does_not_hang`, `ready_result_ignores_late_observation_error_without_hanging` |
+| Worker stdin and SIGTERM escalation | `nonreading_stdin_cannot_block_start_or_cancel`, `a_worker_that_ignores_sigterm_is_killed_inside_the_shutdown_bound` |
+| Process observation and job-await budgets | `process_await_wait_does_not_reserve_a_blocking_worker`, `terminal_hint_drains_more_than_one_record_batch_without_waiting`, `terminal_utf8_larger_than_observation_bound_returns_without_deadline_spin`, `contended_observation_does_not_block_the_async_worker` |
+| Process capacity probes | `running_children_still_count_against_the_session_limit`, `sixty_fifth_running_start_is_refused_before_spawn`, `host_capacity_refuses_the_129th_start_across_services_before_spawn`, `a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure` |
+| Product CAS startup/reopen | `isolated_jsonl_startups_and_reopens_preserve_product_revision`, `isolated_idle_jsonl_quits_and_reopens_preserve_product_revision` |
+| PTY resize | `resizing_between_160_and_60_columns_under_a_long_transcript_refits_the_banner` |
+| Auth lock/callback and HTTP closure deadlines | `expired_commit_and_stalled_callback_writer_are_fail_closed_and_bounded`, `busy_execution_lock_fails_without_waiting_or_accepting`, `an_early_response_to_an_unfinished_upload_is_not_kept`, `a_post_acceptance_deadline_is_definite_on_both_wires` |
+| Detached writer cleanup | `host_future_drop_is_bounded_with_a_detached_continuous_writer` |
 | Auth deadlines | `cancelling_claimed_refresh_after_request_observation_restores_ready`, `local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store` |
 | Host quit, compaction and session round trips | `interactive_observation_timeout_releases_gate_and_joins_without_masking_failure`, `interrupt_then_quit_publishes_the_cancelled_terminal`, `quit_during_active_turn_waits_for_cancelled_terminal_projection`, `scheduled_compaction_failure_keeps_host_worker_alive`, `product_session_facade_create_turn_shutdown_and_reopen`, `retiring_a_live_child_advances_its_session_locator`, `real_session_late_start_ack_releases_after_deadline_without_redispatch` |
 | A real race, listed not hidden | `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` |
@@ -1389,6 +1400,7 @@ they run per platform (`just platform` and `just full`), not in `just check`.
 | --- | --- |
 | Indexed crash-point sweep | `crash_sweep::durability_subset` — `final_only`, `direct_tool_then_final`, `promoted_background_job`, and `sealed_family_artifacts`, every indexed commit, sixteen workers |
 | Real SIGKILL relaunch | `actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers` |
+| Real JSONL face SIGKILL | `jsonl_face_cut_before_the_turn_reopens_exactly`, `jsonl_face_cut_inside_the_model_request_is_abandoned_with_the_billing_note`, `jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note`, `jsonl_face_cut_after_the_answer_reopens_exactly`; `jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen` is explicitly ignored under `JSONL-APPROVAL-RESUME` |
 | GC after a compaction cut | `gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`, `sigkill_gc_cuts_preserve_queue_counters_and_oracle` |
 | Runtime commit cuts | `every_runtime_commit_cut_reopens_without_redispatch` |
 | Crash-matrix completion control | `complete_run_is_one_exact_new_state_and_probe_is_inert` — the same harness child and evidence probe, without SIGKILL; the bounded child lifetime is the load sensitivity |
@@ -2475,9 +2487,9 @@ facts are consistent rather than contradictory.
 
 ### 2.7 The offline performance smoke
 
-`just perf smoke` measures six product paths over the same scripted model plus
-four cell-worker timings, and emits one
-JSON line per metric:
+`just perf smoke` measures six short product paths over the scripted model,
+four cell-worker timings and six retained-history metrics. It emits one JSON
+line per metric:
 
 | metric | what it times | compared |
 | --- | --- | --- |
@@ -2489,6 +2501,12 @@ JSON line per metric:
 | `growth_turn_peak_rss_mb` | maximum resident set over a growth turn through the placeholder rung | yes |
 | `cell_quickjs_spawn_round_trip_ms`, `cell_monty_spawn_round_trip_ms` | worker spawn, checked hello/configure, one cell with a nested call and its acceptance, median of five | no |
 | `cell_quickjs_per_cell_ms`, `cell_monty_per_cell_ms` | the same nested-call cell on a warm worker, median of 80 cells | no |
+| `lineage_400_total_ms` | all 400 prompt turns plus the final actual-history verification turn | no |
+| `lineage_400_first_20_median_ms` | median of the first twenty prompt turns | no |
+| `lineage_400_last_20_median_ms` | median of the last twenty prompt turns, excluding verification | no |
+| `lineage_1000_total_ms` | all 1000 prompt turns plus the final actual-history verification turn | no |
+| `lineage_1000_first_20_median_ms` | median of the first twenty prompt turns | no |
+| `lineage_1000_last_20_median_ms` | median of the last twenty prompt turns, excluding verification | no |
 
 Volume comes from assistant text rather than from tool results, and that is a
 product fact rather than a convenience. One tool outcome is bounded at a
@@ -2498,13 +2516,17 @@ reaches a client, so a large tool body never becomes stream bytes. Assistant
 text is published verbatim up to a few hundred kilobytes, so that is what the
 throughput case uses.
 
-Every line carries a machine id derived from the platform, architecture and CPU,
-because a number measured on one machine says nothing about another. Seeds live
+Every line carries a build `profile` and a machine id derived from the platform,
+architecture and CPU, because a number measured on one machine or profile says
+nothing about another. Seeds live
 in `tests/performance/baselines/offline-perf-smoke.json`, keyed by that id.
 `--check` runs `tools/checks/check_perf_smoke.py` against this machine's row. A
-machine with no seed row reports its numbers and passes.
+machine with no seed row reports `no baseline` and its numbers, then passes.
+Every seed metric also records its `profile`; a missing profile or a profile
+mismatch is refused, including for informational metrics. The baseline document
+may contain no machines: comparisons require an explicit idle-host reseed.
 
-All six are measured. `tui_transcript_20k_layout_ms`,
+The six short product metrics are measured. `tui_transcript_20k_layout_ms`,
 `growth_turn_peak_rss_mb`, `jsonl_bulk_throughput_mb_per_s`, and
 `cli_two_tool_turn_ms` are compared with a fifty percent tolerance by
 `--check`; the other two are informational. `jsonl_tool_round_trip_ms` uses the
@@ -2517,11 +2539,14 @@ Seeding a new machine waits for one run in which all six metrics measure
 successfully on an idle host, so a seed never records a contended number as the
 thing to beat.
 
-The recipe builds the release-profile workspace with all features, then copies
-`plak` and its matching JavaScript/Python workers aside before measuring. Both
-product and worker timings therefore measure optimized binaries, not the gate's
-debug/test artifacts. Historical debug seeds are not release comparisons and
-must be remeasured before being used as release baselines.
+The recipe builds only `plak`, `plakous-js-runtime` and `plakous-py-worker` in
+the release profile, with the product's default features plus `plak/test-hooks`
+and the render benchmark's required `plak/test-support` feature.
+It copies `plak` and its matching JavaScript/Python workers aside before
+measuring. The render benchmark uses the same product features. Product and
+worker timings measure optimized binaries; the row profile is `release`.
+As in the product build helper, `CARGO_PROFILE_RELEASE_STRIP=debuginfo` retains
+raw symbols for the artifact-isolation checker; generated code is release-optimized.
 
 Additional informational cases retain 400 and 1000 sequential prompts in one
 session. They report total turn time and first/last twenty-turn medians. The

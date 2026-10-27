@@ -15,7 +15,7 @@ sys.path.insert(0, str(from_root))
 from perf_long_session import write_home
 
 
-def measure(binary: str, root: Path, machine: str, prompts: int) -> None:
+def measure(binary: str, root: Path, machine: str, profile: str, prompts: int) -> None:
     home = write_home(str(root))
     script = root / "script.json"
     script.write_text(json.dumps({
@@ -72,9 +72,10 @@ def measure(binary: str, root: Path, machine: str, prompts: int) -> None:
                          ("first_20_median", statistics.median(samples[:20])),
                          ("last_20_median", statistics.median(samples[-21:-1]))):
         print(json.dumps({"metric": f"lineage_{prompts}_{label}_ms", "value": round(value, 3),
-                          "unit": "ms", "machine": machine}, sort_keys=True), flush=True)
+                          "unit": "ms", "machine": machine, "profile": profile}, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":
     for size in (400, 1000):
-        measure(str(Path(sys.argv[1]).resolve()), Path(sys.argv[2]) / str(size), sys.argv[3], size)
+        measure(str(Path(sys.argv[1]).resolve()), Path(sys.argv[2]) / str(size),
+                sys.argv[3], sys.argv[4], size)
