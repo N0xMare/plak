@@ -166,6 +166,10 @@ impl Driver {
     /// placeholders, notice — does not fit. The caller keeps the existing
     /// protected-overflow refusal for that case.
     #[allow(
+        clippy::too_many_lines,
+        reason = "Protected-result replacement selects eligible observations and validates the replacement projection before publication"
+    )]
+    #[allow(
         clippy::too_many_arguments,
         reason = "the offline placeholders publication carries the same closed authority tuple as the paid fold"
     )]
@@ -567,6 +571,10 @@ impl Driver {
     }
 
     /// Publishes the placeholder pass in one lease-fenced CAS.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Placeholder publication updates history, compaction provenance, and admitted-round bindings as one successor"
+    )]
     #[allow(
         clippy::too_many_arguments,
         reason = "the offline placeholders publication carries the same closed authority tuple as the paid fold"

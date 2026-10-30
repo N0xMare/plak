@@ -8,6 +8,10 @@ use super::{
 };
 
 impl Driver {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Startup resume distinguishes restored turn, compaction, and cleanup continuations before admitting fresh work"
+    )]
     pub(in crate::runtime::driver) async fn run_restored_startup(
         &mut self,
         restored: DriverRestoredStartup,

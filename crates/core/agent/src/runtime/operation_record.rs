@@ -230,6 +230,10 @@ fn coalesce_working_roots(
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Lifecycle reconstruction resolves all outstanding effects and hosted continuations under the exact working root"
+)]
 pub(super) fn working_lifecycle_for_root(
     default_root: ModelOperationRoot,
     ledger: &RuntimeOperationLedger,

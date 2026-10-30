@@ -395,6 +395,10 @@ fn validate_operation_kind(kind: &DurableOperationKind) -> Result<(), RuntimeMan
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Composition graph validation follows parent markers and nested operations together to reject orphaned or mismatched authority"
+)]
 pub(super) fn validate_composition_graph(
     ledger: &RuntimeOperationLedger,
 ) -> Result<(), RuntimeManifestError> {

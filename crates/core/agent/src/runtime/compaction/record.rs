@@ -215,6 +215,10 @@ pub(in crate::runtime) enum CompactionReceiptKind {
     Abandonment,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Receipt validation cross-checks every recorded compaction strategy, selection, and history identity before recovery accepts it"
+)]
 pub(in crate::runtime) fn validate_compaction_receipt(
     recovered: &CommittedCheckpoint,
     stored: &StoredCheckpoint,

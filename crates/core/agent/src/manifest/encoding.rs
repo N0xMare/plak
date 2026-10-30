@@ -115,6 +115,10 @@ pub(crate) fn encode_bundle_metadata_value(
     Ok(writer.bytes)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Bundle metadata decoding keeps closed tags and bounded collection reads in their canonical wire order"
+)]
 pub(crate) fn decode_bundle_metadata(
     bytes: &[u8],
 ) -> Result<RuntimeManifestBundleMetadata, RuntimeManifestError> {

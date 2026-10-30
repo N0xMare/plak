@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Manifest integrity scenarios build exact object graphs and forge individual provenance and lifecycle fields before asserting rejection"
+)]
+
 use super::codec::{
     obligation_kind, obligation_kind_tag, recovery_action, recovery_action_tag, recovery_phase,
     recovery_phase_tag,

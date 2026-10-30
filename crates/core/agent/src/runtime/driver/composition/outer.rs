@@ -9,6 +9,10 @@ use super::observation::LocalCompositionObservation;
 use super::*;
 
 impl Driver {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Outer cell execution coordinates interpreter ownership and nested dispatch until one authoritative terminal is known"
+    )]
     pub(in crate::runtime::driver) async fn execute_local_composition_outer(
         &mut self,
         command: &PromptCommand,
@@ -438,6 +442,10 @@ impl Driver {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Cell execute handling binds the marker operation and owner generation before publishing interpreter responses"
+    )]
     async fn drive_local_composition_exec(
         &mut self,
         command: &PromptCommand,
@@ -688,6 +696,10 @@ impl Driver {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Cell wait handling reconciles timeout, live-yield, and terminal responses against the retained cell owner"
+    )]
     async fn drive_local_composition_wait(
         &mut self,
         command: &PromptCommand,

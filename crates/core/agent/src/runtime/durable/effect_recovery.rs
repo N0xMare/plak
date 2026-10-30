@@ -309,6 +309,10 @@ fn derived_uuid_checkpoint(digest: Digest) -> Result<CheckpointId, AgentError> {
         .map_err(|error| AgentError::from_identity(&error))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Effect-evidence recovery prepares a successor only after validating the stored dispatch and terminal outcome together"
+)]
 fn prepare_effect_evidence_publication(
     checkpoint: &RuntimeCheckpoint,
     identity: DurableEffectEvidenceIdentity,

@@ -18,6 +18,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as AsyncMutex, mpsc, watch};
 impl PreparedAgent {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Driver spawning wires the bounded control channels, durable startup, and terminal supervision before exposing handles"
+    )]
     pub(in crate::runtime) fn spawn(self) -> Agent {
         let event_pipeline = EventPipeline::new(self.events.clone());
         let ingress_capacity = self

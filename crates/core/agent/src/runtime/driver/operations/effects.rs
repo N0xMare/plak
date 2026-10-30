@@ -175,6 +175,10 @@ impl Driver {
     }
 
     #[allow(
+        clippy::too_many_lines,
+        reason = "Command classification folds admission and control effects into the ledger before acknowledging their disposition"
+    )]
+    #[allow(
         clippy::too_many_arguments,
         reason = "the durable command receipt carries the complete closed classification tuple"
     )]

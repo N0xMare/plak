@@ -25,6 +25,10 @@ use plakous_model::CanonicalHistory;
 use std::sync::Arc;
 // Lower retained replay with fresh destination authority before any store write.
 // Prepared calls are dropped, never dispatched; no carried tool becomes work.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Seed replay validation compares the entire imported history and binding against the exact creation receipt"
+)]
 pub(crate) async fn validate_seed_replay(
     builder: &AgentBuilder,
     segments: &[plakous_model::HistorySegment],

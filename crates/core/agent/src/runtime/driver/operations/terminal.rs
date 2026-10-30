@@ -221,6 +221,10 @@ impl Driver {
     /// The text bytes and provenance of this root's own prompt when it is
     /// still the last canonical segment.
     #[allow(
+        clippy::too_many_lines,
+        reason = "Queued cancellation publishes the command closure, prompt disposition, and terminal receipt in one checkpoint"
+    )]
+    #[allow(
         clippy::too_many_arguments,
         reason = "one atomic queued-cancel candidate closes the complete command and target tuple"
     )]

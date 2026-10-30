@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Credential-wait recovery scenarios exercise cancellation and fresh authority before any resumed provider dispatch"
+)]
+
 use super::*;
 use crate::RuntimeCheckpointKind;
 use plakous_model::RuntimeModelAuthorityError;

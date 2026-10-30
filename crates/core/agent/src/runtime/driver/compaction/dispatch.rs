@@ -206,6 +206,10 @@ impl Driver {
         result
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The compaction dispatch sequence keeps preparation, dispatch fencing, response classification, and cleanup evidence together"
+    )]
     async fn run_compaction_call_inner(
         &mut self,
         live: &mut LiveCompaction,

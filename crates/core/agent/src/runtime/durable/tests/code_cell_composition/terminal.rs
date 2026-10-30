@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Cell-terminal scenarios connect interpreter completion to exactly one outer turn result and canonical tool exchange"
+)]
+
 use super::*;
 
 pub(in super::super) struct WaitObservation<'a> {

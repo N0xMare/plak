@@ -344,6 +344,10 @@ pub struct HistoryNestedTool {
 /// on one effect. Oversized, pruned, undecodable or unresolved effects are
 /// absent. Only exact child/evaluation bindings with an owner in `owners`
 /// qualify; seeded history alone never supplies such a binding.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Nested history projection checks each call owner against its exact registry and lineage before exporting tool facts"
+)]
 #[must_use]
 pub fn history_nested_tools<S: std::hash::BuildHasher>(
     ledger: &crate::manifest::RuntimeOperationLedger,

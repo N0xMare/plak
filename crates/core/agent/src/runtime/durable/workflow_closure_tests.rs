@@ -2,6 +2,11 @@
 //! next open, in one commit carrying its `WorkflowSettled` fact, without any
 //! explicit workflow and without redispatching its summary.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Workflow closure scenarios reopen each recorded row and require one closure commit without redispatch"
+)]
+
 use super::*;
 use crate::feed::{FeedFact, FeedWorkflowOutcome};
 

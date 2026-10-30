@@ -153,6 +153,10 @@ impl ObservedResponse {
 }
 
 impl Driver {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Cell observation records output, named-state, and terminal evidence in the order delivered by the owned interpreter"
+    )]
     pub(super) async fn observe_local_composition_cell(
         &mut self,
         command: &PromptCommand,

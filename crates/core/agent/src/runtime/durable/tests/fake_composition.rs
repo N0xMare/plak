@@ -1,4 +1,9 @@
 //! Scripted composition ports shared by the durable law fixtures.
+#![allow(
+    clippy::too_many_lines,
+    reason = "Scripted composition fixtures define cell generations, nested request batches, and terminal responses as complete protocol scenarios"
+)]
+
 use super::*;
 
 #[derive(Default)]

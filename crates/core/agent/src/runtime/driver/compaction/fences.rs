@@ -416,6 +416,10 @@ impl Driver {
         self.run_turn_compaction(command, trigger, None).await
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Turn compaction preserves the pending round and its budget while crossing the scheduled compaction fences"
+    )]
     async fn run_turn_compaction(
         &mut self,
         command: &PromptCommand,

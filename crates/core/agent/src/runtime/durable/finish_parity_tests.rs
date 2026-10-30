@@ -2,6 +2,11 @@
 //! decision, the consequence commit a newly opened owner publishes equals the
 //! one the live driver published, modulo the new checkpoint's identity.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Live-versus-recovered finish parity compares canonical history, usage, and terminal projection for the same turn"
+)]
+
 use super::super::turn_recovery::{RootClosure, root_turn_closure_for_test};
 use super::*;
 use crate::runtime::terminal::decode_terminal_result_record;

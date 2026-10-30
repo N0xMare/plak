@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Named-state scenarios stage cell writes and prove failure, abandonment, and store refusal publish none of the overlay"
+)]
+
 use super::*;
 use crate::CheckpointObjectBundle;
 use crate::local_composition::{StateOp, StateResult};

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Tool-runtime scenarios combine frozen policy, authorization decisions, scheduler barriers, and execution outcomes"
+)]
+
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

@@ -1,5 +1,10 @@
 //! Codex native successors that keep the current round's tool batch.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Native tail scenarios compare retained current-round segments and their provenance across compaction and recovery"
+)]
+
 use super::*;
 use crate::SemanticCompactionPublication;
 use crate::runtime::PostCompactionNote;

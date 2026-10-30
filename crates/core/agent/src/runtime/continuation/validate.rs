@@ -66,6 +66,10 @@ pub(in crate::runtime) fn restore_frame_plan(
 }
 
 #[allow(
+    clippy::too_many_lines,
+    reason = "Hosted frame validation cross-checks the root, prepared plan, response, budgets, and binding against durable authority"
+)]
+#[allow(
     clippy::too_many_arguments,
     reason = "the hosted frame binding is one exact reconstruction tuple"
 )]
@@ -190,6 +194,10 @@ pub(super) fn validate_hosted_frame(
     Ok(promoted)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Slot reconciliation maps every restored call to its recorded outcome or pending decision while preserving source order"
+)]
 pub(super) fn reconcile_hosted_tool_slots(
     checkpoint: &RuntimeCheckpoint,
     mut frame: AwaitToolBatchV2,

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Cell cancellation and store-refusal campaigns inspect every tool fence and prove completed effects survive interruption"
+)]
+
 use super::*;
 
 /// Which shape of live cell the cancel-truthfulness fixtures drive.
@@ -1120,10 +1125,6 @@ fn counting_probe_registry(
 /// `Session` (or the root is refused for storage pressure), never
 /// `recovery_required`, and every tool that ran has its recorded result.
 #[tokio::test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one refusal campaign over both tool effect classes"
-)]
 async fn an_ordinary_refusal_at_any_tool_fence_fails_the_turn_definitely() -> TestResult {
     for (effect, concurrency) in [
         (ToolEffect::ReadOnly, ToolConcurrency::Parallel),

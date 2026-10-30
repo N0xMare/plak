@@ -23,6 +23,10 @@ pub(super) fn terminal_evidence_fold(
     )
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Local terminal reconstruction verifies prompt disposition and all command and operation closures before returning a result"
+)]
 pub(super) fn local_terminal_from_ledger(
     checkpoint: &RuntimeCheckpoint,
     ledger: &RuntimeOperationLedger,
@@ -241,6 +245,10 @@ pub(super) fn local_terminal_from_ledger(
 /// nothing. Every other same-turn record settles: with its own evidence, as
 /// a control (pending steers unapplied), or, for an uncertain process
 /// session, closed as outcome unknown.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Landed terminal recovery binds committed history and usage to the exact recorded root terminal"
+)]
 fn landed_terminal_recovery_fold(
     checkpoint: &RuntimeCheckpoint,
     command: &DurableCommandRecord,

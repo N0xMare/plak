@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Lineage fixtures run each composition caller class and validate its retained operation evidence and projected ancestry"
+)]
+
 use super::*;
 
 /// Exact local-composition marker family under lineage test.
@@ -354,10 +359,6 @@ async fn observe_lineage_effect_fixture(
 
 /// The real composition driver run behind the lineage pins, with the store
 /// that recorded its commits.
-#[allow(
-    clippy::too_many_lines,
-    reason = "real composition driver and retained evidence proof"
-)]
 pub(super) async fn run_lineage_fixture(
     class: LineagePtcClass,
     scenario: LineageScenario,

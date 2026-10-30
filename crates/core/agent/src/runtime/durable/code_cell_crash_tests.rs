@@ -6,6 +6,11 @@
 //! abandoned, never replayed — so a product holding the pre-turn locator may
 //! adopt the head and the next prompt runs.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Real code-cell crash and reopen scenarios carry worker setup through durable recovery and no-redispatch assertions"
+)]
+
 use super::*;
 
 #[derive(Clone, Copy, Debug)]

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Control recovery scenarios correlate steering, cancellation, and command acknowledgements with the folded checkpoint"
+)]
+
 use super::super::*;
 use super::{STEERING_NOT_APPLIED, has_unapplied_steering};
 use crate::TurnCommand;

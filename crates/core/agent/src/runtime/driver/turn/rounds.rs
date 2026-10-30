@@ -300,6 +300,10 @@ impl Driver {
         result
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The root-turn round loop keeps model decisions, tool batches, steering, and budget terminalization under one owner"
+    )]
     pub(super) async fn run_turn_rounds(
         &mut self,
         command: &PromptCommand,

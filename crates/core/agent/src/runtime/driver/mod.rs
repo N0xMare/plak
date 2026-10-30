@@ -204,6 +204,10 @@ impl Driver {
         combine_cleanup_results([run_result, settlement, cleanup])
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The owner pump selects commands, turn work, and shutdown while keeping each branch under the same driver borrow"
+    )]
     async fn run_loop(&mut self) -> Result<(), AgentError> {
         if let Some(restored) = self.restored.take() {
             Box::pin(self.run_restored_startup(restored)).await?;

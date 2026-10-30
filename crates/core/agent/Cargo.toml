@@ -19,10 +19,10 @@ class = "supported"
 neutral = true
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 23
+too-many-lines-ceiling = 145
 too-many-arguments-ceiling = 59
 large-file-ceiling = 0
-crate-wide-allows = ["src/lib.rs:too_many_lines"]
+crate-wide-allows = []
 reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
 
 [features]

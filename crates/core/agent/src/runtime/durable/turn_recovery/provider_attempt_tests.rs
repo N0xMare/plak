@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Provider-attempt recovery checks that failed and retried attempts contribute usage exactly once to the final turn"
+)]
+
 use super::super::super::tests::landed_round_abandonment::{ExtraCall, cut_text_turn};
 use super::*;
 use plakous_model::{ModelError, ModelErrorKind, Usage};

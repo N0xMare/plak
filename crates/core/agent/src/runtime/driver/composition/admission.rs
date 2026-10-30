@@ -34,10 +34,6 @@ use plakous_tools::ToolInvocationRequest;
 use std::sync::Arc;
 
 impl Driver {
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the composition marker and nested evidence must be checked together"
-    )]
     pub(in crate::runtime::driver) fn cancelled_composition_result(
         &mut self,
         call: &ToolCallBlock,
@@ -69,59 +65,7 @@ impl Driver {
         let (kind, parts, child_ids, updates) = if let Some(failure) =
             LocalCompositionFailureEvidence::decode(evidence.bytes())
         {
-            const MAX_CANCELLED_REPORT_BYTES: usize = 1_048_576;
-            let child_ids = failure.child_operations().to_vec();
-            let detail = failure.detail();
-            let mut report = format!("local composition was interrupted: {detail}");
-            let ledger = self.authority.checkpoint();
-            for child_id in &child_ids {
-                let child = ledger
-                    .manifest()
-                    .ledger()
-                    .operation(*child_id)
-                    .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-                let (DurableOperationState::Completed(evidence)
-                | DurableOperationState::ProvenNotDispatched(evidence)
-                | DurableOperationState::Finalized(evidence)) = child.state()
-                else {
-                    return Err(AgentError::new(
-                        AgentErrorKind::OutcomeUnknown,
-                        "cancelled composition has an unresolved nested effect",
-                    ));
-                };
-                if let DurableOperationKind::Effect { call_id, .. } = child.kind() {
-                    let outcome: serde_json::Value = serde_json::from_slice(evidence.bytes())
-                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    let outcome_fields = outcome
-                        .as_array()
-                        .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    if outcome_fields.first().and_then(serde_json::Value::as_str)
-                        == Some("completed-tool-outcome-v1")
-                    {
-                        let execution: ToolExecutionResult =
-                            serde_json::from_value(outcome_fields.get(2).cloned().ok_or_else(
-                                || AgentError::from_store(SessionStoreError::corrupt()),
-                            )?)
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                        let rendered = serde_json::to_string(&execution.result)
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                        let line = format!("\ncompleted nested call {call_id}: {rendered}");
-                        let remaining = MAX_CANCELLED_REPORT_BYTES.saturating_sub(report.len());
-                        if remaining == 0 {
-                            break;
-                        }
-                        let mut end = remaining.min(line.len());
-                        while !line.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        report.push_str(&line[..end]);
-                        if end < line.len() {
-                            report.push_str("\n[nested results truncated]");
-                            break;
-                        }
-                    }
-                }
-            }
+            let (report, child_ids) = self.cancelled_composition_failure_report(&failure)?;
             (
                 ToolResultKind::Failure,
                 vec![ToolResultPart::Text(TextBlock::new(report, None).map_err(
@@ -175,28 +119,7 @@ impl Driver {
             Provenance::ToolExecution,
         )
         .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-        let ledger = self.authority.checkpoint();
-        let mut operations = Vec::new();
-        for child_id in child_ids {
-            let child = ledger
-                .manifest()
-                .ledger()
-                .operation(child_id)
-                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-            match child.state() {
-                DurableOperationState::Completed(_)
-                | DurableOperationState::ProvenNotDispatched(_) => {
-                    operations.push(OperationId(child_id));
-                }
-                DurableOperationState::Finalized(_) => {}
-                _ => {
-                    return Err(AgentError::new(
-                        AgentErrorKind::OutcomeUnknown,
-                        "cancelled composition has an unresolved nested operation",
-                    ));
-                }
-            }
-        }
+        let operations = self.cancelled_composition_operations(child_ids)?;
         Ok((item, operations))
     }
 
@@ -299,5 +222,96 @@ impl Driver {
                 execution: ToolExecutionResult::new(result, false),
             }),
         }
+    }
+
+    fn cancelled_composition_failure_report(
+        &self,
+        failure: &LocalCompositionFailureEvidence,
+    ) -> Result<(String, Vec<u64>), AgentError> {
+        const MAX_CANCELLED_REPORT_BYTES: usize = 1_048_576;
+        let child_ids = failure.child_operations().to_vec();
+        let detail = failure.detail();
+        let mut report = format!("local composition was interrupted: {detail}");
+        let ledger = self.authority.checkpoint();
+        for child_id in &child_ids {
+            let child = ledger
+                .manifest()
+                .ledger()
+                .operation(*child_id)
+                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
+            let (DurableOperationState::Completed(evidence)
+            | DurableOperationState::ProvenNotDispatched(evidence)
+            | DurableOperationState::Finalized(evidence)) = child.state()
+            else {
+                return Err(AgentError::new(
+                    AgentErrorKind::OutcomeUnknown,
+                    "cancelled composition has an unresolved nested effect",
+                ));
+            };
+            if let DurableOperationKind::Effect { call_id, .. } = child.kind() {
+                let outcome: serde_json::Value = serde_json::from_slice(evidence.bytes())
+                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                let outcome_fields = outcome
+                    .as_array()
+                    .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
+                if outcome_fields.first().and_then(serde_json::Value::as_str)
+                    == Some("completed-tool-outcome-v1")
+                {
+                    let execution: ToolExecutionResult = serde_json::from_value(
+                        outcome_fields
+                            .get(2)
+                            .cloned()
+                            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
+                    )
+                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                    let rendered = serde_json::to_string(&execution.result)
+                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                    let line = format!("\ncompleted nested call {call_id}: {rendered}");
+                    let remaining = MAX_CANCELLED_REPORT_BYTES.saturating_sub(report.len());
+                    if remaining == 0 {
+                        break;
+                    }
+                    let mut end = remaining.min(line.len());
+                    while !line.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    report.push_str(&line[..end]);
+                    if end < line.len() {
+                        report.push_str("\n[nested results truncated]");
+                        break;
+                    }
+                }
+            }
+        }
+        Ok((report, child_ids))
+    }
+
+    fn cancelled_composition_operations(
+        &self,
+        child_ids: Vec<u64>,
+    ) -> Result<Vec<OperationId>, AgentError> {
+        let ledger = self.authority.checkpoint();
+        let mut operations = Vec::new();
+        for child_id in child_ids {
+            let child = ledger
+                .manifest()
+                .ledger()
+                .operation(child_id)
+                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
+            match child.state() {
+                DurableOperationState::Completed(_)
+                | DurableOperationState::ProvenNotDispatched(_) => {
+                    operations.push(OperationId(child_id));
+                }
+                DurableOperationState::Finalized(_) => {}
+                _ => {
+                    return Err(AgentError::new(
+                        AgentErrorKind::OutcomeUnknown,
+                        "cancelled composition has an unresolved nested operation",
+                    ));
+                }
+            }
+        }
+        Ok(operations)
     }
 }

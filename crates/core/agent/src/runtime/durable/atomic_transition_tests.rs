@@ -3,6 +3,11 @@
 //! §3.5). Each accepted commit is a crash cut: a host lost right after it
 //! leaves exactly that head, so no head may hold half a decision.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Crash cuts after each turn commit verify that recovery sees an entire classified transition and never a partial one"
+)]
+
 use super::*;
 use crate::feed::{FeedFact, FeedOperationState, FeedTurnOutcome};
 use crate::runtime::operation_record::{RoundDecision, operation_turn_id, provider_outcome};

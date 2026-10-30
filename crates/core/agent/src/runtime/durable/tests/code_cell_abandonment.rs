@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Explicit cell abandonment proves settled nested outcomes are retained and uncertain effects still refuse closure"
+)]
+
 use super::*;
 
 pub(super) async fn historical_code_cell_continuation_recovery(

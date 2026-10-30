@@ -166,38 +166,7 @@ impl Driver {
         if carries_job_results {
             consumed.extend_from_slice(&self.pending_job_consumptions);
         }
-        let jobs = self
-            .authority
-            .checkpoint()
-            .manifest()
-            .jobs()
-            .updated(
-                plakous_tools::internal::next_job_number(&self.job_sessions),
-                if carries_job_results {
-                    self.pending_job_promotions.clone()
-                } else {
-                    Vec::new()
-                },
-                &consumed,
-            )
-            .and_then(|jobs| jobs.with_terminals(&self.job_sessions.jobs()))
-            .map_err(runtime_manifest_error)?;
-        let prior = self.authority.checkpoint();
-        let newly_finished = jobs
-            .rows()
-            .iter()
-            .filter(|row| {
-                row.terminal.is_some()
-                    && prior
-                        .manifest()
-                        .jobs()
-                        .rows()
-                        .iter()
-                        .find(|before| before.number == row.number)
-                        .is_none_or(|before| before.terminal.is_none())
-            })
-            .map(|row| row.number)
-            .collect::<Vec<_>>();
+        let (jobs, newly_finished, prior) = self.checkpoint_jobs(carries_job_results, &consumed)?;
         // The overlay is eligible only in the checkpoint that first completes
         // its own outer operation, never in an unrelated nested publication.
         let named_state = self
@@ -232,6 +201,64 @@ impl Driver {
             admission,
         )))
         .await?;
+        self.settle_checkpoint_publication(
+            &published,
+            &consumed,
+            newly_finished,
+            carries_job_results,
+            retain,
+        );
+        Ok(published)
+    }
+
+    fn checkpoint_jobs(
+        &self,
+        carries_job_results: bool,
+        consumed: &[u32],
+    ) -> Result<(crate::manifest::JobLedger, Vec<u32>, Arc<RuntimeCheckpoint>), AgentError> {
+        let jobs = self
+            .authority
+            .checkpoint()
+            .manifest()
+            .jobs()
+            .updated(
+                plakous_tools::internal::next_job_number(&self.job_sessions),
+                if carries_job_results {
+                    self.pending_job_promotions.clone()
+                } else {
+                    Vec::new()
+                },
+                consumed,
+            )
+            .and_then(|jobs| jobs.with_terminals(&self.job_sessions.jobs()))
+            .map_err(runtime_manifest_error)?;
+        let prior = self.authority.checkpoint();
+        let newly_finished = jobs
+            .rows()
+            .iter()
+            .filter(|row| {
+                row.terminal.is_some()
+                    && prior
+                        .manifest()
+                        .jobs()
+                        .rows()
+                        .iter()
+                        .find(|before| before.number == row.number)
+                        .is_none_or(|before| before.terminal.is_none())
+            })
+            .map(|row| row.number)
+            .collect::<Vec<_>>();
+        Ok((jobs, newly_finished, prior))
+    }
+
+    fn settle_checkpoint_publication(
+        &mut self,
+        published: &RuntimeCheckpoint,
+        consumed: &[u32],
+        newly_finished: Vec<u32>,
+        carries_job_results: bool,
+        retain: bool,
+    ) {
         if !consumed.is_empty()
             && let Some(host) = &self.job_host
         {
@@ -246,7 +273,7 @@ impl Driver {
                 .collect::<Vec<_>>();
             host.observe_terminal(self.job_owner, &terminal);
         }
-        plakous_tools::internal::consume_jobs(&self.job_sessions, &consumed);
+        plakous_tools::internal::consume_jobs(&self.job_sessions, consumed);
         for number in newly_finished {
             let context = self
                 .active_root
@@ -279,6 +306,5 @@ impl Driver {
             self.command_ledger
                 .retain(|command_id, _| kept.contains(command_id.as_str()));
         }
-        Ok(published)
     }
 }

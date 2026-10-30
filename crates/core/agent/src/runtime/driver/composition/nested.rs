@@ -68,6 +68,10 @@ impl Driver {
         )
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Nested tool execution retains cell lineage through admission, effect fencing, and result delivery"
+    )]
     async fn execute_local_composition_nested(
         &mut self,
         command: &PromptCommand,

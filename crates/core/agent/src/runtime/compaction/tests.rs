@@ -1,4 +1,8 @@
 #![allow(
+    clippy::too_many_lines,
+    reason = "Compaction selection scenarios retain whole tool groups and compare the protected history with the replacement summary"
+)]
+#![allow(
     clippy::expect_used,
     reason = "unit tests use expect for fixture construction"
 )]

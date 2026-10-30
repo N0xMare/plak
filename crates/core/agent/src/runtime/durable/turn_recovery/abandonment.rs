@@ -37,6 +37,10 @@ use super::{
 /// Returns `OutcomeUnknown` when the checkpoint is anything but such a turn,
 /// and a corrupt-store error when one of the turn's provider records does not
 /// decode.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Turn abandonment folds recorded provider and effect evidence without inventing successful outcomes for unresolved work"
+)]
 pub(super) fn abandonment_evidence_fold(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<AbandonedTurnRecoveryFold, AgentError> {

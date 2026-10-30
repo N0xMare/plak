@@ -248,6 +248,10 @@ fn code_cell_abandonment_segment(
     .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Cell abandonment classifies every nested operation before closing only outcomes whose evidence proves safe settlement"
+)]
 pub(in crate::runtime) fn code_cell_abandonment_fold(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<CodeCellAbandonmentFold, AgentError> {
@@ -957,6 +961,10 @@ fn validate_code_cell_evidence_checkpoint(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Final cell receipt validation binds the exact marker, completed nested operations, and projected result before abandonment accepts it"
+)]
 async fn validate_code_cell_final_receipt(
     store: &Arc<dyn SessionStore>,
     recovered: &CommittedCheckpoint,

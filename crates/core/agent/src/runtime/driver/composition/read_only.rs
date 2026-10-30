@@ -9,6 +9,10 @@ use super::*;
 
 impl Driver {
     #[allow(
+        clippy::too_many_lines,
+        reason = "Nested read-only admission binds source-order slots and resource ownership before joining concurrent tool results"
+    )]
+    #[allow(
         clippy::result_large_err,
         reason = "the refusal hands the pending nested call back so the caller can settle it verbatim"
     )]

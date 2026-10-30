@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Admission compaction recovery reconstructs the paused turn and validates its protected round before resumption"
+)]
+
 use super::super::*;
 use crate::runtime::durable::tests::landed_round_abandonment::root_without_provider_cut;
 use plakous_model::{AttemptId, CompactionBlock, SessionWorkflowRootId};

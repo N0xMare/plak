@@ -288,6 +288,10 @@ impl Driver {
         outcome
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Admitted compaction checks quiescence and records the workflow before entering its paid execution path"
+    )]
     async fn compact_session_admitted(
         &mut self,
         active: Option<&PromptCommand>,

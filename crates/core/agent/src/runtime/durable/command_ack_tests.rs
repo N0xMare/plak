@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Killed-owner and bounded-ancestry scenarios check recovered command acknowledgements against durable receipts"
+)]
+
 use super::*;
 use crate::{CommandAckDisposition, ControlErrorKind};
 

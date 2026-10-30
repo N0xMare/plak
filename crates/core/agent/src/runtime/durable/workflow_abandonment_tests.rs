@@ -1,5 +1,10 @@
 //! Paid workflow cuts after a published root answer never restart the fold.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Workflow abandonment traverses every compaction phase and refuses foreign debt without provider dispatch"
+)]
+
 use super::*;
 
 #[tokio::test]

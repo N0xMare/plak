@@ -1,4 +1,8 @@
 #![allow(
+    clippy::too_many_lines,
+    reason = "Observation scenarios verify projected nested names, registered owners, and redaction-safe tool facts together"
+)]
+#![allow(
     clippy::expect_used,
     reason = "unit tests use expect for fixture construction"
 )]

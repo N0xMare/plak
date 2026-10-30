@@ -58,10 +58,6 @@
 //! ```
 
 #![forbid(unsafe_code)]
-#![allow(
-    clippy::too_many_lines,
-    reason = "bound agent construction keeps its authority ordering visible"
-)]
 
 mod checkpoint_bundle;
 mod compaction_verdict;

@@ -1,5 +1,10 @@
 //! Reopened command-ledger retention through the durable session workflow.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Full-ledger retention tests reopen the store and prove settled command capacity becomes reusable"
+)]
+
 use super::*;
 use crate::runtime::control::{command_binding, command_canonical_bytes, durable_rejection};
 

@@ -366,6 +366,10 @@ impl CheckpointOwner {
             .map(StoreBoundUsage::ordinary_refusal)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Checkpoint publication stages the complete successor and installs its authority only after the durable receipt is resolved"
+    )]
     pub(in crate::runtime) async fn publish(
         &mut self,
         facts: SuccessorFacts,

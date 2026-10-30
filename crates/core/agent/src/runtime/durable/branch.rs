@@ -219,6 +219,10 @@ impl DurableSessionRuntime {
         .await)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Branch receipt validation binds the fork operation to its source checkpoint, lease, and installed target head"
+    )]
     pub(super) async fn branch_receipt(
         &self,
         operation_id: &str,
@@ -726,6 +730,10 @@ fn source_target_selectors(
 }
 
 /// `transition` names the caller's transition in a continuity refusal.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Branch target compilation freezes model and tool authority before accepting the requested fork or rebind boundary"
+)]
 async fn compile_branch_target(
     source: &RuntimeCheckpoint,
     request: DurableRebindRequest,

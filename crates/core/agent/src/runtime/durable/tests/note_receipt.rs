@@ -1,5 +1,10 @@
 //! Compaction receipts whose successor carries a post-compaction note.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Harness-note receipt scenarios bind deterministic entry identities to committed history and recovered prompt disposition"
+)]
+
 use super::*;
 use crate::runtime::PostCompactionNote;
 use crate::runtime::compaction::DurableCompactionRequestRecord;

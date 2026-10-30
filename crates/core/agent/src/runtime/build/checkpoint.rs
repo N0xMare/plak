@@ -270,6 +270,10 @@ pub(in crate::runtime) fn harness_plan_component(
 }
 
 #[allow(
+    clippy::too_many_lines,
+    reason = "Manifest binding reconstruction resolves the frozen registry and presentation against the validated runtime binding"
+)]
+#[allow(
     clippy::too_many_arguments,
     reason = "the checkpoint binding consumes the complete live reconstruction authority tuple"
 )]

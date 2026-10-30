@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Descriptor fixtures spell out complete model, registry, and presentation contracts used by admission and recovery tests"
+)]
+
 use super::*;
 
 pub(super) fn durable_test_context_contract(

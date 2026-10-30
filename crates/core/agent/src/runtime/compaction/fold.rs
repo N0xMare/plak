@@ -848,6 +848,10 @@ pub(super) fn fold_native_compaction_success(
 }
 
 #[allow(
+    clippy::too_many_lines,
+    reason = "The success fold combines selected history, provenance, operation closure, and workflow facts into one successor"
+)]
+#[allow(
     clippy::too_many_arguments,
     reason = "live and restart completion share the same exact persisted authority tuple"
 )]

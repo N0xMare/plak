@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Turn-fence workflow scenarios bind pending model rounds to compaction operation closure and resumed admission"
+)]
+
 use super::*;
 use crate::feed::{FeedCompactReason, FeedFact, FeedWorkflowKind};
 use crate::runtime::operation_record::is_accepted_root;

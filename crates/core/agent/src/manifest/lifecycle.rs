@@ -188,6 +188,10 @@ impl RuntimeLifecycle {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Transition validation checks every operation state edge against the same recorded dispatch and effect evidence"
+)]
 pub(super) fn validate_operation_transitions(
     kind: &DurableOperationKind,
     transitions: &[DurableOperationTransition],

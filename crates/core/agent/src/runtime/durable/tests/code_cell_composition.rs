@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Composition scenarios run real nested tool work through cell lifecycle, durable publication, and owner cleanup"
+)]
+
 use super::*;
 
 mod expedite;

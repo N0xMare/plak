@@ -5,6 +5,11 @@
 //! no batch record is `NothingStarted`, and a `Terminal` (a provider-hosted
 //! call the provider already ran included) finishes the turn.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Landed-round cut matrices retain complete boundary fixtures and reject unclosed neighbouring operations"
+)]
+
 use super::super::turn_recovery::{abandoned_turn_claim, abandoned_turn_recovery_fold};
 use super::*;
 use crate::runtime::operation_record::{RoundDecision, is_accepted_root};

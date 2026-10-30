@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Recovery cases forge and replay compaction phases while checking exact summary history and usage attribution"
+)]
+
 use super::*;
 
 #[tokio::test]

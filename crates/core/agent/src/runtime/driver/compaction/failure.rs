@@ -20,6 +20,10 @@ use plakous_model::{Digest, ModelOperationRoot, TurnId, Usage};
 
 impl Driver {
     #[allow(
+        clippy::too_many_lines,
+        reason = "Compaction failure terminalization distinguishes paid ambiguity, cancellation, and safely recorded failure without redispatch"
+    )]
+    #[allow(
         clippy::too_many_arguments,
         reason = "failure publication keeps origin and turn root beside the exact compact tuple"
     )]

@@ -1,5 +1,10 @@
 //! Observation allowances on rounds without provider usage, and across the
 //! durable effect-decision and server-pause frames.
+#![allow(
+    clippy::too_many_lines,
+    reason = "Observation budget scenarios combine large nested results, clipping, and durable source-order projection checks"
+)]
+
 use super::fence_compaction::compaction_workflow_count;
 use super::*;
 

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Reopen scenarios restore pending tool slots from persisted provider evidence without rerunning completed calls"
+)]
+
 use super::*;
 
 fn repeated_pause_model(entry_base: u128) -> TestResult<Arc<ArtifactModel>> {

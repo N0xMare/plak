@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Placeholder scenarios verify replacement history, compaction identities, and the next provider request as one turn boundary"
+)]
+
 use super::*;
 
 /// A descriptor whose context window is small enough to reach in a test.

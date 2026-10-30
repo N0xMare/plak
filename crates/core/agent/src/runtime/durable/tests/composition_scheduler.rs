@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Nested scheduling scenarios retain concurrency barriers, effect ordering, and source-ordered result assertions"
+)]
+
 use super::*;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]

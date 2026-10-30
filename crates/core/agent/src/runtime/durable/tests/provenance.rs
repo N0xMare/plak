@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Durable provenance scenarios compare live success and failure against their exact reopened store facts"
+)]
+
 use super::*;
 
 pub(super) fn provenance_test_model(

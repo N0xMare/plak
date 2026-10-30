@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Compaction admission tests preserve the full request, selected groups, and refusal evidence around paid dispatch"
+)]
+
 use super::*;
 
 /// Whether a V2 projection is the qualified candidate is the composition

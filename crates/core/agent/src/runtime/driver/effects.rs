@@ -46,6 +46,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 impl Driver {
     #[allow(
+        clippy::too_many_lines,
+        reason = "Mutating dispatch keeps claim, authorization, execution, and outcome publication in their required fence order"
+    )]
+    #[allow(
         clippy::too_many_arguments,
         reason = "the arguments are the exact admitted mutating-effect authority tuple"
     )]

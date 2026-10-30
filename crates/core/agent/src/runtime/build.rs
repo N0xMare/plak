@@ -609,6 +609,10 @@ impl PreparedAgent {
         Self::new_bound(builder, Some(bootstrap))
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Bound construction validates model, profile, tools, and persisted authority before installing the single-owner runtime"
+    )]
     pub(super) fn new_bound(
         mut builder: AgentBuilder,
         bootstrap: Option<DurableRuntimeBootstrap>,

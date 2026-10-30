@@ -28,6 +28,10 @@ pub(in crate::runtime) async fn command_feed_sequences(
     Ok(sequences)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Feed ancestry traversal validates bounded parent pages and stops only at the requested authoritative checkpoint"
+)]
 async fn feed_ancestry(
     authority: &RuntimeCheckpoint,
     branch: &DurableBranchFacts,

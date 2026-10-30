@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Mixed cell debt fixtures enumerate settled children and uncertain nested effects before validating abandonment"
+)]
+
 use super::super::turn_recovery::{abandoned_turn_recovery_fold, local_terminal_recovery_fold};
 use super::*;
 

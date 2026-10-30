@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Checkpoint fixtures assemble complete binding and object metadata for the durable recovery scenarios"
+)]
+
 use super::*;
 
 fn recovery_compaction_builder(

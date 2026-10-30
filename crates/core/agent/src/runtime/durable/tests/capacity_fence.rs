@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Capacity-fence scenarios contrast complete wire size with anchored admission across compaction and reopen"
+)]
+
 use super::*;
 
 #[tokio::test]

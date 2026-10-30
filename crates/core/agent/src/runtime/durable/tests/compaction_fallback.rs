@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Fallback scenarios follow the original compaction failure through head recovery and subsequent turn admission"
+)]
+
 use super::*;
 
 async fn source() -> TestResult<(

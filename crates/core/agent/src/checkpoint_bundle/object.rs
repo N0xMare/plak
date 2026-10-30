@@ -288,6 +288,10 @@ pub(crate) fn object_address(
     })
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The canonical object graph enumerates every manifest child in stable role and ordinal order"
+)]
 pub(super) fn canonical_child_specs(
     kind: RuntimeObjectKind,
     canonical_bytes: &[u8],

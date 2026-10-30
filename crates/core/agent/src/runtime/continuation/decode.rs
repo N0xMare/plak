@@ -8,6 +8,10 @@ use super::{
     validate_hosted_frame,
 };
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Effect-decision decoding checks the persisted grant, call slot, provider round, and working-root bindings together"
+)]
 pub(in crate::runtime) fn decode_await_effect_decision_continuation(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<AwaitEffectDecisionV1, AgentError> {
@@ -222,6 +226,10 @@ pub(in crate::runtime) fn decode_restored_continuation(
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Hosted continuation decoding verifies the exact barrier and provider evidence before restoring tool-batch or server-pause state"
+)]
 pub(in crate::runtime) fn decode_hosted_continuation(
     checkpoint: &RuntimeCheckpoint,
 ) -> Result<RestoredContinuationFrame, AgentError> {

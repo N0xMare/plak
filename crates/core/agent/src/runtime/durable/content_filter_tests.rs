@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Content-filter crash scenarios preserve one guidance note while proving the rejected request is not redispatched"
+)]
+
 use super::*;
 
 #[tokio::test]

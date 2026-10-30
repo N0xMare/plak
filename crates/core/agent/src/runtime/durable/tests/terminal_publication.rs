@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Terminal publication scenarios inject commit refusals and verify queues and exactly-once result delivery remain consistent"
+)]
+
 use super::*;
 
 #[tokio::test]
