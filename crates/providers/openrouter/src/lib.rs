@@ -97,10 +97,10 @@ pub use plakous_chat_completions::{
 };
 pub use retrieval::OpenRouterRetrieval;
 pub use route::{
-    OpenRouterApiKey, OpenRouterApiKeyGenerationGrant, OpenRouterApiKeySource,
-    OpenRouterAttribution, OpenRouterAuthError, OpenRouterCatalogCredentialRequest,
-    OpenRouterChatCredentialRequest, OpenRouterChatRoute, OpenRouterChatRouteIdentity,
-    OpenRouterCredentialBinding, OpenRouterCredentialRequest, OpenRouterMessagesCredentialRequest,
-    OpenRouterOrigin, OpenRouterRetentionPolicy, OpenRouterRetrievalCredentialRequest,
-    OpenRouterRouteError, OpenRouterRoutingPolicy, StaticOpenRouterApiKeySource,
+    ApiKey, OpenRouterApiKeySelection, OpenRouterAttribution, OpenRouterAuthError,
+    OpenRouterChatRoute, OpenRouterChatRouteIdentity, OpenRouterCredentialBinding,
+    OpenRouterCredentialPurpose, OpenRouterCredentialRequest, OpenRouterKeyGeneration,
+    OpenRouterKeySource, OpenRouterOrigin, OpenRouterRetentionPolicy, OpenRouterRouteError,
+    OpenRouterRoutingPolicy, StaticOpenRouterKeySource, static_openrouter_api_key_source,
+    static_openrouter_api_key_source_with_generation_binding,
 };

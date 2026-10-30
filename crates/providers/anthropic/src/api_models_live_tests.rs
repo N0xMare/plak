@@ -15,15 +15,40 @@ use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
 use super::{LIST_TIMEOUT, MAX_BODY_BYTES, list_deadline, list_from};
-use crate::{AnthropicApiKey, AnthropicApiKeySource, AnthropicError};
+use crate::{AnthropicError, ApiKey};
 
 const KEY: &str = "plak-test-anthropic-models-key";
 
 struct Fixture;
 
-impl AnthropicApiKeySource for Fixture {
-    fn current_key(&self) -> Result<AnthropicApiKey, AnthropicError> {
-        AnthropicApiKey::new(KEY)
+impl plakous_auth::api_key::ApiKeySource<crate::AnthropicApiKeyRequest> for Fixture {
+    fn authority(&self) -> &() {
+        &()
+    }
+    fn generation_grant(
+        &self,
+        _: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError>
+    {
+        Ok(ApiKey::new(KEY)?.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::AnthropicPlatform,
+            (),
+        ))
+    }
+    fn api_key(
+        &self,
+        _: &crate::AnthropicApiKeyRequest,
+        expected: &plakous_auth::api_key::ApiKeyGenerationGrant,
+    ) -> Result<ApiKey, plakous_auth::api_key::ApiKeyError> {
+        let key = ApiKey::new(KEY)?;
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::AnthropicPlatform,
+            (),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
 }
 

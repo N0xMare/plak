@@ -392,15 +392,16 @@ pub mod anthropic {
     pub use plakous_anthropic::AnthropicRetrieval;
     pub use plakous_anthropic::{ANTHROPIC_API_HOSTED_RETRIEVAL, CLAUDE_OAUTH_HOSTED_RETRIEVAL};
     pub use plakous_anthropic::{
-        ANTHROPIC_API_VERSION, ANTHROPIC_MESSAGES_PATH, ANTHROPIC_PLATFORM_ORIGIN, AnthropicApiKey,
-        AnthropicApiKeySource, AnthropicApiModel, AnthropicApiModelStatus, AnthropicBetaFeature,
-        AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, AnthropicLanguageModel,
-        AnthropicListedModel, AnthropicMessagesDialect, AnthropicPlatformCapabilityProfile,
-        AnthropicPlatformModelConfig, AnthropicPlatformModelResolver, CLAUDE_ENROLLMENTS,
-        CLAUDE_SONNET_4_6_MODEL_ID, CLAUDE_SONNET_5_MODEL_ID, ClaudeEnrollment, FeatureStatus,
-        RetryAdvice, RetrySafety, accept_anthropic_listed_models, anthropic_api_bundled_listing,
-        anthropic_api_models, claude_enrollment, claude_max_output_tokens,
-        list_anthropic_api_models,
+        ANTHROPIC_API_VERSION, ANTHROPIC_MESSAGES_PATH, ANTHROPIC_PLATFORM_ORIGIN,
+        AnthropicApiKeyRequest, AnthropicApiModel, AnthropicApiModelStatus, AnthropicBetaFeature,
+        AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, AnthropicKeySource,
+        AnthropicLanguageModel, AnthropicListedModel, AnthropicMessagesDialect,
+        AnthropicPlatformCapabilityProfile, AnthropicPlatformModelConfig,
+        AnthropicPlatformModelResolver, ApiKey, CLAUDE_ENROLLMENTS, CLAUDE_SONNET_4_6_MODEL_ID,
+        CLAUDE_SONNET_5_MODEL_ID, ClaudeEnrollment, FeatureStatus, RetryAdvice, RetrySafety,
+        accept_anthropic_listed_models, anthropic_api_bundled_listing,
+        anthropic_api_key_fingerprint, anthropic_api_models, claude_enrollment,
+        claude_max_output_tokens, list_anthropic_api_models,
     };
 }
 /// Provider-neutral auth foundations (secrets, private store, OAuth helpers).
@@ -421,6 +422,93 @@ pub mod auth {
         OfflineCredentialLifecycle, PkceS256, PrivateCredentialStore, SecretBytes, SecretString,
         SecretStringExt, SubscriptionIntegrationProfileId, generate_oauth_correlation_token,
         oauth_pins, oauth_workflow,
+    };
+}
+
+/// Shared injected API-key secrets and exact-route generation sources.
+///
+/// Keys cannot be cloned or serialized. Raw bearer text is not a supported
+/// facade operation:
+///
+/// ```compile_fail
+/// use plakous::api_key::ApiKey;
+/// let key = ApiKey::new("synthetic-key").unwrap();
+/// let _ = key.clone();
+/// ```
+///
+/// ```compile_fail
+/// use plakous::api_key::ApiKey;
+/// let key = ApiKey::new("synthetic-key").unwrap();
+/// let _ = serde_json::to_string(&key);
+/// ```
+///
+/// ```compile_fail
+/// use plakous::api_key::ApiKey;
+/// let key = ApiKey::new("synthetic-key").unwrap();
+/// let _ = key.expose_secret();
+/// ```
+///
+/// No provider alias adds a bearer reader:
+///
+/// ```compile_fail
+/// use plakous::auth::ExposeSecret;
+/// fn cannot_read(key: &plakous::anthropic::ApiKey) {
+///     let _ = key.expose_secret();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use plakous::auth::ExposeSecret;
+/// fn cannot_read(key: &plakous::openai::ApiKey) {
+///     let _ = key.expose_secret();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use plakous::auth::ExposeSecret;
+/// fn cannot_read(key: &plakous::openrouter::ApiKey) {
+///     let _ = key.expose_secret();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use plakous::auth::ExposeSecret;
+/// fn cannot_read(key: &plakous::xai::ApiKey) {
+///     let _ = key.expose_secret();
+/// }
+/// ```
+///
+/// Built-in bearer requests cannot be constructed by a facade consumer:
+///
+/// ```compile_fail
+/// let _ = plakous::anthropic::AnthropicApiKeyRequest::platform();
+/// ```
+///
+/// ```compile_fail
+/// let _ = plakous::xai::XaiPlatformApiKeyRequest::platform();
+/// ```
+///
+/// ```compile_fail
+/// fn cannot_request(reference: &plakous::openai::CredentialReference,
+///                   origin: &plakous::openai::EndpointOrigin) {
+///     let _ = plakous::openai::OpenAiApiKeyRequest::new(reference, origin);
+/// }
+/// ```
+#[cfg(any(
+    feature = "auth",
+    feature = "anthropic",
+    feature = "claude",
+    feature = "codex",
+    feature = "grok",
+    feature = "openai",
+    feature = "openrouter",
+    feature = "xai"
+))]
+pub mod api_key {
+    pub use plakous_auth::api_key::{
+        ApiKey, ApiKeyAuthorityToken, ApiKeyError, ApiKeyGenerationGrant, ApiKeyRequest,
+        ApiKeySource, CredentialGenerationFingerprint, CredentialGenerationFingerprintError,
+        CredentialProviderTag, StaticApiKeySource,
     };
 }
 /// Curated provider-neutral model contracts for facade consumers.
@@ -578,16 +666,16 @@ pub mod openai {
     pub use crate::responses_retrieval::OpenAiRetrievalPort;
     pub use plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS;
     pub use plakous_openai::{
-        AccessMode as OpenAiAccessMode, AuthError as OpenAiAuthError, CodexSubscriptionRouteConfig,
-        ConfigError as OpenAiConfigError, CredentialAuthorityId, CredentialReference,
-        EndpointOrigin, ErrorPhase as OpenAiErrorPhase, OPENAI_CHATGPT_ORIGIN,
-        OPENAI_CODEX_RESPONSES_PATH, OpenAiApiKeyGenerationGrant, OpenAiApiModel,
-        OpenAiApiModelStatus, OpenAiError, OpenAiListedModel, OpenAiPlatformModel,
+        AccessMode as OpenAiAccessMode, ApiKey, AuthError as OpenAiAuthError,
+        CodexSubscriptionRouteConfig, ConfigError as OpenAiConfigError, CredentialAuthorityId,
+        CredentialReference, EndpointOrigin, ErrorPhase as OpenAiErrorPhase, OPENAI_CHATGPT_ORIGIN,
+        OPENAI_CODEX_RESPONSES_PATH, OpenAiApiKeyRequest, OpenAiApiModel, OpenAiApiModelStatus,
+        OpenAiError, OpenAiKeyGeneration, OpenAiKeySource, OpenAiListedModel, OpenAiPlatformModel,
         OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts, OpenAiRoute, OpenAiTarget,
-        PlatformCredentialSource, PlatformProjectPolicy, PlatformStoragePolicy,
-        RetryClass as OpenAiRetryClass, SecretString as OpenAiApiKey,
-        StaticPlatformCredentialSource, accept_openai_listed_models, list_openai_api_models,
+        PlatformProjectPolicy, PlatformStoragePolicy, RetryClass as OpenAiRetryClass,
+        StaticOpenAiKeySource, accept_openai_listed_models, list_openai_api_models,
         openai_api_bundled_listing, openai_api_key_fingerprint, openai_api_models,
+        static_openai_api_key_source,
     };
     pub use plakous_openai::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};
     pub use plakous_openai::{
@@ -643,20 +731,20 @@ pub mod openrouter {
 
     pub use crate::openrouter_retrieval::OpenRouterRetrievalPort;
     pub use plakous_openrouter::OPENROUTER_HOSTED_RETRIEVAL;
+    pub use plakous_openrouter::OpenRouterRetrieval;
     pub use plakous_openrouter::{
-        OPENROUTER_CHAT_PROTOCOL_ID, OPENROUTER_MESSAGES_PROTOCOL_ID,
-        OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterApiKey, OpenRouterApiKeyGenerationGrant,
-        OpenRouterApiKeySource, OpenRouterAuthError, OpenRouterCatalogCredentialRequest,
-        OpenRouterChatBuildError, OpenRouterChatCredentialRequest, OpenRouterChatDiscoveryConfig,
-        OpenRouterChatDiscoveryError, OpenRouterChatEndpointCandidate, OpenRouterChatModelEvidence,
-        OpenRouterChatProfile, OpenRouterChatReasoningAlias, OpenRouterChatReasoningReplay,
-        OpenRouterCredentialBinding, OpenRouterCredentialRequest, OpenRouterKeyUsage,
-        OpenRouterKeyUsageError, OpenRouterMessagesBuildError, OpenRouterMessagesCredentialRequest,
-        OpenRouterReasoningFacts, OpenRouterResponsesBuildError, OpenRouterRetentionPolicy,
-        OpenRouterRouteError, OpenRouterToolChoiceModes, StaticOpenRouterApiKeySource,
-        decode_openrouter_key_usage,
+        ApiKey, OPENROUTER_CHAT_PROTOCOL_ID, OPENROUTER_MESSAGES_PROTOCOL_ID,
+        OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterApiKeySelection, OpenRouterAuthError,
+        OpenRouterChatBuildError, OpenRouterChatDiscoveryConfig, OpenRouterChatDiscoveryError,
+        OpenRouterChatEndpointCandidate, OpenRouterChatModelEvidence, OpenRouterChatProfile,
+        OpenRouterChatReasoningAlias, OpenRouterChatReasoningReplay, OpenRouterCredentialBinding,
+        OpenRouterCredentialPurpose, OpenRouterCredentialRequest, OpenRouterKeyGeneration,
+        OpenRouterKeySource, OpenRouterKeyUsage, OpenRouterKeyUsageError,
+        OpenRouterMessagesBuildError, OpenRouterReasoningFacts, OpenRouterResponsesBuildError,
+        OpenRouterRetentionPolicy, OpenRouterRouteError, OpenRouterToolChoiceModes,
+        StaticOpenRouterKeySource, decode_openrouter_key_usage, static_openrouter_api_key_source,
+        static_openrouter_api_key_source_with_generation_binding,
     };
-    pub use plakous_openrouter::{OpenRouterRetrieval, OpenRouterRetrievalCredentialRequest};
 
     /// A bounded OpenRouter Chat connection owning one exact route and HTTP client.
     ///
@@ -674,7 +762,7 @@ pub mod openrouter {
         /// Returns a safe connection error when the credential binding or reviewed
         /// transport configuration is invalid.
         pub fn connect(
-            key_source: Arc<dyn OpenRouterApiKeySource>,
+            key_source: Arc<OpenRouterKeySource>,
         ) -> Result<Self, OpenRouterChatConnectionError> {
             Self::connect_inner(key_source, None)
         }
@@ -685,14 +773,14 @@ pub mod openrouter {
         ///
         /// Returns a safe connection error when the route or transport is invalid.
         pub fn connect_with_retention(
-            key_source: Arc<dyn OpenRouterApiKeySource>,
+            key_source: Arc<OpenRouterKeySource>,
             retention: OpenRouterRetentionPolicy,
         ) -> Result<Self, OpenRouterChatConnectionError> {
             Self::connect_inner(key_source, Some(retention))
         }
 
         fn connect_inner(
-            key_source: Arc<dyn OpenRouterApiKeySource>,
+            key_source: Arc<OpenRouterKeySource>,
             retention: Option<OpenRouterRetentionPolicy>,
         ) -> Result<Self, OpenRouterChatConnectionError> {
             let route = match retention {
@@ -1262,14 +1350,14 @@ pub mod xai {
     pub use crate::responses_retrieval::XaiRetrievalPort;
     pub use plakous_xai::XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS;
     pub use plakous_xai::{
-        GrokCodingProfile, SUPERGROK_REFERENCE_CLIENT_VERSION, SUPERGROK_RESPONSES_ORIGIN,
+        ApiKey, GrokCodingProfile, SUPERGROK_REFERENCE_CLIENT_VERSION, SUPERGROK_RESPONSES_ORIGIN,
         SUPERGROK_RESPONSES_PATH, SuperGrokResponsesDialect, XAI_PLATFORM_GROK_46_CONTEXT_TOKENS,
         XAI_PLATFORM_GROK_46_MODEL, XAI_PLATFORM_MAX_OUTPUT_TOKENS, XaiApiModel, XaiApiModelError,
         XaiApiModelStatus, XaiAuthError, XaiGrokSubscriptionRoute, XaiListedModel, XaiModel,
-        XaiModelError, XaiPlatformApiKey, XaiPlatformApiKeyAuthority, XaiPlatformApiKeySource,
-        XaiPlatformBuildError, XaiPlatformCredentialGrant, XaiPlatformModel, XaiResolvedModel,
+        XaiModelError, XaiPlatformApiKeyAuthority, XaiPlatformApiKeyRequest, XaiPlatformBuildError,
+        XaiPlatformKeyGeneration, XaiPlatformKeySource, XaiPlatformModel, XaiResolvedModel,
         XaiRouteError, accept_xai_listed_models, list_xai_api_models, xai_api_bundled_listing,
-        xai_api_key_fingerprint, xai_api_models, xai_platform_selection,
+        xai_api_key_fingerprint, xai_api_key_generation, xai_api_models, xai_platform_selection,
         xai_platform_selection_for,
     };
     pub use plakous_xai::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};

@@ -10,10 +10,8 @@ use super::OpenRouterCatalogProbe;
 use std::sync::Arc;
 
 use plakous::openrouter::{
-    OpenRouterApiKey, OpenRouterApiKeyGenerationGrant, OpenRouterApiKeySource, OpenRouterAuthError,
-    OpenRouterCatalogCredentialRequest, OpenRouterChatClient, OpenRouterChatCredentialRequest,
-    OpenRouterCredentialBinding, OpenRouterCredentialRequest, OpenRouterMessagesCredentialRequest,
-    OpenRouterRetentionPolicy, OpenRouterRetrievalCredentialRequest,
+    ApiKey, OpenRouterChatClient, OpenRouterCredentialBinding, OpenRouterCredentialRequest,
+    OpenRouterKeyGeneration, OpenRouterKeySource, OpenRouterRetentionPolicy,
 };
 
 use crate::home::paths::PlakPaths;
@@ -50,7 +48,7 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
         crate::home::secrets::require_api_key(&self.paths, "openrouter")
     }
 
-    fn source(&self) -> CliResult<Arc<dyn OpenRouterApiKeySource>> {
+    fn source(&self) -> CliResult<Arc<OpenRouterKeySource>> {
         Ok(Arc::new(ProductOpenRouterApiKeySource::new(
             self.paths.clone(),
         )?))
@@ -84,65 +82,62 @@ impl ProductOpenRouterApiKeySource {
         Ok(Self { paths, binding })
     }
 
-    fn current(&self) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
+    fn current(&self) -> Result<ApiKey, plakous::api_key::ApiKeyError> {
         let value = crate::home::secrets::resolve_api_key(&self.paths, "openrouter")
-            .map_err(|_| OpenRouterAuthError::CredentialSource)?
-            .ok_or(OpenRouterAuthError::CredentialSource)?;
-        OpenRouterApiKey::new(value).map_err(|_| OpenRouterAuthError::CredentialSource)
+            .map_err(|_| plakous::api_key::ApiKeyError::Unavailable)?
+            .ok_or(plakous::api_key::ApiKeyError::Unavailable)?;
+        ApiKey::new(value).map_err(|_| plakous::api_key::ApiKeyError::Unavailable)
     }
 
-    fn generation(&self) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
+    fn generation(&self) -> Result<OpenRouterKeyGeneration, plakous::api_key::ApiKeyError> {
         let value = crate::home::secrets::resolve_api_key(&self.paths, "openrouter")
-            .map_err(|_| OpenRouterAuthError::CredentialSource)?
-            .ok_or(OpenRouterAuthError::CredentialSource)?;
-        OpenRouterApiKeyGenerationGrant::from_generation_binding(value.as_bytes())
+            .map_err(|_| plakous::api_key::ApiKeyError::Unavailable)?
+            .ok_or(plakous::api_key::ApiKeyError::Unavailable)?;
+        OpenRouterKeyGeneration::from_generation_binding(
+            plakous::api_key::CredentialProviderTag::OpenRouterPlatform,
+            self.binding.clone(),
+            value.as_bytes(),
+        )
     }
 }
 
-impl OpenRouterApiKeySource for ProductOpenRouterApiKeySource {
-    fn credential_binding(&self) -> Option<&OpenRouterCredentialBinding> {
-        Some(&self.binding)
+impl plakous::api_key::ApiKeySource<OpenRouterCredentialRequest<'_>, OpenRouterCredentialBinding>
+    for ProductOpenRouterApiKeySource
+{
+    fn authority(&self) -> &OpenRouterCredentialBinding {
+        &self.binding
     }
-
-    fn resolve(
+    fn generation_grant(
+        &self,
+        selection: &dyn plakous::api_key::ApiKeyRequest,
+    ) -> Result<OpenRouterKeyGeneration, plakous::api_key::ApiKeyError> {
+        if selection.provider() != plakous::api_key::CredentialProviderTag::OpenRouterPlatform
+            || selection.origin() != "https://openrouter.ai"
+            || selection.credential_reference().is_some()
+        {
+            return Err(plakous::api_key::ApiKeyError::BindingMismatch);
+        }
+        self.generation()
+    }
+    fn api_key(
         &self,
         _: &OpenRouterCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        self.current()
-    }
-
-    fn resolve_chat(
-        &self,
-        _: &OpenRouterChatCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        self.current()
-    }
-
-    fn resolve_messages(
-        &self,
-        _: &OpenRouterMessagesCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        self.current()
-    }
-
-    fn resolve_catalog(
-        &self,
-        _: &OpenRouterCatalogCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        self.current()
-    }
-
-    fn resolve_retrieval(
-        &self,
-        _: &OpenRouterRetrievalCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        self.current()
-    }
-
-    fn current_generation_grant(
-        &self,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        self.generation()
+        expected: &OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, plakous::api_key::ApiKeyError> {
+        if expected.provider() != plakous::api_key::CredentialProviderTag::OpenRouterPlatform
+            || expected.authority() != &self.binding
+        {
+            return Err(plakous::api_key::ApiKeyError::BindingMismatch);
+        }
+        let key = self.current()?;
+        if key.generation_grant(
+            plakous::api_key::CredentialProviderTag::OpenRouterPlatform,
+            self.binding.clone(),
+        ) != *expected
+        {
+            return Err(plakous::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
 }
 
@@ -261,13 +256,13 @@ mod tests {
         assert_eq!(label.len(), 15);
         assert!(!label.contains("key-alpha"));
         let source = ProductOpenRouterApiKeySource::new(paths.clone()).unwrap();
-        let alpha = source.current_generation_grant().unwrap();
+        let alpha = source.generation().unwrap();
 
         crate::home::secrets::set_api_key(&paths, "openrouter", "key-beta").unwrap();
-        let beta = source.current_generation_grant().unwrap();
+        let beta = source.generation().unwrap();
         assert_ne!(alpha, beta);
 
         assert!(crate::home::secrets::clear_api_key(&paths, "openrouter").unwrap());
-        assert!(source.current_generation_grant().is_err());
+        assert!(source.generation().is_err());
     }
 }

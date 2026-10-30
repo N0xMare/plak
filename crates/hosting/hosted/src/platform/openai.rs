@@ -36,7 +36,7 @@ pub(super) fn profile(model: &str) -> Option<&'static str> {
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
-    fn openai(&self) -> CliResult<Arc<dyn plakous::openai::PlatformCredentialSource>>;
+    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>>;
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/openai.rs"]

@@ -5,6 +5,8 @@ use crate::{
     XAI_PLATFORM_API_KEY_AUTHORITY_CLASS, XAI_PLATFORM_API_KEY_CREDENTIAL_SELECTION,
     XAI_PLATFORM_GROK_46_MODEL, XaiDialect, XaiPlatformApiKeyAuthority, XaiRouteKind,
 };
+pub use plakous_auth::api_key::ApiKey;
+use plakous_auth::api_key::CredentialProviderTag;
 use plakous_model::{
     Capability, CapabilityConstraints, CapabilitySet, CapacityCertificate, CapacityRule,
     ContextContract, ContextEvidenceSource, CountCertificateKind, CredentialSelectionId, Digest,
@@ -14,9 +16,7 @@ use plakous_model::{
     ProviderRouteSelection, ResolvedModelDescriptor, RouteId, RuntimeModelAuthority,
     SelectedProviderConfiguration, Support, Timestamp,
 };
-use plakous_responses::{CredentialGenerationFingerprint, CredentialProviderTag};
-use std::{collections::BTreeMap, fmt, num::NonZeroU64};
-use zeroize::Zeroizing;
+use std::{collections::BTreeMap, num::NonZeroU64};
 
 /// Executable Grok 4.6 local-tool profile; context is a caller declaration.
 pub const XAI_PLATFORM_GROK_46_PROFILE: &str = "xai.platform.grok-4.6.custom-envelope.v1";
@@ -46,80 +46,82 @@ pub enum XaiPlatformBuildError {
     Transport,
 }
 
-/// Zeroized API key; debug formatting never reveals key material.
-pub struct XaiPlatformApiKey(Zeroizing<String>);
-impl XaiPlatformApiKey {
-    /// Validates a nonempty bounded bearer without whitespace or control bytes.
-    pub fn new(value: impl Into<String>) -> Result<Self, XaiPlatformBuildError> {
-        let value = Zeroizing::new(value.into());
-        if value.is_empty() || value.len() > 16_384 || !value.bytes().all(|b| b.is_ascii_graphic())
-        {
-            return Err(XaiPlatformBuildError::Authentication);
-        }
-        Ok(Self(value))
-    }
-    /// Computes a non-secret exact grant for this key and source-owned generation.
-    pub fn grant(
-        &self,
-        authority: XaiPlatformApiKeyAuthority,
-    ) -> Result<XaiPlatformCredentialGrant, XaiPlatformBuildError> {
-        let fingerprint = CredentialGenerationFingerprint::mint_exact(
-            CredentialProviderTag::XaiPlatform,
-            self.0.as_bytes(),
-        )
-        .map_err(|_| XaiPlatformBuildError::Authentication)?;
-        Ok(XaiPlatformCredentialGrant {
-            authority,
-            fingerprint,
-        })
-    }
-    pub(crate) fn bearer(&self) -> Result<plakous_http::HeaderValue, XaiPlatformBuildError> {
-        plakous_http::sensitive_header_value(format!("Bearer {}", self.0.as_str()).into_bytes())
-            .map_err(|_| XaiPlatformBuildError::Authentication)
-    }
-}
-impl fmt::Debug for XaiPlatformApiKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("XaiPlatformApiKey(<redacted>)")
+impl From<plakous_auth::api_key::ApiKeyError> for XaiPlatformBuildError {
+    fn from(_: plakous_auth::api_key::ApiKeyError) -> Self {
+        Self::Authentication
     }
 }
 
-/// Exact non-secret grant binding an API key to one account and generation.
-#[derive(Clone, Eq, PartialEq)]
-pub struct XaiPlatformCredentialGrant {
-    pub(crate) authority: XaiPlatformApiKeyAuthority,
-    pub(crate) fingerprint: CredentialGenerationFingerprint,
-}
-impl XaiPlatformCredentialGrant {
-    pub(crate) fn execution_authority(
-        &self,
-    ) -> Result<XaiPlatformApiKeyAuthority, XaiPlatformBuildError> {
-        self.authority
-            .for_key_generation(self.fingerprint.as_bytes())
-            .map_err(|_| XaiPlatformBuildError::Authentication)
-    }
-    /// Returns the exact source-owned account and generation.
+/// Source-owned xAI authority over the shared non-secret generation grant.
+pub type XaiPlatformKeyGeneration =
+    plakous_auth::api_key::ApiKeyGenerationGrant<XaiPlatformApiKeyAuthority>;
+
+/// Fixed xAI Platform credential audience, without an alternate-origin input.
+pub struct XaiPlatformApiKeyRequest(());
+
+impl XaiPlatformApiKeyRequest {
+    /// Names the official Platform credential audience.
     #[must_use]
-    pub const fn authority(&self) -> &XaiPlatformApiKeyAuthority {
-        &self.authority
-    }
-}
-impl fmt::Debug for XaiPlatformCredentialGrant {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("XaiPlatformCredentialGrant(<redacted>)")
+    pub(crate) const fn platform() -> Self {
+        Self(())
     }
 }
 
-/// Application-owned credentials exclusively for `https://api.x.ai/v1/responses`.
-/// No OAuth or alternate-origin resolution is permitted by this source contract.
-pub trait XaiPlatformApiKeySource: Send + Sync {
-    /// Returns the current non-secret grant without exposing bearer material.
-    fn grant(&self) -> Result<XaiPlatformCredentialGrant, XaiPlatformBuildError>;
-    /// Resolves the bearer only while the supplied exact grant remains current.
-    fn api_key(
-        &self,
-        expected: &XaiPlatformCredentialGrant,
-    ) -> Result<XaiPlatformApiKey, XaiPlatformBuildError>;
+impl plakous_auth::api_key::ApiKeyRequest for XaiPlatformApiKeyRequest {
+    fn provider(&self) -> CredentialProviderTag {
+        CredentialProviderTag::XaiPlatform
+    }
+    fn origin(&self) -> &str {
+        crate::platform::XAI_PLATFORM_API_KEY_ORIGIN
+    }
+}
+
+pub(crate) const API_KEY_REQUEST: XaiPlatformApiKeyRequest = XaiPlatformApiKeyRequest::platform();
+
+#[cfg(test)]
+mod tests;
+
+/// The common source over xAI's exact request and source-owned account authority.
+pub type XaiPlatformKeySource =
+    dyn plakous_auth::api_key::ApiKeySource<XaiPlatformApiKeyRequest, XaiPlatformApiKeyAuthority>;
+
+/// Returns only the current non-secret xAI account and generation authority.
+///
+/// # Errors
+/// Refuses unavailable or changed credential authority without resolving a bearer.
+pub fn xai_api_key_generation(
+    source: &XaiPlatformKeySource,
+) -> Result<XaiPlatformKeyGeneration, XaiPlatformBuildError> {
+    let grant = source
+        .generation_grant(&API_KEY_REQUEST)
+        .map_err(|_| XaiPlatformBuildError::Authentication)?;
+    if grant.provider() != CredentialProviderTag::XaiPlatform
+        || grant.authority() != source.authority()
+    {
+        return Err(XaiPlatformBuildError::Authentication);
+    }
+    Ok(grant)
+}
+
+pub(crate) fn execution_authority(
+    grant: &XaiPlatformKeyGeneration,
+) -> Result<XaiPlatformApiKeyAuthority, XaiPlatformBuildError> {
+    grant
+        .authority()
+        .for_key_generation(grant.fingerprint().as_bytes())
+        .map_err(|_| XaiPlatformBuildError::Authentication)
+}
+
+pub(crate) fn platform_bearer(
+    key: &ApiKey,
+) -> Result<plakous_http::HeaderValue, XaiPlatformBuildError> {
+    use plakous_auth::api_key::ExposeApiKey as _;
+    let text = key.expose_secret();
+    if text.len() > 16_384 || !text.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err(XaiPlatformBuildError::Authentication);
+    }
+    plakous_http::sensitive_header_value(format!("Bearer {text}").into_bytes())
+        .map_err(|_| XaiPlatformBuildError::Authentication)
 }
 
 /// Builds the grok-4.6 route. Other reviewed ids use

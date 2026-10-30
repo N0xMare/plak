@@ -5,7 +5,7 @@ async fn sanitized_production_messages_thinking_signature_validates_for_carry() 
     let policy = behavior()?;
     let bound = policy.output_bound.bound();
     let (configured, model) = AnthropicLanguageModel::build(
-        Arc::new(crate::AnthropicApiKey::new("synthetic-carry-key")?),
+        static_key_source("synthetic-carry-key")?,
         "carry-fixture",
         &crate::AnthropicApiModel::bundled("claude-sonnet-4-6")?,
         b"sanitized-carry-facts",

@@ -9,7 +9,7 @@ impl crate::openrouter::OpenRouterCredentials for NoOpenRouterCredential {
         Err(crate::CliFailure::new("OpenRouter API key is unavailable"))
     }
 
-    fn source(&self) -> CliResult<Arc<dyn plakous::openrouter::OpenRouterApiKeySource>> {
+    fn source(&self) -> CliResult<Arc<plakous::openrouter::OpenRouterKeySource>> {
         Err(crate::CliFailure::new("OpenRouter API key is unavailable"))
     }
 }

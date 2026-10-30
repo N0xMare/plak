@@ -24,8 +24,8 @@ use plakous_model::{CancellationToken, Clock, Digest, DigestDomain};
 use crate::chat::OPENROUTER_CHAT_COMPLETIONS_PATH;
 use crate::wire::insert_attribution;
 use crate::{
-    OpenRouterApiKeyGenerationGrant, OpenRouterChatBuildError, OpenRouterChatModelEvidence,
-    OpenRouterChatRoute, OpenRouterReasoningFacts, OpenRouterRetentionPolicy,
+    OpenRouterChatBuildError, OpenRouterChatModelEvidence, OpenRouterChatRoute,
+    OpenRouterKeyGeneration, OpenRouterReasoningFacts, OpenRouterRetentionPolicy,
 };
 
 /// The effort ladder, lowest first, in OpenRouter's spelling.
@@ -35,7 +35,7 @@ const EFFORT_LADDER: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "
 pub struct OpenRouterRetrieval {
     route: OpenRouterChatRoute,
     evidence: OpenRouterChatModelEvidence,
-    generation: OpenRouterApiKeyGenerationGrant,
+    generation: OpenRouterKeyGeneration,
     client: Client,
     dial_origin: Origin,
     clock: Arc<dyn Clock>,
@@ -153,9 +153,9 @@ impl OpenRouterRetrieval {
         .map_err(|_| invalid_request("side request identity failed"))?;
         let key = self
             .route
-            .retrieval_credential(&operation, self.generation)
+            .retrieval_credential(&operation, &self.generation)
             .map_err(|_| unauthorized("side request authority is not current: credential"))?;
-        let authorization = sensitive_header_value(key.bearer_bytes())
+        let authorization = sensitive_header_value(crate::route::bearer_bytes(&key))
             .map_err(|_| unauthorized("OpenRouter authorization could not be represented"))?;
         let mut headers = HeaderMap::new();
         headers.insert(

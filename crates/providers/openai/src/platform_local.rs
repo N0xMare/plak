@@ -37,10 +37,10 @@ use plakous_responses::{
 use thiserror::Error;
 
 use crate::{
-    OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiApiKeyGenerationGrant,
-    OpenAiPlatformConfigurationAuthority, PlatformProjectPolicy, StandardOpenAiHttpConfig,
-    compile_openai_platform_configuration, config::OPENAI_PLATFORM_RESPONSES_PATH,
-    config::OPENAI_RESPONSES_DIALECT_REVISION, openai_platform_request_policy,
+    OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiKeyGeneration, OpenAiPlatformConfigurationAuthority,
+    PlatformProjectPolicy, StandardOpenAiHttpConfig, compile_openai_platform_configuration,
+    config::OPENAI_PLATFORM_RESPONSES_PATH, config::OPENAI_RESPONSES_DIALECT_REVISION,
+    openai_platform_request_policy,
 };
 
 const PREFLIGHT_REVISION: u32 = 1;
@@ -58,11 +58,11 @@ struct PlatformExecution {
     authority: OpenAiPlatformConfigurationAuthority,
     client: Client,
     dial_origin: Origin,
-    generation: OpenAiApiKeyGenerationGrant,
+    generation: OpenAiKeyGeneration,
 }
 
 struct PlatformDispatchGuard {
-    generation: OpenAiApiKeyGenerationGrant,
+    generation: OpenAiKeyGeneration,
 }
 
 /// Exact Platform API-key model using stateless Responses and local replay.
@@ -74,7 +74,7 @@ pub struct OpenAiPlatformModel {
     service: Arc<ResponsesAttemptService<PlatformExecution, PlatformDispatchGuard>>,
     descriptor: ResolvedModelDescriptor,
     configuration: CompiledProviderConfiguration,
-    generation: OpenAiApiKeyGenerationGrant,
+    generation: OpenAiKeyGeneration,
     clock: Arc<dyn Clock>,
     client: Client,
     dial_origin: Origin,
@@ -324,7 +324,7 @@ impl OpenAiPlatformModel {
             .map_err(|_| "OpenAI API admission is no longer current")?;
         let route = self.authority.target().route();
         let authorization = route
-            .platform_bearer_header(self.generation)
+            .platform_bearer_header(&self.generation)
             .map_err(|_| "OpenAI API key generation is no longer current")?;
         let mut headers = HeaderMap::new();
         headers.insert(HEADER_ACCEPT, HeaderValue::from_static(accept));
@@ -390,7 +390,7 @@ impl LanguageModel for OpenAiPlatformModel {
             self.authority
                 .target()
                 .route()
-                .revalidate_platform_generation(self.generation)
+                .revalidate_platform_generation(&self.generation)
                 .map_err(|_| RuntimeModelAuthorityError::ForeignAuthority)?;
             let runtime = fresh_runtime_authority(&self.authority, &self.descriptor, checked_at)
                 .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
@@ -699,7 +699,7 @@ fn platform_preflight<'a>(
             authority
                 .target()
                 .route()
-                .platform_bearer_header(generation)
+                .platform_bearer_header(&generation)
                 .map_err(|_| ResponsesDispatchRejection::Authentication)?
         };
         let mut headers = HeaderMap::new();
@@ -758,12 +758,12 @@ fn revalidate_platform(
     if request.cancellation().is_cancelled() || Instant::now() >= request.deadline() {
         return Err(ResponsesDispatchRejection::Unavailable);
     }
-    let generation = request.response_head_guard_mut().generation;
+    let generation = request.response_head_guard_mut().generation.clone();
     execution
         .authority
         .target()
         .route()
-        .revalidate_platform_generation(generation)
+        .revalidate_platform_generation(&generation)
         .map_err(|_| ResponsesDispatchRejection::Authentication)?;
     if request
         .binding()
@@ -794,7 +794,7 @@ fn fresh_runtime_authority(
         descriptor,
         authority.target().account_binding(),
         authority.target().credential_authority_binding(),
-        generation_number(grant),
+        generation_number(&grant),
         checked_at,
         descriptor
             .context_contract()
@@ -874,7 +874,7 @@ fn request_matches_configuration(
             .all(|(request, configured)| request == configured)
 }
 
-fn generation_number(grant: OpenAiApiKeyGenerationGrant) -> u64 {
+fn generation_number(grant: &OpenAiKeyGeneration) -> u64 {
     let fingerprint = grant.fingerprint();
     u64::from_be_bytes(fingerprint.as_bytes()[..8].try_into().unwrap_or([0; 8])).max(1)
 }

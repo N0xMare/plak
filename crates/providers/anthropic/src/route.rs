@@ -3,12 +3,16 @@
 use std::fmt;
 use std::sync::Arc;
 
+pub use plakous_auth::api_key::ApiKey;
+use plakous_auth::api_key::ExposeApiKey as _;
+use plakous_auth::api_key::{
+    ApiKeyAuthorityToken, ApiKeyError, ApiKeyRequest, ApiKeySource, CredentialProviderTag,
+};
 use plakous_messages::{MessagesAttempt, MessagesAttemptBinding};
 use plakous_model::{
     Clock, Digest, DigestDomain, ModelAdapterProfileId, ModelFamilyId, ModelId, ProtocolId,
     ResolvedModelDescriptor, RouteId, SessionLineage, SystemClock, ValidatedRequestPlan,
 };
-use secrecy::{ExposeSecret as _, SecretString as SecrecyString};
 
 use crate::{
     AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, AnthropicMessagesDialect,
@@ -21,7 +25,6 @@ pub const ANTHROPIC_PLATFORM_ORIGIN: &str = "https://api.anthropic.com";
 pub const ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
 
 const MAX_ACCOUNT_IDENTITY_BYTES: usize = 256;
-const MAX_API_KEY_BYTES: usize = 64 * 1024;
 
 /// Opaque non-secret account identity used to isolate prepared operations.
 ///
@@ -34,7 +37,7 @@ pub struct AnthropicAccountIdentity(AccountIdentityInner);
 #[derive(Clone)]
 enum AccountIdentityInner {
     Label(Digest),
-    KeyAuthority(Arc<()>),
+    KeyAuthority(ApiKeyAuthorityToken),
 }
 
 impl AnthropicAccountIdentity {
@@ -61,10 +64,8 @@ impl AnthropicAccountIdentity {
             .map(Self)
     }
 
-    fn from_key(key: &AnthropicApiKey) -> Self {
-        Self(AccountIdentityInner::KeyAuthority(
-            key.credential_authority.clone(),
-        ))
+    fn from_key(key: &ApiKey) -> Self {
+        Self(AccountIdentityInner::KeyAuthority(key.authority().clone()))
     }
 
     /// Returns the stable non-secret digest for a label-derived account identity.
@@ -90,7 +91,7 @@ impl PartialEq for AnthropicAccountIdentity {
             (
                 AccountIdentityInner::KeyAuthority(left),
                 AccountIdentityInner::KeyAuthority(right),
-            ) => Arc::ptr_eq(left, right),
+            ) => left == right,
             (AccountIdentityInner::Label(_), AccountIdentityInner::KeyAuthority(_))
             | (AccountIdentityInner::KeyAuthority(_), AccountIdentityInner::Label(_)) => false,
         }
@@ -111,17 +112,17 @@ impl fmt::Debug for AnthropicAccountIdentity {
 /// one key retain it, while independently wrapping the same text creates a new
 /// authority. Neither the key nor the token is serializable or formatted.
 #[derive(Clone)]
-pub struct AnthropicCredentialAuthority(Arc<()>);
+pub struct AnthropicCredentialAuthority(ApiKeyAuthorityToken);
 
 impl AnthropicCredentialAuthority {
-    fn from_key(key: &AnthropicApiKey) -> Self {
-        Self(key.credential_authority.clone())
+    fn from_key(key: &ApiKey) -> Self {
+        Self(key.authority().clone())
     }
 }
 
 impl PartialEq for AnthropicCredentialAuthority {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        self.0 == other.0
     }
 }
 
@@ -169,93 +170,49 @@ impl AnthropicMessagesTransport {
     }
 }
 
-/// A non-serializable Anthropic API key whose formatting is always redacted.
-///
-/// Non-`Clone`: pass by reference or move ownership. Authority
-/// identity is still opaque via an internal token for generation grants.
-pub struct AnthropicApiKey {
-    value: SecrecyString,
-    credential_authority: Arc<()>,
-}
+/// Exact Anthropic Platform audience supplied only by the selected integration.
+pub struct AnthropicApiKeyRequest(());
 
-impl AnthropicApiKey {
-    /// Validates and wraps an API key without inspecting environment variables.
-    ///
-    /// # Errors
-    ///
-    /// Returns an invalid-configuration error for an empty key or control bytes.
-    pub fn new(value: impl Into<String>) -> Result<Self, AnthropicError> {
-        let value = value.into();
-        if value.is_empty()
-            || value.len() > MAX_API_KEY_BYTES
-            || value.bytes().any(|byte| byte.is_ascii_control())
-        {
-            return Err(AnthropicError::new(
-                AnthropicErrorKind::InvalidConfiguration,
-                AnthropicErrorPhase::Prepare,
-                "Anthropic API key must be bounded, non-empty, and contain no control bytes",
-            ));
-        }
-        Ok(Self {
-            value: SecrecyString::from(value),
-            credential_authority: Arc::new(()),
-        })
-    }
-
-    #[cfg(feature = "native-auth")]
-    fn with_retained_authority(
-        value: impl Into<String>,
-        credential_authority: Arc<()>,
-    ) -> Result<Self, AnthropicError> {
-        let key = Self::new(value)?;
-        Ok(Self {
-            value: key.value,
-            credential_authority,
-        })
-    }
-
-    /// A non-secret fingerprint of the key text: the first 16 hex digits of a
-    /// domain-separated SHA-256, enough to key a cache per key. It does not
-    /// reveal the key, but anyone holding a candidate key can check it
-    /// against the fingerprint, so it stays in owner-only files.
+impl AnthropicApiKeyRequest {
+    /// Names the official Platform credential audience.
     #[must_use]
-    pub fn fingerprint(&self) -> String {
-        let mut hex = plakous_model::sha256_hex(&[
-            b"anthropic.api-key-fingerprint.v1",
-            self.expose().as_bytes(),
-        ]);
-        hex.truncate(16);
-        hex
-    }
-
-    pub(crate) fn expose(&self) -> &str {
-        self.value.expose_secret()
+    pub(crate) const fn platform() -> Self {
+        Self(())
     }
 }
 
-impl fmt::Debug for AnthropicApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("AnthropicApiKey(<redacted>)")
+impl ApiKeyRequest for AnthropicApiKeyRequest {
+    fn provider(&self) -> CredentialProviderTag {
+        CredentialProviderTag::AnthropicPlatform
+    }
+
+    fn origin(&self) -> &str {
+        ANTHROPIC_PLATFORM_ORIGIN
     }
 }
 
-impl fmt::Display for AnthropicApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("<redacted>")
+/// Caller-owned API-key source for the exact Anthropic request context.
+pub type AnthropicKeySource = dyn ApiKeySource<AnthropicApiKeyRequest>;
+
+pub(crate) fn current_api_key(source: &AnthropicKeySource) -> Result<ApiKey, AnthropicError> {
+    let request = AnthropicApiKeyRequest::platform();
+    let grant = source.generation_grant(&request).map_err(api_key_error)?;
+    if grant.provider() != CredentialProviderTag::AnthropicPlatform {
+        return Err(api_key_error(ApiKeyError::BindingMismatch));
     }
+    source.api_key(&request, &grant).map_err(api_key_error)
 }
 
-/// Resolves the currently selected API key at preparation and dispatch fences.
-/// Implementations must return sanitized errors and must not fall back to OAuth.
-pub trait AnthropicApiKeySource: Send + Sync + 'static {
-    /// Reads the current key without changing the selected account.
-    fn current_key(&self) -> Result<AnthropicApiKey, AnthropicError>;
-}
-
-impl AnthropicApiKeySource for AnthropicApiKey {
-    fn current_key(&self) -> Result<AnthropicApiKey, AnthropicError> {
-        Self::new(self.expose().to_owned())
-    }
+pub(crate) fn api_key_error(error: ApiKeyError) -> AnthropicError {
+    let kind = match error {
+        ApiKeyError::InvalidKey | ApiKeyError::InvalidGenerationBinding => {
+            AnthropicErrorKind::InvalidConfiguration
+        }
+        ApiKeyError::BindingMismatch | ApiKeyError::Unavailable => {
+            AnthropicErrorKind::Authentication
+        }
+    };
+    AnthropicError::new(kind, AnthropicErrorPhase::Prepare, error.to_string())
 }
 
 /// Resolved API-key authentication bound to the official Platform origin.
@@ -263,7 +220,7 @@ impl AnthropicApiKeySource for AnthropicApiKey {
 /// Clone shares the non-`Clone` key via [`Arc`] without duplicating secret bytes.
 #[derive(Clone)]
 pub struct AnthropicApiKeyAuth {
-    key: Arc<AnthropicApiKey>,
+    key: Arc<ApiKey>,
     audience_origin: &'static str,
     credential_authority: AnthropicCredentialAuthority,
 }
@@ -271,7 +228,7 @@ pub struct AnthropicApiKeyAuth {
 impl AnthropicApiKeyAuth {
     /// Binds a key to the official Anthropic Platform origin.
     #[must_use]
-    pub fn platform(key: AnthropicApiKey) -> Self {
+    pub fn platform(key: ApiKey) -> Self {
         let credential_authority = AnthropicCredentialAuthority::from_key(&key);
         Self {
             key: Arc::new(key),
@@ -359,7 +316,7 @@ impl AnthropicAttemptAuthorization {
         {
             return Err(credential_binding_error());
         }
-        Ok(use_key(self.auth.key.expose()))
+        Ok(use_key(self.auth.key.expose_secret()))
     }
 }
 
@@ -407,16 +364,16 @@ impl AnthropicPlatformRoute {
     pub(crate) fn credential_binding(&self) -> Result<Digest, AnthropicError> {
         digest_identity(
             b"anthropic.platform.credential.v1",
-            self.auth.key.expose().as_bytes(),
+            self.auth.key.expose_secret().as_bytes(),
         )
     }
 
     pub(crate) fn validate_current_key(
         &self,
-        source: &dyn AnthropicApiKeySource,
+        source: &AnthropicKeySource,
     ) -> Result<(), AnthropicError> {
-        let key = source.current_key()?;
-        if self.is_claude_oauth() || key.expose() != self.auth.key.expose() {
+        let key = current_api_key(source)?;
+        if self.is_claude_oauth() || key.expose_secret() != self.auth.key.expose_secret() {
             return Err(credential_binding_error());
         }
         Ok(())
@@ -426,16 +383,16 @@ impl AnthropicPlatformRoute {
     /// source's current key: the one exposure path of an isolated side request.
     pub(crate) fn with_current_key<T>(
         &self,
-        source: &dyn AnthropicApiKeySource,
+        source: &AnthropicKeySource,
         use_key: impl FnOnce(&str) -> T,
     ) -> Result<T, AnthropicError> {
         self.validate_current_key(source)?;
-        Ok(use_key(self.auth.key.expose()))
+        Ok(use_key(self.auth.key.expose_secret()))
     }
 
     /// Creates the official API-key route. Custom origins require a distinct
     /// route type and explicit credential binding; this type cannot be mutated.
-    /// Cloning one [`AnthropicApiKey`] preserves its authority identity;
+    /// Cloning one [`ApiKey`] preserves its authority identity;
     /// independently wrapping even identical key text creates a new authority
     /// and therefore requires newly prepared requests. This constructor uses a
     /// conservative key-scoped account identity; use [`Self::for_account`] when
@@ -445,7 +402,7 @@ impl AnthropicPlatformRoute {
     ///
     /// Returns an invalid-configuration error if the stable route identity
     /// cannot be constructed.
-    pub fn new(key: AnthropicApiKey) -> Result<Self, AnthropicError> {
+    pub fn new(key: ApiKey) -> Result<Self, AnthropicError> {
         let account = AnthropicAccountIdentity::from_key(&key);
         Self::for_account(key, account)
     }
@@ -463,7 +420,7 @@ impl AnthropicPlatformRoute {
     /// Returns an invalid-configuration error if a stable route or credential
     /// authority identity cannot be constructed.
     pub fn for_account(
-        key: AnthropicApiKey,
+        key: ApiKey,
         account: AnthropicAccountIdentity,
     ) -> Result<Self, AnthropicError> {
         Ok(Self {
@@ -491,7 +448,7 @@ impl AnthropicPlatformRoute {
     /// Returns an invalid-configuration error if the stable route identity
     /// cannot be constructed.
     pub fn claude_oauth(
-        token: AnthropicApiKey,
+        token: ApiKey,
         account: AnthropicAccountIdentity,
     ) -> Result<Self, AnthropicError> {
         Ok(Self {
@@ -533,10 +490,7 @@ impl AnthropicPlatformRoute {
                 "OAuth access-token rotation requires the Claude OAuth route",
             ));
         }
-        let key = AnthropicApiKey::with_retained_authority(
-            token,
-            Arc::clone(&self.auth.key.credential_authority),
-        )?;
+        let key = self.auth.key.renew_with(token).map_err(api_key_error)?;
         let credential_authority = AnthropicCredentialAuthority::from_key(&key);
         Ok(Self {
             id: self.id.clone(),

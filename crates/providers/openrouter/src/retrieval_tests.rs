@@ -12,17 +12,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
-use crate::{
-    OpenRouterApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin, OpenRouterToolChoiceModes,
-    StaticOpenRouterApiKeySource,
-};
+use crate::{ApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin, OpenRouterToolChoiceModes};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 fn route(retention: OpenRouterRetentionPolicy) -> TestResult<OpenRouterChatRoute> {
     Ok(OpenRouterChatRoute::new_local_fixture_with_retention(
-        Arc::new(StaticOpenRouterApiKeySource::new(
-            OpenRouterApiKey::new("offline-retrieval-key")?,
+        Arc::new(crate::static_openrouter_api_key_source(
+            ApiKey::new("offline-retrieval-key")?,
             "offline-account",
             "offline-authority",
         )?),
@@ -220,7 +217,11 @@ async fn admission_is_revalidated_before_every_physical_request() -> TestResult 
     assert_eq!(error.kind(), ChatRetrievalErrorKind::Unauthorized);
 
     let mut rotated = retrieval(None)?;
-    rotated.generation = OpenRouterApiKeyGenerationGrant::from_generation_binding(b"rotated")?;
+    rotated.generation = OpenRouterKeyGeneration::from_generation_binding(
+        plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform,
+        rotated.generation.authority().clone(),
+        b"rotated",
+    )?;
     let error = rotated
         .retrieve(&request, &CancellationToken::new())
         .await

@@ -245,7 +245,7 @@ async fn start_local_model(
     let now = authority.observed_at();
     let ((token, _, _), identity) = manager.identity_credentials()?;
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new(token)?,
+        ApiKey::new(token)?,
         AnthropicAccountIdentity::new(identity.account_uuid().as_str())?,
     )?;
     let resolved = oauth_resolved_target(
@@ -435,7 +435,7 @@ async fn same_account_relogin_replays_persisted_thinking_without_reusing_stale_p
             .unwrap()
     );
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-access-token-fixture").unwrap(),
+        ApiKey::new("oauth-access-token-fixture").unwrap(),
         AnthropicAccountIdentity::new(after.identity.account_uuid().as_str()).unwrap(),
     )
     .unwrap();
@@ -622,7 +622,7 @@ fn a_resumed_reasoning_block_without_its_signature_is_never_replayed_as_text() {
 
     let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).unwrap();
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-access-token-fixture").unwrap(),
+        ApiKey::new("oauth-access-token-fixture").unwrap(),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).unwrap(),
     )
     .unwrap();
@@ -726,7 +726,7 @@ fn enrolled_oauth_descriptor_uses_route_evidence_and_pin_expiry() {
     let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
     let expires_at = pin_expires_at(now).expect("pin expiry");
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-access-token-fixture").expect("key"),
+        ApiKey::new("oauth-access-token-fixture").expect("key"),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).expect("account"),
     )
     .expect("route");
@@ -855,7 +855,7 @@ fn oauth_complete_wire_boundary_preserves_typed_context_denial() {
     let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).unwrap();
     let expiry = pin_expires_at(now).unwrap();
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("offline-unused").unwrap(),
+        ApiKey::new("offline-unused").unwrap(),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).unwrap(),
     )
     .unwrap();
@@ -973,7 +973,7 @@ fn unknown_reference_context_row_fails_closed() {
     let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
     let expires_at = pin_expires_at(now).expect("pin expiry");
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-unknown-access-token-fixture").expect("key"),
+        ApiKey::new("oauth-unknown-access-token-fixture").expect("key"),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).expect("account"),
     )
     .expect("route");
@@ -1060,7 +1060,7 @@ async fn refreshed_session_models(
     let now = authority.observed_at();
     let ((token, _, _), identity) = manager.identity_credentials().unwrap();
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new(token).unwrap(),
+        ApiKey::new(token).unwrap(),
         AnthropicAccountIdentity::new(identity.account_uuid().as_str()).unwrap(),
     )
     .unwrap();
@@ -1351,7 +1351,7 @@ fn haiku_5_5_is_enrolled_on_oauth_with_the_shared_window() {
     let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
     let expires_at = pin_expires_at(now).expect("pin expiry");
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-haiku-access-token-fixture").expect("key"),
+        ApiKey::new("oauth-haiku-access-token-fixture").expect("key"),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).expect("account"),
     )
     .expect("route");
@@ -1392,7 +1392,7 @@ fn haiku_4_5_is_not_enrolled() {
     let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
     let expires_at = pin_expires_at(now).expect("pin expiry");
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-haiku-access-token-fixture").expect("key"),
+        ApiKey::new("oauth-haiku-access-token-fixture").expect("key"),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).expect("account"),
     )
     .expect("route");
@@ -2081,7 +2081,7 @@ fn oauth_access_token_rebind_keeps_prepared_target_binding() {
     let now = Timestamp::new(CLAUDE_OAUTH_REVIEWED_AT_UNIX, 0).expect("reviewed at");
     let expires_at = pin_expires_at(now).expect("pin expiry");
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-access-token-one").expect("key"),
+        ApiKey::new("oauth-access-token-one").expect("key"),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).expect("account"),
     )
     .expect("route");
@@ -2103,7 +2103,7 @@ fn oauth_access_token_rebind_keeps_prepared_target_binding() {
         .validate_route(&rotated)
         .expect("rebind must retain prepared credential authority");
     let independently_wrapped = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-access-token-two").expect("key"),
+        ApiKey::new("oauth-access-token-two").expect("key"),
         AnthropicAccountIdentity::new(TEST_GRANT_BINDING).expect("account"),
     )
     .expect("independent route");

@@ -21,7 +21,7 @@ async fn runtime_with_source(
     spec: &ApiRuntimeSpec<'_>,
     client: Client,
     origin: Origin,
-    source: Option<Arc<dyn plakous::anthropic::AnthropicApiKeySource>>,
+    source: Option<Arc<plakous::anthropic::AnthropicKeySource>>,
     window: ApiWindow,
 ) -> (SessionRuntimeBinding, plakous::model::Digest) {
     let native_ptc = spec.composition == CompositionSelection::NativePtc;
@@ -92,7 +92,10 @@ async fn runtime_with_source(
         PlatformProvider::Xai => {
             use plakous::xai::*;
             let source = keys.xai().unwrap();
-            let authority = source.grant().unwrap().authority().clone();
+            let authority = xai_api_key_generation(source.as_ref())
+                .unwrap()
+                .authority()
+                .clone();
             let provisional = xai_platform_selection_for(spec.literal_model, behavior).unwrap();
             let selected =
                 xai_platform_selection_for(spec.literal_model, exact_route_retention(&provisional))
@@ -690,18 +693,34 @@ fn assert_compaction_wire(provider: PlatformProvider, requests: &[serde_json::Va
 }
 
 struct RecoverableKey(Arc<std::sync::atomic::AtomicBool>);
-impl plakous::anthropic::AnthropicApiKeySource for RecoverableKey {
-    fn current_key(
+impl plakous::api_key::ApiKeySource<plakous::anthropic::AnthropicApiKeyRequest> for RecoverableKey {
+    fn authority(&self) -> &() {
+        &()
+    }
+    fn generation_grant(
         &self,
-    ) -> Result<plakous::anthropic::AnthropicApiKey, plakous::anthropic::AnthropicError> {
+        _: &dyn plakous::api_key::ApiKeyRequest,
+    ) -> Result<plakous::api_key::ApiKeyGenerationGrant, plakous::api_key::ApiKeyError> {
         if self.0.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(plakous::anthropic::AnthropicError::new(
-                plakous::anthropic::AnthropicErrorKind::Authentication,
-                plakous::anthropic::AnthropicErrorPhase::Prepare,
-                "synthetic source temporarily unavailable",
-            ));
+            return Err(plakous::api_key::ApiKeyError::Unavailable);
         }
-        plakous::anthropic::AnthropicApiKey::new("synthetic-compaction-key")
+        Ok(
+            plakous::api_key::ApiKey::new("synthetic-compaction-key")?.generation_grant(
+                plakous::api_key::CredentialProviderTag::AnthropicPlatform,
+                (),
+            ),
+        )
+    }
+    fn api_key(
+        &self,
+        request: &plakous::anthropic::AnthropicApiKeyRequest,
+        expected: &plakous::api_key::ApiKeyGenerationGrant,
+    ) -> Result<plakous::api_key::ApiKey, plakous::api_key::ApiKeyError> {
+        use plakous::api_key::ApiKeyError;
+        if &self.generation_grant(request)? != expected {
+            return Err(ApiKeyError::BindingMismatch);
+        }
+        plakous::api_key::ApiKey::new("synthetic-compaction-key")
     }
 }
 
@@ -732,7 +751,7 @@ async fn completed_compaction_recovers_after_reconstructing_fresh_model_without_
         spawned_child: false,
     };
     let outage = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let source: Arc<dyn plakous::anthropic::AnthropicApiKeySource> =
+    let source: Arc<plakous::anthropic::AnthropicKeySource> =
         Arc::new(RecoverableKey(outage.clone()));
     let (client, origin, peer) =
         endpoint_with_cut(provider, "claude-sonnet-5", Some(outage.clone())).await;

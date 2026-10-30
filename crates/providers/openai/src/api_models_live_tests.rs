@@ -13,17 +13,15 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
 use super::{get_models, list_via};
-use crate::{
-    CredentialAuthorityId, CredentialReference, SecretString, StaticPlatformCredentialSource,
-};
+use crate::{ApiKey, CredentialAuthorityId, CredentialReference, StaticOpenAiKeySource};
 
 fn reference() -> CredentialReference {
     CredentialReference::application("openai-list-fixture-reference").expect("reference")
 }
 
-fn fixture_source() -> StaticPlatformCredentialSource {
-    StaticPlatformCredentialSource::new(
-        SecretString::new("plak-test-openai-models-key").expect("key"),
+fn fixture_source() -> StaticOpenAiKeySource {
+    crate::static_openai_api_key_source(
+        ApiKey::new("plak-test-openai-models-key").expect("key"),
         reference(),
         CredentialAuthorityId::new("openai-list-fixture").expect("authority"),
     )

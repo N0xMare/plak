@@ -10,6 +10,7 @@
 //! lists. `ultra` is Codex-client-only and is not an API effort. `none` is
 //! an explicit effort; an omitted effort stays refused.
 
+use plakous_auth::api_key::ExposeApiKey as _;
 use std::time::Instant;
 
 use plakous_http::{
@@ -22,7 +23,7 @@ use serde_json::Value;
 
 use crate::{
     CredentialReference, EndpointOrigin, ErrorPhase, OPENAI_PLATFORM_ORIGIN, OpenAiError,
-    PlatformCredentialSource, RetryClass,
+    OpenAiKeySource, RetryClass,
 };
 
 /// Exact Models API path on the Platform origin.
@@ -159,12 +160,11 @@ fn transport_error() -> OpenAiError {
 /// Returns an error when the credential cannot be resolved.
 pub fn openai_api_key_fingerprint(
     reference: &CredentialReference,
-    source: &dyn PlatformCredentialSource,
+    source: &OpenAiKeySource,
 ) -> Result<String, OpenAiError> {
     let origin = EndpointOrigin::parse(OPENAI_PLATFORM_ORIGIN)
         .map_err(|_| list_error("origin is invalid"))?;
-    let grant = source
-        .generation_grant(reference, &origin)
+    let grant = crate::config::platform_generation_grant(source, reference, &origin)
         .map_err(|_| list_error("credential is unavailable"))?;
     Ok(fingerprint_hex(grant.fingerprint().as_bytes()))
 }
@@ -192,7 +192,7 @@ fn fingerprint_hex(bytes: &[u8; 32]) -> String {
 /// keeps its cache or the bundled table.
 pub async fn list_openai_api_models(
     reference: &CredentialReference,
-    source: &dyn PlatformCredentialSource,
+    source: &OpenAiKeySource,
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
 ) -> Result<Vec<OpenAiListedModel>, OpenAiError> {
     let origin =
@@ -201,7 +201,7 @@ pub async fn list_openai_api_models(
         .map_err(|_| transport_error())?
         .with_observer(observer);
     let key = platform_key(reference, source)?;
-    let body = get_models(&client, origin, key.expose(), deadline_instant()?).await?;
+    let body = get_models(&client, origin, key.expose_secret(), deadline_instant()?).await?;
     parse_openai_models_page(&body)
 }
 
@@ -209,26 +209,30 @@ pub async fn list_openai_api_models(
 #[cfg(test)]
 async fn list_via(
     reference: &CredentialReference,
-    source: &dyn PlatformCredentialSource,
+    source: &OpenAiKeySource,
     client: &Client,
     dial_origin: Origin,
 ) -> Result<Vec<OpenAiListedModel>, OpenAiError> {
     let key = platform_key(reference, source)?;
-    let body = get_models(client, dial_origin, key.expose(), deadline_instant()?).await?;
+    let body = get_models(
+        client,
+        dial_origin,
+        key.expose_secret(),
+        deadline_instant()?,
+    )
+    .await?;
     parse_openai_models_page(&body)
 }
 
 fn platform_key(
     reference: &CredentialReference,
-    source: &dyn PlatformCredentialSource,
-) -> Result<crate::SecretString, OpenAiError> {
+    source: &OpenAiKeySource,
+) -> Result<crate::ApiKey, OpenAiError> {
     let endpoint = EndpointOrigin::parse(OPENAI_PLATFORM_ORIGIN)
         .map_err(|_| list_error("origin is invalid"))?;
-    let grant = source
-        .generation_grant(reference, &endpoint)
+    let grant = crate::config::platform_generation_grant(source, reference, &endpoint)
         .map_err(|_| list_error("credential is unavailable"))?;
-    source
-        .api_key_for_generation(reference, &endpoint, grant)
+    crate::config::platform_key_for_generation(source, reference, &endpoint, &grant)
         .map_err(|_| list_error("credential is unavailable"))
 }
 

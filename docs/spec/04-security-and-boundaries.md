@@ -787,6 +787,21 @@ Codex device flow arm only after the code or approval has arrived.
 
 ### 3.4 Isolation between accounts and routes
 
+API-key sources share the `plakous-auth::api_key` secret and grant types, not
+admission authority. Metadata lookup takes `ApiKeyRequest` data; bearer
+resolution requires the owning integration's privately constructed concrete
+request. Static sources match provider tag, exact origin, credential reference,
+source authority and admitted generation before returning a key. No default
+source method resolves a bearer during generation lookup or selects a fallback.
+The supported API-key facade exposes neither raw-text access nor built-in
+request construction. Only the owning integration reads raw bearer text through
+the accessible but unsupported `plakous-auth::api_key::ExposeApiKey` path;
+the facade's existing `auth::ExposeSecret` trait does not expose API keys.
+Keys are zeroized,
+non-`Clone` and non-serializable. Retaining container identity during renewal
+requires the original key; possession of an opaque token cannot graft authority
+onto an unrelated secret.
+
 A credential handle is scoped to one integration profile and one selected
 account slot; there is no account-scoped store kind. **No account is inferred
 from a slot**: each record stores its own provider-derived account binding,

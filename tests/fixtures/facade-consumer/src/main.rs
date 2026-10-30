@@ -34,6 +34,7 @@ async fn inventory_workflows() -> Result<(), Box<dyn std::error::Error>> {
     use inventory::codex_local_composition_reconstruction as reconstruction;
 
     inventory::construction_helpers_are_supported_facade_workflows();
+    inventory::shared_api_key_source_is_a_supported_facade_workflow()?;
     inventory::application_accepts_caller_supplied_cancellation_without_subscription_features();
     inventory::local_composition_attachment_is_a_capability_poor_facade_workflow();
     reconstruction::four_and_seven_tool_profiles_reconstruct_exactly_and_refuse_cross_profile_substitution()?;

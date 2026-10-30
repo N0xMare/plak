@@ -1,8 +1,8 @@
 use super::{
     Arc, ConfigError, CredentialReference, Deserialize, Deserializer, Digest, DigestDomain,
-    EndpointOrigin, OPENAI_PLATFORM_ORIGIN, OPENAI_PLATFORM_ROUTE_ID, OpenAiRoute,
-    OpenAiRouteConformance, PlatformCredentialSource, PlatformProjectPolicy, PlatformStoragePolicy,
-    ResponsesDialect, RouteAuth, Serialize, StorageMode, Url,
+    EndpointOrigin, OPENAI_PLATFORM_ORIGIN, OPENAI_PLATFORM_ROUTE_ID, OpenAiKeySource, OpenAiRoute,
+    OpenAiRouteConformance, PlatformProjectPolicy, PlatformStoragePolicy, ResponsesDialect,
+    RouteAuth, Serialize, StorageMode, Url,
 };
 
 /// Serializable, secret-free `OpenAI` Platform route configuration.
@@ -62,7 +62,7 @@ impl OpenAiPlatformRouteConfig {
 
     /// Resolves configuration with an application-owned credential source.
     #[must_use]
-    pub fn resolve(self, source: Arc<dyn PlatformCredentialSource>) -> OpenAiRoute {
+    pub fn resolve(self, source: Arc<OpenAiKeySource>) -> OpenAiRoute {
         OpenAiRoute::new(
             OPENAI_PLATFORM_ROUTE_ID,
             ResponsesDialect::platform(),

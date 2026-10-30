@@ -70,7 +70,6 @@ pub(crate) use stream::{
 
 mod attempt_host;
 mod canonical_host;
-mod credential;
 mod images;
 mod model_host;
 mod project_host;
@@ -106,9 +105,6 @@ pub use canonical_host::{
     ResponsesHostedProgramContext, project_canonical_terminal,
     project_canonical_terminal_with_hosted_programs,
 };
-pub use credential::{
-    CredentialGenerationFingerprint, CredentialGenerationFingerprintError, CredentialProviderTag,
-};
 pub use images::{
     RESPONSES_IMAGE_EXCHANGE_TIMEOUT, RESPONSES_IMAGE_MAX_IMAGE_BYTES,
     RESPONSES_IMAGE_MAX_RESPONSE_BYTES, ResponsesImageAuthorization, ResponsesImageEndpoint,
@@ -119,6 +115,9 @@ pub use model_host::{
     PreparedResponsesModelExecution, ResponsesModelBuildError, ResponsesModelErrorHook,
     bind_reachability_probe, start_prepared_responses_model_call,
 };
+use plakous_auth::api_key::CredentialGenerationFingerprint;
+#[cfg(test)]
+use plakous_auth::api_key::CredentialProviderTag;
 pub use project_host::{
     ResponsesArtifactCandidateInput, ResponsesPairedArtifactCandidate,
     ResponsesPairedTerminalProjection, ResponsesProjectError, ResponsesProviderRequestBinding,

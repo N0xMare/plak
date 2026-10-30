@@ -7,14 +7,11 @@ use plakous_model::{
 };
 
 use super::*;
-use crate::{
-    OpenRouterApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin, OpenRouterToolChoiceModes,
-    StaticOpenRouterApiKeySource,
-};
+use crate::{ApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin, OpenRouterToolChoiceModes};
 
 fn route() -> Result<OpenRouterChatRoute, Box<dyn std::error::Error>> {
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("responses-target-test-key")?,
+    let source = Arc::new(crate::static_openrouter_api_key_source(
+        ApiKey::new("responses-target-test-key")?,
         "responses-target-account",
         "responses-target-authority",
     )?);

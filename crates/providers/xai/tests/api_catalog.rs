@@ -10,19 +10,39 @@ use plakous_xai::*;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::Arc;
 
-struct Source;
+struct Source(XaiPlatformApiKeyAuthority);
 fn authority() -> XaiPlatformApiKeyAuthority {
     XaiPlatformApiKeyAuthority::new("fixture-account", "fixture-xai-key", 1).unwrap()
 }
-impl XaiPlatformApiKeySource for Source {
-    fn grant(&self) -> Result<XaiPlatformCredentialGrant, XaiPlatformBuildError> {
-        XaiPlatformApiKey::new("synthetic-xai-platform-key".to_owned())?.grant(authority())
+impl plakous_auth::api_key::ApiKeySource<XaiPlatformApiKeyRequest, XaiPlatformApiKeyAuthority>
+    for Source
+{
+    fn authority(&self) -> &XaiPlatformApiKeyAuthority {
+        &self.0
+    }
+    fn generation_grant(
+        &self,
+        _: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<XaiPlatformKeyGeneration, plakous_auth::api_key::ApiKeyError> {
+        Ok(ApiKey::new("synthetic-xai-platform-key")?.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
+            self.0.clone(),
+        ))
     }
     fn api_key(
         &self,
-        _expected: &XaiPlatformCredentialGrant,
-    ) -> Result<XaiPlatformApiKey, XaiPlatformBuildError> {
-        XaiPlatformApiKey::new("synthetic-xai-platform-key".to_owned())
+        _: &XaiPlatformApiKeyRequest,
+        expected: &XaiPlatformKeyGeneration,
+    ) -> Result<ApiKey, plakous_auth::api_key::ApiKeyError> {
+        let key = ApiKey::new("synthetic-xai-platform-key")?;
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
+            self.0.clone(),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
 }
 
@@ -69,7 +89,7 @@ fn every_catalog_effort_constructs_on_the_xai_platform_route() {
                 xai_platform_selection_for(model.id(), behavior(*effort)).and_then(|selection| {
                     XaiPlatformModel::new(
                         authority(),
-                        Arc::new(Source),
+                        Arc::new(Source(authority())),
                         NonZeroU64::new(200_000).unwrap(),
                         selection,
                         Arc::new(FixedClock::new(
@@ -125,7 +145,7 @@ fn an_envelope_over_the_shared_context_is_refused() {
         let built = xai_platform_selection_for("grok-4.7", over.clone()).and_then(|selection| {
             XaiPlatformModel::new(
                 authority(),
-                Arc::new(Source),
+                Arc::new(Source(authority())),
                 NonZeroU64::new(input).unwrap(),
                 selection,
                 Arc::new(FixedClock::new(
@@ -148,7 +168,7 @@ fn an_envelope_over_the_shared_context_is_refused() {
     let built = xai_platform_selection_for("grok-4.7", over).and_then(|selection| {
         XaiPlatformModel::new(
             authority(),
-            Arc::new(Source),
+            Arc::new(Source(authority())),
             NonZeroU64::new(1).unwrap(),
             selection,
             Arc::new(FixedClock::new(

@@ -20,12 +20,12 @@ use std::time::Duration;
 use futures_util::StreamExt as _;
 use plakous_agent::{AgentBuilder, AgentRequestPolicy};
 use plakous_anthropic::{
-    ANTHROPIC_API_VERSION, AnthropicAccountIdentity, AnthropicApiKey, AnthropicError,
-    AnthropicErrorKind, AnthropicErrorPhase, AnthropicHttpDeadline,
-    AnthropicLocalHttpServiceFactory, AnthropicMessagesDialect, AnthropicModel,
-    AnthropicPlatformRoute, AnthropicRetryGrant, ClaudeCredentialRenewal, ClaudeProfile,
-    MessagesRequestTranslator, ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership,
-    call_local_anthropic_operation, start_anthropic_messages_model_call,
+    ANTHROPIC_API_VERSION, AnthropicAccountIdentity, AnthropicError, AnthropicErrorKind,
+    AnthropicErrorPhase, AnthropicHttpDeadline, AnthropicLocalHttpServiceFactory,
+    AnthropicMessagesDialect, AnthropicModel, AnthropicPlatformRoute, AnthropicRetryGrant, ApiKey,
+    ClaudeCredentialRenewal, ClaudeProfile, MessagesRequestTranslator, ResolvedAnthropicMessages,
+    ThinkingSupport, ToolOwnership, call_local_anthropic_operation,
+    start_anthropic_messages_model_call,
 };
 use plakous_http::{Client, FaultPlan, Limits, Origin, TlsConfigIdentity};
 use plakous_messages::{MessagesAttempt, MessagesAttemptError};
@@ -122,7 +122,7 @@ fn resolved_fixture_model(model: &str) -> TestResult<ResolvedAnthropicMessages> 
     Ok(ResolvedAnthropicMessages::new(
         AnthropicMessagesDialect::stable(),
         AnthropicPlatformRoute::for_account(
-            AnthropicApiKey::new(FIXTURE_KEY)?,
+            ApiKey::new(FIXTURE_KEY)?,
             AnthropicAccountIdentity::new("local-fixture-account")?,
         )?,
         AnthropicModel::new(
@@ -164,7 +164,7 @@ fn resolved_oauth_fixture_model(model: &str) -> TestResult<ResolvedAnthropicMess
     Ok(ResolvedAnthropicMessages::new(
         AnthropicMessagesDialect::claude_oauth(),
         AnthropicPlatformRoute::claude_oauth(
-            AnthropicApiKey::new("oauth-loopback-access-token-fixture")?,
+            ApiKey::new("oauth-loopback-access-token-fixture")?,
             AnthropicAccountIdentity::new("oauth-loopback-account")?,
         )?,
         AnthropicModel::new(
@@ -1077,7 +1077,7 @@ fn hosted_ptc_prepared() -> TestResult<(
     let resolved = ResolvedAnthropicMessages::new(
         AnthropicMessagesDialect::stable(),
         AnthropicPlatformRoute::for_account(
-            AnthropicApiKey::new(FIXTURE_KEY)?,
+            ApiKey::new(FIXTURE_KEY)?,
             AnthropicAccountIdentity::new("local-fixture-account")?,
         )?,
         AnthropicModel::new(

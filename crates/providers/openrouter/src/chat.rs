@@ -43,7 +43,7 @@ use crate::wire::{
     usage_limit_kind,
 };
 use crate::{
-    OpenRouterApiKeyGenerationGrant, OpenRouterChatRoute, OpenRouterRetentionPolicy,
+    OpenRouterChatRoute, OpenRouterKeyGeneration, OpenRouterRetentionPolicy,
     OpenRouterRoutingPolicy,
 };
 
@@ -559,7 +559,7 @@ impl OpenRouterChatTarget {
             &self.descriptor,
             self.route.identity().account_binding(),
             self.route.identity().credential_authority_binding(),
-            generation_number(grant),
+            generation_number(&grant),
             checked_at,
             Some(self.evidence.expires_at()),
         )
@@ -1039,7 +1039,7 @@ impl LanguageModel for OpenRouterChatLanguageModel {
 struct OpenRouterChatHooks {
     target: OpenRouterChatTarget,
     clock: Arc<dyn Clock>,
-    generation: OpenRouterApiKeyGenerationGrant,
+    generation: OpenRouterKeyGeneration,
 }
 
 #[derive(Clone)]
@@ -1063,7 +1063,7 @@ impl ChatHttpHooks for OpenRouterChatHooks {
             .map_err(|_| {
                 ChatAttemptProtocolError::new("OpenRouter Chat dispatch authority unavailable")
             })?;
-        if current.credential_generation() != generation_number(self.generation) {
+        if current.credential_generation() != generation_number(&self.generation) {
             return Err(ChatAttemptProtocolError::new(
                 "OpenRouter Chat dispatch credential changed",
             ));
@@ -1071,9 +1071,9 @@ impl ChatHttpHooks for OpenRouterChatHooks {
         let key = self
             .target
             .route
-            .chat_credential(physical, self.generation)
+            .chat_credential(physical, &self.generation)
             .map_err(|_| ChatAttemptProtocolError::new("OpenRouter Chat authentication failed"))?;
-        let authorization = sensitive_header_value(key.bearer_bytes())
+        let authorization = sensitive_header_value(crate::route::bearer_bytes(&key))
             .map_err(|_| ChatAttemptProtocolError::new("OpenRouter Chat authorization failed"))?;
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -1322,7 +1322,7 @@ fn chat_model_error(descriptor: &ResolvedModelDescriptor, error: &ChatAttemptErr
 
 fn current_generation(
     target: &OpenRouterChatTarget,
-) -> Result<OpenRouterApiKeyGenerationGrant, crate::OpenRouterAuthError> {
+) -> Result<OpenRouterKeyGeneration, crate::OpenRouterAuthError> {
     target.route.current_credential_generation_grant()
 }
 

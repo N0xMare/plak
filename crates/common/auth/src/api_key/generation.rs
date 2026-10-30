@@ -19,17 +19,20 @@ const MAX_CREDENTIAL_GENERATION_BINDING_BYTES: usize = 64 * 1024;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum CredentialProviderTag {
-    /// OpenAI Platform and Codex credential authority.
+    /// Anthropic Platform credential authority.
+    AnthropicPlatform,
+    /// `OpenAI` Platform and Codex credential authority.
     OpenAiPlatform,
-    /// OpenRouter Platform credential authority.
+    /// `OpenRouter` Platform credential authority.
     OpenRouterPlatform,
-    /// xAI Platform and SuperGrok credential authority.
+    /// `xAI` Platform and `SuperGrok` credential authority.
     XaiPlatform,
 }
 
 impl CredentialProviderTag {
     const fn legacy_bytes(self) -> &'static [u8] {
         match self {
+            Self::AnthropicPlatform => b"anthropic-platform",
             Self::OpenAiPlatform => b"openai-platform",
             Self::OpenRouterPlatform => b"openrouter-platform",
             Self::XaiPlatform => b"xai-platform",
@@ -59,6 +62,13 @@ impl CredentialGenerationFingerprint {
         {
             return Err(CredentialGenerationFingerprintError);
         }
+        Ok(Self::for_valid_key(provider, generation_binding))
+    }
+
+    pub(super) fn for_valid_key(
+        provider: CredentialProviderTag,
+        generation_binding: &[u8],
+    ) -> Self {
         let provider_tag = provider.legacy_bytes();
         let mut hasher = Sha256::new();
         hasher.update(CREDENTIAL_GENERATION_DOMAIN);
@@ -66,7 +76,7 @@ impl CredentialGenerationFingerprint {
         hasher.update(provider_tag);
         hasher.update((generation_binding.len() as u64).to_be_bytes());
         hasher.update(generation_binding);
-        Ok(Self(hasher.finalize().into()))
+        Self(hasher.finalize().into())
     }
 
     /// Returns the fingerprint bytes.
@@ -203,6 +213,10 @@ mod tests {
     -> Result<(), CredentialGenerationFingerprintError> {
         let binding = b"same generation binding";
         let fingerprints = [
+            CredentialGenerationFingerprint::mint_exact(
+                CredentialProviderTag::AnthropicPlatform,
+                binding,
+            )?,
             CredentialGenerationFingerprint::mint_exact(
                 CredentialProviderTag::OpenAiPlatform,
                 binding,

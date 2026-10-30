@@ -28,7 +28,10 @@ impl NativeCodexAuthorization {
         // keeps one fingerprint per stored credential generation.
         let mut binding = self.expected_selection_epoch.bytes().to_vec();
         binding.extend_from_slice(&self.expected_fence.generation().get().to_be_bytes());
-        match crate::config::mint_openai_generation(&binding) {
+        match CredentialGenerationFingerprint::mint_exact(
+            plakous_auth::api_key::CredentialProviderTag::OpenAiPlatform,
+            &binding,
+        ) {
             Ok(fingerprint) => fingerprint,
             Err(_) => unreachable!("a digest is a valid credential-generation binding"),
         }

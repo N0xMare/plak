@@ -1,16 +1,47 @@
 use super::*;
 
 #[test]
+fn foreign_provider_grant_is_refused_before_anthropic_bearer_resolution()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct ForeignProvider(AtomicUsize);
+    impl ApiKeySource<AnthropicApiKeyRequest> for ForeignProvider {
+        fn authority(&self) -> &() {
+            &()
+        }
+        fn generation_grant(
+            &self,
+            _: &dyn ApiKeyRequest,
+        ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, ApiKeyError> {
+            Ok(ApiKey::new("synthetic-key")?
+                .generation_grant(CredentialProviderTag::OpenAiPlatform, ()))
+        }
+        fn api_key(
+            &self,
+            _: &AnthropicApiKeyRequest,
+            _: &plakous_auth::api_key::ApiKeyGenerationGrant,
+        ) -> Result<ApiKey, ApiKeyError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            ApiKey::new("synthetic-key")
+        }
+    }
+    let source = ForeignProvider(AtomicUsize::new(0));
+    assert!(current_api_key(&source).is_err());
+    assert_eq!(source.0.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[test]
 fn credential_debug_and_display_are_redacted() -> Result<(), AnthropicError> {
     let sentinel = "sk-ant-sentinel-never-print";
-    // AnthropicApiKey is intentionally non-`Clone` (secrecy hygiene):
+    // ApiKey is intentionally non-`Clone` (secrecy hygiene):
     // independently wrapping the same text creates a new authority token.
-    let key = AnthropicApiKey::new(sentinel)?;
+    let key = ApiKey::new(sentinel)?;
     assert!(!format!("{key:?} {key}").contains(sentinel));
     let route = AnthropicPlatformRoute::new(key)?;
     assert!(!format!("{route:?}").contains(sentinel));
 
-    let independently_wrapped = AnthropicPlatformRoute::new(AnthropicApiKey::new(sentinel)?)?;
+    let independently_wrapped = AnthropicPlatformRoute::new(ApiKey::new(sentinel)?)?;
     assert_ne!(route.account(), independently_wrapped.account());
     assert_ne!(
         route.auth().credential_authority(),
@@ -24,7 +55,7 @@ fn api_replay_account_tracks_key_generation_without_changing_the_selection_label
 -> Result<(), AnthropicError> {
     let route = |key| {
         AnthropicPlatformRoute::for_account(
-            AnthropicApiKey::new(key)?,
+            ApiKey::new(key)?,
             AnthropicAccountIdentity::new("stable-account")?,
         )
     };
@@ -48,13 +79,11 @@ fn credential_authority_is_exact_and_independent_of_stable_account_identity()
 -> Result<(), AnthropicError> {
     let account = AnthropicAccountIdentity::new("stable-account")?;
     let first = AnthropicPlatformRoute::for_account(
-        AnthropicApiKey::new("sk-ant-generation-one")?,
+        ApiKey::new("sk-ant-generation-one")?,
         account.clone(),
     )?;
-    let rotated = AnthropicPlatformRoute::for_account(
-        AnthropicApiKey::new("sk-ant-generation-two")?,
-        account,
-    )?;
+    let rotated =
+        AnthropicPlatformRoute::for_account(ApiKey::new("sk-ant-generation-two")?, account)?;
     assert_eq!(first.account(), rotated.account());
     assert_ne!(
         first.auth().credential_authority(),
@@ -68,7 +97,7 @@ fn credential_authority_is_exact_and_independent_of_stable_account_identity()
 fn oauth_access_token_rotation_retains_prepared_credential_authority() -> Result<(), AnthropicError>
 {
     let route = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-access-token-one")?,
+        ApiKey::new("oauth-access-token-one")?,
         AnthropicAccountIdentity::new("grant-fixture-authority")?,
     )?;
     let rotated = route.with_oauth_access_token("oauth-access-token-two")?;
@@ -79,25 +108,25 @@ fn oauth_access_token_rotation_retains_prepared_credential_authority() -> Result
         route.auth().credential_authority(),
         rotated.auth().credential_authority()
     );
-    assert!(Arc::ptr_eq(
-        &route.auth.key.credential_authority,
-        &rotated.auth.key.credential_authority
-    ));
-    assert_ne!(route.auth.key.expose(), rotated.auth.key.expose());
+    assert_eq!(route.auth.key.authority(), rotated.auth.key.authority());
+    assert_ne!(
+        route.auth.key.expose_secret(),
+        rotated.auth.key.expose_secret()
+    );
     Ok(())
 }
 
 #[cfg(feature = "native-auth")]
 #[test]
 fn oauth_access_token_rotation_rejects_platform_and_empty_tokens() -> Result<(), AnthropicError> {
-    let platform = AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-platform")?)?;
+    let platform = AnthropicPlatformRoute::new(ApiKey::new("sk-ant-platform")?)?;
     assert!(
         platform
             .with_oauth_access_token("oauth-access-token")
             .is_err()
     );
     let oauth = AnthropicPlatformRoute::claude_oauth(
-        AnthropicApiKey::new("oauth-access-token-one")?,
+        ApiKey::new("oauth-access-token-one")?,
         AnthropicAccountIdentity::new("grant-fixture-authority")?,
     )?;
     assert!(oauth.with_oauth_access_token("").is_err());

@@ -458,9 +458,9 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "ebc6183bab0f1f33a2ee8f48c1ee83e5c0db9a33b04c0224d52aec3d1efecfbf",
     "plakous-js-runtime": "ed321c92092e4cb542b36fa116ad3084aaa0ae1f42e8efd7a7239c4f47424496",
-    "plakous": "bcf172b3068f9c00d7542c3d6b51a3015550a619dde4cad9374674b8d6159700",
+    "plakous": "b0ed36086c84288433124585f2a961e4fd5259d556096c082a92f6b2bced175c",
     "plakous-agent": "a19134205d444cf4b88520e8da37268e19e9527aae92ac337ffb68691c7bdba7",
-    "plakous-anthropic": "7c4f9083430f414b1822336d1e33efdf7ca455bb246270dbf50ac21b9cb79e35",
+    "plakous-anthropic": "f0b6f3e7691d49d4edfcbcf5e25698467a44d7d59c5f9cdcbf9a32319f963642",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
     "plakous-auth": "66114ada91a9e5f095e80ca61b9268d97d4c684b2fa5d98dfd61d11c87bb6c63",
     "plakous-chat-completions": "251fd50384154edbb997b1b0394df1cda3b1795f081a383db30835cca6a0295e",
@@ -470,7 +470,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "ce7a257bc2a1e8e92a83f0c8398bbd4360f92353c891a7989719104e9132b929",
     "plakous-messages": "eae7f4a067455ca31bab364c39a597256a19c84e636a17af6b6012bba40284b1",
     "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
-    "plakous-openai": "3fe06a92bc52ac907b0c2df165c41e69de4d8c3ce2efa34964d5a2bf1130eacf",
+    "plakous-openai": "a8afd100012cad8485d0e8c5805f639feb8d08a9a5d643d62150fcac1a917d6c",
     "plakous-tool-files": "f91b59c3d65dff91d2fe462da36376abf3d82c44a5a86abf209d435cd046f759",
     "plakous-tool-plan": "7e57f5a8c4b1b39a7967fe97dbb83d7d78822878b40638d823e49c5a7d0b021c",
     "plakous-tool-process": "f70f0cd80a32e357f1b8381a78eeb0aa69861bb7f5fad614f0c52831a029c5cb",
@@ -478,11 +478,11 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-tool-web": "928dd7ad73b6660b8ed288f93fef0928f83701d952d7cdb24c9c19a18ca4d3c1",
     "plakous-compose": "03528287f0b94dff33643625af2dbc244727cb8a940d3d5a54a59f8195cc196f",
     "plakous-prompts": "da32ae7e9b35e762a8f7ff3a5b6c1b967b29339d4c5586af82804c2c9e59bc74",
-    "plakous-openrouter": "8d7049bf4a200b1b02aa0022990d90c77cdf861cfa86d536903221f6640bcd3c",
-    "plakous-responses": "49012ffd675d654725a1f7dd3ec5e444f17abec0bc56f18b622dcee58e5bbe0c",
+    "plakous-openrouter": "5de41552038e20cf6510e6ecdd837ee2afed7c22c627f33a67ff231b2b39a471",
+    "plakous-responses": "b05da90414cda9c49b347d72ad81ae2addf7afc0a12ad4cbd0e508391c5f4a1b",
     "plakous-store": "64f90ad9ab7d4143c47844d30dfcc4ce41fe06a980d80d6bfba681a3ae378015",
     "plakous-tools": "1140b910a06b7b83f425d6e0ed50a9466d7adc8e2da6a07b4885d4a3c0a737a0",
-    "plakous-xai": "e36c3961aee9e8e158e47cb626bfda4246fa44b05dd2b26458f65673dea317c0",
+    "plakous-xai": "78e4ebcef45cac0521c10b9b53a995923b56620f951f3402c074e1147d991d7e",
 }
 
 
@@ -518,7 +518,7 @@ EXCLUDED_CLOSURE_PACKAGES = {
     ),
     # Credential-store, MCP and Claude closures never acquire JWT crypto.
     ("plakous", ("auth",)): ("jsonwebtoken", "plakous-openai", "plakous-xai"),
-    ("plakous", ("openai",)): ("htmd", "plakous-auth"),
+    ("plakous", ("openai",)): ("htmd", "jsonwebtoken"),
     ("plakous", ("web-fetch",)): (
         "plakous-openai", "plakous-xai", "plakous-anthropic", "plakous-openrouter",
     ),

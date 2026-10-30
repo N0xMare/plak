@@ -152,12 +152,13 @@ use crate::{
     OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiLanguageModel, OpenAiRoute, OpenAiTarget,
     StandardOpenAiHttpConfig, StorageMode, config::OPENAI_CODEX_MODELS_PATH,
 };
+use plakous_auth::api_key::CredentialGenerationFingerprint;
 use plakous_responses::ResponsesPhysicalRequestBinding;
 use plakous_responses::{
-    CredentialGenerationFingerprint, ResponsesAccountSlot, ResponsesAuthSlot,
-    ResponsesCredentialAuthority, ResponsesDispatchRejection, ResponsesHeaderBinding,
-    ResponsesPreflightFuture, ResponsesPreflightRequest, ResponsesPreparedPhysicalRequest,
-    ResponsesRequestAuthority, ResponsesRevalidationRequest,
+    ResponsesAccountSlot, ResponsesAuthSlot, ResponsesCredentialAuthority,
+    ResponsesDispatchRejection, ResponsesHeaderBinding, ResponsesPreflightFuture,
+    ResponsesPreflightRequest, ResponsesPreparedPhysicalRequest, ResponsesRequestAuthority,
+    ResponsesRevalidationRequest,
 };
 
 /// Exact `OpenAI` authentication origin pinned by the native profile.

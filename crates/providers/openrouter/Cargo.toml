@@ -26,6 +26,7 @@ reason = "Existing item-local debt; admission and duplicate-tag matrices use lab
 test-clock = []
 
 [dependencies]
+plakous-auth.workspace = true
 plakous-attempt.workspace = true
 plakous-chat-completions.workspace = true
 plakous-exchange.workspace = true

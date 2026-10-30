@@ -63,6 +63,7 @@ use jsonwebtoken::jwk::{
     AlgorithmParameters, EllipticCurve, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode_header};
+use plakous_auth::api_key::CredentialGenerationFingerprint;
 use plakous_auth::oauth_orchestrator::jwt::decode;
 use plakous_auth::oauth_orchestrator::{
     BrowserLoopbackHooks, BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks,
@@ -104,9 +105,9 @@ use plakous_model::{
     SubscriptionUsageUnavailable, Timestamp,
 };
 use plakous_responses::{
-    CredentialGenerationFingerprint, ResponsesAuthSlot, ResponsesCredentialAuthority,
-    ResponsesDispatchRejection, ResponsesHeaderBinding, ResponsesPreflightFuture,
-    ResponsesPreflightRequest, ResponsesPreparedPhysicalRequest, ResponsesRevalidationRequest,
+    ResponsesAuthSlot, ResponsesCredentialAuthority, ResponsesDispatchRejection,
+    ResponsesHeaderBinding, ResponsesPreflightFuture, ResponsesPreflightRequest,
+    ResponsesPreparedPhysicalRequest, ResponsesRevalidationRequest,
 };
 use serde::de::{self, DeserializeOwned, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};

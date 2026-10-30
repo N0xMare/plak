@@ -77,9 +77,10 @@ pub use platform::{
     xai_platform_request_lowering_facts, xai_platform_stream_event_policy,
 };
 pub use platform_binding::{
-    XAI_PLATFORM_EXECUTION_REVISION, XAI_PLATFORM_GROK_46_PROFILE, XaiPlatformApiKey,
-    XaiPlatformApiKeySource, XaiPlatformBuildError, XaiPlatformCredentialGrant,
-    xai_platform_selection, xai_platform_selection_for,
+    ApiKey, XAI_PLATFORM_EXECUTION_REVISION, XAI_PLATFORM_GROK_46_PROFILE,
+    XaiPlatformApiKeyRequest, XaiPlatformBuildError, XaiPlatformKeyGeneration,
+    XaiPlatformKeySource, xai_api_key_generation, xai_platform_selection,
+    xai_platform_selection_for,
 };
 pub use platform_model::XaiPlatformModel;
 

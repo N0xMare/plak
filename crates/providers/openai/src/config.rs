@@ -19,6 +19,10 @@ use std::{future::Future, pin::Pin};
 
 #[cfg(feature = "native-auth")]
 use plakous_auth::CredentialFence;
+pub use plakous_auth::api_key::ApiKey;
+use plakous_auth::api_key::{
+    ApiKeyGenerationGrant, ApiKeyRequest, ApiKeySource, CredentialProviderTag, StaticApiKeySource,
+};
 #[cfg(feature = "native-auth")]
 use plakous_auth::subscription_limit::SubscriptionRequestPermit;
 #[cfg(feature = "native-auth")]
@@ -30,10 +34,8 @@ use plakous_model::{
     ModelRequest, ProtocolId, ResolvedModelDescriptor, RouteId, Support, SystemClock,
     ValidatedRequestPlan,
 };
-use plakous_responses::CredentialGenerationFingerprint;
 #[cfg(feature = "native-auth")]
 use plakous_responses::ResponsesPhysicalRequestBinding;
-use secrecy::{ExposeSecret as _, SecretString as SecrecyString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 use url::Url;
@@ -386,62 +388,6 @@ impl<'de> Deserialize<'de> for EndpointOrigin {
     }
 }
 
-/// A secret string whose diagnostics never expose its contents.
-///
-/// Backed by [`secrecy::SecretString`] and zeroized on drop. This wrapper is
-/// deliberately non-`Clone` and provides no public secret-exposure method so
-/// Platform bearers stay awkward to inspect and cannot cross a serialization
-/// boundary.
-///
-/// ```compile_fail
-/// use plakous_openai::SecretString;
-///
-/// fn requires_serialize<T: serde::Serialize>() {}
-/// requires_serialize::<SecretString>();
-/// ```
-///
-/// ```compile_fail
-/// use plakous_openai::SecretString;
-///
-/// let secret = SecretString::new("synthetic-sentinel")?;
-/// let duplicate = secret.clone();
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
-///
-/// ```compile_fail
-/// use plakous_openai::SecretString;
-///
-/// let secret = SecretString::new("synthetic-sentinel")?;
-/// let raw = secret.expose_secret();
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
-pub struct SecretString(SecrecyString);
-
-impl SecretString {
-    /// Wraps a non-empty secret.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the supplied secret is empty.
-    pub fn new(value: impl Into<String>) -> Result<Self, ConfigError> {
-        let value = value.into();
-        if value.is_empty() {
-            return Err(ConfigError::EmptyField("secret"));
-        }
-        Ok(Self(SecrecyString::from(value)))
-    }
-
-    pub(crate) fn expose(&self) -> &str {
-        self.0.expose_secret()
-    }
-}
-
-impl fmt::Debug for SecretString {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("SecretString(<redacted>)")
-    }
-}
-
 /// A closed, serializable reference to an application-owned Platform credential.
 #[derive(Clone, Eq, PartialEq)]
 pub struct CredentialReference {
@@ -489,84 +435,23 @@ impl CredentialReference {
     }
 }
 
-/// Caller-injected in-memory Platform API-key source bound to one exact
-/// application credential reference and the official Platform origin.
-pub struct StaticPlatformCredentialSource {
-    key: SecretString,
-    generation: Option<OpenAiApiKeyGenerationGrant>,
+/// The shared static source with the route's source-owned authority type.
+pub type StaticOpenAiKeySource = StaticApiKeySource<CredentialAuthorityId>;
+
+/// Binds an injected key to the official Platform origin and exact reference.
+#[must_use]
+pub fn static_openai_api_key_source(
+    key: ApiKey,
     reference: CredentialReference,
     authority: CredentialAuthorityId,
-}
-
-impl StaticPlatformCredentialSource {
-    /// Creates one exact in-memory source without exposing the key through
-    /// cloning, formatting, or serialization.
-    #[must_use]
-    pub fn new(
-        key: SecretString,
-        reference: CredentialReference,
-        authority: CredentialAuthorityId,
-    ) -> Self {
-        let generation = OpenAiApiKeyGenerationGrant::from_secret(&key).ok();
-        Self {
-            key,
-            generation,
-            reference,
-            authority,
-        }
-    }
-}
-
-impl PlatformCredentialSource for StaticPlatformCredentialSource {
-    fn credential_authority(&self) -> &CredentialAuthorityId {
-        &self.authority
-    }
-
-    fn api_key(
-        &self,
-        reference: &CredentialReference,
-        origin: &EndpointOrigin,
-    ) -> Result<SecretString, AuthError> {
-        if reference != &self.reference || origin.as_str() != OPENAI_PLATFORM_ORIGIN {
-            return Err(AuthError::BindingMismatch);
-        }
-        SecretString::new(self.key.expose()).map_err(|_| AuthError::SourceFailure)
-    }
-
-    fn generation_grant(
-        &self,
-        reference: &CredentialReference,
-        origin: &EndpointOrigin,
-    ) -> Result<OpenAiApiKeyGenerationGrant, AuthError> {
-        if reference != &self.reference || origin.as_str() != OPENAI_PLATFORM_ORIGIN {
-            return Err(AuthError::BindingMismatch);
-        }
-        self.generation.ok_or(AuthError::SourceFailure)
-    }
-
-    fn api_key_for_generation(
-        &self,
-        reference: &CredentialReference,
-        origin: &EndpointOrigin,
-        expected: OpenAiApiKeyGenerationGrant,
-    ) -> Result<SecretString, AuthError> {
-        let current = self.generation_grant(reference, origin)?;
-        if current != expected {
-            return Err(AuthError::BindingMismatch);
-        }
-        SecretString::new(self.key.expose()).map_err(|_| AuthError::SourceFailure)
-    }
-}
-
-impl fmt::Debug for StaticPlatformCredentialSource {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("StaticPlatformCredentialSource")
-            .field("key", &"<redacted>")
-            .field("reference", &"<redacted>")
-            .field("authority", &"<redacted>")
-            .finish()
-    }
+) -> StaticOpenAiKeySource {
+    StaticApiKeySource::for_key(
+        key,
+        CredentialProviderTag::OpenAiPlatform,
+        OPENAI_PLATFORM_ORIGIN,
+        Some(reference.id),
+        authority,
+    )
 }
 
 impl fmt::Debug for CredentialReference {
@@ -643,113 +528,84 @@ impl fmt::Debug for CredentialAuthorityId {
     }
 }
 
-/// Non-secret authority for one exact current `OpenAI` API-key generation.
-///
-/// The grant retains only a provider-tagged digest. Public credential-source
-/// implementations can construct one from a generation-unique nonce or fence;
-/// the raw binding is hashed and never retained.
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct OpenAiApiKeyGenerationGrant(CredentialGenerationFingerprint);
+/// Source-owned Platform generation over the shared credential grant.
+pub type OpenAiKeyGeneration = ApiKeyGenerationGrant<CredentialAuthorityId>;
 
-impl OpenAiApiKeyGenerationGrant {
-    /// Constructs a grant from canonical bytes unique to one API-key generation.
-    ///
-    /// # Errors
-    ///
-    /// Rejects an empty or oversized binding.
-    pub fn from_generation_binding(binding: &[u8]) -> Result<Self, ConfigError> {
-        mint_openai_generation(binding)
-            .map(Self)
-            .map_err(|_| ConfigError::InvalidCredentialGenerationBinding)
+#[cfg(test)]
+mod api_key_tests;
+
+/// Exact Platform reference and origin retained by one credential resolution.
+pub struct OpenAiApiKeyRequest<'a> {
+    reference: &'a CredentialReference,
+    origin: &'a EndpointOrigin,
+}
+
+impl<'a> OpenAiApiKeyRequest<'a> {
+    /// Constructs an explicit audience/reference request; sources still validate both.
+    #[must_use]
+    pub(crate) const fn new(
+        reference: &'a CredentialReference,
+        origin: &'a EndpointOrigin,
+    ) -> Self {
+        Self { reference, origin }
     }
 
-    fn from_secret(secret: &SecretString) -> Result<Self, AuthError> {
-        mint_openai_generation(secret.expose().as_bytes())
-            .map(Self)
-            .map_err(|_| AuthError::SourceFailure)
+    /// Exact application-owned credential reference.
+    #[must_use]
+    pub const fn reference(&self) -> &CredentialReference {
+        self.reference
     }
 
-    pub(crate) const fn fingerprint(self) -> CredentialGenerationFingerprint {
-        self.0
+    /// Exact endpoint audience, never selected by fallback.
+    #[must_use]
+    pub const fn endpoint(&self) -> &EndpointOrigin {
+        self.origin
     }
 }
 
-pub(crate) fn mint_openai_generation(
-    binding: &[u8],
-) -> Result<CredentialGenerationFingerprint, plakous_responses::CredentialGenerationFingerprintError>
-{
-    CredentialGenerationFingerprint::mint_exact(
-        plakous_responses::CredentialProviderTag::OpenAiPlatform,
-        binding,
-    )
-}
-
-impl fmt::Debug for OpenAiApiKeyGenerationGrant {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("OpenAiApiKeyGenerationGrant(<redacted fingerprint>)")
+impl ApiKeyRequest for OpenAiApiKeyRequest<'_> {
+    fn provider(&self) -> CredentialProviderTag {
+        CredentialProviderTag::OpenAiPlatform
+    }
+    fn origin(&self) -> &str {
+        self.origin.as_str()
+    }
+    fn credential_reference(&self) -> Option<&str> {
+        Some(&self.reference.id)
     }
 }
 
-/// An application-owned, refresh-capable source for Platform API credentials.
-pub trait PlatformCredentialSource: Send + Sync + 'static {
-    /// Returns the stable non-secret identity of this credential authority.
-    ///
-    /// Separate resolver instances or stores that can select different
-    /// credentials must use different identities. The identifier is digested
-    /// before it enters a prepared operation binding.
-    fn credential_authority(&self) -> &CredentialAuthorityId;
+/// The shared source contract over the Platform's exact request and authority types.
+pub type OpenAiKeySource = dyn for<'a> ApiKeySource<OpenAiApiKeyRequest<'a>, CredentialAuthorityId>;
 
-    /// Resolves an origin-bound API key for one request.
-    ///
-    /// # Errors
-    ///
-    /// Returns a redaction-safe authorization error when resolution fails.
-    fn api_key(
-        &self,
-        reference: &CredentialReference,
-        origin: &EndpointOrigin,
-    ) -> Result<SecretString, AuthError>;
-
-    /// Returns a non-secret lease for the exact API-key generation that would
-    /// be resolved now.
-    ///
-    /// The compatibility default fails closed without calling [`Self::api_key`].
-    /// A source must override this method with a generation nonce, fence, or
-    /// other non-secret grant to make paid dispatch eligible. Secret material
-    /// may be resolved only later through [`Self::api_key_for_generation`],
-    /// after the paid authority has reserved the exact admitted request.
-    ///
-    /// # Errors
-    ///
-    /// Returns a redaction-safe source or binding error.
-    fn generation_grant(
-        &self,
-        _reference: &CredentialReference,
-        _origin: &EndpointOrigin,
-    ) -> Result<OpenAiApiKeyGenerationGrant, AuthError> {
-        Err(AuthError::SourceFailure)
+pub(crate) fn platform_generation_grant(
+    source: &OpenAiKeySource,
+    reference: &CredentialReference,
+    origin: &EndpointOrigin,
+) -> Result<OpenAiKeyGeneration, AuthError> {
+    let grant = source.generation_grant(&OpenAiApiKeyRequest::new(reference, origin))?;
+    if grant.provider() != CredentialProviderTag::OpenAiPlatform
+        || grant.authority() != source.authority()
+    {
+        return Err(AuthError::BindingMismatch);
     }
+    Ok(grant)
+}
 
-    /// Resolves a bearer only if it still matches an admitted generation.
-    ///
-    /// The compatibility default resolves once, derives its non-secret grant,
-    /// and rejects a generation swap before returning the bearer.
-    ///
-    /// # Errors
-    ///
-    /// Returns a redaction-safe source or binding error.
-    fn api_key_for_generation(
-        &self,
-        reference: &CredentialReference,
-        origin: &EndpointOrigin,
-        expected: OpenAiApiKeyGenerationGrant,
-    ) -> Result<SecretString, AuthError> {
-        let key = self.api_key(reference, origin)?;
-        if OpenAiApiKeyGenerationGrant::from_secret(&key)? != expected {
-            return Err(AuthError::BindingMismatch);
-        }
-        Ok(key)
+pub(crate) fn platform_key_for_generation(
+    source: &OpenAiKeySource,
+    reference: &CredentialReference,
+    origin: &EndpointOrigin,
+    expected: &OpenAiKeyGeneration,
+) -> Result<ApiKey, AuthError> {
+    if expected.provider() != CredentialProviderTag::OpenAiPlatform
+        || expected.authority() != source.authority()
+    {
+        return Err(AuthError::BindingMismatch);
     }
+    source
+        .api_key(&OpenAiApiKeyRequest::new(reference, origin), expected)
+        .map_err(Into::into)
 }
 
 /// Explicit Platform response-retention policy.
@@ -865,7 +721,7 @@ pub enum AccessMode {
 enum RouteAuth {
     Platform {
         reference: CredentialReference,
-        source: Arc<dyn PlatformCredentialSource>,
+        source: Arc<OpenAiKeySource>,
         project: PlatformProjectPolicy,
         local_fixture: bool,
     },
@@ -1104,7 +960,7 @@ fn credential_authority_binding(auth: &RouteAuth) -> Digest {
             1,
             &[
                 b"openai-platform-credential-authority",
-                source.credential_authority().as_str().as_bytes(),
+                source.authority().as_str().as_bytes(),
             ],
         ),
         #[cfg(feature = "native-auth")]

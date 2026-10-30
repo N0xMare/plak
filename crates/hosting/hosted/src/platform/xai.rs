@@ -10,7 +10,7 @@ pub(super) use plakous::xai::XaiListedModel as ListedModel;
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
-    fn xai(&self) -> CliResult<Arc<dyn plakous::xai::XaiPlatformApiKeySource>>;
+    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>>;
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/xai.rs"]
@@ -40,7 +40,10 @@ pub(super) async fn construct(
     )
     .map_err(api_error)?;
     plakous::xai::XaiPlatformModel::preflight_configuration(&selected).map_err(api_error)?;
-    let authority = source.grant().map_err(api_error)?.authority().clone();
+    let authority = plakous::xai::xai_api_key_generation(source.as_ref())
+        .map_err(api_error)?
+        .authority()
+        .clone();
     let model = Arc::new(
         plakous::xai::XaiPlatformModel::with_admitted_facts(
             authority,

@@ -4,15 +4,14 @@ use plakous_model::{Capability, CapacityRule, FixedClock, Timestamp};
 
 use super::{OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts};
 use crate::{
-    CredentialAuthorityId, CredentialReference, EndpointOrigin, OPENAI_PLATFORM_ORIGIN,
+    ApiKey, CredentialAuthorityId, CredentialReference, EndpointOrigin, OPENAI_PLATFORM_ORIGIN,
     OpenAiPlatformRouteConfig, OpenAiProjectId, PlatformProjectPolicy, PlatformStoragePolicy,
-    SecretString, StaticPlatformCredentialSource,
-    manifest::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS,
+    StaticOpenAiKeySource, manifest::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS,
 };
 
-fn source(reference: &CredentialReference) -> Arc<StaticPlatformCredentialSource> {
-    Arc::new(StaticPlatformCredentialSource::new(
-        SecretString::new("fixture-key-never-dispatched").expect("fixture secret"),
+fn source(reference: &CredentialReference) -> Arc<StaticOpenAiKeySource> {
+    Arc::new(crate::static_openai_api_key_source(
+        ApiKey::new("fixture-key-never-dispatched").expect("fixture secret"),
         reference.clone(),
         CredentialAuthorityId::new("openai-platform-fixture-authority").expect("fixture authority"),
     ))

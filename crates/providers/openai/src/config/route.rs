@@ -1,9 +1,15 @@
-use super::*;
+use super::{
+    AccessMode, AuthError, ConfigError, Digest, DigestDomain, EndpointOrigin,
+    OPENAI_PLATFORM_RESPONSES_PATH, OpenAiKeyGeneration, OpenAiRoute, OpenAiRouteConformance,
+    PlatformProjectPolicy, ResponsesDialect, Routability, RouteAuth, RouteId, StorageMode, fmt,
+    platform_generation_grant, platform_key_for_generation,
+};
 
+use plakous_auth::api_key::ExposeApiKey as _;
 impl OpenAiRoute {
     pub(crate) fn bind_platform_generation(
         mut self,
-        grant: OpenAiApiKeyGenerationGrant,
+        grant: OpenAiKeyGeneration,
     ) -> Result<Self, ConfigError> {
         let bind = |source: Digest| {
             Digest::sha256(
@@ -52,7 +58,7 @@ impl OpenAiRoute {
         match &self.auth {
             RouteAuth::Platform { .. } => OPENAI_PLATFORM_RESPONSES_PATH,
             #[cfg(feature = "native-auth")]
-            RouteAuth::NativeCodexSubscription { .. } => OPENAI_CODEX_RESPONSES_PATH,
+            RouteAuth::NativeCodexSubscription { .. } => super::OPENAI_CODEX_RESPONSES_PATH,
         }
     }
 
@@ -102,13 +108,11 @@ impl OpenAiRoute {
         )
     }
 
-    pub(crate) fn platform_generation_grant(
-        &self,
-    ) -> Result<OpenAiApiKeyGenerationGrant, AuthError> {
+    pub(crate) fn platform_generation_grant(&self) -> Result<OpenAiKeyGeneration, AuthError> {
         match &self.auth {
             RouteAuth::Platform {
                 reference, source, ..
-            } => source.generation_grant(reference, &self.origin),
+            } => platform_generation_grant(source.as_ref(), reference, &self.origin),
             #[cfg(feature = "native-auth")]
             RouteAuth::NativeCodexSubscription { .. } => Err(AuthError::BindingMismatch),
         }
@@ -116,16 +120,16 @@ impl OpenAiRoute {
 
     pub(crate) fn revalidate_platform_generation(
         &self,
-        expected: OpenAiApiKeyGenerationGrant,
+        expected: &OpenAiKeyGeneration,
     ) -> Result<(), AuthError> {
-        (self.platform_generation_grant()? == expected)
+        (&self.platform_generation_grant()? == expected)
             .then_some(())
             .ok_or(AuthError::BindingMismatch)
     }
 
     pub(crate) fn platform_bearer_header(
         &self,
-        expected: OpenAiApiKeyGenerationGrant,
+        expected: &OpenAiKeyGeneration,
     ) -> Result<plakous_http::HeaderValue, AuthError> {
         let (reference, source, local_fixture) = match &self.auth {
             RouteAuth::Platform {
@@ -140,9 +144,9 @@ impl OpenAiRoute {
         if *local_fixture {
             return Err(AuthError::BindingMismatch);
         }
-        let key = source.api_key_for_generation(reference, &self.origin, expected)?;
+        let key = platform_key_for_generation(source.as_ref(), reference, &self.origin, expected)?;
         let mut bytes = b"Bearer ".to_vec();
-        bytes.extend_from_slice(key.expose().as_bytes());
+        bytes.extend_from_slice(key.expose_secret().as_bytes());
         plakous_http::sensitive_header_value(bytes).map_err(|_| AuthError::SourceFailure)
     }
 
@@ -176,8 +180,8 @@ impl OpenAiRoute {
     #[cfg(feature = "native-auth")]
     pub(crate) async fn native_codex_preflight(
         &self,
-        request: NativeCodexPreflightRequest,
-    ) -> Result<NativeCodexAuthorization, AuthError> {
+        request: super::NativeCodexPreflightRequest,
+    ) -> Result<super::NativeCodexAuthorization, AuthError> {
         request.target().validate_route(self)?;
         match &self.auth {
             RouteAuth::NativeCodexSubscription { authority } => authority
@@ -193,7 +197,7 @@ impl OpenAiRoute {
     #[cfg(feature = "native-auth")]
     pub(crate) async fn native_codex_refresh_after_rejection(
         &self,
-        rejected: &CredentialFence,
+        rejected: &super::CredentialFence,
         selection_epoch: Digest,
     ) -> Result<(), AuthError> {
         match &self.auth {
@@ -202,7 +206,7 @@ impl OpenAiRoute {
                 // cancelled (Esc) or past its deadline mid-exchange does not
                 // abandon a started claim; it completes or fails within its
                 // 30 s refresh deadline and records its outcome.
-                let authority = Arc::clone(authority);
+                let authority = super::Arc::clone(authority);
                 let rejected = rejected.clone();
                 tokio::spawn(async move {
                     authority
@@ -220,7 +224,7 @@ impl OpenAiRoute {
     pub(crate) fn acquire_native_codex_inference(
         &self,
         input_token_upper_bound: u64,
-    ) -> Result<Box<dyn SubscriptionRequestPermit>, AuthError> {
+    ) -> Result<Box<dyn super::SubscriptionRequestPermit>, AuthError> {
         match &self.auth {
             RouteAuth::NativeCodexSubscription { authority } => {
                 authority.acquire_inference(input_token_upper_bound)
@@ -232,8 +236,8 @@ impl OpenAiRoute {
     #[cfg(feature = "native-auth")]
     pub(crate) fn bind_native_codex_authorization(
         &self,
-        authorization: &mut NativeCodexAuthorization,
-        physical_request: ResponsesPhysicalRequestBinding,
+        authorization: &mut super::NativeCodexAuthorization,
+        physical_request: super::ResponsesPhysicalRequestBinding,
     ) -> Result<(), AuthError> {
         authorization.target().validate_route(self)?;
         match &self.auth {

@@ -2669,6 +2669,29 @@ the feed, never the events.
 
 `plakous-responses` owns the Responses wire kernel and its shared dialect hosts.
 
+`plakous-auth::api_key` owns the single zeroizing, non-`Clone`, non-Serde
+`ApiKey`, `ApiKeyGenerationGrant<A>`, `ApiKeySource<R, A>` and
+`StaticApiKeySource<A>`. The supported facade exposes them through `api_key`.
+The four API-key integrations retain their own origin and source-owned authority
+type. A source returns non-secret generation metadata before reservation; bearer
+resolution takes the integration's concrete request and the exact admitted
+grant. Metadata-only selection cannot substitute for a physical request proof.
+OpenRouter Responses retains the model's admitted generation through dispatch;
+a later metadata lookup cannot replace it before bearer resolution.
+There are no default source methods, cross-route fallback or branded secret
+wrappers. Key construction rejects empty, over-64-KiB or control-byte text;
+xAI product key loading applies its 16-KiB ASCII-graphic bound before granting
+a generation; the dispatch fence checks that bound as well.
+Raw text access is absent from the supported API-key facade; integrations read
+it through the unsupported, doc-hidden `plakous_auth::api_key::ExposeApiKey`
+trait. Bearer formatting and execution-authority
+derivation stay integration-private. Source failures use
+redaction-safe `ApiKeyError` variants, translated to each provider's error type.
+The existing three generation-hash domains and every hosted listing-cache key
+are unchanged. Anthropic's opaque key-container identity is separate from the
+generation fingerprint; renewal retains container identity only when supplied
+the original key, after the integration's OAuth renewal fence.
+
 ### 6.1 Three kernels, thin dialects
 
 Plakous has one neutral runtime and three wire-family kernels:
@@ -3388,7 +3411,7 @@ bundled-table row, never on a family-pattern match alone, under that row's
 output limit. The caller appends an opaque admitted-facts binding to the
 provider semantic evidence, so those facts are identity-bearing; the provider
 facts digest (`anthropic.api-model-facts.v2`) binds the id, family, effort
-ladder and output limit only. `AnthropicApiKey::fingerprint` is the first 16 hex digits of a
+ladder and output limit only. `anthropic_api_key_fingerprint` is the first 16 hex digits of a
 domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
 
@@ -3451,7 +3474,8 @@ not added unless the maintainer passes `--promote`.
 The xAI facade exposes caller-owned API-key selectors, keys, and grants so an
 embedder can implement its credential source. Constructing
 `XaiPlatformApiKeyAuthority` supplies non-secret account/generation labels;
-`XaiPlatformApiKey::grant` binds the supplied key. Neither exposes raw bearer
+`ApiKey::generation_grant` binds the supplied key to that authority and the xAI
+provider tag. Neither operation exposes raw bearer
 material or lets callers derive the provider's key-bound execution authority:
 key-generation binding, grant execution-authority derivation, and bearer
 extraction remain provider-private operations.
@@ -6352,8 +6376,9 @@ filters as `include_domains`/`exclude_domains`. The engine is pinned because
 the gateway's default engine silently runs no search for some models. Before every physical request it
 revalidates the discovery evidence and requires the credential generation it
 was built under, then resolves the key through
-`OpenRouterApiKeySource::resolve_retrieval` with an
-`OpenRouterRetrievalCredentialRequest` naming the route and exact body. The
+`OpenRouterKeySource::api_key` with an
+`OpenRouterCredentialRequest` carrying a retrieval proof naming the route and
+exact body. The
 Chat kernel's side-request grammar accepts text and `url_citation`
 annotations (streamed `delta` or non-streamed `message`) and refuses tool
 calls, other annotation types, a second choice and unknown message fields;

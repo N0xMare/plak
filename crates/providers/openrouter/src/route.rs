@@ -3,17 +3,21 @@
 use std::fmt;
 use std::sync::Arc;
 
+pub use plakous_auth::api_key::ApiKey;
+use plakous_auth::api_key::ExposeApiKey as _;
 use plakous_model::{Digest, DigestDomain, DigestError, IdentityError, RouteId};
-use secrecy::{ExposeSecret as _, SecretString as SecrecyString};
 use thiserror::Error;
 
 use plakous_chat_completions::ChatPhysicalRequestBinding;
 use plakous_messages::MessagesPhysicalRequestBinding;
-use plakous_responses::{CredentialGenerationFingerprint, ResponsesPhysicalRequestBinding};
+use plakous_responses::ResponsesPhysicalRequestBinding;
 
 use crate::{OpenRouterAccessMode, OpenRouterRouteKind};
 
 const OPENROUTER_PLATFORM_ORIGIN: &str = "https://openrouter.ai";
+
+#[cfg(test)]
+mod tests;
 /// Exact upstream endpoint selection used by OpenRouter's provider router.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct OpenRouterRoutingPolicy {
@@ -292,623 +296,224 @@ fn valid_binding_component(value: &str) -> bool {
         })
 }
 
-/// A secret OpenRouter Platform API key.
+/// Common generation grant with the exact source-owned OpenRouter binding.
+pub type OpenRouterKeyGeneration =
+    plakous_auth::api_key::ApiKeyGenerationGrant<OpenRouterCredentialBinding>;
+/// Common source over the concrete, privately constructed admitted request.
+pub type OpenRouterKeySource = dyn for<'a> plakous_auth::api_key::ApiKeySource<
+        OpenRouterCredentialRequest<'a>,
+        OpenRouterCredentialBinding,
+    >;
+/// Common injected static source over the route's account/authority binding.
+pub type StaticOpenRouterKeySource =
+    plakous_auth::api_key::StaticApiKeySource<OpenRouterCredentialBinding>;
+
+/// Binds one static key to the official audience and a source-owned identity.
 ///
-/// Non-cloneable and backed by [`secrecy::SecretString`] (zeroized on drop).
-pub struct OpenRouterApiKey {
-    value: SecrecyString,
-    generation: CredentialGenerationFingerprint,
-}
-
-impl OpenRouterApiKey {
-    /// Creates an injected API key.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`OpenRouterAuthError::MissingCredential`] for an empty value.
-    pub fn new(value: impl Into<String>) -> Result<Self, OpenRouterAuthError> {
-        let value = value.into();
-        if value.is_empty() {
-            return Err(OpenRouterAuthError::MissingCredential);
-        }
-        let generation = mint_openrouter_generation(value.as_bytes())
-            .map_err(|_| OpenRouterAuthError::CredentialSource)?;
-        Ok(Self {
-            value: SecrecyString::from(value),
-            generation,
-        })
-    }
-
-    fn expose(&self) -> &str {
-        self.value.expose_secret()
-    }
-
-    pub(crate) fn bearer_bytes(&self) -> Vec<u8> {
-        let mut value = Vec::with_capacity(7 + self.expose().len());
-        value.extend_from_slice(b"Bearer ");
-        value.extend_from_slice(self.expose().as_bytes());
-        value
-    }
-
-    /// Returns a non-secret grant for this exact key generation.
-    ///
-    /// Credential sources can retain this value at construction and later
-    /// return it from [`OpenRouterApiKeySource::generation_grant`] without
-    /// retaining the original generation-binding bytes or resolving secret
-    /// material before paid reservation.
-    #[must_use]
-    pub const fn generation_grant(&self) -> OpenRouterApiKeyGenerationGrant {
-        OpenRouterApiKeyGenerationGrant {
-            fingerprint: self.generation,
-        }
-    }
-}
-
-impl fmt::Debug for OpenRouterApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("OpenRouterApiKey(<redacted>)")
-    }
-}
-
-impl fmt::Display for OpenRouterApiKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("<redacted>")
-    }
-}
-
-/// Non-secret proof of one exact resolved OpenRouter Platform API-key generation.
-///
-/// It is safe to retain in a paid admission, but cannot be used to reconstruct
-/// the key or the credential-owner generation binding.
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct OpenRouterApiKeyGenerationGrant {
-    fingerprint: CredentialGenerationFingerprint,
-}
-
-impl OpenRouterApiKeyGenerationGrant {
-    /// Derives a grant from bounded canonical bytes unique to one current key generation.
-    ///
-    /// This constructor lets credential owners use a non-secret generation
-    /// nonce or durable credential fence without exposing key material.
-    ///
-    /// # Errors
-    ///
-    /// Rejects an empty or over-64-KiB generation binding.
-    pub fn from_generation_binding(generation_binding: &[u8]) -> Result<Self, OpenRouterAuthError> {
-        mint_openrouter_generation(generation_binding)
-            .map(|fingerprint| Self { fingerprint })
-            .map_err(|_| OpenRouterAuthError::CredentialSource)
-    }
-
-    fn from_key(key: &OpenRouterApiKey) -> Self {
-        key.generation_grant()
-    }
-
-    /// Returns the exact non-secret generation fingerprint.
-    #[must_use]
-    pub const fn fingerprint(self) -> CredentialGenerationFingerprint {
-        self.fingerprint
-    }
-
-    fn matches_key(self, key: &OpenRouterApiKey) -> bool {
-        self == Self::from_key(key)
-    }
-}
-
-impl fmt::Debug for OpenRouterApiKeyGenerationGrant {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("OpenRouterApiKeyGenerationGrant")
-            .field("fingerprint", &self.fingerprint)
-            .finish()
-    }
-}
-
-fn mint_openrouter_generation(
-    binding: &[u8],
-) -> Result<CredentialGenerationFingerprint, plakous_responses::CredentialGenerationFingerprintError>
-{
-    CredentialGenerationFingerprint::mint_exact(
-        plakous_responses::CredentialProviderTag::OpenRouterPlatform,
+/// # Errors
+/// Rejects invalid account or authority identifiers.
+pub fn static_openrouter_api_key_source(
+    key: ApiKey,
+    account: impl Into<String>,
+    authority: impl Into<String>,
+) -> Result<StaticOpenRouterKeySource, OpenRouterRouteError> {
+    let binding = OpenRouterCredentialBinding::platform(account, authority)?;
+    Ok(plakous_auth::api_key::StaticApiKeySource::for_key(
+        key,
+        plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform,
+        OPENROUTER_PLATFORM_ORIGIN,
+        None,
         binding,
-    )
+    ))
 }
 
-/// Resolves an OpenRouter Platform API key at dispatch time.
-pub trait OpenRouterApiKeySource: Send + Sync + 'static {
-    /// Returns the typed account/authority identity owned by this source.
-    fn credential_binding(&self) -> Option<&OpenRouterCredentialBinding> {
-        None
-    }
-
-    /// Resolves the currently active key for a prevalidated admitted attempt.
-    ///
-    /// # Errors
-    ///
-    /// Returns a typed authentication error without embedding secret material.
-    fn resolve(
-        &self,
-        request: &OpenRouterCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError>;
-
-    /// Resolves a non-secret grant for the exact currently active key generation.
-    ///
-    /// Sources return only non-secret generation metadata here. The
-    /// compatibility default fails closed so paid denial can never materialize
-    /// the key before reservation.
-    ///
-    /// # Errors
-    ///
-    /// Returns a redaction-safe credential-source error.
-    fn generation_grant(
-        &self,
-        _request: &OpenRouterCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        self.current_generation_grant()
-    }
-
-    /// Resolves a key for one exact admitted Chat physical request.
-    fn resolve_chat(
-        &self,
-        _request: &OpenRouterChatCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        Err(OpenRouterAuthError::CredentialSource)
-    }
-
-    /// Returns the generation for one exact admitted Chat physical request.
-    fn generation_grant_chat(
-        &self,
-        _request: &OpenRouterChatCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        self.current_generation_grant()
-    }
-
-    /// Resolves a key for one exact admitted Messages physical request.
-    fn resolve_messages(
-        &self,
-        _request: &OpenRouterMessagesCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        Err(OpenRouterAuthError::CredentialSource)
-    }
-
-    /// Returns the generation for one exact admitted Messages physical request.
-    fn generation_grant_messages(
-        &self,
-        _request: &OpenRouterMessagesCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        self.current_generation_grant()
-    }
-
-    /// Resolves a key for one exact authenticated catalog operation.
-    fn resolve_catalog(
-        &self,
-        _request: &OpenRouterCatalogCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        Err(OpenRouterAuthError::CredentialSource)
-    }
-
-    /// Returns the generation for one exact authenticated catalog operation.
-    fn generation_grant_catalog(
-        &self,
-        _request: &OpenRouterCatalogCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        self.current_generation_grant()
-    }
-
-    /// Resolves a catalog key only while the admitted generation remains exact.
-    fn resolve_generation_catalog(
-        &self,
-        request: &OpenRouterCatalogCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        let key = self.resolve_catalog(request)?;
-        if !expected.matches_key(&key) {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        Ok(key)
-    }
-
-    /// Resolves a key for one exact hosted-retrieval side request.
-    fn resolve_retrieval(
-        &self,
-        _request: &OpenRouterRetrievalCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        Err(OpenRouterAuthError::CredentialSource)
-    }
-
-    /// Returns the generation for one exact hosted-retrieval side request.
-    fn generation_grant_retrieval(
-        &self,
-        _request: &OpenRouterRetrievalCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        self.current_generation_grant()
-    }
-
-    /// Resolves a side-request key only while the admitted generation remains exact.
-    fn resolve_generation_retrieval(
-        &self,
-        request: &OpenRouterRetrievalCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        let key = self.resolve_retrieval(request)?;
-        if !expected.matches_key(&key) {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        Ok(key)
-    }
-
-    /// Resolves the Chat key only while the admitted generation remains exact.
-    fn resolve_generation_chat(
-        &self,
-        request: &OpenRouterChatCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        let key = self.resolve_chat(request)?;
-        if !expected.matches_key(&key) {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        Ok(key)
-    }
-
-    /// Resolves the Messages key only while the admitted generation remains exact.
-    fn resolve_generation_messages(
-        &self,
-        request: &OpenRouterMessagesCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        let key = self.resolve_messages(request)?;
-        if !expected.matches_key(&key) {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        Ok(key)
-    }
-
-    /// Returns the current non-secret credential-generation authority before
-    /// one physical attempt is constructed.
-    ///
-    /// This value authorizes only runtime binding and paid reservation. Secret
-    /// resolution still requires an exact physical request and revalidates the
-    /// same generation at the transport fence.
-    fn current_generation_grant(
-        &self,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        Err(OpenRouterAuthError::CredentialSource)
-    }
-
-    /// Resolves the key only if the same exact generation remains current.
-    ///
-    /// # Errors
-    ///
-    /// Fails closed when rotation occurred after paid reservation.
-    fn resolve_generation(
-        &self,
-        request: &OpenRouterCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        let key = self.resolve(request)?;
-        if !expected.matches_key(&key) {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        Ok(key)
-    }
-}
-
-/// A caller-injected in-memory API-key source.
-pub struct StaticOpenRouterApiKeySource {
-    key: OpenRouterApiKey,
-    generation_grant: OpenRouterApiKeyGenerationGrant,
-    credential_binding: OpenRouterCredentialBinding,
-}
-
-impl StaticOpenRouterApiKeySource {
-    /// Creates a static source with a source-owned typed route binding.
-    ///
-    /// # Errors
-    ///
-    /// Returns a route error for an invalid account or authority identity.
-    pub fn new(
-        key: OpenRouterApiKey,
-        account_binding: impl Into<String>,
-        authority_id: impl Into<String>,
-    ) -> Result<Self, OpenRouterRouteError> {
-        let generation_grant = OpenRouterApiKeyGenerationGrant::from_key(&key);
-        Ok(Self {
-            key,
-            generation_grant,
-            credential_binding: OpenRouterCredentialBinding::platform(
-                account_binding,
-                authority_id,
-            )?,
-        })
-    }
-
-    /// Creates a static source with an explicit non-secret generation binding.
-    ///
-    /// This is the preferred constructor for credential stores that already own
-    /// a rotation nonce or durable generation fence.
-    ///
-    /// # Errors
-    ///
-    /// Returns a route error for an invalid account, authority, or generation identity.
-    pub fn new_with_generation_binding(
-        key: OpenRouterApiKey,
-        account_binding: impl Into<String>,
-        authority_id: impl Into<String>,
-        generation_binding: &[u8],
-    ) -> Result<Self, OpenRouterRouteError> {
-        let generation_grant =
-            OpenRouterApiKeyGenerationGrant::from_generation_binding(generation_binding)
-                .map_err(|_| OpenRouterRouteError::InvalidCredentialBinding)?;
-        Ok(Self {
-            key,
-            generation_grant,
-            credential_binding: OpenRouterCredentialBinding::platform(
-                account_binding,
-                authority_id,
-            )?,
-        })
-    }
-}
-
-impl fmt::Debug for StaticOpenRouterApiKeySource {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("StaticOpenRouterApiKeySource")
-            .field("key", &"<redacted>")
-            .field("generation_grant", &self.generation_grant)
-            .field("credential_binding", &self.credential_binding)
-            .finish()
-    }
-}
-
-impl OpenRouterApiKeySource for StaticOpenRouterApiKeySource {
-    fn credential_binding(&self) -> Option<&OpenRouterCredentialBinding> {
-        Some(&self.credential_binding)
-    }
-
-    fn resolve(
-        &self,
-        _request: &OpenRouterCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        OpenRouterApiKey::new(self.key.expose())
-    }
-
-    fn generation_grant(
-        &self,
-        _request: &OpenRouterCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        Ok(self.generation_grant)
-    }
-
-    fn resolve_chat(
-        &self,
-        _request: &OpenRouterChatCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        OpenRouterApiKey::new(self.key.expose())
-    }
-
-    fn generation_grant_chat(
-        &self,
-        _request: &OpenRouterChatCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        Ok(self.generation_grant)
-    }
-
-    fn resolve_messages(
-        &self,
-        _request: &OpenRouterMessagesCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        OpenRouterApiKey::new(self.key.expose())
-    }
-
-    fn generation_grant_messages(
-        &self,
-        _request: &OpenRouterMessagesCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        Ok(self.generation_grant)
-    }
-
-    fn resolve_generation_chat(
-        &self,
-        request: &OpenRouterChatCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if expected != self.generation_grant {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        self.resolve_chat(request)
-    }
-
-    fn resolve_generation_messages(
-        &self,
-        request: &OpenRouterMessagesCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if expected != self.generation_grant {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        self.resolve_messages(request)
-    }
-
-    fn resolve_catalog(
-        &self,
-        _request: &OpenRouterCatalogCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        OpenRouterApiKey::new(self.key.expose())
-    }
-
-    fn generation_grant_catalog(
-        &self,
-        _request: &OpenRouterCatalogCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        Ok(self.generation_grant)
-    }
-
-    fn resolve_generation_catalog(
-        &self,
-        request: &OpenRouterCatalogCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if expected != self.generation_grant {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        self.resolve_catalog(request)
-    }
-
-    fn resolve_retrieval(
-        &self,
-        _request: &OpenRouterRetrievalCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        OpenRouterApiKey::new(self.key.expose())
-    }
-
-    fn generation_grant_retrieval(
-        &self,
-        _request: &OpenRouterRetrievalCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        Ok(self.generation_grant)
-    }
-
-    fn resolve_generation_retrieval(
-        &self,
-        request: &OpenRouterRetrievalCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if expected != self.generation_grant {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        self.resolve_retrieval(request)
-    }
-
-    fn current_generation_grant(
-        &self,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        Ok(self.generation_grant)
-    }
-
-    fn resolve_generation(
-        &self,
-        request: &OpenRouterCredentialRequest<'_>,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if expected != self.generation_grant {
-            return Err(OpenRouterAuthError::BindingMismatch);
-        }
-        self.resolve(request)
-    }
-}
-
-/// Proof that an exact admitted attempt was validated against the captured route.
+/// Binds one static key to an owner-controlled non-secret generation fence.
 ///
-/// Construction is crate-private, so credential sources cannot be invoked
-/// through a zero-argument or origin-only route path.
+/// # Errors
+/// Rejects invalid account, authority or generation identifiers.
+pub fn static_openrouter_api_key_source_with_generation_binding(
+    key: ApiKey,
+    account: impl Into<String>,
+    authority: impl Into<String>,
+    generation: &[u8],
+) -> Result<StaticOpenRouterKeySource, OpenRouterRouteError> {
+    let binding = OpenRouterCredentialBinding::platform(account, authority)?;
+    let grant = OpenRouterKeyGeneration::from_generation_binding(
+        plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform,
+        binding,
+        generation,
+    )
+    .map_err(|_| OpenRouterRouteError::InvalidCredentialBinding)?;
+    Ok(plakous_auth::api_key::StaticApiKeySource::new(
+        key,
+        OPENROUTER_PLATFORM_ORIGIN,
+        None,
+        grant,
+    ))
+}
+
+/// Public non-secret selection, never an admitted bearer-resolution request.
+pub struct OpenRouterApiKeySelection(());
+impl OpenRouterApiKeySelection {
+    /// Names the exact official credential audience without resolving a key.
+    #[must_use]
+    pub const fn platform() -> Self {
+        Self(())
+    }
+}
+impl plakous_auth::api_key::ApiKeyRequest for OpenRouterApiKeySelection {
+    fn provider(&self) -> plakous_auth::api_key::CredentialProviderTag {
+        plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform
+    }
+    fn origin(&self) -> &str {
+        OPENROUTER_PLATFORM_ORIGIN
+    }
+}
+
+pub(crate) fn credential_generation(
+    source: &OpenRouterKeySource,
+    selection: &dyn plakous_auth::api_key::ApiKeyRequest,
+) -> Result<OpenRouterKeyGeneration, OpenRouterAuthError> {
+    let grant = source.generation_grant(selection)?;
+    if grant.provider() != plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform
+        || grant.authority() != source.authority()
+    {
+        return Err(OpenRouterAuthError::BindingMismatch);
+    }
+    Ok(grant)
+}
+
+fn resolve_key(
+    source: &OpenRouterKeySource,
+    request: &OpenRouterCredentialRequest<'_>,
+    expected: &OpenRouterKeyGeneration,
+) -> Result<ApiKey, OpenRouterAuthError> {
+    if expected.provider() != plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform
+        || expected.authority() != source.authority()
+    {
+        return Err(OpenRouterAuthError::BindingMismatch);
+    }
+    source.api_key(request, expected).map_err(Into::into)
+}
+
+pub(crate) fn bearer_bytes(key: &ApiKey) -> Vec<u8> {
+    let text = key.expose_secret();
+    let mut value = Vec::with_capacity(7 + text.len());
+    value.extend_from_slice(b"Bearer ");
+    value.extend_from_slice(text.as_bytes());
+    value
+}
+
+/// Closed purpose of a privately constructed OpenRouter credential request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OpenRouterCredentialPurpose {
+    /// Admitted Responses physical request.
+    Responses,
+    /// Admitted Chat physical request.
+    Chat,
+    /// Admitted Messages physical request.
+    Messages,
+    /// Exact catalog operation.
+    Catalog,
+    /// Exact retrieval side request.
+    Retrieval,
+}
+
+#[derive(Debug)]
+enum OpenRouterCredentialProof<'a> {
+    Responses(&'a ResponsesPhysicalRequestBinding),
+    Chat(&'a ChatPhysicalRequestBinding),
+    Messages(&'a MessagesPhysicalRequestBinding),
+    Catalog(&'a Digest),
+    Retrieval(&'a Digest),
+}
+
+/// Proof of one exact admitted physical request or bound side operation.
+/// Its constructors stay private; a metadata selection cannot resolve a bearer.
+#[derive(Debug)]
 pub struct OpenRouterCredentialRequest<'a> {
-    binding: &'a ResponsesPhysicalRequestBinding,
+    proof: OpenRouterCredentialProof<'a>,
 }
 
-/// Proof that a Chat credential resolution names one admitted physical request.
-pub struct OpenRouterChatCredentialRequest<'a> {
-    binding: &'a ChatPhysicalRequestBinding,
-}
+impl<'a> OpenRouterCredentialRequest<'a> {
+    fn responses(binding: &'a ResponsesPhysicalRequestBinding) -> Self {
+        Self {
+            proof: OpenRouterCredentialProof::Responses(binding),
+        }
+    }
+    fn chat(binding: &'a ChatPhysicalRequestBinding) -> Self {
+        Self {
+            proof: OpenRouterCredentialProof::Chat(binding),
+        }
+    }
+    fn messages(binding: &'a MessagesPhysicalRequestBinding) -> Self {
+        Self {
+            proof: OpenRouterCredentialProof::Messages(binding),
+        }
+    }
+    fn catalog(operation: &'a Digest) -> Self {
+        Self {
+            proof: OpenRouterCredentialProof::Catalog(operation),
+        }
+    }
+    fn retrieval(operation: &'a Digest) -> Self {
+        Self {
+            proof: OpenRouterCredentialProof::Retrieval(operation),
+        }
+    }
 
-/// Proof that Messages credential resolution names one admitted physical request.
-pub struct OpenRouterMessagesCredentialRequest<'a> {
-    binding: &'a MessagesPhysicalRequestBinding,
-}
-
-impl OpenRouterMessagesCredentialRequest<'_> {
-    /// Returns the exact admitted Messages physical-attempt binding.
+    /// Purpose of the exact admitted request.
     #[must_use]
-    pub const fn physical_binding(&self) -> &MessagesPhysicalRequestBinding {
-        self.binding
+    pub const fn purpose(&self) -> OpenRouterCredentialPurpose {
+        match self.proof {
+            OpenRouterCredentialProof::Responses(_) => OpenRouterCredentialPurpose::Responses,
+            OpenRouterCredentialProof::Chat(_) => OpenRouterCredentialPurpose::Chat,
+            OpenRouterCredentialProof::Messages(_) => OpenRouterCredentialPurpose::Messages,
+            OpenRouterCredentialProof::Catalog(_) => OpenRouterCredentialPurpose::Catalog,
+            OpenRouterCredentialProof::Retrieval(_) => OpenRouterCredentialPurpose::Retrieval,
+        }
     }
-}
-
-impl fmt::Debug for OpenRouterMessagesCredentialRequest<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("OpenRouterMessagesCredentialRequest")
-            .field("binding", &self.binding)
-            .finish()
-    }
-}
-
-/// Proof that credential resolution belongs to one exact catalog operation.
-pub struct OpenRouterCatalogCredentialRequest<'a> {
-    operation: &'a Digest,
-}
-
-impl OpenRouterCatalogCredentialRequest<'_> {
-    /// Returns the exact non-secret catalog-operation identity.
+    /// Exact Responses physical binding, only for that wire.
     #[must_use]
-    pub const fn operation(&self) -> Digest {
-        *self.operation
+    pub const fn responses_binding(&self) -> Option<&ResponsesPhysicalRequestBinding> {
+        match self.proof {
+            OpenRouterCredentialProof::Responses(binding) => Some(binding),
+            _ => None,
+        }
     }
-}
-
-impl fmt::Debug for OpenRouterCatalogCredentialRequest<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("OpenRouterCatalogCredentialRequest")
-            .field("operation", self.operation)
-            .finish()
-    }
-}
-
-/// Proof that credential resolution belongs to one exact hosted-retrieval
-/// side request: the digest names the route and the exact body it carries.
-pub struct OpenRouterRetrievalCredentialRequest<'a> {
-    operation: &'a Digest,
-}
-
-impl OpenRouterRetrievalCredentialRequest<'_> {
-    /// Returns the exact non-secret side-request identity.
+    /// Exact Chat physical binding, only for that wire.
     #[must_use]
-    pub const fn operation(&self) -> Digest {
-        *self.operation
+    pub const fn chat_binding(&self) -> Option<&ChatPhysicalRequestBinding> {
+        match self.proof {
+            OpenRouterCredentialProof::Chat(binding) => Some(binding),
+            _ => None,
+        }
     }
-}
-
-impl fmt::Debug for OpenRouterRetrievalCredentialRequest<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("OpenRouterRetrievalCredentialRequest")
-            .field("operation", self.operation)
-            .finish()
-    }
-}
-
-impl OpenRouterChatCredentialRequest<'_> {
-    /// Returns the exact admitted Chat physical-attempt binding.
+    /// Exact Messages physical binding, only for that wire.
     #[must_use]
-    pub const fn physical_binding(&self) -> &ChatPhysicalRequestBinding {
-        self.binding
+    pub const fn messages_binding(&self) -> Option<&MessagesPhysicalRequestBinding> {
+        match self.proof {
+            OpenRouterCredentialProof::Messages(binding) => Some(binding),
+            _ => None,
+        }
     }
-}
-
-impl fmt::Debug for OpenRouterChatCredentialRequest<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("OpenRouterChatCredentialRequest")
-            .field("binding", &self.binding)
-            .finish()
-    }
-}
-
-impl OpenRouterCredentialRequest<'_> {
-    /// Returns the exact admitted physical-attempt binding.
+    /// Exact bound side-operation digest, only for catalog and retrieval requests.
     #[must_use]
-    pub const fn physical_binding(&self) -> &ResponsesPhysicalRequestBinding {
-        self.binding
+    pub const fn operation(&self) -> Option<Digest> {
+        match self.proof {
+            OpenRouterCredentialProof::Catalog(operation)
+            | OpenRouterCredentialProof::Retrieval(operation) => Some(*operation),
+            _ => None,
+        }
     }
 }
 
-impl fmt::Debug for OpenRouterCredentialRequest<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("OpenRouterCredentialRequest")
-            .field("binding", &self.binding)
-            .finish()
+impl plakous_auth::api_key::ApiKeyRequest for OpenRouterCredentialRequest<'_> {
+    fn provider(&self) -> plakous_auth::api_key::CredentialProviderTag {
+        plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform
+    }
+    fn origin(&self) -> &str {
+        OPENROUTER_PLATFORM_ORIGIN
     }
 }
 
@@ -1074,12 +679,12 @@ impl fmt::Debug for OpenRouterChatRouteIdentity {
 pub struct OpenRouterChatRoute {
     pub(crate) clock: Arc<dyn plakous_model::Clock>,
     identity: Box<OpenRouterChatRouteIdentity>,
-    key_source: Arc<dyn OpenRouterApiKeySource>,
+    key_source: Arc<OpenRouterKeySource>,
 }
 
 impl OpenRouterChatRoute {
     /// Creates the production OpenRouter Chat route without an endpoint pin.
-    pub fn new(key_source: Arc<dyn OpenRouterApiKeySource>) -> Result<Self, OpenRouterRouteError> {
+    pub fn new(key_source: Arc<OpenRouterKeySource>) -> Result<Self, OpenRouterRouteError> {
         Self::construct(
             key_source,
             OpenRouterOrigin::new(OPENROUTER_PLATFORM_ORIGIN)?,
@@ -1090,7 +695,7 @@ impl OpenRouterChatRoute {
 
     /// Creates a production Chat route with explicit documented retention restrictions.
     pub fn new_with_retention(
-        key_source: Arc<dyn OpenRouterApiKeySource>,
+        key_source: Arc<OpenRouterKeySource>,
         retention_policy: OpenRouterRetentionPolicy,
     ) -> Result<Self, OpenRouterRouteError> {
         Self::construct(
@@ -1104,7 +709,7 @@ impl OpenRouterChatRoute {
     /// Creates a loopback TLS Chat/catalog route for deterministic tests.
     #[doc(hidden)]
     pub fn new_local_fixture(
-        key_source: Arc<dyn OpenRouterApiKeySource>,
+        key_source: Arc<OpenRouterKeySource>,
         origin: OpenRouterOrigin,
     ) -> Result<Self, OpenRouterRouteError> {
         if !local_fixture_origin(&origin) {
@@ -1116,7 +721,7 @@ impl OpenRouterChatRoute {
     /// Creates a loopback TLS route with explicit retention for family dispatch tests.
     #[doc(hidden)]
     pub fn new_local_fixture_with_retention(
-        key_source: Arc<dyn OpenRouterApiKeySource>,
+        key_source: Arc<OpenRouterKeySource>,
         origin: OpenRouterOrigin,
         retention_policy: OpenRouterRetentionPolicy,
     ) -> Result<Self, OpenRouterRouteError> {
@@ -1132,14 +737,12 @@ impl OpenRouterChatRoute {
     }
 
     fn construct(
-        key_source: Arc<dyn OpenRouterApiKeySource>,
+        key_source: Arc<OpenRouterKeySource>,
         origin: OpenRouterOrigin,
         access_mode: OpenRouterAccessMode,
         retention_policy: Option<OpenRouterRetentionPolicy>,
     ) -> Result<Self, OpenRouterRouteError> {
-        let credential_binding = key_source
-            .credential_binding()
-            .ok_or(OpenRouterRouteError::CredentialBindingUnavailable)?;
+        let credential_binding = key_source.authority();
         let identity = OpenRouterChatRouteIdentity::new(
             origin,
             access_mode,
@@ -1183,114 +786,116 @@ impl OpenRouterChatRoute {
 
     pub(crate) fn current_credential_generation_grant(
         &self,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        if self.key_source.credential_binding() != Some(self.identity.credential_binding()) {
+    ) -> Result<OpenRouterKeyGeneration, OpenRouterAuthError> {
+        if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        self.key_source.current_generation_grant()
+        credential_generation(
+            self.key_source.as_ref(),
+            &OpenRouterApiKeySelection::platform(),
+        )
     }
 
     pub(crate) fn catalog_credential(
         &self,
         operation: &Digest,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if self.key_source.credential_binding() != Some(self.identity.credential_binding()) {
+        expected: &OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, OpenRouterAuthError> {
+        if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        let request = OpenRouterCatalogCredentialRequest { operation };
-        let current = self.key_source.generation_grant_catalog(&request)?;
-        if current != expected {
+        let request = OpenRouterCredentialRequest::catalog(operation);
+        let current = credential_generation(self.key_source.as_ref(), &request)?;
+        if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        self.key_source
-            .resolve_generation_catalog(&request, expected)
+        resolve_key(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn retrieval_credential(
         &self,
         operation: &Digest,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if self.key_source.credential_binding() != Some(self.identity.credential_binding()) {
+        expected: &OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, OpenRouterAuthError> {
+        if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        let request = OpenRouterRetrievalCredentialRequest { operation };
-        let current = self.key_source.generation_grant_retrieval(&request)?;
-        if current != expected {
+        let request = OpenRouterCredentialRequest::retrieval(operation);
+        let current = credential_generation(self.key_source.as_ref(), &request)?;
+        if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        self.key_source
-            .resolve_generation_retrieval(&request, expected)
+        resolve_key(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn chat_credential(
         &self,
         physical: &ChatPhysicalRequestBinding,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if self.key_source.credential_binding() != Some(self.identity.credential_binding()) {
+        expected: &OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, OpenRouterAuthError> {
+        if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        let request = OpenRouterChatCredentialRequest { binding: physical };
-        let current = self.key_source.generation_grant_chat(&request)?;
-        if current != expected {
+        let request = OpenRouterCredentialRequest::chat(physical);
+        let current = credential_generation(self.key_source.as_ref(), &request)?;
+        if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        self.key_source.resolve_generation_chat(&request, expected)
+        resolve_key(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn messages_credential(
         &self,
         physical: &MessagesPhysicalRequestBinding,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if self.key_source.credential_binding() != Some(self.identity.credential_binding()) {
+        expected: &OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, OpenRouterAuthError> {
+        if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        let request = OpenRouterMessagesCredentialRequest { binding: physical };
-        let current = self.key_source.generation_grant_messages(&request)?;
-        if current != expected {
+        let request = OpenRouterCredentialRequest::messages(physical);
+        let current = credential_generation(self.key_source.as_ref(), &request)?;
+        if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        self.key_source
-            .resolve_generation_messages(&request, expected)
+        resolve_key(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn responses_credential_generation_grant(
         &self,
         physical: &ResponsesPhysicalRequestBinding,
-    ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-        if self.key_source.credential_binding() != Some(self.identity.credential_binding()) {
+    ) -> Result<OpenRouterKeyGeneration, OpenRouterAuthError> {
+        if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        self.key_source
-            .generation_grant(&OpenRouterCredentialRequest { binding: physical })
+        credential_generation(
+            self.key_source.as_ref(),
+            &OpenRouterCredentialRequest::responses(physical),
+        )
     }
 
     /// Resolves the Responses Bearer key at the admitted physical-request fence.
     pub(crate) fn responses_credential(
         &self,
         physical: &ResponsesPhysicalRequestBinding,
-        expected: OpenRouterApiKeyGenerationGrant,
-    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-        if self.key_source.credential_binding() != Some(self.identity.credential_binding()) {
+        expected: &OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, OpenRouterAuthError> {
+        if self.key_source.authority() != self.identity.credential_binding() {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        let request = OpenRouterCredentialRequest { binding: physical };
-        let current = self.key_source.generation_grant(&request)?;
-        if current != expected {
+        let request = OpenRouterCredentialRequest::responses(physical);
+        let current = credential_generation(self.key_source.as_ref(), &request)?;
+        if &current != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
-        self.key_source.resolve_generation(&request, expected)
+        resolve_key(self.key_source.as_ref(), &request, expected)
     }
 
     pub(crate) fn revalidate_responses_credential_generation(
         &self,
         physical: &ResponsesPhysicalRequestBinding,
-        expected: OpenRouterApiKeyGenerationGrant,
+        expected: &OpenRouterKeyGeneration,
     ) -> Result<(), OpenRouterAuthError> {
-        if self.responses_credential_generation_grant(physical)? != expected {
+        if &self.responses_credential_generation_grant(physical)? != expected {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
         Ok(())
@@ -1324,9 +929,6 @@ pub enum OpenRouterRouteError {
     /// A provider endpoint slug was empty, oversized, or non-canonical.
     #[error("OpenRouter routing policy requires one bounded canonical endpoint slug")]
     InvalidRoutingPolicy,
-    /// The selected credential source did not expose a typed route binding.
-    #[error("OpenRouter credential source has no validated route binding")]
-    CredentialBindingUnavailable,
     /// The source binding was created for another route family.
     #[error("OpenRouter credential binding belongs to another route family")]
     CredentialBindingRouteMismatch,
@@ -1342,9 +944,6 @@ pub enum OpenRouterRouteError {
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum OpenRouterAuthError {
-    /// No credential was available from the selected source.
-    #[error("the selected OpenRouter credential source is empty")]
-    MissingCredential,
     /// The request target or route identity did not match the credential binding.
     #[error("OpenRouter credential cannot be used for a different origin or route identity")]
     OriginMismatch,
@@ -1363,4 +962,13 @@ pub enum OpenRouterAuthError {
     /// The selected credential source failed without safe detail.
     #[error("the selected OpenRouter credential source failed")]
     CredentialSource,
+}
+
+impl From<plakous_auth::api_key::ApiKeyError> for OpenRouterAuthError {
+    fn from(error: plakous_auth::api_key::ApiKeyError) -> Self {
+        match error {
+            plakous_auth::api_key::ApiKeyError::BindingMismatch => Self::BindingMismatch,
+            _ => Self::CredentialSource,
+        }
+    }
 }

@@ -141,46 +141,47 @@ use plakous::application::ApplicationExecutor;
 use std::cell::RefCell;
 
 struct TopologyApiCredentials;
-struct NoInferenceSource(plakous::openai::StaticPlatformCredentialSource);
-impl plakous::openai::PlatformCredentialSource for NoInferenceSource {
-    fn credential_authority(&self) -> &plakous::openai::CredentialAuthorityId {
-        self.0.credential_authority()
+struct NoInferenceSource(plakous::openai::StaticOpenAiKeySource);
+impl
+    plakous::api_key::ApiKeySource<
+        plakous::openai::OpenAiApiKeyRequest<'_>,
+        plakous::openai::CredentialAuthorityId,
+    > for NoInferenceSource
+{
+    fn authority(&self) -> &plakous::openai::CredentialAuthorityId {
+        self.0.authority()
     }
     fn api_key(
         &self,
-        _: &plakous::openai::CredentialReference,
-        _: &plakous::openai::EndpointOrigin,
-    ) -> Result<plakous::openai::OpenAiApiKey, plakous::openai::OpenAiAuthError> {
+        _: &plakous::openai::OpenAiApiKeyRequest<'_>,
+        _: &plakous::openai::OpenAiKeyGeneration,
+    ) -> Result<plakous::openai::ApiKey, plakous::api_key::ApiKeyError> {
         panic!("topology lifecycle must not request inference credentials")
     }
     fn generation_grant(
         &self,
-        reference: &plakous::openai::CredentialReference,
-        origin: &plakous::openai::EndpointOrigin,
-    ) -> Result<plakous::openai::OpenAiApiKeyGenerationGrant, plakous::openai::OpenAiAuthError>
-    {
-        self.0.generation_grant(reference, origin)
+        request: &dyn plakous::api_key::ApiKeyRequest,
+    ) -> Result<plakous::openai::OpenAiKeyGeneration, plakous::api_key::ApiKeyError> {
+        self.0.generation_grant(request)
     }
 }
 impl crate::platform::OpenAiCredentials for TopologyApiCredentials {
-    fn openai(&self) -> CliResult<Arc<dyn plakous::openai::PlatformCredentialSource>> {
+    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
         use plakous::openai::*;
-        Ok(Arc::new(NoInferenceSource(
-            StaticPlatformCredentialSource::new(
-                OpenAiApiKey::new("synthetic-topology-lifecycle-key").unwrap(),
-                CredentialReference::application("plak/openai").unwrap(),
-                CredentialAuthorityId::new("offline/topology-lifecycle").unwrap(),
-            ),
-        )))
+        Ok(Arc::new(NoInferenceSource(static_openai_api_key_source(
+            ApiKey::new("synthetic-topology-lifecycle-key").unwrap(),
+            CredentialReference::application("plak/openai").unwrap(),
+            CredentialAuthorityId::new("offline/topology-lifecycle").unwrap(),
+        ))))
     }
 }
 impl crate::platform::AnthropicCredentials for TopologyApiCredentials {
-    fn anthropic(&self) -> CliResult<Arc<dyn plakous::anthropic::AnthropicApiKeySource>> {
+    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
         Err(CliFailure::new("unselected provider"))
     }
 }
 impl crate::platform::XaiCredentials for TopologyApiCredentials {
-    fn xai(&self) -> CliResult<Arc<dyn plakous::xai::XaiPlatformApiKeySource>> {
+    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
         Err(CliFailure::new("unselected provider"))
     }
 }

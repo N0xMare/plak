@@ -33,7 +33,6 @@ native-auth = [
     "dep:futures-util",
     "dep:getrandom",
     "dep:jsonwebtoken",
-    "dep:plakous-auth",
     "dep:sha2",
     "dep:url",
     "plakous-auth/http-refresh",
@@ -46,7 +45,7 @@ base64 = { workspace = true, optional = true }
 futures-util = { workspace = true, features = ["async-await", "std"], optional = true }
 getrandom = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, optional = true }
-plakous-auth = { workspace = true, optional = true }
+plakous-auth.workspace = true
 plakous-exchange.workspace = true
 plakous-http.workspace = true
 plakous-attempt.workspace = true

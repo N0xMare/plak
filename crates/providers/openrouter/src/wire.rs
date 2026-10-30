@@ -22,7 +22,7 @@ use plakous_model::{
     RuntimeModelAuthorityError, ValidatedRequestPlan,
 };
 
-use crate::{OpenRouterApiKeyGenerationGrant, OpenRouterChatRouteIdentity};
+use crate::{OpenRouterChatRouteIdentity, OpenRouterKeyGeneration};
 
 /// The labels and revisions one wire's prepared projection carries.
 pub(crate) struct WireProjection {
@@ -440,7 +440,7 @@ pub(crate) fn post_send_status_outcome(status: StatusCode) -> PhysicalRequestOut
     }
 }
 
-pub(crate) fn generation_number(grant: OpenRouterApiKeyGenerationGrant) -> u64 {
+pub(crate) fn generation_number(grant: &OpenRouterKeyGeneration) -> u64 {
     let fingerprint = grant.fingerprint();
     let bytes = fingerprint.as_bytes();
     u64::from_be_bytes(bytes[..8].try_into().unwrap_or([0; 8])).max(1)

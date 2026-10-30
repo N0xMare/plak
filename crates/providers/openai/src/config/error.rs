@@ -22,9 +22,6 @@ pub enum ConfigError {
     /// A credential authority used an unsupported or unsafe shape.
     #[error("credential authority must be a bounded application identifier")]
     InvalidCredentialAuthority,
-    /// A public API-key generation binding was empty or too large.
-    #[error("credential generation binding must be nonempty and bounded")]
-    InvalidCredentialGenerationBinding,
     /// An explicit project identifier was empty, oversized, or non-ASCII.
     #[error("OpenAI project identifier must be nonempty, bounded, ASCII text")]
     InvalidProjectId,
@@ -137,4 +134,14 @@ pub enum AuthError {
         /// Immutable inference-class allowance.
         allowance: u32,
     },
+}
+
+impl From<plakous_auth::api_key::ApiKeyError> for AuthError {
+    fn from(error: plakous_auth::api_key::ApiKeyError) -> Self {
+        match error {
+            plakous_auth::api_key::ApiKeyError::BindingMismatch => Self::BindingMismatch,
+            plakous_auth::api_key::ApiKeyError::Unavailable => Self::Unavailable,
+            _ => Self::SourceFailure,
+        }
+    }
 }

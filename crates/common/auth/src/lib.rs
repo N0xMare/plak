@@ -18,6 +18,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod api_key;
 mod binding;
 mod compatibility;
 mod credential;

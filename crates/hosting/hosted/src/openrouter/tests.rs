@@ -366,7 +366,7 @@ async fn discover_admission_evidence(
     use std::io;
     use std::sync::Arc;
 
-    use plakous::openrouter::{OpenRouterApiKey, StaticOpenRouterApiKeySource};
+    use plakous::openrouter::ApiKey;
     use plakous_http::{Client, Limits, TlsConfigIdentity};
     use plakous_openrouter::{
         OpenRouterChatDiscoveryConfig, OpenRouterChatRoute, OpenRouterOrigin,
@@ -477,8 +477,8 @@ async fn discover_admission_evidence(
         Ok::<_, io::Error>(())
     });
     let source = Arc::new(
-        StaticOpenRouterApiKeySource::new(
-            OpenRouterApiKey::new("test-catalog-key").expect("api key"),
+        plakous::openrouter::static_openrouter_api_key_source(
+            ApiKey::new("test-catalog-key").expect("api key"),
             "test-account",
             "test-authority",
         )
@@ -1594,11 +1594,11 @@ impl OpenRouterCredentials for PiHubOpenRouterCredentials {
     fn preflight(&self) -> CliResult<()> {
         Ok(())
     }
-    fn source(&self) -> CliResult<Arc<dyn OpenRouterApiKeySource>> {
-        use plakous::openrouter::{OpenRouterApiKey, StaticOpenRouterApiKeySource};
+    fn source(&self) -> CliResult<Arc<OpenRouterKeySource>> {
+        use plakous::openrouter::ApiKey;
         Ok(Arc::new(
-            StaticOpenRouterApiKeySource::new(
-                OpenRouterApiKey::new("test-catalog-key").expect("api key"),
+            plakous::openrouter::static_openrouter_api_key_source(
+                ApiKey::new("test-catalog-key").expect("api key"),
                 "test-account",
                 "test-authority",
             )
@@ -1663,7 +1663,7 @@ async fn pi_hub_local_route_evidence(
     use std::io;
     use std::sync::Arc;
 
-    use plakous::openrouter::{OpenRouterApiKey, StaticOpenRouterApiKeySource};
+    use plakous::openrouter::ApiKey;
     use plakous_http::{Client, Limits, TlsConfigIdentity};
     use plakous_openrouter::{
         OpenRouterChatDiscoveryConfig, OpenRouterChatRoute, OpenRouterOrigin,
@@ -1819,8 +1819,8 @@ async fn pi_hub_local_route_evidence(
         Ok::<_, io::Error>(requests)
     });
     let source = Arc::new(
-        StaticOpenRouterApiKeySource::new(
-            OpenRouterApiKey::new("test-catalog-key").expect("api key"),
+        plakous::openrouter::static_openrouter_api_key_source(
+            ApiKey::new("test-catalog-key").expect("api key"),
             "test-account",
             "test-authority",
         )

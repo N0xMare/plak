@@ -123,14 +123,11 @@ use plakous_model::{
 
 use super::*;
 use crate::wire::WireOperation;
-use crate::{
-    OpenRouterApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin, OpenRouterToolChoiceModes,
-    StaticOpenRouterApiKeySource,
-};
+use crate::{ApiKey, OpenRouterChatEndpointCandidate, OpenRouterOrigin, OpenRouterToolChoiceModes};
 
 fn route() -> Result<OpenRouterChatRoute, Box<dyn std::error::Error>> {
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("messages-test-key")?,
+    let source = Arc::new(crate::static_openrouter_api_key_source(
+        ApiKey::new("messages-test-key")?,
         "messages-test-account",
         "messages-test-authority",
     )?);
@@ -286,8 +283,8 @@ fn target_is_messages_family_custom_and_endpoint_neutral() -> Result<(), Box<dyn
 
 #[test]
 fn target_rejects_route_without_retention_contract() -> Result<(), Box<dyn std::error::Error>> {
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("messages-no-retention-key")?,
+    let source = Arc::new(crate::static_openrouter_api_key_source(
+        ApiKey::new("messages-no-retention-key")?,
         "messages-no-retention-account",
         "messages-no-retention-authority",
     )?);

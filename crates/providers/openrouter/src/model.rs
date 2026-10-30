@@ -18,8 +18,8 @@ use plakous_responses::{
 use thiserror::Error;
 
 use crate::{
-    OPENROUTER_RESPONSES_PATH, OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterApiKeyGenerationGrant,
-    OpenRouterAuthError, OpenRouterChatModelEvidence, OpenRouterChatRoute,
+    OPENROUTER_RESPONSES_PATH, OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterAuthError,
+    OpenRouterChatModelEvidence, OpenRouterChatRoute, OpenRouterKeyGeneration,
     dialect::OPENROUTER_RESPONSES_DIALECT_REVISION,
 };
 
@@ -180,7 +180,7 @@ impl OpenRouterResponsesTarget {
             &self.descriptor,
             self.route.identity().account_binding(),
             self.route.identity().credential_authority_binding(),
-            generation_number(grant),
+            generation_number(&grant),
             checked_at,
             Some(self.evidence.expires_at()),
         )
@@ -233,7 +233,7 @@ fn responses_capabilities() -> Result<CapabilitySet, plakous_model::IdentityErro
     Ok(CapabilitySet::new(features, BTreeMap::new()))
 }
 
-fn generation_number(grant: OpenRouterApiKeyGenerationGrant) -> u64 {
+fn generation_number(grant: &OpenRouterKeyGeneration) -> u64 {
     let fingerprint = grant.fingerprint();
     let bytes = fingerprint.as_bytes();
     u64::from_be_bytes(bytes[..8].try_into().unwrap_or([0; 8])).max(1)

@@ -31,9 +31,7 @@ use plakous_model::ReasoningEffort;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{
-    XaiPlatformApiKeySource, XaiPlatformBuildError, platform::XAI_PLATFORM_API_KEY_ORIGIN,
-};
+use crate::{XaiPlatformBuildError, XaiPlatformKeySource, platform::XAI_PLATFORM_API_KEY_ORIGIN};
 
 /// Exact Models API path on the Platform origin.
 const XAI_MODELS_PATH: &str = "/v1/models";
@@ -363,7 +361,7 @@ fn optional_u64(value: Option<&Value>) -> Result<Option<u64>, XaiApiModelError> 
 /// # Errors
 /// Returns the credential, transport, status or parse failure.
 pub async fn list_xai_api_models(
-    source: &dyn XaiPlatformApiKeySource,
+    source: &XaiPlatformKeySource,
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
 ) -> Result<Vec<XaiListedModel>, XaiApiModelError> {
     let origin =
@@ -379,7 +377,7 @@ pub async fn list_xai_api_models(
 /// The real listing over a test transport (loopback dial and trust root).
 #[cfg(test)]
 async fn list_via(
-    source: &dyn XaiPlatformApiKeySource,
+    source: &XaiPlatformKeySource,
     client: &Client,
     dial_origin: Origin,
 ) -> Result<Vec<XaiListedModel>, XaiApiModelError> {
@@ -392,24 +390,19 @@ async fn list_via(
 ///
 /// # Errors
 /// Returns an error when the credential cannot be resolved.
-pub fn xai_api_key_fingerprint(
-    source: &dyn XaiPlatformApiKeySource,
-) -> Result<String, XaiApiModelError> {
-    let grant = source
-        .grant()
+pub fn xai_api_key_fingerprint(source: &XaiPlatformKeySource) -> Result<String, XaiApiModelError> {
+    let grant = crate::platform_binding::xai_api_key_generation(source)
         .map_err(|_| list_error("credential is unavailable"))?;
-    Ok(fingerprint_hex(grant.fingerprint.as_bytes()))
+    Ok(fingerprint_hex(grant.fingerprint().as_bytes()))
 }
 
-fn platform_key(source: &dyn XaiPlatformApiKeySource) -> Result<String, XaiApiModelError> {
-    let grant = source
-        .grant()
+fn platform_key(source: &XaiPlatformKeySource) -> Result<String, XaiApiModelError> {
+    let grant = crate::platform_binding::xai_api_key_generation(source)
         .map_err(|_| list_error("credential is unavailable"))?;
     let key = source
-        .api_key(&grant)
+        .api_key(&crate::platform_binding::API_KEY_REQUEST, &grant)
         .map_err(|_| list_error("credential is unavailable"))?;
-    let header = key
-        .bearer()
+    let header = crate::platform_binding::platform_bearer(&key)
         .map_err(|_| list_error("credential is not a header value"))?;
     let value = header
         .to_str()

@@ -10,7 +10,7 @@ pub(super) use plakous::anthropic::AnthropicListedModel as ListedModel;
 
 /// Product-owned credentials for this compiled API route.
 pub trait Credentials: Send + Sync + 'static {
-    fn anthropic(&self) -> CliResult<Arc<dyn plakous::anthropic::AnthropicApiKeySource>>;
+    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>>;
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/anthropic.rs"]
@@ -118,8 +118,8 @@ pub(super) async fn listing(
         Ok(source) => source,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
-    let fingerprint = match source.current_key() {
-        Ok(key) => key.fingerprint(),
+    let fingerprint = match plakous::anthropic::anthropic_api_key_fingerprint(source.as_ref()) {
+        Ok(fingerprint) => fingerprint,
         Err(error) => return bundled_catalog(provider, &error.to_string()),
     };
     let lookup = Lookup::new(provider, product_home, &fingerprint, lists, now);

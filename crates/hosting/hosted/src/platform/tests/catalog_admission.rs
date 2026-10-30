@@ -120,9 +120,10 @@ async fn exact_reopen_from_stored_evidence_keeps_window_and_refuses_moved_facts(
     session.release().await.unwrap();
 
     // The provider now publishes a smaller output limit for Haiku.
-    let fingerprint = plakous::anthropic::AnthropicApiKey::new("fixture-key-one")
-        .unwrap()
-        .fingerprint();
+    let fingerprint = plakous::anthropic::anthropic_api_key_fingerprint(
+        Credentials("fixture-key-one").anthropic().unwrap().as_ref(),
+    )
+    .unwrap();
     let mut listed = plakous::anthropic::anthropic_api_bundled_listing().unwrap();
     listed
         .iter_mut()
@@ -216,26 +217,47 @@ fn cache_read_does_not_follow_a_symlink() {
 
 /// Counts key reads: the fingerprint is one read, a fetch would be another.
 struct CountingCredentials(Arc<std::sync::atomic::AtomicUsize>);
-impl plakous::anthropic::AnthropicApiKeySource for CountingCredentials {
-    fn current_key(
+impl plakous::api_key::ApiKeySource<plakous::anthropic::AnthropicApiKeyRequest>
+    for CountingCredentials
+{
+    fn authority(&self) -> &() {
+        &()
+    }
+    fn generation_grant(
         &self,
-    ) -> Result<plakous::anthropic::AnthropicApiKey, plakous::anthropic::AnthropicError> {
+        _: &dyn plakous::api_key::ApiKeyRequest,
+    ) -> Result<plakous::api_key::ApiKeyGenerationGrant, plakous::api_key::ApiKeyError> {
+        Ok(
+            plakous::api_key::ApiKey::new("fixture-key-one")?.generation_grant(
+                plakous::api_key::CredentialProviderTag::AnthropicPlatform,
+                (),
+            ),
+        )
+    }
+    fn api_key(
+        &self,
+        request: &plakous::anthropic::AnthropicApiKeyRequest,
+        expected: &plakous::api_key::ApiKeyGenerationGrant,
+    ) -> Result<plakous::api_key::ApiKey, plakous::api_key::ApiKeyError> {
+        if &self.generation_grant(request)? != expected {
+            return Err(plakous::api_key::ApiKeyError::BindingMismatch);
+        }
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        plakous::anthropic::AnthropicApiKey::new("fixture-key-one")
+        plakous::api_key::ApiKey::new("fixture-key-one")
     }
 }
 impl OpenAiCredentials for CountingCredentials {
-    fn openai(&self) -> CliResult<Arc<dyn plakous::openai::PlatformCredentialSource>> {
+    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
         Credentials("fixture-key-one").openai()
     }
 }
 impl AnthropicCredentials for CountingCredentials {
-    fn anthropic(&self) -> CliResult<Arc<dyn plakous::anthropic::AnthropicApiKeySource>> {
+    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
         Ok(Arc::new(CountingCredentials(Arc::clone(&self.0))))
     }
 }
 impl XaiCredentials for CountingCredentials {
-    fn xai(&self) -> CliResult<Arc<dyn plakous::xai::XaiPlatformApiKeySource>> {
+    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
         Credentials("fixture-key-one").xai()
     }
 }
@@ -248,9 +270,10 @@ async fn a_recent_listing_failure_is_not_retried_for_five_minutes() {
     let provider = PlatformProvider::Anthropic;
     let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let credentials = CountingCredentials(Arc::clone(&reads));
-    let fingerprint = plakous::anthropic::AnthropicApiKey::new("fixture-key-one")
-        .unwrap()
-        .fingerprint();
+    let fingerprint = plakous::anthropic::anthropic_api_key_fingerprint(
+        Credentials("fixture-key-one").anthropic().unwrap().as_ref(),
+    )
+    .unwrap();
     let path = cache_path(directory.path(), provider, &fingerprint);
     let listed = plakous::anthropic::anthropic_api_bundled_listing().unwrap();
     let now = 2_000_000_000;
@@ -332,6 +355,55 @@ async fn every_admitted_model_effort_constructs_on_its_route() {
         assert!(
             constructed.contains(&(PlatformProvider::Xai, model.to_owned(), effort)),
             "{model} {effort:?} was not exercised"
+        );
+    }
+}
+
+#[test]
+fn unified_api_keys_keep_existing_owner_only_listing_cache_paths() {
+    use plakous::api_key::{ApiKey, CredentialProviderTag, StaticApiKeySource};
+    use std::path::Path;
+    let text = "synthetic-cache-key";
+    let anthropic = StaticApiKeySource::for_key(
+        ApiKey::new(text).unwrap(),
+        CredentialProviderTag::AnthropicPlatform,
+        plakous::anthropic::ANTHROPIC_PLATFORM_ORIGIN,
+        None,
+        (),
+    );
+    let reference = openai::openai_credential_reference().unwrap();
+    let openai = plakous::openai::static_openai_api_key_source(
+        ApiKey::new(text).unwrap(),
+        reference.clone(),
+        plakous::openai::CredentialAuthorityId::new("listing-cache-test").unwrap(),
+    );
+    let xai = StaticApiKeySource::for_key(
+        ApiKey::new(text).unwrap(),
+        CredentialProviderTag::XaiPlatform,
+        "https://api.x.ai",
+        None,
+        plakous::xai::XaiPlatformApiKeyAuthority::new("account", "generation", 1).unwrap(),
+    );
+    for (provider, fingerprint, expected) in [
+        (
+            PlatformProvider::Anthropic,
+            plakous::anthropic::anthropic_api_key_fingerprint(&anthropic).unwrap(),
+            "anthropic-9cde85e0a177c85a.json",
+        ),
+        (
+            PlatformProvider::OpenAi,
+            plakous::openai::openai_api_key_fingerprint(&reference, &openai).unwrap(),
+            "openai-56cfe837c01b67b9.json",
+        ),
+        (
+            PlatformProvider::Xai,
+            plakous::xai::xai_api_key_fingerprint(&xai).unwrap(),
+            "xai-api-7d3c094215a49ad5.json",
+        ),
+    ] {
+        assert_eq!(
+            cache_path(Path::new("owner"), provider, &fingerprint),
+            Path::new("owner/cache/api-models").join(expected)
         );
     }
 }

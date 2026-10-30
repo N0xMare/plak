@@ -1,4 +1,4 @@
-use super::*;
+use super::{ConfigError, Deserialize, EndpointOrigin, OpenAiRoute, Routability, Serialize};
 
 /// Serializable, secret-free direct Codex subscription route configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -54,22 +54,22 @@ impl CodexSubscriptionRouteConfig {
     #[cfg(feature = "native-auth")]
     pub(crate) fn resolve_native(
         self,
-        manager: Arc<CodexSubscriptionCredentialManager>,
+        manager: super::Arc<super::CodexSubscriptionCredentialManager>,
     ) -> Result<OpenAiRoute, ConfigError> {
-        if self.origin.as_str() != OPENAI_CHATGPT_ORIGIN {
+        if self.origin.as_str() != super::OPENAI_CHATGPT_ORIGIN {
             return Err(ConfigError::NonOfficialCodexSubscriptionOrigin);
         }
         manager
             .validate_route_resolution()
             .map_err(|_| ConfigError::SubscriptionCredentialUnavailable)?;
-        let authority: Arc<dyn NativeCodexCredentialAuthority> = manager;
+        let authority: super::Arc<dyn super::NativeCodexCredentialAuthority> = manager;
         Ok(OpenAiRoute::new(
-            OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID,
-            ResponsesDialect::codex_subscription(),
+            super::OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID,
+            super::ResponsesDialect::codex_subscription(),
             self.origin,
-            StorageMode::Stateless,
-            OpenAiRouteConformance::codex_compatibility(),
-            RouteAuth::NativeCodexSubscription { authority },
+            super::StorageMode::Stateless,
+            super::OpenAiRouteConformance::codex_compatibility(),
+            super::RouteAuth::NativeCodexSubscription { authority },
         ))
     }
 }

@@ -1,8 +1,8 @@
 use super::{
     Arc, CapacityRule, Clock, ConfigError, CredentialReference, EndpointOrigin,
     ModelAdapterProfileId, OPENAI_PLATFORM_ORIGIN, OPENAI_RESPONSES_ADAPTER_REVISION,
-    OpenAiPlatformConfigurationAuthority, OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts,
-    OpenAiPlatformResolveError, OpenAiPlatformRouteConfig, OpenAiTarget, PlatformCredentialSource,
+    OpenAiKeySource, OpenAiPlatformConfigurationAuthority, OpenAiPlatformModelBuilder,
+    OpenAiPlatformModelFacts, OpenAiPlatformResolveError, OpenAiPlatformRouteConfig, OpenAiTarget,
     PlatformStoragePolicy, ResolvedModelDescriptor, SelectedProviderConfiguration,
     StandardOpenAiHttpConfig, SystemClock, admit_reviewed_platform_model,
 };
@@ -12,7 +12,7 @@ impl OpenAiPlatformModelBuilder {
     #[must_use]
     pub fn new(
         credential: CredentialReference,
-        source: Arc<dyn PlatformCredentialSource>,
+        source: Arc<OpenAiKeySource>,
         facts: OpenAiPlatformModelFacts,
         storage: PlatformStoragePolicy,
         project: crate::PlatformProjectPolicy,
@@ -172,7 +172,7 @@ impl std::fmt::Debug for OpenAiPlatformModelBuilder {
 impl OpenAiPlatformConfigurationAuthority {
     pub(crate) fn bind_initial_generation(
         self,
-        grant: crate::OpenAiApiKeyGenerationGrant,
+        grant: crate::OpenAiKeyGeneration,
     ) -> Result<Self, ConfigError> {
         let descriptor = self.descriptor();
         let clock = self.target.clock();

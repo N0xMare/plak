@@ -7,6 +7,7 @@
 //! rule's decision, and pricing thresholds and hosted-feature support come
 //! only from the bundled table a reviewer checked in.
 
+use plakous_auth::api_key::ExposeApiKey as _;
 use std::time::Instant;
 
 use plakous_http::{
@@ -18,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    ANTHROPIC_API_VERSION, ANTHROPIC_PLATFORM_ORIGIN, AnthropicApiKeySource, AnthropicError,
-    AnthropicErrorKind, AnthropicErrorPhase,
+    ANTHROPIC_API_VERSION, ANTHROPIC_PLATFORM_ORIGIN, AnthropicError, AnthropicErrorKind,
+    AnthropicErrorPhase, AnthropicKeySource,
 };
 
 /// Exact Models API path on the Platform origin.
@@ -242,6 +243,22 @@ fn list_error(reason: &str) -> AnthropicError {
     )
 }
 
+/// Unchanged owner-only fingerprint used by the hosted model-list cache.
+///
+/// # Errors
+/// Returns an error when the exact API-key source is unavailable.
+pub fn anthropic_api_key_fingerprint(
+    source: &AnthropicKeySource,
+) -> Result<String, AnthropicError> {
+    let key = crate::route::current_api_key(source)?;
+    let mut fingerprint = plakous_model::sha256_hex(&[
+        b"anthropic.api-key-fingerprint.v1",
+        key.expose_secret().as_bytes(),
+    ]);
+    fingerprint.truncate(16);
+    Ok(fingerprint)
+}
+
 /// Lists every model the API key can see with bounded authenticated
 /// `GET /v1/models` requests on the exact Platform origin, following
 /// pagination. No inference is dispatched. The dial origin is not a
@@ -252,7 +269,7 @@ fn list_error(reason: &str) -> AnthropicError {
 /// Returns the credential, transport, status or parse failure; the caller
 /// keeps its cache or the bundled table.
 pub async fn list_anthropic_api_models(
-    source: &dyn AnthropicApiKeySource,
+    source: &AnthropicKeySource,
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
     let origin =
@@ -270,13 +287,13 @@ fn list_deadline() -> Result<Instant, AnthropicError> {
 }
 
 async fn list_from(
-    source: &dyn AnthropicApiKeySource,
+    source: &AnthropicKeySource,
     client: &Client,
     origin: Origin,
     deadline: Instant,
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
     let deadline = plakous_exchange::lookup::LookupBudget::from_deadline(deadline);
-    let key = source.current_key()?;
+    let key = crate::route::current_api_key(source)?;
     let mut models: Vec<AnthropicListedModel> = Vec::new();
     let mut after: Option<String> = None;
     for _ in 0..MAX_PAGES {
@@ -284,7 +301,7 @@ async fn list_from(
             None => format!("{ANTHROPIC_MODELS_PATH}?limit={PAGE_LIMIT}"),
             Some(cursor) => format!("{ANTHROPIC_MODELS_PATH}?limit={PAGE_LIMIT}&after_id={cursor}"),
         };
-        let body = get_page(client, origin.clone(), &path, key.expose(), deadline).await?;
+        let body = get_page(client, origin.clone(), &path, key.expose_secret(), deadline).await?;
         let page = parse_anthropic_models_page(&body)?;
         let last_row = page.models.last().map(|row| row.id.clone());
         for model in page.models {

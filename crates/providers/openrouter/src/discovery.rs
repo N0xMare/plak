@@ -69,7 +69,7 @@ impl OpenRouterChatRoute {
             ],
         )?;
         let generation = self.current_credential_generation_grant()?;
-        let key = self.catalog_credential(&operation, generation)?;
+        let key = self.catalog_credential(&operation, &generation)?;
         let deadline = Instant::now()
             .checked_add(config.operation_timeout)
             .ok_or(OpenRouterChatDiscoveryError::InvalidPolicy)?;
@@ -78,7 +78,7 @@ impl OpenRouterChatRoute {
             client,
             Origin::parse(self.identity().origin().as_str())?,
             MODELS_PATH,
-            key.bearer_bytes(),
+            crate::route::bearer_bytes(&key),
             deadline,
             config.maximum_body_bytes,
         )
@@ -116,7 +116,7 @@ impl OpenRouterChatRoute {
             ],
         )?;
         let generation = self.current_credential_generation_grant()?;
-        let key = self.catalog_credential(&operation, generation)?;
+        let key = self.catalog_credential(&operation, &generation)?;
         let deadline = Instant::now()
             .checked_add(config.operation_timeout)
             .ok_or(OpenRouterChatDiscoveryError::InvalidPolicy)?;
@@ -126,7 +126,7 @@ impl OpenRouterChatRoute {
             client,
             origin.clone(),
             MODELS_PATH,
-            key.bearer_bytes(),
+            crate::route::bearer_bytes(&key),
             deadline,
             config.maximum_body_bytes,
         )
@@ -138,7 +138,7 @@ impl OpenRouterChatRoute {
             client,
             origin,
             &endpoint_path,
-            key.bearer_bytes(),
+            crate::route::bearer_bytes(&key),
             deadline,
             config.maximum_body_bytes,
         )

@@ -198,7 +198,7 @@ fn response(body: &str) -> Vec<u8> {
 fn configured(
     client: Client,
     origin: Origin,
-    source: Arc<dyn AnthropicApiKeySource>,
+    source: Arc<AnthropicKeySource>,
     model: &str,
     effort: ReasoningEffort,
 ) -> TestResult<ConfiguredLanguageModel> {
@@ -250,7 +250,7 @@ async fn production_api_executes_sonnet_and_opus_5_family_low_medium_through_age
             let binding = configured(
                 client,
                 origin,
-                Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+                static_key_source("offline-only")?,
                 model,
                 effort,
             )?;
@@ -321,7 +321,7 @@ async fn production_api_key_admits_required_caching_and_emits_three_one_hour_bre
     };
     policy.tools = vec![tool.clone()];
     let binding = AnthropicLanguageModel::build(
-        Arc::new(crate::AnthropicApiKey::new("offline-api-key-cache")?),
+        static_key_source("offline-api-key-cache")?,
         "api-key-cache-account",
         &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
         b"api-key-cache-facts",
@@ -404,9 +404,31 @@ async fn production_api_key_admits_required_caching_and_emits_three_one_hour_bre
     Ok(())
 }
 
-impl AnthropicApiKeySource for Rotating {
-    fn current_key(&self) -> Result<crate::AnthropicApiKey, AnthropicError> {
-        crate::AnthropicApiKey::new(*self.0.lock().unwrap())
+impl plakous_auth::api_key::ApiKeySource<crate::AnthropicApiKeyRequest> for Rotating {
+    fn authority(&self) -> &() {
+        &()
+    }
+    fn generation_grant(
+        &self,
+        _: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError>
+    {
+        key_grant(*self.0.lock().unwrap())
+    }
+    fn api_key(
+        &self,
+        _: &crate::AnthropicApiKeyRequest,
+        expected: &plakous_auth::api_key::ApiKeyGenerationGrant,
+    ) -> Result<crate::ApiKey, plakous_auth::api_key::ApiKeyError> {
+        let key = crate::ApiKey::new(*self.0.lock().unwrap())?;
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::AnthropicPlatform,
+            (),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
 }
 
@@ -519,7 +541,7 @@ async fn production_api_wrong_model_stream_never_completes() -> TestResult {
         let binding = configured(
             client,
             origin,
-            Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+            static_key_source("offline-only")?,
             crate::CLAUDE_SONNET_5_MODEL_ID,
             ReasoningEffort::Low,
         )?;
@@ -554,7 +576,7 @@ async fn production_api_truncated_stream_is_replayed_for_a_turn() -> TestResult 
     let binding = configured(
         client,
         origin,
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         crate::CLAUDE_SONNET_5_MODEL_ID,
         ReasoningEffort::Low,
     )?;
@@ -594,7 +616,7 @@ async fn messages_replay_wait_gets_a_fresh_generation_head_budget() -> TestResul
     let binding = configured(
         client,
         origin,
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         crate::CLAUDE_SONNET_5_MODEL_ID,
         ReasoningEffort::Low,
     )?;
@@ -661,7 +683,7 @@ async fn production_api_dropped_exchange_after_send_is_replayed_for_a_turn() -> 
     let binding = configured(
         client,
         origin,
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         crate::CLAUDE_SONNET_5_MODEL_ID,
         ReasoningEffort::Low,
     )?;
@@ -756,7 +778,7 @@ async fn production_api_tool_result_continues_without_redispatching_effect() -> 
         ToolCallerDisposition::DirectOnly,
     ));
     let binding = AnthropicLanguageModel::build(
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         "fixture-account",
         &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
         b"",
@@ -864,7 +886,7 @@ async fn production_api_accepted_stall_cancellation_joins_connection() -> TestRe
     let binding = configured(
         client,
         origin,
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         crate::CLAUDE_SONNET_5_MODEL_ID,
         ReasoningEffort::Low,
     )?;
@@ -1036,7 +1058,7 @@ async fn production_api_old_signed_thinking_projects_changed_key_before_dispatch
     let binding = configured(
         client,
         origin,
-        Arc::new(crate::AnthropicApiKey::new("offline-one")?),
+        static_key_source("offline-one")?,
         crate::CLAUDE_SONNET_5_MODEL_ID,
         ReasoningEffort::Low,
     )?;
@@ -1061,7 +1083,7 @@ async fn production_api_old_signed_thinking_projects_changed_key_before_dispatch
         let target = configured(
             client,
             origin,
-            Arc::new(crate::AnthropicApiKey::new(key)?),
+            static_key_source(key)?,
             crate::CLAUDE_SONNET_5_MODEL_ID,
             ReasoningEffort::Low,
         )?;
@@ -1137,7 +1159,7 @@ async fn an_accepted_stream_that_only_refuses_is_replayed_for_the_turn() -> Test
         let binding = configured(
             client,
             origin,
-            Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+            static_key_source("offline-only")?,
             crate::CLAUDE_SONNET_5_MODEL_ID,
             ReasoningEffort::Low,
         )?;
@@ -1173,7 +1195,7 @@ async fn api_turn_replays_a_rate_limit_on_the_same_exact_route() -> TestResult {
     let binding = configured(
         client,
         origin,
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         crate::CLAUDE_SONNET_5_MODEL_ID,
         ReasoningEffort::Low,
     )?;
@@ -1208,7 +1230,7 @@ async fn api_turn_rate_limits_retry_to_the_policy_budget_then_fail() -> TestResu
     let binding = configured(
         client,
         origin,
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         crate::CLAUDE_SONNET_5_MODEL_ID,
         ReasoningEffort::Low,
     )?;
@@ -1253,7 +1275,7 @@ async fn api_turn_does_not_retry_a_status_the_policy_does_not_name() -> TestResu
         let binding = configured(
             client,
             origin,
-            Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+            static_key_source("offline-only")?,
             crate::CLAUDE_SONNET_5_MODEL_ID,
             ReasoningEffort::Low,
         )?;
@@ -1294,7 +1316,7 @@ async fn production_api_http_rejection_and_accepted_error_never_retry() -> TestR
         let binding = configured(
             client,
             origin,
-            Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+            static_key_source("offline-only")?,
             crate::CLAUDE_SONNET_5_MODEL_ID,
             ReasoningEffort::Low,
         )?;
@@ -1327,10 +1349,32 @@ async fn production_api_http_rejection_and_accepted_error_never_retry() -> TestR
 }
 
 struct CountingKey(std::sync::atomic::AtomicUsize);
-impl AnthropicApiKeySource for CountingKey {
-    fn current_key(&self) -> Result<crate::AnthropicApiKey, AnthropicError> {
+impl plakous_auth::api_key::ApiKeySource<crate::AnthropicApiKeyRequest> for CountingKey {
+    fn authority(&self) -> &() {
+        &()
+    }
+    fn generation_grant(
+        &self,
+        _: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError>
+    {
+        key_grant("offline-configuration-key")
+    }
+    fn api_key(
+        &self,
+        _: &crate::AnthropicApiKeyRequest,
+        expected: &plakous_auth::api_key::ApiKeyGenerationGrant,
+    ) -> Result<crate::ApiKey, plakous_auth::api_key::ApiKeyError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        crate::AnthropicApiKey::new("offline-configuration-key")
+        let key = crate::ApiKey::new("offline-configuration-key")?;
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::AnthropicPlatform,
+            (),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
 }
 
@@ -1566,10 +1610,32 @@ struct WorkflowKey {
     key: std::sync::Mutex<&'static str>,
     reads: std::sync::atomic::AtomicUsize,
 }
-impl AnthropicApiKeySource for WorkflowKey {
-    fn current_key(&self) -> Result<crate::AnthropicApiKey, AnthropicError> {
+impl plakous_auth::api_key::ApiKeySource<crate::AnthropicApiKeyRequest> for WorkflowKey {
+    fn authority(&self) -> &() {
+        &()
+    }
+    fn generation_grant(
+        &self,
+        _: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError>
+    {
+        key_grant(*self.key.lock().unwrap())
+    }
+    fn api_key(
+        &self,
+        _: &crate::AnthropicApiKeyRequest,
+        expected: &plakous_auth::api_key::ApiKeyGenerationGrant,
+    ) -> Result<crate::ApiKey, plakous_auth::api_key::ApiKeyError> {
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        crate::AnthropicApiKey::new(*self.key.lock().unwrap())
+        let key = crate::ApiKey::new(*self.key.lock().unwrap())?;
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::AnthropicPlatform,
+            (),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
 }
 
@@ -1674,7 +1740,7 @@ async fn production_api_workflow_connect_retry_revalidates_the_sealed_key() -> T
 #[test]
 fn api_side_request_uses_the_session_model_and_lowest_adaptive_effort() -> TestResult {
     let (_, retrieval) = AnthropicLanguageModel::configured_with_retrieval(
-        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        static_key_source("offline-only")?,
         "fixture-account",
         &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
         b"",
@@ -1700,4 +1766,25 @@ fn api_side_request_uses_the_session_model_and_lowest_adaptive_effort() -> TestR
         plakous_messages::ReplaySafety::CostOnly
     );
     Ok(())
+}
+
+fn key_grant(
+    key: &str,
+) -> Result<plakous_auth::api_key::ApiKeyGenerationGrant, plakous_auth::api_key::ApiKeyError> {
+    Ok(crate::ApiKey::new(key)?.generation_grant(
+        plakous_auth::api_key::CredentialProviderTag::AnthropicPlatform,
+        (),
+    ))
+}
+
+fn static_key_source(key: &str) -> Result<Arc<AnthropicKeySource>, Box<dyn Error>> {
+    Ok(Arc::new(
+        plakous_auth::api_key::StaticApiKeySource::for_key(
+            crate::ApiKey::new(key)?,
+            plakous_auth::api_key::CredentialProviderTag::AnthropicPlatform,
+            crate::ANTHROPIC_PLATFORM_ORIGIN,
+            None,
+            (),
+        ),
+    ))
 }

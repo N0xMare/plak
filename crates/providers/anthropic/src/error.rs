@@ -302,6 +302,12 @@ impl fmt::Display for AnthropicError {
 
 impl std::error::Error for AnthropicError {}
 
+impl From<plakous_auth::api_key::ApiKeyError> for AnthropicError {
+    fn from(error: plakous_auth::api_key::ApiKeyError) -> Self {
+        crate::route::api_key_error(error)
+    }
+}
+
 /// Maximum provider error response bytes inspected by the classifier.
 pub(crate) const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
 

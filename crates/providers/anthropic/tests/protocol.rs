@@ -3,11 +3,11 @@
 use std::collections::BTreeMap;
 
 use plakous_anthropic::{
-    AnthropicAccountIdentity, AnthropicApiKey, AnthropicErrorKind, AnthropicMessagesDialect,
-    AnthropicMessagesStreamDecoder, AnthropicModel, AnthropicPlatformRoute, CLAUDE_OAUTH_IDENTITY,
-    CLAUDE_OAUTH_MESSAGES_USER_AGENT, CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION,
-    CLAUDE_SONNET_5_HOSTED_PTC_PROFILE_ID, ClaudeProfile, MessagesRequestTranslator,
-    ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership,
+    AnthropicAccountIdentity, AnthropicErrorKind, AnthropicMessagesDialect,
+    AnthropicMessagesStreamDecoder, AnthropicModel, AnthropicPlatformRoute, ApiKey,
+    CLAUDE_OAUTH_IDENTITY, CLAUDE_OAUTH_MESSAGES_USER_AGENT,
+    CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION, CLAUDE_SONNET_5_HOSTED_PTC_PROFILE_ID, ClaudeProfile,
+    MessagesRequestTranslator, ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership,
 };
 use plakous_model::{
     Actor, AttemptId, BlockStart, CachePolicy, Capability, CapabilityConstraints,
@@ -52,7 +52,7 @@ fn resolved() -> TestResult<ResolvedAnthropicMessages> {
     ResolvedAnthropicMessages::new(
         AnthropicMessagesDialect::stable(),
         AnthropicPlatformRoute::for_account(
-            AnthropicApiKey::new("sk-ant-offline-fixture")?,
+            ApiKey::new("sk-ant-offline-fixture")?,
             AnthropicAccountIdentity::new("offline-fixture-account")?,
         )?,
         AnthropicModel::new(
@@ -96,7 +96,7 @@ fn hosted_resolved() -> TestResult<ResolvedAnthropicMessages> {
     ResolvedAnthropicMessages::new(
         AnthropicMessagesDialect::stable(),
         AnthropicPlatformRoute::for_account(
-            AnthropicApiKey::new("sk-ant-hosted-offline")?,
+            ApiKey::new("sk-ant-hosted-offline")?,
             AnthropicAccountIdentity::new("hosted-offline-account")?,
         )?,
         AnthropicModel::new(
@@ -729,7 +729,7 @@ fn oauth_resolved_model(model_id: &str) -> TestResult<ResolvedAnthropicMessages>
     ResolvedAnthropicMessages::new(
         dialect,
         AnthropicPlatformRoute::claude_oauth(
-            AnthropicApiKey::new("oauth-access-token-fixture")?,
+            ApiKey::new("oauth-access-token-fixture")?,
             AnthropicAccountIdentity::new("oauth-fixture-account")?,
         )?,
         AnthropicModel::new(

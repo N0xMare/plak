@@ -3,7 +3,7 @@
 use crate::{
     XAI_PLATFORM_API_KEY_ORIGIN, XAI_PLATFORM_ENCRYPTED_REASONING_INCLUDE,
     XAI_PLATFORM_EXECUTION_REVISION, XAI_PLATFORM_RESPONSES_PATH, XaiPlatformApiKeyAuthority,
-    XaiPlatformApiKeySource, XaiPlatformBuildError, XaiPlatformCredentialGrant,
+    XaiPlatformBuildError, XaiPlatformKeyGeneration, XaiPlatformKeySource,
     platform_binding::{self, ACCOUNTING, PROJECTION},
     xai_platform_selection, xai_platform_selection_for,
 };
@@ -54,8 +54,8 @@ const AUTHORIZATION: HeaderName = HeaderName::from_static("authorization");
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 struct PlatformExecution {
-    source: Arc<dyn XaiPlatformApiKeySource>,
-    grant: XaiPlatformCredentialGrant,
+    source: Arc<XaiPlatformKeySource>,
+    grant: XaiPlatformKeyGeneration,
     model: String,
     client: Client,
     origin: Origin,
@@ -69,7 +69,7 @@ pub struct XaiPlatformModel {
     descriptor: ResolvedModelDescriptor,
     configuration: CompiledProviderConfiguration,
     attempt_data: ResponsesAttemptDialectData,
-    service: Arc<ResponsesAttemptService<PlatformExecution, XaiPlatformCredentialGrant>>,
+    service: Arc<ResponsesAttemptService<PlatformExecution, XaiPlatformKeyGeneration>>,
 }
 impl XaiPlatformModel {
     /// Checks the selection before resolving a source-owned grant.
@@ -81,7 +81,7 @@ impl XaiPlatformModel {
     /// Constructs the exact official Platform route. No secret is resolved here.
     pub fn new(
         authority: XaiPlatformApiKeyAuthority,
-        source: Arc<dyn XaiPlatformApiKeySource>,
+        source: Arc<XaiPlatformKeySource>,
         maximum_input: NonZeroU64,
         selected: SelectedProviderConfiguration,
         clock: Arc<dyn Clock>,
@@ -91,7 +91,7 @@ impl XaiPlatformModel {
     /// Constructs official execution with the existing exchange observer.
     pub fn with_exchange_observer(
         authority: XaiPlatformApiKeyAuthority,
-        source: Arc<dyn XaiPlatformApiKeySource>,
+        source: Arc<XaiPlatformKeySource>,
         maximum_input: NonZeroU64,
         selected: SelectedProviderConfiguration,
         clock: Arc<dyn Clock>,
@@ -118,7 +118,7 @@ impl XaiPlatformModel {
     /// to the provider semantic evidence. Empty bytes leave that evidence unchanged.
     pub fn with_admitted_facts(
         authority: XaiPlatformApiKeyAuthority,
-        source: Arc<dyn XaiPlatformApiKeySource>,
+        source: Arc<XaiPlatformKeySource>,
         maximum_input: NonZeroU64,
         selected: SelectedProviderConfiguration,
         clock: Arc<dyn Clock>,
@@ -145,7 +145,7 @@ impl XaiPlatformModel {
     /// Builds the exact route selection and returns a configured executable model.
     pub async fn from_behavior(
         authority: XaiPlatformApiKeyAuthority,
-        source: Arc<dyn XaiPlatformApiKeySource>,
+        source: Arc<XaiPlatformKeySource>,
         maximum_input: NonZeroU64,
         behavior: ProviderBehaviorConfiguration,
         clock: Arc<dyn Clock>,
@@ -164,7 +164,7 @@ impl XaiPlatformModel {
     #[doc(hidden)]
     pub fn with_local_transport(
         authority: XaiPlatformApiKeyAuthority,
-        source: Arc<dyn XaiPlatformApiKeySource>,
+        source: Arc<XaiPlatformKeySource>,
         maximum_input: NonZeroU64,
         selected: SelectedProviderConfiguration,
         clock: Arc<dyn Clock>,
@@ -197,7 +197,7 @@ impl XaiPlatformModel {
     )]
     fn assemble(
         authority: XaiPlatformApiKeyAuthority,
-        source: Arc<dyn XaiPlatformApiKeySource>,
+        source: Arc<XaiPlatformKeySource>,
         maximum_input: NonZeroU64,
         selected: SelectedProviderConfiguration,
         clock: Arc<dyn Clock>,
@@ -216,11 +216,11 @@ impl XaiPlatformModel {
         ) {
             return Err(XaiPlatformBuildError::Configuration);
         }
-        let grant = source.grant()?;
-        if grant.authority != authority {
+        let grant = platform_binding::xai_api_key_generation(source.as_ref())?;
+        if grant.authority() != &authority {
             return Err(XaiPlatformBuildError::Authentication);
         }
-        let execution_authority = grant.execution_authority()?;
+        let execution_authority = platform_binding::execution_authority(&grant)?;
         let descriptor = platform_binding::descriptor(
             &execution_authority,
             selected.route().requested_model().as_str(),
@@ -349,9 +349,13 @@ impl XaiPlatformModel {
         check_grant(execution).map_err(|_| "xAI API key grant is no longer current")?;
         let key = execution
             .source
-            .api_key(&execution.grant)
+            .api_key(&platform_binding::API_KEY_REQUEST, &execution.grant)
             .map_err(|_| "xAI API key is unavailable")?;
-        if key.grant(execution.grant.authority.clone()).ok().as_ref() != Some(&execution.grant) {
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
+            execution.grant.authority().clone(),
+        ) != execution.grant
+        {
             return Err("xAI API key does not match the session's grant");
         }
         let mut headers = HeaderMap::new();
@@ -359,7 +363,7 @@ impl XaiPlatformModel {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
-            key.bearer()
+            platform_binding::platform_bearer(&key)
                 .map_err(|_| "xAI API key is not a header value")?,
         );
         Request::new(
@@ -455,16 +459,13 @@ impl LanguageModel for XaiPlatformModel {
         context
             .authority()
             .validate(&self.descriptor, context.prepared_at())?;
-        let execution_authority = self
-            .execution
-            .grant
-            .execution_authority()
+        let execution_authority = platform_binding::execution_authority(&self.execution.grant)
             .map_err(|_| rejection("xAI Platform credential binding is invalid"))?;
         if context.authority().account_binding() != execution_authority.account_binding()
             || context.authority().credential_authority_binding()
                 != execution_authority.credential_authority_binding()
             || context.authority().credential_generation()
-                != self.execution.grant.authority.generation()
+                != self.execution.grant.authority().generation()
         {
             return Err(RuntimeModelAuthorityError::ForeignAuthority.into());
         }
@@ -667,7 +668,7 @@ fn compile_configuration(
     selected: &SelectedProviderConfiguration,
     descriptor: &ResolvedModelDescriptor,
     runtime: &RuntimeModelAuthority,
-    grant: &XaiPlatformCredentialGrant,
+    grant: &XaiPlatformKeyGeneration,
     admitted_facts: &[u8],
 ) -> Result<CompiledProviderConfiguration, XaiPlatformBuildError> {
     let build = || -> Result<_, Box<dyn std::error::Error>> {
@@ -676,7 +677,7 @@ fn compile_configuration(
             XAI_PLATFORM_API_KEY_ORIGIN,
             XAI_PLATFORM_RESPONSES_PATH,
             descriptor.semantic_binding_digest()?,
-            grant.fingerprint,
+            grant.fingerprint(),
         ))?;
         semantic_bytes.extend_from_slice(admitted_facts);
         let semantic = ProviderSemanticEvidence::new(1, semantic_bytes)?;
@@ -692,15 +693,15 @@ fn compile_configuration(
 }
 fn runtime_authority(
     descriptor: &ResolvedModelDescriptor,
-    grant: &XaiPlatformCredentialGrant,
+    grant: &XaiPlatformKeyGeneration,
     now: Timestamp,
 ) -> Result<RuntimeModelAuthority, XaiPlatformBuildError> {
-    let authority = grant.execution_authority()?;
+    let authority = platform_binding::execution_authority(grant)?;
     RuntimeModelAuthority::new(
         descriptor,
         authority.account_binding(),
         authority.credential_authority_binding(),
-        grant.authority.generation(),
+        grant.authority().generation(),
         now,
         descriptor
             .context_contract()
@@ -709,7 +710,7 @@ fn runtime_authority(
     .map_err(|_| XaiPlatformBuildError::Configuration)
 }
 fn check_grant(execution: &PlatformExecution) -> Result<(), XaiPlatformBuildError> {
-    if execution.source.grant()? != execution.grant {
+    if platform_binding::xai_api_key_generation(execution.source.as_ref())? != execution.grant {
         return Err(XaiPlatformBuildError::Authentication);
     }
     Ok(())
@@ -717,7 +718,7 @@ fn check_grant(execution: &PlatformExecution) -> Result<(), XaiPlatformBuildErro
 fn preflight<'a>(
     execution: &'a PlatformExecution,
     request: ResponsesPreflightRequest<'a>,
-) -> ResponsesPreflightFuture<'a, XaiPlatformCredentialGrant> {
+) -> ResponsesPreflightFuture<'a, XaiPlatformKeyGeneration> {
     Box::pin(async move {
         if request.cancellation().is_cancelled() || Instant::now() >= request.deadline() {
             return Err(ResponsesDispatchRejection::Unavailable);
@@ -733,12 +734,12 @@ fn preflight<'a>(
         }
         let key = execution
             .source
-            .api_key(&execution.grant)
+            .api_key(&platform_binding::API_KEY_REQUEST, &execution.grant)
             .map_err(|_| ResponsesDispatchRejection::Authentication)?;
-        if key
-            .grant(execution.grant.authority.clone())
-            .map_err(|_| ResponsesDispatchRejection::Authentication)?
-            != execution.grant
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
+            execution.grant.authority().clone(),
+        ) != execution.grant
         {
             return Err(ResponsesDispatchRejection::Authentication);
         }
@@ -748,7 +749,7 @@ fn preflight<'a>(
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
-            key.bearer()
+            platform_binding::platform_bearer(&key)
                 .map_err(|_| ResponsesDispatchRejection::Authentication)?,
         );
         let bindings = vec![
@@ -777,7 +778,7 @@ fn preflight<'a>(
         Ok(ResponsesPreparedPhysicalRequest::new(
             request.physical().clone(),
             wire,
-            ResponsesCredentialAuthority::primary(execution.grant.fingerprint),
+            ResponsesCredentialAuthority::primary(execution.grant.fingerprint()),
             bindings,
             execution.grant.clone(),
         ))
@@ -785,7 +786,7 @@ fn preflight<'a>(
 }
 fn revalidate(
     execution: &PlatformExecution,
-    request: ResponsesRevalidationRequest<'_, XaiPlatformCredentialGrant>,
+    request: ResponsesRevalidationRequest<'_, XaiPlatformKeyGeneration>,
 ) -> Result<(), ResponsesDispatchRejection> {
     if request.cancellation().is_cancelled() || Instant::now() >= request.deadline() {
         return Err(ResponsesDispatchRejection::Unavailable);
@@ -795,7 +796,7 @@ fn revalidate(
         .binding()
         .credential_authority()
         .generation(ResponsesAuthSlot::Primary)
-        != Some(execution.grant.fingerprint)
+        != Some(execution.grant.fingerprint())
     {
         return Err(ResponsesDispatchRejection::Binding);
     }

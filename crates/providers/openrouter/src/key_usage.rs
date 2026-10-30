@@ -244,7 +244,7 @@ impl OpenRouterChatRoute {
             ],
         )?;
         let generation = self.current_credential_generation_grant()?;
-        let key = self.catalog_credential(&operation, generation)?;
+        let key = self.catalog_credential(&operation, &generation)?;
         let deadline = Instant::now()
             .checked_add(OPENROUTER_KEY_USAGE_TIMEOUT)
             .ok_or(OpenRouterKeyUsageError::InvalidPolicy)?;
@@ -257,7 +257,7 @@ impl OpenRouterChatRoute {
         );
         headers.insert(
             HeaderName::from_static("authorization"),
-            sensitive_header_value(key.bearer_bytes())
+            sensitive_header_value(crate::route::bearer_bytes(&key))
                 .map_err(|_| OpenRouterAuthError::CredentialSource)?,
         );
         let request = Request::new(

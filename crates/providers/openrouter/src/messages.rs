@@ -43,7 +43,7 @@ use crate::wire::{
     usage_limit_kind,
 };
 use crate::{
-    OpenRouterApiKeyGenerationGrant, OpenRouterChatModelEvidence, OpenRouterChatRoute,
+    OpenRouterChatModelEvidence, OpenRouterChatRoute, OpenRouterKeyGeneration,
     OpenRouterRetentionPolicy,
 };
 
@@ -179,7 +179,7 @@ impl OpenRouterMessagesTarget {
             &self.descriptor,
             self.route.identity().account_binding(),
             self.route.identity().credential_authority_binding(),
-            generation_number(generation),
+            generation_number(&generation),
             checked_at,
             Some(self.evidence.expires_at()),
         )
@@ -532,7 +532,7 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
 struct OpenRouterMessagesHooks {
     target: OpenRouterMessagesTarget,
     clock: Arc<dyn Clock>,
-    generation: OpenRouterApiKeyGenerationGrant,
+    generation: OpenRouterKeyGeneration,
 }
 
 #[derive(Clone)]
@@ -559,13 +559,14 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
         let key = self
             .target
             .route
-            .messages_credential(&physical, self.generation)
+            .messages_credential(&physical, &self.generation)
             .map_err(|_| {
                 MessagesAttemptProtocolError::new("OpenRouter Messages authentication failed")
             })?;
-        let authorization = sensitive_header_value(key.bearer_bytes()).map_err(|_| {
-            MessagesAttemptProtocolError::new("OpenRouter Messages authorization failed")
-        })?;
+        let authorization =
+            sensitive_header_value(crate::route::bearer_bytes(&key)).map_err(|_| {
+                MessagesAttemptProtocolError::new("OpenRouter Messages authorization failed")
+            })?;
         let mut headers = HeaderMap::new();
         headers.insert(
             HeaderName::from_static("accept"),
@@ -725,7 +726,7 @@ fn revalidate_messages_authority(
         .map_err(|_| {
             MessagesAttemptProtocolError::new("OpenRouter Messages dispatch authority unavailable")
         })?;
-    if current.credential_generation() != generation_number(hooks.generation) {
+    if current.credential_generation() != generation_number(&hooks.generation) {
         return Err(MessagesAttemptProtocolError::new(
             "OpenRouter Messages dispatch credential changed",
         ));

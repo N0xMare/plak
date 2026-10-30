@@ -56,9 +56,8 @@ use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 use crate::{
-    CHAT_COMPLETIONS_FAMILY_ID, OpenRouterApiKey, OpenRouterChatLanguageModel,
-    OpenRouterChatTarget, OpenRouterOrigin, OpenRouterRetentionPolicy,
-    StaticOpenRouterApiKeySource,
+    ApiKey, CHAT_COMPLETIONS_FAMILY_ID, OpenRouterChatLanguageModel, OpenRouterChatTarget,
+    OpenRouterOrigin, OpenRouterRetentionPolicy,
 };
 
 fn custom_context(
@@ -114,8 +113,8 @@ fn custom_context(
 }
 
 fn test_route() -> Result<OpenRouterChatRoute, Box<dyn std::error::Error>> {
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("test-catalog-key")?,
+    let source = Arc::new(crate::static_openrouter_api_key_source(
+        ApiKey::new("test-catalog-key")?,
         "test-account",
         "test-authority",
     )?);
@@ -1379,8 +1378,8 @@ async fn authenticated_loopback_discovery_binds_exact_literal_and_paths()
         origin_text,
         peer,
     } = discovery_wire_peer().await?;
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("test-catalog-key")?,
+    let source = Arc::new(crate::static_openrouter_api_key_source(
+        ApiKey::new("test-catalog-key")?,
         "test-account",
         "test-authority",
     )?);

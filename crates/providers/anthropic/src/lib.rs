@@ -62,8 +62,8 @@ pub use retrieval::AnthropicRetrieval;
 
 pub use api_models::{
     AnthropicApiModel, AnthropicApiModelStatus, AnthropicListedModel,
-    accept_anthropic_listed_models, anthropic_api_bundled_listing, anthropic_api_models,
-    list_anthropic_api_models,
+    accept_anthropic_listed_models, anthropic_api_bundled_listing, anthropic_api_key_fingerprint,
+    anthropic_api_models, list_anthropic_api_models,
 };
 pub use cch::{
     attest_claude_oauth_cch, claude_oauth_billing_header, claude_oauth_cch_matches_body,
@@ -124,11 +124,11 @@ pub use request::{
 };
 pub(crate) use route::AnthropicResolutionTrust;
 pub use route::{
-    ANTHROPIC_MESSAGES_PATH, ANTHROPIC_PLATFORM_ORIGIN, AnthropicAccountIdentity, AnthropicApiKey,
-    AnthropicApiKeyAuth, AnthropicApiKeySource, AnthropicAttemptAuthorization,
-    AnthropicCredentialAuthority, AnthropicMessagesTargetBinding, AnthropicMessagesTransport,
-    AnthropicModel, AnthropicPlatformRoute, ClaudeProfile, ResolvedAnthropicMessages,
-    ScopedFeatureEvidence, ThinkingSupport,
+    ANTHROPIC_MESSAGES_PATH, ANTHROPIC_PLATFORM_ORIGIN, AnthropicAccountIdentity,
+    AnthropicApiKeyAuth, AnthropicApiKeyRequest, AnthropicAttemptAuthorization,
+    AnthropicCredentialAuthority, AnthropicKeySource, AnthropicMessagesTargetBinding,
+    AnthropicMessagesTransport, AnthropicModel, AnthropicPlatformRoute, ApiKey, ClaudeProfile,
+    ResolvedAnthropicMessages, ScopedFeatureEvidence, ThinkingSupport,
 };
 pub use stream::{
     AnthropicMessagesStreamDecoder, MessagesStopDetails, MessagesStopDetailsKind,

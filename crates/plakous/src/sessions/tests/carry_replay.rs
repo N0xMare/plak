@@ -41,8 +41,8 @@ async fn responses() -> TestResult<ConfiguredLanguageModel> {
 async fn responses_with_key(key: &str) -> TestResult<ConfiguredLanguageModel> {
     use plakous_openai::*;
     let reference = CredentialReference::application("carry-sanitized-fixture")?;
-    let source = Arc::new(StaticPlatformCredentialSource::new(
-        SecretString::new(key)?,
+    let source = Arc::new(static_openai_api_key_source(
+        ApiKey::new(key)?,
         reference.clone(),
         CredentialAuthorityId::new("carry-fixture")?,
     ));

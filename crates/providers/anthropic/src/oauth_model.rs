@@ -28,12 +28,11 @@ use crate::oauth::{
     claude_max_output_tokens, claude_oauth_reasoning_effort_options,
 };
 use crate::{
-    AnthropicAccountIdentity, AnthropicApiKey, AnthropicError, AnthropicErrorKind,
-    AnthropicErrorPhase, AnthropicHttpDeadline, AnthropicLocalHttpServiceFactory,
-    AnthropicMessagesDialect, AnthropicModel, AnthropicPlatformRoute, AnthropicRetryGrant,
-    ClaudeCredentialRenewal, ClaudeNativeAuthError, ClaudeNativeAuthManager, ClaudeProfile,
-    MessagesRequestTranslator, ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership,
-    start_anthropic_messages_model_call,
+    AnthropicAccountIdentity, AnthropicError, AnthropicErrorKind, AnthropicErrorPhase,
+    AnthropicHttpDeadline, AnthropicLocalHttpServiceFactory, AnthropicMessagesDialect,
+    AnthropicModel, AnthropicPlatformRoute, AnthropicRetryGrant, ApiKey, ClaudeCredentialRenewal,
+    ClaudeNativeAuthError, ClaudeNativeAuthManager, ClaudeProfile, MessagesRequestTranslator,
+    ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership, start_anthropic_messages_model_call,
 };
 
 const WIRE_DOMAIN: &[u8] = b"plakous-anthropic/claude-oauth-messages-wire-v1";
@@ -678,7 +677,7 @@ impl ClaudeNativeAuthManager {
         self.refresh_if_needed().await?;
         self.ensure_account_identity().await?;
         let ((access_token, generation, _), identity) = self.identity_credentials()?;
-        let key = AnthropicApiKey::new(access_token)
+        let key = ApiKey::new(access_token)
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
         let account = AnthropicAccountIdentity::new(identity.account_uuid().as_str())
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;

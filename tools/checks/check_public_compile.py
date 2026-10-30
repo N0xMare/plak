@@ -292,6 +292,7 @@ AUTHORITY_NEGATIVE_BINS = (
     "issued_invocation",
     "terminal_result",
     "credential_bytes",
+    "api_key_admission",
     "family_transport",
     "standard_descriptor",
     "release_evidence",
@@ -302,8 +303,6 @@ AUTHORITY_NEGATIVE_BINS = (
     "anthropic_transport",
     "openrouter_model_lane",
     "xai_platform_authority",
-    "xai_platform_grant",
-    "xai_platform_bearer",
     "local_composition_session",
 )
 AUTHORITY_NEGATIVE_IMPORTS = {
@@ -324,6 +323,7 @@ AUTHORITY_NEGATIVE_IMPORTS = {
     "issued_invocation": "use plakous::tools::ToolInvocation;",
     "terminal_result": "use plakous::agent::TurnResult;",
     "credential_bytes": "use plakous::auth::SecretString;",
+    "api_key_admission": "use plakous::openrouter::{OpenRouterApiKeySelection, OpenRouterKeyGeneration, OpenRouterKeySource};",
     "family_transport": "use plakous::responses::ResponsesAttemptHost;",
     "standard_descriptor": "use plakous::model::StandardIntegrationAuthority;",
     "release_evidence": "use plakous::model::StandardIntegrationAuthority;",
@@ -334,8 +334,6 @@ AUTHORITY_NEGATIVE_IMPORTS = {
     "anthropic_transport": "use plakous::anthropic::AnthropicMessagesTransport;",
     "openrouter_model_lane": "use plakous::openrouter::OpenRouterLanguageModel;",
     "xai_platform_authority": "use plakous::xai::XaiPlatformApiKeyAuthority;",
-    "xai_platform_grant": "use plakous::xai::XaiPlatformCredentialGrant;",
-    "xai_platform_bearer": "use plakous::xai::XaiPlatformApiKey;",
     "local_composition_session": "use plakous::agent::LocalCompositionSession;",
 }
 AUTHORITY_NEGATIVE_MARKERS = {
@@ -486,11 +484,24 @@ fn main() {
 }
 """
 AUTHORITY_NEGATIVE_MARKERS["hosted_runtime_factory"] = "ExternalFactory"
+AUTHORITY_NEGATIVE_MARKERS["api_key_admission"] = "api_key"
+AUTHORITY_NEGATIVE_SOURCES["api_key_admission"] = """use plakous::openrouter::{
+    OpenRouterApiKeySelection, OpenRouterKeyGeneration, OpenRouterKeySource,
+};
+
+fn forbidden(
+    source: &OpenRouterKeySource,
+    selection: &OpenRouterApiKeySelection,
+    grant: &OpenRouterKeyGeneration,
+) {
+    let _ = source.api_key(selection, grant);
+}
+
+fn main() {}
+"""
 
 for binary, argument, operation in (
     ("xai_platform_authority", "XaiPlatformApiKeyAuthority", "for_key_generation(&[])"),
-    ("xai_platform_grant", "XaiPlatformCredentialGrant", "execution_authority()"),
-    ("xai_platform_bearer", "XaiPlatformApiKey", "bearer()"),
 ):
     AUTHORITY_NEGATIVE_SOURCES[binary] = (
         f"{AUTHORITY_NEGATIVE_IMPORTS[binary]}\n\n"
@@ -528,9 +539,11 @@ AUTHORITY_NEGATIVE_ERROR_LINES["hosted_registered_authority"] = 4
 AUTHORITY_NEGATIVE_ERROR_LINES["issued_invocation"] = 4
 AUTHORITY_NEGATIVE_ERROR_LINES["terminal_result"] = 4
 AUTHORITY_NEGATIVE_ERROR_LINES["credential_bytes"] = 5
-for binary in ("xai_platform_authority", "xai_platform_grant", "xai_platform_bearer"):
+for binary in ("xai_platform_authority",):
     AUTHORITY_NEGATIVE_ERROR_CODES[binary] = "E0624"
     AUTHORITY_NEGATIVE_ERROR_LINES[binary] = 4
+AUTHORITY_NEGATIVE_ERROR_CODES["api_key_admission"] = "E0308"
+AUTHORITY_NEGATIVE_ERROR_LINES["api_key_admission"] = 10
 AUTHORITY_NEGATIVE = tuple(
     (
         f"negative-authority-{binary.replace('_', '-')}",

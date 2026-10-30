@@ -1,7 +1,7 @@
 use plakous_model::{FixedClock, ModelAdapterProfileId, ModelId};
 
 use super::*;
-use crate::AnthropicApiKey;
+use crate::ApiKey;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -19,7 +19,7 @@ fn config() -> TestResult<AnthropicPlatformModelConfig> {
 fn resolver_owns_route_provenance_freshness_and_conservative_capabilities() -> TestResult {
     let now = Timestamp::new(ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS + 60, 500)?;
     let resolver = AnthropicPlatformModelResolver::with_runtime(
-        AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-resolver-sentinel")?)?,
+        AnthropicPlatformRoute::new(ApiKey::new("sk-ant-resolver-sentinel")?)?,
         Arc::new(FixedClock::new(now)),
     );
     let target = resolver.resolve(config()?)?;
@@ -60,7 +60,7 @@ fn resolver_owns_route_provenance_freshness_and_conservative_capabilities() -> T
 #[test]
 fn minimal_profile_advertises_reviewed_streaming_client_tools_images_and_caching() -> TestResult {
     let resolver = AnthropicPlatformModelResolver::with_runtime(
-        AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-minimal-profile")?)?,
+        AnthropicPlatformRoute::new(ApiKey::new("sk-ant-minimal-profile")?)?,
         Arc::new(FixedClock::new(Timestamp::new(
             ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS + 60,
             0,
@@ -94,7 +94,7 @@ fn minimal_profile_advertises_reviewed_streaming_client_tools_images_and_caching
 #[test]
 fn sonnet_5_base_profile_is_exact_and_non_beta() -> TestResult {
     let resolver = AnthropicPlatformModelResolver::with_runtime(
-        AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-sonnet-5-offline")?)?,
+        AnthropicPlatformRoute::new(ApiKey::new("sk-ant-sonnet-5-offline")?)?,
         Arc::new(FixedClock::new(Timestamp::new(
             ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS + 60,
             0,
@@ -130,7 +130,7 @@ fn sonnet_5_base_profile_is_exact_and_non_beta() -> TestResult {
 #[test]
 fn unsupported_model_profile_and_overstated_ceiling_fail_closed() -> TestResult {
     let resolver = AnthropicPlatformModelResolver::with_runtime(
-        AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-admission-negative")?)?,
+        AnthropicPlatformRoute::new(ApiKey::new("sk-ant-admission-negative")?)?,
         Arc::new(FixedClock::new(Timestamp::new(
             ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS + 1,
             0,
@@ -189,7 +189,7 @@ fn api_admission_never_refuses_on_the_calendar() -> TestResult {
     ] {
         let now = Timestamp::new(seconds, 0)?;
         let resolver = AnthropicPlatformModelResolver::with_runtime(
-            AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-past-review")?)?,
+            AnthropicPlatformRoute::new(ApiKey::new("sk-ant-past-review")?)?,
             Arc::new(FixedClock::new(now)),
         );
         let target = resolver.resolve(config()?)?;

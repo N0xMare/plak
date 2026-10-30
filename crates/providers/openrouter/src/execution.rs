@@ -36,7 +36,7 @@ use plakous_responses::{
 use thiserror::Error;
 
 use crate::{
-    OpenRouterApiKeyGenerationGrant, OpenRouterDialect, OpenRouterResponsesTarget,
+    OpenRouterDialect, OpenRouterKeyGeneration, OpenRouterResponsesTarget,
     compile_openrouter_responses_configuration, dialect::OPENROUTER_RESPONSES_DIALECT_REVISION,
 };
 
@@ -117,10 +117,11 @@ pub enum OpenRouterResponsesLanguageModelConfigError {
 struct OpenRouterResponsesExecution {
     target: OpenRouterResponsesTarget,
     client: Client,
+    generation: OpenRouterKeyGeneration,
 }
 
 struct OpenRouterDispatchGuard {
-    generation: OpenRouterApiKeyGenerationGrant,
+    generation: OpenRouterKeyGeneration,
 }
 
 /// OpenRouter model backed exclusively by shared Responses request, attempt,
@@ -207,7 +208,7 @@ impl OpenRouterResponsesLanguageModel {
         let runtime = target
             .runtime_authority(checked_at)
             .map_err(|_| OpenRouterResponsesLanguageModelConfigError::Configuration)?;
-        if generation_number(generation) != runtime.credential_generation() {
+        if generation_number(&generation) != runtime.credential_generation() {
             return Err(OpenRouterResponsesLanguageModelConfigError::Configuration);
         }
         let configuration =
@@ -217,6 +218,7 @@ impl OpenRouterResponsesLanguageModel {
         let execution = Arc::new(OpenRouterResponsesExecution {
             target: target.clone(),
             client: client.clone(),
+            generation: generation.clone(),
         });
         let authorization = ResponsesAuthorizationAdapter::new(
             PREFLIGHT_REVISION,
@@ -648,11 +650,14 @@ fn openrouter_preflight<'a>(
         let generation = route
             .responses_credential_generation_grant(request.physical())
             .map_err(|_| ResponsesDispatchRejection::Authentication)?;
+        if generation != dialect.generation {
+            return Err(ResponsesDispatchRejection::Authentication);
+        }
         let identity = route.identity();
         let key = route
-            .responses_credential(request.physical(), generation)
+            .responses_credential(request.physical(), &generation)
             .map_err(|_| ResponsesDispatchRejection::Authentication)?;
-        let authorization = sensitive_header_value(key.bearer_bytes())
+        let authorization = sensitive_header_value(crate::route::bearer_bytes(&key))
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
         let mut headers = HeaderMap::new();
         headers.insert(HEADER_ACCEPT, HeaderValue::from_static("text/event-stream"));
@@ -738,9 +743,9 @@ fn revalidate_openrouter(
         .runtime_authority(dialect.target.route().clock.now())
         .map_err(|_| ResponsesDispatchRejection::Binding)?;
     let route = dialect.target.route();
-    let generation = request.response_head_guard_mut().generation;
+    let generation = request.response_head_guard_mut().generation.clone();
     route
-        .revalidate_responses_credential_generation(request.binding().physical(), generation)
+        .revalidate_responses_credential_generation(request.binding().physical(), &generation)
         .map_err(|_| ResponsesDispatchRejection::Authentication)?;
     if request
         .binding()
@@ -813,7 +818,7 @@ fn request_output_bound_matches(
     )
 }
 
-fn generation_number(grant: OpenRouterApiKeyGenerationGrant) -> u64 {
+fn generation_number(grant: &OpenRouterKeyGeneration) -> u64 {
     let fingerprint = grant.fingerprint();
     let bytes = fingerprint.as_bytes();
     u64::from_be_bytes(bytes[..8].try_into().unwrap_or([0; 8])).max(1)

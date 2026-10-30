@@ -56,7 +56,7 @@ pub use codex_search::{
     CODEX_SEARCH_PATH, CodexSearchRequest, classify_codex_search_body, decode_codex_search_response,
 };
 pub use config::{
-    AccessMode, AuthError, CodexSubscriptionRouteConfig, ConfigError, ConformanceStatus,
+    AccessMode, ApiKey, AuthError, CodexSubscriptionRouteConfig, ConfigError, ConformanceStatus,
     CredentialAuthorityId, CredentialReference, EndpointOrigin, OPENAI_CHATGPT_ORIGIN,
     OPENAI_CODEX_COMPATIBILITY_PROFILE_ID, OPENAI_CODEX_ENCRYPTED_REASONING_INCLUDE,
     OPENAI_CODEX_REFERENCE_CLIENT_VERSION, OPENAI_CODEX_RESPONSES_PATH,
@@ -64,10 +64,11 @@ pub use config::{
     OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID, OPENAI_PLATFORM_AUTH_PROFILE_ID,
     OPENAI_PLATFORM_AUTH_REVISION, OPENAI_PLATFORM_AUTHORITY_CLASS,
     OPENAI_PLATFORM_CREDENTIAL_SELECTION, OPENAI_PLATFORM_ORIGIN, OPENAI_PLATFORM_ROUTE_ID,
-    OPENAI_RESPONSES_ADAPTER_REVISION, OPENAI_RESPONSES_PROTOCOL_ID, OpenAiApiKeyGenerationGrant,
-    OpenAiPlatformRouteConfig, OpenAiProjectId, OpenAiRoute, OpenAiRouteConformance, OpenAiTarget,
-    PlatformCredentialSource, PlatformProjectPolicy, PlatformStoragePolicy, ResponsesDialect,
-    ResponsesFeature, Routability, SecretString, StaticPlatformCredentialSource, StorageMode,
+    OPENAI_RESPONSES_ADAPTER_REVISION, OPENAI_RESPONSES_PROTOCOL_ID, OpenAiApiKeyRequest,
+    OpenAiKeyGeneration, OpenAiKeySource, OpenAiPlatformRouteConfig, OpenAiProjectId, OpenAiRoute,
+    OpenAiRouteConformance, OpenAiTarget, PlatformProjectPolicy, PlatformStoragePolicy,
+    ResponsesDialect, ResponsesFeature, Routability, StaticOpenAiKeySource, StorageMode,
+    static_openai_api_key_source,
 };
 pub use error::{ErrorPhase, MAX_PROVIDER_REQUEST_ID_BYTES, OpenAiError, RetryClass};
 pub use hosted_support::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};

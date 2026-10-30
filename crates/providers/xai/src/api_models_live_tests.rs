@@ -12,30 +12,16 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
 use super::{get_models, list_via};
-use crate::{
-    XaiPlatformApiKey, XaiPlatformApiKeyAuthority, XaiPlatformApiKeySource, XaiPlatformBuildError,
-    XaiPlatformCredentialGrant,
-};
+use crate::{ApiKey, XaiPlatformApiKeyAuthority};
 
-struct Fixture;
-
-impl XaiPlatformApiKeySource for Fixture {
-    fn grant(&self) -> Result<XaiPlatformCredentialGrant, XaiPlatformBuildError> {
-        let authority = XaiPlatformApiKeyAuthority::new("plak", "xai-list-fixture", 1)
-            .map_err(|_| XaiPlatformBuildError::Authentication)?;
-        XaiPlatformApiKey::new("plak-test-xai-models-key")?.grant(authority)
-    }
-
-    fn api_key(
-        &self,
-        expected: &XaiPlatformCredentialGrant,
-    ) -> Result<XaiPlatformApiKey, XaiPlatformBuildError> {
-        let key = XaiPlatformApiKey::new("plak-test-xai-models-key")?;
-        if &key.grant(expected.authority().clone())? != expected {
-            return Err(XaiPlatformBuildError::Authentication);
-        }
-        Ok(key)
-    }
+fn fixture() -> plakous_auth::api_key::StaticApiKeySource<XaiPlatformApiKeyAuthority> {
+    plakous_auth::api_key::StaticApiKeySource::for_key(
+        ApiKey::new("plak-test-xai-models-key").expect("key"),
+        plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
+        crate::platform::XAI_PLATFORM_API_KEY_ORIGIN,
+        None,
+        XaiPlatformApiKeyAuthority::new("plak", "xai-list-fixture", 1).expect("authority"),
+    )
 }
 
 struct Loop {
@@ -152,7 +138,7 @@ async fn loopback_list_sends_the_bearer_and_rejects_a_cursor() {
         stream.shutdown().await.expect("shutdown");
         request
     });
-    let error = list_via(&Fixture, &client, origin)
+    let error = list_via(&fixture(), &client, origin)
         .await
         .expect_err("cursor");
     assert!(error.to_string().contains("another page"), "{error}");
@@ -181,7 +167,7 @@ async fn permanent_non_200_fails_the_list() {
             .expect("write");
         stream.shutdown().await.expect("shutdown");
     });
-    let error = list_via(&Fixture, &client, origin)
+    let error = list_via(&fixture(), &client, origin)
         .await
         .expect_err("status");
     assert!(error.to_string().contains("HTTP 400"), "{error}");
@@ -204,7 +190,7 @@ async fn oversized_body_fails_the_list() {
             .expect("write");
         stream.shutdown().await.expect("shutdown");
     });
-    let error = list_via(&Fixture, &client, origin)
+    let error = list_via(&fixture(), &client, origin)
         .await
         .expect_err("bound");
     assert!(

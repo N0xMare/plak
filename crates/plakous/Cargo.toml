@@ -30,7 +30,7 @@ default = []
 # Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.
 # TUI/embedder-safe surface is always-on: agent (curated), model, tools, profiles.
 # Provider-hosted tools and the local page fetcher are independent choices.
-anthropic = ["dep:plakous-anthropic", "dep:plakous-http", "plakous-tool-web/image-gen"]
+anthropic = ["dep:plakous-auth", "dep:plakous-anthropic", "dep:plakous-http", "plakous-tool-web/image-gen"]
 auth = ["dep:plakous-auth"]
 web-fetch = ["plakous-tool-web/fetch", "dep:plakous-http"]
 # Code Mode and JavaScript through the engine-free cell client; Python is
@@ -65,10 +65,10 @@ mcp = ["plakous-mcp/client"]
 codex = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-openai", "plakous-openai/native-auth"]
 grok = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-xai", "plakous-xai/native-auth", "dep:plakous-responses"]
 claude = ["dep:plakous-exchange", "dep:plakous-auth", "plakous-auth/http-refresh", "dep:plakous-http", "plakous-tool-web/image-gen", "dep:rustix", "dep:serde", "dep:uuid", "dep:plakous-anthropic", "plakous-anthropic/native-auth"]
-openai = ["dep:plakous-openai", "dep:plakous-http", "plakous-tool-web/image-gen"]
-openrouter = ["dep:plakous-http", "dep:plakous-openrouter", "plakous-tool-web/image-gen"]
+openai = ["dep:plakous-auth", "dep:plakous-openai", "dep:plakous-http", "plakous-tool-web/image-gen"]
+openrouter = ["dep:plakous-auth", "dep:plakous-http", "dep:plakous-openrouter", "plakous-tool-web/image-gen"]
 sessions-sqlite = ["plakous-store/sqlite"]
-xai = ["dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/image-gen"]
+xai = ["dep:plakous-auth", "dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/image-gen"]
 
 [package.metadata.docs.rs]
 all-features = true

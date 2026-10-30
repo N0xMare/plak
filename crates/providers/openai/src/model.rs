@@ -64,8 +64,8 @@ use crate::native_auth::{
     revalidate_codex_responses,
 };
 use crate::{
-    ConfigError, CredentialReference, EndpointOrigin, OPENAI_PLATFORM_ORIGIN,
-    OpenAiPlatformRouteConfig, OpenAiTarget, PlatformCredentialSource, PlatformStoragePolicy,
+    ConfigError, CredentialReference, EndpointOrigin, OPENAI_PLATFORM_ORIGIN, OpenAiKeySource,
+    OpenAiPlatformRouteConfig, OpenAiTarget, PlatformStoragePolicy,
     manifest::OPENAI_GPT_6_PLATFORM_PROFILE_ID, manifest::OPENAI_GPT_56_PLATFORM_PROFILE_ID,
 };
 
@@ -315,7 +315,7 @@ pub enum OpenAiPlatformResolveError {
 #[derive(Clone)]
 pub struct OpenAiPlatformModelBuilder {
     credential: CredentialReference,
-    source: Arc<dyn PlatformCredentialSource>,
+    source: Arc<OpenAiKeySource>,
     facts: OpenAiPlatformModelFacts,
     context_envelope: Option<std::num::NonZeroU64>,
     storage: PlatformStoragePolicy,

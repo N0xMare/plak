@@ -7,8 +7,8 @@ use crate::discovery::{AdmissionWire, catalog_snapshot_identity};
 
 fn admission_fixture() -> Result<OpenRouterChatModelEvidence, Box<dyn std::error::Error>> {
     let route = OpenRouterChatRoute::new_local_fixture_with_retention(
-        Arc::new(crate::StaticOpenRouterApiKeySource::new(
-            crate::OpenRouterApiKey::new("offline-admission-key")?,
+        Arc::new(crate::static_openrouter_api_key_source(
+            crate::ApiKey::new("offline-admission-key")?,
             "offline-account",
             "offline-authority",
         )?),
@@ -544,8 +544,8 @@ fn admission_projection_does_not_authorize_tampered_or_foreign_snapshot()
 -> Result<(), Box<dyn std::error::Error>> {
     let evidence = admission_fixture()?;
     let route = OpenRouterChatRoute::new_local_fixture_with_retention(
-        Arc::new(crate::StaticOpenRouterApiKeySource::new(
-            crate::OpenRouterApiKey::new("offline-admission-key")?,
+        Arc::new(crate::static_openrouter_api_key_source(
+            crate::ApiKey::new("offline-admission-key")?,
             "offline-account",
             "offline-authority",
         )?),
@@ -567,8 +567,8 @@ fn admission_projection_does_not_authorize_tampered_or_foreign_snapshot()
     assert!(!tampered.validates(route.identity(), now));
     assert!(!evidence.validates(route.identity(), evidence.expires_at()));
     let foreign = OpenRouterChatRoute::new_local_fixture_with_retention(
-        Arc::new(crate::StaticOpenRouterApiKeySource::new(
-            crate::OpenRouterApiKey::new("offline-admission-key")?,
+        Arc::new(crate::static_openrouter_api_key_source(
+            crate::ApiKey::new("offline-admission-key")?,
             "foreign-account",
             "offline-authority",
         )?),
@@ -581,8 +581,8 @@ fn admission_projection_does_not_authorize_tampered_or_foreign_snapshot()
     )?)));
     assert!(!evidence.validates(foreign.identity(), now));
     let moved = OpenRouterChatRoute::new_local_fixture_with_retention(
-        Arc::new(crate::StaticOpenRouterApiKeySource::new(
-            crate::OpenRouterApiKey::new("offline-admission-key")?,
+        Arc::new(crate::static_openrouter_api_key_source(
+            crate::ApiKey::new("offline-admission-key")?,
             "offline-account",
             "offline-authority",
         )?),

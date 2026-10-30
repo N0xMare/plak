@@ -22,8 +22,8 @@ use plakous::model::{
     ToolChoice, ToolPresentationMode,
 };
 use plakous::openrouter::{
-    OpenRouterApiKeySource, OpenRouterChatClient, OpenRouterChatDiscoveryError,
-    OpenRouterChatEndpointCandidate, OpenRouterReasoningFacts, OpenRouterRetentionPolicy,
+    OpenRouterChatClient, OpenRouterChatDiscoveryError, OpenRouterChatEndpointCandidate,
+    OpenRouterKeySource, OpenRouterReasoningFacts, OpenRouterRetentionPolicy,
     OpenRouterToolChoiceModes,
 };
 pub use plakous::openrouter::{OpenRouterChatModelEvidence, OpenRouterKeyUsage};
@@ -74,7 +74,7 @@ pub trait OpenRouterCredentials: Send + Sync + 'static {
     /// # Errors
     ///
     /// Returns a redaction-safe failure when the credential binding is invalid.
-    fn source(&self) -> CliResult<Arc<dyn OpenRouterApiKeySource>>;
+    fn source(&self) -> CliResult<Arc<OpenRouterKeySource>>;
 
     /// The selected key's safe account label: its environment variable name
     /// or `sha256:` plus eight hex digits, never a key prefix or suffix.

@@ -66,6 +66,7 @@ fn clock() -> Arc<dyn Clock> {
     Arc::new(FixedClock::new(now()))
 }
 struct Source {
+    authority: XaiPlatformApiKeyAuthority,
     key: Mutex<Option<String>>,
     resolves: AtomicUsize,
     grants: AtomicUsize,
@@ -73,6 +74,7 @@ struct Source {
 impl Source {
     fn new() -> Self {
         Self {
+            authority: authority(),
             key: Mutex::new(Some("synthetic-xai-platform-key".into())),
             resolves: AtomicUsize::new(0),
             grants: AtomicUsize::new(0),
@@ -82,36 +84,52 @@ impl Source {
 fn authority() -> XaiPlatformApiKeyAuthority {
     XaiPlatformApiKeyAuthority::new("fixture-account", "fixture-xai-key", 1).unwrap()
 }
-impl XaiPlatformApiKeySource for Source {
-    fn grant(&self) -> Result<XaiPlatformCredentialGrant, XaiPlatformBuildError> {
+impl plakous_auth::api_key::ApiKeySource<XaiPlatformApiKeyRequest, XaiPlatformApiKeyAuthority>
+    for Source
+{
+    fn authority(&self) -> &XaiPlatformApiKeyAuthority {
+        &self.authority
+    }
+    fn generation_grant(
+        &self,
+        _: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<XaiPlatformKeyGeneration, plakous_auth::api_key::ApiKeyError> {
         self.grants.fetch_add(1, Ordering::SeqCst);
         let key = self
             .key
             .lock()
-            .map_err(|_| XaiPlatformBuildError::Authentication)?;
-        XaiPlatformApiKey::new(
+            .map_err(|_| plakous_auth::api_key::ApiKeyError::Unavailable)?;
+        Ok(ApiKey::new(
             key.as_ref()
-                .ok_or(XaiPlatformBuildError::Authentication)?
+                .ok_or(plakous_auth::api_key::ApiKeyError::Unavailable)?
                 .clone(),
         )?
-        .grant(authority())
+        .generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
+            self.authority.clone(),
+        ))
     }
     fn api_key(
         &self,
-        expected: &XaiPlatformCredentialGrant,
-    ) -> Result<XaiPlatformApiKey, XaiPlatformBuildError> {
+        _: &XaiPlatformApiKeyRequest,
+        expected: &XaiPlatformKeyGeneration,
+    ) -> Result<ApiKey, plakous_auth::api_key::ApiKeyError> {
         self.resolves.fetch_add(1, Ordering::SeqCst);
         let key = self
             .key
             .lock()
-            .map_err(|_| XaiPlatformBuildError::Authentication)?;
-        let key = XaiPlatformApiKey::new(
+            .map_err(|_| plakous_auth::api_key::ApiKeyError::Unavailable)?;
+        let key = ApiKey::new(
             key.as_ref()
-                .ok_or(XaiPlatformBuildError::Authentication)?
+                .ok_or(plakous_auth::api_key::ApiKeyError::Unavailable)?
                 .clone(),
         )?;
-        if &key.grant(authority())? != expected {
-            return Err(XaiPlatformBuildError::Authentication);
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
+            self.authority.clone(),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
         }
         Ok(key)
     }
@@ -912,7 +930,7 @@ async fn unsupported_behavior_refuses_before_credentials_and_reviews_never_expir
         .await?;
     assert_eq!(runtime.valid_until(), None);
     assert!(
-        !format!("{:?}", XaiPlatformApiKey::new("synthetic-visible-marker")?)
+        !format!("{:?}", ApiKey::new("synthetic-visible-marker")?)
             .contains("synthetic-visible-marker")
     );
     Ok(())

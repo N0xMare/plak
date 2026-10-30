@@ -4,6 +4,34 @@
 //! absent; their negative pins are the `authority-negative` fixture and the
 //! facade's `compile_fail` doctests.
 
+pub(crate) fn shared_api_key_source_is_a_supported_facade_workflow()
+-> Result<(), Box<dyn std::error::Error>> {
+    use plakous::api_key::{
+        ApiKey, ApiKeyRequest, ApiKeySource, CredentialProviderTag, StaticApiKeySource,
+    };
+    struct Request;
+    impl ApiKeyRequest for Request {
+        fn provider(&self) -> CredentialProviderTag {
+            CredentialProviderTag::OpenAiPlatform
+        }
+        fn origin(&self) -> &str {
+            "https://api.example.invalid"
+        }
+    }
+    let source = StaticApiKeySource::for_key(
+        ApiKey::new("synthetic-facade-key")?,
+        CredentialProviderTag::OpenAiPlatform,
+        "https://api.example.invalid",
+        None,
+        (),
+    );
+    let source: &dyn ApiKeySource<Request> = &source;
+    let grant = source.generation_grant(&Request)?;
+    let key: ApiKey = source.api_key(&Request, &grant)?;
+    assert!(format!("{key:?}").contains("redacted"));
+    Ok(())
+}
+
 pub(crate) fn construction_helpers_are_supported_facade_workflows() {
     use plakous::construction::{
         CustomProviderConfigurationRequest, bind_custom_model_authority,
@@ -66,7 +94,11 @@ pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow(
         registry: plakous::tools::FrozenToolRegistry,
         target: plakous::tools::ProviderModelProjectionIdentityV2,
     ) -> Result<PythonHarnessSdkDescriptorV1, Box<dyn std::error::Error>> {
-        Ok(PythonHarnessSdkV1::compile(plakous::tools::JobConfig::default(), registry, target)?)
+        Ok(PythonHarnessSdkV1::compile(
+            plakous::tools::JobConfig::default(),
+            registry,
+            target,
+        )?)
     }
 
     fn select_profile(descriptor: &CellDescriptor) -> Result<LocalCompositionProfile, AgentError> {
@@ -1087,14 +1119,13 @@ pub(crate) fn curated_provider_namespaces_are_nameable_without_unqualified_lanes
         OpenAiRetryClass, OpenAiRoute, OpenAiTarget,
     };
     use plakous::openrouter::{
-        OpenRouterApiKey, OpenRouterApiKeySource, OpenRouterAuthError,
-        OpenRouterCatalogCredentialRequest, OpenRouterChatClient, OpenRouterChatConnectionError,
-        OpenRouterChatCredentialRequest, OpenRouterChatDiscoveryConfig,
-        OpenRouterChatDiscoveryError, OpenRouterChatEndpointCandidate, OpenRouterChatModelEvidence,
-        OpenRouterChatProfile, OpenRouterChatReasoningAlias, OpenRouterChatReasoningReplay,
-        OpenRouterCredentialBinding, OpenRouterCredentialRequest, OpenRouterReasoningFacts,
+        ApiKey, OpenRouterAuthError, OpenRouterChatClient, OpenRouterChatConnectionError,
+        OpenRouterChatDiscoveryConfig, OpenRouterChatDiscoveryError,
+        OpenRouterChatEndpointCandidate, OpenRouterChatModelEvidence, OpenRouterChatProfile,
+        OpenRouterChatReasoningAlias, OpenRouterChatReasoningReplay, OpenRouterCredentialBinding,
+        OpenRouterCredentialRequest, OpenRouterKeySource, OpenRouterReasoningFacts,
         OpenRouterRetentionPolicy, OpenRouterRouteError, OpenRouterToolChoiceModes,
-        StaticOpenRouterApiKeySource,
+        StaticOpenRouterKeySource,
     };
     use plakous::xai::{
         GrokCodingProfile, SUPERGROK_RESPONSES_ORIGIN, SuperGrokResponsesDialect,
@@ -1118,13 +1149,11 @@ pub(crate) fn curated_provider_namespaces_are_nameable_without_unqualified_lanes
     hold(&std::any::type_name::<AnthropicPlatformCapabilityProfile>());
     hold(&std::any::type_name::<AnthropicPlatformModelConfig>());
     hold(&std::any::type_name::<AnthropicPlatformModelResolver>());
-    hold(&std::any::type_name::<OpenRouterApiKey>());
-    hold(&std::any::type_name::<dyn OpenRouterApiKeySource>());
+    hold(&std::any::type_name::<ApiKey>());
+    hold(&std::any::type_name::<OpenRouterKeySource>());
     hold(&std::any::type_name::<OpenRouterAuthError>());
-    hold(&std::any::type_name::<OpenRouterCatalogCredentialRequest<'_>>());
     hold(&std::any::type_name::<OpenRouterChatClient>());
     hold(&std::any::type_name::<OpenRouterChatConnectionError>());
-    hold(&std::any::type_name::<OpenRouterChatCredentialRequest<'_>>());
     hold(&std::any::type_name::<OpenRouterChatDiscoveryConfig>());
     hold(&std::any::type_name::<OpenRouterChatDiscoveryError>());
     hold(&std::any::type_name::<OpenRouterChatEndpointCandidate>());
@@ -1138,7 +1167,7 @@ pub(crate) fn curated_provider_namespaces_are_nameable_without_unqualified_lanes
     hold(&std::any::type_name::<OpenRouterCredentialRequest<'_>>());
     hold(&std::any::type_name::<OpenRouterRetentionPolicy>());
     hold(&std::any::type_name::<OpenRouterRouteError>());
-    hold(&std::any::type_name::<StaticOpenRouterApiKeySource>());
+    hold(&std::any::type_name::<StaticOpenRouterKeySource>());
     hold(&std::any::type_name::<GrokCodingProfile>());
     hold(&SUPERGROK_RESPONSES_ORIGIN);
     hold(&std::any::type_name::<SuperGrokResponsesDialect>());
@@ -1153,54 +1182,45 @@ pub(crate) fn openrouter_facade_is_custom_bounded_and_redacted()
 
     use plakous::model::IntegrationClass;
     use plakous::openrouter::{
-        OpenRouterApiKey, OpenRouterApiKeyGenerationGrant, OpenRouterApiKeySource,
-        OpenRouterAuthError, OpenRouterCatalogCredentialRequest, OpenRouterChatClient,
-        OpenRouterChatCredentialRequest, OpenRouterCredentialBinding, OpenRouterCredentialRequest,
-        StaticOpenRouterApiKeySource,
+        ApiKey, OpenRouterAuthError, OpenRouterChatClient, OpenRouterCredentialBinding,
+        OpenRouterCredentialRequest, OpenRouterKeyGeneration, OpenRouterKeySource,
+        StaticOpenRouterKeySource,
     };
 
     const SECRET: &str = "facade-openrouter-secret-that-must-not-appear";
 
     struct FacadeOnlySource {
         binding: OpenRouterCredentialBinding,
-        generation: OpenRouterApiKeyGenerationGrant,
+        generation: OpenRouterKeyGeneration,
     }
 
-    impl OpenRouterApiKeySource for FacadeOnlySource {
-        fn credential_binding(&self) -> Option<&OpenRouterCredentialBinding> {
-            Some(&self.binding)
+    impl
+        plakous::api_key::ApiKeySource<OpenRouterCredentialRequest<'_>, OpenRouterCredentialBinding>
+        for FacadeOnlySource
+    {
+        fn authority(&self) -> &OpenRouterCredentialBinding {
+            &self.binding
         }
-
-        fn resolve(
+        fn generation_grant(
             &self,
-            _request: &OpenRouterCredentialRequest<'_>,
-        ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-            OpenRouterApiKey::new(SECRET)
+            _: &dyn plakous::api_key::ApiKeyRequest,
+        ) -> Result<OpenRouterKeyGeneration, plakous::api_key::ApiKeyError> {
+            Ok(self.generation.clone())
         }
-
-        fn resolve_chat(
+        fn api_key(
             &self,
-            _request: &OpenRouterChatCredentialRequest<'_>,
-        ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-            OpenRouterApiKey::new(SECRET)
-        }
-
-        fn resolve_catalog(
-            &self,
-            _request: &OpenRouterCatalogCredentialRequest<'_>,
-        ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
-            OpenRouterApiKey::new(SECRET)
-        }
-
-        fn current_generation_grant(
-            &self,
-        ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
-            Ok(self.generation)
+            _: &OpenRouterCredentialRequest<'_>,
+            expected: &OpenRouterKeyGeneration,
+        ) -> Result<ApiKey, plakous::api_key::ApiKeyError> {
+            if expected != &self.generation {
+                return Err(plakous::api_key::ApiKeyError::BindingMismatch);
+            }
+            ApiKey::new(SECRET)
         }
     }
 
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new(SECRET)?,
+    let source = Arc::new(plakous::openrouter::static_openrouter_api_key_source(
+        ApiKey::new(SECRET)?,
         "facade-test-account",
         "facade-test-authority",
     )?);
@@ -1210,13 +1230,15 @@ pub(crate) fn openrouter_facade_is_custom_bounded_and_redacted()
     assert_eq!(connection.integration_class(), IntegrationClass::Custom);
     assert!(!format!("{connection:?}").contains(SECRET));
 
-    let key = OpenRouterApiKey::new(SECRET)?;
+    let key = ApiKey::new(SECRET)?;
+    let binding =
+        OpenRouterCredentialBinding::platform("facade-only-account", "facade-only-authority")?;
     let facade_only = Arc::new(FacadeOnlySource {
-        binding: OpenRouterCredentialBinding::platform(
-            "facade-only-account",
-            "facade-only-authority",
-        )?,
-        generation: key.generation_grant(),
+        generation: key.generation_grant(
+            plakous::api_key::CredentialProviderTag::OpenRouterPlatform,
+            binding.clone(),
+        ),
+        binding,
     });
     let connection = OpenRouterChatClient::connect(facade_only)?;
     assert_eq!(connection.integration_class(), IntegrationClass::Custom);

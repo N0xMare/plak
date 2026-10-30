@@ -363,9 +363,10 @@ class PublicCompileGateTests(unittest.TestCase):
                 ))
 
     def test_xai_public_credentials_cannot_invoke_private_execution_methods(self) -> None:
-        for binary in ("xai_platform_authority", "xai_platform_grant", "xai_platform_bearer"):
+        for binary in ("xai_platform_authority",):
             with self.subTest(binary=binary):
-                self.assertEqual(compile_gate.AUTHORITY_NEGATIVE_ERROR_CODES[binary], "E0624")
+                expected = "E0624"
+                self.assertEqual(compile_gate.AUTHORITY_NEGATIVE_ERROR_CODES[binary], expected)
                 self.assertEqual(compile_gate.AUTHORITY_NEGATIVE_ERROR_LINES[binary], 4)
                 self.assertTrue(compile_gate.has_authority_diagnostic(self.diagnostic(binary), binary))
                 self.assertFalse(compile_gate.has_authority_diagnostic(

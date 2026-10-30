@@ -1,4 +1,10 @@
-use super::*;
+use super::{
+    AccessMode, Arc, Capability, Clock, ConfigError, ConformanceStatus, Digest, FactSource,
+    ModelAdapterProfileId, ModelId, ModelRequest, OpenAiRoute, OpenAiRouteConformance,
+    OpenAiTarget, ResolvedModelDescriptor, ResponsesFeature, ReviewedPlatformManifestWitness,
+    Routability, Support, SystemClock, TargetAdmission, ValidatedRequestPlan, fmt,
+    validate_reviewed_platform_request, validate_reviewed_platform_witness,
+};
 
 impl fmt::Debug for OpenAiTarget {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -60,7 +66,7 @@ impl OpenAiTarget {
     pub(crate) fn new_native_catalog_target(
         route: OpenAiRoute,
         descriptor: ResolvedModelDescriptor,
-        witness: NativeCodexCatalogWitness,
+        witness: super::NativeCodexCatalogWitness,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, ConfigError> {
         if !route.is_native_codex() {
@@ -74,10 +80,10 @@ impl OpenAiTarget {
         }
         validate_conformance_claims(route.conformance(), &descriptor, clock.now())?;
         match &route.auth {
-            RouteAuth::NativeCodexSubscription { authority } => authority
+            super::RouteAuth::NativeCodexSubscription { authority } => authority
                 .validate_catalog_witness(&descriptor, &witness)
                 .map_err(|_| ConfigError::NativeTargetRequiresCatalogWitness)?,
-            RouteAuth::Platform { .. } => {
+            super::RouteAuth::Platform { .. } => {
                 return Err(ConfigError::NativeTargetRequiresCatalogWitness);
             }
         }
@@ -143,7 +149,7 @@ impl OpenAiTarget {
     }
 
     #[cfg(feature = "native-auth")]
-    pub(crate) fn validate_route(&self, route: &OpenAiRoute) -> Result<(), AuthError> {
+    pub(crate) fn validate_route(&self, route: &OpenAiRoute) -> Result<(), super::AuthError> {
         if self.route.id() != route.id()
             || self.route.origin() != route.origin()
             || self.route.responses_path() != route.responses_path()
@@ -152,13 +158,13 @@ impl OpenAiTarget {
             || self.route.account_binding != route.account_binding
             || self.route.credential_authority_binding != route.credential_authority_binding
         {
-            return Err(AuthError::BindingMismatch);
+            return Err(super::AuthError::BindingMismatch);
         }
         Ok(())
     }
 
     #[cfg(feature = "native-auth")]
-    pub(crate) const fn route_id(&self) -> &RouteId {
+    pub(crate) const fn route_id(&self) -> &super::RouteId {
         self.route.id()
     }
 
@@ -210,10 +216,10 @@ impl OpenAiTarget {
             #[cfg(feature = "native-auth")]
             TargetAdmission::NativeCatalog(witness) => {
                 match &self.route.auth {
-                    RouteAuth::NativeCodexSubscription { authority } => authority
+                    super::RouteAuth::NativeCodexSubscription { authority } => authority
                         .validate_catalog_witness(&self.descriptor, witness)
                         .map_err(|_| ConfigError::NativeTargetRequiresCatalogWitness)?,
-                    RouteAuth::Platform { .. } => {
+                    super::RouteAuth::Platform { .. } => {
                         return Err(ConfigError::NativeTargetRequiresCatalogWitness);
                     }
                 }
@@ -230,21 +236,21 @@ impl OpenAiTarget {
     #[cfg(feature = "native-auth")]
     pub(crate) async fn revalidate_native_runtime_authority(
         &self,
-        checked_at: Timestamp,
-    ) -> Result<RuntimeModelAuthority, RuntimeModelAuthorityError> {
+        checked_at: super::Timestamp,
+    ) -> Result<super::RuntimeModelAuthority, super::RuntimeModelAuthorityError> {
         let (
-            RouteAuth::NativeCodexSubscription { authority },
+            super::RouteAuth::NativeCodexSubscription { authority },
             TargetAdmission::NativeCatalog(witness),
         ) = (&self.route.auth, &self.admission)
         else {
-            return Err(RuntimeModelAuthorityError::Unavailable);
+            return Err(super::RuntimeModelAuthorityError::Unavailable);
         };
         if !self.route.is_native_codex()
             || self.descriptor.protocol() != self.route.dialect().protocol()
             || self.descriptor.route() != self.route.id()
-            || self.descriptor.profile().as_str() != OPENAI_CODEX_COMPATIBILITY_PROFILE_ID
+            || self.descriptor.profile().as_str() != super::OPENAI_CODEX_COMPATIBILITY_PROFILE_ID
         {
-            return Err(RuntimeModelAuthorityError::Invalid);
+            return Err(super::RuntimeModelAuthorityError::Invalid);
         }
         authority
             .revalidate_runtime_authority(&self.descriptor, witness, checked_at)
@@ -260,7 +266,7 @@ impl OpenAiTarget {
                 validate_reviewed_platform_request(&self.descriptor, witness, request)
             }
             #[cfg(feature = "native-auth")]
-            TargetAdmission::NativeCatalog(_) => validate_unscoped_adapter_request(request),
+            TargetAdmission::NativeCatalog(_) => super::validate_unscoped_adapter_request(request),
             TargetAdmission::OfflineCodec => Err(ConfigError::NonRoutableTarget),
         }
     }
@@ -271,7 +277,9 @@ impl OpenAiTarget {
 
     /// The admitting catalog's observation and expiry.
     #[cfg(feature = "native-auth")]
-    pub(crate) const fn native_codex_catalog_window(&self) -> Option<(Timestamp, Timestamp)> {
+    pub(crate) const fn native_codex_catalog_window(
+        &self,
+    ) -> Option<(super::Timestamp, super::Timestamp)> {
         match &self.admission {
             TargetAdmission::NativeCatalog(witness) => {
                 Some((witness.observed_at(), witness.expires_at()))
@@ -281,7 +289,9 @@ impl OpenAiTarget {
     }
 
     #[cfg(feature = "native-auth")]
-    pub(crate) fn native_codex_credential_selection(&self) -> Option<(&CredentialFence, Digest)> {
+    pub(crate) fn native_codex_credential_selection(
+        &self,
+    ) -> Option<(&super::CredentialFence, Digest)> {
         match &self.admission {
             TargetAdmission::NativeCatalog(witness) => Some((
                 witness.credential_fence(),
@@ -307,7 +317,7 @@ impl OpenAiTarget {
 fn validate_conformance_claims(
     conformance: OpenAiRouteConformance,
     descriptor: &ResolvedModelDescriptor,
-    now: Timestamp,
+    now: super::Timestamp,
 ) -> Result<(), ConfigError> {
     let native_support = native_option_namespace_support(descriptor)?;
     for (capability, support) in descriptor.capabilities().features() {
@@ -318,7 +328,7 @@ fn validate_conformance_claims(
             return Err(ConfigError::FixtureClaimRequiresOfflineTarget);
         }
         let pinned_codex_parallel = descriptor.profile().as_str()
-            == OPENAI_CODEX_COMPATIBILITY_PROFILE_ID
+            == super::OPENAI_CODEX_COMPATIBILITY_PROFILE_ID
             && *capability == Capability::ParallelTools
             && support.provenance().source() == FactSource::BuiltIn
             && support.provenance().expires_at().is_none();

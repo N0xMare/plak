@@ -1313,6 +1313,7 @@ version = "0.0.2"
 dependencies = [
  "futures-util",
  "plakous-attempt",
+ "plakous-auth",
  "plakous-chat-completions",
  "plakous-exchange",
  "plakous-http",
@@ -1357,6 +1358,7 @@ dependencies = [
  "futures-core",
  "httpdate",
  "plakous-attempt",
+ "plakous-auth",
  "plakous-exchange",
  "plakous-http",
  "plakous-model",

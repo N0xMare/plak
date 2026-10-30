@@ -29,11 +29,14 @@ pub fn surface_is_nameable() {
 // Caller-owned labels and keys are supported; execution bindings remain provider-owned.
 #[allow(dead_code)]
 pub fn xai_platform_credential_source_surface() -> Result<(), Box<dyn std::error::Error>> {
-    use plakous::xai::{XaiPlatformApiKey, XaiPlatformApiKeyAuthority};
+    use plakous::xai::{ApiKey, XaiPlatformApiKeyAuthority};
 
     let authority = XaiPlatformApiKeyAuthority::new("fixture-account", "fixture-source", 1)?;
-    let key = XaiPlatformApiKey::new("synthetic-compile-contract-key")?;
-    let grant = key.grant(authority.clone())?;
+    let key = ApiKey::new("synthetic-compile-contract-key")?;
+    let grant = key.generation_grant(
+        plakous::api_key::CredentialProviderTag::XaiPlatform,
+        authority.clone(),
+    );
     assert_eq!(grant.authority(), &authority);
     Ok(())
 }

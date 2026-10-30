@@ -17,12 +17,12 @@ use plakous_model::{
     SelectedProviderConfigurationId, TextBlock, ToolChoice, TurnId, ValidationMode,
 };
 use plakous_openai::{
-    AuthError, CredentialAuthorityId, CredentialReference, EndpointOrigin,
+    ApiKey, CredentialAuthorityId, CredentialReference, EndpointOrigin,
     OPENAI_PLATFORM_AUTH_PROFILE_ID, OPENAI_PLATFORM_AUTH_REVISION,
     OPENAI_PLATFORM_AUTHORITY_CLASS, OPENAI_PLATFORM_CREDENTIAL_SELECTION,
-    OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiApiKeyGenerationGrant, OpenAiPlatformLocalModel,
-    OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts, OpenAiProjectId,
-    PlatformCredentialSource, PlatformProjectPolicy, PlatformStoragePolicy, SecretString,
+    OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiKeyGeneration, OpenAiPlatformLocalModel,
+    OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts, OpenAiProjectId, PlatformProjectPolicy,
+    PlatformStoragePolicy,
 };
 use rcgen::{CertifiedKey, generate_simple_self_signed};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -59,28 +59,41 @@ impl CountingSource {
     }
 }
 
-impl PlatformCredentialSource for CountingSource {
-    fn credential_authority(&self) -> &CredentialAuthorityId {
+impl
+    plakous_auth::api_key::ApiKeySource<
+        plakous_openai::OpenAiApiKeyRequest<'_>,
+        CredentialAuthorityId,
+    > for CountingSource
+{
+    fn authority(&self) -> &CredentialAuthorityId {
         &self.authority
     }
-
     fn api_key(
         &self,
-        _reference: &CredentialReference,
-        _origin: &EndpointOrigin,
-    ) -> Result<SecretString, AuthError> {
+        _: &plakous_openai::OpenAiApiKeyRequest<'_>,
+        expected: &OpenAiKeyGeneration,
+    ) -> Result<ApiKey, plakous_auth::api_key::ApiKeyError> {
         self.secret_resolutions.fetch_add(1, Ordering::SeqCst);
-        SecretString::new("real-key-resolution-must-not-run").map_err(|_| AuthError::SourceFailure)
+        let key = ApiKey::new("real-key-resolution-must-not-run")?;
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::OpenAiPlatform,
+            self.authority.clone(),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
-
     fn generation_grant(
         &self,
-        _reference: &CredentialReference,
-        _origin: &EndpointOrigin,
-    ) -> Result<OpenAiApiKeyGenerationGrant, AuthError> {
+        _: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<OpenAiKeyGeneration, plakous_auth::api_key::ApiKeyError> {
         self.generation_grants.fetch_add(1, Ordering::SeqCst);
-        OpenAiApiKeyGenerationGrant::from_generation_binding(b"openai-local-generation-v1")
-            .map_err(|_| AuthError::SourceFailure)
+        OpenAiKeyGeneration::from_generation_binding(
+            plakous_auth::api_key::CredentialProviderTag::OpenAiPlatform,
+            self.authority.clone(),
+            b"openai-local-generation-v1",
+        )
     }
 }
 

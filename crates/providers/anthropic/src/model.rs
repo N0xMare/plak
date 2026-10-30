@@ -6,8 +6,8 @@
 pub(crate) const CLAUDE_IMAGE_MAX_TOKENS: u64 = 4784;
 
 use crate::{
-    AnthropicAccountIdentity, AnthropicApiKeySource, AnthropicError, AnthropicErrorKind,
-    AnthropicErrorPhase, AnthropicHttpDeadline, AnthropicLocalHttpServiceFactory,
+    AnthropicAccountIdentity, AnthropicError, AnthropicErrorKind, AnthropicErrorPhase,
+    AnthropicHttpDeadline, AnthropicKeySource, AnthropicLocalHttpServiceFactory,
     AnthropicPlatformCapabilityProfile, AnthropicPlatformModelConfig,
     AnthropicPlatformModelResolver, AnthropicPlatformRoute, MessagesRequestTranslator,
     ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership,
@@ -40,7 +40,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 /// Production API-key model with an explicit caller-owned input envelope.
 pub struct AnthropicLanguageModel {
     resolved: ResolvedAnthropicMessages,
-    source: Arc<dyn AnthropicApiKeySource>,
+    source: Arc<AnthropicKeySource>,
     client: Client,
     authority: RuntimeModelAuthority,
     configuration: plakous_model::CompiledProviderConfiguration,
@@ -50,7 +50,7 @@ pub struct AnthropicLanguageModel {
 impl AnthropicLanguageModel {
     /// Builds a stable API-key binding with no OAuth or origin fallback.
     pub fn configured(
-        source: Arc<dyn AnthropicApiKeySource>,
+        source: Arc<AnthropicKeySource>,
         account: &str,
         model: &crate::AnthropicApiModel,
         admitted_facts: &[u8],
@@ -72,7 +72,7 @@ impl AnthropicLanguageModel {
 
     /// Builds the exact-origin executor with an explicit exchange observer.
     pub fn configured_with_exchange_observer(
-        source: Arc<dyn AnthropicApiKeySource>,
+        source: Arc<AnthropicKeySource>,
         account: &str,
         model: &crate::AnthropicApiModel,
         admitted_facts: &[u8],
@@ -97,7 +97,7 @@ impl AnthropicLanguageModel {
     /// Builds the exact-origin executor and its hosted-retrieval side-request
     /// port on the same route, key, model and client.
     pub fn configured_with_retrieval(
-        source: Arc<dyn AnthropicApiKeySource>,
+        source: Arc<AnthropicKeySource>,
         account: &str,
         model: &crate::AnthropicApiModel,
         admitted_facts: &[u8],
@@ -128,7 +128,7 @@ impl AnthropicLanguageModel {
 
     /// Builds the same exact-origin executor with an explicit transport client.
     pub fn configured_with_client(
-        source: Arc<dyn AnthropicApiKeySource>,
+        source: Arc<AnthropicKeySource>,
         account: &str,
         model: &crate::AnthropicApiModel,
         admitted_facts: &[u8],
@@ -157,7 +157,7 @@ impl AnthropicLanguageModel {
         reason = "one exact API binding names its whole tuple"
     )]
     pub fn configured_with_local_transport(
-        source: Arc<dyn AnthropicApiKeySource>,
+        source: Arc<AnthropicKeySource>,
         account: &str,
         model: &crate::AnthropicApiModel,
         admitted_facts: &[u8],
@@ -201,7 +201,7 @@ impl AnthropicLanguageModel {
         reason = "one exact API binding names its whole tuple"
     )]
     fn build(
-        source: Arc<dyn AnthropicApiKeySource>,
+        source: Arc<AnthropicKeySource>,
         account: &str,
         model: &crate::AnthropicApiModel,
         admitted_facts: &[u8],
@@ -246,8 +246,7 @@ impl AnthropicLanguageModel {
         crate::config::preflight_platform_admission(&config)?;
         plakous_messages::validate_messages_api_behavior(&behavior).map_err(configuration_error)?;
         let account_identity = AnthropicAccountIdentity::new(account)?;
-        let key = source
-            .current_key()
+        let key = crate::route::current_api_key(source.as_ref())
             .map_err(|_| configuration_error("Anthropic API credential unavailable"))?;
         let route = AnthropicPlatformRoute::for_account(key, account_identity)?;
         let account_binding = route

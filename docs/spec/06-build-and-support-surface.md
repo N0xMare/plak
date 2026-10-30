@@ -162,6 +162,14 @@ transport, parsing or provider admission into the facade. A separate narrow
 consume the one provider-neutral classified request gate. It does not put
 provider names, credentials or HTTP into the model crate.
 
+`plakous-auth::api_key` is the common owner of injected API-key secrets,
+generation fingerprints, typed sources and the static source. The facade's
+`api_key` module is enabled by auth or any credential-bearing route feature;
+each API provider declares the common dependency itself. Provider namespaces
+re-export the same `ApiKey`, not separate secret wrappers, and retain concrete
+request and account-authority types. The old branded key/source/grant APIs are
+removed rather than kept as compatibility aliases.
+
 ### 3.1 What each supported package promises
 
 Support is limited to five inventories, and each is pinned by code rather than
@@ -210,6 +218,11 @@ The internal tier is deliberately nameable so official sibling crates can
 compose against it. `#[doc(hidden)]` is not a support boundary, and the lasting
 proof is the supported-root inventory plus the compile-negative pins described
 in chapter 05.
+
+The obsolete xAI bearer/grant-method negative fixtures are retired with those
+methods. API-key compile contracts instead pin private built-in request
+construction, metadata-only request refusal and the absence of facade bearer
+text access for all four provider aliases.
 
 ### 3.3 Package contents
 

@@ -17,48 +17,36 @@ use plakous::agent::ReasoningEffort;
 
 struct Credentials(&'static str);
 impl OpenAiCredentials for Credentials {
-    fn openai(&self) -> CliResult<Arc<dyn plakous::openai::PlatformCredentialSource>> {
-        use plakous::openai::{
-            CredentialAuthorityId, CredentialReference, OpenAiApiKey,
-            StaticPlatformCredentialSource,
-        };
-        Ok(Arc::new(StaticPlatformCredentialSource::new(
-            OpenAiApiKey::new(self.0).map_err(api_error)?,
+    fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
+        use plakous::openai::{ApiKey, CredentialAuthorityId, CredentialReference};
+        Ok(Arc::new(plakous::openai::static_openai_api_key_source(
+            ApiKey::new(self.0).map_err(api_error)?,
             CredentialReference::application("plak/openai").map_err(api_error)?,
             CredentialAuthorityId::new("fixture/openai").map_err(api_error)?,
         )))
     }
 }
 impl AnthropicCredentials for Credentials {
-    fn anthropic(&self) -> CliResult<Arc<dyn plakous::anthropic::AnthropicApiKeySource>> {
-        Ok(Arc::new(
-            plakous::anthropic::AnthropicApiKey::new(self.0).map_err(api_error)?,
-        ))
+    fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
+        Ok(Arc::new(plakous::api_key::StaticApiKeySource::for_key(
+            plakous::api_key::ApiKey::new(self.0).map_err(api_error)?,
+            plakous::api_key::CredentialProviderTag::AnthropicPlatform,
+            plakous::anthropic::ANTHROPIC_PLATFORM_ORIGIN,
+            None,
+            (),
+        )))
     }
 }
 impl XaiCredentials for Credentials {
-    fn xai(&self) -> CliResult<Arc<dyn plakous::xai::XaiPlatformApiKeySource>> {
-        Ok(Arc::new(XaiKey(self.0)))
-    }
-}
-struct XaiKey(&'static str);
-impl plakous::xai::XaiPlatformApiKeySource for XaiKey {
-    fn grant(
-        &self,
-    ) -> Result<plakous::xai::XaiPlatformCredentialGrant, plakous::xai::XaiPlatformBuildError> {
-        let authority =
+    fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+        Ok(Arc::new(plakous::api_key::StaticApiKeySource::for_key(
+            plakous::api_key::ApiKey::new(self.0).map_err(api_error)?,
+            plakous::api_key::CredentialProviderTag::XaiPlatform,
+            "https://api.x.ai",
+            None,
             plakous::xai::XaiPlatformApiKeyAuthority::new("fixture/xai", "fixture/key", 1)
-                .map_err(|_| plakous::xai::XaiPlatformBuildError::Authentication)?;
-        plakous::xai::XaiPlatformApiKey::new(self.0)?.grant(authority)
-    }
-    fn api_key(
-        &self,
-        expected: &plakous::xai::XaiPlatformCredentialGrant,
-    ) -> Result<plakous::xai::XaiPlatformApiKey, plakous::xai::XaiPlatformBuildError> {
-        if &self.grant()? != expected {
-            return Err(plakous::xai::XaiPlatformBuildError::Authentication);
-        }
-        plakous::xai::XaiPlatformApiKey::new(self.0)
+                .map_err(api_error)?,
+        )))
     }
 }
 struct NoWorkers;
@@ -943,7 +931,10 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         let source = Credentials("fixture-key-one").xai().unwrap();
         let provisional = xai_platform_selection(behavior).unwrap();
         let selected = xai_platform_selection(exact_route_retention(&provisional)).unwrap();
-        let authority = source.grant().unwrap().authority().clone();
+        let authority = plakous::xai::xai_api_key_generation(source.as_ref())
+            .unwrap()
+            .authority()
+            .clone();
         Arc::new(
             XaiPlatformModel::with_exchange_observer(
                 authority,

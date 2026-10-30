@@ -27,11 +27,10 @@ use plakous_model::{
     ToolResultPart, TurnId, ValidationMode,
 };
 use plakous_openrouter::{
-    CHAT_COMPLETIONS_FAMILY_ID, MESSAGES_FAMILY_ID, OPENROUTER_CHAT_COMPLETIONS_PATH,
-    OPENROUTER_MESSAGES_PATH, OPENROUTER_RESPONSES_PATH, OpenRouterApiKey,
-    OpenRouterChatDiscoveryConfig, OpenRouterChatLanguageModel, OpenRouterChatRoute,
-    OpenRouterMessagesLanguageModel, OpenRouterOrigin, OpenRouterResponsesLanguageModel,
-    StaticOpenRouterApiKeySource,
+    ApiKey, CHAT_COMPLETIONS_FAMILY_ID, MESSAGES_FAMILY_ID, OPENROUTER_CHAT_COMPLETIONS_PATH,
+    OPENROUTER_MESSAGES_PATH, OPENROUTER_RESPONSES_PATH, OpenRouterChatDiscoveryConfig,
+    OpenRouterChatLanguageModel, OpenRouterChatRoute, OpenRouterMessagesLanguageModel,
+    OpenRouterOrigin, OpenRouterResponsesLanguageModel, StaticOpenRouterKeySource,
 };
 use plakous_tools::{ToolRegistryBuilder, ToolRuntimeErrorKind, WorkspacePolicy};
 use rcgen::{CertifiedKey, generate_simple_self_signed};
@@ -84,8 +83,8 @@ async fn key_usage_distinguishes_invalid_key_from_forbidden_access() -> TestResu
             vec![(status, "application/json", "{}".to_owned(), "")],
         )
         .await?;
-        let source = Arc::new(StaticOpenRouterApiKeySource::new(
-            OpenRouterApiKey::new("offline-status-fixture")?,
+        let source = Arc::new(plakous_openrouter::static_openrouter_api_key_source(
+            ApiKey::new("offline-status-fixture")?,
             "offline-account",
             "offline-authority",
         )?);
@@ -511,13 +510,14 @@ async fn loopback_with_status(
     identity: &[u8],
     replies: Vec<(&'static str, &'static str, String, &'static str)>,
 ) -> TestResult<(Client, String, JoinHandle<io::Result<Vec<Vec<u8>>>>)> {
-    loopback_with_status_holding(identity, replies, None).await
+    loopback_with_status_holding(identity, replies, None, None).await
 }
 
 async fn loopback_with_status_holding(
     identity: &[u8],
     replies: Vec<(&'static str, &'static str, String, &'static str)>,
     hold: Option<HoldOneReply>,
+    connections: Option<Arc<std::sync::atomic::AtomicUsize>>,
 ) -> TestResult<(Client, String, JoinHandle<io::Result<Vec<Vec<u8>>>>)> {
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["127.0.0.1".to_owned()])?;
@@ -548,6 +548,9 @@ async fn loopback_with_status_holding(
         for (index, (status, content_type, body, extra_headers)) in replies.into_iter().enumerate()
         {
             let (stream, _) = listener.accept().await?;
+            if let Some(connections) = &connections {
+                connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             let mut stream = acceptor.accept(stream).await?;
             requests.push(read_request(&mut stream).await?);
             let response = format!(
@@ -652,8 +655,8 @@ async fn catalog_drift_preserves_all_wire_bindings_and_refuses_changed_facts() -
     ]);
     let (client, origin, peer) = loopback(b"catalog-drift", replies).await?;
     let route = OpenRouterChatRoute::new_local_fixture_with_retention(
-        Arc::new(StaticOpenRouterApiKeySource::new(
-            OpenRouterApiKey::new("offline-drift-key")?,
+        Arc::new(plakous_openrouter::static_openrouter_api_key_source(
+            ApiKey::new("offline-drift-key")?,
             "offline-account",
             "offline-authority",
         )?),
@@ -1081,8 +1084,8 @@ async fn physical_terminal_case(case: TerminalCase, ordinal: u128) -> TestResult
         Ok::<_, io::Error>(requests)
     });
 
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("offline-terminal-key")?,
+    let source = Arc::new(plakous_openrouter::static_openrouter_api_key_source(
+        ApiKey::new("offline-terminal-key")?,
         "offline-terminal-account",
         "offline-terminal-authority",
     )?);
@@ -1287,8 +1290,8 @@ async fn configured_lanes_case(attributed: bool) -> TestResult {
     ]);
     let (client, origin, peer) = loopback(b"openrouter-multi-wire-loopback-v1", replies).await?;
 
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("offline-loopback-key")?,
+    let source = Arc::new(plakous_openrouter::static_openrouter_api_key_source(
+        ApiKey::new("offline-loopback-key")?,
         "offline-account",
         "offline-authority",
     )?);
@@ -1506,8 +1509,8 @@ async fn discovered_chat_model(
     client: Client,
     origin: String,
 ) -> TestResult<plakous_model::ConfiguredLanguageModel> {
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
-        OpenRouterApiKey::new("offline-loopback-key")?,
+    let source = Arc::new(plakous_openrouter::static_openrouter_api_key_source(
+        ApiKey::new("offline-loopback-key")?,
         "offline-account",
         "offline-authority",
     )?);
@@ -1712,6 +1715,7 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
                 release: Arc::clone(&release),
                 body_prefix: Some(body_prefix),
             }),
+            None,
         )
         .await?;
         let chat = discovered_chat_model(client, origin).await?;
@@ -1891,6 +1895,7 @@ async fn chat_replay_wait_gets_a_fresh_generation_head_budget() -> TestResult {
             release: Arc::clone(&release),
             body_prefix: None,
         }),
+        None,
     )
     .await?;
     let chat = discovered_chat_model(client, origin).await?;
@@ -2545,66 +2550,309 @@ async fn chat_terminal_retry_advice_and_quota_on_success_heads_suppress_stream_r
 }
 
 struct WorkflowKeySource {
-    inner: StaticOpenRouterApiKeySource,
+    inner: StaticOpenRouterKeySource,
     physical_keys: std::sync::atomic::AtomicUsize,
     revoked: std::sync::atomic::AtomicBool,
 }
 
-impl plakous_openrouter::OpenRouterApiKeySource for WorkflowKeySource {
-    fn credential_binding(&self) -> Option<&plakous_openrouter::OpenRouterCredentialBinding> {
-        self.inner.credential_binding()
-    }
+struct RotatingKeySource {
+    inner: StaticOpenRouterKeySource,
+    rotated: std::sync::atomic::AtomicBool,
+    rotate_on_lookup: std::sync::atomic::AtomicUsize,
+    post_admission_lookups: std::sync::atomic::AtomicUsize,
+    physical_keys: std::sync::atomic::AtomicUsize,
+}
 
-    fn current_generation_grant(
+impl
+    plakous_auth::api_key::ApiKeySource<
+        plakous_openrouter::OpenRouterCredentialRequest<'_>,
+        plakous_openrouter::OpenRouterCredentialBinding,
+    > for RotatingKeySource
+{
+    fn authority(&self) -> &plakous_openrouter::OpenRouterCredentialBinding {
+        self.inner.authority()
+    }
+    fn generation_grant(
         &self,
-    ) -> Result<
-        plakous_openrouter::OpenRouterApiKeyGenerationGrant,
-        plakous_openrouter::OpenRouterAuthError,
-    > {
+        request: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<plakous_openrouter::OpenRouterKeyGeneration, plakous_auth::api_key::ApiKeyError>
+    {
+        let rotate_on = self
+            .rotate_on_lookup
+            .load(std::sync::atomic::Ordering::SeqCst);
+        if rotate_on != 0
+            && self.physical_keys.load(std::sync::atomic::Ordering::SeqCst) == 0
+            && self
+                .post_admission_lookups
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1
+                >= rotate_on
+        {
+            self.rotated
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if self.rotated.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(ApiKey::new("rotated-key")?.generation_grant(
+                plakous_auth::api_key::CredentialProviderTag::OpenRouterPlatform,
+                self.inner.authority().clone(),
+            ));
+        }
+        self.inner.generation_grant(request)
+    }
+    fn api_key(
+        &self,
+        request: &plakous_openrouter::OpenRouterCredentialRequest<'_>,
+        _expected: &plakous_openrouter::OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, plakous_auth::api_key::ApiKeyError> {
+        if matches!(
+            request.purpose(),
+            plakous_openrouter::OpenRouterCredentialPurpose::Chat
+                | plakous_openrouter::OpenRouterCredentialPurpose::Responses
+        ) {
+            self.physical_keys
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        // Deliberately ignore expected: the integration must enforce its own fence.
+        ApiKey::new(if self.rotated.load(std::sync::atomic::Ordering::SeqCst) {
+            "rotated-key"
+        } else {
+            "offline-loopback-key"
+        })
+    }
+}
+
+async fn rotation_fixture(
+    responses: bool,
+) -> TestResult<(
+    plakous_model::ConfiguredLanguageModel,
+    Arc<RotatingKeySource>,
+    Arc<std::sync::atomic::AtomicUsize>,
+    JoinHandle<io::Result<Vec<Vec<u8>>>>,
+)> {
+    let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut replies = discovery_replies();
+    replies.push((
+        "text/event-stream",
+        if responses {
+            responses_sse()
+        } else {
+            chat_sse()
+        },
+        if responses {
+            "x-generation-id: rotation-control\r\n"
+        } else {
+            "x-request-id: rotation-control\r\n"
+        },
+    ));
+    let replies = replies
+        .into_iter()
+        .map(|(kind, body, headers)| ("200 OK", kind, body, headers))
+        .collect();
+    let (client, origin, peer) = loopback_with_status_holding(
+        b"dispatch-key-rotation",
+        replies,
+        None,
+        Some(Arc::clone(&connections)),
+    )
+    .await?;
+    let source = Arc::new(RotatingKeySource {
+        inner: plakous_openrouter::static_openrouter_api_key_source(
+            ApiKey::new("offline-loopback-key")?,
+            "offline-account",
+            "offline-authority",
+        )?,
+        rotated: std::sync::atomic::AtomicBool::new(false),
+        rotate_on_lookup: std::sync::atomic::AtomicUsize::new(0),
+        post_admission_lookups: std::sync::atomic::AtomicUsize::new(0),
+        physical_keys: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let route = OpenRouterChatRoute::new_local_fixture_with_retention(
+        source.clone(),
+        OpenRouterOrigin::new(origin)?,
+        plakous_openrouter::OpenRouterRetentionPolicy::strict(),
+    )?
+    .with_clock(Arc::new(review_clock()));
+    let evidence = route
+        .discover_chat_model(&client, MODEL, OpenRouterChatDiscoveryConfig::default())
+        .await?;
+    let model = if responses {
+        OpenRouterResponsesLanguageModel::configured_gateway_managed_behavior(
+            route.clone(),
+            evidence,
+            context(
+                &route,
+                "responses-family",
+                "responses-wire-bytes-openrouter-v1",
+                "responses-canonical-openrouter-v1",
+            )?,
+            behavior(
+                "openrouter.responses.dynamic-custom-v1",
+                "openrouter-responses-integration-v1",
+            )?,
+            client,
+        )?
+    } else {
+        OpenRouterChatLanguageModel::configured_gateway_managed_behavior(
+            route.clone(),
+            evidence,
+            context(
+                &route,
+                CHAT_COMPLETIONS_FAMILY_ID,
+                "openrouter-chat-custom-accounting-v1",
+                "openrouter-chat-canonical-v1",
+            )?,
+            behavior("openrouter.chat.dynamic-v1", "openrouter-chat-retention-v1")?,
+            client,
+        )?
+    };
+    Ok((model, source, connections, peer))
+}
+
+async fn assert_rotation_boundary(responses: bool, lookup: usize) -> TestResult<bool> {
+    let (configured, source, connections, peer) = rotation_fixture(responses).await?;
+    let request = request_rooted(&configured, 1, true)?;
+    let attempt = request.metadata().attempt_id();
+    let plan = configured
+        .registered()
+        .descriptor()
+        .validate_request(request, ValidationMode::Strict)?;
+    let model = configured.model();
+    let authority = model
+        .clone()
+        .revalidate_runtime_authority(review_clock().now())
+        .await?;
+    let prepared = model.prepare_call(
+        plan,
+        ModelPreparationContext::new(authority, review_clock().now()),
+    )?;
+    source
+        .rotate_on_lookup
+        .store(lookup, std::sync::atomic::Ordering::SeqCst);
+    let outcome = timeout(
+        Duration::from_secs(30),
+        prepared.start(ModelCallContext::new(
+            attempt,
+            plakous_model::CancellationToken::new(),
+            None,
+        )),
+    )
+    .await?;
+    let mut completed = false;
+    let mut diagnostics = Vec::new();
+    let rejected = match outcome {
+        Err(error) => {
+            diagnostics.push(format!("{error}"));
+            true
+        }
+        Ok(mut stream) => {
+            let mut rejected = false;
+            while let Some(event) = timeout(Duration::from_secs(30), stream.next()).await? {
+                match event {
+                    Err(error) => {
+                        diagnostics.push(format!("{error}"));
+                        rejected = true;
+                    }
+                    Ok(ModelEvent::ResponseCompleted(_)) => completed = true,
+                    Ok(_) => {}
+                }
+            }
+            rejected
+        }
+    };
+    peer.abort();
+    let _ = peer.await;
+    let rotated = source.rotated.load(std::sync::atomic::Ordering::SeqCst);
+    if rotated {
+        assert!(
+            rejected && !completed,
+            "responses={responses}, lookup={lookup}"
+        );
+        assert_eq!(
+            source
+                .physical_keys
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "responses={responses}, lookup={lookup}"
+        );
+        assert_eq!(
+            connections.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "responses={responses}, lookup={lookup}"
+        );
+    } else {
+        assert!(
+            completed && !rejected,
+            "unrotated control failed: responses={responses}, lookup={lookup}, errors={diagnostics:?}"
+        );
+    }
+    Ok(rotated)
+}
+
+#[tokio::test]
+async fn generation_rotation_after_admission_refuses_chat_and_responses_before_connection()
+-> TestResult {
+    for responses in [false, true] {
+        let mut fenced = 0;
+        // Sweep every generation read after admission until the unrotated
+        // control completes. No exact internal read count is part of the test.
+        for lookup in 1..=32 {
+            if !assert_rotation_boundary(responses, lookup).await? {
+                break;
+            }
+            fenced += 1;
+        }
+        assert!(fenced > 0 && fenced < 32, "rotation sweep was not bounded");
+    }
+    Ok(())
+}
+
+impl
+    plakous_auth::api_key::ApiKeySource<
+        plakous_openrouter::OpenRouterCredentialRequest<'_>,
+        plakous_openrouter::OpenRouterCredentialBinding,
+    > for WorkflowKeySource
+{
+    fn authority(&self) -> &plakous_openrouter::OpenRouterCredentialBinding {
+        self.inner.authority()
+    }
+    fn generation_grant(
+        &self,
+        selection: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<plakous_openrouter::OpenRouterKeyGeneration, plakous_auth::api_key::ApiKeyError>
+    {
         if self.revoked.load(std::sync::atomic::Ordering::SeqCst)
             && self.physical_keys.load(std::sync::atomic::Ordering::SeqCst) > 0
         {
-            return Err(plakous_openrouter::OpenRouterAuthError::CredentialSource);
+            return Err(plakous_auth::api_key::ApiKeyError::Unavailable);
         }
-        self.inner.current_generation_grant()
+        self.inner.generation_grant(selection)
     }
-
-    fn resolve(
+    fn api_key(
         &self,
         request: &plakous_openrouter::OpenRouterCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, plakous_openrouter::OpenRouterAuthError> {
-        self.physical_keys
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inner.resolve(request)
-    }
-
-    fn resolve_chat(
-        &self,
-        request: &plakous_openrouter::OpenRouterChatCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, plakous_openrouter::OpenRouterAuthError> {
-        self.physical_keys
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inner.resolve_chat(request)
-    }
-
-    fn resolve_messages(
-        &self,
-        request: &plakous_openrouter::OpenRouterMessagesCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, plakous_openrouter::OpenRouterAuthError> {
-        assert_eq!(
-            request.physical_binding().generation() as usize,
-            self.physical_keys
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                + 1
-        );
-        self.inner.resolve_messages(request)
-    }
-
-    fn resolve_catalog(
-        &self,
-        request: &plakous_openrouter::OpenRouterCatalogCredentialRequest<'_>,
-    ) -> Result<OpenRouterApiKey, plakous_openrouter::OpenRouterAuthError> {
-        self.inner.resolve_catalog(request)
+        expected: &plakous_openrouter::OpenRouterKeyGeneration,
+    ) -> Result<ApiKey, plakous_auth::api_key::ApiKeyError> {
+        use plakous_openrouter::OpenRouterCredentialPurpose;
+        match request.purpose() {
+            OpenRouterCredentialPurpose::Messages => assert_eq!(
+                request
+                    .messages_binding()
+                    .ok_or(plakous_auth::api_key::ApiKeyError::BindingMismatch)?
+                    .generation() as usize,
+                self.physical_keys
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1,
+            ),
+            OpenRouterCredentialPurpose::Responses | OpenRouterCredentialPurpose::Chat => {
+                self.physical_keys
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            OpenRouterCredentialPurpose::Catalog => {}
+            OpenRouterCredentialPurpose::Retrieval => {
+                return Err(plakous_auth::api_key::ApiKeyError::Unavailable);
+            }
+        }
+        plakous_auth::api_key::ApiKeySource::api_key(&self.inner, request, expected)
     }
 }
 
@@ -2677,8 +2925,8 @@ async fn workflow_unsent_retry_revalidates_authorization_on_every_wire() -> Test
                 "path={path},fault=connect,nth=1"
             ))?));
             let source = Arc::new(WorkflowKeySource {
-                inner: StaticOpenRouterApiKeySource::new(
-                    OpenRouterApiKey::new("offline-loopback-key")?,
+                inner: plakous_openrouter::static_openrouter_api_key_source(
+                    ApiKey::new("offline-loopback-key")?,
                     "offline-account",
                     "offline-authority",
                 )?,

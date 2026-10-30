@@ -404,7 +404,7 @@ pub(super) fn supergrok_generation_fingerprint(
     binding.extend_from_slice(&(selection_epoch.len() as u64).to_be_bytes());
     binding.extend_from_slice(selection_epoch.as_bytes());
     match CredentialGenerationFingerprint::mint_exact(
-        plakous_responses::CredentialProviderTag::XaiPlatform,
+        plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
         &binding,
     ) {
         Ok(fingerprint) => fingerprint,

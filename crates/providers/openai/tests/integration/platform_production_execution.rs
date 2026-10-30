@@ -13,11 +13,11 @@ use plakous_model::{
     SelectedProviderConfigurationId, TextBlock, ToolChoice, TurnId, ValidationMode,
 };
 use plakous_openai::{
-    CredentialAuthorityId, CredentialReference, OPENAI_PLATFORM_AUTH_PROFILE_ID,
+    ApiKey, CredentialAuthorityId, CredentialReference, OPENAI_PLATFORM_AUTH_PROFILE_ID,
     OPENAI_PLATFORM_AUTH_REVISION, OPENAI_PLATFORM_AUTHORITY_CLASS,
     OPENAI_PLATFORM_CREDENTIAL_SELECTION, OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiPlatformModel,
     OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts, OpenAiProjectId, PlatformProjectPolicy,
-    PlatformStoragePolicy, SecretString,
+    PlatformStoragePolicy,
 };
 use rcgen::{CertifiedKey, generate_simple_self_signed};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -67,7 +67,7 @@ use plakous_model::{
     ModelCallContext, ModelError, ModelErrorKind, ModelErrorPhase, ModelEvent, ModelHttpStatus,
     ModelRetryRisk, ModelRetryability, ReasoningEffort,
 };
-use plakous_openai::{OpenAiPlatformConfigurationAuthority, StaticPlatformCredentialSource};
+use plakous_openai::OpenAiPlatformConfigurationAuthority;
 use std::future::poll_fn;
 
 fn selected_configuration(
@@ -296,8 +296,8 @@ fn authority_with_key(
     key: &str,
 ) -> TestResult<OpenAiPlatformConfigurationAuthority> {
     let reference = CredentialReference::application("platform-production-path-fixture")?;
-    let source = Arc::new(StaticPlatformCredentialSource::new(
-        SecretString::new(key)?,
+    let source = Arc::new(plakous_openai::static_openai_api_key_source(
+        ApiKey::new(key)?,
         reference.clone(),
         CredentialAuthorityId::new("platform-production-path-test")?,
     ));
@@ -912,45 +912,57 @@ struct RotatingSource {
     resolutions: std::sync::atomic::AtomicUsize,
     grants: std::sync::atomic::AtomicUsize,
 }
-impl plakous_openai::PlatformCredentialSource for RotatingSource {
-    fn credential_authority(&self) -> &CredentialAuthorityId {
+impl
+    plakous_auth::api_key::ApiKeySource<
+        plakous_openai::OpenAiApiKeyRequest<'_>,
+        CredentialAuthorityId,
+    > for RotatingSource
+{
+    fn authority(&self) -> &CredentialAuthorityId {
         &self.authority
     }
     fn api_key(
         &self,
-        _reference: &CredentialReference,
-        origin: &plakous_openai::EndpointOrigin,
-    ) -> Result<SecretString, plakous_openai::AuthError> {
-        if origin.as_str() != plakous_openai::OPENAI_PLATFORM_ORIGIN {
-            return Err(plakous_openai::AuthError::BindingMismatch);
+        request: &plakous_openai::OpenAiApiKeyRequest<'_>,
+        expected: &plakous_openai::OpenAiKeyGeneration,
+    ) -> Result<ApiKey, plakous_auth::api_key::ApiKeyError> {
+        if request.endpoint().as_str() != plakous_openai::OPENAI_PLATFORM_ORIGIN {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
         }
         self.resolutions
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        SecretString::new(if self.rotated.load(std::sync::atomic::Ordering::SeqCst) {
+        let key = ApiKey::new(if self.rotated.load(std::sync::atomic::Ordering::SeqCst) {
             "second-key"
         } else {
             "first-key"
-        })
-        .map_err(|_| plakous_openai::AuthError::SourceFailure)
+        })?;
+        if key.generation_grant(
+            plakous_auth::api_key::CredentialProviderTag::OpenAiPlatform,
+            self.authority.clone(),
+        ) != *expected
+        {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
+        }
+        Ok(key)
     }
     fn generation_grant(
         &self,
-        _reference: &CredentialReference,
-        origin: &plakous_openai::EndpointOrigin,
-    ) -> Result<plakous_openai::OpenAiApiKeyGenerationGrant, plakous_openai::AuthError> {
-        if origin.as_str() != plakous_openai::OPENAI_PLATFORM_ORIGIN {
-            return Err(plakous_openai::AuthError::BindingMismatch);
+        request: &dyn plakous_auth::api_key::ApiKeyRequest,
+    ) -> Result<plakous_openai::OpenAiKeyGeneration, plakous_auth::api_key::ApiKeyError> {
+        if request.origin() != plakous_openai::OPENAI_PLATFORM_ORIGIN {
+            return Err(plakous_auth::api_key::ApiKeyError::BindingMismatch);
         }
         self.grants
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        plakous_openai::OpenAiApiKeyGenerationGrant::from_generation_binding(
+        plakous_openai::OpenAiKeyGeneration::from_generation_binding(
+            plakous_auth::api_key::CredentialProviderTag::OpenAiPlatform,
+            self.authority.clone(),
             if self.rotated.load(std::sync::atomic::Ordering::SeqCst) {
                 b"second-key"
             } else {
                 b"first-key"
             },
         )
-        .map_err(|_| plakous_openai::AuthError::SourceFailure)
     }
 }
 

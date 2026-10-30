@@ -27,16 +27,16 @@ use plakous::model::{
     ReplayDisposition, ResponseStateDisposition, RetentionDisposition, ToolChoice,
     ToolPresentationMode,
 };
-use plakous::openrouter::{OpenRouterApiKey, OpenRouterChatClient, StaticOpenRouterApiKeySource};
+use plakous::openrouter::{ApiKey, OpenRouterChatClient};
 use plakous::tools::{ToolRegistryBuilder, WorkspacePolicy};
 
 /// The error type this example returns.
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// Reads one API key from a file, trimming only the trailing newline.
-fn read_key(path: &str) -> Fallible<OpenRouterApiKey> {
+fn read_key(path: &str) -> Fallible<ApiKey> {
     let text = std::fs::read_to_string(path)?;
-    Ok(OpenRouterApiKey::new(text.trim_end_matches(['\n', '\r']))?)
+    Ok(ApiKey::new(text.trim_end_matches(['\n', '\r']))?)
 }
 
 #[tokio::main]
@@ -52,7 +52,7 @@ async fn main() -> Fallible<()> {
 
     // The credential is caller-owned and explicit. `account` and `authority`
     // are the caller's own non-secret labels for this key.
-    let source = Arc::new(StaticOpenRouterApiKeySource::new(
+    let source = Arc::new(plakous::openrouter::static_openrouter_api_key_source(
         read_key(&key_path)?,
         "example-account",
         "example-key-authority",
