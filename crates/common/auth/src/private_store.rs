@@ -124,7 +124,7 @@ impl RefreshClaim {
     ///
     /// This does not authorize transmission. Callers using the `http-refresh`
     /// bridge must finish constructing the concrete request locally, then move
-    /// this exact claim into [`PrivateCredentialStore::execute_claimed_http`],
+    /// this exact claim into `PrivateCredentialStore::execute_claimed_http`,
     /// which owns the adjacent start/execute boundary.
     #[must_use]
     pub const fn payload(&self) -> &SecretBytes {

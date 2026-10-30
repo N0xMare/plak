@@ -238,7 +238,10 @@ run_group() {
       run_build_denying_warnings python3 tools/checks/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
     rustdoc)
       echo "== rustdoc =="
-      RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"} ;;
+      RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"}
+      for package in "${supported_packages[@]}"; do
+        RUSTDOCFLAGS="-D warnings" cargo doc -p "$package" --no-deps --locked ${target_args[@]+"${target_args[@]}"}
+      done ;;
     tests-parallel)
       echo "-- nextest: parallel lane (profile offline) --"
       if [[ -n "$scope" ]]; then

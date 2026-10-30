@@ -404,7 +404,9 @@ package builds on its own. The gate's `builds` group therefore also builds each
 supported package alone, `cargo build -p <package>` with its own default
 features, rustc warnings denied (chapter 05 §1); for `plak` that is the release
 build's resolution. The `static` group runs clippy on the same per-package
-resolutions with all targets. The feature checker scans UUID generation
+resolutions with all targets. The `rustdoc` group documents each supported
+package alone with default features as well as the all-features workspace;
+both resolutions deny rustdoc warnings. The feature checker scans UUID generation
 constructors in package source, tests, benches, examples and build scripts
 (including inline test modules, excluding comments and literals), and requires
 the matching `v1` through `v8` feature in that package's UUID dependency

@@ -595,7 +595,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py`, `check_features.py` and the `structure: evidence allowlist` audit (`tools/release/gate_evidence.py audit`, chapter 06 §6.5) (fetch and structure checkers not in platform), then workspace all-features clippy, then clippy on each supported package alone in its own default resolution with all its targets (`cargo clippy -p <package> --all-targets`); all deny warnings |
 | `builds` | Workspace default-feature build; each supported package built alone in its own default resolution (`cargo build -p <package>`); Plak maintainer-feature build. All deny rustc warnings |
 | `variants` | Four distinct reduced Plak resolutions (`without-tui`, `without-clipboard`, `without-images`, `without-product-features`), built and clippy-linted with warnings denied using the gate's target and rustflags; feature-admission and JSONL contracts, plus canonical Python/MCP store read/refusal and byte-preservation fixtures. Selected by full only, never check, fast or platform |
-| `rustdoc` | Workspace all-features rustdoc, denied warnings |
+| `rustdoc` | Workspace all-features rustdoc, then each supported package alone with default features; denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
 | `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
 | `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, one test thread |
@@ -1141,9 +1141,10 @@ and their authenticated inputs live in `tools/build/`, repository policy in
 small maintainer entrypoint surface and delegates to these owners.
 
 Doc comments are gated on the same footing as tests: the `== rustdoc ==` step
-runs `cargo doc --workspace --no-deps --all-features --locked` under
-`RUSTDOCFLAGS="-D warnings"` between clippy and nextest, so a stale intra-doc
-link fails the gate instead of rotting unnoticed.
+runs `cargo doc --workspace --no-deps --all-features --locked`, then
+`cargo doc -p <package> --no-deps --locked` separately for each supported
+package, all under `RUSTDOCFLAGS="-D warnings"`. A stale intra-doc link fails
+the gate even when only the package's default resolution exposes it.
 
 **Compiled review windows never decide an offline test.** A subscription
 profile expires 90 days after its review (spec 01 §7.1), so a test that checks

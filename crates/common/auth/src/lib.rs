@@ -9,7 +9,7 @@
 //! math, callback query parse, field validation, access-token timing,
 //! HTTP/1.1 request/response framing). The optional
 //! `http-refresh` feature adds the claimed-refresh/revoke, browser-loopback,
-//! and JWKS cache orchestrators ([`oauth_orchestrator`]) plus one provider-blind
+//! and JWKS cache orchestrators (`oauth_orchestrator`) plus one provider-blind
 //! bridge to the concrete Plakous HTTP transport so transmission facts cannot
 //! be separated from durable refresh-claim transitions.
 //!

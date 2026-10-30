@@ -114,8 +114,8 @@ impl ResolvedProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`NativeSubscriptionError::ReresolutionBindingChanged`] when
-    /// any of those changed, [`NativeSubscriptionError::ProviderConfigurationRejected`]
+    /// Returns [`super::NativeSubscriptionError::ReresolutionBindingChanged`] when
+    /// any of those changed, [`super::NativeSubscriptionError::ProviderConfigurationRejected`]
     /// for a resolution without a window, or the fresh resolution's own failure.
     #[allow(
         clippy::unused_async,

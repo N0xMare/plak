@@ -406,12 +406,18 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
         order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(order, ['fmt', 'fetch', *CLIPPIES, *['build'] * len(BUILDS), 'doc', 'test',
+        self.assertEqual(order, ['fmt', 'fetch', *CLIPPIES, *['build'] * len(BUILDS),
+                                 *['doc'] * (1 + len(SUPPORTED)), 'test',
                                  'nextest', 'nextest', 'nextest'])
-        doc = next(c for c in calls if c['args'][0] == 'doc')
-        self.assertEqual(doc['rustdocflags'], '-D warnings')
+        docs = [c for c in calls if c['args'][0] == 'doc']
+        self.assertTrue(all(doc['rustdocflags'] == '-D warnings' for doc in docs))
         for flag in ('--workspace', '--no-deps', '--all-features', '--locked'):
-            self.assertIn(flag, doc['args'])
+            self.assertIn(flag, docs[0]['args'])
+        self.assertEqual(
+            [doc['args'] for doc in docs[1:]],
+            [['doc', '-p', package, '--no-deps', '--locked', '--target', 'host-triple']
+             for package in SUPPORTED],
+        )
         ran = [s[0] for s in scripts]
         for checker in ('tools/checks/check_public_compile.py', 'tools/checks/check_workspace.py',
                         'tools/checks/check_features.py', 'tools/checks/run_tooling_tests.py'):

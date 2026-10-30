@@ -4,7 +4,7 @@
 //! Credential-free math and string construction only: form encoding, authorize
 //! URL building, device poll schedules, callback query parsing, access-token
 //! timing, and HTTP/1.1 request/response framing. Shared async loopback accept
-//! and JWKS cache ladders live in [`crate::oauth_orchestrator`]. Native auth
+//! and JWKS cache ladders live in `oauth_orchestrator` (`http-refresh`). Native auth
 //! managers retain dialect HTTP, key crypto, catalog, and durable store
 //! ownership.
 //!
