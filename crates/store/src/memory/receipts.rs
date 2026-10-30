@@ -8,17 +8,16 @@ use super::{
 use plakous_agent::internal::Digest;
 
 pub(super) fn validate_genesis(
-    candidate: &Candidate,
+    checkpoint: &RuntimeCheckpoint,
     request: &CreateSession,
 ) -> Result<(), SessionStoreError> {
-    let checkpoint = &candidate.checkpoint;
     let manifest = checkpoint.manifest();
     let topology = manifest.topology();
     if checkpoint.kind() != RuntimeCheckpointKind::Quiescent
         || request.initial().base_root().is_some()
         || topology.session_id != request.session().session_id()
         || topology.branch_id != request.session().branch_id()
-        || topology.checkpoint_id != candidate.reference.checkpoint_id()
+        || topology.checkpoint_id != request.initial().checkpoint_id()
         || topology.parent_checkpoint_id.is_some()
         || topology.branch_revision != BranchRevision::INITIAL.get()
         || topology.fork.is_some()

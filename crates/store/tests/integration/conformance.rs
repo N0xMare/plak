@@ -489,6 +489,21 @@ where
     let created = store.create(create.clone()).await?;
     assert_eq!(created, store.create(create.clone()).await?);
     assert_eq!(created, store.recover_create(create.clone()).await?);
+    // Validate the supplied genesis before comparing an existing receipt, on
+    // both backends: a branch mismatch is not a receipt identity conflict.
+    let wrong_branch = CreateSession::new(
+        SessionRef::new(session_id, target_branch),
+        create.created_at(),
+        owner,
+        lease_seconds,
+        genesis_bundle.clone(),
+    );
+    assert_eq!(
+        store.create(wrong_branch).await,
+        Err(SessionStoreError::Invalid(
+            StoreInvalidReason::GenesisCheckpointTopology,
+        ))
+    );
     let conflicting_create = CreateSession::new(
         source_ref,
         Timestamp::new(51, 0)?,

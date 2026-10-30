@@ -29,7 +29,7 @@ mod candidates;
 use candidates::{
     bundle_reference, commit_history_pruned, install_candidate, pinned_checkpoints,
     plan_object_sweep, prune_hot_bundles, publication_candidate, retain_head_bundle,
-    sweep_unreachable,
+    sweep_unreachable, validated_checkpoint,
 };
 pub(crate) mod receipts;
 use receipts::{
@@ -282,13 +282,13 @@ impl MemorySessionStore {
         let reference = bundle_reference(request.initial());
         let mut state = self.lock()?;
         require_open(&state)?;
+        let checkpoint = validated_checkpoint(request.initial())?;
+        validate_genesis(&checkpoint, request)?;
+        let checkpoint_commit_identity = checkpoint.checkpoint_commit_identity();
         if state.deletes.contains_key(&request.session().session_id()) {
             return Err(SessionStoreError::IdentityConflict);
         }
         if let Some(receipt) = state.creates.get(&request.session().session_id()) {
-            let checkpoint_commit_identity = publication_candidate(request.initial())?
-                .checkpoint
-                .checkpoint_commit_identity();
             return if create_matches(receipt, request, reference, checkpoint_commit_identity) {
                 Ok(receipt.clone())
             } else {
@@ -307,7 +307,6 @@ impl MemorySessionStore {
         }
 
         let candidate = publication_candidate(request.initial())?;
-        validate_genesis(&candidate, request)?;
         let expires_at = expiry(self.lease_now()?, request.lease_seconds())?;
         let fence = NonZeroU64::MIN;
         let lease = BranchLease::from_store(
@@ -382,12 +381,11 @@ impl MemorySessionStore {
         request: &CreateSession,
     ) -> Result<CreateReceipt, SessionStoreError> {
         let reference = bundle_reference(request.initial());
+        let checkpoint_commit_identity =
+            validated_checkpoint(request.initial())?.checkpoint_commit_identity();
         let state = self.lock()?;
         match state.creates.get(&request.session().session_id()) {
             Some(receipt) => {
-                let checkpoint_commit_identity = publication_candidate(request.initial())?
-                    .checkpoint
-                    .checkpoint_commit_identity();
                 if create_matches(receipt, request, reference, checkpoint_commit_identity) {
                     Ok(receipt.clone())
                 } else {
@@ -579,10 +577,9 @@ impl MemorySessionStore {
         let checkpoint_id = reference.checkpoint_id();
         let mut state = self.lock()?;
         require_open(&state)?;
+        let checkpoint_commit_identity =
+            validated_checkpoint(request.checkpoint())?.checkpoint_commit_identity();
         if let Some(committed) = state.commits.get(&checkpoint_id) {
-            let checkpoint_commit_identity = publication_candidate(request.checkpoint())?
-                .checkpoint
-                .checkpoint_commit_identity();
             return if commit_matches(committed, request, reference, checkpoint_commit_identity) {
                 Ok(committed.receipt())
             } else {

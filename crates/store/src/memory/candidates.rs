@@ -1,12 +1,27 @@
 use super::{
     BTreeSet, Candidate, CheckpointId, CheckpointObjectBundle, CheckpointObjectRef,
-    CheckpointRecord, MemoryStoreLimits, ObjectSweep, RuntimeObject, SessionRef, SessionStoreError,
-    StoreAdmission, StoreCapacityBound, StoreInvalidReason, StoreState, admit, capacity,
+    CheckpointRecord, MemoryStoreLimits, ObjectSweep, RuntimeCheckpoint, RuntimeObject, SessionRef,
+    SessionStoreError, StoreAdmission, StoreCapacityBound, StoreInvalidReason, StoreState, admit,
+    capacity,
 };
+use std::sync::Arc;
 
 pub(super) fn publication_candidate(
     bundle: &CheckpointObjectBundle,
 ) -> Result<Candidate, SessionStoreError> {
+    let checkpoint = validated_checkpoint(bundle)?;
+    Ok(Candidate {
+        reference: bundle_reference(bundle),
+        base_root: bundle.base_root(),
+        checkpoint,
+        bundle: bundle.clone(),
+        objects: bundle.supplied_objects().to_vec(),
+    })
+}
+
+pub(super) fn validated_checkpoint(
+    bundle: &CheckpointObjectBundle,
+) -> Result<Arc<RuntimeCheckpoint>, SessionStoreError> {
     let checkpoint = bundle
         .validated_checkpoint()
         .map_err(|_| SessionStoreError::Invalid(StoreInvalidReason::CheckpointObjectBundle))?;
@@ -18,13 +33,7 @@ pub(super) fn publication_candidate(
             StoreInvalidReason::CheckpointObjectBinding,
         ));
     }
-    Ok(Candidate {
-        reference,
-        base_root: bundle.base_root(),
-        checkpoint,
-        bundle: bundle.clone(),
-        objects: bundle.supplied_objects().to_vec(),
-    })
+    Ok(checkpoint)
 }
 
 pub(super) fn bundle_reference(bundle: &CheckpointObjectBundle) -> CheckpointObjectRef {
