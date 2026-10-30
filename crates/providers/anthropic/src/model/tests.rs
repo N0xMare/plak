@@ -4,7 +4,6 @@
     clippy::expect_used,
     reason = "offline assertions"
 )]
-#[path = "model_tests/carry_replay.rs"]
 mod carry_replay;
 
 use super::*;

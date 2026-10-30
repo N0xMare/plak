@@ -887,5 +887,4 @@ fn descriptor_claim_error(message: &'static str) -> AnthropicError {
 }
 
 #[cfg(test)]
-#[path = "model_tests.rs"]
 mod tests;
