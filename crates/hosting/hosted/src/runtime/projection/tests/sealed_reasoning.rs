@@ -190,10 +190,28 @@ fn live_reasoning(events: &[HostEvent]) -> String {
 
 fn run_prompt(config: crate::runtime::HostConfig<TestExtension>, prompt: &str) -> Vec<HostEvent> {
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
+    // This law compares what was streamed with the rebuilt rows. Drain on
+    // publication so a final presentation snapshot cannot supersede a delta
+    // merely because the test's consumer thread was descheduled.
+    let events = Arc::new(events);
+    let mailbox = Arc::downgrade(&events);
+    let (captured, received) = std::sync::mpsc::channel();
+    let serial = std::sync::Mutex::new(());
+    let drain = Arc::new(move || {
+        let _guard = serial.lock().unwrap();
+        if let Some(mailbox) = mailbox.upgrade() {
+            for event in mailbox.try_iter() {
+                let _ = captured.send(event);
+            }
+        }
+    });
+    let notified = drain.clone();
+    events.set_notify(move || notified());
+    drain();
     let mut seen = Vec::new();
     send_attached_action(&actions, UserAction::Prompt(prompt.to_owned().into()));
     loop {
-        let event = events
+        let event = received
             .recv_timeout(Duration::from_secs(30))
             .unwrap_or_else(|_| panic!("a host event after {seen:#?}"));
         let done = matches!(&event, HostEvent::TurnLifecycle(lifecycle)
