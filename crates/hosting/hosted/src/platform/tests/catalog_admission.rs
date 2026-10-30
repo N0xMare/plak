@@ -39,6 +39,304 @@ fn spec<'a>(
     }
 }
 
+mod listing_cache {
+    use super::*;
+    use crate::platform::listing::CachedRows;
+    use plakous::api_key::{
+        ApiKey, ApiKeyError, ApiKeyGenerationGrant, ApiKeyRequest, ApiKeySource,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const PROVIDERS: [PlatformProvider; 3] = [
+        PlatformProvider::Anthropic,
+        PlatformProvider::OpenAi,
+        PlatformProvider::Xai,
+    ];
+    const NOW: u64 = 2_000_000_000;
+    const KEY: &str = "fixture-key-one";
+
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum Failure {
+        None,
+        Source,
+        Fingerprint,
+    }
+
+    struct ListingCredentials {
+        reads: Arc<AtomicUsize>,
+        failure: Failure,
+    }
+
+    impl ListingCredentials {
+        fn new(failure: Failure) -> Self {
+            Self {
+                reads: Arc::new(AtomicUsize::new(0)),
+                failure,
+            }
+        }
+
+        fn wrap<S: ?Sized>(
+            &self,
+            provider: PlatformProvider,
+            source: CliResult<Arc<S>>,
+        ) -> CliResult<Arc<ListingSource<S>>> {
+            if self.failure == Failure::Source {
+                return Err(CliFailure::new(format!(
+                    "{} selected source failed",
+                    provider.account()
+                )));
+            }
+            Ok(Arc::new(ListingSource {
+                source: source?,
+                reads: Arc::clone(&self.reads),
+                fail_fingerprint: self.failure == Failure::Fingerprint,
+            }))
+        }
+    }
+
+    struct ListingSource<S: ?Sized> {
+        source: Arc<S>,
+        reads: Arc<AtomicUsize>,
+        fail_fingerprint: bool,
+    }
+
+    impl<R, A, S> ApiKeySource<R, A> for ListingSource<S>
+    where
+        R: ApiKeyRequest + ?Sized,
+        S: ApiKeySource<R, A> + ?Sized,
+    {
+        fn authority(&self) -> &A {
+            self.source.authority()
+        }
+
+        fn generation_grant(
+            &self,
+            request: &dyn ApiKeyRequest,
+        ) -> Result<ApiKeyGenerationGrant<A>, ApiKeyError> {
+            let previous = self.reads.fetch_add(1, Ordering::SeqCst);
+            // A fetch re-resolves after fingerprinting. Refuse that read before
+            // constructing HTTP, so every live-path probe remains offline.
+            if self.fail_fingerprint || previous != 0 {
+                return Err(ApiKeyError::Unavailable);
+            }
+            self.source.generation_grant(request)
+        }
+
+        fn api_key(
+            &self,
+            request: &R,
+            expected: &ApiKeyGenerationGrant<A>,
+        ) -> Result<ApiKey, ApiKeyError> {
+            self.source.api_key(request, expected)
+        }
+    }
+
+    impl AnthropicCredentials for ListingCredentials {
+        fn anthropic(&self) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>> {
+            Ok(self.wrap(PlatformProvider::Anthropic, Credentials(KEY).anthropic())?)
+        }
+    }
+
+    impl OpenAiCredentials for ListingCredentials {
+        fn openai(&self) -> CliResult<Arc<plakous::openai::OpenAiKeySource>> {
+            Ok(self.wrap(PlatformProvider::OpenAi, Credentials(KEY).openai())?)
+        }
+    }
+
+    impl XaiCredentials for ListingCredentials {
+        fn xai(&self) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>> {
+            Ok(self.wrap(PlatformProvider::Xai, Credentials(KEY).xai())?)
+        }
+    }
+
+    fn cache_fixture(provider: PlatformProvider) -> (String, serde_json::Value) {
+        let (fingerprint, rows) = match provider {
+            PlatformProvider::Anthropic => (
+                plakous::anthropic::anthropic_api_key_fingerprint(
+                    Credentials(KEY).anthropic().unwrap().as_ref(),
+                )
+                .unwrap(),
+                CachedRows::Anthropic(
+                    plakous::anthropic::anthropic_api_bundled_listing().unwrap()[..1].to_vec(),
+                ),
+            ),
+            PlatformProvider::OpenAi => (
+                plakous::openai::openai_api_key_fingerprint(
+                    &openai::openai_credential_reference().unwrap(),
+                    Credentials(KEY).openai().unwrap().as_ref(),
+                )
+                .unwrap(),
+                CachedRows::OpenAi(
+                    plakous::openai::openai_api_bundled_listing().unwrap()[..1].to_vec(),
+                ),
+            ),
+            PlatformProvider::Xai => (
+                plakous::xai::xai_api_key_fingerprint(Credentials(KEY).xai().unwrap().as_ref())
+                    .unwrap(),
+                CachedRows::Xai(plakous::xai::xai_api_bundled_listing().unwrap()[..1].to_vec()),
+            ),
+        };
+        let document = serde_json::json!({
+            "version": 2,
+            "account": provider.account(),
+            "key_fingerprint": fingerprint,
+            "fetched_at": NOW - 60,
+            "rows": rows,
+        });
+        (fingerprint, document)
+    }
+
+    fn write_fixture(path: &std::path::Path, document: &serde_json::Value) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(document).unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn fresh_and_recent_failure_caches_are_used_on_every_platform() {
+        for provider in PROVIDERS {
+            for age in [60, 6 * 60 * 60 + 10] {
+                let directory = tempfile::tempdir().unwrap();
+                let credentials = ListingCredentials::new(Failure::None);
+                let (fingerprint, mut document) = cache_fixture(provider);
+                document["fetched_at"] = (NOW - age).into();
+                let path = cache_path(directory.path(), provider, &fingerprint);
+                write_fixture(&path, &document);
+                if age > 60 {
+                    std::fs::write(path.with_extension("failed"), (NOW - 60).to_string()).unwrap();
+                }
+                let catalog = api_model_catalog_observed(
+                    provider,
+                    &credentials,
+                    Some(directory.path()),
+                    ApiModelLists::Live,
+                    NOW,
+                    None,
+                )
+                .await;
+                assert_eq!(
+                    catalog.source,
+                    ApiCatalogSource::Cached { age_seconds: age }
+                );
+                assert_eq!(catalog.models.len(), 1, "{provider:?}");
+                assert_eq!(credentials.reads.load(Ordering::SeqCst), 1, "{provider:?}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn live_stale_cache_without_a_failure_marker_attempts_a_fetch_on_every_platform() {
+        let mut failures = Vec::new();
+        for provider in PROVIDERS {
+            let directory = tempfile::tempdir().unwrap();
+            let credentials = ListingCredentials::new(Failure::None);
+            let (fingerprint, mut document) = cache_fixture(provider);
+            document["fetched_at"] = 1.into();
+            let path = cache_path(directory.path(), provider, &fingerprint);
+            write_fixture(&path, &document);
+            let catalog = api_model_catalog_observed(
+                provider,
+                &credentials,
+                Some(directory.path()),
+                ApiModelLists::Live,
+                NOW,
+                None,
+            )
+            .await;
+            assert_eq!(
+                catalog.source,
+                ApiCatalogSource::Cached {
+                    age_seconds: NOW - 1
+                }
+            );
+            assert_eq!(catalog.models.len(), 1, "{provider:?}");
+            let reads = credentials.reads.load(Ordering::SeqCst);
+            if reads != 2 || !path.with_extension("failed").exists() {
+                failures.push(format!("{provider:?}: fetch not attempted, reads={reads}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[tokio::test]
+    async fn source_and_fingerprint_failures_keep_exact_diagnostics_on_every_platform() {
+        let mut failures = Vec::new();
+        for provider in PROVIDERS {
+            for failure in [Failure::Source, Failure::Fingerprint] {
+                let credentials = ListingCredentials::new(failure);
+                let catalog = api_model_catalog_observed(
+                    provider,
+                    &credentials,
+                    None,
+                    ApiModelLists::Offline,
+                    NOW,
+                    None,
+                )
+                .await;
+                let expected = if failure == Failure::Source {
+                    format!("{} selected source failed", provider.account())
+                } else {
+                    match provider {
+                        PlatformProvider::Anthropic => "API-key credential source is unavailable",
+                        PlatformProvider::OpenAi => {
+                            "OpenAI Request error: OpenAI model list credential is unavailable"
+                        }
+                        PlatformProvider::Xai => "xAI model list credential is unavailable",
+                    }
+                    .to_owned()
+                };
+                let expected = ApiCatalogSource::Bundled { reason: expected };
+                if catalog.source != expected {
+                    failures.push(format!(
+                        "{provider:?}: {:?}, expected {expected:?}",
+                        catalog.source
+                    ));
+                }
+                assert!(!catalog.models.is_empty(), "{provider:?}");
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[tokio::test]
+    async fn corrupt_cache_envelopes_are_ignored_offline_on_every_platform() {
+        for provider in PROVIDERS {
+            let (fingerprint, document) = cache_fixture(provider);
+            let mut wrong_version = document.clone();
+            wrong_version["version"] = 999.into();
+            let mut wrong_account = document;
+            wrong_account["account"] = "other-account".into();
+            for bytes in [
+                b"not JSON".to_vec(),
+                serde_json::to_vec(&wrong_version).unwrap(),
+                serde_json::to_vec(&wrong_account).unwrap(),
+            ] {
+                let directory = tempfile::tempdir().unwrap();
+                let credentials = ListingCredentials::new(Failure::None);
+                let path = cache_path(directory.path(), provider, &fingerprint);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, bytes).unwrap();
+                let catalog = api_model_catalog_observed(
+                    provider,
+                    &credentials,
+                    Some(directory.path()),
+                    ApiModelLists::Offline,
+                    NOW,
+                    None,
+                )
+                .await;
+                assert_eq!(
+                    catalog.source,
+                    ApiCatalogSource::Bundled {
+                        reason: "no cached model list".into()
+                    }
+                );
+                assert!(!catalog.models.is_empty(), "{provider:?}");
+                assert_eq!(credentials.reads.load(Ordering::SeqCst), 1, "{provider:?}");
+            }
+        }
+    }
+}
+
 /// An Anthropic API session created under the full window reopens exactly
 /// from the evidence the facade reader returns, even after the product default
 /// moved back to the working window, and keeps the full window. Once the

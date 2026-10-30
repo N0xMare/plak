@@ -23,10 +23,7 @@
 
 use std::time::Instant;
 
-use plakous_http::{
-    Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
-    StatusCode, sensitive_header_value,
-};
+use plakous_http::{Client, HeaderMap, HeaderName, HeaderValue, Origin, sensitive_header_value};
 use plakous_model::ReasoningEffort;
 use serde::Deserialize;
 use serde_json::Value;
@@ -217,15 +214,13 @@ pub fn xai_api_bundled_listing() -> Result<Vec<XaiListedModel>, XaiApiModelError
 /// Returns an error when the bundled table is malformed.
 pub fn xai_api_models(listed: &[XaiListedModel]) -> Result<Vec<XaiApiModel>, XaiApiModelError> {
     let table = bundled_table()?;
-    listed
-        .iter()
-        .map(|row| {
-            classify(
-                row,
-                table.models.iter().find(|candidate| candidate.id == row.id),
-            )
-        })
-        .collect()
+    plakous_exchange::catalog::classify_listed(
+        listed,
+        &table.models,
+        |row| &row.id,
+        |row| &row.id,
+        classify,
+    )
 }
 
 /// The same id checks a fetched page uses. Cached rows go through this before
@@ -236,23 +231,14 @@ pub fn xai_api_models(listed: &[XaiListedModel]) -> Result<Vec<XaiApiModel>, Xai
 pub fn accept_xai_listed_models(
     models: &[XaiListedModel],
 ) -> Result<Vec<XaiListedModel>, XaiApiModelError> {
-    if models.len() > MAX_MODELS {
-        return Err(list_error("exceeds the row bound"));
-    }
-    let mut accepted = Vec::with_capacity(models.len());
-    for model in models {
-        if !safe_id(&model.id) {
-            continue;
-        }
-        if accepted
-            .iter()
-            .any(|seen: &XaiListedModel| seen.id == model.id)
-        {
-            return Err(list_error("repeats a model id"));
-        }
-        accepted.push(model.clone());
-    }
-    Ok(accepted)
+    plakous_exchange::catalog::accept_listed(
+        models,
+        MAX_MODELS,
+        |row| &row.id,
+        |id| Ok(safe_id(id)),
+        |_| Ok(()),
+    )
+    .map_err(list_error)
 }
 
 /// Parses one `/v1/models` page. A cursor, `has_more`, an unknown lifecycle
@@ -393,7 +379,7 @@ async fn list_via(
 pub fn xai_api_key_fingerprint(source: &XaiPlatformKeySource) -> Result<String, XaiApiModelError> {
     let grant = crate::platform_binding::xai_api_key_generation(source)
         .map_err(|_| list_error("credential is unavailable"))?;
-    Ok(fingerprint_hex(grant.fingerprint().as_bytes()))
+    Ok(grant.listing_fingerprint())
 }
 
 fn platform_key(source: &XaiPlatformKeySource) -> Result<String, XaiApiModelError> {
@@ -431,53 +417,22 @@ pub(crate) async fn get_models(
         sensitive_header_value(bearer)
             .map_err(|_| list_error("credential is not a header value"))?,
     );
-    let request = Request::new(
+    plakous_exchange::catalog::get_page(
+        client,
         origin,
-        Method::GET,
         XAI_MODELS_PATH,
         headers,
-        SensitiveBytes::new(Vec::new()).into_bytes(),
-        client.limits(),
-    )
-    .map_err(|_| transport_error())?;
-    let reply = plakous_exchange::lookup::get(
-        client,
-        request,
         plakous_exchange::lookup::LookupBudget::from_deadline(deadline),
         MAX_BODY_BYTES,
     )
     .await
-    .map_err(|error| match error {
-        plakous_exchange::lookup::LookupError::BodyLimit => list_error("exceeds the body bound"),
-        _ => list_error(&error.to_string()),
-    })?;
-    if reply.status != StatusCode::OK {
-        return Err(list_error(&format!(
-            "answered HTTP {}",
-            reply.status.as_u16()
-        )));
-    }
-    Ok(reply.body.to_vec())
+    .map_err(|error| list_error(&error.to_string()))
 }
 
 fn deadline_instant() -> Result<Instant, XaiApiModelError> {
     Instant::now()
         .checked_add(LIST_TIMEOUT)
         .ok_or_else(|| list_error("deadline is invalid"))
-}
-
-fn fingerprint_hex(bytes: &[u8; 32]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    bytes
-        .iter()
-        .take(8)
-        .flat_map(|byte| {
-            [
-                HEX[usize::from(byte >> 4)] as char,
-                HEX[usize::from(byte & 0x0f)] as char,
-            ]
-        })
-        .collect()
 }
 
 fn classify(
@@ -608,18 +563,11 @@ fn narrowed_efforts(listed: &XaiListedModel, reviewed: &BundledRow) -> Vec<Reaso
 }
 
 fn efforts_from(names: &[String]) -> Vec<ReasoningEffort> {
-    EFFORT_LADDER
-        .iter()
-        .filter(|(name, _)| names.iter().any(|listed| listed == name))
-        .map(|(_, effort)| *effort)
-        .collect()
+    plakous_exchange::catalog::efforts_from(names, EFFORT_LADDER)
 }
 
 fn effort_from(name: &str) -> Option<ReasoningEffort> {
-    EFFORT_LADDER
-        .iter()
-        .find(|(candidate, _)| *candidate == name)
-        .map(|(_, effort)| *effort)
+    plakous_exchange::catalog::effort_from(name, EFFORT_LADDER)
 }
 
 fn effort_name(effort: ReasoningEffort) -> &'static str {
@@ -634,11 +582,7 @@ fn effort_name(effort: ReasoningEffort) -> &'static str {
 }
 
 fn safe_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= MAX_ID_BYTES
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b':'))
+    plakous_exchange::catalog::safe_id(id, MAX_ID_BYTES, b"-._:")
 }
 
 #[derive(Debug, Deserialize)]

@@ -5,6 +5,7 @@
 //! failures to the same neutral `plakous-model` network facts, read error
 //! bodies under the same bound and cancellation race, and decline a turn retry
 //! with one precedence (spec 01 §13.1). This crate owns those pieces once.
+//! It also shares bounded catalog transport and ordered row projection.
 //!
 //! ## Not in this crate
 //!
@@ -14,6 +15,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod catalog;
 pub mod lookup;
 
 use std::future::Future;

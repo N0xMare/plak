@@ -2692,6 +2692,16 @@ are unchanged. Anthropic's opaque key-container identity is separate from the
 generation fingerprint; renewal retains container identity only when supplied
 the original key, after the integration's OAuth renewal fence.
 
+`plakous-exchange::catalog` owns bounded catalog GET/body/status handling,
+ordered safe-id and duplicate checks, effort-ladder lookup and exact-id
+classification traversal. Integrations supply their exact
+origin, authentication headers, schema, punctuation policy, row checks and
+reviewed family rules. Unsafe ids are skipped for OpenAI and xAI but fail the
+Anthropic listing. Row bounds precede filtering; duplicate checks precede
+provider-specific row validation. Reviewed-table loading, schema and family
+admission belong to each provider, including the Anthropic admission timestamp
+and OpenAI manifest. Hosted listing-cache policy is specified in spec 02 §2.3.
+
 ### 6.1 Three kernels, thin dialects
 
 Plakous has one neutral runtime and three wire-family kernels:

@@ -10,10 +10,7 @@
 use plakous_auth::api_key::ExposeApiKey as _;
 use std::time::Instant;
 
-use plakous_http::{
-    Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
-    StatusCode, sensitive_header_value,
-};
+use plakous_http::{Client, HeaderMap, HeaderName, HeaderValue, Origin, sensitive_header_value};
 use plakous_model::ReasoningEffort;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -165,43 +162,47 @@ fn listed_row(row: &Value) -> Result<AnthropicListedModel, AnthropicError> {
 pub fn accept_anthropic_listed_models(
     listed: &[AnthropicListedModel],
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
-    if listed.len() > MAX_MODELS {
-        return Err(list_error("exceeds the row bound"));
-    }
-    let mut ids = std::collections::BTreeSet::new();
-    for row in listed {
-        if !safe_id(&row.id) {
-            return Err(list_error("has a missing or unsafe model id"));
-        }
-        if !ids.insert(row.id.as_str()) {
-            return Err(list_error("repeats a model id"));
-        }
-        if row.max_input_tokens == Some(0) || row.max_tokens == Some(0) {
-            return Err(list_error("has a malformed token limit"));
-        }
-        if let Some(efforts) = &row.efforts {
-            let mut seen = std::collections::BTreeSet::new();
-            if efforts.iter().any(|name| {
-                !EFFORT_LADDER.iter().any(|(known, _)| known == name) || !seen.insert(name)
-            }) {
-                return Err(list_error("has a malformed effort list"));
+    plakous_exchange::catalog::accept_listed(
+        listed,
+        MAX_MODELS,
+        |row| &row.id,
+        |id| {
+            if safe_id(id) {
+                Ok(true)
+            } else {
+                Err("has a missing or unsafe model id")
             }
-        }
-        for text in [&row.lifecycle, &row.deprecated_at, &row.retires_at]
-            .into_iter()
-            .flatten()
-        {
-            if text.len() > MAX_ID_BYTES {
-                return Err(list_error("has a malformed string field"));
+        },
+        |row| {
+            if row.max_input_tokens == Some(0) || row.max_tokens == Some(0) {
+                return Err("has a malformed token limit");
             }
-        }
-        for time in [&row.deprecated_at, &row.retires_at].into_iter().flatten() {
-            if unix_seconds(time).is_none() {
-                return Err(list_error("has a malformed lifecycle time"));
+            if let Some(efforts) = &row.efforts {
+                let mut seen = std::collections::BTreeSet::new();
+                if efforts.iter().any(|name| {
+                    plakous_exchange::catalog::effort_from(name, &EFFORT_LADDER).is_none()
+                        || !seen.insert(name)
+                }) {
+                    return Err("has a malformed effort list");
+                }
             }
-        }
-    }
-    Ok(listed.to_vec())
+            for text in [&row.lifecycle, &row.deprecated_at, &row.retires_at]
+                .into_iter()
+                .flatten()
+            {
+                if text.len() > MAX_ID_BYTES {
+                    return Err("has a malformed string field");
+                }
+            }
+            for time in [&row.deprecated_at, &row.retires_at].into_iter().flatten() {
+                if unix_seconds(time).is_none() {
+                    return Err("has a malformed lifecycle time");
+                }
+            }
+            Ok(())
+        },
+    )
+    .map_err(list_error)
 }
 
 fn optional_u64(row: &Value, key: &str) -> Result<Option<u64>, AnthropicError> {
@@ -224,11 +225,7 @@ fn optional_string(row: &Value, key: &str) -> Result<Option<String>, AnthropicEr
 }
 
 fn safe_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= MAX_ID_BYTES
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_'))
+    plakous_exchange::catalog::safe_id(id, MAX_ID_BYTES, b"-._")
 }
 
 fn transport_error<E>(_: E) -> AnthropicError {
@@ -345,30 +342,9 @@ async fn get_page(
         sensitive_header_value(key.as_bytes().to_vec())
             .map_err(|_| list_error("credential is not a header value"))?,
     );
-    let request = Request::new(
-        origin,
-        Method::GET,
-        path,
-        headers,
-        SensitiveBytes::new(Vec::new()).into_bytes(),
-        client.limits(),
-    )
-    .map_err(transport_error)?;
-    let reply = plakous_exchange::lookup::get(client, request, deadline, MAX_BODY_BYTES)
+    plakous_exchange::catalog::get_page(client, origin, path, headers, deadline, MAX_BODY_BYTES)
         .await
-        .map_err(|error| match error {
-            plakous_exchange::lookup::LookupError::BodyLimit => {
-                list_error("exceeds the body bound")
-            }
-            _ => list_error(&error.to_string()),
-        })?;
-    if reply.status != StatusCode::OK {
-        return Err(list_error(&format!(
-            "answered HTTP {}",
-            reply.status.as_u16()
-        )));
-    }
-    Ok(reply.body.to_vec())
+        .map_err(|error| list_error(&error.to_string()))
 }
 
 /// Hosted features the reviewed table records per model, from the docs'
@@ -667,11 +643,7 @@ pub(crate) const fn effort_name(effort: ReasoningEffort) -> &'static str {
 }
 
 fn efforts_from(names: &[String]) -> Vec<ReasoningEffort> {
-    EFFORT_LADDER
-        .iter()
-        .filter(|(name, _)| names.iter().any(|listed| listed == name))
-        .map(|(_, effort)| *effort)
-        .collect()
+    plakous_exchange::catalog::efforts_from(names, &EFFORT_LADDER)
 }
 
 /// Classifies every listed model against the bundled table and the family
@@ -692,16 +664,14 @@ pub fn anthropic_api_models(
     now_unix_seconds: u64,
 ) -> Result<Vec<AnthropicApiModel>, AnthropicError> {
     let table = bundled_table()?;
-    accept_anthropic_listed_models(listed)?
-        .iter()
-        .map(|row| {
-            classify(
-                row,
-                table.models.iter().find(|r| r.id == row.id),
-                now_unix_seconds,
-            )
-        })
-        .collect()
+    let listed = accept_anthropic_listed_models(listed)?;
+    plakous_exchange::catalog::classify_listed(
+        &listed,
+        &table.models,
+        |row| &row.id,
+        |row| &row.id,
+        |row, reviewed| classify(row, reviewed, now_unix_seconds),
+    )
 }
 
 #[allow(
