@@ -19,8 +19,8 @@ class = "supported"
 neutral = true
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 14
-too-many-arguments-ceiling = 14
+too-many-lines-ceiling = 13
+too-many-arguments-ceiling = 11
 large-file-ceiling = 0
 reason = "Existing item-level lint debt after the joined-process registry split; ratchet down as further splits land."
 

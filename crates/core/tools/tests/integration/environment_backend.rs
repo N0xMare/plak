@@ -964,6 +964,48 @@ async fn joined_process_pty_supports_initial_size_input_eof_and_contained_cwd()
     Ok(())
 }
 
+#[tokio::test]
+async fn joined_process_pty_captures_output_written_immediately_before_leader_exit()
+-> Result<(), TestError> {
+    let workspace = tempfile::tempdir()?;
+    let environment = ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(run_id(46)?),
+        workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::new(limits(131_072, 131_072, 262_144, 4096)?, [], [])?,
+    )?;
+    let sessions = environment.joined_process_sessions()?;
+    let shell = unix_program(&["/bin/sh", "/usr/bin/sh"])?;
+    let chunk = "0123456789abcdef0123456789abcdef";
+    let marker = "terminal-output-before-leader-exit";
+    let script = format!(
+        "i=0; while [ \"$i\" -lt 2048 ]; do printf '%s' '{chunk}'; i=$((i + 1)); done; printf '%s' '{marker}'"
+    );
+    let id = sessions.start(
+        JoinedProcessStartRequest::new(
+            JoinedProcessCommand::literal(shell, [String::from("-c"), script])?,
+            ".",
+            [],
+            true,
+            JoinedProcessTerminalMode::UnixPty,
+        )?,
+        control(),
+    )?;
+    let (output, status) = collect_joined_output(&sessions, id).await?;
+    sessions.join(id)?;
+    assert_eq!(status, JoinedProcessStatus::Exited(Some(0)));
+    let expected = format!("{}{marker}", chunk.repeat(2048));
+    assert_eq!(output.len(), expected.len());
+    assert!(
+        output.ends_with(marker.as_bytes()),
+        "final PTY output was lost"
+    );
+    assert!(output == expected.as_bytes(), "PTY output bytes differ");
+    sessions.join_all()?;
+    assert!(sessions.is_drained());
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn joined_process_pty_terminate_and_drop_clean_descendants() -> Result<(), TestError> {

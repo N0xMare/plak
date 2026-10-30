@@ -1,4 +1,8 @@
-//! Pipe and PTY process start. The two paths stay separate.
+//! One joined-process admission path with terminal-specific spawn and I/O.
+
+mod terminal;
+pub(super) use terminal::JoinedProcessResources;
+use terminal::JoinedSpawn;
 
 use std::os::unix::process::CommandExt;
 
@@ -15,11 +19,10 @@ use super::{
     RawFd, Receiver, Stdio, SyncSender, TrySendError, Write, backend_error,
     cleanup_pty_setup_error, cleanup_setup_error, cleanup_unresolved_error, conflict_error,
     displayed_command, fs, host_process_home, host_process_path, invalid_request, io_error,
-    join_thread_until, lock, native_pty_system, resolve_existing_no_symlink, resource_error,
+    join_thread_until, native_pty_system, resolve_existing_no_symlink, resource_error,
     restore_path_after_login, set_nonblocking, sleep_until_next_poll, spawn_joined_output_reader,
-    supervise_joined_process, supervise_joined_pty, sync_channel, terminate_direct_child,
-    terminate_direct_pty_child, terminate_owned_process_group_until,
-    terminate_owned_pty_group_until, workspace_error,
+    supervise_joined_process, sync_channel, terminate_direct_child, terminate_direct_pty_child,
+    workspace_error,
 };
 
 pub(in crate::environment::backend) fn validate_absolute_program(
@@ -58,8 +61,9 @@ pub(in crate::environment::backend) fn validate_process_value(
 }
 
 #[allow(
+    clippy::too_many_lines,
     clippy::too_many_arguments,
-    reason = "spawn setup and every rollback edge stay with the single joined cleanup owner"
+    reason = "joined spawn, initial I/O rollback and supervisor ownership transfer form one admission boundary"
 )]
 pub(super) fn start_joined_host_process(
     workspace: &ExecutionWorkspace,
@@ -88,45 +92,6 @@ pub(super) fn start_joined_host_process(
         resolved.command = JoinedProcessCommand::literal(program, arguments.iter().cloned())?;
     }
     let request = &resolved;
-    match request.terminal_mode {
-        JoinedProcessTerminalMode::Pipes => start_joined_pipes_process(
-            workspace,
-            process,
-            environment,
-            limits,
-            queue_limit,
-            request,
-            control,
-            pending_spool,
-        ),
-        JoinedProcessTerminalMode::UnixPty => start_joined_pty_process(
-            workspace,
-            process,
-            environment,
-            limits,
-            queue_limit,
-            request,
-            control,
-            pending_spool,
-        ),
-    }
-}
-
-#[allow(
-    clippy::too_many_lines,
-    clippy::too_many_arguments,
-    reason = "spawn setup and every rollback edge stay with the single joined cleanup owner"
-)]
-fn start_joined_pipes_process(
-    workspace: &ExecutionWorkspace,
-    process: &HostProcessContext,
-    environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
-    limits: ExecutionEnvironmentLimits,
-    queue_limit: usize,
-    request: &JoinedProcessStartRequest,
-    control: ExecutionOperationControl,
-    pending_spool: Option<PendingJobOutput>,
-) -> Result<JoinedSession, ExecutionBackendError> {
     let cwd = resolve_existing_no_symlink(workspace, &request.cwd)?;
     if !cwd.is_dir() {
         return Err(workspace_error(
@@ -135,7 +100,11 @@ fn start_joined_pipes_process(
     }
     let wrapped_shell = match &request.command {
         JoinedProcessCommand::Shell { command, .. } => {
-            Some(restore_path_after_login(process, command)?)
+            let command = restore_path_after_login(process, command)?;
+            Some(match request.terminal_mode {
+                JoinedProcessTerminalMode::Pipes => command,
+                JoinedProcessTerminalMode::UnixPty => format!("trap '' HUP; {command}"),
+            })
         }
         JoinedProcessCommand::Literal { .. } => None,
     };
@@ -158,86 +127,17 @@ fn start_joined_pipes_process(
             (profile.revalidated_executable()?, arguments)
         }
     };
-    let mut command = Command::new(program);
-    command.args(arguments);
-    command.arg0(argv0.unwrap_or(program));
-    command
-        .current_dir(cwd)
-        .env_clear()
-        .stdin(if request.keep_stdin_open || !request.stdin.is_empty() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    for (name, value) in environment {
-        if name.as_str() == "PATH" {
-            continue;
-        }
-        command.env(name.as_str(), value.0.as_ref());
+    let (mut resources, io) = JoinedSpawn {
+        program,
+        argv0,
+        arguments,
+        cwd: &cwd,
+        process,
+        environment,
+        request,
+        limits,
     }
-    command.env("PATH", host_process_path(process, environment)?);
-    if let Some(ceiling) = &process.discovery_ceiling {
-        command.env("GIT_CEILING_DIRECTORIES", ceiling);
-    }
-    if let Some(home) = host_process_home(process, environment) {
-        command.env("HOME", home);
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|_| invalid_request("joined process executable could not be started"))?;
-    let process_group = i32::try_from(child.id())
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-        .ok_or_else(|| io_error("joined process returned an invalid pid"));
-    let process_group = match process_group {
-        Ok(process_group) => process_group,
-        Err(error) => {
-            return Err(
-                terminate_direct_child(&mut child, limits.cleanup_duration())
-                    .err()
-                    .unwrap_or(error),
-            );
-        }
-    };
-    let mut stdin = child.stdin.take();
-    if (request.keep_stdin_open || !request.stdin.is_empty()) && stdin.is_none() {
-        return Err(cleanup_setup_error(
-            &mut child,
-            process_group,
-            limits.cleanup_duration(),
-            io_error("joined process stdin was unavailable"),
-        ));
-    }
-    let Some(stdout) = child.stdout.take() else {
-        return Err(cleanup_setup_error(
-            &mut child,
-            process_group,
-            limits.cleanup_duration(),
-            io_error("joined process stdout was unavailable"),
-        ));
-    };
-    let Some(stderr) = child.stderr.take() else {
-        return Err(cleanup_setup_error(
-            &mut child,
-            process_group,
-            limits.cleanup_duration(),
-            io_error("joined process stderr was unavailable"),
-        ));
-    };
-    if let Some(stdin) = &stdin
-        && let Err(error) = set_nonblocking(stdin)
-    {
-        return Err(cleanup_setup_error(
-            &mut child,
-            process_group,
-            limits.cleanup_duration(),
-            error,
-        ));
-    }
-
+    .spawn()?;
     let shared = Arc::new(Mutex::new(JoinedSessionShared {
         output: JoinedSessionOutput::default(),
         status: JoinedProcessStatus::Running,
@@ -252,64 +152,7 @@ fn start_joined_pipes_process(
         disowned: false,
     }));
     let output_io_failed = Arc::new(AtomicBool::new(false));
-    let io_stop = Arc::new(AtomicBool::new(false));
-    let stdout_thread = spawn_joined_output_reader(
-        stdout,
-        JoinedProcessOutputStream::Stdout,
-        Arc::clone(&shared),
-        Arc::clone(&output_io_failed),
-        Arc::clone(&io_stop),
-        limits,
-    )
-    .map_err(|error| {
-        cleanup_setup_error(&mut child, process_group, limits.cleanup_duration(), error)
-    })?;
-    let stderr_thread = match spawn_joined_output_reader(
-        stderr,
-        JoinedProcessOutputStream::Stderr,
-        Arc::clone(&shared),
-        Arc::clone(&output_io_failed),
-        Arc::clone(&io_stop),
-        limits,
-    ) {
-        Ok(thread) => thread,
-        Err(error) => {
-            io_stop.store(true, Ordering::Release);
-            let deadline = Instant::now() + limits.cleanup_duration();
-            let cleanup =
-                terminate_owned_process_group_until(&mut child, process_group, None, deadline);
-            let joined = join_thread_until(stdout_thread, deadline);
-            return Err(match (cleanup, joined) {
-                (Err(cleanup), _) => cleanup,
-                (Ok(_), false) => cleanup_unresolved_error(),
-                (Ok(_), true) => error,
-            });
-        }
-    };
-    let initial_input = match stdin.as_mut() {
-        Some(stdin) => {
-            write_joined_initial_input(stdin, &request.stdin, limits.execution_duration())
-        }
-        None => Ok(()),
-    };
-    if let Err(error) = initial_input {
-        io_stop.store(true, Ordering::Release);
-        let deadline = Instant::now() + limits.cleanup_duration();
-        let cleanup =
-            terminate_owned_process_group_until(&mut child, process_group, None, deadline);
-        let joined = (
-            join_thread_until(stdout_thread, deadline),
-            join_thread_until(stderr_thread, deadline),
-        );
-        return Err(if let Err(cleanup) = cleanup {
-            cleanup
-        } else if !joined.0 || !joined.1 {
-            cleanup_unresolved_error()
-        } else {
-            error
-        });
-    }
-    let input = if request.keep_stdin_open { stdin } else { None };
+    let input = resources.start_io(io, &shared, &output_io_failed, limits, request)?;
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let foreground_control = control.clone();
@@ -319,53 +162,39 @@ fn start_joined_pipes_process(
     let thread_stop_grace = Arc::clone(&stop_grace_millis);
     let thread_shared = Arc::clone(&shared);
     let shell_command = matches!(request.command, JoinedProcessCommand::Shell { .. });
-    let resources = JoinedProcessResources {
-        child,
-        process_group,
-        stdout_thread: Some(stdout_thread),
-        stderr_thread: Some(stderr_thread),
-        io_stop,
-        cleanup_duration: limits.cleanup_duration(),
-        armed: true,
+    let (thread_name, thread_error) = match request.terminal_mode {
+        JoinedProcessTerminalMode::Pipes => (
+            "plak-joined-process",
+            "joined process supervisor could not start",
+        ),
+        JoinedProcessTerminalMode::UnixPty => (
+            "plak-joined-pty",
+            "joined process PTY supervisor could not start",
+        ),
     };
     let thread = std::thread::Builder::new()
-        .name(String::from("plak-joined-process"))
+        .name(String::from(thread_name))
         .spawn(move || {
             let mut resources = resources;
-            let (Some(stdout_thread), Some(stderr_thread)) = (
-                resources.stdout_thread.take(),
-                resources.stderr_thread.take(),
-            ) else {
-                let mut shared = lock(&thread_shared);
-                shared.status = JoinedProcessStatus::Failed;
-                shared.terminal_changed();
-                return;
-            };
-            let process_group = resources.process_group;
             supervise_joined_process(
-                &mut resources.child,
-                process_group,
-                stdout_thread,
-                stderr_thread,
+                &mut resources,
                 limits,
                 &control,
                 &thread_promoted,
                 &thread_stop_grace,
                 &thread_stop,
-                &resources.io_stop,
                 &output_io_failed,
                 &thread_shared,
                 shell_command,
             );
-            resources.armed = false;
+            resources.disarm();
         })
-        .map_err(|_| io_error("joined process supervisor could not start"));
+        .map_err(|_| io_error(thread_error));
     let thread = match thread {
         Ok(thread) => thread,
         Err(error) => {
             stop.store(true, Ordering::Release);
-            // Dropping the rejected closure runs JoinedProcessResources'
-            // rollback owner, which terminates/reaps and joins both readers.
+            // Dropping the rejected closure terminates the group before joining I/O.
             return Err(error);
         }
     };
@@ -373,7 +202,7 @@ fn start_joined_pipes_process(
         operation: Mutex::new(()),
         queued: AtomicUsize::new(0),
         queue_limit,
-        input: Mutex::new(input.map(JoinedSessionInput::Pipes)),
+        input: Mutex::new(input),
         input_bytes: AtomicUsize::new(request.stdin.len()),
         input_timeout: limits.execution_duration(),
         cleanup_duration: limits.cleanup_duration(),
@@ -431,282 +260,6 @@ pub(super) fn joined_pty_command(
     let mut command = CommandBuilder::new(argv0.unwrap_or(program));
     command.args(arguments);
     command
-}
-
-#[allow(
-    clippy::too_many_lines,
-    clippy::too_many_arguments,
-    reason = "PTY spawn and every rollback edge stay with the single joined cleanup owner"
-)]
-fn start_joined_pty_process(
-    workspace: &ExecutionWorkspace,
-    process: &HostProcessContext,
-    environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
-    limits: ExecutionEnvironmentLimits,
-    queue_limit: usize,
-    request: &JoinedProcessStartRequest,
-    control: ExecutionOperationControl,
-    pending_spool: Option<PendingJobOutput>,
-) -> Result<JoinedSession, ExecutionBackendError> {
-    let cwd = resolve_existing_no_symlink(workspace, &request.cwd)?;
-    if !cwd.is_dir() {
-        return Err(workspace_error(
-            "joined process cwd is not a contained directory",
-        ));
-    }
-    let wrapped_shell = match &request.command {
-        JoinedProcessCommand::Shell { command, .. } => Some(format!(
-            "trap '' HUP; {}",
-            restore_path_after_login(process, command)?
-        )),
-        JoinedProcessCommand::Literal { .. } => None,
-    };
-    let argv0 = match &request.command {
-        JoinedProcessCommand::Shell { profile, .. } => Some(profile.executable()),
-        JoinedProcessCommand::Literal { .. } => None,
-    };
-    let (program, arguments): (&Path, Vec<&str>) = match &request.command {
-        JoinedProcessCommand::Literal {
-            executable,
-            arguments,
-        } => (executable, arguments.iter().map(String::as_str).collect()),
-        JoinedProcessCommand::Shell { profile, .. } => {
-            let mut arguments = profile
-                .arguments()
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>();
-            arguments.push(wrapped_shell.as_deref().unwrap_or(""));
-            (profile.revalidated_executable()?, arguments)
-        }
-    };
-    let pair = native_pty_system()
-        .openpty(PtySize {
-            rows: JOINED_PROCESS_PTY_INITIAL_ROWS,
-            cols: JOINED_PROCESS_PTY_INITIAL_COLUMNS,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|_| io_error("joined process PTY could not be opened"))?;
-    let portable_pty::PtyPair { master, slave } = pair;
-    let mut command = joined_pty_command(program, argv0, arguments);
-    command.cwd(&cwd);
-    command.env_clear();
-    for (name, value) in environment {
-        if name.as_str() == "PATH" {
-            continue;
-        }
-        command.env(name.as_str(), value.0.as_ref());
-    }
-    command.env("PATH", host_process_path(process, environment)?);
-    if let Some(ceiling) = &process.discovery_ceiling {
-        command.env("GIT_CEILING_DIRECTORIES", ceiling);
-    }
-    if let Some(home) = host_process_home(process, environment) {
-        command.env("HOME", home);
-    }
-    // The session's terminal is a duplicate of the master descriptor, and the
-    // duplicate is what keeps the master side open. The original is dropped
-    // with this function; closing one of two duplicates closes neither end.
-    let terminal = clone_linux_pty_master(master.as_ref())?;
-    set_nonblocking(&terminal)?;
-    let reader = terminal
-        .try_clone()
-        .map_err(|_| io_error("joined process PTY reader was unavailable"))?;
-    let writer = terminal;
-    let mut child = slave
-        .spawn_command(command)
-        .map_err(|_| invalid_request("joined process PTY command could not be started"))?;
-    drop(slave);
-    let process_group = child
-        .process_id()
-        .and_then(|pid| i32::try_from(pid).ok())
-        .and_then(rustix::process::Pid::from_raw)
-        .ok_or_else(|| io_error("joined process PTY returned an invalid pid"));
-    let process_group = match process_group {
-        Ok(process_group) => process_group,
-        Err(error) => {
-            return Err(
-                terminate_direct_pty_child(child.as_mut(), limits.cleanup_duration())
-                    .err()
-                    .unwrap_or(error),
-            );
-        }
-    };
-    let shared = Arc::new(Mutex::new(JoinedSessionShared {
-        output: JoinedSessionOutput::default(),
-        status: JoinedProcessStatus::Running,
-        elapsed: None,
-        terminal_changes: None,
-        changes: tokio::sync::watch::channel(0).0,
-        terminal: Arc::new(Condvar::new()),
-        released: false,
-        spool: None,
-        pending_spool,
-        leftover: None,
-        disowned: false,
-    }));
-    let output_io_failed = Arc::new(AtomicBool::new(false));
-    let io_stop = Arc::new(AtomicBool::new(false));
-    let reader_thread = match spawn_joined_output_reader(
-        reader,
-        JoinedProcessOutputStream::Terminal,
-        Arc::clone(&shared),
-        Arc::clone(&output_io_failed),
-        Arc::clone(&io_stop),
-        limits,
-    ) {
-        Ok(thread) => thread,
-        Err(error) => {
-            return Err(cleanup_pty_setup_error(
-                child.as_mut(),
-                process_group,
-                limits.cleanup_duration(),
-                error,
-            ));
-        }
-    };
-    let (input, input_owner, input_thread) = match spawn_pty_input_writer(Box::new(writer)) {
-        Ok(input) => input,
-        Err(error) => {
-            io_stop.store(true, Ordering::Release);
-            let deadline = Instant::now() + limits.cleanup_duration();
-            let cleanup = cleanup_pty_setup_error(
-                child.as_mut(),
-                process_group,
-                limits.cleanup_duration(),
-                error,
-            );
-            return Err(if join_thread_until(reader_thread, deadline) {
-                cleanup
-            } else {
-                cleanup_unresolved_error()
-            });
-        }
-    };
-    if let Err(error) = input.write(&request.stdin, limits.execution_duration()) {
-        io_stop.store(true, Ordering::Release);
-        let deadline = Instant::now() + limits.cleanup_duration();
-        let cleanup = cleanup_pty_setup_error(
-            child.as_mut(),
-            process_group,
-            limits.cleanup_duration(),
-            error,
-        );
-        let _ = input_owner.try_send(PtyInputCommand::Stop);
-        let joined = (
-            join_thread_until(reader_thread, deadline),
-            join_thread_until(input_thread, deadline),
-        );
-        return Err(if !joined.0 || !joined.1 {
-            cleanup_unresolved_error()
-        } else {
-            cleanup
-        });
-    }
-    let input = if request.keep_stdin_open {
-        Some(JoinedSessionInput::Pty(input))
-    } else {
-        if let Err(error) = input.close(limits.execution_duration()) {
-            io_stop.store(true, Ordering::Release);
-            let deadline = Instant::now() + limits.cleanup_duration();
-            let cleanup = cleanup_pty_setup_error(
-                child.as_mut(),
-                process_group,
-                limits.cleanup_duration(),
-                error,
-            );
-            let _ = input_owner.try_send(PtyInputCommand::Stop);
-            let joined = (
-                join_thread_until(reader_thread, deadline),
-                join_thread_until(input_thread, deadline),
-            );
-            return Err(if !joined.0 || !joined.1 {
-                cleanup_unresolved_error()
-            } else {
-                cleanup
-            });
-        }
-        None
-    };
-    let stop = Arc::new(AtomicBool::new(false));
-    let thread_stop = Arc::clone(&stop);
-    let foreground_control = control.clone();
-    let promoted = Arc::new(AtomicU8::new(FOREGROUND));
-    let thread_promoted = Arc::clone(&promoted);
-    let stop_grace_millis = Arc::new(AtomicU64::new(2000));
-    let thread_stop_grace = Arc::clone(&stop_grace_millis);
-    let thread_shared = Arc::clone(&shared);
-    let shell_command = matches!(request.command, JoinedProcessCommand::Shell { .. });
-    let resources = JoinedPtyResources {
-        child,
-        process_group,
-        reader_thread: Some(reader_thread),
-        input_thread: Some(input_thread),
-        input_owner,
-        io_stop,
-        cleanup_duration: limits.cleanup_duration(),
-        armed: true,
-    };
-    let thread = std::thread::Builder::new()
-        .name(String::from("plak-joined-pty"))
-        .spawn(move || {
-            let mut resources = resources;
-            let (Some(reader_thread), Some(input_thread)) = (
-                resources.reader_thread.take(),
-                resources.input_thread.take(),
-            ) else {
-                let mut shared = lock(&thread_shared);
-                shared.status = JoinedProcessStatus::Failed;
-                shared.terminal_changed();
-                return;
-            };
-            supervise_joined_pty(
-                resources.child.as_mut(),
-                resources.process_group,
-                reader_thread,
-                input_thread,
-                &resources.input_owner,
-                limits,
-                &control,
-                &thread_promoted,
-                &thread_stop_grace,
-                &thread_stop,
-                &resources.io_stop,
-                &output_io_failed,
-                &thread_shared,
-                shell_command,
-            );
-            resources.armed = false;
-        })
-        .map_err(|_| io_error("joined process PTY supervisor could not start"))?;
-    Ok(JoinedSession {
-        operation: Mutex::new(()),
-        queued: AtomicUsize::new(0),
-        queue_limit,
-        input: Mutex::new(input),
-        input_bytes: AtomicUsize::new(request.stdin.len()),
-        input_timeout: limits.execution_duration(),
-        cleanup_duration: limits.cleanup_duration(),
-        shared,
-        consumer_cursor: Arc::new(Mutex::new(JoinedProcessOutputCursor::new(0))),
-        consumer_pending_utf8: Arc::new(Mutex::new(Vec::new())),
-        consumer_quiet_polls: Arc::default(),
-        consumed: AtomicBool::new(false),
-        promoted,
-        foreground_control,
-        stop_grace_millis,
-        command: displayed_command(&request.command),
-        started_at: plakous_model::Timestamp::new(plakous_model::now_unix_secs(), 0)
-            .map_err(|_| invalid_request("process start timestamp is invalid"))?,
-        started: Instant::now(),
-        ended: Mutex::new(None),
-        stopped_by: Mutex::new(None),
-        owner: Mutex::new(Some(HostProcessOwner {
-            stop,
-            thread: Some(thread),
-        })),
-    })
 }
 
 fn write_joined_initial_input(
@@ -868,70 +421,4 @@ fn spawn_pty_input_writer(
         })
         .map_err(|_| io_error("joined process PTY input worker could not start"))?;
     Ok((PtyInputSender { commands }, owner_commands, thread))
-}
-
-pub(super) struct JoinedProcessResources {
-    pub(super) child: std::process::Child,
-    pub(super) process_group: rustix::process::Pid,
-    pub(super) stdout_thread: Option<std::thread::JoinHandle<()>>,
-    pub(super) stderr_thread: Option<std::thread::JoinHandle<()>>,
-    pub(super) io_stop: Arc<AtomicBool>,
-    pub(super) cleanup_duration: Duration,
-    pub(super) armed: bool,
-}
-
-impl Drop for JoinedProcessResources {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        let deadline = Instant::now() + self.cleanup_duration;
-        let _ = terminate_owned_process_group_until(
-            &mut self.child,
-            self.process_group,
-            None,
-            deadline,
-        );
-        self.io_stop.store(true, Ordering::Release);
-        if let Some(thread) = self.stdout_thread.take() {
-            let _ = join_thread_until(thread, deadline);
-        }
-        if let Some(thread) = self.stderr_thread.take() {
-            let _ = join_thread_until(thread, deadline);
-        }
-    }
-}
-
-pub(super) struct JoinedPtyResources {
-    pub(super) child: Box<dyn portable_pty::Child + Send + Sync>,
-    pub(super) process_group: rustix::process::Pid,
-    pub(super) reader_thread: Option<std::thread::JoinHandle<()>>,
-    pub(super) input_thread: Option<std::thread::JoinHandle<()>>,
-    pub(super) input_owner: SyncSender<PtyInputCommand>,
-    pub(super) io_stop: Arc<AtomicBool>,
-    pub(super) cleanup_duration: Duration,
-    pub(super) armed: bool,
-}
-
-impl Drop for JoinedPtyResources {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        let deadline = Instant::now() + self.cleanup_duration;
-        let _ = terminate_owned_pty_group_until(
-            self.child.as_mut(),
-            self.process_group,
-            None,
-            deadline,
-        );
-        self.io_stop.store(true, Ordering::Release);
-        let _ = self.input_owner.try_send(PtyInputCommand::Stop);
-        if let Some(thread) = self.reader_thread.take() {
-            let _ = join_thread_until(thread, deadline);
-        }
-        if let Some(thread) = self.input_thread.take() {
-            let _ = join_thread_until(thread, deadline);
-        }
-    }
 }

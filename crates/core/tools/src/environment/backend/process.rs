@@ -12,8 +12,8 @@ use cleanup::{
     GroupProbe, cleanup_pty_setup_error, cleanup_setup_error, join_thread_until,
     observe_leftover_group, peek_leader_exit, terminate_direct_child, terminate_direct_pty_child,
     terminate_owned_process_group, terminate_owned_process_group_until,
-    terminate_owned_process_group_with_grace, terminate_owned_pty_group_until,
-    terminate_owned_pty_group_with_grace, wait_for_output_readers_until,
+    terminate_owned_process_group_with_grace, terminate_owned_pty_group_with_grace,
+    wait_for_output_readers_until,
 };
 pub(in crate::environment) use host_context::HostProcessContext;
 use host_context::restore_path_after_login;
@@ -34,7 +34,7 @@ pub use sessions::{JoinedProcessHostCapacity, JoinedProcessSessions};
 #[cfg(test)]
 use start::joined_pty_command;
 use start::{
-    PtyInputCommand, PtyInputSender, close_joined_session_input, start_joined_host_process,
+    PtyInputSender, close_joined_session_input, start_joined_host_process,
     write_joined_session_input,
 };
 pub(super) use start::{
@@ -43,7 +43,7 @@ pub(super) use start::{
 #[cfg(test)]
 use supervise::{joined_process_final_status, supervision_sleep};
 use supervise::{
-    sleep_until_next_poll, supervise_host_process, supervise_joined_process, supervise_joined_pty,
+    sleep_until_next_poll, supervise_host_process, supervise_joined_process,
     supervision_poll_interval,
 };
 
