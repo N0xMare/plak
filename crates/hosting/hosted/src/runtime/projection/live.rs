@@ -281,6 +281,10 @@ impl Drop for LiveProjector {
 /// Wakes the task on a request or on a commit of the followed session. A
 /// forwarder task turns the feed subscription into wakes; it is replaced
 /// when the followed session changes.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Live catch-up reconciles transient projection failures, cursor progress, pending control settlement, and cancellation before notifying observers."
+)]
 async fn run(
     mut requests: watch::Receiver<Option<Request>>,
     wake: Arc<Notify>,

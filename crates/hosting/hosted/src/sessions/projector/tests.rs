@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Recorded feed scenarios compare replay, page boundaries, retained rows, and cursor-CAS projections end to end."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -429,11 +433,7 @@ fn apply_step(feed: &mut Feed, step: &Step) {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    clippy::fn_params_excessive_bools,
-    reason = "one scripted turn"
-)]
+#[allow(clippy::fn_params_excessive_bools, reason = "one scripted turn")]
 fn turn(
     feed: &mut Feed,
     host_wake: bool,
@@ -1472,10 +1472,6 @@ fn a_truncated_call_is_not_counted_again_after_terminal_recovery() {
     recovered_call(false, true);
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one recovery feed with both truncation and dispatch variants"
-)]
 fn recovered_call(undispatched: bool, truncated: bool) {
     let (mut feed, _) = single_turn(End::RecoveryRequired, true, false);
     if undispatched {

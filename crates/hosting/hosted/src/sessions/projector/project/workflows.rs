@@ -76,7 +76,7 @@ impl Applier<'_> {
         })
     }
 
-    pub(super) fn compact_row(&mut self, workflow_id: &[u8]) -> RowKey {
+    fn compact_row(&mut self, workflow_id: &[u8]) -> RowKey {
         let hex = workflow_hex(workflow_id);
         if let Some(key) = self.views.state.compactions.get(&hex) {
             return *key;
@@ -92,6 +92,28 @@ impl Applier<'_> {
         tool.started_at_ms = Some(self.committed_at());
         self.replace(key, TranscriptRow::Tool(tool));
         key
+    }
+
+    pub(super) fn workflow_admitted(
+        &mut self,
+        workflow_id: &[u8],
+        operation_id: Option<&String>,
+        kind: FeedWorkflowKind,
+    ) {
+        let hex = workflow_hex(workflow_id);
+        let key = operation_id.cloned().unwrap_or_else(|| hex.clone());
+        self.views
+            .state
+            .workflows
+            .entry(key)
+            .or_insert(WorkflowCompletion {
+                admitted_at: None,
+                settled: None,
+            })
+            .admitted_at = Some(self.seq());
+        if matches!(kind, FeedWorkflowKind::Compact { .. }) {
+            self.compact_row(workflow_id);
+        }
     }
 
     pub(super) fn workflow_settled(

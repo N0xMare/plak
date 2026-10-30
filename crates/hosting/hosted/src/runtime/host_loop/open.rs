@@ -15,6 +15,10 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Host open reconstructs projection, workflow settlements, queued submissions, and live attachments before exposing a ready session."
+    )]
     pub(super) fn open(
         mut config: HostConfig<P>,
         actions: &'a crate::surface_protocol::UserActionReceiver<P>,

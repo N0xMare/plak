@@ -35,6 +35,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         !self.quit_after_terminal
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The running-turn owner serializes queue edits, steering, cancellation, navigation, usage, and shutdown intents against one admission."
+    )]
     pub(super) async fn poll_actions(&mut self) -> bool {
         crate::call_detail::note_attached(&self.host.session.id);
         self.host

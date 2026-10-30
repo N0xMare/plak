@@ -247,6 +247,10 @@ async fn project_to_tail_cached(
     .await
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Catch-up projection preserves cursor-CAS retries, interrupt cuts, retained-history rebuilding, and winning-commit usage emission."
+)]
 async fn project_to_tail_controlled(
     sessions: &AgentSessions,
     store: &Arc<dyn SessionRecordStore>,

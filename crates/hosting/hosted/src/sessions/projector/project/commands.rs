@@ -1,10 +1,44 @@
 use super::{
     Anchored, Applier, Delivery, Derived, FeedCommandKind, Lane, NOT_RETAINED_ROW, NoticeScope,
-    OpenTurn, ROUND_PROSE_ORDINAL, ReadActor, ReadItem, ReadPart, RowKey, TranscriptRow,
-    host_owns_subject, item_rows, tool_row,
+    OpenTurn, PauseCause, ROUND_PROSE_ORDINAL, ReadActor, ReadItem, ReadPart, RowKey,
+    TranscriptRow, control_error_label, host_owns_subject, item_rows, session_wide, tool_row,
 };
 
 impl Applier<'_> {
+    pub(super) fn command_rejected(
+        &mut self,
+        command_id: &str,
+        kind: FeedCommandKind,
+        error: plakous::agent::ControlErrorKind,
+    ) {
+        let error = control_error_label(error);
+        self.views.state.deliveries.insert(
+            command_id.to_owned(),
+            Delivery::Rejected {
+                error: error.clone(),
+            },
+        );
+        if matches!(kind, FeedCommandKind::Root { .. } | FeedCommandKind::Steer) {
+            self.push(TranscriptRow::warning(
+                NoticeScope::Queue,
+                format!(
+                    "{}: {}",
+                    crate::runtime::PROMPT_NOT_ADMITTED,
+                    error.replace('_', " ")
+                ),
+            ));
+            if session_wide(&error) {
+                self.views.state.pause = Some(Anchored {
+                    anchor: self.seq(),
+                    value: Some(PauseCause::SessionRefusal {
+                        command_id: command_id.to_owned(),
+                        error,
+                    }),
+                });
+            }
+        }
+    }
+
     pub(super) fn command_accepted(
         &mut self,
         command_id: &str,

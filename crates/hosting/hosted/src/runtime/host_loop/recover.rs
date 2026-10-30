@@ -39,6 +39,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// On failure the old attachment stays released and `recovery_blocked`
     /// stays set, so the next action tries again; nothing is lost and nothing
     /// ends in `/clear`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Recovery distinguishes retained approvals, abandoned turns, pending projection debt, and the exact source binding before reopening."
+    )]
     pub(super) fn recover_session(&mut self, trigger: RecoveryTrigger) -> CliResult<HostStep> {
         let _ = self.events.send(ContentEvent::SetBusy(true));
         let _ = self.events.send(ContentEvent::Status {
@@ -217,6 +221,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
     /// Releases the stopped driver's attachment, then opens a new owner of the
     /// same session. The old attachment keeps its topology lease until the new
     /// one holds its own, so a recycle never shuts a running agent tree.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "In-place reopen restores the canonical session and reattaches its events without losing the existing host queue and notices."
+    )]
     pub(super) fn reopen_in_place(&mut self) -> CliResult<ReopenedTurn> {
         let previous_cursor = self
             .config

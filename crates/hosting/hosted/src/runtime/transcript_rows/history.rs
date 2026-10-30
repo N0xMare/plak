@@ -22,6 +22,10 @@ const UNSETTLED_STATE: &str = "interrupted";
 /// Maps committed items to rows, oldest first. `locator` is the session the
 /// items belong to, for a process call's subject; `processes` is the job
 /// registry as the host sees it now.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Canonical history projection preserves message-part order, image chips, tool lineage, hosted calls, and compaction boundaries."
+)]
 pub(in crate::runtime) fn canonical_items(
     items: &[TranscriptRead<'_>],
     locator: SessionLocator,

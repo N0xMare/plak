@@ -12,6 +12,10 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Send-now keeps durable command preparation, steering admission, queue acknowledgement, and projection-debt recovery ordered."
+    )]
     pub(super) async fn send_queued_now(&mut self, id: String, revision: u64) -> bool {
         if (self.host.session.queue_projection_debt
             || self.host.session.queue_commands.has_pending())

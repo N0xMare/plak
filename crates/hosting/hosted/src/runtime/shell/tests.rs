@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Shell profile scenarios bind native, API, and OpenRouter roots to their exact selected account and model facts."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;

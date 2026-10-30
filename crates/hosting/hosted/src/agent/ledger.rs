@@ -177,6 +177,10 @@ fn mail_batch(
 /// batch (or is a corrective round) refuses a different command until it has
 /// a fact or is withdrawn; a wake or corrective round written for an earlier
 /// attempt never blocks the current one.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child delivery preparation validates replay identity and persists the exact command before exposing an admitted attempt to its caller."
+)]
 fn prepare(
     driver: &TreeDriver,
     recipient: &str,

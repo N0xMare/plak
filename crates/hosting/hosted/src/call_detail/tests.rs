@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Call-detail scenarios compact a real session and distinguish retained root rows from child-owned call lookup."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::{

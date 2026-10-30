@@ -26,40 +26,7 @@ impl Applier<'_> {
             _ => false,
         };
         let completed = matches!(outcome, FeedTurnOutcome::Completed { .. });
-        let open: Vec<(String, RowKey, bool)> = self
-            .views
-            .state
-            .calls
-            .iter()
-            .filter(|(_, call)| call.turn_id.as_deref() == Some(turn.as_str()) && !call.settled)
-            .map(|(id, call)| (id.clone(), call.key, call.operated))
-            .collect();
-        for (call_id, key, operated) in open {
-            if let Some(call) = self.views.state.calls.get_mut(&call_id) {
-                call.settled = true;
-            }
-            if let Some(TranscriptRow::Tool(mut tool)) = self.views.rows.get(&key).cloned() {
-                tool.state = if interrupted {
-                    "cancelled".to_owned()
-                } else if completed && !operated {
-                    completed_tool_state(&tool.name, Some((true, "")))
-                } else {
-                    "interrupted".to_owned()
-                };
-                self.replace(key, TranscriptRow::Tool(tool));
-            }
-        }
-        // Provisional terminal presentation must retain both the row key and
-        // counted bit, including a tombstone for an already truncated row.
-        self.views.state.calls.retain(|_, call| {
-            !call.counted
-                || call.turn_id.as_deref() != Some(turn.as_str())
-                || self.views.rows.get(&call.key).is_none_or(|row| {
-                    row.as_tool().is_some_and(|tool| {
-                        matches!(tool.state.as_str(), "interrupted" | "cancelled")
-                    })
-                })
-        });
+        self.settle_turn_calls(&turn, interrupted, completed);
         let anchor = self.seq();
         match outcome {
             FeedTurnOutcome::Completed {
@@ -141,6 +108,43 @@ impl Applier<'_> {
             ));
         }
         Ok(())
+    }
+
+    fn settle_turn_calls(&mut self, turn: &str, interrupted: bool, completed: bool) {
+        let open: Vec<(String, RowKey, bool)> = self
+            .views
+            .state
+            .calls
+            .iter()
+            .filter(|(_, call)| call.turn_id.as_deref() == Some(turn) && !call.settled)
+            .map(|(id, call)| (id.clone(), call.key, call.operated))
+            .collect();
+        for (call_id, key, operated) in open {
+            if let Some(call) = self.views.state.calls.get_mut(&call_id) {
+                call.settled = true;
+            }
+            if let Some(TranscriptRow::Tool(mut tool)) = self.views.rows.get(&key).cloned() {
+                tool.state = if interrupted {
+                    "cancelled".to_owned()
+                } else if completed && !operated {
+                    completed_tool_state(&tool.name, Some((true, "")))
+                } else {
+                    "interrupted".to_owned()
+                };
+                self.replace(key, TranscriptRow::Tool(tool));
+            }
+        }
+        // Provisional terminal presentation must retain both the row key and
+        // counted bit, including a tombstone for an already truncated row.
+        self.views.state.calls.retain(|_, call| {
+            !call.counted
+                || call.turn_id.as_deref() != Some(turn)
+                || self.views.rows.get(&call.key).is_none_or(|row| {
+                    row.as_tool().is_some_and(|tool| {
+                        matches!(tool.state.as_str(), "interrupted" | "cancelled")
+                    })
+                })
+        });
     }
 
     fn terminal_read(&self, turn_id: plakous::model::TurnId) -> Result<TerminalRead, ProjectError> {

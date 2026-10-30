@@ -87,6 +87,10 @@ struct CompactAnswer {
 /// One compact pass, for an operator `/compact`, a scheduled pass or a
 /// capacity recovery: the boundary checks, the single dispatch, the
 /// classified answer and its publication.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Manual compaction binds the attached session, durable reason, interrupt watch, and host event sink at dispatch."
+)]
 pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     watch: InterruptWatch<'_, P>,
@@ -245,6 +249,10 @@ fn compact_source<P: plakous_host_protocol::ProtocolExtension>(
 /// The pass's single dispatch: its workflow request, then the canonical
 /// compact run to its own receipt. Returns the answer and the occupancy
 /// measured before it.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Compaction dispatch preserves the ordered interrupt, source release, canonical dispatch, and reconciliation cuts."
+)]
 fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
     run: &CompactRun<'_, P>,
     watch: InterruptWatch<'_, P>,
@@ -372,6 +380,10 @@ fn dispatch_compact<P: plakous_host_protocol::ProtocolExtension>(
 
 /// Classifies the canonical answer to the pass's dispatch, binding the
 /// session to its successor or exact source.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Each canonical compaction outcome determines its own source restoration, notice, and reconciliation action."
+)]
 fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
     run: &CompactRun<'_, P>,
     config: &mut HostConfig<P>,
@@ -551,6 +563,10 @@ fn classify_compact_answer<P: plakous_host_protocol::ProtocolExtension>(
 
 /// Settles the pass in the product: its views, the queue's drain, its
 /// activity row and the operator notes.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Compaction completion reconciles the workflow before restoring the binding, context counters, and queue snapshot."
+)]
 fn finish_compact<P: plakous_host_protocol::ProtocolExtension>(
     run: &CompactRun<'_, P>,
     watch: InterruptWatch<'_, P>,

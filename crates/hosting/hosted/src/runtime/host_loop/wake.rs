@@ -270,6 +270,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         self.try_child_wake_with_jobs(now, jobs)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Child wake admission reconciles unread mail, joined jobs, suppression, and durable wake preparation before dispatch."
+    )]
     fn try_child_wake_with_jobs(
         &mut self,
         now: Instant,

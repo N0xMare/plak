@@ -350,6 +350,10 @@ pub(super) fn joined_assistant_text(response: &plakous::model::ModelResponse) ->
 /// `Search "{pattern}"[ in {path}]`, `Edit {path} +{ins}/-{del}`, `Fetch {url}`,
 /// `List {path}`. Result-derived counts arrive later from
 /// [`tool_result_summary`]; the renderer never parses tool output for them.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Tool subjects follow the canonical tool vocabulary and its distinct path, process, search, and topology argument shapes."
+)]
 pub(super) fn tool_subject_from_args(name: &str, args: &serde_json::Value) -> Option<String> {
     let obj = args.as_object()?;
     if let Some(label) = process_label(name, args).filter(|label| *label != "Shell") {

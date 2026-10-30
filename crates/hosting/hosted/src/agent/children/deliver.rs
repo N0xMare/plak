@@ -201,6 +201,10 @@ impl ProductMailDeliverer {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Child start binds the immutable attempt request, runtime attachment, admission acknowledgement, and waiter ownership without duplicate dispatch."
+    )]
     async fn start_child(
         &self,
         request: crate::agent_tree_tools::MailDeliveryRequest,

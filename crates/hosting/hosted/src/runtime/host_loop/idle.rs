@@ -21,6 +21,10 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The idle owner arbitrates operator intents, queued work, child wakes, transient retries, and shutdown without a second dispatcher."
+    )]
     pub(super) fn next_prompt(
         &mut self,
         mut one_shot: Option<&mut super::super::oneshot::OneShotState>,

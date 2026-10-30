@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Tool-event scenarios retain the full nested call and settlement sequence needed to compare parent and child activity."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::session_store::SessionRecordStore;

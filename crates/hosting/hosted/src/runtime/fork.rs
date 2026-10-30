@@ -21,6 +21,10 @@ use super::{HostBoundary, HostWorkflow};
 use super::{HostConfig, RuntimeRole, Sender};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Fork publication keeps preparation, source detachment, canonical outcome reconciliation, and target activation ordered."
+)]
 pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     watch: InterruptWatch<'_, P>,

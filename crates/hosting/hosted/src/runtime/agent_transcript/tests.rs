@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Historical agent transcripts reconstruct native and local cells, process calls, nested lineage, and failure tallies."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::{

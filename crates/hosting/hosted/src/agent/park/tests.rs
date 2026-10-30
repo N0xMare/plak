@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Park and wake scenarios force interrupt and mail races across durable admission and rejoin boundaries."
+)]
 #![allow(clippy::unwrap_used, reason = "offline park fixtures")]
 
 use crate::agent::ledger::ChildLedger;

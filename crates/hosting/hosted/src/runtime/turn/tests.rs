@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Turn-lifecycle scenarios drive each canonical result outcome through the hosted terminal mapping."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 fn block_on<F: Future>(future: F) -> F::Output {

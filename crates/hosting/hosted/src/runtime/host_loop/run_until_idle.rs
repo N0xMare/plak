@@ -7,6 +7,10 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Run-until-idle selection preserves queue priority, child wake readiness, turn bounds, and terminal shutdown conditions."
+    )]
     pub(super) fn next_run_prompt(&mut self, state: &mut OneShotState) -> CliResult<HostStep> {
         let mut waiting_noted = false;
         loop {

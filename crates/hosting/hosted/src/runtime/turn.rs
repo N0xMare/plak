@@ -317,6 +317,10 @@ fn operator_facing_render(
 ///
 /// Called at the top of every drive-loop iteration so settlement and the
 /// bounded timeout are checked without blocking action or event drain.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Pending-cancel observation updates the exact turn, its cached terminal, queued events, and timing under the current watch."
+)]
 pub(super) async fn observe_pending_cancel_settlement<
     P: plakous_host_protocol::ProtocolExtension,
 >(

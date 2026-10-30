@@ -299,6 +299,11 @@ impl ChildCommand {
 
 // Keeping acknowledgement delivery separate from admission lets the offline
 // fixture lose/delay the response while the real runtime owns an admitted turn.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "Owned child admission keeps the exact start request, pending-delivery receipt, cancellation token, and acknowledgement channel distinct."
+)]
 pub(in crate::agent) async fn start_child_turn_owned_with_ack(
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
     agent_id: &str,

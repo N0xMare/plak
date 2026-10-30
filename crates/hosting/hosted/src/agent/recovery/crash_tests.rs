@@ -1,5 +1,9 @@
 //! Real child owners killed during a parked wake and an initial model turn.
 #![allow(
+    clippy::too_many_lines,
+    reason = "Crash recovery scenarios reopen durable child state at publication cuts without redispatching admitted work."
+)]
+#![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "process crash fixture"

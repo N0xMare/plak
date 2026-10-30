@@ -268,6 +268,10 @@ pub(super) fn prepare_instruction(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Result-mail preparation binds the original command identity and delivery bytes to the current tree and session records."
+)]
 pub(super) fn prepare_with_command(
     rows: &(dyn TopologyRows + Sync),
     store: &dyn crate::session_store::SessionRecordStore,

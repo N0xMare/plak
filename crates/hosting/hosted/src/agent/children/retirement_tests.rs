@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Child retirement scenarios exercise real submissions, delayed acknowledgements, terminal ownership, and replayed result publication."
+)]
+
 use super::bind::{StartupWorker, child_create_failure};
 
 use super::reopen::reconcile_reopened_child_results;

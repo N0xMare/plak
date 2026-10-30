@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Child projection scenarios force event-prefix eviction and attach races while preserving exact committed counters."
+)]
+
 use super::*;
 use crate::runtime::child_live::tests::tool_lifecycle_event;
 use plakous::agent::{AgentEventKind, ToolCallerLineageView};

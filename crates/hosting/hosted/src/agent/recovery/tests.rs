@@ -4,6 +4,11 @@
 //! offline fixture shaped like a product coding session, so the product's
 //! projection gate admits its reopen.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Child recovery scenarios reconstruct persisted attempts and reconcile ownership, terminal outcomes, and queued deliveries."
+)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize};

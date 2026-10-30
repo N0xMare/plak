@@ -205,6 +205,10 @@ fn inflight_children(tree: &crate::agent_tree::ProductAgentTree) -> Vec<Inflight
         .collect()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child reattachment reconciles each persisted attempt with its live owner, runtime locator, pending delivery, and terminal publication state."
+)]
 pub(in crate::agent) async fn reattach_inflight_children(
     parent: &SpawnParent,
     runtime: &crate::topology_runtime::ProductTopologyRuntime,
@@ -777,6 +781,10 @@ pub(in crate::agent) async fn reopen_spawned_child(
     .await
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child reopen reconstructs the stored binding and frozen tools before admitting its existing canonical head into the topology runtime."
+)]
 async fn reopen_spawned_child_at_head(
     parent: &SpawnParent,
     agent_id: &str,

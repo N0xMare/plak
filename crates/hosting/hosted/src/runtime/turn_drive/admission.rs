@@ -14,6 +14,10 @@ use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger, Settlement};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Root admission owns prompt preparation, durable delivery identity, runtime dispatch, and refusal cleanup without replaying admitted work."
+)]
 pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::ProtocolExtension>(
     agent: &Agent,
     runtime: &plakous::sessions::AgentSessions,

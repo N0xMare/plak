@@ -1007,6 +1007,10 @@ async fn attach_api_source(
     result
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Takes the session store, runtime binding, optional locator and seed history, operation id, topology owner, rederived output bound, and runtime wording that one source attachment needs."
+)]
 async fn attach_runtime_source(
     sessions: Arc<AgentSessions>,
     runtime: SessionRuntimeBinding,

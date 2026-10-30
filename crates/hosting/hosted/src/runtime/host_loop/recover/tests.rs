@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Recovery scenarios reconstruct a retained approval after owner loss and verify the original admission survives."
+)]
+
 use super::*;
 use crate::runtime::recover_tests::{script, scripted_host_with};
 use crate::runtime::test_kit::TestExtension;

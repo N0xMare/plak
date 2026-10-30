@@ -649,7 +649,7 @@ pub(in crate::agent) fn child_plan_state_authority(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "one child bind names its whole exact tuple"
+    reason = "Native child binding names the parent authority, child identity, selected tuple, durable reopen state, tool fence, and output bound."
 )]
 pub(in crate::agent) async fn child_session_runtime_binding(
     parent: &SpawnParent,
@@ -757,7 +757,7 @@ pub(super) async fn production_child_runtime(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "one child bind names its whole exact tuple"
+    reason = "OpenRouter child binding carries its created output bound beside the exact parent, account, model, effort, and tool fence."
 )]
 pub(in crate::agent) async fn openrouter_child_runtime_binding(
     created_output_bound: Option<OutputBoundDisposition>,
@@ -927,6 +927,10 @@ pub(in crate::agent) fn openrouter_frozen_pin(
     ))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child specification resolution reconstructs native provider evidence, reasoning admission, frozen tools, and the exact spawned identity."
+)]
 pub async fn spawned_child_spec(
     parent: &SpawnParent,
     agent_id: &str,

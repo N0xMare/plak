@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Startup reopen scenarios retain persisted session facts and frozen construction inputs through runtime reattachment."
+)]
 #![allow(clippy::unwrap_used, reason = "offline reopen assertions")]
 
 use std::sync::atomic::{AtomicUsize, Ordering};

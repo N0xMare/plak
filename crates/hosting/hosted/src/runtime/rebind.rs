@@ -158,6 +158,10 @@ pub(super) fn release_profile_build_lease<P: plakous_host_protocol::ProtocolExte
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Native rebind resolution names the source authority, target tuple, plan namespace, and selected topology explicitly."
+)]
 pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     watch: InterruptWatch<'_, P>,
@@ -419,6 +423,10 @@ enum ProfileTarget {
 
 /// Forks the attached session onto a profile's root: the branch opens a
 /// tree of its own frozen on `roster`, so the source keeps its tree and cards.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Profile rebinding receives the attached source, interrupt watch, target tuple, and frozen roster as distinct authorities."
+)]
 pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     watch: InterruptWatch<'_, P>,

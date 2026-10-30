@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Projection scenarios exercise retained-history catch-up, partial pages, and committed bookkeeping across real session fixtures."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use std::sync::Arc;

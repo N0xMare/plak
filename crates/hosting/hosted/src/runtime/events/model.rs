@@ -91,6 +91,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
     }
 
     /// One model stream event: text and reasoning deltas, blocks, usage, retries.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Model event projection keeps reasoning, prose, retry status, provider usage, and round timing synchronized with the active response."
+    )]
     pub(super) fn model(self) {
         let Self {
             event,

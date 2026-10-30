@@ -1,6 +1,11 @@
 //! A turn a live owner fenced recovers in place, on the next prompt or on
 //! `/recover`, with one note and no second terminal result.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "In-process recovery scenarios abandon an owner fence and reopen the same session before checking terminal reconciliation."
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;

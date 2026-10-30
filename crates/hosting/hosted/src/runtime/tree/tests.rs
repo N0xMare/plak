@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Tree-view scenarios reconcile revision changes, completed children, and adoption notices across real topology transitions."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;

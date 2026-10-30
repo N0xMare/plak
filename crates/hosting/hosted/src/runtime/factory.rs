@@ -102,6 +102,10 @@ pub trait RuntimeFactory<P: plakous_host_protocol::ProtocolExtension>:
         stderr: &mut Vec<u8>,
     ) -> (CliResult<SessionRuntimeBinding>, Option<String>);
     fn input_window(&self, config: &HostConfig<P>) -> CliResult<SessionInputWindow>;
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The runtime factory clear seam receives both the source session authority and the complete new-session construction facts."
+    )]
     fn clear(
         &self,
         executor: &plakous::application::ApplicationExecutor,

@@ -1156,6 +1156,10 @@ mod memory {
             )
         }
 
+        #[allow(
+            clippy::too_many_lines,
+            reason = "The memory-store cursor CAS validates successor provenance and installs the session, view rows, and bookkeeping atomically under its lock."
+        )]
         fn commit_projection_views(
             &self,
             id: &str,

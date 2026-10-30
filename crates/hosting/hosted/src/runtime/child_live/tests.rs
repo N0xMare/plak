@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Live child transcript scenarios compare streamed rows against committed history through yields, gaps, and subsequent turns."
+)]
+
 use super::*;
 use crate::runtime::test_support::empty_transcript_call;
 use crate::surface_protocol::ContentEvent;

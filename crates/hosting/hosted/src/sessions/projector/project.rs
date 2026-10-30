@@ -355,6 +355,10 @@ impl Applier<'_> {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Feed-fact dispatch preserves exact history-range loading, per-kind bookkeeping, and terminal usage attribution on the followed branch."
+    )]
     fn apply_fact(&mut self, fact: &FeedFact) -> Result<(), ProjectError> {
         match fact {
             FeedFact::SessionCreated { operation_id, .. } => {
@@ -375,32 +379,7 @@ impl Applier<'_> {
                 kind,
                 error,
             } => {
-                let error = control_error_label(*error);
-                self.views.state.deliveries.insert(
-                    command_id.as_str().to_owned(),
-                    Delivery::Rejected {
-                        error: error.clone(),
-                    },
-                );
-                if matches!(kind, FeedCommandKind::Root { .. } | FeedCommandKind::Steer) {
-                    self.push(TranscriptRow::warning(
-                        NoticeScope::Queue,
-                        format!(
-                            "{}: {}",
-                            crate::runtime::PROMPT_NOT_ADMITTED,
-                            error.replace('_', " ")
-                        ),
-                    ));
-                    if session_wide(&error) {
-                        self.views.state.pause = Some(Anchored {
-                            anchor: self.seq(),
-                            value: Some(PauseCause::SessionRefusal {
-                                command_id: command_id.as_str().to_owned(),
-                                error,
-                            }),
-                        });
-                    }
-                }
+                self.command_rejected(command_id.as_str(), *kind, *error);
                 Ok(())
             }
             FeedFact::HistoryAppended {
@@ -485,20 +464,7 @@ impl Applier<'_> {
                 operation_id,
                 kind,
             } => {
-                let hex = workflow_hex(workflow_id.as_bytes());
-                let key = operation_id.clone().unwrap_or_else(|| hex.clone());
-                self.views
-                    .state
-                    .workflows
-                    .entry(key)
-                    .or_insert(WorkflowCompletion {
-                        admitted_at: None,
-                        settled: None,
-                    })
-                    .admitted_at = Some(self.seq());
-                if matches!(kind, FeedWorkflowKind::Compact { .. }) {
-                    self.compact_row(workflow_id.as_bytes());
-                }
+                self.workflow_admitted(workflow_id.as_bytes(), operation_id.as_ref(), *kind);
                 Ok(())
             }
             FeedFact::WorkflowSettled {

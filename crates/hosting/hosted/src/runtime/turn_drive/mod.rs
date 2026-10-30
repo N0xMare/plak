@@ -217,6 +217,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The turn driver selects canonical completion, live events, operator actions, and interrupt escalation under one terminal fence."
+    )]
     async fn run(mut self, mut turn: plakous::agent::Turn) -> Result<DrivenTurn, DriveTurnError> {
         let mut event_stream = turn
             .take_events()

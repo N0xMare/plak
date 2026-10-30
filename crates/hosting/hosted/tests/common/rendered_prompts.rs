@@ -864,6 +864,10 @@ pub(crate) mod suite {
         .expect("route surface")
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Native prompt goldens compile the selected provider profile with the exact nested tools, product home, workspace, and working directory."
+    )]
     pub(crate) fn native_profile(
         provider: NativeProvider,
         model: &str,

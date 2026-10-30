@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Live child release scenarios drive joined jobs, follow-up delivery, close, and authoritative terminal cleanup together."
+)]
 #![allow(clippy::unwrap_used, reason = "offline release fixture")]
 
 use super::*;

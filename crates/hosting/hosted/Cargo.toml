@@ -18,10 +18,10 @@ layer = "host"
 class = "published-internal"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 6
-too-many-arguments-ceiling = 8
+too-many-lines-ceiling = 102
+too-many-arguments-ceiling = 29
 large-file-ceiling = 0
-crate-wide-allows = ["src/lib.rs:too_many_arguments", "src/lib.rs:too_many_lines"]
+crate-wide-allows = []
 reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
 
 [dependencies]

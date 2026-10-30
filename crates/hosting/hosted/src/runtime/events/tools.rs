@@ -286,6 +286,10 @@ pub(in crate::runtime) fn completed_tool_summary(
 
 impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
     /// A started tool call: its live row, subject and process facts.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Tool-start projection joins canonical ownership, nested-cell lineage, argument subjects, and retained row identity for the live activity."
+    )]
     pub(super) fn tool_started(self) {
         let Self {
             event,
@@ -529,6 +533,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
     }
 
     /// A completed tool call: its settled row, compose and child bookkeeping.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Tool completion reconciles nested calls, process continuation, hosted results, and durable tool settlement before updating activity rows."
+    )]
     pub(super) fn tool_completed(self) {
         let Self {
             event,
@@ -971,6 +979,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> EventApplier<'_, P> {
     }
 
     /// A tool call the runtime refused before it ran.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Preparation rejection projects the exact tool identity and structured refusal without inventing dispatched work or losing parent lineage."
+    )]
     pub(super) fn tool_preparation_rejected(self) {
         let Self {
             event,

@@ -652,6 +652,10 @@ pub(crate) async fn read_tree_feed(
 ///
 /// The caller holds the runtime's reattach lock, so no other recovery,
 /// reattach, or fenced-turn recycle of the same tree runs concurrently.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child recovery reconciles tree ownership and canonical terminal state before reopening or retiring the existing attempt."
+)]
 pub(super) async fn recover_child(
     runtime: &ProductTopologyRuntime,
     port: &dyn ChildSessionPort,

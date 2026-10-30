@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Navigator scenarios coordinate background joins, interrupt, close, and stop without sealing unpublished child work."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;

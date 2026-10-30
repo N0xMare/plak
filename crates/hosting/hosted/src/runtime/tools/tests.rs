@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Process-subject scenarios distinguish start, wait, read, input, and stop against a scoped registry that survives restore."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::*;

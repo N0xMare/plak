@@ -137,6 +137,10 @@ impl ChildTurnProjection {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Child projection coordinates the bounded face stream, committed history catch-up, and cancellation lifetime in one task."
+    )]
     fn start(
         turn: TurnId,
         agent: Option<Agent>,

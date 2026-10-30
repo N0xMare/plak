@@ -1,4 +1,8 @@
 //! Delivery/terminal rendezvous over a real child session, without a turn waiter.
+#![allow(
+    clippy::too_many_lines,
+    reason = "Follow-up fixtures preserve the transition from a released attempt to the next instruction admission."
+)]
 #![allow(clippy::unwrap_used, reason = "offline follow-up fixtures")]
 
 use super::*;

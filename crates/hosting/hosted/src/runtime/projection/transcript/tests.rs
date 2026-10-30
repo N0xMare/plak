@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Transcript projection scenarios reconstruct complete canonical histories and compare persisted row identity and presentation."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::*;

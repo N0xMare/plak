@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Live child fixtures construct real sessions to exercise restart controls and asynchronous admission ownership."
+)]
+
 use super::*;
 use plakous::agent::{CommandAckDisposition, TurnResultOutcome};
 use plakous::model::ModelErrorKind;

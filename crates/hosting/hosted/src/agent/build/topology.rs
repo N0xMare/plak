@@ -690,6 +690,10 @@ pub(in crate::agent) fn claim_root_topology_owner(tree_id: &str, is_root: bool) 
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "An API topology parent freezes route evidence, tool selection, instruction authority, limits, and its owning tree identity."
+)]
 pub fn api_topology_parent(
     product_home: PathBuf,
     topology_tree_id: String,

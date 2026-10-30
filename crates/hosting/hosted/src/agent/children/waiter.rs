@@ -100,6 +100,10 @@ impl Drop for TurnWaiterRegistration {
 /// go to the store the hub bound, whether or not the hub still lists this
 /// tree when the turn ends (a root that quit releases the hub entry while a
 /// child turn can still be unwinding).
+#[allow(
+    clippy::too_many_lines,
+    reason = "The child waiter owns observation, transient recovery, result publication, and terminal release for exactly one bound attempt."
+)]
 pub(in crate::agent) fn spawn_topology_turn_waiter(
     registration: TurnWaiterRegistration,
     live: Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
@@ -956,6 +960,10 @@ pub fn finalize_topology_child_turn(
     );
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Child finalization reconciles canonical outcome and tree attempt state before publishing the result and releasing its runtime."
+)]
 pub(super) fn finalize_child_turn(
     driver: &TreeDriver,
     agent_id: &str,
@@ -1150,6 +1158,10 @@ pub(in crate::agent) async fn wait_resume_gate(
     .await
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Transient child resume revalidates ownership, pending instructions, and canonical turn state before reconnecting the same attempt."
+)]
 async fn try_transient_resume(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
@@ -1322,6 +1334,10 @@ pub(super) async fn start_submit_harness_turn(
     .await
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Instruction-turn start preserves pending delivery identity, admission acknowledgement, and runtime release when the attempt cannot bind."
+)]
 pub(in crate::agent) async fn start_instruction_turn(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,

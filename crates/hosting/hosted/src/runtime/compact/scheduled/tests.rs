@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Scheduled compaction scenarios preserve paid-dispatch identity and successor admission through real placeholder and capacity transitions."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use super::{

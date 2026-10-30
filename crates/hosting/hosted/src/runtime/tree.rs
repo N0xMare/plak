@@ -385,6 +385,10 @@ fn ask_milestone(
 
 /// Publish on durable revisions or material child progress changes. Progress-only
 /// snapshots are limited to one per second; timestamps alone never project rows.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Tree snapshot publication reconciles revisions, child attention, adoption notices, and navigator state before emitting one view."
+)]
 pub(super) fn emit_tree_snapshot_if_revision_advanced<
     P: plakous_host_protocol::ProtocolExtension,
 >(

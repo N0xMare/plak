@@ -10,6 +10,10 @@ use super::{
 use crate::surface_protocol::ContentEvent;
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Turn finish reconciles in-flight delivery, cancel settlement, final projection, and the authoritative terminal result before release."
+    )]
     pub(super) async fn finish(mut self) -> Result<DrivenTurn, DriveTurnError> {
         if self.abandoned_by_quit
             && self.turn_result.is_none()

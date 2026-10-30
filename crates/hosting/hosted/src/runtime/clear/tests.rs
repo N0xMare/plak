@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Clear scenarios exercise durable intent publication, successor projection, and source preservation across the complete rebuild."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::runtime::test_kit::TestExtension;

@@ -3,6 +3,10 @@
 use super::{CliFailure, CliResult, HostLoop, delete_unpublished_runtime};
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Host release drains terminal publication and pending cancellations before dropping runtime and topology ownership."
+    )]
     pub(super) fn release(mut self) -> CliResult<()> {
         self.pending_resume = None;
         self.quit_abandoned_turn =

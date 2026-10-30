@@ -68,6 +68,10 @@ pub fn selected_coding_provider_configuration(
 /// Materializes an exact provider selection with an independently selected
 /// processing tier. This constructs a candidate, not admission evidence;
 /// provider resolution must validate named tiers against its authenticated row.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Native configuration selection maps each provider capability, reasoning effort, tool mode, composition, and service tier without fallback."
+)]
 pub fn selected_coding_provider_configuration_with_processing_tier(
     provider: NativeProvider,
     model: ModelId,
@@ -328,6 +332,10 @@ pub(crate) async fn api_session_runtime_binding_for(
     .await
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "API session construction preserves the supplied tool owner, frozen route evidence, and topology lease through runtime preparation."
+)]
 pub(super) async fn api_session_runtime_binding_with_owner(
     parent: &ApiTopologyParent,
     opening_durable_session: bool,
@@ -498,6 +506,10 @@ pub(in crate::agent) const fn native_provider_kind(provider: NativeProvider) -> 
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Native runtime construction preserves provider-specific tool compilation, composition attachment, admission, and topology lease cleanup."
+)]
 pub(in crate::agent) fn coding_session_runtime_binding_for(
     spec: ProductAgentSpec,
     stderr: &mut dyn Write,

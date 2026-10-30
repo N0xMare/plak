@@ -91,6 +91,10 @@ struct RebindTransition<'a, 'interrupt, P: plakous_host_protocol::ProtocolExtens
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Canonical rebind dispatch distinguishes published, unchanged, refused, and uncertain outcomes while preserving source restoration."
+    )]
     fn dispatch(
         &mut self,
         source_was_detached: bool,

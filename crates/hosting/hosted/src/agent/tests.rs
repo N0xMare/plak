@@ -1,5 +1,10 @@
 //! Unit tests for the product coding session (construction and children).
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Agent construction scenarios exercise frozen tools, native bindings, reopened profiles, and tree attachment using real session fixtures."
+)]
+
 use super::*;
 
 #[test]

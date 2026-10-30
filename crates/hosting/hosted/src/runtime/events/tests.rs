@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Event projection scenarios drive complete response and tool lifecycles against the host's live row accumulators."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::session_store::SessionRecordStore;

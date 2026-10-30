@@ -14,6 +14,10 @@ use std::path::Path;
 
 /// `pub(crate)` so rendered prompt/wire goldens can compile the same harness
 /// spec offline. Production behaviour is unchanged.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Native harness selection binds provider capability, reasoning effort, Code Mode tools, composition, workspace, and enrolled instructions."
+)]
 pub(crate) fn selected_harness_profile(
     provider: NativeProvider,
     selected_model: &ModelId,
@@ -103,6 +107,10 @@ pub(crate) fn subagent_catalog_profile_id(
     HarnessProfileId::new(id).map_err(|_| CliFailure::new("subagent catalog profile id is invalid"))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The product profile compiler receives the exact model, identity, workspace, instruction sources, and composition declarations."
+)]
 pub(in crate::agent) fn product_identity_profile(
     profile: &HarnessProfileSpec,
     provider: NativeProvider,

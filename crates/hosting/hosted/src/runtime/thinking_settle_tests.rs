@@ -2,6 +2,11 @@
 //! a discarding replay drops only its own response, and every way a turn ends
 //! keeps what earlier responses showed.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Thinking-settlement scenarios coordinate quit grace, pending model work, and final reasoning-row cleanup."
+)]
+
 use crate::runtime::recover_tests::{script, scripted_host_with, turn_completed, wait_for};
 use crate::runtime::spawn_host_worker;
 use crate::runtime::test_kit::TestExtension;

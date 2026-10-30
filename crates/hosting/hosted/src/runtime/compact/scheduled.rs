@@ -36,6 +36,10 @@ pub(in crate::runtime) enum ScheduledPrompt {
 /// made to fit, the send-or-park decision falls back to it and the batch is
 /// dropped, so a prompt that fits is never parked behind its own mail.
 /// Returns whether the prompt is sent or parked.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Takes the host authority (executor, configuration, attached session, events, log), the interrupt watch, the stderr buffer, and the triggering prompt with its bare form."
+)]
 pub(in crate::runtime) fn run_scheduled_compaction_until_fits<
     P: plakous_host_protocol::ProtocolExtension,
 >(
@@ -101,6 +105,10 @@ fn scheduled_prompt_sendable(projection: crate::context::ContextProjection) -> b
         && !projection.compaction_verdict().observation_headroom()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "The scheduled-pass loop distinguishes paid dispatch, no eligible range, capacity recovery, and authoritative stop outcomes."
+)]
 fn run_scheduled_compaction_until_fits_with<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,

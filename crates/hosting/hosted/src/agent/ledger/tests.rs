@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Delivery-ledger scenarios retain the complete prepare, bind, acknowledge, and duplicate-replay sequence."
+)]
 #![allow(clippy::unwrap_used, reason = "test assertions")]
 
 use super::{

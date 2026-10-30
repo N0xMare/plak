@@ -196,6 +196,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         Ok(())
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "One prompt admission owns preparation, interrupt handling, dispatch, and terminal publication as an ordered host transition."
+    )]
     fn run_prompt_inner(
         &mut self,
         raw_text: String,
@@ -391,6 +395,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         Ok(std::ops::ControlFlow::Continue(()))
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Prompt preflight reconciles queue identity, product pressure, recovery, and scheduled compaction before admitting inference."
+    )]
     fn preflight_prompt(
         &mut self,
         input: PromptInput,
@@ -626,6 +634,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         .map(PromptOutcome::Dispatched)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Prompt dispatch records delivery and reconciles definite refusal versus admitted canonical work before returning to the host loop."
+    )]
     fn dispatch_prompt(
         &mut self,
         input: PromptInput,
@@ -751,6 +763,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         )
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Prompt completion publishes the canonical terminal before deciding queue continuation, transient retry, and child-wake suppression."
+    )]
     fn finish_prompt(
         &mut self,
         input: PromptInput,

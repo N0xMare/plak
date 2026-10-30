@@ -1,5 +1,10 @@
 //! Host handle consumption and retry after a definite persistence refusal.
 
+#![allow(
+    clippy::too_many_lines,
+    reason = "Decision-event scenarios retain complete provider-round fixtures to verify live projection and usage attribution."
+)]
+
 use super::*;
 use crate::runtime::test_kit::TestExtension;
 use crate::surface_protocol::HostEvent;

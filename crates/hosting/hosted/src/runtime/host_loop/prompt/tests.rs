@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Prompt-loop scenarios drive busy steering, admission refusal, delivery acknowledgements, and durable projection failures end to end."
+)]
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
 use crate::surface_protocol::HostEvent;
