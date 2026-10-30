@@ -7048,6 +7048,47 @@ async fn a_401_forced_refresh_never_replays_and_the_next_operation_renews_once()
 }
 
 #[tokio::test]
+async fn a_wrapped_overload_401_is_retried_without_a_refresh() -> TestResult {
+    // The exact body the subscription backend sends under account load when
+    // its upstream authentication service answers 503.
+    let overloaded = response(
+        "401 Unauthorized",
+        "application/json",
+        br#"{"error":{"message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}","type":"authentication_error","param":null,"code":null}}"#,
+        "Retry-After: 0\r\n",
+    );
+    let (fixture, _, server) = renew_fixture(
+        "overload-401-account",
+        "overload-401-subject",
+        now_unix_secs() + 3_600,
+        0,
+        vec![overloaded, inference_reply()],
+    )
+    .await?;
+    let generation = fixture.manager.load_fence().await?.generation();
+    let response = run_text(
+        &fixture.model,
+        &fixture.descriptor,
+        "00000000-0000-7000-8000-000000000508",
+    )
+    .await?;
+    assert_ne!(response.output(), []);
+    let (requests, unexpected) = server.await??;
+    assert_eq!(
+        request_kinds(&requests),
+        ["catalog", "inference", "inference"]
+    );
+    assert!(!unexpected);
+    assert_eq!(fixture.manager.load_fence().await?.generation(), generation);
+    assert_eq!(fixture.manager.status()?, CodexCredentialStatus::Ready);
+    assert_eq!(
+        dispatched(&fixture.gate, SubscriptionRequestClass::Inference)?,
+        2
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_renewal_cancelled_during_its_catalog_fetch_installs_nothing() -> TestResult {
     let endpoint = test_endpoint().await?;
     let client = endpoint.client.clone();

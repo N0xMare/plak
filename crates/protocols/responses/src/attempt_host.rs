@@ -24,7 +24,9 @@ use authority::{header_name_requires_secret, validate_auth_slots, validate_heade
 use dispatch::{
     CollectorFailure, ObservationDelivery, RawTerminal, StreamCollector, classify_status,
 };
-use dispatch::{admit_attempt, event_starts_visible_output, execute_admitted, status_outcome};
+use dispatch::{
+    admit_attempt, event_starts_visible_output, execute_admitted, refusal_status, status_outcome,
+};
 use identity::{
     authority_target, dialect_execution_identity, host_behavior_identity, inspect_serialized_body,
     lowered_replay_safety, physical_request_digest, prepared_wire_digest, request_body_digest,
@@ -1033,6 +1035,7 @@ pub struct ResponsesAttemptDialectData {
     provider_request_id_header: Option<HeaderName>,
     allow_missing_sse_content_type: bool,
     router_policy: Option<ResponsesRouterPolicy>,
+    wrapped_overload: bool,
 }
 
 impl ResponsesAttemptDialectData {
@@ -1103,7 +1106,21 @@ impl ResponsesAttemptDialectData {
             provider_request_id_header,
             allow_missing_sse_content_type,
             router_policy: None,
+            wrapped_overload: false,
         })
+    }
+
+    /// Classifies the route's proven HTTP 401 that wraps an upstream HTTP 503
+    /// overload as [`ResponsesHttpStatusClass::WrappedOverload`]: its parsed
+    /// error has type `authentication_error` and a message that starts with
+    /// `authentication failed (status=503)` and names
+    /// `Too many concurrent requests`. Every other 401 stays a credential
+    /// rejection. Like the credential-rejection hook it changes no wire byte
+    /// of any dispatch, so it is not part of the execution identity.
+    #[must_use]
+    pub const fn with_wrapped_overload(mut self) -> Self {
+        self.wrapped_overload = true;
+        self
     }
 
     /// Attaches one strict route-evidenced router request extension.

@@ -1827,6 +1827,248 @@ async fn a_401_triggers_one_refresh_and_retry() -> Result<(), TestError> {
     Ok(())
 }
 
+/// The exact body the Codex subscription backend sends with HTTP 401 when its
+/// upstream authentication service refuses with a transient 503.
+const WRAPPED_OVERLOAD_BODY: &[u8] = br#"{"error":{"message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}","type":"authentication_error","param":null,"code":null}}"#;
+
+fn wrapped_overload(retry_after: &str) -> Vec<u8> {
+    http_response_with(
+        "401 Unauthorized",
+        Some("application/json"),
+        &format!("Retry-After: {retry_after}\r\n"),
+        WRAPPED_OVERLOAD_BODY,
+    )
+}
+
+/// On a route that opts in, the proven wrapped overload is retried as the 503
+/// it names: Retry-After is honored, the next dispatch carries the same
+/// credential, and no credential refresh runs.
+#[tokio::test]
+async fn a_wrapped_overload_401_retries_as_its_503_without_a_refresh() -> Result<(), TestError> {
+    let accepted = http_response("200 OK", Some("text/event-stream"), &complete_sse_body());
+    let (client_config, tls_identity, origin, peer) =
+        responding_wire_peer_sequence(vec![wrapped_overload("0"), accepted]).await?;
+    let client =
+        Client::with_tls_config_and_identity(Limits::default(), client_config, tls_identity)?;
+    let dialect = wire_dialect(
+        origin,
+        openai_generation_fingerprint(b"overload-generation"),
+    );
+    let authorization = ResponsesAuthorizationAdapter::new(1, 1, wire_preflight, wire_revalidate)?
+        .with_credential_rejected(wire_credential_rejected);
+    let data = attempt_data(&client, &authorization)?.with_wrapped_overload();
+    let (sender, mut observations) = mpsc::channel(64);
+    let attempt = executable_attempt(&data, CancellationToken::new())?.with_observations(sender);
+    let service = ResponsesAttemptService::new(client, Arc::clone(&dialect), data, authorization)?;
+    let response = service.execute(attempt).await?;
+    assert!(response.terminal().is_completed());
+    assert_eq!(response.facts().physical_attempts(), 2);
+    assert_eq!(dialect.credential_rejections.load(Ordering::SeqCst), 0);
+    assert_eq!(dialect.preflights.load(Ordering::SeqCst), 2);
+    assert_eq!(dialect.final_authorizations.load(Ordering::SeqCst), 2);
+    let mut retries = Vec::new();
+    while let Ok(observation) = observations.try_recv() {
+        if let ResponsesObservation::Retry(retry) = observation {
+            retries.push((
+                retry.next_physical(),
+                retry.cause(),
+                retry.delay(),
+                retry.loss().declined_reason,
+                retry.detail().as_str().to_owned(),
+            ));
+        }
+    }
+    assert_eq!(
+        retries,
+        [(
+            2,
+            ModelRetryCause::HttpStatus { status: 503 },
+            Duration::ZERO,
+            None,
+            "HTTP 401 wrapping upstream HTTP 503".to_owned(),
+        )]
+    );
+    let requests = peer.await??;
+    assert_eq!(requests.len(), 2);
+    for request in &requests {
+        assert!(
+            request
+                .windows(b"Bearer exact-test-secret".len())
+                .any(|v| v == b"Bearer exact-test-secret")
+        );
+    }
+    Ok(())
+}
+
+/// A wrapped overload on every attempt exhausts the turn budget as an
+/// unavailable refusal with the provider's exact status, never a credential
+/// rejection.
+#[tokio::test]
+async fn exhausted_wrapped_overloads_end_unavailable_without_a_refresh() -> Result<(), TestError> {
+    let (client_config, tls_identity, origin, peer) =
+        responding_wire_peer_sequence(vec![wrapped_overload("0"); 4]).await?;
+    let client =
+        Client::with_tls_config_and_identity(Limits::default(), client_config, tls_identity)?;
+    let dialect = wire_dialect(origin, openai_generation_fingerprint(b"overload-budget"));
+    let authorization = ResponsesAuthorizationAdapter::new(1, 1, wire_preflight, wire_revalidate)?
+        .with_credential_rejected(wire_credential_rejected);
+    let data = attempt_data(&client, &authorization)?.with_wrapped_overload();
+    let attempt = executable_attempt(&data, CancellationToken::new())?;
+    let ledger = attempt.core.observations();
+    let service = ResponsesAttemptService::new(client, Arc::clone(&dialect), data, authorization)?;
+    let Err(error) = service.execute(attempt).await else {
+        panic!("four wrapped overloads must end the attempt");
+    };
+    assert!(matches!(
+        error,
+        ResponsesAttemptError::HttpStatus {
+            status: StatusCode::UNAUTHORIZED,
+            class: ResponsesHttpStatusClass::WrappedOverload,
+            ..
+        }
+    ));
+    assert_eq!(error.facts().physical_attempts(), 4);
+    assert_eq!(dialect.credential_rejections.load(Ordering::SeqCst), 0);
+    let summary = ledger.attempt_summary().to_string();
+    assert!(summary.contains("last: unavailable"), "{summary}");
+    let mapped = error
+        .contextual_http_error(&test_descriptor()?)
+        .ok_or("contextual HTTP error")?;
+    assert_eq!(mapped.kind(), ModelErrorKind::Unavailable);
+    assert_eq!(
+        mapped
+            .context()
+            .and_then(ModelErrorContext::http_status)
+            .map(plakous_model::ModelHttpStatus::get),
+        Some(401)
+    );
+    assert_eq!(peer.await??.len(), 4);
+    Ok(())
+}
+
+/// Without the route's opt-in, and for every other 401 body on a route that
+/// opts in, a 401 stays a credential rejection: terminal without the
+/// credential-rejection hook, one forced refresh and re-dispatch with it.
+#[tokio::test]
+async fn other_401s_and_routes_without_the_opt_in_stay_credential_rejections()
+-> Result<(), TestError> {
+    let cases: [(&str, bool, &[u8]); 7] = [
+        ("exact body without the opt-in", false, WRAPPED_OVERLOAD_BODY),
+        ("no body", true, b""),
+        ("unparseable body", true, b"authentication failed (status=503)"),
+        (
+            "plain authentication_error",
+            true,
+            br#"{"error":{"message":"token expired","type":"authentication_error"}}"#,
+        ),
+        (
+            "other wrapped status",
+            true,
+            br#"{"error":{"message":"authentication failed (status=401): {\"error\":\"Too many concurrent requests\"}","type":"authentication_error"}}"#,
+        ),
+        (
+            "other upstream 503 reason",
+            true,
+            br#"{"error":{"message":"authentication failed (status=503): {\"error\":\"upstream unavailable\"}","type":"authentication_error"}}"#,
+        ),
+        (
+            "other error type",
+            true,
+            br#"{"error":{"message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}","type":"invalid_request_error"}}"#,
+        ),
+    ];
+    for (label, opted_in, body) in cases {
+        let unauthorized = http_response_with(
+            "401 Unauthorized",
+            Some("application/json"),
+            "Retry-After: 0\r\n",
+            body,
+        );
+        let (result, dialect, requests) =
+            execute_after_401(unauthorized.clone(), opted_in, false).await?;
+        let Err(error) = result else {
+            panic!("{label}: a 401 without a refresh hook must end the attempt");
+        };
+        assert!(
+            matches!(
+                error,
+                ResponsesAttemptError::HttpStatus {
+                    status: StatusCode::UNAUTHORIZED,
+                    class: ResponsesHttpStatusClass::Authentication,
+                    ..
+                }
+            ),
+            "{label}: {error:?}"
+        );
+        assert_eq!(error.facts().physical_attempts(), 1, "{label}");
+        assert_eq!(
+            error
+                .contextual_http_error(&test_descriptor()?)
+                .as_ref()
+                .map(ModelError::kind),
+            Some(ModelErrorKind::Authentication),
+            "{label}"
+        );
+        assert_eq!(dialect.credential_rejections.load(Ordering::SeqCst), 0);
+        assert_eq!(requests.len(), 1, "{label}");
+
+        let (result, dialect, requests) = execute_after_401(unauthorized, opted_in, true).await?;
+        result?;
+        assert_eq!(
+            dialect.credential_rejections.load(Ordering::SeqCst),
+            1,
+            "{label}"
+        );
+        assert_eq!(requests.len(), 2, "{label}");
+        assert!(
+            requests[1]
+                .windows(b"Bearer renewed-test-secret".len())
+                .any(|v| v == b"Bearer renewed-test-secret"),
+            "{label}"
+        );
+    }
+    Ok(())
+}
+
+/// Executes one attempt answered by `unauthorized` and, with the
+/// credential-rejection hook installed, then by an accepted stream.
+async fn execute_after_401(
+    unauthorized: Vec<u8>,
+    opted_in: bool,
+    refresh_hook: bool,
+) -> TestResult<(
+    Result<ResponsesAttemptResponse, ResponsesAttemptError>,
+    Arc<WireDialect>,
+    Vec<Vec<u8>>,
+)> {
+    let mut responses = vec![unauthorized];
+    if refresh_hook {
+        responses.push(http_response(
+            "200 OK",
+            Some("text/event-stream"),
+            &complete_sse_body(),
+        ));
+    }
+    let (client_config, tls_identity, origin, peer) =
+        responding_wire_peer_sequence(responses).await?;
+    let client =
+        Client::with_tls_config_and_identity(Limits::default(), client_config, tls_identity)?;
+    let dialect = wire_dialect(origin, openai_generation_fingerprint(b"other-401"));
+    let mut authorization =
+        ResponsesAuthorizationAdapter::new(1, 1, wire_preflight, wire_revalidate)?;
+    if refresh_hook {
+        authorization = authorization.with_credential_rejected(wire_credential_rejected);
+    }
+    let mut data = attempt_data(&client, &authorization)?;
+    if opted_in {
+        data = data.with_wrapped_overload();
+    }
+    let attempt = executable_attempt(&data, CancellationToken::new())?;
+    let service = ResponsesAttemptService::new(client, Arc::clone(&dialect), data, authorization)?;
+    let result = service.execute(attempt).await;
+    Ok((result, dialect, peer.await??))
+}
+
 fn refusal(status: &str, retry_after: &str) -> Vec<u8> {
     http_response_with(
         status,

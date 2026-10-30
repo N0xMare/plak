@@ -65,6 +65,10 @@ pub enum ResponsesHttpStatusClass {
     Rejected,
     /// 5xx ambiguous server outcome.
     Server,
+    /// HTTP 401 whose body is a route's proven wrap of the provider's upstream
+    /// HTTP 503 overload refusal; it is refused before acceptance and retried
+    /// as that 503, never as a credential rejection.
+    WrappedOverload,
     /// Other unsupported/ambiguous status.
     Unknown,
 }

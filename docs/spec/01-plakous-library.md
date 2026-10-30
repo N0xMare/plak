@@ -3977,6 +3977,24 @@ betas removed. Unsent values, other 400s and attestation errors retain the
 existing error path. The shared Messages failure carries a neutral typed
 contract-refusal flag; it does not parse diagnostic strings to recover it.
 
+Under account load the Codex subscription backend answers some inference
+requests with HTTP 401, `error.type=authentication_error` and
+`error.message` ``authentication failed (status=503): {"error":"Too many
+concurrent requests"}``: its upstream authentication service refused with a
+transient 503; the credential was not rejected. This is observed provider
+behavior in sanitized wire captures, not documented behavior. On the Codex
+subscription route only, a 401 whose parsed error has that type and a message
+that starts with `authentication failed (status=503)` and contains
+`Too many concurrent requests` is the `WrappedOverload` HTTP status class. It
+is refused before acceptance and is retried under the turn policy
+(§13.1) as that 503, honoring `Retry-After`. It never runs the 401 credential
+refresh, gives a re-login remedy, or quarantines the credential. Its retry
+records `HttpStatus { status: 503 }` with the detail
+`HTTP 401 wrapping upstream HTTP 503`. An exhausted budget ends the turn
+`Unavailable`, retaining the provider's HTTP 401 status in its context. Every
+other 401 body, a missing or unparseable body, and every other route (the
+OpenAI API-key route, xAI and OpenRouter) keep the credential-rejection path.
+
 `plakous-auth` owns provider-neutral authentication scaffolding: bounded,
 zeroizing response-body pulls, media-type recognition, unvalidated audience
 and subject claim shapes (in the claimed-HTTP orchestrator module, not the
@@ -9551,7 +9569,7 @@ attempt ledger at admission.
 | --- | --- |
 | `SessionWorkflow` (including compaction, context measurement, titles) | only typed proof of unsent request: connect failure before request bytes or `RequestIncomplete` (including `peer_rejected_record`); no HTTP response grants permission |
 | Hosted activity with side effects was observed, or the request is `ServerEffect` | never (except a provable pre-acceptance refusal below, which cannot have run anything) |
-| Refused or never sent: connect/TLS failure, `RequestIncomplete` (including `peer_rejected_record`), HTTP `429`/`503`/`529` the transport proves refused | yes |
+| Refused or never sent: connect/TLS failure, `RequestIncomplete` (including `peer_rejected_record`), HTTP `429`/`503`/`529` the transport proves refused, the Codex subscription's wrapped-503 `401` (§7.2) | yes |
 | Sent, response head not received (`MayHaveTransmitted` with `Io`/`Protocol`/`Tls`/timeout cause), `CostOnly` | yes |
 | HTTP `500`, `502`, `504` or `408` with no stream, or a refusal status not proven refused, `CostOnly` | yes |
 | Mid-stream break, including after a local tool call began, no hosted event, `CostOnly`: reset, EOF or missing terminal, idle timeout, or an in-stream provider error naming overload or rate limit | yes; the partial output is discarded |

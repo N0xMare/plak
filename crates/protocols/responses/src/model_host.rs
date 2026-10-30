@@ -100,7 +100,9 @@ impl ResponsesAttemptError {
                 ModelErrorKind::ContextLimit
             }
             ResponsesHttpStatusClass::Rejected => ModelErrorKind::InvalidRequest,
-            ResponsesHttpStatusClass::Server => ModelErrorKind::Unavailable,
+            ResponsesHttpStatusClass::Server | ResponsesHttpStatusClass::WrappedOverload => {
+                ModelErrorKind::Unavailable
+            }
             ResponsesHttpStatusClass::Unknown => ModelErrorKind::Protocol,
         };
         // A terminal credential rejection needs new credentials, contract

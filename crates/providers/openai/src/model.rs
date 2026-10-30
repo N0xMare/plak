@@ -479,7 +479,8 @@ impl OpenAiLanguageModel {
             Some(plakous_http::HeaderName::from_static("x-request-id")),
             true,
         )
-        .map_err(|_| StandardOpenAiHttpBuildError::SharedBinding)?;
+        .map_err(|_| StandardOpenAiHttpBuildError::SharedBinding)?
+        .with_wrapped_overload();
         let service = codex_dispatch_service(&target, &client, &attempt_data)?;
         Ok(Self {
             target: std::sync::Mutex::new(Arc::new(CodexDispatchTarget { target, service })),

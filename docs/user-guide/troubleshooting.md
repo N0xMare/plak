@@ -91,8 +91,9 @@ Plak re-sends a turn's model request automatically whenever doing so can only
 cost a duplicate inference:
 
 - the provider refused it or it was never sent: a rate limit (HTTP 429),
-  service unavailable (503), overloaded (529), or a connection that could not
-  be established;
+  service unavailable (503, including the Codex subscription's HTTP 401
+  `authentication failed (status=503)` overload, which is not a login
+  failure), overloaded (529), or a connection that could not be established;
 - it was sent but no response arrived, for example
   `RequestWriteOrResponseHead (MayHaveTransmitted, Protocol)`, or the provider
   answered HTTP 500, 502, 504 or 408;

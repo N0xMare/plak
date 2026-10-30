@@ -288,6 +288,11 @@ where
             .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota)
         {
             class = ResponsesHttpStatusClass::Quota;
+        } else if data.wrapped_overload
+            && status == StatusCode::UNAUTHORIZED
+            && provider.as_ref().is_some_and(wraps_upstream_overload)
+        {
+            class = ResponsesHttpStatusClass::WrappedOverload;
         }
         let retry_disabled = retry_disabled
             || provider
@@ -304,7 +309,11 @@ where
             },
             Some(plakous_model::ModelRetryPhase::ResponseHead.as_str()),
             (class != ResponsesHttpStatusClass::Quota)
-                .then(|| plakous_attempt::ProviderRefusal::from_http_status(status.as_u16()))
+                .then(|| {
+                    plakous_attempt::ProviderRefusal::from_http_status(
+                        refusal_status(status, class).as_u16(),
+                    )
+                })
                 .flatten(),
             false,
             None,
@@ -1073,6 +1082,28 @@ pub(super) fn classify_status(status: StatusCode) -> ResponsesHttpStatusClass {
         status if status.is_client_error() => ResponsesHttpStatusClass::Rejected,
         status if status.is_server_error() => ResponsesHttpStatusClass::Server,
         _ => ResponsesHttpStatusClass::Unknown,
+    }
+}
+
+/// The Codex subscription backend, under account load, answers HTTP 401 with
+/// an `authentication_error` whose message reads
+/// `authentication failed (status=503): {"error":"Too many concurrent requests"}`:
+/// its upstream authentication service refused with a transient 503.
+fn wraps_upstream_overload(error: &ResponsesProviderError) -> bool {
+    error.kind() == Some("authentication_error")
+        && error.message().is_some_and(|message| {
+            message.starts_with("authentication failed (status=503)")
+                && message.contains("Too many concurrent requests")
+        })
+}
+
+/// The status a refusal is retried and recorded as: a wrapped overload is the
+/// upstream `503` it names.
+pub(super) fn refusal_status(status: StatusCode, class: ResponsesHttpStatusClass) -> StatusCode {
+    if class == ResponsesHttpStatusClass::WrappedOverload {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        status
     }
 }
 

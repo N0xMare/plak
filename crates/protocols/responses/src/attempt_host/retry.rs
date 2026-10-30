@@ -5,8 +5,8 @@ use super::{
     ModelRetry, ModelRetryCause, ModelTransportFault, PhysicalRequestOutcome, ReplaySafety,
     ResponsesAttempt, ResponsesAttemptError, ResponsesCredentialRejectedFn,
     ResponsesFamilyStreamError, ResponsesHttpStatusClass, ResponsesObservation, RetryDeclineInput,
-    RetryPolicy, StatusCode, StreamProgress, milliseconds, monotonic_now, retry_decline,
-    retry_phase, status_outcome,
+    RetryPolicy, StatusCode, StreamProgress, milliseconds, monotonic_now, refusal_status,
+    retry_decline, retry_phase, status_outcome,
 };
 
 /// What a refused generation leads to.
@@ -98,26 +98,37 @@ pub(super) fn retryable(
     match error {
         ResponsesAttemptError::HttpStatus {
             status,
+            class,
             retry_after,
             ..
         } => {
-            let point = match RetryPolicy::status_failure_point(status.as_u16())? {
+            let refused = refusal_status(*status, *class);
+            let point = match RetryPolicy::status_failure_point(refused.as_u16())? {
                 // Only a definite rejection proves the request was refused.
                 FailurePoint::Refused
-                    if status_outcome(*status) != PhysicalRequestOutcome::DefiniteRejection =>
+                    if status_outcome(refused) != PhysicalRequestOutcome::DefiniteRejection =>
                 {
                     FailurePoint::AfterSend
                 }
                 point => point,
             };
+            let detail = if refused == *status {
+                format!("HTTP {}", status.as_u16())
+            } else {
+                format!(
+                    "HTTP {} wrapping upstream HTTP {}",
+                    status.as_u16(),
+                    refused.as_u16()
+                )
+            };
             Some(Retryable {
                 point,
                 cause: ModelRetryCause::HttpStatus {
-                    status: status.as_u16(),
+                    status: refused.as_u16(),
                 },
                 retry_after: *retry_after,
                 output_discarded: false,
-                detail: format!("HTTP {}", status.as_u16()),
+                detail,
                 phase: Some(plakous_model::ModelRetryPhase::ResponseHead),
             })
         }
