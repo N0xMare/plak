@@ -5572,7 +5572,10 @@ host events drain in a bounded batch, so a burst of stream deltas cannot starve
 a keypress. An unfollowed transcript camera is the last block-space anchor:
 stream growth remaps that row and must not move it, and a wheel or key notch
 is a delta on the remapped row rather than a from-bottom offset against the
-new height. Follow-live stays a zero offset and pins to the tail. Targets are
+new height. Follow-live stays a zero offset and pins to the tail, including
+after a windowed measurement corrects the height of blocks above it: the
+viewport is placed on the settled total, so the last row stays on screen and
+the jump-to-bottom control stays hidden. Targets are
 a first frame within 50 ms of terminal initialization with no network work,
 input echo within 16 ms, stream coalescing in 16–33 ms batches, and dirty
 redraw except on resize.

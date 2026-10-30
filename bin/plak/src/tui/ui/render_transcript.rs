@@ -467,15 +467,30 @@ impl App {
         let message_rows = self.pane.transcript_cache.layout().plain.len();
         let total = message_rows.saturating_add(banner_h);
         if follow_live {
-            let vstart = total.saturating_sub(body_h);
-            let _ = self.pane.transcript_cache.settle_window(
-                &self.pane.blocks,
-                layout_anchor(
-                    self.pane.transcript_cache.layout(),
-                    vstart.saturating_sub(banner_h),
-                ),
-                body_h,
-            );
+            // Promoting an estimated block above the tail grows the document
+            // after vstart was chosen. Recompute from the settled total and
+            // measure the new tail until it stops moving; one pass leaves the
+            // camera short of the last rows and the next paint is no longer
+            // follow-live.
+            let mut vstart = total.saturating_sub(body_h);
+            for _ in 0..4 {
+                let before = self.pane.transcript_cache.layout().plain.len();
+                let _ = self.pane.transcript_cache.settle_window(
+                    &self.pane.blocks,
+                    layout_anchor(
+                        self.pane.transcript_cache.layout(),
+                        vstart.saturating_sub(banner_h),
+                    ),
+                    body_h,
+                );
+                let after = self.pane.transcript_cache.layout().plain.len();
+                let next = after.saturating_add(banner_h).saturating_sub(body_h);
+                let stable = next == vstart && after == before;
+                vstart = next;
+                if stable {
+                    break;
+                }
+            }
             return vstart;
         }
         if let Some(held) = held_anchor {
