@@ -71,6 +71,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod admission;
 mod nested;
 mod observation;
 mod outer;

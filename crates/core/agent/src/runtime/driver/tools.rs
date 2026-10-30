@@ -1,11 +1,11 @@
 //! Tool admission and bounded batch execution.
 
+mod interrupted;
+
 use crate::runtime::ArtifactTransition;
-use crate::runtime::composition::projection::local_composition_exec_registry_arguments;
 use crate::runtime::continuation::{ContinuationToolSlot, ToolBatchContinuation};
 use crate::runtime::control::effect_intent_bytes;
 use crate::runtime::driver::ToolDispatchOrigin;
-use crate::runtime::driver::composition::LocalCompositionFailureEvidence;
 use crate::runtime::driver::execution::{
     canonicalize_observed_tool_execution, execute_indexed_read_only, publish_observation_clip,
 };
@@ -15,7 +15,7 @@ use crate::runtime::driver::{
     ToolBatchResult,
 };
 use crate::runtime::observation::{
-    bounded_rejection_detail, clip_tool_result, composition_tool_error_telemetry_status,
+    bounded_rejection_detail, composition_tool_error_telemetry_status,
     conversation_item_tool_result, local_composition_result_observation,
     no_active_cell_wait_result, normalized_tool_failure, rejected_tool_call_observation,
     tool_call_observation, tool_result_content_bytes, tool_result_observation,
@@ -30,9 +30,9 @@ use crate::runtime::{
 };
 use crate::tool_runtime::{AuthorizedToolInvocation, PendingEffectDecision};
 use crate::{
-    AgentError, AgentErrorKind, AgentEventKind, DurableOperationKind, DurableOperationRecord,
-    DurableOperationState, EventContext, SessionStoreError, StoreAdmission,
-    TelemetryTerminalStatus, ToolAuditIdentity, ToolCallAttemptIdentity, ToolCallerLineageView,
+    AgentError, AgentErrorKind, AgentEventKind, DurableOperationKind, DurableOperationState,
+    EventContext, SessionStoreError, StoreAdmission, TelemetryTerminalStatus, ToolAuditIdentity,
+    ToolCallAttemptIdentity, ToolCallerLineageView,
 };
 use futures_util::StreamExt;
 
@@ -42,9 +42,9 @@ pub(super) struct AdmissionPresentation {
 }
 use futures_util::stream::FuturesUnordered;
 use plakous_model::{
-    Actor, AttemptId, CallId, ContentBlock, ConversationItem, EntryId, HistorySegmentKind,
-    ModelResponse, Provenance, TextBlock, ToolCallBlock, ToolEffect, ToolName, ToolResultBlock,
-    ToolResultKind, ToolResultPart, ToolResultUpdateBlock, TurnId, ValidatedRequestPlan,
+    AttemptId, CallId, ConversationItem, EntryId, HistorySegmentKind, ModelResponse, TextBlock,
+    ToolCallBlock, ToolEffect, ToolName, ToolResultBlock, ToolResultKind, ToolResultPart, TurnId,
+    ValidatedRequestPlan,
 };
 use plakous_tools::{
     ToolInvocation, ToolInvocationRequest, ToolOwnerClass, ToolProjectionReceiptV2,
@@ -53,230 +53,6 @@ use plakous_tools::{
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 impl Driver {
-    /// Closes the exchange of a batch that stopped with `error` and returns the
-    /// error that ends the turn. An outcome-unknown stop keeps its working
-    /// obligations for recovery instead, and an internal stop (a contained
-    /// panic or broken driver invariant) does not rebuild history from state it
-    /// can no longer vouch for. A close that itself fails on an
-    /// unresolved effect ends the turn with that stronger error; any other close
-    /// failure leaves the original failure in charge of the terminal.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the arguments are the exact interrupted batch and its provider round"
-    )]
-    pub(super) async fn close_interrupted_tool_batch(
-        &mut self,
-        command: &PromptCommand,
-        attempt_id: AttemptId,
-        calls: &[ToolCallBlock],
-        result_entry_ids: &[EntryId],
-        provider_operation: OperationId,
-        provider_response: &ModelResponse,
-        restored_slots: Option<&[ContinuationToolSlot]>,
-        error: AgentError,
-    ) -> AgentError {
-        if matches!(
-            error.kind(),
-            AgentErrorKind::OutcomeUnknown | AgentErrorKind::Internal
-        ) {
-            return error;
-        }
-        match self
-            .promote_interrupted_tool_batch(
-                command,
-                attempt_id,
-                calls,
-                result_entry_ids,
-                provider_operation,
-                provider_response,
-                restored_slots,
-                &error,
-            )
-            .await
-        {
-            Err(close)
-                if error.kind() == AgentErrorKind::Cancelled
-                    || close.kind() == AgentErrorKind::OutcomeUnknown =>
-            {
-                close
-            }
-            _ => error,
-        }
-    }
-
-    /// A batch interrupted by cancellation or an operational failure may have
-    /// completed effects before it stopped. Rebuild from durable effect
-    /// outcomes, not from published observations, and close every proposed call
-    /// in one valid tool exchange before the root's terminal is published, so
-    /// the next turn's model sees what already ran. A call that never completed
-    /// gets a typed failure result naming `interruption`.
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::too_many_lines,
-        reason = "one interruption close reconstructs every source slot and its durable operations"
-    )]
-    pub(super) async fn promote_interrupted_tool_batch(
-        &mut self,
-        command: &PromptCommand,
-        attempt_id: AttemptId,
-        calls: &[ToolCallBlock],
-        result_entry_ids: &[EntryId],
-        provider_operation: OperationId,
-        provider_response: &ModelResponse,
-        restored_slots: Option<&[ContinuationToolSlot]>,
-        interruption: &AgentError,
-    ) -> Result<(), AgentError> {
-        // Provider-programmatic calls carry a server continuation whose next
-        // request has stricter adjacency rules than an ordinary local batch.
-        if calls.iter().any(|call| {
-            call.correlation()
-                .caller_lineage()
-                .provider_programmatic_kind()
-                .is_some()
-        }) {
-            return Ok(());
-        }
-        let authority = self.authority.checkpoint();
-        let mut effects = std::collections::BTreeMap::new();
-        let mut markers = std::collections::BTreeMap::new();
-        for record in authority.manifest().ledger().operations() {
-            let (turn_id, recorded_attempt, call_id, source_index, marker) = match record.kind() {
-                DurableOperationKind::Effect {
-                    turn_id,
-                    attempt_id,
-                    call_id,
-                    source_index,
-                } => (turn_id, attempt_id, call_id, source_index, false),
-                DurableOperationKind::CompositionEvaluation {
-                    turn_id,
-                    attempt_id,
-                    call_id,
-                    source_index,
-                }
-                | DurableOperationKind::CompositionContinuation {
-                    turn_id,
-                    attempt_id,
-                    call_id,
-                    source_index,
-                    ..
-                } => (turn_id, attempt_id, call_id, source_index, true),
-                _ => continue,
-            };
-            if *turn_id == command.turn_id
-                && *recorded_attempt == attempt_id
-                && calls
-                    .get(*source_index as usize)
-                    .is_some_and(|call| call.call_id() == *call_id)
-            {
-                let target = if marker { &mut markers } else { &mut effects };
-                if target
-                    .insert(*source_index as usize, (*record).clone())
-                    .is_some()
-                {
-                    return Err(AgentError::from_store(SessionStoreError::corrupt()));
-                }
-            }
-        }
-        let mut items = provider_response.output().to_vec();
-        let mut operations = vec![provider_operation];
-        for (index, (call, result_entry_id)) in calls.iter().zip(result_entry_ids).enumerate() {
-            if let Some(record) = markers.remove(&index) {
-                // A cell that yielded earlier in this batch is still live and
-                // owned here: its marker already holds the yielded result, and
-                // the root boundary terminates the cell and settles the marker.
-                let live_yield = matches!(record.state(), DurableOperationState::LocatorBound(_))
-                    && self.local_composition.as_ref().and_then(
-                        crate::runtime::composition::CompositionOwner::evaluation_operation,
-                    ) == Some(OperationId(record.operation_id()));
-                let (item, nested_operations) =
-                    self.cancelled_composition_result(call, *result_entry_id, &record, live_yield)?;
-                if matches!(
-                    record.state(),
-                    DurableOperationState::Completed(_)
-                        | DurableOperationState::ProvenNotDispatched(_)
-                ) {
-                    operations.push(OperationId(record.operation_id()));
-                }
-                operations.extend(nested_operations);
-                items.push(item);
-                continue;
-            }
-            let outcome = effects.remove(&index);
-            let item = if let Some(record) = outcome {
-                if matches!(record.state(), DurableOperationState::Prepared) {
-                    let operation_id = OperationId(record.operation_id());
-                    let terminal = tool_operation_terminal_state(
-                        &Err(interruption.clone()),
-                        false,
-                        *result_entry_id,
-                    )?;
-                    self.transition_operation(command.turn_id, operation_id, terminal)
-                        .await?;
-                    operations.push(operation_id);
-                    self.undispatched_tool_result(call, *result_entry_id, interruption)?
-                } else {
-                    let (DurableOperationState::Completed(evidence)
-                    | DurableOperationState::ProvenNotDispatched(evidence)) = record.state()
-                    else {
-                        return Err(AgentError::new(
-                            AgentErrorKind::OutcomeUnknown,
-                            "interrupted tool batch contains an unresolved effect",
-                        ));
-                    };
-                    operations.push(OperationId(record.operation_id()));
-                    let (tag, evidence_entry, value): (String, EntryId, serde_json::Value) =
-                        serde_json::from_slice(evidence.bytes())
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    if evidence_entry != *result_entry_id {
-                        return Err(AgentError::from_store(SessionStoreError::corrupt()));
-                    }
-                    if let Some(ContinuationToolSlot::Completed {
-                        operation_id,
-                        result_entry_id: restored_entry_id,
-                        item,
-                        ..
-                    }) = restored_slots.and_then(|slots| slots.get(index))
-                        && *operation_id == OperationId(record.operation_id())
-                        && *restored_entry_id == *result_entry_id
-                    {
-                        item.clone()
-                    } else if tag == "completed-tool-outcome-v1" {
-                        let execution: ToolExecutionResult = serde_json::from_value(value)
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                        canonicalize_observed_tool_execution(
-                            *result_entry_id,
-                            execution,
-                            &mut self.observation_budget,
-                        )?
-                        .0
-                    } else if tag == "failed-tool-outcome-v1" {
-                        let failure: DurableAgentError = serde_json::from_value(value)
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                        let failure = failure.into_error()?;
-                        self.failed_tool_result(call, *result_entry_id, &failure)?
-                    } else {
-                        return Err(AgentError::from_store(SessionStoreError::corrupt()));
-                    }
-                }
-            } else {
-                self.undispatched_tool_result(call, *result_entry_id, interruption)?
-            };
-            items.push(item);
-        }
-        if !effects.is_empty() || !markers.is_empty() || calls.len() != result_entry_ids.len() {
-            return Err(AgentError::from_store(SessionStoreError::corrupt()));
-        }
-        self.promote_completed_operations_with_history(
-            command.turn_id,
-            Some(HistorySegmentKind::ToolExchange),
-            items,
-            operations,
-            ArtifactTransition::Clear,
-        )
-        .await?;
-        Ok(())
-    }
-
     fn undispatched_tool_result(
         &mut self,
         call: &ToolCallBlock,
@@ -323,172 +99,6 @@ impl Driver {
             &mut self.observation_budget,
         )
         .map(|(item, _)| item)
-    }
-
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the composition marker and nested evidence must be checked together"
-    )]
-    fn cancelled_composition_result(
-        &mut self,
-        call: &ToolCallBlock,
-        result_entry_id: EntryId,
-        record: &DurableOperationRecord,
-        live_yield: bool,
-    ) -> Result<(ConversationItem, Vec<OperationId>), AgentError> {
-        let evidence = match record.state() {
-            DurableOperationState::Completed(evidence)
-            | DurableOperationState::ProvenNotDispatched(evidence) => evidence,
-            DurableOperationState::LocatorBound(evidence) if live_yield => evidence,
-            DurableOperationState::Finalized(_) => record
-                .transitions()
-                .iter()
-                .rev()
-                .find_map(|transition| match transition.state() {
-                    DurableOperationState::Completed(evidence)
-                    | DurableOperationState::ProvenNotDispatched(evidence) => Some(evidence),
-                    _ => None,
-                })
-                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
-            _ => {
-                return Err(AgentError::new(
-                    AgentErrorKind::OutcomeUnknown,
-                    "cancelled composition marker has an unresolved outcome",
-                ));
-            }
-        };
-        let (kind, parts, child_ids, updates) = if let Some(failure) =
-            LocalCompositionFailureEvidence::decode(evidence.bytes())
-        {
-            const MAX_CANCELLED_REPORT_BYTES: usize = 1_048_576;
-            let child_ids = failure.child_operations().to_vec();
-            let detail = failure.detail();
-            let mut report = format!("local composition was interrupted: {detail}");
-            let ledger = self.authority.checkpoint();
-            for child_id in &child_ids {
-                let child = ledger
-                    .manifest()
-                    .ledger()
-                    .operation(*child_id)
-                    .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-                let (DurableOperationState::Completed(evidence)
-                | DurableOperationState::ProvenNotDispatched(evidence)
-                | DurableOperationState::Finalized(evidence)) = child.state()
-                else {
-                    return Err(AgentError::new(
-                        AgentErrorKind::OutcomeUnknown,
-                        "cancelled composition has an unresolved nested effect",
-                    ));
-                };
-                if let DurableOperationKind::Effect { call_id, .. } = child.kind() {
-                    let outcome: serde_json::Value = serde_json::from_slice(evidence.bytes())
-                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    let outcome_fields = outcome
-                        .as_array()
-                        .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    if outcome_fields.first().and_then(serde_json::Value::as_str)
-                        == Some("completed-tool-outcome-v1")
-                    {
-                        let execution: ToolExecutionResult =
-                            serde_json::from_value(outcome_fields.get(2).cloned().ok_or_else(
-                                || AgentError::from_store(SessionStoreError::corrupt()),
-                            )?)
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                        let rendered = serde_json::to_string(&execution.result)
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                        let line = format!("\ncompleted nested call {call_id}: {rendered}");
-                        let remaining = MAX_CANCELLED_REPORT_BYTES.saturating_sub(report.len());
-                        if remaining == 0 {
-                            break;
-                        }
-                        let mut end = remaining.min(line.len());
-                        while !line.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        report.push_str(&line[..end]);
-                        if end < line.len() {
-                            report.push_str("\n[nested results truncated]");
-                            break;
-                        }
-                    }
-                }
-            }
-            (
-                ToolResultKind::Failure,
-                vec![ToolResultPart::Text(TextBlock::new(report, None).map_err(
-                    |_| AgentError::from_store(SessionStoreError::corrupt()),
-                )?)],
-                child_ids,
-                Vec::new(),
-            )
-        } else {
-            let value: serde_json::Value = serde_json::from_slice(evidence.bytes())
-                .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-            let fields = value
-                .as_array()
-                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-            let tag = fields
-                .first()
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-            match tag {
-                "plakous-local-composition-cell-v2" if fields.len() == 8 => {
-                    let child_ids: Vec<u64> = serde_json::from_value(fields[4].clone())
-                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    let parts: Vec<ToolResultPart> = serde_json::from_value(fields[7].clone())
-                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    let updates: Vec<ToolResultUpdateBlock> =
-                        serde_json::from_value(fields[6].clone())
-                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    (ToolResultKind::Success, parts, child_ids, updates)
-                }
-                _ => return Err(AgentError::from_store(SessionStoreError::corrupt())),
-            }
-        };
-        let result = ToolResultBlock::new(
-            call.call_id(),
-            call.owner().clone(),
-            kind,
-            parts,
-            call.correlation().clone(),
-        )
-        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-        let (result, _) = clip_tool_result(result, &mut self.observation_budget)?;
-        let mut blocks = updates
-            .into_iter()
-            .map(ContentBlock::ToolResultUpdate)
-            .collect::<Vec<_>>();
-        blocks.push(ContentBlock::ToolResult(result));
-        let item = ConversationItem::new(
-            result_entry_id,
-            Actor::Tool,
-            blocks,
-            Provenance::ToolExecution,
-        )
-        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-        let ledger = self.authority.checkpoint();
-        let mut operations = Vec::new();
-        for child_id in child_ids {
-            let child = ledger
-                .manifest()
-                .ledger()
-                .operation(child_id)
-                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-            match child.state() {
-                DurableOperationState::Completed(_)
-                | DurableOperationState::ProvenNotDispatched(_) => {
-                    operations.push(OperationId(child_id));
-                }
-                DurableOperationState::Finalized(_) => {}
-                _ => {
-                    return Err(AgentError::new(
-                        AgentErrorKind::OutcomeUnknown,
-                        "cancelled composition has an unresolved nested operation",
-                    ));
-                }
-            }
-        }
-        Ok((item, operations))
     }
 
     #[allow(
@@ -1328,107 +938,6 @@ impl Driver {
             parent_call_id,
         )
         .await
-    }
-
-    async fn admit_local_composition_exec(
-        &mut self,
-        command: &PromptCommand,
-        attempt_id: AttemptId,
-        call: &ToolCallBlock,
-    ) -> Result<ToolAdmission, AgentError> {
-        let definition = self
-            .tools
-            .definitions()
-            .iter()
-            .find(|definition| definition.name() == call.canonical_name())
-            .ok_or_else(|| {
-                AgentError::new(
-                    AgentErrorKind::Internal,
-                    "local composition exec marker is absent from its frozen registry",
-                )
-            })?;
-        let registry_arguments =
-            match local_composition_exec_registry_arguments(call, definition.input()) {
-                Ok(arguments) => arguments,
-                Err(error) => {
-                    return Ok(ToolAdmission::RejectedBeforeValidation {
-                        execution: ToolExecutionResult::new(
-                            normalized_tool_failure(call, &error)?,
-                            false,
-                        ),
-                        attempt: ToolCallAttemptIdentity::new(
-                            call.exposed_name().clone(),
-                            Some(self.tool_presentation.digest()),
-                        ),
-                        reason: error.kind(),
-                        detail: error.to_string(),
-                    });
-                }
-            };
-        let request = ToolInvocationRequest::new(
-            self.run_id,
-            command.turn_id,
-            attempt_id,
-            call.call_id(),
-            call.canonical_name().clone(),
-            call.correlation().clone(),
-            Arc::<str>::from(registry_arguments),
-        );
-        let invocation = match self.tools.prepare(request) {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                return Ok(ToolAdmission::RejectedBeforeValidation {
-                    execution: ToolExecutionResult::new(
-                        normalized_tool_failure(call, &error)?,
-                        false,
-                    ),
-                    attempt: ToolCallAttemptIdentity::new(
-                        call.exposed_name().clone(),
-                        Some(self.tool_presentation.digest()),
-                    ),
-                    reason: error.kind(),
-                    detail: error.to_string(),
-                });
-            }
-        };
-        if !self.is_local_composition_invocation(&invocation) {
-            return Err(AgentError::new(
-                AgentErrorKind::Internal,
-                "exec did not resolve to the exact local composition marker binding",
-            ));
-        }
-        let audit_identity = ToolAuditIdentity::from_invocation(&invocation);
-        match self
-            .authorize_tool(command, call, invocation.clone())
-            .await?
-        {
-            AuthorizationOutcome::Authorized(authorized) => {
-                let _ = command.shared.events.publish(
-                    EventContext::call(command.turn_id, attempt_id, call.call_id()),
-                    AgentEventKind::ToolAuthorized {
-                        identity: audit_identity.clone(),
-                        lineage: self.local_composition_marker_lineage(),
-                    },
-                );
-                Ok(ToolAdmission::Admitted {
-                    execution: Box::new(self.admitted_tool_execution(
-                        invocation,
-                        None,
-                        *authorized,
-                    )?),
-                    audit_identity,
-                })
-            }
-            AuthorizationOutcome::Pending(pending) => Ok(ToolAdmission::DecisionRequired {
-                invocation: Box::new(invocation),
-                projection_receipt: None,
-                pending,
-                audit_identity,
-            }),
-            AuthorizationOutcome::Rejected(result) => Ok(ToolAdmission::RejectedAfterValidation {
-                execution: ToolExecutionResult::new(result, false),
-            }),
-        }
     }
 
     /// Admits one call, publishing its authorization with caller lineage.
