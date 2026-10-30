@@ -1,4 +1,4 @@
-//! Supervision polls and the joined-process wait loops.
+//! Supervision polling and the shared joined-process wait loop.
 
 use std::os::unix::process::CommandExt;
 
