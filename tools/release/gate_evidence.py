@@ -60,7 +60,7 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
     "bin/plak/src/tui/ui/pilot_tests.rs": (frozenset({"README.md"}), "a tool-call path fixture"),
     "bin/plak/src/tui/ui/test_support.rs": (frozenset({"README.md"}), "rendered tool output"),
     "crates/core/agent/src/manifest/tests.rs": (frozenset({"README.md"}), "a tool-call path fixture"),
-    "crates/core/agent/src/profile.rs": (frozenset({'"spec"'}), "an expect message"),
+    "crates/core/agent/src/profile/tests.rs": (frozenset({'"spec"'}), "an expect message"),
     "crates/core/tools/src/environment/backend/workspace.rs": (
         frozenset({'"docs"', "*.md", "docs/spec", "docs/spec/*.md", "docs/spec/{a,b}/*.md"}),
         "glob-prefix unit inputs, not repository paths"),
