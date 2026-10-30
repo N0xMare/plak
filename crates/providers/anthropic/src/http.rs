@@ -1,5 +1,8 @@
 //! Anthropic HTTP dialect hooks for the neutral Messages exchange host.
 
+#[cfg(feature = "native-auth")]
+mod compatibility;
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
@@ -550,9 +553,14 @@ fn anthropic_model_error(
     );
     // An input over the window is refused before any inference runs, so it is
     // definite; the runtime compacts and sends a new, smaller request.
-    let (kind, retryability) = if error.is_some_and(MessagesAttemptError::usage_limit)
+    let (kind, retryability) = if error.is_some_and(MessagesAttemptError::compatibility_drift)
         && !hosted_effects_possible
     {
+        (
+            plakous_model::ModelErrorKind::InvalidConfiguration,
+            plakous_model::ModelRetryability::Permanent,
+        )
+    } else if error.is_some_and(MessagesAttemptError::usage_limit) && !hosted_effects_possible {
         (
             plakous_model::ModelErrorKind::QuotaExceeded,
             plakous_model::ModelRetryability::Permanent,
@@ -817,6 +825,16 @@ impl MessagesHttpHooks for AnthropicHttpHooks {
         body: &[u8],
         safety: MessagesHttpSafety,
     ) -> MessagesAttemptProtocolError {
+        #[cfg(feature = "native-auth")]
+        if self.route.is_claude_oauth()
+            && let Some(sent) = self.prepared.dialect().beta_header()
+            && let Some(reason) = compatibility::unknown_beta(metadata.status, body, &sent)
+        {
+            let error = MessagesAttemptProtocolError::new(reason.message("Claude"))
+                .with_compatibility_drift();
+            return ModelHttpStatus::new(metadata.status)
+                .map_or(error.clone(), |status| error.with_http_status(status));
+        }
         let error = classify_provider_error_with_safety(
             Some(metadata.status),
             body,

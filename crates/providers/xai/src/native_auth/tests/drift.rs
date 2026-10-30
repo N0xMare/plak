@@ -1,6 +1,20 @@
 use super::*;
 use plakous_auth::CompatibilityDrift;
 
+#[test]
+fn only_the_documented_426_version_shape_is_compatibility_drift() {
+    let body = br#"{"error":"Your Grok CLI version (0.2.93) is outdated. Please update to version 1.0.13 or later via `grok update` or the installation documentation."}"#;
+    assert_eq!(
+        dispatch::version_gate(426, body),
+        Some(CompatibilityDrift::VersionGate)
+    );
+    assert_eq!(dispatch::version_gate(400, body), None);
+    assert_eq!(
+        dispatch::version_gate(426, br#"{"error":"unrelated refusal"}"#),
+        None
+    );
+}
+
 pub(super) fn oidc_document() -> serde_json::Value {
     let p = XAI_OAUTH;
     let origin = p.auth_origin;

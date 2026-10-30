@@ -91,10 +91,24 @@ pub struct MessagesAttemptProtocolError {
     refusal: Option<MessagesProviderRefusal>,
     context_overflow: bool,
     usage_limit: bool,
+    compatibility_drift: bool,
     exchange_break: ExchangeBreak,
 }
 
 impl MessagesAttemptProtocolError {
+    /// Marks a dialect-proven refusal of its compiled adapter contract.
+    #[must_use]
+    pub const fn with_compatibility_drift(mut self) -> Self {
+        self.compatibility_drift = true;
+        self.refusal = None;
+        self
+    }
+
+    /// Whether the dialect proved a compiled-contract rejection.
+    #[must_use]
+    pub const fn compatibility_drift(&self) -> bool {
+        self.compatibility_drift
+    }
     /// Attaches the redacted physical transport tuple without changing human text.
     #[must_use]
     pub fn with_detail(mut self, detail: impl AsRef<str>) -> Self {
@@ -121,6 +135,7 @@ impl MessagesAttemptProtocolError {
             refusal: None,
             context_overflow: false,
             usage_limit: false,
+            compatibility_drift: false,
             exchange_break: ExchangeBreak::Protocol,
         }
     }
@@ -327,6 +342,15 @@ impl MessagesAttemptError {
     pub const fn usage_limit(&self) -> bool {
         match self {
             Self::Protocol { source, .. } => source.usage_limit(),
+            _ => false,
+        }
+    }
+
+    /// Whether a dialect proved that its compiled adapter contract was refused.
+    #[must_use]
+    pub const fn compatibility_drift(&self) -> bool {
+        match self {
+            Self::Protocol { source, .. } => source.compatibility_drift(),
             _ => false,
         }
     }

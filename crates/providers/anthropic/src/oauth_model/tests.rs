@@ -1474,6 +1474,64 @@ async fn a_second_physical_dispatch_requires_a_second_inference_permit() {
 }
 
 #[tokio::test]
+async fn production_unknown_sent_beta_is_single_dispatch_permanent_configuration_drift() {
+    let temp = tempfile::tempdir().unwrap();
+    let refusal = local_response(
+        400,
+        "application/json",
+        r#"{"type":"error","error":{"type":"invalid_request_error","message":"Unexpected value(s) `effort-2025-11-24` for the `anthropic-beta` header. Please consult our documentation at docs.claude.com or try again without the header."}}"#,
+    );
+    let (client, origin, peer) = local_peer(vec![refusal]).await;
+    let gate = inference_gate(2);
+    let manager = manager_with_client(private_store(&temp), client.clone())
+        .with_subscription_request_gate(gate.clone());
+    manager
+        .persist_test_grant(
+            "offline-access",
+            "offline-refresh",
+            3600,
+            CLAUDE_OAUTH_INFERENCE_SCOPE,
+        )
+        .unwrap();
+    let failure = timeout(
+        Duration::from_secs(5),
+        start_local_model(manager, client, origin, false),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    let model = failure.downcast_ref::<ModelError>().expect("model failure");
+    assert_eq!(model.kind(), ModelErrorKind::InvalidConfiguration);
+    assert_eq!(
+        model.context().expect("failure context").retryability(),
+        plakous_model::ModelRetryability::Permanent
+    );
+    assert!(model.to_string().contains("install a newer build"));
+    assert_eq!(
+        timeout(Duration::from_secs(5), peer)
+            .await
+            .unwrap()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        gate.snapshot()
+            .unwrap()
+            .class(SubscriptionRequestClass::Inference)
+            .dispatched(),
+        1
+    );
+    assert_eq!(
+        gate.snapshot()
+            .unwrap()
+            .class(SubscriptionRequestClass::AuthRefresh)
+            .reserved(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn production_oauth_turn_retries_local_429_with_fresh_inference_permit() {
     let temp = tempfile::tempdir().unwrap();
     let refusal = local_response(

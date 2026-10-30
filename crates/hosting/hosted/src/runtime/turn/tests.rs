@@ -696,6 +696,19 @@ fn operator_facing_render_does_not_call_a_request_id_429_a_rate_limit() {
 
 /// Typed quota exhaustion renders the quota category, not a generic 429.
 #[test]
+fn contract_drift_does_not_claim_a_credential_was_refused() {
+    let reason = "provider rejected the compiled client version; this build's subscription contract is out of date; install a newer build";
+    let rendered = operator_facing_render(
+        reason.into(),
+        Some(plakous::model::ModelErrorKind::InvalidConfiguration),
+        None,
+    );
+    assert_eq!(rendered, reason);
+    assert!(!rendered.contains("credential"));
+    assert!(!rendered.contains("reauthentication"));
+}
+
+#[test]
 fn operator_facing_render_reports_typed_quota_exhaustion() {
     let rendered = operator_facing_render(
         "agent turn failed: provider refused the request".to_owned(),

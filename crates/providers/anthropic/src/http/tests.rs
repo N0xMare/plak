@@ -16,6 +16,36 @@ use plakous_http::{
 use super::{anthropic_model_error, classify_messages_attempt_failure, transport_error};
 
 #[test]
+fn proved_contract_drift_is_permanent_configuration_drift_not_a_login_or_request_retry()
+-> Result<(), Box<dyn std::error::Error>> {
+    let descriptor = ResolvedModelDescriptor::new(
+        &plakous_model::StandardIntegrationAuthority::release_owned(),
+        ProtocolId::new("anthropic.messages")?,
+        RouteId::new("anthropic.claude_oauth")?,
+        ModelId::new("claude-sonnet-5")?,
+        None,
+        None,
+        ModelAdapterProfileId::new("anthropic.claude.oauth.test")?,
+        CapabilitySet::new(BTreeMap::new(), BTreeMap::new()),
+    );
+    let message = "this build's Claude contract is out of date; install a newer build";
+    let attempt = MessagesAttemptError::protocol(
+        MessagesAttemptProtocolError::new(message)
+            .with_compatibility_drift()
+            .with_http_status(ModelHttpStatus::new(400)?),
+        TerminalFacts::preacceptance_test(),
+    );
+    let failure = anthropic_model_error(&descriptor, Some(&attempt), message);
+    assert_eq!(failure.kind(), ModelErrorKind::InvalidConfiguration);
+    assert_eq!(
+        failure.context().ok_or("context absent")?.retryability(),
+        ModelRetryability::Permanent
+    );
+    assert!(failure.to_string().contains("install a newer build"));
+    Ok(())
+}
+
+#[test]
 fn user_cancel_after_accept_is_cancelled_not_outcome_unknown() {
     for (acceptance, message) in [
         (

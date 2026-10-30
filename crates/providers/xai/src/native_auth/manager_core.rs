@@ -736,7 +736,11 @@ impl ManagerCore {
         } else {
             self.execute(request).await?
         };
-
+        if endpoint.path == CATALOG_PATH
+            && let Some(reason) = super::dispatch::version_gate(status.as_u16(), &response)
+        {
+            return Err(XaiNativeAuthError::CompatibilityDrift(reason));
+        }
         if status != StatusCode::OK {
             return Err(status_error(status));
         }

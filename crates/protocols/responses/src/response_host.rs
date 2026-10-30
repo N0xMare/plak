@@ -425,6 +425,8 @@ impl ResponsesUsage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResponsesProviderErrorClass {
+    /// Exact body shape of a compiled-client version rejection (HTTP 426 only).
+    ClientVersion,
     /// The selected route was not authorized.
     Authentication,
     /// The selected route exhausted a provider quota.

@@ -472,6 +472,9 @@ pub(crate) fn parse_provider_error_with_canonical_type(
                     _ => ResponsesProviderErrorClass::Unknown,
                 },
             },
+            ResponsesProviderErrorPolicy::Grok if grok_version_gate_message(value) => {
+                ResponsesProviderErrorClass::ClientVersion
+            }
             ResponsesProviderErrorPolicy::Grok => match (kind.as_deref(), code.as_deref()) {
                 // xAI's usage-guideline check answers HTTP 403 with exactly
                 // this code and a refusal sentence before any generation;
@@ -497,6 +500,31 @@ pub(crate) fn parse_provider_error_with_canonical_type(
         request_id: None,
         class,
         native: value.clone(),
+    })
+}
+
+fn grok_version_gate_message(value: &Value) -> bool {
+    let Some(message) = value.get("error").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(rest) = message.strip_prefix("Your Grok CLI version (") else {
+        return false;
+    };
+    let Some((served, required)) = rest.split_once(") is outdated. Please update to version ")
+    else {
+        return false;
+    };
+    let Some(required) =
+        required.strip_suffix(" or later via `grok update` or the installation documentation.")
+    else {
+        return false;
+    };
+    [served, required].iter().all(|version| {
+        let parts: Vec<_> = version.split('.').collect();
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
     })
 }
 

@@ -3954,6 +3954,29 @@ retain typed endpoint/scope/signing reasons through the facade, with the newer
 build remedy rather than a re-login loop. Existing valid logins are not made
 dependent on fresh discovery; there is no discovery polling or persisted drift.
 
+Inference and catalog version rejection is classified only from reviewed response
+shapes. Grok's HTTP 426 JSON `error` must match ``Your Grok CLI version (<version>)
+is outdated. Please update to version <version> or later via `grok update` or
+the installation documentation.`` (reported verbatim in
+`kittors/CliRelay` issue 1123 and `AuuCoder/NovaApi` issue 1). It is a permanent
+invalid-configuration `VersionGate`, with the install-newer-build remedy; the advertised
+version is never installed or sent. Other statuses or messages keep their
+existing classification. No Codex inference-time version gate is proven, so
+none is classified.
+
+Claude's `UnknownBeta` requires HTTP 400, `error.type=invalid_request_error`,
+the stable ``Unexpected value(s) ... for the `anthropic-beta` header`` wording,
+and a backtick-quoted beta value actually sent by that frozen request. The
+documentation URL suffix is not matched. This shape is documented by Anthropic's
+`anthropics/skills`, `skills/claude-api/shared/error-codes.md`; applying the API
+shape to the subscription route is inferred from their shared `/v1/messages`
+endpoint, not live-probed evidence. It can mean an unknown beta or one not
+enabled for that organization; the client does not guess which. This is a
+permanent invalid-configuration refusal with the newer-build remedy, never a retry with
+betas removed. Unsent values, other 400s and attestation errors retain the
+existing error path. The shared Messages failure carries a neutral typed
+contract-refusal flag; it does not parse diagnostic strings to recover it.
+
 `plakous-auth` owns provider-neutral authentication scaffolding: bounded,
 zeroizing response-body pulls, media-type recognition, unvalidated audience
 and subject claim shapes (in the claimed-HTTP orchestrator module, not the

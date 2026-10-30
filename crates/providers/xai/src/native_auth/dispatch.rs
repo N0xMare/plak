@@ -1,5 +1,20 @@
 //! Provider-specific request preflight and response-head guard ownership.
 
+pub(super) fn version_gate(status: u16, body: &[u8]) -> Option<plakous_auth::CompatibilityDrift> {
+    if status != 426 || body.len() > super::MAX_AUTH_BODY_BYTES {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let error = plakous_responses::parse_provider_error_with_policy(
+        &value,
+        plakous_responses::ResponsesResponseLimits::default(),
+        plakous_responses::ResponsesProviderErrorPolicy::Grok,
+    )
+    .ok()?;
+    (error.class() == plakous_responses::ResponsesProviderErrorClass::ClientVersion)
+        .then_some(plakous_auth::CompatibilityDrift::VersionGate)
+}
+
 #[cfg(test)]
 use super::{Arc, SubscriptionRequestGate};
 

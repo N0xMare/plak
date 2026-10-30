@@ -43,6 +43,15 @@ retry; use `plak status`, `plak models <account>` and the reported remedy.
 Cached catalogs can avoid a network lookup. Claude subscription models use a
 pinned local catalog, so they do not make a startup catalog GET.
 
+## `this build's contract is out of date`
+
+`<reason>; this build's <route> contract is out of date; install a newer build`
+means the provider's contract no longer matches this build's compiled pins.
+It can appear on an unavailable picker row, during login, or during a turn.
+Install a newer build; logging in again or refreshing the same credential
+does not repair contract drift. Other subscription failures keep their own
+reported remedy; not every failure calls for login or refresh.
+
 ## `model refused the request`
 
 The model declined the request; this is not a login or refresh failure.
@@ -544,10 +553,12 @@ you to run a command that needs the invalid configuration to parse first.
 
 ## `… is signed out; run …` and other subscription remedies
 
-Subscription failures exit 3 and end with the command that repairs them. A
+Subscription setup and model-admission failures exit 3 and name their remedy. A
 signed-out, revoked or quarantined credential needs `plak login <account>`; a
 credential that needs a refresh names `plak refresh <account>` first. Catalog
-or token failures caused by the network say to check it and retry.
+or token failures caused by the network say to check it and retry. Contract
+drift calls for a newer build, not another login; a turn-time contract refusal
+is an agent failure (exit 5 in `plak run`) with that same newer-build remedy.
 
 ## `plak mcp login` finds no authorization metadata
 
@@ -570,7 +581,8 @@ Codex and Grok subscription models are admitted from a catalog read that is
 valid for 6 hours. A root turn or a child agent that runs longer (for example a
 root waiting on children) continues on a fresh read of the same model between
 model calls, with no action from you. It stops with this message, before
-anything is sent, only when that fresh read could not be used: a signed-out or
+anything is sent, only when that fresh read could not be used. Follow its
+specific reason: contract drift needs a newer build, while a signed-out or
 quarantined credential names `plak login codex`, `grok`, or `claude`. A same-account
 Claude login preserves the session binding; retry the prompt or `/attach`.
 Another account or a changed model binding refuses exact reopen: restore the
@@ -585,7 +597,7 @@ same account. Re-login cannot restore that old selection: use `/reload` or
 is attached; an unattached session with history refuses it and needs the carry.
 `plak doctor` and `plak status` show the sanitized last refresh failure with its
 time and credential generation; no raw response body or token is retained.
-After fixing the login, retry the prompt: it reads the catalog afresh rather
+After following the reported remedy, retry the prompt: it reads the catalog afresh rather
 than reusing the read that was refused.
 
 ## `the <account> compatibility notice needs an answer on stdin and none came`

@@ -10,6 +10,62 @@ use plakous_model::{
 use super::*;
 
 #[test]
+fn grok_exact_426_version_gate_is_permanent_configuration_drift_without_adopting_the_required_version()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/grok-client-version-gate.json"
+    ))?;
+    for policy in [
+        crate::ResponsesProviderErrorPolicy::Grok,
+        crate::ResponsesProviderErrorPolicy::OpenAiCompatible,
+    ] {
+        let provider = crate::parse_provider_error_with_policy(
+            &fixture,
+            crate::ResponsesResponseLimits::default(),
+            policy,
+        )?;
+        for status in [426, 400] {
+            let error = model_error_from_attempt(
+                ResponsesAttemptError::HttpStatus {
+                    retry_after: None,
+                    retry_disabled: false,
+                    physical: None,
+                    status: StatusCode::from_u16(status)?,
+                    class: ResponsesHttpStatusClass::Rejected,
+                    provider: Some(provider.clone()),
+                    facts: TerminalFacts::preacceptance_test(),
+                },
+                &descriptor()?,
+                None,
+                &StreamProgress::new(Instant::now()),
+            );
+            if status == 426 && policy == crate::ResponsesProviderErrorPolicy::Grok {
+                assert_eq!(error.kind(), ModelErrorKind::InvalidConfiguration);
+                assert_eq!(
+                    error.context().ok_or("missing context")?.retryability(),
+                    ModelRetryability::Permanent
+                );
+                assert!(error.to_string().contains("install a newer build"));
+                assert!(!error.to_string().contains("1.0.13"));
+            } else {
+                assert_ne!(error.kind(), ModelErrorKind::Authentication);
+            }
+        }
+    }
+    let unrelated = serde_json::json!({"error":"upgrade your account"});
+    let provider = crate::parse_provider_error_with_policy(
+        &unrelated,
+        crate::ResponsesResponseLimits::default(),
+        crate::ResponsesProviderErrorPolicy::Grok,
+    )?;
+    assert_eq!(
+        provider.class(),
+        crate::ResponsesProviderErrorClass::Unknown
+    );
+    Ok(())
+}
+
+#[test]
 fn codex_usage_limit_is_terminal_and_carries_reset_without_provider_prose()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture: serde_json::Value = serde_json::from_slice(include_bytes!(

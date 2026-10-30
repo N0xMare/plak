@@ -436,8 +436,8 @@ feature-ceiling = 65
 reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]
-feature-ceiling = 22
-reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+feature-ceiling = 23
+reason = "Existing placement debt plus the native-auth-only beta classifier and its HTTP hook; API-key-only builds do not link subscription auth."
 
 [workspace.metadata.plakous.cfg.plakous-auth]
 feature-ceiling = 18

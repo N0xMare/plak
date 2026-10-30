@@ -70,6 +70,13 @@ impl ResponsesAttemptError {
         };
         let retryability = retryability_from_facts(self.facts(), self.retry_class());
         let kind = match class {
+            _ if status.as_u16() == 426
+                && provider.as_ref().is_some_and(|error| {
+                    error.class() == crate::ResponsesProviderErrorClass::ClientVersion
+                }) =>
+            {
+                ModelErrorKind::InvalidConfiguration
+            }
             ResponsesHttpStatusClass::Authentication => ModelErrorKind::Authentication,
             ResponsesHttpStatusClass::Authorization
                 if provider.as_ref().is_some_and(|provider| {
@@ -96,12 +103,13 @@ impl ResponsesAttemptError {
             ResponsesHttpStatusClass::Server => ModelErrorKind::Unavailable,
             ResponsesHttpStatusClass::Unknown => ModelErrorKind::Protocol,
         };
-        // A terminal credential rejection needs new credentials, and a
-        // content refusal a different request, not a caller retry of the
-        // exhausted attempt.
+        // A terminal credential rejection needs new credentials, contract
+        // drift a new build, and a content refusal a different request.
         let retryability = if matches!(
             kind,
-            ModelErrorKind::Authentication | ModelErrorKind::Policy
+            ModelErrorKind::Authentication
+                | ModelErrorKind::InvalidConfiguration
+                | ModelErrorKind::Policy
         ) && retryability == ModelRetryability::Exhausted
         {
             ModelRetryability::Permanent
@@ -1269,7 +1277,15 @@ fn contextual_http_error(
     status: u16,
     provider: Option<crate::ResponsesProviderError>,
 ) -> ModelError {
-    let message = responses_http_error_message(provider.as_ref());
+    let message = if status == 426
+        && provider
+            .as_ref()
+            .is_some_and(|error| error.class() == crate::ResponsesProviderErrorClass::ClientVersion)
+    {
+        "provider rejected the compiled client version; this build's subscription contract is out of date; install a newer build".to_owned()
+    } else {
+        responses_http_error_message(provider.as_ref())
+    };
     let Some(mut context) = ModelErrorContext::new(
         descriptor.protocol().clone(),
         descriptor.route().clone(),
@@ -1352,7 +1368,11 @@ fn provider_terminal_error(
         {
             ModelErrorKind::Policy
         }
-        Some(crate::ResponsesProviderErrorClass::Unknown) | None => ModelErrorKind::Protocol,
+        Some(
+            crate::ResponsesProviderErrorClass::Unknown
+            | crate::ResponsesProviderErrorClass::ClientVersion,
+        )
+        | None => ModelErrorKind::Protocol,
     };
     let retryability = retryability_from_facts(facts, RetryClass::Never);
     let message = match provider.and_then(operator_provider_detail) {
