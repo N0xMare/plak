@@ -2805,10 +2805,10 @@ tests pin each family:
   stream cut after a local tool call began discards the partial and replays; the budget ends on the
   fourth failure; cancellation during the wait sends nothing more; and the
   shared model host restarts a discarded response.
-- Messages, `plakous-anthropic`: in `model_tests.rs`, a peer that reads the
+- Messages, `plakous-anthropic`: in `model/tests.rs`, a peer that reads the
   request and drops TLS without `close_notify` is replayed for an API-key turn,
   a truncated stream and an accepted stream that only refuses are replayed, and
-  four 429s spend the budget with markers 2/4 to 4/4; in `oauth_model.rs`, the
+  four 429s spend the budget with markers 2/4 to 4/4; in `oauth_model/tests.rs`, the
   same drop is replayed for a Claude OAuth turn and never for a session workflow
   (compaction); in `tests/local_transport.rs`, the drop is replayed for a
   cost-only request and never for a hosted programmatic-tool (server-effect)
