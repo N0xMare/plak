@@ -139,6 +139,7 @@ impl NativeSubscriptions {
             .map_err(map_claude_error)?
             .into_iter()
             .map(|entry| NativeModelSummary {
+                unavailable_reason: None,
                 exact_id: entry.exact_id().to_owned(),
                 visibility: NativeModelVisibility::List,
                 native_tool_mode: None,

@@ -27,6 +27,16 @@ pub fn list_models(
         ));
     }
     for model in models {
+        if let Some(reason) = &model.unavailable_reason {
+            writeln!(
+                stdout,
+                "{}\tvisibility={}\tunavailable={reason}",
+                model.exact_id,
+                native_visibility_label(model.visibility)
+            )
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+            continue;
+        }
         writeln!(
             stdout,
             "{}\tvisibility={}\ttool_mode={}\tstreaming={}\ttools={}\treasoning={}\tefforts={}\tcontext_length={}",

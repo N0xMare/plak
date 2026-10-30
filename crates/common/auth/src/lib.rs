@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 mod binding;
+mod compatibility;
 mod credential;
 #[cfg(feature = "jwt")]
 mod jwt_crypto;
@@ -45,6 +46,7 @@ pub mod oauth_workflow;
 pub mod subscription_limit;
 
 pub use binding::*;
+pub use compatibility::CompatibilityDrift;
 pub use credential::*;
 pub use private_store::*;
 pub use secret::*;

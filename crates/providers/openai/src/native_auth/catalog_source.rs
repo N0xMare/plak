@@ -1,5 +1,6 @@
 //! The shared catalog inputs of a resolver and its models.
 
+use super::catalog::{contract_drift, raw_contract_drift};
 use super::{
     ACCESS_REFRESH_SKEW, Arc, BTreeMap, BTreeSet, CATALOG_TTL_SECONDS,
     CODEX_NATIVE_COMPACTION_NAMESPACE, Capability, CapabilityConstraints, CapabilitySet,
@@ -185,13 +186,26 @@ impl CodexCatalogSource {
             .collect::<BTreeSet<_>>();
         let mut entries = Vec::new();
         let mut descriptors = BTreeMap::new();
+        let mut drifted_models = BTreeMap::new();
+        let mut drifted_visibility = BTreeMap::new();
         for raw in document.models {
             let Ok(model) = parse_catalog_json::<CatalogModelWire>(raw.get().as_bytes()) else {
-                continue;
-            };
-            let Some(visibility) = model.visibility.recognized() else {
-                // Visibility is a required closed enum in the pinned reference
-                // client. An unknown row is observational only, never executable.
+                if let Ok(row) = parse_catalog_json::<CatalogSlug>(raw.get().as_bytes())
+                    && executable_codex_catalog_model(&row.slug)
+                    && !ambiguous_slugs.contains(&row.slug)
+                    && let Some(reason) = raw_contract_drift(raw.get(), &row.slug)
+                {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw.get())
+                        && let Some(value) = value.get("visibility")
+                        && let Ok(visibility) = serde_json::from_value::<
+                            super::catalog::CatalogVisibility,
+                        >(value.clone())
+                        && let Some(visibility) = visibility.recognized()
+                    {
+                        drifted_visibility.insert(row.slug.clone(), visibility);
+                    }
+                    drifted_models.insert(row.slug, reason);
+                }
                 continue;
             };
             if ambiguous_slugs.contains(&model.slug)
@@ -200,6 +214,16 @@ impl CodexCatalogSource {
             {
                 continue;
             }
+            if let Some(reason) = contract_drift(&model) {
+                if let Some(visibility) = model.visibility.recognized() {
+                    drifted_visibility.insert(model.slug.clone(), visibility);
+                }
+                drifted_models.insert(model.slug.clone(), reason);
+                continue;
+            }
+            let Some(visibility) = model.visibility.recognized() else {
+                continue;
+            };
             let Ok(capacity_facts) = CodexCatalogCapacityFacts::from_wire(&model) else {
                 continue;
             };
@@ -425,6 +449,9 @@ impl CodexCatalogSource {
         }
         entries.sort_by_key(CodexCatalogEntry::priority);
         if entries.is_empty() {
+            if let Some((_, reason)) = drifted_models.into_iter().next() {
+                return Err(NativeCodexAuthError::CompatibilityDrift(reason));
+            }
             return Err(NativeCodexAuthError::Catalog);
         }
         Ok(ResolvedCatalog {
@@ -432,6 +459,8 @@ impl CodexCatalogSource {
                 entries,
                 profile_id: OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
                 source_revision: crate::config::OPENAI_CODEX_CATALOG_SOURCE_REVISION,
+                drifted_models,
+                drifted_visibility,
             },
             descriptors,
             ambiguous_slugs,

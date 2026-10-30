@@ -154,7 +154,16 @@ impl CodexModelResolver {
                 .map_err(|_| NativeCodexAuthError::Coordination)? = None;
             return Err(error);
         }
-        let resolved = self.fetch_catalog().await?;
+        let resolved = match self.fetch_catalog().await {
+            Err(error @ NativeCodexAuthError::CompatibilityDrift(_)) => {
+                *self
+                    .catalog
+                    .lock()
+                    .map_err(|_| NativeCodexAuthError::Coordination)? = None;
+                return Err(error);
+            }
+            result => result?,
+        };
         self.manager.validate_profile_admission()?;
         if let Err(error) = self.validate_route_account() {
             *self
@@ -242,6 +251,9 @@ impl CodexModelResolver {
             .map_err(|_| NativeCodexAuthError::Coordination)?;
         let catalog = catalog.as_ref().ok_or(NativeCodexAuthError::Catalog)?;
         self.validate_catalog_fence(&catalog.credential_fence)?;
+        if let Some(reason) = catalog.public.drifted_models.get(model_id) {
+            return Err(NativeCodexAuthError::CompatibilityDrift(reason.clone()));
+        }
         if catalog.ambiguous_slugs.contains(model_id) {
             return Err(NativeCodexAuthError::Catalog);
         }

@@ -2151,6 +2151,13 @@ profile acceptance. Missing, revoked, quarantined and unsupported credentials
 fail without a consent prompt or catalog request; a refresh-required credential
 may proceed through acceptance and refresh.
 
+Contract-drift rows retain provider visibility: hidden rows do not become picker
+choices. Listed refused rows show their exact unavailable reason in the picker
+and an `unavailable=<reason>` column in `plak models`. `plak run --model <id>`
+and continuation refuse a drifted row with Auth-class exit 3 and that reason
+before checking effort or composition, with the newer-build remedy rather than
+a re-login hint.
+
 Two hidden forms exist for `/reload` only and are not in help:
 `plak version --state-key` prints this build's state key, and
 `plak --import-resume <file>` imports an export document and opens the TUI on

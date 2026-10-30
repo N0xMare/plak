@@ -115,7 +115,7 @@ fn stored_credential_matrix_is_consistent_and_never_loops() {
             let read = match fixture {
                 Ok(state) => Ok(*state),
                 Err(OfflineReadError::Subscription(error)) => {
-                    Err(OfflineReadError::Subscription(*error))
+                    Err(OfflineReadError::Subscription(error.clone()))
                 }
                 Err(OfflineReadError::Execution) => Err(OfflineReadError::Execution),
             };
@@ -237,11 +237,11 @@ fn no_remedy_names_the_logout_or_refresh_that_produced_it() {
             NativeProvider::Xai,
             NativeProvider::Claude,
         ] {
-            let message = native_subscription_failure(error, Some(provider), state)
+            let message = native_subscription_failure(error.clone(), Some(provider), state)
                 .message()
                 .to_owned();
             assert!(!message.contains("plak refresh"), "{error:?}: {message}");
-            if let Err(error) = revocation_from(Err(error)) {
+            if let Err(error) = revocation_from(Err(error.clone())) {
                 assert!(!message.contains("plak logout"), "{error:?}: {message}");
             }
         }

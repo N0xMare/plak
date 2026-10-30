@@ -1,5 +1,8 @@
 //! Authenticated Codex model catalog shapes, parsing and release enrollment.
 
+mod drift;
+pub(super) use drift::{contract_drift, raw_contract_drift};
+
 use super::{
     BTreeMap, BTreeSet, CODEX_REFERENCE_CAPACITY_REVISION, CODEX_REFERENCE_MEASUREMENT_REVISION,
     CapacityCertificate, CapacityRule, ContextContract, ContextEvidenceSource,
@@ -375,9 +378,22 @@ pub struct CodexModelCatalog {
     pub(super) entries: Vec<CodexCatalogEntry>,
     pub(super) profile_id: &'static str,
     pub(super) source_revision: &'static str,
+    pub(super) drifted_models: BTreeMap<String, plakous_auth::CompatibilityDrift>,
+    pub(super) drifted_visibility: BTreeMap<String, CodexCatalogVisibility>,
 }
 
 impl CodexModelCatalog {
+    /// Provider-authored visibility of a refused row, if recognized.
+    #[must_use]
+    pub fn drifted_visibility(&self, model: &str) -> Option<CodexCatalogVisibility> {
+        self.drifted_visibility.get(model).copied()
+    }
+
+    /// Contract-bearing refusals for exact enrolled rows; never persisted.
+    #[must_use]
+    pub fn drifted_models(&self) -> &BTreeMap<String, plakous_auth::CompatibilityDrift> {
+        &self.drifted_models
+    }
     /// Returns catalog entries in backend order.
     #[must_use]
     pub fn entries(&self) -> &[CodexCatalogEntry] {
@@ -742,6 +758,8 @@ pub(super) const fn default_catalog_effective_context_window_percent() -> i64 {
 #[derive(Deserialize)]
 pub(super) struct CatalogModelWire {
     pub(super) slug: String,
+    #[serde(default)]
+    pub(super) minimal_client_version: Option<String>,
     pub(super) visibility: CatalogVisibility,
     pub(super) priority: i32,
     pub(super) supported_in_api: bool,

@@ -137,6 +137,8 @@ fn refusal(provider: NativeProvider, kind: NativeSubscriptionError) -> ModelRere
         _ => ("xAI", "grok"),
     };
     ModelReresolutionError::new(match kind {
+        #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+        NativeSubscriptionError::CompatibilityDrift { .. } => kind.to_string(),
         NativeSubscriptionError::ReresolutionBindingChanged => format!(
             "fresh {label} resolution changed the selected login, account or model semantics; \
              rebind with Fork now in the Agents tab, or start a new session"

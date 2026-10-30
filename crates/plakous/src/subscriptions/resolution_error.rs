@@ -33,7 +33,7 @@ impl NativeModelResolutionError {
 
     /// Returns the underlying subscription failure kind.
     #[must_use]
-    pub const fn kind(&self) -> NativeSubscriptionError {
-        self.kind
+    pub fn kind(&self) -> NativeSubscriptionError {
+        self.kind.clone()
     }
 }

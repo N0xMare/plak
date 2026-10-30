@@ -107,6 +107,7 @@ fn persisted_catalog_from_models(
         expires_at_unix,
         models: models
             .iter()
+            .filter(|model| model.unavailable_reason().is_none())
             .map(|model| PersistedNativeModelSummary {
                 exact_id: model.exact_id().to_owned(),
                 visibility: persisted_visibility(model.visibility()),
@@ -142,6 +143,7 @@ fn native_catalog_from_persisted(
         .models
         .into_iter()
         .map(|model| NativeModelSummary {
+            unavailable_reason: None,
             exact_id: model.exact_id,
             visibility: facade_persisted_visibility(model.visibility),
             native_tool_mode: model.native_tool_mode.map(facade_persisted_tool_mode),

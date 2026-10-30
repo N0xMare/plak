@@ -18,6 +18,46 @@ use plakous_hosted::runtime as product_host;
 use std::env;
 use std::{io, sync::Arc};
 
+fn require_available_model(model: &crate::presentation::CliModelSummary) -> CliResult<()> {
+    if let Some(reason) = &model.unavailable_reason {
+        return Err(CliFailure::classified(CliFailureKind::Auth, reason.clone()));
+    }
+    Ok(())
+}
+
+fn run_effort(
+    model: &crate::presentation::CliModelSummary,
+    effort: Option<ReasoningEffort>,
+) -> CliResult<Option<ReasoningEffort>> {
+    require_available_model(model)?;
+    let id = &model.exact_id;
+    if model.reasoning_efforts.is_empty() {
+        if effort.is_some() {
+            return Err(CliFailure::classified(
+                CliFailureKind::Usage,
+                format!("model `{id}` does not admit a reasoning effort"),
+            ));
+        }
+        return Ok(None);
+    }
+    let effort = effort.ok_or_else(|| {
+        CliFailure::classified(
+            CliFailureKind::Usage,
+            format!(
+                "model `{id}` is a reasoning model and needs an explicit effort: --effort <{}>",
+                plakous_hosted::effort::levels_pipe_list()
+            ),
+        )
+    })?;
+    if !model.reasoning_efforts.contains(&effort) {
+        return Err(CliFailure::classified(
+            CliFailureKind::Usage,
+            "effort is absent from the authenticated model catalog",
+        ));
+    }
+    Ok(Some(effort))
+}
+
 impl PlakousApplication {
     #[allow(
         clippy::too_many_arguments,
@@ -110,32 +150,7 @@ impl PlakousApplication {
                     ),
                 )
             })?;
-        let selected_effort = if catalog_entry.reasoning_efforts.is_empty() {
-            if effort.is_some() {
-                return Err(CliFailure::classified(
-                    CliFailureKind::Usage,
-                    format!("model `{model}` does not admit a reasoning effort"),
-                ));
-            }
-            None
-        } else {
-            let effort = effort.ok_or_else(|| {
-                CliFailure::classified(
-                    CliFailureKind::Usage,
-                    format!(
-                        "model `{model}` is a reasoning model and needs an explicit effort: --effort <{}>",
-                        plakous_hosted::effort::levels_pipe_list()
-                    ),
-                )
-            })?;
-            if !catalog_entry.reasoning_efforts.contains(&effort) {
-                return Err(CliFailure::classified(
-                    CliFailureKind::Usage,
-                    "effort is absent from the authenticated model catalog",
-                ));
-            }
-            Some(effort)
-        };
+        let selected_effort = run_effort(catalog_entry, effort)?;
         if priority_requested
             && !catalog_entry
                 .service_tiers
@@ -401,6 +416,7 @@ impl PlakousApplication {
                     "model is absent from the authenticated native catalog",
                 )
             })?;
+        require_available_model(catalog_entry)?;
         if catalog_entry.reasoning_efforts.is_empty() {
             if effort_explicit {
                 return Err(CliFailure::new(

@@ -4,9 +4,22 @@ use super::NativeProvider;
 use plakous_model::ProviderConfigurationError;
 
 /// Redaction-safe failure from the curated subscription facade.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum NativeSubscriptionError {
+    /// A served contract-bearing fact disagrees with this route's compiled pins.
+    #[cfg(any(
+        feature = "codex",
+        feature = "grok",
+        feature = "claude",
+        feature = "auth"
+    ))]
+    CompatibilityDrift {
+        /// Exact subscription route, never an API-key fallback.
+        provider: NativeProvider,
+        /// Credential-free mismatch; never an adaptive replacement value.
+        reason: plakous_auth::CompatibilityDrift,
+    },
     /// The exact requested subscription route was not compiled.
     NotCompiled(NativeProvider),
     /// The explicit state root or fixed descendant layout is unsafe.
@@ -110,6 +123,15 @@ pub enum NativeSubscriptionError {
 
 impl fmt::Display for NativeSubscriptionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[cfg(any(
+            feature = "codex",
+            feature = "grok",
+            feature = "claude",
+            feature = "auth"
+        ))]
+        if let Self::CompatibilityDrift { provider, reason } = self {
+            return formatter.write_str(&reason.message(provider.as_str()));
+        }
         if let Self::ModelLookup {
             attempts, cause, ..
         } = self
@@ -127,7 +149,13 @@ impl fmt::Display for NativeSubscriptionError {
         if let Self::Transport(Some(cause)) = self {
             return write!(formatter, "native subscription transport failed: {cause}");
         }
-        formatter.write_str(match self {
+        formatter.write_str(self.label())
+    }
+}
+
+impl NativeSubscriptionError {
+    fn label(&self) -> &'static str {
+        match self {
             Self::NotCompiled(_) => "native subscription route is not included in this build",
             Self::UnsafeStorage => "native subscription storage is unsafe",
             Self::CredentialProfileChanged => {
@@ -207,7 +235,14 @@ impl fmt::Display for NativeSubscriptionError {
             Self::ModelLookup { .. } => unreachable!("handled above"),
             Self::Transport(_) => "native subscription transport failed",
             Self::Internal => "native subscription operation failed internally",
-        })
+            #[cfg(any(
+                feature = "codex",
+                feature = "grok",
+                feature = "claude",
+                feature = "auth"
+            ))]
+            Self::CompatibilityDrift { .. } => unreachable!("handled above"),
+        }
     }
 }
 

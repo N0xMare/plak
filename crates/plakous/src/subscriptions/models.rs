@@ -10,6 +10,7 @@ use super::{Error, ModelId, NativeProvider, ReasoningEffort, fmt};
 /// provider-native API.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeModelSummary {
+    pub(super) unavailable_reason: Option<String>,
     pub(super) exact_id: String,
     pub(super) visibility: NativeModelVisibility,
     pub(super) native_tool_mode: Option<NativeToolMode>,
@@ -51,6 +52,32 @@ impl NativeServiceTierSummary {
 }
 
 impl NativeModelSummary {
+    /// A live contract refusal for this row; never stored in the catalog cache.
+    #[must_use]
+    pub fn unavailable_reason(&self) -> Option<&str> {
+        self.unavailable_reason.as_deref()
+    }
+
+    #[cfg(feature = "codex")]
+    pub(super) fn unavailable(
+        exact_id: String,
+        visibility: NativeModelVisibility,
+        reason: String,
+    ) -> Self {
+        Self {
+            exact_id,
+            unavailable_reason: Some(reason),
+            visibility,
+            native_tool_mode: None,
+            streaming: false,
+            tools: false,
+            reasoning_efforts: Vec::new(),
+            default_reasoning_effort: None,
+            service_tiers: Vec::new(),
+            default_service_tier: None,
+            reported_context_length: None,
+        }
+    }
     /// Returns the exact authenticated catalog identifier, never an alias.
     #[must_use]
     pub fn exact_id(&self) -> &str {

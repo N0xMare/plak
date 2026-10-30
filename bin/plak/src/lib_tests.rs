@@ -121,6 +121,23 @@ fn exit_codes_match_the_documented_classification() {
     );
 }
 
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+#[test]
+fn native_contract_drift_is_auth_exit_three_without_relogin_advice() {
+    let error = NativeSubscriptionError::CompatibilityDrift {
+        provider: NativeProvider::Codex,
+        reason: plakous::subscriptions::CompatibilityDrift::GrantedScope,
+    };
+    let failure = native_subscription_failure(
+        error,
+        Some(NativeProvider::Codex),
+        Path::new("/nonexistent-plak-state"),
+    );
+    assert_eq!(failure.exit_code(), 3);
+    assert!(failure.to_string().contains("install a newer build"));
+    assert!(!failure.to_string().contains("plak login"));
+}
+
 #[test]
 fn native_subscription_failures_name_their_repair_and_class() {
     let state = Path::new("/nonexistent-plak-state");
@@ -1818,6 +1835,7 @@ fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inferenc
     backend.credential = CredentialState::Ready;
     backend.model_summaries = vec![
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "gpt-5.6-luna".to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: Some(NativeToolMode::CodeModeOnly),
@@ -1832,6 +1850,7 @@ fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inferenc
             reported_context_length: None,
         },
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "grok-4.6".to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: None,
@@ -1842,6 +1861,7 @@ fn tui_catalog_preserves_exact_facade_efforts_without_provider_or_model_inferenc
             reported_context_length: None,
         },
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "claude-fable-5-1".to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: None,
@@ -1905,6 +1925,7 @@ fn tui_catalog_fails_closed_for_non_displayable_facade_effort() {
     backend.credential = CredentialState::Ready;
     for exact_id in ["gpt-5.6-sol", "grok-4.6"] {
         backend.model_summaries.push(CliModelSummary {
+            unavailable_reason: None,
             exact_id: exact_id.to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: (exact_id == "gpt-5.6-sol").then_some(NativeToolMode::CodeModeOnly),
@@ -1936,6 +1957,7 @@ fn tui_catalog_never_offers_models_without_an_exact_process_presentation_candida
     backend.credential = CredentialState::Ready;
     backend.model_summaries = vec![
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "gpt-future".to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: None,
@@ -1946,6 +1968,7 @@ fn tui_catalog_never_offers_models_without_an_exact_process_presentation_candida
             reported_context_length: None,
         },
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "grok-future".to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: None,
@@ -1975,6 +1998,7 @@ fn tui_catalog_hides_provider_hidden_rows_and_disables_unqualified_code_mode_row
     backend.credential = CredentialState::Ready;
     backend.model_summaries = vec![
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "codex-auto-review".to_owned(),
             visibility: NativeModelVisibility::Hide,
             native_tool_mode: Some(NativeToolMode::CodeModeOnly),
@@ -1985,6 +2009,7 @@ fn tui_catalog_hides_provider_hidden_rows_and_disables_unqualified_code_mode_row
             reported_context_length: None,
         },
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "gpt-5.6-terra".to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: Some(NativeToolMode::CodeModeOnly),
@@ -1995,6 +2020,7 @@ fn tui_catalog_hides_provider_hidden_rows_and_disables_unqualified_code_mode_row
             reported_context_length: None,
         },
         CliModelSummary {
+            unavailable_reason: None,
             exact_id: "gpt-5.6-luna".to_owned(),
             visibility: NativeModelVisibility::List,
             native_tool_mode: Some(NativeToolMode::CodeModeOnly),
@@ -3106,6 +3132,42 @@ fn models_reports_unusable_credential_before_compatibility_prompt() {
 }
 
 #[test]
+fn drifted_model_is_disabled_in_picker_and_explained_in_models() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = product_paths::PlakPaths::explicit(root.path().join("product"));
+    let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+    backend.credential = CredentialState::Ready;
+    let reason =
+        "model contract changed; this build's Codex contract is out of date; install a newer build";
+    backend.model_summaries = vec![CliModelSummary {
+        unavailable_reason: Some(reason.into()),
+        exact_id: "gpt-5.6-luna".into(),
+        visibility: NativeModelVisibility::List,
+        native_tool_mode: None,
+        streaming: false,
+        tools: false,
+        reasoning_efforts: Vec::new(),
+        service_tiers: Vec::new(),
+        reported_context_length: None,
+    }];
+    let (_, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
+    let entry = sections
+        .iter()
+        .find(|section| section.account == "codex")
+        .unwrap()
+        .entries
+        .iter()
+        .find(|entry| entry.id == "gpt-5.6-luna")
+        .unwrap();
+    assert_eq!(entry.unavailable_reason.as_deref(), Some(reason));
+    let (result, stdout, _) = invoke(Command::Models(NativeProvider::Codex), &mut backend, b"");
+    assert_eq!(result, Ok(ProcessOutcome::Success));
+    let stdout = String::from_utf8(stdout).unwrap();
+    assert!(stdout.contains(&format!("unavailable={reason}")));
+    assert!(!stdout.contains("streaming="));
+}
+
+#[test]
 fn models_run_status_then_exact_acknowledgement_then_discovery() {
     for provider in [
         NativeProvider::Codex,
@@ -3116,6 +3178,7 @@ fn models_run_status_then_exact_acknowledgement_then_discovery() {
         backend.credential = CredentialState::Ready;
         backend.model_summaries = vec![
             CliModelSummary {
+                unavailable_reason: None,
                 exact_id: "exact-model-a".to_owned(),
                 visibility: NativeModelVisibility::List,
                 native_tool_mode: None,
@@ -3126,6 +3189,7 @@ fn models_run_status_then_exact_acknowledgement_then_discovery() {
                 reported_context_length: Some(256_000),
             },
             CliModelSummary {
+                unavailable_reason: None,
                 exact_id: "exact-model-b".to_owned(),
                 visibility: NativeModelVisibility::Hide,
                 native_tool_mode: Some(NativeToolMode::Direct),
@@ -3211,6 +3275,7 @@ fn models_backend_failure_cannot_emit_a_partial_listing() {
     let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
     backend.credential = CredentialState::Ready;
     backend.model_summaries.push(CliModelSummary {
+        unavailable_reason: None,
         exact_id: "must-not-print".to_owned(),
         visibility: NativeModelVisibility::List,
         native_tool_mode: Some(NativeToolMode::Direct),

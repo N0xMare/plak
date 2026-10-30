@@ -74,6 +74,8 @@ pub struct CliStatus {
 /// One native catalog model row for TUI presentation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CliModelSummary {
+    /// Live contract refusal; absent on an admitted row.
+    pub unavailable_reason: Option<String>,
     /// Exact provider model id.
     pub exact_id: String,
     /// Catalog visibility.
@@ -186,6 +188,7 @@ impl PresentationBackend for NativePresentationBackend {
             .models()
             .iter()
             .map(|model| CliModelSummary {
+                unavailable_reason: model.unavailable_reason().map(str::to_owned),
                 exact_id: model.exact_id().to_owned(),
                 visibility: model.visibility(),
                 native_tool_mode: model.native_tool_mode(),
@@ -463,7 +466,7 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
                                 ),
                                 _ => None,
                             };
-                            let unavailable_reason = composition_refusal.or(unavailable_reason);
+                            let unavailable_reason = model.unavailable_reason.or(composition_refusal).or(unavailable_reason);
                             let reasoning = !reasoning_efforts.is_empty();
                             Some(plakous_host_protocol::views::ModelEntry {
                                 tag: [
@@ -815,6 +818,7 @@ mod tests {
         let live_refreshes = Arc::new(AtomicUsize::new(0));
         let mut backend = SnapshotBackend {
             models: vec![CliModelSummary {
+                unavailable_reason: None,
                 exact_id: "gpt-5.6-sol".to_owned(),
                 visibility: NativeModelVisibility::List,
                 native_tool_mode: Some(NativeToolMode::CodeModeOnly),

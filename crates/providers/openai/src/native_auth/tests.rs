@@ -3,6 +3,7 @@
     reason = "Exercise exact Codex login, catalog, credential rotation and inference through complete controlled-peer scenarios."
 )]
 mod carry_replay;
+mod drift;
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -1619,7 +1620,12 @@ async fn catalog_tool_mode_defaults_missing_to_direct_and_rejects_unknown() -> T
     assert!(entry("gpt-5.6-terra").is_err());
     assert!(matches!(
         resolver.resolve_with_evidence("gpt-5.6-terra"),
-        Err(NativeCodexAuthError::Catalog)
+        Err(NativeCodexAuthError::CompatibilityDrift(
+            plakous_auth::CompatibilityDrift::CatalogField {
+                field: "tool_mode",
+                ..
+            }
+        ))
     ));
     let (_, evidence) = resolver.resolve_with_evidence("gpt-5.6-sol")?;
     assert_eq!(
@@ -1912,6 +1918,18 @@ async fn exact_catalog_resolution_rejects_selected_defects_and_duplicate_slug() 
     let (_directory, resolver, _) =
         resolver_for_catalog_values("account-selected-defects", models).await?;
     for slug in rejected {
+        if slug == "gpt-5.6-luna" {
+            assert!(matches!(
+                resolver.resolve(slug),
+                Err(NativeCodexAuthError::CompatibilityDrift(
+                    plakous_auth::CompatibilityDrift::CatalogField {
+                        field: "shell_type",
+                        ..
+                    }
+                ))
+            ));
+            continue;
+        }
         assert!(matches!(
             resolver.resolve(slug),
             Err(NativeCodexAuthError::Catalog)

@@ -388,7 +388,8 @@ fn persisted_catalog_roundtrip_is_offline() -> Result<(), Box<dyn Error>> {
     let root = unique_test_root("catalog-roundtrip")?;
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
     paths.prepare()?;
-    let models = vec![NativeModelSummary {
+    let mut models = vec![NativeModelSummary {
+        unavailable_reason: None,
         exact_id: "gpt-5.6-sol".to_owned(),
         visibility: NativeModelVisibility::List,
         native_tool_mode: Some(NativeToolMode::CodeModeOnly),
@@ -400,11 +401,20 @@ fn persisted_catalog_roundtrip_is_offline() -> Result<(), Box<dyn Error>> {
         default_service_tier: None,
         reported_context_length: None,
     }];
+    let mut refused = models[0].clone();
+    refused.exact_id = "gpt-6.1-sol".to_owned();
+    refused.unavailable_reason = Some("live drift; install a newer build".to_owned());
+    models.push(refused);
     SubscriptionState::new(paths.clone())
         .persist_catalog_snapshot(NativeProvider::Codex, &models)?;
     let loaded =
         SubscriptionState::new(paths.clone()).load_persisted_catalog(NativeProvider::Codex)?;
     assert_eq!(loaded.models()[0].exact_id(), "gpt-5.6-sol");
+    assert_eq!(
+        loaded.models().len(),
+        1,
+        "live drift observations must never be stored"
+    );
     fs::remove_dir_all(root)?;
     Ok(())
 }
@@ -469,6 +479,7 @@ async fn public_catalog_policy_requires_ready_and_exact_terminal_dispatch_eviden
                 .authorize_dispatch()
                 .map_err(|_| NativeSubscriptionError::Internal)?;
             Ok(vec![NativeModelSummary {
+                unavailable_reason: None,
                 exact_id: "exact-model".to_owned(),
                 visibility: NativeModelVisibility::List,
                 native_tool_mode: None,

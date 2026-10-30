@@ -216,7 +216,7 @@ async fn authentication_policy_and_model_absence_do_not_retry() {
                 attempts.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(Err::<(), _>(NativeModelResolutionError::after_selection(
                     model.clone(),
-                    kind,
+                    kind.clone(),
                 )))
             },
             &model,

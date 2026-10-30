@@ -11,6 +11,28 @@ use plakous_offline_crash_harness::protocol::CrashBoundary;
 use plakous_offline_crash_harness::{BoundaryController, text_runtime_binding};
 
 #[test]
+fn run_refuses_drifted_model_before_effort_admission() {
+    let reason =
+        "model contract changed; this build's Codex contract is out of date; install a newer build";
+    let model = crate::presentation::CliModelSummary {
+        unavailable_reason: Some(reason.into()),
+        exact_id: "gpt-5.6-luna".into(),
+        visibility: plakous::subscriptions::NativeModelVisibility::List,
+        native_tool_mode: None,
+        streaming: false,
+        tools: false,
+        reasoning_efforts: Vec::new(),
+        service_tiers: Vec::new(),
+        reported_context_length: None,
+    };
+    for effort in [None, Some(ReasoningEffort::High)] {
+        let error = run_effort(&model, effort).unwrap_err();
+        assert_eq!(error.exit_code(), 3);
+        assert_eq!(error.message(), reason);
+    }
+}
+
+#[test]
 fn reemitted_run_approval_sends_one_denial_per_offered_id() {
     use crate::surface_protocol::{UserAction, user_action_channel};
     let (controls, received) = user_action_channel();

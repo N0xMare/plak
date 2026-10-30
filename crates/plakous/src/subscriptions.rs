@@ -73,6 +73,13 @@ pub use models::{
     NativeToolModeRequirementError,
 };
 pub use paths::SubscriptionPaths;
+#[cfg(any(
+    feature = "codex",
+    feature = "grok",
+    feature = "claude",
+    feature = "auth"
+))]
+pub use plakous_auth::CompatibilityDrift;
 pub use plakous_model::subscription_limit::{
     SubscriptionInferenceScope, SubscriptionRequestClass, SubscriptionRequestGate,
     SubscriptionRequestLimits, SystemSubscriptionGateClock, TurnScopedSubscriptionRequestGate,

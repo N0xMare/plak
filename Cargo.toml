@@ -426,14 +426,14 @@ lto = false
 [workspace.metadata.plakous.cfg.plak]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs"]
-feature-ceiling = 150
+feature-ceiling = 151
 test-seam-ceiling = 76
 env-ceiling = 29
-reason = "Capability registry, grouped interactive identity/carry helpers, remaining lookup and re-export predicates, and the capacity-probe test hook; existing placement debt must fall as module boundaries replace inline configuration."
+reason = "Capability registry, grouped interactive identity/carry helpers, lookup/re-export predicates and the capacity-probe hook; native contract-drift errors exist only with their compiled route."
 
 [workspace.metadata.plakous.cfg.plakous]
-feature-ceiling = 60
-reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+feature-ceiling = 65
+reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth."
 
 [workspace.metadata.plakous.cfg.plakous-anthropic]
 feature-ceiling = 22
@@ -456,9 +456,9 @@ reason = "Existing placement debt; ratchet down as composition-root ports and mo
 
 [workspace.metadata.plakous.cfg.plakous-hosted]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
-feature-ceiling = 27
+feature-ceiling = 28
 test-seam-ceiling = 29
-reason = "Capability registry; feature-off capability markers live behind module gates. Existing placement debt must fall as module boundaries replace inline configuration."
+reason = "Capability registry and existing placement debt; native drift refusals exist only when a native route is compiled and preserve their exact newer-build remedy."
 
 [workspace.metadata.plakous.cfg.plakous-http]
 feature-ceiling = 17

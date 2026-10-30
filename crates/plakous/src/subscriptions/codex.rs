@@ -162,11 +162,12 @@ impl NativeSubscriptions {
             resolver.without_catalog_retries()
         };
         let catalog = resolver.refresh_catalog().await.map_err(map_codex_error)?;
-        Ok(catalog
+        let mut models: Vec<_> = catalog
             .entries()
             .iter()
             .filter(|entry| entry.supports_text())
             .map(|entry| NativeModelSummary {
+                unavailable_reason: None,
                 exact_id: entry.model_id().to_owned(),
                 visibility: entry
                     .visibility()
@@ -191,7 +192,17 @@ impl NativeSubscriptions {
                     .context_window()
                     .map(|window| u64::from(window.get())),
             })
-            .collect())
+            .collect();
+        models.extend(catalog.drifted_models().iter().map(|(model, reason)| {
+            NativeModelSummary::unavailable(
+                model.clone(),
+                catalog
+                    .drifted_visibility(model)
+                    .map_or(NativeModelVisibility::None, facade_codex_visibility),
+                reason.message("Codex"),
+            )
+        }));
+        Ok(models)
     }
 }
 
@@ -222,6 +233,12 @@ pub(super) fn map_codex_error(
     error: plakous_openai::NativeCodexAuthError,
 ) -> NativeSubscriptionError {
     match error {
+        plakous_openai::NativeCodexAuthError::CompatibilityDrift(reason) => {
+            NativeSubscriptionError::CompatibilityDrift {
+                provider: NativeProvider::Codex,
+                reason,
+            }
+        }
         plakous_openai::NativeCodexAuthError::ProfileNotAccepted => {
             NativeSubscriptionError::AcceptanceRequired
         }
@@ -654,11 +671,11 @@ impl NativeVertical for Vertical {
                     online
                         .client
                         .with_observer(subscriptions.exchange_observer.clone()),
-                    codex_native_http_config().map_err(|error| {
-                        exact_selection.clone().map_or_else(
-                            || NativeModelResolutionError::before_selection(error),
-                            |selected| NativeModelResolutionError::after_selection(selected, error),
-                        )
+                    codex_native_http_config().map_err(|error| match exact_selection.clone() {
+                        Some(selected) => {
+                            NativeModelResolutionError::after_selection(selected, error)
+                        }
+                        None => NativeModelResolutionError::before_selection(error),
                     })?,
                 )
                 .map_err(|error| {
@@ -668,10 +685,12 @@ impl NativeVertical for Vertical {
                         }
                         other => map_codex_error(other),
                     };
-                    exact_selection.clone().map_or_else(
-                        || NativeModelResolutionError::before_selection(error),
-                        |selected| NativeModelResolutionError::after_selection(selected, error),
-                    )
+                    match exact_selection.clone() {
+                        Some(selected) => {
+                            NativeModelResolutionError::after_selection(selected, error)
+                        }
+                        None => NativeModelResolutionError::before_selection(error),
+                    }
                 })?
                 .with_inference_observer(subscriptions.exchange_observer.clone());
                 let resolver = if subscriptions.catalog_retries {
@@ -686,10 +705,12 @@ impl NativeVertical for Vertical {
                         }
                         other => map_codex_error(other),
                     };
-                    exact_selection.clone().map_or_else(
-                        || NativeModelResolutionError::before_selection(error),
-                        |selected| NativeModelResolutionError::after_selection(selected, error),
-                    )
+                    match exact_selection.clone() {
+                        Some(selected) => {
+                            NativeModelResolutionError::after_selection(selected, error)
+                        }
+                        None => NativeModelResolutionError::before_selection(error),
+                    }
                 })?;
                 let selected_model = match model_selector {
                     NativeModelSelector::Exact(model) => model.clone(),

@@ -585,8 +585,8 @@ pub(crate) fn credential_unavailable_failure(
 
 /// A redaction-safe facade failure with the repair the operator can run.
 ///
-/// Credential, compatibility and storage failures are auth failures (exit 3);
-/// catalog contract, transport and internal failures keep the internal class.
+/// Credential, compatibility drift and storage failures are auth failures (exit 3);
+/// other catalog, transport and internal failures keep the internal class.
 pub fn native_subscription_failure(
     error: NativeSubscriptionError,
     account: Option<NativeProvider>,
@@ -597,14 +597,9 @@ pub fn native_subscription_failure(
     let login = format!("run `plak login {name}`");
     let auth = |message: String| CliFailure::classified(CliFailureKind::Auth, message);
     match error {
-        E::NotCompiled(provider) => {
-            let account = cli_provider_name(provider);
-            plakous_hosted::capabilities::CapabilityUnavailable {
-                id: account,
-                kind: plakous_hosted::capabilities::CapabilityKind::Route,
-                feature: account,
-            }.into()
-        }
+        #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+        E::CompatibilityDrift { .. } => auth(error.to_string()),
+        E::NotCompiled(provider) => unavailable_native_route(provider),
         E::UnsafeStorage => auth(
             super::subscription_storage::find_violation(state_home, account).map_or_else(
                 || format!(
@@ -692,6 +687,16 @@ pub fn native_subscription_failure(
             "{error}; retry, and run `plak doctor` if it persists"
         )),
     }
+}
+
+fn unavailable_native_route(provider: NativeProvider) -> CliFailure {
+    let account = cli_provider_name(provider);
+    plakous_hosted::capabilities::CapabilityUnavailable {
+        id: account,
+        kind: plakous_hosted::capabilities::CapabilityKind::Route,
+        feature: account,
+    }
+    .into()
 }
 
 /// Display-only refresh evidence, without changing the credential state.

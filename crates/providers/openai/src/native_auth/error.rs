@@ -3,9 +3,12 @@
 use super::Error;
 
 /// Redaction-safe native authentication failure.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum NativeCodexAuthError {
+    /// The served contract no longer matches the compiled native pins.
+    #[error("{}", .0.message("Codex"))]
+    CompatibilityDrift(plakous_auth::CompatibilityDrift),
     /// Transient model lookup retries exhausted their bounded budget.
     #[error(transparent)]
     Lookup(plakous_exchange::lookup::LookupError),

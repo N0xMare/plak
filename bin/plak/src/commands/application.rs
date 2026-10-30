@@ -313,6 +313,7 @@ pub fn catalog_summaries(
         .models()
         .iter()
         .map(|model| CliModelSummary {
+            unavailable_reason: model.unavailable_reason().map(str::to_owned),
             exact_id: model.exact_id().to_owned(),
             visibility: model.visibility(),
             native_tool_mode: model.native_tool_mode(),

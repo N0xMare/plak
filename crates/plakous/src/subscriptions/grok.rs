@@ -172,6 +172,7 @@ impl NativeSubscriptions {
             .iter()
             .filter(|entry| facade_xai_model_is_selectable(entry.model().as_str()))
             .map(|entry| NativeModelSummary {
+                unavailable_reason: None,
                 exact_id: entry.model().as_str().to_owned(),
                 visibility: NativeModelVisibility::List,
                 native_tool_mode: None,

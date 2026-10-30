@@ -1185,7 +1185,7 @@ mod lookup_failure_tests {
             super::NativeSubscriptionError::CatalogDocumentRejected,
             super::NativeSubscriptionError::Transport(None),
         ] {
-            assert!(super::child_provider_failure(error).ends_with(&error.to_string()));
+            assert!(super::child_provider_failure(error.clone()).ends_with(&error.to_string()));
         }
     }
 }

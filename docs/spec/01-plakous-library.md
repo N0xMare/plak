@@ -3922,6 +3922,21 @@ Chat) have no such window; their review-due dates only warn (§6).
 
 ### 7.2 The three OAuth verticals
 
+Subscription contract drift is a typed `CompatibilityDrift`, not ordinary
+catalog absence or authority to adapt a pin. Codex compares every exact enrolled
+row's optional minimum client version with the compiled reference and refuses
+unknown visibility/tool-mode/wire-field types or loss of text, local tools or
+named reasoning. The existing admitted Standard/Lite wire modes and Direct or
+CodeModeOnly enrollment alternatives remain unchanged. Only the affected model
+is refused when other enrolled rows remain admissible; the live picker shows
+its reason. With no admissible enrolled row and at least one drift, the whole
+route refuses and clears its prior resolver snapshot. Exact selection returns
+the typed reason and the remedy to install a newer build, never a fallback.
+Capacity windows, effort lists, service tiers, unenrolled model additions or
+removals and unknown extra fields remain provider authority, not drift.
+Observations and picker refusals are in-memory only and never enter the local
+catalog snapshot, offline doctor/status, credentials, or exported documents.
+
 `plakous-auth` owns provider-neutral authentication scaffolding: bounded,
 zeroizing response-body pulls, media-type recognition, unvalidated audience
 and subject claim shapes (in the claimed-HTTP orchestrator module, not the
