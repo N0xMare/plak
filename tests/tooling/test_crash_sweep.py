@@ -13,14 +13,16 @@ SPEC.loader.exec_module(SWEEP)
 
 
 class CrashSweepTests(unittest.TestCase):
-    def run_sweep(self, scratch, results):
-        with patch("sys.argv", ["crash-sweep.py", "--strict", "--jobs", "8",
-                                "--shapes", "code_mode_cell_final"]), \
+    def run_sweep(self, scratch, results, args=None):
+        if args is None:
+            args = ["--strict", "--jobs", "8", "--shapes", "code_mode_cell_final"]
+        with patch("sys.argv", ["crash-sweep.py", *args]), \
                 patch.object(SWEEP.subprocess, "run", return_value=subprocess.CompletedProcess(
                     [], 0, stdout=str(scratch) + "\n")), \
                 patch.object(SWEEP.subprocess, "call", side_effect=results) as calls, \
                 patch.dict("os.environ", {"CARGO_TARGET_DIR": "custom-target",
-                                          "CARGO_BUILD_TARGET": "host-triple"}):
+                                          "CARGO_BUILD_TARGET": "host-triple",
+                                          "PLAK_CRASH_SWEEP_SHAPES": "final_only"}):
             return SWEEP.main(), calls.call_args_list
 
     def test_builds_workers_and_product_before_running_sweep_with_the_same_environment(self):
@@ -40,6 +42,32 @@ class CrashSweepTests(unittest.TestCase):
             self.assertEqual(env["PLAK_CRASH_SWEEP_STRICT"], "1")
             self.assertEqual(env["PLAK_CRASH_SWEEP_JOBS"], "8")
             self.assertEqual(env["PLAK_CRASH_SWEEP_SHAPES"], "code_mode_cell_final")
+
+    def test_strict_default_defers_to_all_registered_shapes_even_with_inherited_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, calls = self.run_sweep(Path(directory), [0, 0], ["--strict"])
+            self.assertEqual(code, 0)
+            for call in calls:
+                self.assertNotIn("PLAK_CRASH_SWEEP_SHAPES", call.kwargs["env"])
+                self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_STRICT"], "1")
+
+    def test_non_strict_default_keeps_the_quick_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, calls = self.run_sweep(Path(directory), [0, 0], [])
+            self.assertEqual(code, 0)
+            for call in calls:
+                self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_SHAPES"],
+                                 "final_only,direct_tool_then_final")
+                self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_STRICT"], "0")
+
+    def test_explicit_non_strict_selection_overrides_the_quick_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, calls = self.run_sweep(Path(directory), [0, 0],
+                                         ["--shapes", "tree_refresh,code_mode_cell_final"])
+            self.assertEqual(code, 0)
+            for call in calls:
+                self.assertEqual(call.kwargs["env"]["PLAK_CRASH_SWEEP_SHAPES"],
+                                 "tree_refresh,code_mode_cell_final")
 
     def test_build_failure_never_runs_sweep_against_leftover_workers(self):
         with tempfile.TemporaryDirectory() as directory:

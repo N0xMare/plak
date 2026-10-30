@@ -1807,6 +1807,11 @@ panicking; the command-id validity assertion remains in force.
 [--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
 `promoted_background_job`, and `sealed_family_artifacts` with sixteen workers.
+Without `--shapes`, `--strict` selects every registered shape; a non-strict run
+uses the quick `final_only,direct_tool_then_final` selection. An explicit
+`--shapes` selection applies in either mode. The wrapper overrides any inherited
+`PLAK_CRASH_SWEEP_SHAPES`, leaving it unset for the strict all-shapes default so
+the Rust registry supplies the complete inventory.
 The entry point first prepares the whole workspace's all-features test build,
 including `plak`, `plakous-js-runtime`'s `plakous-js-host` and
 `plakous-py-worker`'s `plakous-py-host`, in the same Cargo

@@ -8,7 +8,7 @@ import subprocess
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--shapes", default="final_only,direct_tool_then_final")
+    parser.add_argument("--shapes")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--strict", action="store_true")
@@ -25,10 +25,15 @@ def main() -> int:
     git_config.write_text("")
     env = dict(os.environ, TMPDIR=str(scratch), PLAK_HOME=str(home),
                GIT_CONFIG_GLOBAL=str(git_config), GIT_CONFIG_NOSYSTEM="1",
-               PLAK_CRASH_SWEEP_SHAPES=args.shapes,
                PLAK_CRASH_SWEEP_JOBS=str(args.jobs),
                PLAK_CRASH_SWEEP_REPEAT=str(args.repeat),
                PLAK_CRASH_SWEEP_STRICT=str(int(args.strict)))
+    if args.shapes is not None:
+        env["PLAK_CRASH_SWEEP_SHAPES"] = args.shapes
+    elif args.strict:
+        env.pop("PLAK_CRASH_SWEEP_SHAPES", None)
+    else:
+        env["PLAK_CRASH_SWEEP_SHAPES"] = "final_only,direct_tool_then_final"
     # Use the gate's test build, including both cell workers. Building only
     # plak can silently run stale sibling executables from another tree.
     built = subprocess.call([
