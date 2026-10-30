@@ -1037,6 +1037,10 @@ SQL, tables, transactions, connection handles, and backend paths are not
 consumer APIs. Event sequence allocation, presentation snapshots, and transient
 fanout are not store authority. In-memory and durable backends satisfy one
 behavioral conformance law.
+As defense-in-depth parity, both memory and SQLite require the exact
+`checkpoint_commit_identity` on create recovery/replay and commit replay,
+returning `IdentityConflict` for a mismatch even though checkpoint integrity
+already covers that identity.
 
 Every accepted mutation that changes session authority — create (including a
 seeded create), commit, fork and rebind, lease release, prune and archive —

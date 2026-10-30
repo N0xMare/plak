@@ -6,6 +6,7 @@
 )]
 
 use super::super::*;
+use crate::memory::receipts::commit_matches;
 
 pub(in super::super) fn commit(
     backend: &mut Backend,
@@ -283,16 +284,4 @@ fn load_commit_receipt(
         Ok(committed)
     })
     .transpose()
-}
-
-fn commit_matches(
-    v: &CommittedCheckpoint,
-    r: &CommitCheckpoint,
-    x: CheckpointObjectRef,
-    checkpoint_commit_identity: Digest,
-) -> bool {
-    v.operation().lease() == r.lease()
-        && v.operation().expected() == r.expected()
-        && v.operation().checkpoint() == x
-        && v.operation().checkpoint_commit_identity() == checkpoint_commit_identity
 }

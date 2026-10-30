@@ -32,13 +32,11 @@ use candidates::{
     sweep_unreachable,
 };
 pub(crate) mod receipts;
-#[cfg(feature = "sqlite")]
-pub(crate) use receipts::validate_branch_manifest_transition;
 use receipts::{
     commit_matches, create_matches, fork_matches, recover_fork_matches, validate_commit,
-    validate_fork, validate_genesis,
+    validate_fork, validate_fork_semantic_request, validate_genesis,
+    validate_materialized_fork_receipt,
 };
-pub(crate) use receipts::{validate_fork_semantic_request, validate_materialized_fork_receipt};
 mod reads;
 use reads::{branch, stored_checkpoint};
 
@@ -288,7 +286,10 @@ impl MemorySessionStore {
             return Err(SessionStoreError::IdentityConflict);
         }
         if let Some(receipt) = state.creates.get(&request.session().session_id()) {
-            return if create_matches(receipt, request, reference) {
+            let checkpoint_commit_identity = publication_candidate(request.initial())?
+                .checkpoint
+                .checkpoint_commit_identity();
+            return if create_matches(receipt, request, reference, checkpoint_commit_identity) {
                 Ok(receipt.clone())
             } else {
                 Err(SessionStoreError::IdentityConflict)
@@ -383,8 +384,16 @@ impl MemorySessionStore {
         let reference = bundle_reference(request.initial());
         let state = self.lock()?;
         match state.creates.get(&request.session().session_id()) {
-            Some(receipt) if create_matches(receipt, request, reference) => Ok(receipt.clone()),
-            Some(_) => Err(SessionStoreError::IdentityConflict),
+            Some(receipt) => {
+                let checkpoint_commit_identity = publication_candidate(request.initial())?
+                    .checkpoint
+                    .checkpoint_commit_identity();
+                if create_matches(receipt, request, reference, checkpoint_commit_identity) {
+                    Ok(receipt.clone())
+                } else {
+                    Err(SessionStoreError::IdentityConflict)
+                }
+            }
             None => Err(SessionStoreError::NotFound),
         }
     }
@@ -571,7 +580,10 @@ impl MemorySessionStore {
         let mut state = self.lock()?;
         require_open(&state)?;
         if let Some(committed) = state.commits.get(&checkpoint_id) {
-            return if commit_matches(committed, request, reference) {
+            let checkpoint_commit_identity = publication_candidate(request.checkpoint())?
+                .checkpoint
+                .checkpoint_commit_identity();
+            return if commit_matches(committed, request, reference, checkpoint_commit_identity) {
                 Ok(committed.receipt())
             } else {
                 Err(SessionStoreError::IdentityConflict)

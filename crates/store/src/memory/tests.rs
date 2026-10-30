@@ -9,6 +9,134 @@ impl LeaseClock for FixedClock {
     }
 }
 
+fn replay_fixture() -> fixture::TestResult<(MemorySessionStore, CreateSession)> {
+    let store = MemorySessionStore::with_clock(MemoryStoreLimits::default(), Arc::new(FixedClock))?;
+    let selector = SessionRef::new(fixture::id(1)?, fixture::id(2)?);
+    let initial = fixture::checkpoint(
+        fixture::topology(
+            selector.session_id(),
+            selector.branch_id(),
+            fixture::id(100)?,
+            None,
+            0,
+            None,
+            1,
+        )?,
+        1,
+        RuntimeDurability::Disabled,
+    )?;
+    let request = CreateSession::new(
+        selector,
+        plakous_agent::internal::Timestamp::new(50, 0)?,
+        fixture::id(3)?,
+        NonZeroU64::new(1_000).ok_or("nonzero lease")?,
+        fixture::bundle(&initial, None)?,
+    );
+    Ok((store, request))
+}
+
+#[test]
+fn memory_create_replay_and_recovery_require_checkpoint_commit_identity() -> fixture::TestResult {
+    let (store, request) = replay_fixture()?;
+    let receipt = store.create_sync(&request)?;
+    assert_eq!(store.create_sync(&request)?, receipt);
+    assert_eq!(store.recover_create_sync(&request)?, receipt);
+    let operation = receipt.operation();
+    let wrong_identity = plakous_agent::internal::Digest::sha256(
+        DigestDomain::ProviderOperation,
+        1,
+        &[b"different commit"],
+    )?;
+    // Integrity already binds commit identity. Damage only the retained receipt
+    // to exercise the same defense-in-depth replay predicate as SQLite.
+    store.lock()?.creates.insert(
+        request.session().session_id(),
+        CreateReceipt::from_store(
+            CreateOperation::from_store(
+                operation.session(),
+                operation.created_at(),
+                operation.owner(),
+                operation.lease_seconds(),
+                operation.initial(),
+                wrong_identity,
+            ),
+            receipt.session(),
+            receipt.branch(),
+            receipt.lease().clone(),
+            receipt.feed_seq(),
+        ),
+    );
+    let head = store.load_branch_sync(request.session())?.head();
+    let tail = store.feed_tail_sync(request.session().session_id())?;
+    assert_eq!(
+        store.create_sync(&request),
+        Err(SessionStoreError::IdentityConflict)
+    );
+    assert_eq!(
+        store.recover_create_sync(&request),
+        Err(SessionStoreError::IdentityConflict)
+    );
+    assert_eq!(store.load_branch_sync(request.session())?.head(), head);
+    assert_eq!(store.feed_tail_sync(request.session().session_id())?, tail);
+    Ok(())
+}
+
+#[test]
+fn memory_commit_replay_requires_checkpoint_commit_identity() -> fixture::TestResult {
+    let (store, create) = replay_fixture()?;
+    let created = store.create_sync(&create)?;
+    let checkpoint = fixture::checkpoint(
+        fixture::topology(
+            create.session().session_id(),
+            create.session().branch_id(),
+            fixture::id(101)?,
+            Some(create.initial().checkpoint_id()),
+            1,
+            None,
+            1,
+        )?,
+        2,
+        RuntimeDurability::Disabled,
+    )?;
+    let request = CommitCheckpoint::new(
+        created.lease().clone(),
+        created.branch(),
+        fixture::bundle(&checkpoint, Some(create.initial()))?,
+    );
+    let receipt = store.commit_sync(&request)?;
+    assert_eq!(store.commit_sync(&request)?, receipt);
+    let committed = store.recover_commit_sync(receipt.checkpoint().checkpoint_id())?;
+    let operation = committed.operation();
+    let wrong_identity = plakous_agent::internal::Digest::sha256(
+        DigestDomain::ProviderOperation,
+        1,
+        &[b"different commit"],
+    )?;
+    store.lock()?.commits.insert(
+        receipt.checkpoint().checkpoint_id(),
+        CommittedCheckpoint::from_store(
+            CommitOperation::from_store(
+                operation.lease().clone(),
+                operation.expected(),
+                operation.checkpoint(),
+                wrong_identity,
+            ),
+            receipt,
+        ),
+    );
+    let tail = store.feed_tail_sync(create.session().session_id())?;
+    assert_eq!(
+        store.commit_sync(&request),
+        Err(SessionStoreError::IdentityConflict)
+    );
+    assert_eq!(
+        store.load_branch_sync(create.session())?.head(),
+        receipt.head()
+    );
+    assert_eq!(store.feed_tail_sync(create.session().session_id())?, tail);
+    Ok(())
+}
+
 fn prune_fixture() -> fixture::TestResult<(MemorySessionStore, PruneBranch)> {
     let store = MemorySessionStore::with_clock(MemoryStoreLimits::default(), Arc::new(FixedClock))?;
     let selector = SessionRef::new(fixture::id(1)?, fixture::id(2)?);

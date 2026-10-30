@@ -496,7 +496,7 @@ test-seam-ceiling = 2
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-store]
-feature-ceiling = 56
+feature-ceiling = 55
 test-seam-ceiling = 53
 env-ceiling = 2
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."

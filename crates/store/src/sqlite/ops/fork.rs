@@ -17,7 +17,7 @@ pub(in super::super) fn fork(
     r: &ForkBranch,
 ) -> Result<ForkReceipt, SessionStoreError> {
     b.require_open()?;
-    crate::memory::validate_fork_semantic_request(r)?;
+    crate::memory::receipts::validate_fork_semantic_request(r)?;
     let reference = bundle_ref(r.target());
     let x = candidate(r.target())?;
     let target = SessionRef::new(r.source().session().session_id(), r.target_branch());
@@ -96,7 +96,7 @@ pub(in super::super) fn fork(
             StoreInvalidReason::ForkCheckpointSemantics,
         ));
     }
-    crate::memory::validate_branch_manifest_transition(
+    crate::memory::receipts::validate_branch_manifest_transition(
         source_checkpoint,
         &x.checkpoint,
         r.transition(),
@@ -345,7 +345,7 @@ fn load_fork(
         {
             return Err(SessionStoreError::corrupt());
         }
-        crate::memory::validate_materialized_fork_receipt(
+        crate::memory::receipts::validate_materialized_fork_receipt(
             &receipt,
             &source_checkpoint,
             &target_checkpoint,

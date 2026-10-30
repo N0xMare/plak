@@ -5,6 +5,7 @@ use super::{
     RuntimeContextTransitionKind, RuntimeDurability, RuntimeLifecycle, SessionRef,
     SessionStoreError, StoreInvalidReason, StoredCheckpoint,
 };
+use plakous_agent::internal::Digest;
 
 pub(super) fn validate_genesis(
     candidate: &Candidate,
@@ -229,10 +230,11 @@ pub(crate) fn validate_materialized_fork_receipt(
     .map_err(|_| SessionStoreError::corrupt())
 }
 
-pub(super) fn create_matches(
+pub(crate) fn create_matches(
     receipt: &CreateReceipt,
     request: &CreateSession,
     reference: CheckpointObjectRef,
+    checkpoint_commit_identity: Digest,
 ) -> bool {
     let operation = receipt.operation();
     operation.session() == request.session()
@@ -240,16 +242,19 @@ pub(super) fn create_matches(
         && operation.owner() == request.owner()
         && operation.lease_seconds() == request.lease_seconds()
         && operation.initial() == reference
+        && operation.checkpoint_commit_identity() == checkpoint_commit_identity
 }
 
-pub(super) fn commit_matches(
+pub(crate) fn commit_matches(
     committed: &CommittedCheckpoint,
     request: &CommitCheckpoint,
     reference: CheckpointObjectRef,
+    checkpoint_commit_identity: Digest,
 ) -> bool {
     committed.operation().lease() == request.lease()
         && committed.operation().expected() == request.expected()
         && committed.operation().checkpoint() == reference
+        && committed.operation().checkpoint_commit_identity() == checkpoint_commit_identity
 }
 
 pub(super) fn fork_matches(

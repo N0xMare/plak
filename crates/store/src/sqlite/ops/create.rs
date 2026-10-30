@@ -6,6 +6,7 @@
 )]
 
 use super::super::*;
+use crate::memory::receipts::create_matches;
 
 #[allow(
     clippy::too_many_lines,
@@ -244,19 +245,4 @@ fn load_create(c: &Connection, sid: SessionId) -> Result<Option<CreateReceipt>, 
         Ok(receipt)
     })
     .transpose()
-}
-
-fn create_matches(
-    v: &CreateReceipt,
-    r: &CreateSession,
-    x: CheckpointObjectRef,
-    checkpoint_commit_identity: Digest,
-) -> bool {
-    let o = v.operation();
-    o.session() == r.session()
-        && o.created_at() == r.created_at()
-        && o.owner() == r.owner()
-        && o.lease_seconds() == r.lease_seconds()
-        && o.initial() == x
-        && o.checkpoint_commit_identity() == checkpoint_commit_identity
 }
