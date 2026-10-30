@@ -6,7 +6,6 @@ mod client;
 mod error;
 #[path = "http.rs"]
 mod http;
-#[path = "listing.rs"]
 mod listing;
 #[path = "lowering.rs"]
 mod lowering;
