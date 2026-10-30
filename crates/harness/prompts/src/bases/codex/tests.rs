@@ -6,7 +6,7 @@ fn gpt6_source_and_approved_bases_are_pinned() {
     let pins = [
         PromptPin::new(
             "codex.gpt6.source",
-            include_str!("../../vendor/codex-prompt/gpt6/instructions-template.md"),
+            include_str!("../../../vendor/codex-prompt/gpt6/instructions-template.md"),
             "3449952e84d7b22b05d440ffcb36c45f546dd91c20949b6360eedbbea712fa0a",
         ),
         PromptPin::new(
