@@ -152,6 +152,9 @@ impl From<ReadFailure> for CliFailure {
     fn from(failure: ReadFailure) -> Self {
         let mut cli = Self::new(failure.message);
         cli.refusal = failure.refusal;
+        if failure.refusal == Some(StoreRefusal::LowSpace) {
+            cli = cli.with_advice(plakous_host_protocol::refusal::RefusalAdvice::CheckStorage);
+        }
         cli
     }
 }
@@ -161,6 +164,9 @@ impl From<crate::session_store::RecordStoreError> for CliFailure {
         let refusal = error.refusal();
         let mut cli = Self::new(String::from(error));
         cli.refusal = refusal;
+        if refusal == Some(StoreRefusal::LowSpace) {
+            cli = cli.with_advice(plakous_host_protocol::refusal::RefusalAdvice::CheckStorage);
+        }
         if refusal == Some(StoreRefusal::StorageFull) {
             cli.remedy = Some(plakous_host_protocol::notice_remedy::NoticeRemedy::FreeDiskSpace {});
         }

@@ -54,6 +54,17 @@ fn remedies_and_live_pause_project_through_existing_jsonl_envelopes() {
     let detail = value["detail"].as_str().unwrap();
     assert!(detail.contains("resume_tree") && detail.contains("resume_queue"));
     assert!(!detail.contains("Tab") && !detail.contains("/attach"));
+    let line = project_host_event(
+        &HostEvent::StorageAdmissionRefused(DiagnosticText::new("opaque storage facts")),
+        correlation,
+        Some("exact-root"),
+    )
+    .unwrap();
+    let value = object_from_line(&line);
+    assert_eq!(value["id"], "command");
+    assert_eq!(value["kind"], "status");
+    assert_eq!(value["phase"], "note");
+    assert!(value["detail"].as_str().unwrap().contains("plak doctor"));
 }
 
 /// The session binding changes only through templates and profiles, so

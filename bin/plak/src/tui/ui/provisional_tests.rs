@@ -31,6 +31,17 @@ fn showing(app: &mut App, needle: &str) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn preventive_storage_refusal_renders_the_operator_health_command_live() {
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(HostEvent::StorageAdmissionRefused(
+        plakous_host_protocol::status::DiagnosticText::new("opaque storage facts"),
+    ));
+    let notice = showing(&mut app, "plak doctor");
+    assert_eq!(notice.len(), 1, "{notice:?}");
+    assert!(notice[0].contains("opaque storage facts"));
+}
+
 /// Enter on an idle prompt draws it at once, before the host has answered
 /// anything; the host's acknowledgement alone keeps it there, and the
 /// host's user row replaces it in place, once.

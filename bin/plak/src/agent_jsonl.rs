@@ -550,19 +550,17 @@ pub fn project_host_event<P: plakous_host_protocol::ProtocolExtension>(
             queue_len,
             detail,
         } => {
-            JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
-            fields.insert("kind".into(), Value::from("status"));
-            fields.insert("phase".into(), Value::from(phase.as_str()));
-            fields.insert("queue_len".into(), Value::from(*queue_len as u64));
-            if let Some(detail) = detail {
-                fields.insert(
-                    "detail".into(),
-                    Value::from(crate::host_status_text::status_detail(
-                        detail,
-                        crate::notice_text::Frontend::Jsonl,
-                    )),
-                );
-            }
+            fields = status_fields(*phase, *queue_len, detail.as_ref(), correlation);
+        }
+        HostEvent::StorageAdmissionRefused(diagnostic) => {
+            return project_host_event(
+                &HostEvent::<P>::Row(TranscriptRow::warning(
+                    plakous_host_protocol::views::transcript::NoticeScope::Settings,
+                    crate::notice_text::storage_admission(diagnostic.as_str()),
+                )),
+                correlation,
+                session_id,
+            );
         }
         HostEvent::RestoredPause(pause) => {
             let text = crate::notice_text::restored_pause(
@@ -640,6 +638,29 @@ pub fn project_host_event<P: plakous_host_protocol::ProtocolExtension>(
         _ => return plakous_host_protocol::jsonl::project_host_event(event, correlation),
     }
     Some(encode_object(fields))
+}
+
+fn status_fields(
+    phase: plakous_host_protocol::status::HostPhase,
+    queue_len: usize,
+    detail: Option<&plakous_host_protocol::status::HostStatusDetail>,
+    correlation: JsonlCorrelation<'_>,
+) -> Map<String, Value> {
+    let mut fields = Map::new();
+    JsonlCorrelation::insert_id(&mut fields, correlation.turn_scoped_id());
+    fields.insert("kind".into(), Value::from("status"));
+    fields.insert("phase".into(), Value::from(phase.as_str()));
+    fields.insert("queue_len".into(), Value::from(queue_len as u64));
+    if let Some(detail) = detail {
+        fields.insert(
+            "detail".into(),
+            Value::from(crate::host_status_text::status_detail(
+                detail,
+                crate::notice_text::Frontend::Jsonl,
+            )),
+        );
+    }
+    fields
 }
 
 /// Decode golden fixtures in tests without depending on field order.

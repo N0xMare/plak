@@ -1006,10 +1006,9 @@ pub(in crate::agent) fn coding_session_runtime_binding_for(
         .map_err(|error| CliFailure::new(format!("harness plan could not be compiled: {error}")))?;
         // Effort / preferred-feature downgrades must not stay silent when
         // the operator chose `--effort`, and should at least warn otherwise.
-        let effort_downgraded = plan
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.as_str().contains("reasoning effort downgraded"));
+        let effort_downgraded = profile.reasoning_strategy()
+            == plakous::agent::ReasoningPreferenceStrategy::PreferEffort
+            && !plan.reasoning().enabled();
         if effort_downgraded {
             for diagnostic in plan.diagnostics() {
                 let _ = writeln!(stderr, "plan diagnostic: {}", diagnostic.as_str());

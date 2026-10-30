@@ -850,8 +850,10 @@ fn latest_state_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bo
 
 /// A non-error notice row: the one transcript row a full queue may replace.
 fn replaceable_diagnostic_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
-    matches!(event, SessionObservation::RestoredPause(_))
-        || matches!(event, SessionObservation::Row(TranscriptRow::Notice(notice)) if notice.tone != NoticeTone::Error)
+    matches!(
+        event,
+        SessionObservation::RestoredPause(_) | SessionObservation::StorageAdmissionRefused(_)
+    ) || matches!(event, SessionObservation::Row(TranscriptRow::Notice(notice)) if notice.tone != NoticeTone::Error)
 }
 
 /// An error row or a published refusal: what eviction must never drop.

@@ -64,6 +64,16 @@ fn credential_command(account: AccountTarget) -> String {
     }
 }
 
+pub(crate) fn storage_admission(text: &str) -> String {
+    format!(
+        "{text}; {}",
+        crate::refusal_text::advice_text(
+            &plakous_host_protocol::refusal::RefusalAdvice::CheckStorage,
+            Frontend::Run,
+        )
+    )
+}
+
 pub(crate) fn with_remedy(
     text: &str,
     remedy: Option<&NoticeRemedy>,

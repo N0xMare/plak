@@ -4303,6 +4303,9 @@ key source, and child activity retains the waiting account. A restored open
 warning carries typed tree/queue pause facts; it remains live-only and does not
 write a second stored pause notice. Log-only retained compaction overflow is a
 typed presentation fact whose Plak log adapter preserves the `/clear` hint.
+Preventive low-storage refusal carries a typed live-only admission warning and
+`CheckStorage` refusal advice. Every existing frontend retains `plak doctor`;
+the warning never enters transcript/export history and adds no stored remedy code.
 
 A known structured tool refusal keeps its code and repair targets intact in
 the existing detail payload, rather than flattening them together with its

@@ -79,6 +79,8 @@ define_observations! {
     Row(TranscriptRow),
     /// Live-only open warning; frontends own the tree/queue action grammar.
     RestoredPause(crate::status::HostPause),
+    /// Live-only operator storage refusal; never part of transcript/export history.
+    StorageAdmissionRefused(crate::status::DiagnosticText),
     /// Replace status strip fields.
     Status {
         /// Semantic latest-state phase, distinct from terminal turn authority.

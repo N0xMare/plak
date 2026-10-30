@@ -720,6 +720,12 @@ impl App {
             HostEvent::TranscriptStream { .. } => {
                 unreachable!("scoped stream routed before root events")
             }
+            HostEvent::StorageAdmissionRefused(diagnostic) => self.apply_live_op(HostEvent::Row(
+                plakous_host_protocol::views::transcript::TranscriptRow::warning(
+                    plakous_host_protocol::views::transcript::NoticeScope::Settings,
+                    crate::notice_text::storage_admission(diagnostic.as_str()),
+                ),
+            )),
             HostEvent::RestoredPause(pause) => self.apply_live_op(HostEvent::Row(
                 plakous_host_protocol::views::transcript::TranscriptRow::warning(
                     plakous_host_protocol::views::transcript::NoticeScope::Queue,

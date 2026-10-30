@@ -312,7 +312,13 @@ fn low_storage_keeps_the_prompt_queued_without_admission_and_rechecks_on_retry()
     );
     assert!(!host.config.session.queue_commands.has_pending());
     assert_eq!(host.transient_resumes_used, 2);
-    assert!(!events.try_iter().any(|event| matches!(
+    let refused = events.try_iter().collect::<Vec<_>>();
+    assert!(
+        refused
+            .iter()
+            .any(|event| matches!(event, HostEvent::StorageAdmissionRefused(_)))
+    );
+    assert!(!refused.into_iter().any(|event| matches!(
         event,
         HostEvent::PromptStarted(_) | HostEvent::TurnLifecycle(_)
     )));

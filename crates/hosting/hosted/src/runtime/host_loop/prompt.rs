@@ -79,9 +79,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     reject_draft(&self.events, super::UserAction::Prompt(raw_text.into()));
                 }
                 // Operator-only feedback never enters the transcript/export.
-                let _ = self
-                    .events
-                    .notice(TranscriptRow::warning(NoticeScope::Settings, reason));
+                let _ = self.events.send(ContentEvent::StorageAdmissionRefused(
+                    plakous_host_protocol::status::DiagnosticText::new(reason),
+                ));
                 return Ok(HostStep::Continue);
             }
         }

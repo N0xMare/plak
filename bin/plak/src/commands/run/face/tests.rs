@@ -97,6 +97,16 @@ fn face() -> CliFace {
 }
 
 #[test]
+fn preventive_storage_refusal_keeps_the_operator_health_command() {
+    assert_eq!(
+        face().lines(&HostEvent::StorageAdmissionRefused(
+            plakous_host_protocol::status::DiagnosticText::new("opaque storage facts")
+        )),
+        vec!["plak: opaque storage facts; check `plak doctor`"],
+    );
+}
+
+#[test]
 fn a_running_tool_is_silent_and_its_completion_is_one_line() {
     let mut face = face();
     assert_eq!(

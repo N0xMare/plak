@@ -121,6 +121,9 @@ impl CliFace {
     /// decision pure, so a test pins the text a user reads without a host.
     pub(crate) fn lines(&mut self, event: &HostEvent) -> Vec<String> {
         match event {
+            HostEvent::StorageAdmissionRefused(diagnostic) => vec![prefixed(
+                &crate::notice_text::storage_admission(diagnostic.as_str()),
+            )],
             HostEvent::RestoredPause(pause) => vec![prefixed(&crate::notice_text::restored_pause(
                 *pause,
                 crate::notice_text::RemedyContext {

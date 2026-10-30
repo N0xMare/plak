@@ -264,8 +264,12 @@ async fn all_writes_including_renewal_park_beyond_call_deadlines_then_complete_o
             assert_eq!(model.calls.load(Ordering::Acquire), 1);
             *lock_mutex(&store.full_until) = Some(started + Duration::from_secs(45));
             store.full_writes.store(false, Ordering::Release);
+            // The outage still holds: the round was refused and the result is
+            // not published until the park ends. The pre-model iteration cannot
+            // assert that here; prompt() returns only after the timed park, and
+            // the terminal may already be published.
+            assert_eq!(control.shared.published_result_count(), 0);
         }
-        assert_eq!(control.shared.published_result_count(), 0);
         let result = turn.result().await?;
         assert!(
             matches!(result.outcome(), TurnResultOutcome::Completed(_)),
