@@ -1,9 +1,8 @@
 //! Thin dynamic OpenRouter Messages dialect over the shared Messages kernel.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
-use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,36 +10,32 @@ use std::time::Duration;
 use plakous_attempt::PhysicalRequestBinding;
 use plakous_http::{
     Client, Failure as HttpFailure, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
-    Response, SensitiveBytes, StatusCode, sensitive_header_value,
+    Response, SensitiveBytes, sensitive_header_value,
 };
 use plakous_messages::{
-    MessagesAttempt, MessagesAttemptError, MessagesAttemptProtocolError,
-    MessagesHttpAttemptService, MessagesHttpErrorHead, MessagesHttpHooks, MessagesHttpResponseHead,
-    MessagesHttpSafety, MessagesOperationBinding, MessagesRequestErrorKind, MessagesRequestPolicy,
+    MessagesAttempt, MessagesAttemptError, MessagesAttemptProtocolError, MessagesHttpHooks,
+    MessagesHttpResponseHead, MessagesHttpSafety, MessagesRequestErrorKind, MessagesRequestPolicy,
     MessagesRouterPolicy, MessagesStreamDialectHooks, MessagesStreamError,
     MessagesStreamExtensions, PreparedMessagesHttpOperation, PreparedMessagesStreamBinding,
-    ToolOwnership, call_messages_operation, lower_request_with_active_artifact,
+    ToolOwnership, lower_request_with_active_artifact,
 };
 use plakous_model::{
-    Capability, CapabilityConstraints, CapabilitySet, Clock, CompiledProviderConfiguration,
-    ConfiguredLanguageModel, ContextContract, ContextEvidenceClass, CredentialSelectionId, Digest,
-    DigestDomain, EffectiveProviderConfiguration, FactProvenance, FactSource, FamilyPolicyEnvelope,
-    FeatureSupport, LanguageModel, ModelAdapterProfileId, ModelDiagnostic, ModelError,
+    CapabilitySet, Clock, CompiledProviderConfiguration, ConfiguredLanguageModel, ContextContract,
+    ContextEvidenceClass, CredentialSelectionId, Digest, DigestDomain, FactProvenance, FactSource,
+    FamilyPolicyEnvelope, LanguageModel, ModelAdapterProfileId, ModelDiagnostic, ModelError,
     ModelErrorKind, ModelFamilyId, ModelImplementationIdentity, ModelPreparationContext,
     ModelPreparationError, ModelPreparationErrorKind, NamespaceId, PreparedModelCall, ProtocolId,
     ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
     ProviderRouteSelection, ProviderSemanticEvidence, ResolvedModelDescriptor,
     ResolvedProviderAuthorityBinding, RuntimeModelAuthority, RuntimeModelAuthorityError,
-    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Support, SystemIdGenerator,
-    Timestamp, ValidatedRequestPlan,
+    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Timestamp, ValidatedRequestPlan,
 };
 use thiserror::Error;
 
 use crate::wire::{
-    AttemptWire, JoinedStream, WireProjection, body_reports_context_overflow,
-    context_overflow_kind, generation_number, inferred_failure_kind, insert_attribution,
-    is_sse_content_type, named_refusal_kind, operation_error, post_send_status_outcome, rejection,
-    usage_limit_kind,
+    AttemptWire, WireProjection, body_reports_context_overflow, context_overflow_kind,
+    generation_number, inferred_failure_kind, insert_attribution, named_refusal_kind,
+    operation_error, rejection, usage_limit_kind,
 };
 use crate::{
     OpenRouterChatModelEvidence, OpenRouterChatRoute, OpenRouterKeyGeneration,
@@ -175,13 +170,12 @@ impl OpenRouterMessagesTarget {
             checked_at,
         )?;
         let generation = self.route.current_credential_generation_grant()?;
-        RuntimeModelAuthority::new(
+        crate::wire::runtime_authority(
             &self.descriptor,
-            self.route.identity().account_binding(),
-            self.route.identity().credential_authority_binding(),
-            generation_number(&generation),
+            self.route.identity(),
+            &generation,
             checked_at,
-            Some(self.evidence.expires_at()),
+            self.evidence.expires_at(),
         )
         .map_err(OpenRouterMessagesBuildError::RuntimeAuthority)
     }
@@ -299,10 +293,11 @@ impl OpenRouterMessagesLanguageModel {
         client: Client,
         config: OpenRouterMessagesHttpConfig,
     ) -> Result<Self, OpenRouterMessagesBuildError> {
-        if config.operation_timeout.is_zero()
-            || config.event_channel_capacity == 0
-            || config.maximum_error_body_bytes == 0
-        {
+        if !crate::wire::valid_transport_bounds(
+            config.operation_timeout,
+            config.event_channel_capacity,
+            config.maximum_error_body_bytes,
+        ) {
             return Err(OpenRouterMessagesBuildError::InvalidPolicy);
         }
         let clock = Arc::clone(&target.route.clock);
@@ -458,15 +453,12 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
                 .with_extensions(MessagesStreamExtensions::OpenRouterV1),
         );
         let stream = lowered.bind_active_artifact_to_stream(stream);
-        let binding = MessagesOperationBinding::new(
+        let operation = WireProjection::prepare_http::<plakous_messages::MessagesWire>(
             self.target.target_identity(),
-            plan.digest(),
+            &plan,
             lowered.operation_digest(),
             lowered.replay_safety(),
-        );
-        let operation = PreparedMessagesHttpOperation::new(
-            binding.clone(),
-            Arc::<[u8]>::from(lowered.body()),
+            lowered.body(),
             stream,
         );
         let hooks = OpenRouterMessagesHooks {
@@ -483,48 +475,33 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
                     )
                 })?,
         };
-        let client = self.client.clone();
         let origin = Origin::parse(identity.origin().as_str()).map_err(|_| {
             rejection(
                 ModelPreparationErrorKind::InvalidConfiguration,
                 "OpenRouter Messages origin is invalid",
             )
         })?;
-        let clock = Arc::clone(&self.clock);
-        let config = self.config;
-        let descriptor = descriptor.clone();
-        let turn_rooted = matches!(
-            plan.request().metadata().root(),
-            plakous_model::ModelOperationRoot::Turn(_)
-        );
-        Ok(PreparedModelCall::new(record, move |call_context| {
-            Box::pin(async move {
-                let capacity =
-                    NonZeroUsize::new(config.event_channel_capacity).unwrap_or(NonZeroUsize::MIN);
-                let (attempt, receiver) =
-                    MessagesAttempt::with_event_channel(binding, call_context, capacity);
-                let mut service = MessagesHttpAttemptService::new(
-                    client,
-                    origin,
-                    operation,
-                    hooks,
-                    Arc::clone(&clock),
-                    Arc::new(SystemIdGenerator),
-                    config.operation_timeout,
-                    config.maximum_error_body_bytes,
-                    turn_rooted,
-                )
-                .with_retry(revalidate_hooks);
-                let operation =
-                    Box::pin(async move { call_messages_operation(&mut service, attempt).await });
-                Ok(Box::pin(JoinedStream::<MessagesWire, _>::new(
-                    descriptor,
-                    replay_diagnostics,
-                    operation,
-                    receiver,
-                )) as plakous_model::ModelStream)
-            })
-        }))
+        let execution = crate::wire::GatewayExecution {
+            client: self.client.clone(),
+            origin,
+            clock: Arc::clone(&self.clock),
+            timeout: self.config.operation_timeout,
+            error_bytes: self.config.maximum_error_body_bytes,
+            event_capacity: self.config.event_channel_capacity,
+            turn_rooted: matches!(
+                plan.request().metadata().root(),
+                plakous_model::ModelOperationRoot::Turn(_)
+            ),
+        };
+        Ok(crate::wire::prepare_model_call::<MessagesWire, _, _>(
+            record,
+            descriptor.clone(),
+            execution,
+            operation,
+            hooks,
+            Some(revalidate_hooks),
+            replay_diagnostics,
+        ))
     }
 }
 
@@ -535,14 +512,8 @@ struct OpenRouterMessagesHooks {
     generation: OpenRouterKeyGeneration,
 }
 
-#[derive(Clone)]
-struct ErrorMetadata {
-    status: u16,
-    retry_after: Option<Duration>,
-}
-
-impl MessagesHttpHooks for OpenRouterMessagesHooks {
-    type ErrorMetadata = ErrorMetadata;
+impl MessagesHttpHooks<plakous_messages::MessagesWire> for OpenRouterMessagesHooks {
+    type ErrorMetadata = crate::wire::GatewayErrorMetadata;
 
     fn build_request(
         &self,
@@ -595,40 +566,13 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
         &self,
         response: &Response,
     ) -> Result<MessagesHttpResponseHead<Self::ErrorMetadata>, MessagesAttemptProtocolError> {
-        let status = response.status();
-        if status != StatusCode::OK {
-            return Ok(MessagesHttpResponseHead::Error(MessagesHttpErrorHead {
-                metadata: ErrorMetadata {
-                    status: status.as_u16(),
-                    retry_after: response
-                        .headers()
-                        .get(&HeaderName::from_static("retry-after"))
-                        .and_then(|value| value.to_str().ok())
-                        .and_then(plakous_attempt::retry_after_seconds),
-                },
-                outcome: post_send_status_outcome(status),
-                provider_accepted: false,
-            }));
-        }
-        let content_type = response
-            .headers()
-            .get(&HeaderName::from_static("content-type"))
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        if !is_sse_content_type(content_type) {
-            return Err(MessagesAttemptProtocolError::new(
-                "OpenRouter Messages success was not an SSE response",
-            ));
-        }
-        let request_id = response
-            .headers()
-            .get(&HeaderName::from_static("x-request-id"))
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| plakous_model::ModelProviderRequestId::new(value).ok());
-        Ok(request_id.map_or(
-            MessagesHttpResponseHead::StreamWithoutRequestId,
-            MessagesHttpResponseHead::Stream,
-        ))
+        crate::wire::classify_response_head::<plakous_messages::MessagesWire>(response, || {
+            Ok(response
+                .headers()
+                .get(&HeaderName::from_static("x-request-id"))
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| plakous_model::ModelProviderRequestId::new(value).ok()))
+        })
     }
 
     fn classify_error_response(
@@ -644,13 +588,13 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
         };
         let error = MessagesAttemptProtocolError::new(format!(
             "OpenRouter Messages HTTP {} ({disposition})",
-            metadata.status
+            metadata.status()
         ));
-        let error = match plakous_model::ModelHttpStatus::new(metadata.status) {
+        let error = match plakous_model::ModelHttpStatus::new(metadata.status()) {
             Ok(status) => error.with_http_status(status),
             Err(_) => error,
         };
-        let error = match metadata.retry_after.and_then(retry_delay) {
+        let error = match metadata.retry_after().and_then(crate::wire::retry_delay) {
             Some(advice) => error.with_retry_after(advice),
             None => error,
         };
@@ -660,7 +604,7 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
             error
         };
         // Carry the classification, not just the number in a sentence.
-        match plakous_attempt::ProviderRefusal::from_http_status(metadata.status) {
+        match plakous_attempt::ProviderRefusal::from_http_status(metadata.status()) {
             Some(refusal) => error.with_refusal(refusal),
             None => error,
         }
@@ -855,15 +799,7 @@ fn compile_configuration(
         ))
         .map_err(|_| OpenRouterMessagesBuildError::Identity)?,
     )?;
-    let effective = EffectiveProviderConfiguration::compile(
-        &selected,
-        descriptor.clone(),
-        implementation,
-        authority,
-        selected.behavior().clone(),
-        policy,
-    )?;
-    CompiledProviderConfiguration::new(selected, effective)
+    crate::wire::compile_configuration(selected, descriptor, implementation, authority, policy)
         .map_err(OpenRouterMessagesBuildError::ProviderConfiguration)
 }
 
@@ -895,30 +831,11 @@ fn messages_capabilities(
     evidence: &OpenRouterChatModelEvidence,
 ) -> Result<CapabilitySet, plakous_model::IdentityError> {
     let provenance = FactProvenance::new(FactSource::BuiltIn, Timestamp::new(0, 0)?, None);
-    let mut features: BTreeMap<_, _> = [
-        Capability::Streaming,
-        Capability::Tools,
-        Capability::Reasoning,
-    ]
-    .into_iter()
-    .map(|capability| {
-        (
-            capability,
-            FeatureSupport::new(
-                Support::Native,
-                CapabilityConstraints::new(
-                    None,
-                    Some("Custom OpenRouter Messages dialect".to_owned()),
-                ),
-                provenance,
-            ),
-        )
-    })
-    .collect();
-    if let Some(image) = crate::chat::image_input_fact(evidence) {
-        features.insert(Capability::ImageInput, image);
-    }
-    Ok(CapabilitySet::new(features, BTreeMap::new()))
+    Ok(crate::wire::gateway_capabilities(
+        evidence,
+        provenance,
+        "Custom OpenRouter Messages dialect",
+    ))
 }
 
 /// Safe OpenRouter Messages construction failure.
@@ -967,15 +884,6 @@ pub enum OpenRouterMessagesBuildError {
     /// Credential authority was unavailable.
     #[error(transparent)]
     Authentication(#[from] crate::OpenRouterAuthError),
-}
-
-/// Saturates provider advice at the representable 24 h so long advice
-/// reaches the retry kernel's 60 s clamp instead of being dropped.
-fn retry_delay(advice: Duration) -> Option<plakous_model::ModelRetryDelay> {
-    let millis = u64::try_from(advice.as_millis())
-        .unwrap_or(u64::MAX)
-        .min(plakous_model::ModelRetryDelay::MAX_MILLIS);
-    plakous_model::ModelRetryDelay::from_millis(millis).ok()
 }
 
 fn messages_lowering_error(error: plakous_messages::MessagesRequestError) -> ModelPreparationError {

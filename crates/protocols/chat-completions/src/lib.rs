@@ -22,7 +22,7 @@ mod stream;
 pub use attempt::{
     CHAT_FAMILY_LEDGER_POLICY, ChatAttempt, ChatAttemptBinding, ChatAttemptError,
     ChatAttemptEventReceiver, ChatAttemptEventSink, ChatAttemptProtocolError, ChatAttemptResponse,
-    ChatOperationBinding, ChatPhysicalRequestBinding, MAX_CHAT_ADMITTED_CLEANUP_POLLS,
+    ChatOperationBinding, ChatPhysicalRequestBinding, ChatWire, MAX_CHAT_ADMITTED_CLEANUP_POLLS,
     call_chat_operation,
 };
 pub use http::{

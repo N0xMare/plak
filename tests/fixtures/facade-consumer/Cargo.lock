@@ -1005,8 +1005,6 @@ name = "plakous-chat-completions"
 version = "0.0.2"
 dependencies = [
  "base64",
- "futures-channel",
- "futures-util",
  "plakous-attempt",
  "plakous-exchange",
  "plakous-http",
@@ -1014,7 +1012,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower-service",
  "unicode-general-category",
 ]
 
@@ -1046,12 +1043,14 @@ dependencies = [
 name = "plakous-exchange"
 version = "0.0.2"
 dependencies = [
+ "futures-channel",
  "futures-util",
  "getrandom 0.4.3",
  "plakous-attempt",
  "plakous-http",
  "plakous-model",
  "tokio",
+ "tower-service",
  "zeroize",
 ]
 
@@ -1104,8 +1103,6 @@ name = "plakous-messages"
 version = "0.0.2"
 dependencies = [
  "base64",
- "futures-channel",
- "futures-util",
  "plakous-attempt",
  "plakous-exchange",
  "plakous-http",
@@ -1113,7 +1110,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower-service",
 ]
 
 [[package]]

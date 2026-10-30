@@ -30,7 +30,7 @@ pub use attempt::{
     MAX_MESSAGES_ADMITTED_CLEANUP_POLLS, MessagesAttempt, MessagesAttemptBinding,
     MessagesAttemptError, MessagesAttemptEventReceiver, MessagesAttemptEventSink,
     MessagesAttemptProtocolError, MessagesAttemptResponse, MessagesOperationBinding,
-    MessagesPhysicalRequestBinding, MessagesProviderRefusal, call_messages_operation,
+    MessagesPhysicalRequestBinding, MessagesProviderRefusal, MessagesWire, call_messages_operation,
 };
 pub use configuration::{
     MESSAGES_FAMILY_POLICY_COMPILER_REVISION, MESSAGES_FAMILY_POLICY_SCHEMA_REVISION,

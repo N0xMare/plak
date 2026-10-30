@@ -9338,6 +9338,20 @@ rather than a provider and model label.
 
 ### 13.1 Errors and retry
 
+Chat Completions and Messages use one admitted family attempt and HTTP/SSE
+host. Each family retains its own grammar, terminal projection and ledger
+policy; providers retain exact-route authorization and error interpretation.
+Chat uses the Messages seal-before-publish rule: a successful terminal
+observation is published only after projection, binding and single-terminal
+validation have sealed the response, and a dialect cannot publish an unsealed
+`ResponseCompleted` through its observation sink. Chat also carries Messages'
+validated `ModelHttpStatus`, bounded retry-delay advice, and conservative
+acceptance and terminal facts. Chat keeps its own provider-deadline one-replay
+cap, request-build revalidation of a retried grant, event-loss accounting, and
+the absence of a status-retry decline notice. Messages keeps hosted-effect
+accounting and a projector-emitted terminal. This does not change any request,
+artifact or persisted encoding.
+
 Public diagnostic redaction preserves failure prose (`credential refresh`,
 `token limit`). Assignments, Bearer values and known credential prefixes remain
 redacted. Bare secret/password/api-key/authorization labels redact the following

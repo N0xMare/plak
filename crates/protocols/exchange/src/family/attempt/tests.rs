@@ -1,7 +1,13 @@
 use plakous_model::{DigestDomain, ModelCallContext};
 use uuid::Uuid;
 
+use super::super::test_wire::TestWire;
 use super::*;
+use plakous_attempt::ProviderRefusal;
+type ChatAttempt = FamilyAttempt<TestWire>;
+type ChatAttemptError = FamilyAttemptError<TestWire>;
+type ChatOperationBinding = FamilyOperationBinding;
+type ChatPhysicalRequestBinding = FamilyPhysicalRequestBinding;
 
 fn attempt(label: &[u8]) -> Result<ChatAttempt, Box<dyn std::error::Error>> {
     let operation = ChatOperationBinding::new(
@@ -58,8 +64,8 @@ fn an_in_band_deadline_after_a_hosted_effect_never_replays()
             plakous_attempt::Jitter::SHORTEST,
         );
         assert_eq!(delay, None);
-        let reason = plakous_exchange::retry_decline(
-            &plakous_exchange::RetryDeclineInput {
+        let reason = crate::retry_decline(
+            &crate::RetryDeclineInput {
                 deadline_remaining: None,
                 established: None,
                 redispatch_available: true,
@@ -123,5 +129,35 @@ fn authorization_rejects_foreign_attempt_and_generation_bindings()
         owner.validate_authorization(&foreign_binding),
         Err(ChatAttemptError::Binding { .. })
     ));
+    Ok(())
+}
+
+#[test]
+fn admitted_exact_acceptance_is_preserved_in_terminal_facts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (attempt, _receiver) = ChatAttempt::with_event_channel(
+        FamilyOperationBinding::new(
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"accepted"])?,
+            Digest::sha256(DigestDomain::RequestPlan, 1, &[b"accepted"])?,
+            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"accepted"])?,
+            ReplaySafety::CostOnly,
+        ),
+        ModelCallContext::new(
+            AttemptId::try_from(Uuid::from_u128(5))?,
+            CancellationToken::new(),
+            None,
+        ),
+        NonZeroUsize::new(1).ok_or("nonzero")?,
+    );
+    attempt.core.mark_service_admitted()?;
+    attempt.observe_physical_request_started()?;
+    attempt.observe_provider_accepted()?;
+    let facts = attempt.terminal_facts();
+    assert_eq!(facts.physical_attempts(), 1);
+    assert_eq!(facts.provider_acceptance(), ProviderAcceptance::Accepted);
+    assert_ne!(
+        facts.retry_class(),
+        plakous_attempt::RetryClass::BeforeAcceptance
+    );
     Ok(())
 }

@@ -1,3 +1,4 @@
+use super::super::test_wire::TestWire;
 use super::*;
 use futures_util::StreamExt as _;
 use plakous_model::{
@@ -8,23 +9,23 @@ use std::{error::Error, num::NonZeroUsize};
 #[derive(Clone)]
 struct UnusedHooks;
 
-impl MessagesHttpHooks for UnusedHooks {
+impl FamilyHttpHooks<TestWire> for UnusedHooks {
     type ErrorMetadata = ();
 
     fn build_request(
         &self,
         _: &Client,
         _: Origin,
-        _: &MessagesAttempt,
-        _: &PreparedMessagesHttpOperation,
-    ) -> Result<HttpRequest, MessagesAttemptProtocolError> {
+        _: &FamilyAttempt<TestWire>,
+        _: &PreparedFamilyHttpOperation<TestWire>,
+    ) -> Result<HttpRequest, FamilyAttemptProtocolError<TestWire>> {
         unreachable!("declined retry does not dispatch")
     }
 
     fn classify_response_head(
         &self,
         _: &Response,
-    ) -> Result<MessagesHttpResponseHead<()>, MessagesAttemptProtocolError> {
+    ) -> Result<FamilyHttpResponseHead<()>, FamilyAttemptProtocolError<TestWire>> {
         unreachable!("declined retry does not exchange")
     }
 
@@ -32,8 +33,8 @@ impl MessagesHttpHooks for UnusedHooks {
         &self,
         (): (),
         _: &[u8],
-        _: MessagesHttpSafety,
-    ) -> MessagesAttemptProtocolError {
+        _: FamilyHttpSafety,
+    ) -> FamilyAttemptProtocolError<TestWire> {
         unreachable!("declined retry does not exchange")
     }
 
@@ -41,15 +42,15 @@ impl MessagesHttpHooks for UnusedHooks {
         &self,
         _: HttpFailure,
         _: Option<&str>,
-    ) -> MessagesAttemptProtocolError {
+    ) -> FamilyAttemptProtocolError<TestWire> {
         unreachable!("declined retry does not exchange")
     }
 
-    fn cancellation_error(&self) -> MessagesAttemptProtocolError {
+    fn cancellation_error(&self) -> FamilyAttemptProtocolError<TestWire> {
         unreachable!("fixture is not cancelled")
     }
 
-    fn classify_stream_error(&self, _: MessagesStreamError) -> MessagesAttemptProtocolError {
+    fn classify_stream_error(&self, (): ()) -> FamilyAttemptProtocolError<TestWire> {
         unreachable!("declined retry does not exchange")
     }
 }
@@ -59,7 +60,7 @@ async fn assert_decline(
     reason: Decline,
 ) -> Result<(), Box<dyn Error>> {
     let digest = |domain| Digest::sha256(domain, 1, &[b"messages-decline"]);
-    let operation = MessagesOperationBinding::new(
+    let operation = FamilyOperationBinding::new(
         digest(DigestDomain::ModelBinding)?,
         digest(DigestDomain::RequestPlan)?,
         digest(DigestDomain::ProviderOperation)?,
@@ -70,7 +71,7 @@ async fn assert_decline(
         CancellationToken::new(),
         None,
     );
-    let (mut attempt, mut receiver) = MessagesAttempt::with_event_channel(
+    let (mut attempt, mut receiver) = FamilyAttempt::<TestWire>::with_event_channel(
         operation,
         context,
         NonZeroUsize::new(1).ok_or("nonzero")?,

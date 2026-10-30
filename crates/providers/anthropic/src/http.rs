@@ -681,7 +681,7 @@ struct AnthropicErrorMetadata {
     fable_included_limit: bool,
 }
 
-impl MessagesHttpHooks for AnthropicHttpHooks {
+impl MessagesHttpHooks<plakous_messages::MessagesWire> for AnthropicHttpHooks {
     type ErrorMetadata = AnthropicErrorMetadata;
 
     fn build_request(

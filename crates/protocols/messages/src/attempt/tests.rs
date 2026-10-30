@@ -7,6 +7,12 @@ use tower_service::Service;
 use uuid::Uuid;
 
 use super::*;
+use plakous_attempt::{PhysicalRequestOutcome, ProviderAcceptance, ReplaySafety, TerminalFacts};
+use plakous_model::{
+    AttemptId, CancellationToken, Digest, ModelCallContext, ModelEvent, ModelHttpStatus,
+    ModelRetryDelay,
+};
+use std::num::NonZeroUsize;
 
 fn operation(label: &[u8]) -> Result<MessagesOperationBinding, Box<dyn std::error::Error>> {
     Ok(MessagesOperationBinding::new(
@@ -47,12 +53,12 @@ fn cancellation_wakes_backpressured_observation_delivery() -> Result<(), Box<dyn
     let cancellation = CancellationToken::new();
     let binding = operation(b"backpressure")?;
     let plan = binding.plan();
-    let (attempt, _receiver) = MessagesAttempt::with_event_channel(
+    let (mut attempt, _receiver) = MessagesAttempt::with_event_channel(
         binding,
         context(1, cancellation.clone())?,
         NonZeroUsize::new(1).ok_or("nonzero")?,
     );
-    let mut sink = attempt.events.clone();
+    let mut sink = attempt.events_mut().clone();
     block_on(sink.send(started(plan)))?;
     let mut blocked = Box::pin(sink.send(started(plan)));
     let waker = futures::task::noop_waker();
@@ -68,13 +74,13 @@ fn cancellation_wakes_backpressured_observation_delivery() -> Result<(), Box<dyn
 
 #[test]
 fn terminal_observation_is_emitted_at_most_once() -> Result<(), Box<dyn std::error::Error>> {
-    let (attempt, mut receiver) = MessagesAttempt::with_event_channel(
+    let (mut attempt, mut receiver) = MessagesAttempt::with_event_channel(
         operation(b"terminal")?,
         context(2, CancellationToken::new())?,
         NonZeroUsize::new(2).ok_or("nonzero")?,
     );
-    let mut first = attempt.events.clone();
-    let mut retained = attempt.events.clone();
+    let mut first = attempt.events_mut().clone();
+    let mut retained = attempt.events_mut().clone();
     let terminal = MessagesAttemptProtocolError::new("terminal fixture");
     block_on(first.send_error(terminal.clone()))?;
     assert_eq!(
@@ -105,6 +111,58 @@ fn protocol_metadata_survives_attempt_error() -> Result<(), Box<dyn std::error::
 }
 
 struct AmbiguousService;
+
+struct UnsealedTerminalService;
+impl Service<MessagesAttempt> for UnsealedTerminalService {
+    type Response = MessagesAttemptResponse;
+    type Error = MessagesAttemptError;
+    type Future =
+        std::pin::Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+    fn call(&mut self, mut attempt: MessagesAttempt) -> Self::Future {
+        Box::pin(async move {
+            attempt.observe_physical_request_started()?;
+            let response = ModelResponse::new(
+                Vec::new(),
+                plakous_model::FinishDetails::new(plakous_model::FinishReason::Stop, None),
+                None,
+                None,
+                attempt.binding().operation().plan(),
+            );
+            match attempt
+                .events_mut()
+                .send(ModelEvent::ResponseCompleted(response))
+                .await
+            {
+                Err(error) => Err(error),
+                Ok(()) => Err(MessagesAttemptError::Unavailable),
+            }
+        })
+    }
+}
+
+#[test]
+fn an_unsealed_terminal_never_reaches_the_observation_receiver()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (attempt, mut receiver) = MessagesAttempt::with_event_channel(
+        operation(b"unsealed-terminal")?,
+        context(9, CancellationToken::new())?,
+        NonZeroUsize::MIN,
+    );
+    let result = block_on(call_messages_operation(
+        &mut UnsealedTerminalService,
+        attempt,
+    ));
+    assert!(matches!(
+        result,
+        Err(MessagesAttemptError::ServiceContract { .. })
+    ));
+    assert_eq!(block_on(futures_util::StreamExt::next(&mut receiver)), None);
+    Ok(())
+}
+
 impl Service<MessagesAttempt> for AmbiguousService {
     type Response = MessagesAttemptResponse;
     type Error = MessagesAttemptError;
@@ -205,27 +263,6 @@ fn hosted_capability_survives_cancellation_after_acceptance()
     assert_eq!(facts.replay_safety(), ReplaySafety::ServerEffect);
     assert!(facts.hosted_effects_possible());
     assert_eq!(facts.retry_class(), plakous_attempt::RetryClass::Never);
-    Ok(())
-}
-
-#[test]
-fn admitted_exact_acceptance_is_preserved_in_terminal_facts()
--> Result<(), Box<dyn std::error::Error>> {
-    let (attempt, _receiver) = MessagesAttempt::with_event_channel(
-        operation(b"accepted")?,
-        context(5, CancellationToken::new())?,
-        NonZeroUsize::new(1).ok_or("nonzero")?,
-    );
-    attempt.core.mark_service_admitted()?;
-    attempt.observe_physical_request_started()?;
-    attempt.observe_provider_accepted()?;
-    let facts = attempt.terminal_facts();
-    assert_eq!(facts.physical_attempts(), 1);
-    assert_eq!(facts.provider_acceptance(), ProviderAcceptance::Accepted);
-    assert_ne!(
-        facts.retry_class(),
-        plakous_attempt::RetryClass::BeforeAcceptance
-    );
     Ok(())
 }
 

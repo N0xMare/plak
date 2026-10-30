@@ -24,6 +24,210 @@ use plakous_model::{
 
 use crate::{OpenRouterChatRouteIdentity, OpenRouterKeyGeneration};
 
+pub(crate) struct GatewayExecution {
+    pub(crate) client: plakous_http::Client,
+    pub(crate) origin: plakous_http::Origin,
+    pub(crate) clock: std::sync::Arc<dyn plakous_model::Clock>,
+    pub(crate) timeout: std::time::Duration,
+    pub(crate) error_bytes: usize,
+    pub(crate) event_capacity: usize,
+    pub(crate) turn_rooted: bool,
+}
+
+pub(crate) fn prepare_model_call<A, W, H>(
+    record: PreparedCallRecord,
+    descriptor: ResolvedModelDescriptor,
+    execution: GatewayExecution,
+    operation: plakous_exchange::family::PreparedFamilyHttpOperation<W>,
+    hooks: H,
+    redispatch: Option<plakous_exchange::family::FamilyRedispatchFn<W, H>>,
+    diagnostics: VecDeque<ModelDiagnostic>,
+) -> plakous_model::PreparedModelCall
+where
+    W: plakous_exchange::family::FamilyWire + Unpin,
+    H: plakous_exchange::family::FamilyHttpHooks<W>,
+    A: AttemptWire<
+            Response = plakous_exchange::family::FamilyAttemptResponse<W>,
+            AttemptError = plakous_exchange::family::FamilyAttemptError<W>,
+            ProtocolError = plakous_exchange::family::FamilyAttemptProtocolError<W>,
+        > + 'static,
+{
+    use plakous_exchange::family::{
+        FamilyAttempt, FamilyHttpAttemptService, call_family_operation,
+    };
+    plakous_model::PreparedModelCall::new(record, move |call_context| {
+        Box::pin(async move {
+            let capacity = std::num::NonZeroUsize::new(execution.event_capacity)
+                .unwrap_or(std::num::NonZeroUsize::MIN);
+            let (attempt, receiver) = FamilyAttempt::<W>::with_event_channel(
+                operation.binding().clone(),
+                call_context,
+                capacity,
+            );
+            let mut service = FamilyHttpAttemptService::new(
+                execution.client,
+                execution.origin,
+                operation,
+                hooks,
+                execution.clock,
+                std::sync::Arc::new(plakous_model::SystemIdGenerator),
+                execution.timeout,
+                execution.error_bytes,
+                execution.turn_rooted,
+            );
+            if let Some(redispatch) = redispatch {
+                service = service.with_retry(redispatch);
+            }
+            let operation =
+                Box::pin(async move { call_family_operation(&mut service, attempt).await });
+            Ok(Box::pin(JoinedStream::<A, _>::new(
+                descriptor,
+                diagnostics,
+                operation,
+                receiver,
+            )) as plakous_model::ModelStream)
+        })
+    })
+}
+
+pub(crate) fn valid_transport_bounds(
+    timeout: std::time::Duration,
+    capacity: usize,
+    error_bytes: usize,
+) -> bool {
+    !timeout.is_zero() && capacity != 0 && error_bytes != 0
+}
+
+pub(crate) fn runtime_authority(
+    descriptor: &ResolvedModelDescriptor,
+    identity: &OpenRouterChatRouteIdentity,
+    grant: &OpenRouterKeyGeneration,
+    checked_at: plakous_model::Timestamp,
+    expires_at: plakous_model::Timestamp,
+) -> Result<plakous_model::RuntimeModelAuthority, RuntimeModelAuthorityError> {
+    plakous_model::RuntimeModelAuthority::new(
+        descriptor,
+        identity.account_binding(),
+        identity.credential_authority_binding(),
+        generation_number(grant),
+        checked_at,
+        Some(expires_at),
+    )
+}
+
+pub(crate) fn gateway_capabilities(
+    evidence: &crate::OpenRouterChatModelEvidence,
+    provenance: plakous_model::FactProvenance,
+    constraint: &str,
+) -> plakous_model::CapabilitySet {
+    use plakous_model::{
+        Capability, CapabilityConstraints, CapabilitySet, FeatureSupport, Support,
+    };
+    let constraints = CapabilityConstraints::new(None, Some(constraint.to_owned()));
+    let mut features = [
+        Capability::Streaming,
+        Capability::Tools,
+        Capability::Reasoning,
+    ]
+    .into_iter()
+    .map(|capability| {
+        (
+            capability,
+            FeatureSupport::new(Support::Native, constraints.clone(), provenance),
+        )
+    })
+    .collect::<std::collections::BTreeMap<_, _>>();
+    if let Some(image) = crate::chat::image_input_fact(evidence) {
+        features.insert(Capability::ImageInput, image);
+    }
+    CapabilitySet::new(features, std::collections::BTreeMap::new())
+}
+
+pub(crate) fn compile_configuration(
+    selected: plakous_model::SelectedProviderConfiguration,
+    descriptor: &ResolvedModelDescriptor,
+    implementation: plakous_model::ModelImplementationIdentity,
+    authority: plakous_model::ResolvedProviderAuthorityBinding,
+    policy: plakous_model::FamilyPolicyEnvelope,
+) -> Result<CompiledProviderConfiguration, plakous_model::ProviderConfigurationError> {
+    let effective = plakous_model::EffectiveProviderConfiguration::compile(
+        &selected,
+        descriptor.clone(),
+        implementation,
+        authority,
+        selected.behavior().clone(),
+        policy,
+    )?;
+    CompiledProviderConfiguration::new(selected, effective)
+}
+
+#[derive(Clone)]
+pub(crate) struct GatewayErrorMetadata {
+    status: u16,
+    retry_after: Option<std::time::Duration>,
+}
+impl GatewayErrorMetadata {
+    pub(crate) const fn status(&self) -> u16 {
+        self.status
+    }
+    pub(crate) const fn retry_after(&self) -> Option<std::time::Duration> {
+        self.retry_after
+    }
+}
+
+/// Saturate provider advice at the representable 24 h, before retry's 60 s clamp.
+pub(crate) fn retry_delay(advice: std::time::Duration) -> Option<plakous_model::ModelRetryDelay> {
+    let millis = u64::try_from(advice.as_millis())
+        .unwrap_or(u64::MAX)
+        .min(plakous_model::ModelRetryDelay::MAX_MILLIS);
+    plakous_model::ModelRetryDelay::from_millis(millis).ok()
+}
+
+pub(crate) fn classify_response_head<W: plakous_exchange::family::FamilyWire>(
+    response: &plakous_http::Response,
+    request_id: impl FnOnce() -> Result<
+        Option<plakous_model::ModelProviderRequestId>,
+        plakous_exchange::family::FamilyAttemptProtocolError<W>,
+    >,
+) -> Result<
+    plakous_exchange::family::FamilyHttpResponseHead<GatewayErrorMetadata>,
+    plakous_exchange::family::FamilyAttemptProtocolError<W>,
+> {
+    use plakous_exchange::family::{
+        FamilyAttemptProtocolError, FamilyHttpErrorHead, FamilyHttpResponseHead,
+    };
+    let status = response.status();
+    if status != StatusCode::OK {
+        return Ok(FamilyHttpResponseHead::Error(FamilyHttpErrorHead {
+            metadata: GatewayErrorMetadata {
+                status: status.as_u16(),
+                retry_after: response
+                    .headers()
+                    .get(&HeaderName::from_static("retry-after"))
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(plakous_attempt::retry_after_seconds),
+            },
+            outcome: post_send_status_outcome(status),
+            provider_accepted: false,
+        }));
+    }
+    let content_type = response
+        .headers()
+        .get(&HeaderName::from_static("content-type"))
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !is_sse_content_type(content_type) {
+        return Err(FamilyAttemptProtocolError::new(format!(
+            "OpenRouter {} success was not an SSE response",
+            W::NAME
+        )));
+    }
+    Ok(request_id()?.map_or(
+        FamilyHttpResponseHead::StreamWithoutRequestId,
+        FamilyHttpResponseHead::Stream,
+    ))
+}
+
 /// The labels and revisions one wire's prepared projection carries.
 pub(crate) struct WireProjection {
     /// The wire name in rejection messages: `Chat` or `Messages`.
@@ -37,6 +241,21 @@ pub(crate) struct WireProjection {
 }
 
 impl WireProjection {
+    pub(crate) fn prepare_http<W: plakous_exchange::family::FamilyWire>(
+        target: Digest,
+        plan: &ValidatedRequestPlan,
+        operation: Digest,
+        replay: plakous_attempt::ReplaySafety,
+        body: &[u8],
+        stream: W::StreamBinding,
+    ) -> plakous_exchange::family::PreparedFamilyHttpOperation<W> {
+        use plakous_exchange::family::{FamilyOperationBinding, PreparedFamilyHttpOperation};
+        PreparedFamilyHttpOperation::new(
+            FamilyOperationBinding::new(target, plan.digest(), operation, replay),
+            std::sync::Arc::<[u8]>::from(body),
+            stream,
+        )
+    }
     /// Admits a plan to this wire's compiled configuration: its descriptor
     /// binding, its selected and effective identities, its behavior, its plan
     /// admission and the preparation authority.

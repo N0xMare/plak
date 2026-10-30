@@ -1,46 +1,42 @@
 //! First-class OpenRouter Chat Completions dialect and executable target.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
 use plakous_attempt::FailureRisk;
 use plakous_chat_completions::{
     ChatAttempt, ChatAttemptError, ChatAttemptProtocolError, ChatDisabledReasoningWire,
-    ChatHttpAttemptService, ChatHttpErrorHead, ChatHttpHooks, ChatHttpResponseHead, ChatHttpSafety,
-    ChatOperationBinding, ChatOutputLimitField, ChatPhysicalRequestBinding, ChatReasoningReplay,
-    ChatRequestPolicy, ChatRouterPolicy, ChatStreamError, ChatStreamExtensions, ChatStreamLimits,
-    PreparedChatHttpOperation, PreparedChatStreamBinding, ReasoningAliasPolicy,
-    call_chat_operation, lower_request,
+    ChatHttpHooks, ChatHttpResponseHead, ChatHttpSafety, ChatOutputLimitField,
+    ChatPhysicalRequestBinding, ChatReasoningReplay, ChatRequestPolicy, ChatRouterPolicy,
+    ChatStreamError, ChatStreamExtensions, ChatStreamLimits, PreparedChatHttpOperation,
+    PreparedChatStreamBinding, ReasoningAliasPolicy, lower_request,
 };
 use plakous_http::{
     Client, Failure as HttpFailure, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
-    Response, SensitiveBytes, StatusCode, sensitive_header_value,
+    Response, SensitiveBytes, sensitive_header_value,
 };
 use plakous_model::{
-    Capability, CapabilityConstraints, CapabilitySet, CapacityRule, Clock,
-    CompiledProviderConfiguration, ConfiguredLanguageModel, ContextContract, ContextContractError,
-    ContextEvidenceClass, CredentialSelectionId, Digest, DigestDomain,
-    EffectiveProviderConfiguration, FactProvenance, FactSource, FamilyPolicyEnvelope,
+    CapabilityConstraints, CapabilitySet, CapacityRule, Clock, CompiledProviderConfiguration,
+    ConfiguredLanguageModel, ContextContract, ContextContractError, ContextEvidenceClass,
+    CredentialSelectionId, Digest, DigestDomain, FactProvenance, FactSource, FamilyPolicyEnvelope,
     FeatureSupport, LanguageModel, ModelAdapterProfileId, ModelError, ModelErrorKind,
     ModelFamilyId, ModelId, ModelImplementationIdentity, ModelPreparationContext,
     ModelPreparationError, ModelPreparationErrorKind, NamespaceId, PreparedModelCall, ProtocolId,
     ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
     ProviderRouteSelection, ProviderSemanticEvidence, ResolvedModelDescriptor,
     ResolvedProviderAuthorityBinding, RuntimeModelAuthority, RuntimeModelAuthorityError,
-    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Support, SystemIdGenerator,
-    Timestamp, ValidatedRequestPlan,
+    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Support, Timestamp,
+    ValidatedRequestPlan,
 };
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::wire::{
-    AttemptWire, JoinedStream, WireProjection, body_reports_context_overflow,
-    context_overflow_kind, generation_number, inferred_failure_kind, insert_attribution,
-    is_sse_content_type, named_refusal_kind, operation_error, post_send_status_outcome, rejection,
-    usage_limit_kind,
+    AttemptWire, WireProjection, body_reports_context_overflow, context_overflow_kind,
+    generation_number, inferred_failure_kind, insert_attribution, named_refusal_kind,
+    operation_error, rejection, usage_limit_kind,
 };
 use crate::{
     OpenRouterChatRoute, OpenRouterKeyGeneration, OpenRouterRetentionPolicy,
@@ -555,13 +551,12 @@ impl OpenRouterChatTarget {
             return Err(OpenRouterChatBuildError::StaleEvidence);
         }
         let grant = self.route.current_credential_generation_grant()?;
-        RuntimeModelAuthority::new(
+        crate::wire::runtime_authority(
             &self.descriptor,
-            self.route.identity().account_binding(),
-            self.route.identity().credential_authority_binding(),
-            generation_number(&grant),
+            self.route.identity(),
+            &grant,
             checked_at,
-            Some(self.evidence.expires_at()),
+            self.evidence.expires_at(),
         )
         .map_err(|_| OpenRouterChatBuildError::Configuration)
     }
@@ -575,32 +570,11 @@ fn openrouter_chat_dialect_capabilities(
         Timestamp::new(OPENROUTER_CHAT_REVIEWED_AT, 0)?,
         None,
     );
-    let mut features = BTreeMap::new();
-    if let Some(image) = image_input_fact(evidence) {
-        features.insert(Capability::ImageInput, image);
-    }
-    let constraints = CapabilityConstraints::new(
-        None,
-        Some(
-            "reviewed OpenRouter Chat Completions streaming, client function tools, and reasoning grammar; dynamic endpoint facts remain separate prerequisites"
-                .to_owned(),
-        ),
-    );
-    features.extend([
-        (
-            Capability::Streaming,
-            FeatureSupport::new(Support::Native, constraints.clone(), provenance),
-        ),
-        (
-            Capability::Tools,
-            FeatureSupport::new(Support::Native, constraints.clone(), provenance),
-        ),
-        (
-            Capability::Reasoning,
-            FeatureSupport::new(Support::Native, constraints, provenance),
-        ),
-    ]);
-    Ok(CapabilitySet::new(features, BTreeMap::new()))
+    Ok(crate::wire::gateway_capabilities(
+        evidence,
+        provenance,
+        "reviewed OpenRouter Chat Completions streaming, client function tools, and reasoning grammar; dynamic endpoint facts remain separate prerequisites",
+    ))
 }
 
 /// The `ImageInput` fact a discovered model row attests, shared by every
@@ -788,10 +762,11 @@ impl OpenRouterChatLanguageModel {
         client: Client,
         config: OpenRouterChatHttpConfig,
     ) -> Result<Self, OpenRouterChatBuildError> {
-        if config.operation_timeout.is_zero()
-            || config.event_channel_capacity == 0
-            || config.maximum_error_body_bytes == 0
-        {
+        if !crate::wire::valid_transport_bounds(
+            config.operation_timeout,
+            config.event_channel_capacity,
+            config.maximum_error_body_bytes,
+        ) {
             return Err(OpenRouterChatBuildError::InvalidPolicy);
         }
         if matches!(
@@ -971,14 +946,14 @@ impl LanguageModel for OpenRouterChatLanguageModel {
             self.config.stream_limits,
         )
         .with_extensions(ChatStreamExtensions::OpenRouterV1);
-        let operation_binding = ChatOperationBinding::new(
+        let operation = WireProjection::prepare_http::<plakous_chat_completions::ChatWire>(
             self.target.target_identity(),
-            plan.digest(),
+            &plan,
             lowered.operation_digest(),
             lowered.replay_safety(),
+            lowered.body(),
+            stream_binding,
         );
-        let operation =
-            PreparedChatHttpOperation::new(operation_binding.clone(), lowered, stream_binding);
         let hooks = OpenRouterChatHooks {
             target: self.target.clone(),
             clock: Arc::clone(&self.clock),
@@ -989,49 +964,33 @@ impl LanguageModel for OpenRouterChatLanguageModel {
                 )
             })?,
         };
-        let client = self.client.clone();
         let origin = Origin::parse(identity.origin().as_str()).map_err(|_| {
             rejection(
                 ModelPreparationErrorKind::InvalidConfiguration,
                 "OpenRouter Chat origin is invalid",
             )
         })?;
-        let clock = Arc::clone(&self.clock);
-        let config = self.config;
-        let descriptor = descriptor.clone();
-        let turn_rooted = matches!(
-            plan.request().metadata().root(),
-            plakous_model::ModelOperationRoot::Turn(_)
-        );
-        Ok(PreparedModelCall::new(record, move |call_context| {
-            Box::pin(async move {
-                let capacity =
-                    NonZeroUsize::new(config.event_channel_capacity).unwrap_or(NonZeroUsize::MIN);
-                let (attempt, receiver) =
-                    ChatAttempt::with_event_channel(operation_binding, call_context, capacity);
-                let mut service = ChatHttpAttemptService::new(
-                    client,
-                    origin,
-                    operation,
-                    hooks,
-                    Arc::clone(&clock),
-                    Arc::new(SystemIdGenerator),
-                    config.operation_timeout,
-                    config.maximum_error_body_bytes,
-                );
-                if turn_rooted {
-                    service = service.with_turn_retry();
-                }
-                let operation =
-                    Box::pin(async move { call_chat_operation(&mut service, attempt).await });
-                Ok(Box::pin(JoinedStream::<ChatWire, _>::new(
-                    descriptor,
-                    VecDeque::new(),
-                    operation,
-                    receiver,
-                )) as plakous_model::ModelStream)
-            })
-        }))
+        let execution = crate::wire::GatewayExecution {
+            client: self.client.clone(),
+            origin,
+            clock: Arc::clone(&self.clock),
+            timeout: self.config.operation_timeout,
+            error_bytes: self.config.maximum_error_body_bytes,
+            event_capacity: self.config.event_channel_capacity,
+            turn_rooted: matches!(
+                plan.request().metadata().root(),
+                plakous_model::ModelOperationRoot::Turn(_)
+            ),
+        };
+        Ok(crate::wire::prepare_model_call::<ChatWire, _, _>(
+            record,
+            descriptor.clone(),
+            execution,
+            operation,
+            hooks,
+            None,
+            VecDeque::new(),
+        ))
     }
 }
 
@@ -1042,21 +1001,20 @@ struct OpenRouterChatHooks {
     generation: OpenRouterKeyGeneration,
 }
 
-#[derive(Clone)]
-struct ErrorMetadata {
-    status: u16,
-}
-
-impl ChatHttpHooks for OpenRouterChatHooks {
-    type ErrorMetadata = ErrorMetadata;
+impl ChatHttpHooks<plakous_chat_completions::ChatWire> for OpenRouterChatHooks {
+    type ErrorMetadata = crate::wire::GatewayErrorMetadata;
 
     fn build_request(
         &self,
         client: &Client,
         dial_origin: Origin,
-        physical: &ChatPhysicalRequestBinding,
+        attempt: &ChatAttempt,
         operation: &PreparedChatHttpOperation,
     ) -> Result<Request, ChatAttemptProtocolError> {
+        let physical = &ChatPhysicalRequestBinding::new(
+            attempt.binding().clone(),
+            attempt.terminal_facts().physical_attempts(),
+        );
         let current = self
             .target
             .runtime_authority(self.clock.now())
@@ -1105,31 +1063,17 @@ impl ChatHttpHooks for OpenRouterChatHooks {
         &self,
         response: &Response,
     ) -> Result<ChatHttpResponseHead<Self::ErrorMetadata>, ChatAttemptProtocolError> {
-        let status = response.status();
-        if status != StatusCode::OK {
-            return Ok(ChatHttpResponseHead::Error(ChatHttpErrorHead {
-                metadata: ErrorMetadata {
-                    status: status.as_u16(),
-                },
-                outcome: post_send_status_outcome(status),
-                provider_accepted: false,
-            }));
-        }
-        let content_type = response
-            .headers()
-            .get(&HeaderName::from_static("content-type"))
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        if !is_sse_content_type(content_type) {
-            return Err(ChatAttemptProtocolError::new(
-                "OpenRouter Chat success was not an SSE response",
-            ));
-        }
-        let request_id = openrouter_request_id(|name| response.headers().get(name))
-            .ok_or_else(|| ChatAttemptProtocolError::new("OpenRouter Chat request ID is absent"))?;
-        let request_id = plakous_model::ModelProviderRequestId::new(request_id)
-            .map_err(|_| ChatAttemptProtocolError::new("OpenRouter Chat request ID is invalid"))?;
-        Ok(ChatHttpResponseHead::Stream(Some(request_id)))
+        crate::wire::classify_response_head::<plakous_chat_completions::ChatWire>(response, || {
+            let request_id = openrouter_request_id(|name| response.headers().get(name))
+                .ok_or_else(|| {
+                    ChatAttemptProtocolError::new("OpenRouter Chat request ID is absent")
+                })?;
+            let request_id =
+                plakous_model::ModelProviderRequestId::new(request_id).map_err(|_| {
+                    ChatAttemptProtocolError::new("OpenRouter Chat request ID is invalid")
+                })?;
+            Ok(Some(request_id))
+        })
     }
 
     fn classify_error_response(
@@ -1139,7 +1083,7 @@ impl ChatHttpHooks for OpenRouterChatHooks {
         safety: ChatHttpSafety,
     ) -> ChatAttemptProtocolError {
         let disposition =
-            if matches!(metadata.status, 401 | 403 | 429 | 503 | 529) && !safety.visible_output {
+            if matches!(metadata.status(), 401 | 403 | 429 | 503 | 529) && !safety.visible_output {
                 "rejected-before-acceptance"
             } else if safety.visible_output {
                 "post-acceptance"
@@ -1151,11 +1095,18 @@ impl ChatHttpHooks for OpenRouterChatHooks {
         let error = ChatAttemptProtocolError::new(match openrouter_error_detail(body) {
             Some(detail) => format!(
                 "OpenRouter Chat HTTP {} ({disposition}): {detail}",
-                metadata.status
+                metadata.status()
             ),
-            None => format!("OpenRouter Chat HTTP {} ({disposition})", metadata.status),
-        })
-        .with_http_status(metadata.status);
+            None => format!("OpenRouter Chat HTTP {} ({disposition})", metadata.status()),
+        });
+        let error = match plakous_model::ModelHttpStatus::new(metadata.status()) {
+            Ok(status) => error.with_http_status(status),
+            Err(_) => error,
+        };
+        let error = match metadata.retry_after().and_then(crate::wire::retry_delay) {
+            Some(advice) => error.with_retry_after(advice),
+            None => error,
+        };
         let error = if body_reports_context_overflow(body) {
             error.with_context_overflow()
         } else {
@@ -1164,7 +1115,7 @@ impl ChatHttpHooks for OpenRouterChatHooks {
         // The status and the disposition above are diagnostic text. Carry the
         // classification itself forward so nothing upstream has to parse a
         // message to learn what the provider said.
-        match plakous_attempt::ProviderRefusal::from_http_status(metadata.status) {
+        match plakous_attempt::ProviderRefusal::from_http_status(metadata.status()) {
             Some(refusal) => error.with_refusal(refusal),
             None => error,
         }
@@ -1210,7 +1161,10 @@ impl ChatHttpHooks for OpenRouterChatHooks {
         let Some(status) = error.http_status() else {
             return protocol;
         };
-        let protocol = protocol.with_http_status(status);
+        let protocol = match plakous_model::ModelHttpStatus::new(status) {
+            Ok(status) => protocol.with_http_status(status),
+            Err(_) => protocol,
+        };
         match plakous_attempt::ProviderRefusal::from_http_status(status) {
             Some(refusal) => protocol.with_refusal(refusal),
             None => protocol,
@@ -1279,7 +1233,7 @@ fn chat_observation_error(
         descriptor,
         kind,
         facts,
-        error.http_status(),
+        error.http_status().map(plakous_model::ModelHttpStatus::get),
         format!("OpenRouter Chat protocol failed: {error}"),
     )
 }
@@ -1296,7 +1250,7 @@ fn chat_model_error(descriptor: &ResolvedModelDescriptor, error: &ChatAttemptErr
     let kind = match error {
         ChatAttemptError::Cancelled { .. } => ModelErrorKind::Cancelled,
         ChatAttemptError::Unavailable => ModelErrorKind::Unavailable,
-        _ if error.http_status() == Some(401)
+        _ if error.http_status().map(plakous_model::ModelHttpStatus::get) == Some(401)
             && facts.is_some_and(|facts| facts.failure_risk() == FailureRisk::None) =>
         {
             ModelErrorKind::Authentication
@@ -1307,7 +1261,7 @@ fn chat_model_error(descriptor: &ResolvedModelDescriptor, error: &ChatAttemptErr
         descriptor,
         kind,
         facts,
-        error.http_status(),
+        error.http_status().map(plakous_model::ModelHttpStatus::get),
         format!("OpenRouter Chat operation failed: {error}"),
     )
     .with_attempt_summary(facts.map_or_else(String::new, |facts| facts.summary().to_string()));
@@ -1402,15 +1356,14 @@ fn compile_chat_configuration(
     .map_err(|_| OpenRouterChatBuildError::Identity)?;
     let family_policy =
         FamilyPolicyEnvelope::new(family, 1, 1, OPENROUTER_CHAT_DIALECT_REVISION, policy_bytes)?;
-    let effective = EffectiveProviderConfiguration::compile(
-        &selected,
-        descriptor.clone(),
+    crate::wire::compile_configuration(
+        selected,
+        descriptor,
         implementation,
         authority,
-        selected.behavior().clone(),
         family_policy,
-    )?;
-    CompiledProviderConfiguration::new(selected, effective).map_err(OpenRouterChatBuildError::from)
+    )
+    .map_err(OpenRouterChatBuildError::from)
 }
 
 const fn reasoning_replay_label(policy: ChatReasoningReplay) -> &'static str {
@@ -1572,6 +1525,8 @@ pub enum OpenRouterChatBuildError {
 #[allow(clippy::expect_used, reason = "fixed literal identities")]
 #[cfg(test)]
 pub(crate) fn test_descriptor() -> ResolvedModelDescriptor {
+    use std::collections::BTreeMap;
+
     ResolvedModelDescriptor::new(
         &plakous_model::StandardIntegrationAuthority::release_owned(),
         ProtocolId::new("openrouter.chat").expect("protocol"),

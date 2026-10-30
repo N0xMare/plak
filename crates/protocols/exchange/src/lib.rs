@@ -6,16 +6,19 @@
 //! bodies under the same bound and cancellation race, and decline a turn retry
 //! with one precedence (spec 01 §13.1). This crate owns those pieces once.
 //! It also shares bounded catalog transport and ordered row projection.
+//! Chat and Messages share the admitted attempt and HTTP/SSE host here;
+//! their wire grammars and terminal projections remain in the family kernels.
 //!
 //! ## Not in this crate
 //!
 //! - Wire grammar, SSE framing, or family event machines
-//! - Attempt lifecycle and observation ledgers (`plakous-attempt`)
+//! - Core lifecycle decision tables and observation ledgers (`plakous-attempt`)
 //! - Provider credentials or route identities
 
 #![forbid(unsafe_code)]
 
 pub mod catalog;
+pub mod family;
 pub mod lookup;
 
 use std::future::Future;

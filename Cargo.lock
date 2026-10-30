@@ -3966,7 +3966,6 @@ version = "0.0.2"
 dependencies = [
  "base64 0.22.1",
  "futures",
- "futures-channel",
  "futures-util",
  "plakous-attempt",
  "plakous-exchange",
@@ -3978,7 +3977,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-rustls",
- "tower-service",
  "unicode-general-category",
  "uuid",
 ]
@@ -4014,12 +4012,16 @@ dependencies = [
 name = "plakous-exchange"
 version = "0.0.2"
 dependencies = [
+ "futures",
+ "futures-channel",
  "futures-util",
  "getrandom 0.4.3",
  "plakous-attempt",
  "plakous-http",
  "plakous-model",
  "tokio",
+ "tower-service",
+ "uuid",
  "zeroize",
 ]
 
@@ -4156,7 +4158,6 @@ version = "0.0.2"
 dependencies = [
  "base64 0.22.1",
  "futures",
- "futures-channel",
  "futures-util",
  "plakous-attempt",
  "plakous-exchange",

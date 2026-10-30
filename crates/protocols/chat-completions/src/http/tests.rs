@@ -1,4 +1,15 @@
 use super::*;
+use crate::{
+    ChatAttempt, ChatAttemptError, ChatAttemptProtocolError, ChatOperationBinding,
+    ChatPhysicalRequestBinding, ChatStreamError, LoweredChatRequest, PreparedChatStreamBinding,
+};
+use plakous_attempt::{ExchangeBreak, PhysicalRequestOutcome};
+use plakous_http::{Client, Failure as HttpFailure, Origin, Request as HttpRequest, Response};
+use plakous_model::ModelRetryDeclineReason as Decline;
+use plakous_model::{
+    Clock, IdGenerator, ModelEvent, ModelProviderRequestId, ModelRetryCause, ModelTransportFault,
+};
+use tokio::time::Instant;
 
 use std::error::Error;
 use std::io;
@@ -30,21 +41,49 @@ use crate::{
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
+#[test]
+fn chat_protocol_errors_keep_typed_retry_advice_and_terminal_acceptance() -> TestResult {
+    let status = plakous_model::ModelHttpStatus::new(429)?;
+    let delay = plakous_model::ModelRetryDelay::from_millis(2_000)?;
+    let facts = plakous_attempt::TerminalFacts::preacceptance_test();
+    let error = ChatAttemptError::protocol(
+        ChatAttemptProtocolError::new("opaque rejection")
+            .with_http_status(status)
+            .with_retry_after(delay),
+        facts,
+    );
+    assert_eq!(error.http_status(), Some(status));
+    assert_eq!(error.retry_after(), Some(delay));
+    let ChatAttemptError::Protocol { source, .. } = error else {
+        panic!("protocol failure")
+    };
+    assert_eq!(source.terminal_facts(), Some(facts));
+    assert_eq!(
+        source.provider_acceptance(),
+        Some(facts.provider_acceptance())
+    );
+    Ok(())
+}
+
 #[derive(Clone, Default)]
 struct FakeHooks {
     physical: Arc<Mutex<Option<ChatPhysicalRequestBinding>>>,
 }
 
-impl ChatHttpHooks for FakeHooks {
+impl ChatHttpHooks<ChatWire> for FakeHooks {
     type ErrorMetadata = ();
 
     fn build_request(
         &self,
         client: &Client,
         dial_origin: Origin,
-        physical: &ChatPhysicalRequestBinding,
+        attempt: &ChatAttempt,
         operation: &PreparedChatHttpOperation,
     ) -> Result<HttpRequest, ChatAttemptProtocolError> {
+        let physical = &ChatPhysicalRequestBinding::new(
+            attempt.binding().clone(),
+            attempt.terminal_facts().physical_attempts(),
+        );
         *self.physical.lock().expect("physical capture") = Some(physical.clone());
         Request::new(
             dial_origin,
@@ -71,10 +110,10 @@ impl ChatHttpHooks for FakeHooks {
         if response.status() != StatusCode::OK || response.version() != Version::HTTP_11 {
             return Err(ChatAttemptProtocolError::new("fake response head mismatch"));
         }
-        Ok(ChatHttpResponseHead::Stream(Some(
+        Ok(ChatHttpResponseHead::Stream(
             ModelProviderRequestId::new("head-request-exact")
                 .map_err(|_| ChatAttemptProtocolError::new("fake request id failed"))?,
-        )))
+        ))
     }
 
     fn classify_error_response(
@@ -103,7 +142,9 @@ impl ChatHttpHooks for FakeHooks {
         let Some(status) = error.http_status() else {
             return protocol;
         };
-        let protocol = protocol.with_http_status(status);
+        let protocol = protocol.with_http_status(
+            plakous_model::ModelHttpStatus::new(status).expect("valid HTTP status"),
+        );
         match plakous_attempt::ProviderRefusal::from_http_status(status) {
             Some(refusal) => protocol.with_refusal(refusal),
             None => protocol,
@@ -160,7 +201,11 @@ fn fixture_operation_with_body(label: &[u8], body: &[u8]) -> TestResult<Prepared
         lowered_digest,
         lowered.replay_safety(),
     );
-    Ok(PreparedChatHttpOperation::new(binding, lowered, stream))
+    Ok(PreparedChatHttpOperation::new(
+        binding,
+        lowered.body().to_vec(),
+        stream,
+    ))
 }
 
 fn fixture_attempt(
@@ -326,6 +371,7 @@ async fn a_second_in_band_deadline_stops_before_a_third_scripted_reply() -> Test
         ids(),
         Duration::from_secs(30),
         1024,
+        false,
     )
     .with_turn_retry();
     let result = tokio::time::timeout(
@@ -386,6 +432,7 @@ async fn a_transport_idle_stall_does_not_spend_the_provider_deadline_replay() ->
         ids(),
         Duration::from_secs(30),
         1024,
+        false,
     )
     .with_turn_retry();
     let execution = tokio::spawn(async move { call_chat_operation(&mut service, attempt).await });
@@ -444,6 +491,7 @@ async fn a_server_effect_chat_body_never_replays_an_in_band_deadline() -> TestRe
         ids(),
         Duration::from_secs(30),
         1024,
+        false,
     )
     .with_turn_retry();
     let error = call_chat_operation(&mut service, attempt)
@@ -536,6 +584,7 @@ async fn a_long_chat_stream_failure_allows_only_one_replay() -> TestResult {
         ids(),
         Duration::from_secs(5),
         1024,
+        false,
     )
     .with_turn_retry();
     let execution = tokio::spawn(async move { call_chat_operation(&mut service, attempt).await });
@@ -616,6 +665,7 @@ async fn required_capture_failure_on_429_ends_without_retry() -> TestResult {
             ids(),
             Duration::from_secs(5),
             limit,
+            false,
         )
         .with_turn_retry();
         let error = call_chat_operation(&mut service, attempt)
@@ -665,6 +715,7 @@ async fn optional_429_body_faults_and_passive_capture_still_allow_retry() -> Tes
             ids(),
             Duration::from_secs(5),
             limit,
+            false,
         )
         .with_turn_retry();
         let response = call_chat_operation(&mut service, attempt).await?;
@@ -701,6 +752,7 @@ async fn record_rejected_resends_immediately_on_a_fresh_connection() -> TestResu
         ids(),
         Duration::from_secs(5),
         1024,
+        false,
     )
     .with_turn_retry();
     let response = call_chat_operation(&mut service, attempt).await?;
@@ -740,6 +792,7 @@ async fn chat_unreachable_ride_out_excludes_incomplete_requests() -> TestResult 
             ids(),
             Duration::from_secs(5),
             1024,
+            false,
         )
         .with_turn_retry();
         let started = Instant::now();
@@ -786,6 +839,7 @@ async fn loopback_success_seals_exact_head_metadata_before_one_terminal() -> Tes
         ids(),
         Duration::from_secs(5),
         1024,
+        false,
     );
     let drain = tokio::spawn(async move {
         let mut events = Vec::new();
@@ -811,7 +865,7 @@ async fn loopback_success_seals_exact_head_metadata_before_one_terminal() -> Tes
         Some("model-literal")
     );
     assert_eq!(response.response().usage(), Some(Usage::new(7, 4, 2, 3, 0)));
-    assert_eq!(response.finish().wire(), "stop");
+    assert_eq!(response.stop().wire(), "stop");
     assert!(response.facts().provider_accepted());
     assert_eq!(
         response.facts().retry_class(),
@@ -847,6 +901,58 @@ async fn loopback_success_seals_exact_head_metadata_before_one_terminal() -> Tes
 }
 
 #[tokio::test]
+async fn retry_loss_keeps_completed_chat_blocks_after_a_truncated_transport() -> TestResult {
+    let operation = fixture_operation(b"completed-before-truncation")?;
+    let (attempt, mut receiver) = fixture_attempt(operation.binding().clone())?;
+    let (client, origin, dispatches) = loopback_responses(vec![
+        (200, successful_sse(), true),
+        (200, successful_sse(), false),
+    ])
+    .await?;
+    let mut service = ChatHttpAttemptService::new(
+        client,
+        origin,
+        operation,
+        FakeHooks::default(),
+        clock(),
+        ids(),
+        Duration::from_secs(5),
+        1024,
+        false,
+    )
+    .with_turn_retry();
+    let drain = tokio::spawn(async move {
+        let mut events = Vec::new();
+        while let Some(event) = receiver.next().await {
+            events.push(event);
+        }
+        events
+    });
+    let response = call_chat_operation(&mut service, attempt).await?;
+    let events = drain.await?;
+    let mut completed = 0;
+    let mut retries = 0;
+    let mut terminals = 0;
+    for event in events {
+        match event? {
+            ModelEvent::BlockCompleted(_) => completed += 1,
+            ModelEvent::Retry(retry) => {
+                assert!(completed > 0, "the first response completed real blocks");
+                assert_eq!(retry.loss().completed_items, completed);
+                assert!(retry.output_discarded());
+                retries += 1;
+            }
+            ModelEvent::ResponseCompleted(_) => terminals += 1,
+            _ => {}
+        }
+    }
+    assert_eq!((retries, terminals), (1, 1));
+    assert_eq!(response.facts().physical_attempts(), 2);
+    assert_eq!(dispatches.load(Ordering::SeqCst), 2);
+    Ok(())
+}
+
+#[tokio::test]
 async fn rejects_foreign_operation_before_building_a_physical_request() -> TestResult {
     let operation = fixture_operation(b"service")?;
     let foreign = fixture_operation(b"foreign")?;
@@ -863,6 +969,7 @@ async fn rejects_foreign_operation_before_building_a_physical_request() -> TestR
         ids(),
         Duration::from_secs(5),
         1024,
+        false,
     );
     let error = call_chat_operation(&mut service, attempt)
         .await
@@ -890,6 +997,7 @@ async fn accepted_malformed_stream_error_retains_outcome_unknown_facts() -> Test
         ids(),
         Duration::from_secs(5),
         1024,
+        false,
     );
 
     let operation_error = call_chat_operation(&mut service, attempt)

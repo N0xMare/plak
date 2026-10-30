@@ -108,7 +108,7 @@ classes and directory policy.
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family wire grammar, stream lifecycle, projection and shared dialect hosts |
 | `plakous-messages` | `crates/protocols/messages` | `protocol` | Messages-family kernel: request grammar, block ordering, thinking/signature replay, stream grammar, wire accounting |
 | `plakous-chat-completions` | `crates/protocols/chat-completions` | `protocol` | Chat Completions kernel: message lowering, one-choice streaming lifecycle, indexed function calls, exact usage, SSE `[DONE]` |
-| `plakous-exchange` | `crates/protocols/exchange` | `protocol` | Physical-exchange plumbing shared by the kernels and providers: transport failure to network-failure facts, bounded error-body reads, the cancellation race, and the turn-retry decline ladder |
+| `plakous-exchange` | `crates/protocols/exchange` | `protocol` | The shared admitted Chat/Messages family host, bounded catalog transport, and physical-exchange plumbing: transport failure to network-failure facts, bounded error-body reads, the cancellation race, and the turn-retry decline ladder |
 | `plakous-openai` | `crates/providers/openai` | `provider` | OpenAI route/catalog/authz dialect plus Codex OAuth subscription execution |
 | `plakous-anthropic` | `crates/providers/anthropic` | `provider` | Anthropic Messages dialect: route, authz, catalog, error hooks, Claude OAuth costume |
 | `plakous-xai` | `crates/providers/xai` | `provider` | xAI Responses provider facts and SuperGrok subscription auth |

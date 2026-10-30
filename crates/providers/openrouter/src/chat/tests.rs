@@ -1,7 +1,11 @@
 use super::*;
+use crate::wire::{JoinedStream, is_sse_content_type, post_send_status_outcome};
 use plakous_attempt::{PhysicalRequestOutcome, TerminalFacts};
+use plakous_chat_completions::ChatOperationBinding;
+use plakous_http::StatusCode;
+use plakous_model::ModelHttpStatus;
 use plakous_model::{ModelErrorContext, ModelEvent, ModelRetryRisk, ModelRetryability};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use crate::discovery::{AdmissionWire, catalog_snapshot_identity};
 
@@ -862,10 +866,11 @@ fn the_openrouter_chat_row_of_the_provider_failure_matrix_is_definite() {
 /// be in flight; the same status with possible hosted effects stays
 /// undetermined.
 #[test]
-fn an_initial_401_is_authentication_only_without_acceptance_or_hosted_effects() {
+fn an_initial_401_is_authentication_only_without_acceptance_or_hosted_effects()
+-> Result<(), Box<dyn std::error::Error>> {
     let rejected = ChatAttemptError::protocol(
         ChatAttemptProtocolError::new("OpenRouter Chat HTTP 401 (rejected-before-acceptance)")
-            .with_http_status(401),
+            .with_http_status(ModelHttpStatus::new(401)?),
         TerminalFacts::preacceptance_test(),
     );
     assert_eq!(
@@ -874,13 +879,14 @@ fn an_initial_401_is_authentication_only_without_acceptance_or_hosted_effects() 
     );
     let hosted = ChatAttemptError::protocol(
         ChatAttemptProtocolError::new("OpenRouter Chat HTTP 401 (post-acceptance)")
-            .with_http_status(401),
+            .with_http_status(ModelHttpStatus::new(401)?),
         hosted_effect_facts(),
     );
     assert_eq!(
         chat_model_error(&test_descriptor(), &hosted).kind(),
         ModelErrorKind::OutcomeUnknown
     );
+    Ok(())
 }
 
 /// Terminal facts for an accepted exchange with a hosted effect in flight.

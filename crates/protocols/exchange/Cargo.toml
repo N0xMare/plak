@@ -17,16 +17,26 @@ exclude.workspace = true
 layer = "protocol"
 class = "published-internal"
 
+[package.metadata.plakous-lint]
+too-many-lines-ceiling = 2
+too-many-arguments-ceiling = 4
+large-file-ceiling = 0
+reason = "One physical family host replaces the Chat and Messages copies; phase and stream owners retain their exact authority inputs."
+
 [dependencies]
-futures-util = { workspace = true, features = ["std"] }
+futures-channel = { workspace = true, features = ["sink"] }
+futures-util = { workspace = true, features = ["sink", "std"] }
 getrandom.workspace = true
 plakous-attempt.workspace = true
 plakous-http.workspace = true
 plakous-model.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["macros", "time"] }
+tower-service.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+futures = { workspace = true, features = ["executor", "std"] }
+uuid.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]
