@@ -412,19 +412,13 @@ fn changed_keys_emit_the_same_settled_rows_as_a_full_scan() {
 }
 
 /// Sends `prompt` and waits for the turn's completion and the idle that
-/// follows its terminal publication. Returns the host events up to it and
-/// the product views the store parsed meanwhile.
+/// follows its terminal publication. Returns the host events up to it.
 fn run_turn(
     actions: &crate::surface_protocol::UserActionSender<crate::runtime::test_kit::TestExtension>,
     events: &crate::surface_protocol::HostEventReceiver<crate::runtime::test_kit::TestExtension>,
-    store: &MemoryStore,
     prompt: &str,
-) -> (
-    Vec<crate::surface_protocol::HostEvent<crate::runtime::test_kit::TestExtension>>,
-    usize,
-) {
+) -> Vec<crate::surface_protocol::HostEvent<crate::runtime::test_kit::TestExtension>> {
     use crate::runtime::recover_tests::{turn_completed, wait_for};
-    let reads = store.view_read_count();
     crate::runtime::test_support::send_attached_action(
         actions,
         crate::surface_protocol::UserAction::Prompt(prompt.to_owned().into()),
@@ -434,7 +428,7 @@ fn run_turn(
     wait_for(events, &mut seen, "the idle after the turn", |event| {
         matches!(event, crate::surface_protocol::HostEvent::SetBusy(false))
     });
-    (seen, store.view_read_count() - reads)
+    seen
 }
 
 /// A scripted host whose model makes one `loopback_effect` call and then
@@ -519,28 +513,28 @@ fn an_attachment_keeps_its_live_views_and_shown_rows_across_turns() {
     let (mut config, _) = tool_turns_host(root.path(), 4);
     let store = Arc::new(MemoryStore::new());
     config.store = store.clone();
+    let id = config.session.id.clone();
+    super::super::probe::track(&id);
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
     // The attachment publishes a snapshot and goes idle before any prompt.
     crate::runtime::recover_tests::wait_for(&events, &mut seen, "the attached idle", |event| {
         matches!(event, crate::surface_protocol::HostEvent::SetBusy(false))
     });
-    let mut parsed = Vec::new();
     for turn in 0..4 {
-        let (turn_events, reads) = run_turn(&actions, &events, &store, &format!("turn {turn}"));
-        parsed.push(reads);
+        let turn_events = run_turn(&actions, &events, &format!("turn {turn}"));
         seen.extend(turn_events);
     }
-    assert_eq!(
-        parsed.iter().sum::<usize>(),
-        1,
-        "one cold load for the attachment, none per turn: {parsed:?}"
-    );
     crate::runtime::test_support::send_attached_action(
         &actions,
         crate::surface_protocol::UserAction::Quit,
     );
     worker.join().unwrap().unwrap();
+    assert_eq!(
+        super::super::probe::take(&id).live_view_reads,
+        1,
+        "one cold load by the live projector, none per turn"
+    );
     seen.extend(events.try_iter());
     let mut emitted = std::collections::BTreeMap::<String, usize>::new();
     for event in &seen {

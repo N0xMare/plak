@@ -39,6 +39,7 @@ pub(in crate::runtime) struct Counts {
     pub(in crate::runtime) release: usize,
     pub(super) other: usize,
     pub(in crate::runtime) writes: usize,
+    pub(in crate::runtime) live_view_reads: usize,
     active: usize,
 }
 
@@ -79,6 +80,14 @@ pub(super) fn enter(id: &str) -> Entry {
         }
     }
     Entry(id.to_owned())
+}
+
+pub(super) fn view_read(id: &str) {
+    if matches!(CALLER.try_with(|caller| *caller), Ok(Caller::Live))
+        && let Some(count) = counts().lock().unwrap().get_mut(id)
+    {
+        count.live_view_reads += 1;
+    }
 }
 
 impl Drop for Entry {

@@ -484,6 +484,8 @@ async fn load_views(
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
 ) -> Result<SessionViews, String> {
+    #[cfg(test)]
+    probe::view_read(product_id);
     Ok(blocking(store, product_id, |store, id| {
         store.load_views(id).map_err(ReadFailure::from)
     })
