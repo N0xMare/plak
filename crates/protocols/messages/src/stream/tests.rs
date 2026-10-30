@@ -42,20 +42,20 @@ fn projector_with_hosted(hosted: bool) -> MessagesStreamProjector {
     .expect("effective");
     let digest = Digest::sha256(DigestDomain::RequestPlan, 1, &[b"messages-projector-test"])
         .expect("digest");
-    let mut policy = MessagesRequestPolicy::new(
-        ProtocolId::new("anthropic.messages").expect("protocol"),
-        ModelId::new("claude-sonnet-5").expect("model"),
-        None,
-        digest,
-        digest,
-        digest,
-        selected,
-        effective,
-        128,
-        None,
-        "2023-06-01",
-        "oauth-2025-04-20,claude-code-20250219",
-    );
+    let mut policy = MessagesRequestPolicy::new(crate::MessagesRequestPolicyInput {
+        protocol: ProtocolId::new("anthropic.messages").expect("protocol"),
+        requested_model: ModelId::new("claude-sonnet-5").expect("model"),
+        expected_reported_model: None,
+        descriptor_binding: digest,
+        semantic_descriptor_binding: digest,
+        account_binding: digest,
+        selected_provider_configuration: selected,
+        effective_provider_configuration: effective,
+        maximum_output_tokens: 128,
+        minimum_thinking_budget: None,
+        api_version: "2023-06-01".into(),
+        beta_header: "oauth-2025-04-20,claude-code-20250219".into(),
+    });
     if hosted {
         policy = policy.with_programmatic_tool_calling(
             vec![

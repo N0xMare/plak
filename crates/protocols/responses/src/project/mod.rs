@@ -18,5 +18,6 @@ mod error;
 pub use core::{
     CanonicalIdSources, ProjectedBlock, ProjectedItem, ProjectedItemKind, ProjectorLimits,
     ProjectorPolicy, ReasoningEmitMode, ResponseProjectorCore, ToolArgsFinishPolicy,
+    ToolBlockStart,
 };
 pub use error::FamilyProjectionError;

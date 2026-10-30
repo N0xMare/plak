@@ -1580,20 +1580,20 @@ fn lower_on(wire: Wire, items: &[ConversationItem]) -> TestResult<Vec<u8>> {
     let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"crash-matrix-routes"])?;
     match wire {
         Wire::Messages => {
-            let policy = MessagesRequestPolicy::new(
-                protocol_id,
-                model_id.clone(),
-                Some(model_id),
-                plan.binding_digest(),
-                descriptor.semantic_binding_digest()?,
-                account,
-                selected,
-                effective,
-                8_192,
-                None,
-                "2023-06-01",
-                "",
-            );
+            let policy = MessagesRequestPolicy::new(plakous_messages::MessagesRequestPolicyInput {
+                protocol: protocol_id,
+                requested_model: model_id.clone(),
+                expected_reported_model: Some(model_id),
+                descriptor_binding: plan.binding_digest(),
+                semantic_descriptor_binding: descriptor.semantic_binding_digest()?,
+                account_binding: account,
+                selected_provider_configuration: selected,
+                effective_provider_configuration: effective,
+                maximum_output_tokens: 8_192,
+                minimum_thinking_budget: None,
+                api_version: "2023-06-01".into(),
+                beta_header: String::new(),
+            });
             Ok(
                 lower_messages_request(&plan, &policy, ToolOwnership::default())?
                     .body()

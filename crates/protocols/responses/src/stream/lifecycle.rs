@@ -14,6 +14,25 @@ use crate::json_fields::{ResponsesFieldError, required_object, required_string};
 
 mod validate;
 
+/// Exact terminal envelope checked against the streamed lifecycle.
+#[derive(Clone, Copy, Debug)]
+pub struct TerminalResponseInput<'a> {
+    /// Provider response identity.
+    pub response_id: &'a str,
+    /// Provider-reported model identity.
+    pub response_model: Option<&'a str>,
+    /// Terminal event's status.
+    pub event_status: &'static str,
+    /// Terminal envelope's status.
+    pub response_status: &'a str,
+    /// Native incomplete-response details.
+    pub incomplete_details: Option<&'a Value>,
+    /// Whether the terminal carries a provider error.
+    pub has_error: bool,
+    /// Ordered native output items.
+    pub output: &'a [&'a Value],
+}
+
 use validate::{
     completed_content_part, item_kind, item_status, output_item_id, require_added_status,
     soft_seed_function_arguments_from_done, strict_terminal_item_matches, validate_done_item,
@@ -1241,20 +1260,19 @@ impl ResponsesLifecycle {
     /// # Errors
     ///
     /// Lifecycle errors.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "public signature; typed-parameter pass follows with the provider/hosted wave"
-    )]
     pub fn terminal_response(
         &self,
-        response_id: &str,
-        response_model: Option<&str>,
-        event_status: &'static str,
-        response_status: &str,
-        incomplete_details: Option<&Value>,
-        has_error: bool,
-        output: &[&Value],
+        input: TerminalResponseInput<'_>,
     ) -> Result<(), ResponsesLifecycleError> {
+        let TerminalResponseInput {
+            response_id,
+            response_model,
+            event_status,
+            response_status,
+            incomplete_details,
+            has_error,
+            output,
+        } = input;
         let created = self
             .created
             .as_ref()

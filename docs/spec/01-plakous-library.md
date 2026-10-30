@@ -2667,6 +2667,12 @@ the feed, never the events.
 
 ## 6. Providers, protocol families, and admission
 
+The published-internal Responses tool-start and terminal-lifecycle APIs accept
+`ToolBlockStart` and `TerminalResponseInput`; Messages request-policy construction
+accepts `MessagesRequestPolicyInput`. These typed inputs retain the exact target,
+replay authority, correlation and terminal fields; they do not change request
+bytes, validation order or canonical projection.
+
 ### 6.1 Three kernels, thin dialects
 
 Plakous has one neutral runtime and three wire-family kernels:

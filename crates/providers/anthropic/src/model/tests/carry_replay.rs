@@ -16,18 +16,20 @@ async fn sanitized_production_messages_thinking_signature_validates_for_carry() 
     )?;
     let target = crate::AnthropicMessagesTargetBinding::from_resolved(model.resolved())?;
     let replay_policy = plakous_messages::MessagesRequestPolicy::new(
-        target.protocol().clone(),
-        target.model().remote_id().clone(),
-        target.expected_reported_model().cloned(),
-        target.descriptor_binding(),
-        target.semantic_descriptor_binding(),
-        target.replay_account_binding().ok_or("account")?,
-        configured.configuration().selected_identity(),
-        configured.configuration().effective_identity(),
-        target.model().maximum_output_tokens(),
-        None,
-        target.dialect().api_version(),
-        target.dialect().beta_header().unwrap_or_default(),
+        plakous_messages::MessagesRequestPolicyInput {
+            protocol: target.protocol().clone(),
+            requested_model: target.model().remote_id().clone(),
+            expected_reported_model: target.expected_reported_model().cloned(),
+            descriptor_binding: target.descriptor_binding(),
+            semantic_descriptor_binding: target.semantic_descriptor_binding(),
+            account_binding: target.replay_account_binding().ok_or("account")?,
+            selected_provider_configuration: configured.configuration().selected_identity(),
+            effective_provider_configuration: configured.configuration().effective_identity(),
+            maximum_output_tokens: target.model().maximum_output_tokens(),
+            minimum_thinking_budget: None,
+            api_version: (target.dialect().api_version()).into(),
+            beta_header: target.dialect().beta_header().unwrap_or_default(),
+        },
     );
     let replay = plakous_messages::bind_replay_payload(
         &replay_policy,

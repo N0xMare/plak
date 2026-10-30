@@ -37,20 +37,24 @@ fn policy_with_authority(
     selected: &[u8],
     effective: &[u8],
 ) -> TestResult<MessagesRequestPolicy> {
-    Ok(MessagesRequestPolicy::new(
-        ProtocolId::new("anthropic.messages")?,
-        ModelId::new("claude-exact")?,
-        Some(ModelId::new("claude-exact")?),
-        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"descriptor"])?,
-        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"semantic-descriptor"])?,
-        Digest::sha256(DigestDomain::ModelBinding, 1, &[account])?,
-        selected_id(selected)?,
-        effective_id(effective)?,
-        8_192,
-        None,
-        "2023-06-01",
-        "",
-    ))
+    Ok(MessagesRequestPolicy::new(MessagesRequestPolicyInput {
+        protocol: ProtocolId::new("anthropic.messages")?,
+        requested_model: ModelId::new("claude-exact")?,
+        expected_reported_model: Some(ModelId::new("claude-exact")?),
+        descriptor_binding: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"descriptor"])?,
+        semantic_descriptor_binding: Digest::sha256(
+            DigestDomain::ModelBinding,
+            1,
+            &[b"semantic-descriptor"],
+        )?,
+        account_binding: Digest::sha256(DigestDomain::ModelBinding, 1, &[account])?,
+        selected_provider_configuration: selected_id(selected)?,
+        effective_provider_configuration: effective_id(effective)?,
+        maximum_output_tokens: 8_192,
+        minimum_thinking_budget: None,
+        api_version: "2023-06-01".into(),
+        beta_header: String::new(),
+    }))
 }
 
 fn policy() -> TestResult<MessagesRequestPolicy> {
@@ -171,20 +175,20 @@ fn lowering_fixture_with_history(
     )
     .build()?;
     let plan = descriptor.validate_request(request, ValidationMode::Strict)?;
-    let policy = MessagesRequestPolicy::new(
-        ProtocolId::new("messages.test")?,
-        ModelId::new("model/exact")?,
-        Some(ModelId::new("model/exact")?),
-        plan.binding_digest(),
-        descriptor.semantic_binding_digest()?,
-        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"])?,
-        selected,
-        effective,
-        8_192,
-        None,
-        "2023-06-01",
-        "",
-    );
+    let policy = MessagesRequestPolicy::new(MessagesRequestPolicyInput {
+        protocol: ProtocolId::new("messages.test")?,
+        requested_model: ModelId::new("model/exact")?,
+        expected_reported_model: Some(ModelId::new("model/exact")?),
+        descriptor_binding: plan.binding_digest(),
+        semantic_descriptor_binding: descriptor.semantic_binding_digest()?,
+        account_binding: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"])?,
+        selected_provider_configuration: selected,
+        effective_provider_configuration: effective,
+        maximum_output_tokens: 8_192,
+        minimum_thinking_budget: None,
+        api_version: "2023-06-01".into(),
+        beta_header: String::new(),
+    });
     Ok((plan, policy))
 }
 
@@ -257,20 +261,20 @@ fn lowering_fixture_with_customer_tool() -> TestResult<(ValidatedRequestPlan, Me
     .tools(vec![tool])
     .build()?;
     let plan = descriptor.validate_request(request, ValidationMode::Strict)?;
-    let policy = MessagesRequestPolicy::new(
-        ProtocolId::new("messages.test")?,
-        ModelId::new("model/exact")?,
-        Some(ModelId::new("model/exact")?),
-        plan.binding_digest(),
-        descriptor.semantic_binding_digest()?,
-        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"])?,
-        selected,
-        effective,
-        8_192,
-        None,
-        "2023-06-01",
-        "",
-    );
+    let policy = MessagesRequestPolicy::new(MessagesRequestPolicyInput {
+        protocol: ProtocolId::new("messages.test")?,
+        requested_model: ModelId::new("model/exact")?,
+        expected_reported_model: Some(ModelId::new("model/exact")?),
+        descriptor_binding: plan.binding_digest(),
+        semantic_descriptor_binding: descriptor.semantic_binding_digest()?,
+        account_binding: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"])?,
+        selected_provider_configuration: selected,
+        effective_provider_configuration: effective,
+        maximum_output_tokens: 8_192,
+        minimum_thinking_budget: None,
+        api_version: "2023-06-01".into(),
+        beta_header: String::new(),
+    });
     Ok((plan, policy))
 }
 
@@ -365,24 +369,24 @@ fn lowering_fixture_with_tool_choice_and_history(
     .reasoning(reasoning)
     .build()?;
     let plan = descriptor.validate_request(request, ValidationMode::Strict)?;
-    let policy = MessagesRequestPolicy::new(
-        ProtocolId::new("messages.test")?,
-        ModelId::new("model/exact")?,
-        Some(ModelId::new("model/exact")?),
-        plan.binding_digest(),
-        descriptor.semantic_binding_digest()?,
-        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"])?,
-        selected,
-        effective,
-        if reasoning == ReasoningPolicy::Disabled {
+    let policy = MessagesRequestPolicy::new(MessagesRequestPolicyInput {
+        protocol: ProtocolId::new("messages.test")?,
+        requested_model: ModelId::new("model/exact")?,
+        expected_reported_model: Some(ModelId::new("model/exact")?),
+        descriptor_binding: plan.binding_digest(),
+        semantic_descriptor_binding: descriptor.semantic_binding_digest()?,
+        account_binding: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account"])?,
+        selected_provider_configuration: selected,
+        effective_provider_configuration: effective,
+        maximum_output_tokens: if reasoning == ReasoningPolicy::Disabled {
             8_192
         } else {
             32_768
         },
-        (reasoning != ReasoningPolicy::Disabled).then_some(1_024),
-        "2023-06-01",
-        "",
-    );
+        minimum_thinking_budget: (reasoning != ReasoningPolicy::Disabled).then_some(1_024),
+        api_version: "2023-06-01".into(),
+        beta_header: String::new(),
+    });
     Ok((plan, policy))
 }
 

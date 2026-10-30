@@ -86,7 +86,7 @@ pub use json_fields::{
 pub use project::{
     CanonicalIdSources, FamilyProjectionError, ProjectedBlock, ProjectedItem, ProjectedItemKind,
     ProjectorLimits, ProjectorPolicy, ReasoningEmitMode, ResponseProjectorCore,
-    ToolArgsFinishPolicy,
+    ToolArgsFinishPolicy, ToolBlockStart,
 };
 pub use request::{
     FunctionToolChoiceWire, FunctionToolWire, REASONING_SUMMARY_AUTO, ReasoningConfigWire,
@@ -96,6 +96,6 @@ pub use request::{
 pub use stream::{
     DialectStreamHooks, LifecycleDialectPolicy, ReasoningLifecycleMode, ResponseModelBinding,
     ResponsesDecodeLimitError, ResponsesDecodeLimits, ResponsesLifecycle, ResponsesLifecycleError,
-    ResponsesStreamKernel, ResponsesStreamLimitError, ResponsesStreamLimits,
+    ResponsesStreamKernel, ResponsesStreamLimitError, ResponsesStreamLimits, TerminalResponseInput,
     is_comment_only_unfinished,
 };

@@ -356,25 +356,25 @@ impl OpenRouterMessagesLanguageModel {
                 "OpenRouter Messages routing policy is invalid",
             )
         })?;
-        let policy = MessagesRequestPolicy::new(
-            descriptor.protocol().clone(),
-            descriptor.requested_model().clone(),
-            None,
-            plan.binding_digest(),
-            descriptor.semantic_binding_digest().map_err(|_| {
+        let policy = MessagesRequestPolicy::new(plakous_messages::MessagesRequestPolicyInput {
+            protocol: descriptor.protocol().clone(),
+            requested_model: descriptor.requested_model().clone(),
+            expected_reported_model: None,
+            descriptor_binding: plan.binding_digest(),
+            semantic_descriptor_binding: descriptor.semantic_binding_digest().map_err(|_| {
                 rejection(
                     ModelPreparationErrorKind::InvalidConfiguration,
                     "OpenRouter Messages replay descriptor binding failed",
                 )
             })?,
-            identity.account_binding(),
-            self.configuration.selected_identity(),
-            self.configuration.effective_identity(),
-            output_bound.get(),
-            None,
-            "openrouter-messages-v1",
-            "",
-        )
+            account_binding: identity.account_binding(),
+            selected_provider_configuration: self.configuration.selected_identity(),
+            effective_provider_configuration: self.configuration.effective_identity(),
+            maximum_output_tokens: output_bound.get(),
+            minimum_thinking_budget: None,
+            api_version: "openrouter-messages-v1".into(),
+            beta_header: String::new(),
+        })
         .with_router_policy(router)
         .with_plugins(plakous_messages::OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS)
         .with_prompt_cache(true)

@@ -29,7 +29,7 @@ pub use hooks::DialectStreamHooks;
 pub use kernel::ResponsesStreamKernel;
 pub use lifecycle::{
     LifecycleDialectPolicy, ReasoningLifecycleMode, ResponseModelBinding, ResponsesLifecycle,
-    ResponsesLifecycleError,
+    ResponsesLifecycleError, TerminalResponseInput,
 };
 pub use limits::{
     ResponsesDecodeLimitError, ResponsesDecodeLimits, ResponsesStreamLimitError,

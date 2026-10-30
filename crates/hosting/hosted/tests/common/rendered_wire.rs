@@ -470,35 +470,36 @@ pub(crate) mod suite {
                         plakous::model::SessionLineage::Root
                     }
                 };
-                let policy = MessagesRequestPolicy::new(
-                    protocol_id,
-                    model,
-                    None,
-                    plan.binding_digest(),
-                    descriptor
-                        .semantic_binding_digest()
-                        .expect("semantic descriptor"),
-                    account,
-                    selected,
-                    effective,
-                    claude_max_output_tokens(spec.model),
-                    None,
-                    "2023-06-01",
-                    claude_oauth_beta_header(spec.model),
-                )
-                .with_system_prefix(claude_oauth_billing_header(lineage, &plan, None, None))
-                .with_system_prefix(CLAUDE_OAUTH_IDENTITY)
-                .with_serialized_body_transform(attest_claude_oauth_cch)
-                .with_metadata_user_id(metadata)
-                .with_prompt_cache(true)
-                .with_top_level_prompt_cache(false)
-                .with_prompt_cache_ttl(Some("1h"))
-                .with_omitted_disabled_thinking(true)
-                .with_claude_oauth_context_management()
-                .with_request_output_cap(
-                    claude_oauth_request_max_tokens(spec.model)
-                        .expect("enrolled Claude render model"),
-                );
+                let policy =
+                    MessagesRequestPolicy::new(plakous_messages::MessagesRequestPolicyInput {
+                        protocol: protocol_id,
+                        requested_model: model,
+                        expected_reported_model: None,
+                        descriptor_binding: plan.binding_digest(),
+                        semantic_descriptor_binding: descriptor
+                            .semantic_binding_digest()
+                            .expect("semantic descriptor"),
+                        account_binding: account,
+                        selected_provider_configuration: selected,
+                        effective_provider_configuration: effective,
+                        maximum_output_tokens: claude_max_output_tokens(spec.model),
+                        minimum_thinking_budget: None,
+                        api_version: "2023-06-01".into(),
+                        beta_header: (claude_oauth_beta_header(spec.model)).into(),
+                    })
+                    .with_system_prefix(claude_oauth_billing_header(lineage, &plan, None, None))
+                    .with_system_prefix(CLAUDE_OAUTH_IDENTITY)
+                    .with_serialized_body_transform(attest_claude_oauth_cch)
+                    .with_metadata_user_id(metadata)
+                    .with_prompt_cache(true)
+                    .with_top_level_prompt_cache(false)
+                    .with_prompt_cache_ttl(Some("1h"))
+                    .with_omitted_disabled_thinking(true)
+                    .with_claude_oauth_context_management()
+                    .with_request_output_cap(
+                        claude_oauth_request_max_tokens(spec.model)
+                            .expect("enrolled Claude render model"),
+                    );
                 let lowered =
                     plakous_messages::lower_request(&plan, &policy, ToolOwnership::default())
                         .unwrap_or_else(|error| {
@@ -520,25 +521,26 @@ pub(crate) mod suite {
                     .unwrap_or_else(|error| {
                         panic!("{}: anthropic-api validate: {error}", spec.file_stem)
                     });
-                let policy = MessagesRequestPolicy::new(
-                    protocol_id,
-                    model,
-                    None,
-                    plan.binding_digest(),
-                    descriptor
-                        .semantic_binding_digest()
-                        .expect("semantic descriptor"),
-                    account_binding_digest(),
-                    selected,
-                    effective,
-                    claude_max_output_tokens(spec.model),
-                    None,
-                    "2023-06-01",
-                    "",
-                )
-                .with_prompt_cache(true)
-                .with_top_level_prompt_cache(false)
-                .with_prompt_cache_ttl(Some("1h"));
+                let policy =
+                    MessagesRequestPolicy::new(plakous_messages::MessagesRequestPolicyInput {
+                        protocol: protocol_id,
+                        requested_model: model,
+                        expected_reported_model: None,
+                        descriptor_binding: plan.binding_digest(),
+                        semantic_descriptor_binding: descriptor
+                            .semantic_binding_digest()
+                            .expect("semantic descriptor"),
+                        account_binding: account_binding_digest(),
+                        selected_provider_configuration: selected,
+                        effective_provider_configuration: effective,
+                        maximum_output_tokens: claude_max_output_tokens(spec.model),
+                        minimum_thinking_budget: None,
+                        api_version: "2023-06-01".into(),
+                        beta_header: String::new(),
+                    })
+                    .with_prompt_cache(true)
+                    .with_top_level_prompt_cache(false)
+                    .with_prompt_cache_ttl(Some("1h"));
                 let lowered =
                     plakous_messages::lower_request(&plan, &policy, ToolOwnership::default())
                         .unwrap_or_else(|error| {
@@ -564,27 +566,28 @@ pub(crate) mod suite {
                     });
                 let router = MessagesRouterPolicy::gateway_managed(None, None)
                     .expect("openrouter messages router");
-                let policy = MessagesRequestPolicy::new(
-                    protocol_id,
-                    model,
-                    None,
-                    plan.binding_digest(),
-                    descriptor
-                        .semantic_binding_digest()
-                        .expect("semantic descriptor"),
-                    account_binding_digest(),
-                    selected,
-                    effective,
-                    NATIVE_RUN_MAX_OUTPUT_TOKENS,
-                    None,
-                    "openrouter-messages-v1",
-                    "",
-                )
-                .with_router_policy(router)
-                .with_plugins(plakous_messages::OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS)
-                .with_prompt_cache(true)
-                .with_top_level_prompt_cache(false)
-                .with_session_id(affinity.to_string());
+                let policy =
+                    MessagesRequestPolicy::new(plakous_messages::MessagesRequestPolicyInput {
+                        protocol: protocol_id,
+                        requested_model: model,
+                        expected_reported_model: None,
+                        descriptor_binding: plan.binding_digest(),
+                        semantic_descriptor_binding: descriptor
+                            .semantic_binding_digest()
+                            .expect("semantic descriptor"),
+                        account_binding: account_binding_digest(),
+                        selected_provider_configuration: selected,
+                        effective_provider_configuration: effective,
+                        maximum_output_tokens: NATIVE_RUN_MAX_OUTPUT_TOKENS,
+                        minimum_thinking_budget: None,
+                        api_version: "openrouter-messages-v1".into(),
+                        beta_header: String::new(),
+                    })
+                    .with_router_policy(router)
+                    .with_plugins(plakous_messages::OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS)
+                    .with_prompt_cache(true)
+                    .with_top_level_prompt_cache(false)
+                    .with_session_id(affinity.to_string());
                 let lowered =
                     plakous_messages::lower_request(&plan, &policy, ToolOwnership::default())
                         .unwrap_or_else(|error| {

@@ -249,15 +249,15 @@ fn openai_codex_accepts_created_model_distinct_from_requested_catalog_slug() {
     .expect("Codex OAuth does not ExactRequest SSE response.model");
     assert_eq!(life.created_model(), Some("gpt-5.4-mini-2026-03-17"));
     assert!(
-        life.terminal_response(
-            "resp_mini",
-            Some("other-backend"),
-            "completed",
-            "completed",
-            None,
-            false,
-            &[],
-        )
+        life.terminal_response(TerminalResponseInput {
+            response_id: "resp_mini",
+            response_model: Some("other-backend"),
+            event_status: "completed",
+            response_status: "completed",
+            incomplete_details: None,
+            has_error: false,
+            output: &[],
+        })
         .is_err(),
         "later events must still agree with the created reported model"
     );
@@ -412,15 +412,15 @@ fn xai_retains_provider_reported_model_and_requires_terminal_consistency() {
     .expect("xAI preserves provider-reported routed identity");
     assert_eq!(life.created_model(), Some("routed-backend"));
     assert!(
-        life.terminal_response(
-            "resp_1",
-            Some("another-backend"),
-            "completed",
-            "completed",
-            None,
-            false,
-            &[],
-        )
+        life.terminal_response(TerminalResponseInput {
+            response_id: "resp_1",
+            response_model: Some("another-backend"),
+            event_status: "completed",
+            response_status: "completed",
+            incomplete_details: None,
+            has_error: false,
+            output: &[],
+        })
         .is_err()
     );
 }
@@ -465,15 +465,15 @@ fn finish_one_item(
     }
     life.output_item_added(0, &added)?;
     life.output_item_done(0, done)?;
-    life.terminal_response(
-        "resp_1",
-        Some("gpt-test"),
-        "completed",
-        "completed",
-        None,
-        false,
-        &[terminal],
-    )
+    life.terminal_response(TerminalResponseInput {
+        response_id: "resp_1",
+        response_model: Some("gpt-test"),
+        event_status: "completed",
+        response_status: "completed",
+        incomplete_details: None,
+        has_error: false,
+        output: &[terminal],
+    })
 }
 
 #[test]

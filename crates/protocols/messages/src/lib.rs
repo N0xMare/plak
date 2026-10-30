@@ -49,10 +49,10 @@ pub use plakous_attempt::{
 };
 pub use request::{
     LoweredMessagesRequest, MESSAGES_REPLAY_SCHEMA_REVISION, MessagesRequestError,
-    MessagesRequestErrorKind, MessagesRequestPlugin, MessagesRequestPolicy, MessagesRouterPolicy,
-    MessagesThinkingDisplay, OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS, REDACTED_REPLAY_KIND,
-    SIGNATURE_REPLAY_KIND, ToolOwnership, bind_replay_payload, lower_request,
-    lower_request_with_active_artifact,
+    MessagesRequestErrorKind, MessagesRequestPlugin, MessagesRequestPolicy,
+    MessagesRequestPolicyInput, MessagesRouterPolicy, MessagesThinkingDisplay,
+    OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS, REDACTED_REPLAY_KIND, SIGNATURE_REPLAY_KIND,
+    ToolOwnership, bind_replay_payload, lower_request, lower_request_with_active_artifact,
 };
 pub use retrieval::{
     MAX_MESSAGES_RETRIEVAL_CONTINUATIONS, MESSAGES_RETRIEVAL_MAX_TOKENS,

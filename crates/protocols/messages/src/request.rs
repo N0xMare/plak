@@ -229,30 +229,56 @@ impl MessagesRouterPolicy {
     }
 }
 
+/// Exact target and replay authority used to construct a Messages policy.
+#[derive(Clone, Debug)]
+pub struct MessagesRequestPolicyInput {
+    /// Wire protocol identity.
+    pub protocol: ProtocolId,
+    /// Exact requested model.
+    pub requested_model: ModelId,
+    /// Required provider-reported model, when pinned.
+    pub expected_reported_model: Option<ModelId>,
+    /// Full freshness-sensitive descriptor binding.
+    pub descriptor_binding: Digest,
+    /// Stable descriptor behavior binding for opaque replay.
+    pub semantic_descriptor_binding: Digest,
+    /// Exact replay account authority.
+    pub account_binding: Digest,
+    /// Selected provider configuration identity.
+    pub selected_provider_configuration: SelectedProviderConfigurationId,
+    /// Effective provider configuration identity.
+    pub effective_provider_configuration: EffectiveProviderConfigurationId,
+    /// Model output bound.
+    pub maximum_output_tokens: u32,
+    /// Minimum thinking budget, when supported.
+    pub minimum_thinking_budget: Option<u32>,
+    /// Exact API version header.
+    pub api_version: String,
+    /// Exact beta header.
+    pub beta_header: String,
+}
+
 impl MessagesRequestPolicy {
     /// Creates the closed request policy supplied by one exact dialect target.
     ///
     /// `descriptor_binding` is the full freshness-sensitive plan binding;
     /// `semantic_descriptor_binding` is the descriptor's stable behavior binding
     /// used only to validate opaque replay across refreshed observations.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "public signature; typed-parameter pass follows with the provider/hosted wave"
-    )]
-    pub fn new(
-        protocol: ProtocolId,
-        requested_model: ModelId,
-        expected_reported_model: Option<ModelId>,
-        descriptor_binding: Digest,
-        semantic_descriptor_binding: Digest,
-        account_binding: Digest,
-        selected_provider_configuration: SelectedProviderConfigurationId,
-        effective_provider_configuration: EffectiveProviderConfigurationId,
-        maximum_output_tokens: u32,
-        minimum_thinking_budget: Option<u32>,
-        api_version: impl Into<String>,
-        beta_header: impl Into<String>,
-    ) -> Self {
+    pub fn new(input: MessagesRequestPolicyInput) -> Self {
+        let MessagesRequestPolicyInput {
+            protocol,
+            requested_model,
+            expected_reported_model,
+            descriptor_binding,
+            semantic_descriptor_binding,
+            account_binding,
+            selected_provider_configuration,
+            effective_provider_configuration,
+            maximum_output_tokens,
+            minimum_thinking_budget,
+            api_version,
+            beta_header,
+        } = input;
         Self {
             protocol,
             requested_model,
@@ -264,8 +290,8 @@ impl MessagesRequestPolicy {
             effective_provider_configuration,
             maximum_output_tokens,
             minimum_thinking_budget,
-            api_version: api_version.into(),
-            beta_header: beta_header.into(),
+            api_version,
+            beta_header,
             system_prefixes: Vec::new(),
             metadata_user_id: None,
             prompt_cache: false,

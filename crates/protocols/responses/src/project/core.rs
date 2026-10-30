@@ -18,6 +18,23 @@ use super::error::FamilyProjectionError;
 
 type ProjResult<T> = Result<T, FamilyProjectionError>;
 
+/// One function-call tool block's provider identity and initial arguments.
+#[derive(Debug)]
+pub struct ToolBlockStart<'a> {
+    /// Provider output index.
+    pub provider_index: u32,
+    /// Canonical owning entry.
+    pub entry_id: EntryId,
+    /// Exact provider call identity.
+    pub call_id_remote: &'a str,
+    /// Admitted tool name.
+    pub name: ToolName,
+    /// Admitted execution owner.
+    pub owner: ToolExecutionOwner,
+    /// Initial serialized arguments.
+    pub initial_arguments: &'a str,
+}
+
 /// Injectable canonical identity sources used once per projected item and call.
 #[derive(Clone)]
 pub struct CanonicalIdSources {
@@ -444,20 +461,19 @@ impl ResponseProjectorCore {
     }
 
     /// Start a function-call tool block at provider block 0 (emit + Requested).
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "public signature; typed-parameter pass follows with the provider/hosted wave"
-    )]
     pub fn start_tool_block(
         &mut self,
-        provider_index: u32,
-        entry_id: EntryId,
-        call_id_remote: &str,
-        name: ToolName,
-        owner: ToolExecutionOwner,
-        initial_arguments: &str,
+        input: ToolBlockStart<'_>,
         output: &mut Vec<ModelEvent>,
     ) -> ProjResult<()> {
+        let ToolBlockStart {
+            provider_index,
+            entry_id,
+            call_id_remote,
+            name,
+            owner,
+            initial_arguments,
+        } = input;
         let correlation = ToolCorrelation::new(
             Some(call_id_remote.to_owned()),
             None,

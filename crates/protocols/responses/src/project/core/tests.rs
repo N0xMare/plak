@@ -47,12 +47,14 @@ fn start_function(core: &mut ResponseProjectorCore) -> EntryId {
         .expect("register");
     let name = ToolName::new("lookup").expect("name");
     core.start_tool_block(
-        0,
-        entry,
-        "call_1",
-        name,
-        ToolExecutionOwner::Local,
-        "",
+        ToolBlockStart {
+            provider_index: 0,
+            entry_id: entry,
+            call_id_remote: "call_1",
+            name,
+            owner: ToolExecutionOwner::Local,
+            initial_arguments: "",
+        },
         &mut out,
     )
     .expect("tool start");

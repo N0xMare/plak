@@ -19,9 +19,9 @@ class = "published-internal"
 
 [package.metadata.plakous-lint]
 too-many-lines-ceiling = 2
-too-many-arguments-ceiling = 6
+too-many-arguments-ceiling = 4
 large-file-ceiling = 0
-reason = "Existing item-local debt plus two public signatures awaiting the provider/hosted typed-parameter pass; no crate-wide lint allowances remain."
+reason = "Existing item-local protocol debt; tool starts and terminal lifecycle checks use typed inputs."
 
 [dependencies]
 plakous-http.workspace = true

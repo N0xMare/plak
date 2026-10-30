@@ -923,17 +923,17 @@ impl ResponsesFamilyHooks {
             .map(ResponsesOutputItem::native)
             .collect::<Vec<_>>();
         self.lifecycle
-            .terminal_response(
-                response.id(),
-                Some(response.model()),
-                expected_status,
-                actual_status,
-                response
+            .terminal_response(plakous_responses::TerminalResponseInput {
+                response_id: response.id(),
+                response_model: Some(response.model()),
+                event_status: expected_status,
+                response_status: actual_status,
+                incomplete_details: response
                     .incomplete_details()
                     .map(crate::ResponsesIncompleteDetails::native),
-                response.error().is_some(),
-                &output,
-            )
+                has_error: response.error().is_some(),
+                output: &output,
+            })
             .map_err(map_lifecycle_error)?;
         if !self.data.lifecycle.strict_terminal_output {
             let streamed = self
