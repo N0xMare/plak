@@ -6,6 +6,9 @@ use super::{Error, PrivateStoreError};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ClaudeNativeAuthError {
+    /// The provider no longer serves the compiled subscription contract.
+    #[error("{}", .0.message("Claude"))]
+    CompatibilityDrift(plakous_auth::CompatibilityDrift),
     /// The caller did not explicitly accept the exact pinned revision.
     #[error("the exact Claude OAuth compatibility profile was not accepted")]
     CompatibilityNotAccepted,

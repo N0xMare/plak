@@ -366,6 +366,12 @@ impl XaiNativeAuthManager {
     pub async fn begin_device_login(&self) -> Result<XaiDeviceLogin, XaiNativeAuthError> {
         self.core.ensure_active()?;
         let authorization_deadline = self.core.flow_deadline(LOGIN_TIMEOUT)?;
+        until_deadline(
+            authorization_deadline,
+            || XaiNativeAuthError::LoginExpired,
+            self.core.validate_login_discovery(),
+        )
+        .await?;
         let baseline = self.core.store.load()?;
         let form = urlencoded_form(&[
             ("client_id", XAI_PUBLIC_CLIENT_ID),

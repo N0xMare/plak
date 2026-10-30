@@ -2,9 +2,8 @@
 
 use super::{
     Arc, CLAUDE_OAUTH_REDIRECT_URI, ClaudeNativeAuthError, ClaudeSubscriptionStatus,
-    CredentialFence, Instant, ManagerCore, PkceS256, claude_oauth_scope_admits_inference,
-    claude_token_code_body, fmt, parse_claude_oauth_authorization_input,
-    parse_claude_oauth_token_grant, until_flow_deadline,
+    CredentialFence, Instant, ManagerCore, PkceS256, claude_token_code_body, fmt,
+    parse_claude_oauth_authorization_input, parse_claude_oauth_token_grant, until_flow_deadline,
 };
 
 /// Non-cloneable paste-complete Claude OAuth login.
@@ -42,12 +41,16 @@ impl ClaudeOAuthLogin {
         let response = until_flow_deadline(self.deadline, self.core.post_json(body)).await?;
         let grant = parse_claude_oauth_token_grant(&response)
             .map_err(|_| ClaudeNativeAuthError::LoginTokenExchange)?;
-        if grant
+        let scope = grant
             .scope()
-            .is_none_or(|scope| !claude_oauth_scope_admits_inference(scope))
-        {
-            return Err(ClaudeNativeAuthError::LoginAccountVerification);
-        }
+            .ok_or(ClaudeNativeAuthError::CompatibilityDrift(
+                plakous_auth::CompatibilityDrift::GrantedScope,
+            ))?;
+        plakous_auth::oauth_workflow::validate_granted_scope(
+            Some(scope),
+            crate::oauth::CLAUDE_OAUTH_INFERENCE_SCOPE,
+        )
+        .map_err(ClaudeNativeAuthError::CompatibilityDrift)?;
         if grant.refresh_token().is_none() {
             return Err(ClaudeNativeAuthError::LoginTokenExchange);
         }

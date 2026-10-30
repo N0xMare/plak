@@ -14,6 +14,7 @@
 mod authorize;
 mod callback;
 mod device_poll;
+mod drift;
 mod error;
 mod form;
 mod http11_get;
@@ -27,6 +28,7 @@ pub use callback::{
     parse_remote_authorization_input,
 };
 pub use device_poll::DevicePollSchedule;
+pub use drift::{validate_granted_scope, validate_subscription_oidc};
 pub use error::OAuthWorkflowError;
 pub use form::{
     access_needs_refresh, authorization_code_token_form, capped_deadline, decode_json_bounded,

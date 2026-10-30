@@ -81,7 +81,7 @@ impl Drop for OpenAiIdentityClaims {
 
 #[derive(Deserialize)]
 struct JwksDocument {
-    keys: Vec<RsaJwk>,
+    keys: Vec<serde_json::Value>,
 }
 
 impl CodexSubscriptionCredentialManager {
@@ -399,11 +399,24 @@ impl CodexSubscriptionCredentialManager {
         let document: JwksDocument =
             parse_strict_json(&reply.body).map_err(|error| login_signing_keys_or(login, error))?;
         remaining_until(deadline, Instant::now()).ok_or(signing_transport())?;
-        if document.keys.is_empty() || document.keys.len() > MAX_JWKS_KEYS {
+        if document.keys.len() > MAX_JWKS_KEYS {
             return Err(signing_validation());
         }
+        if !document
+            .keys
+            .iter()
+            .any(|key| key.get("alg").and_then(serde_json::Value::as_str) == Some("RS256"))
+        {
+            return Err(NativeCodexAuthError::CompatibilityDrift(
+                plakous_auth::CompatibilityDrift::SigningAlgorithm,
+            ));
+        }
         let mut keys = BTreeMap::new();
-        for key in document.keys {
+        for raw in document.keys {
+            if raw.get("alg").and_then(serde_json::Value::as_str) != Some("RS256") {
+                continue;
+            }
+            let key: RsaJwk = serde_json::from_value(raw).map_err(|_| signing_validation())?;
             validate_identifier(&key.kid, 128)
                 .map_err(|error| login_signing_keys_or(login, error))?;
             if key.kty != "RSA"

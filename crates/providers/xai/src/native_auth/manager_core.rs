@@ -22,6 +22,28 @@ use super::{
 use plakous_auth::oauth_orchestrator::pull_auth_body;
 
 impl ManagerCore {
+    pub(super) async fn validate_login_discovery(&self) -> Result<(), XaiNativeAuthError> {
+        // Only fixture constructors replace the compiled auth origin with
+        // loopback. No URL served by discovery ever reaches dispatch.
+        let endpoint = Endpoint {
+            origin: self.endpoints.token().origin.clone(),
+            path: url::Url::parse(
+                super::XAI_OAUTH
+                    .oidc_discovery_url
+                    .ok_or(XaiNativeAuthError::Request)?,
+            )
+            .map_err(|_| XaiNativeAuthError::Request)?
+            .path()
+            .to_owned(),
+        };
+        let bytes = self
+            .get_login_json(&endpoint, None, LoginHttpStage::AccountVerification)
+            .await?;
+        let document: serde_json::Value = decode_json(&bytes, MAX_AUTH_BODY_BYTES)?;
+        plakous_auth::oauth_workflow::validate_subscription_oidc(super::XAI_OAUTH, &document)
+            .map_err(XaiNativeAuthError::CompatibilityDrift)
+    }
+
     pub(super) fn ensure_active(&self) -> Result<(), XaiNativeAuthError> {
         validate_acceptance_until(
             &self.acceptance,
@@ -63,6 +85,8 @@ impl ManagerCore {
         baseline: Option<&CredentialFence>,
         deadline: Instant,
     ) -> Result<XaiSubscriptionStatus, XaiNativeAuthError> {
+        self.ensure_flow_active(deadline)?;
+        self.validate_login_discovery().await?;
         self.ensure_flow_active(deadline)?;
         let form = urlencoded_form(&authorization_code_token_form(
             code.as_str(),
@@ -712,6 +736,7 @@ impl ManagerCore {
         } else {
             self.execute(request).await?
         };
+
         if status != StatusCode::OK {
             return Err(status_error(status));
         }

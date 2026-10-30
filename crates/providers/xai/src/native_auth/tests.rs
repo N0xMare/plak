@@ -41,6 +41,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 
 use super::*;
+mod drift;
 use plakous_auth::oauth_workflow::parse_absolute_redirect_query;
 
 #[test]
@@ -196,14 +197,22 @@ async fn mock_peer() -> TestResult<MockPeer> {
                 acknowledgement,
             } = exchange;
             let result = async {
-                let (tcp, _) = listener.accept().await.map_err(|error| error.to_string())?;
-                let mut tls = acceptor
-                    .accept(tcp)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let request = read_http_request(&mut tls)
-                    .await
-                    .map_err(|error| error.to_string())?;
+                // Generic login fixtures serve pinned discovery independently
+                // of their scripted token/JWKS/account ladder. Drift scenarios
+                // below use a dedicated peer and record this GET explicitly.
+                let (mut tls, request) = loop {
+                    let (tcp, _) = listener.accept().await.map_err(|error| error.to_string())?;
+                    let mut tls = acceptor.accept(tcp).await.map_err(|error| error.to_string())?;
+                    let request = read_http_request(&mut tls).await.map_err(|error| error.to_string())?;
+                    if request.starts_with(b"GET /.well-known/openid-configuration ") {
+                        let body = drift::oidc_document().to_string();
+                        let reply = plakous_test_support::native_auth::response("200 OK", "application/json", body.as_bytes(), "");
+                        tls.write_all(&reply).await.map_err(|error| error.to_string())?;
+                        tls.shutdown().await.map_err(|error| error.to_string())?;
+                    } else {
+                        break (tls, request);
+                    }
+                };
                 observed.lock().await.push(request);
                 if response.disconnect_after_request {
                     drop(tls);

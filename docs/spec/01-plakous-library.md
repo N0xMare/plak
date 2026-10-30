@@ -3937,6 +3937,23 @@ removals and unknown extra fields remain provider authority, not drift.
 Observations and picker refusals are in-memory only and never enter the local
 catalog snapshot, offline doctor/status, credentials, or exported documents.
 
+At login, Grok fetches only the pinned OIDC discovery URL and compares issuer,
+authorization/token/device/revocation/UserInfo/JWKS endpoints exactly. Every
+pinned requested scope must occur in `scopes_supported` when that field is
+present. A mismatch refuses before token/device dispatch; a discovered URL is
+never used. Grok does not refuse a token response on its granted `scope`, at
+login or refresh: no such acceptance gate is evidenced by the pinned native
+reference. Claude login requires only `user:inference`, matching Claude Code
+2.1.314's inference-scope membership check, not equality with its six requested
+or five refresh scopes. Reordered grants and supersets are accepted. This is
+reference-client evidence, not a live-login claim; refresh does not recheck
+login grant scopes. Codex checks JWKS on login and refresh, ignoring keys for
+other algorithms in a mixed set and refusing drift only when no RS256 key
+remains. These refusals
+retain typed endpoint/scope/signing reasons through the facade, with the newer
+build remedy rather than a re-login loop. Existing valid logins are not made
+dependent on fresh discovery; there is no discovery polling or persisted drift.
+
 `plakous-auth` owns provider-neutral authentication scaffolding: bounded,
 zeroizing response-body pulls, media-type recognition, unvalidated audience
 and subject claim shapes (in the claimed-HTTP orchestrator module, not the

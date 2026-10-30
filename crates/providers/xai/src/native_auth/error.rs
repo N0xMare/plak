@@ -8,6 +8,9 @@ use super::{
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum XaiNativeAuthError {
+    /// The provider no longer serves the compiled subscription contract.
+    #[error("{}", .0.message("Grok"))]
+    CompatibilityDrift(plakous_auth::CompatibilityDrift),
     /// Transient model lookup retries exhausted their bounded budget.
     #[error(transparent)]
     Lookup(plakous_exchange::lookup::LookupError),

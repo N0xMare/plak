@@ -221,6 +221,12 @@ pub(super) fn map_xai_offline_status(
 )]
 pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSubscriptionError {
     let mapped = match &error {
+        plakous_xai::XaiNativeAuthError::CompatibilityDrift(reason) => {
+            NativeSubscriptionError::CompatibilityDrift {
+                provider: NativeProvider::Xai,
+                reason: reason.clone(),
+            }
+        }
         plakous_xai::XaiNativeAuthError::CompatibilityNotAccepted => {
             NativeSubscriptionError::AcceptanceRequired
         }

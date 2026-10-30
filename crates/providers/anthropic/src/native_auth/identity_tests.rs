@@ -4,6 +4,46 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 const ACCOUNT: &str = "12345678-1234-4234-8234-123456789abc";
 const OTHER_ACCOUNT: &str = "87654321-4321-4321-8321-cba987654321";
 
+#[tokio::test]
+async fn login_rejects_missing_required_scope_without_installing_credentials() {
+    let (_temp, manager, peer) = fixture(serde_json::json!({"access_token":"fixture-access","refresh_token":"fixture-refresh","expires_in":3600,"scope":"user:profile"})).await;
+    let login = manager.begin_login().unwrap();
+    let input = format!(
+        "{}#{}",
+        "fixture-code".repeat(3),
+        login.state.expose_secret()
+    );
+    let failure = login.complete(&input).await.unwrap_err();
+    assert!(
+        matches!(
+            failure,
+            ClaudeNativeAuthError::CompatibilityDrift(
+                plakous_auth::CompatibilityDrift::GrantedScope
+            )
+        ),
+        "{failure:?}"
+    );
+    assert!(failure.to_string().contains("install a newer build"));
+    assert!(manager.core.store.load().unwrap().is_none());
+    assert!(peer.await.unwrap().starts_with("POST "));
+}
+
+#[tokio::test]
+async fn login_accepts_inference_only_and_reordered_superset_grants() {
+    for scope in ["user:inference", "future:scope user:profile user:inference"] {
+        let (_temp, manager, peer) = fixture(serde_json::json!({"access_token":"fixture-access","refresh_token":"fixture-refresh","expires_in":3600,"scope":scope})).await;
+        let login = manager.begin_login().unwrap();
+        let input = format!(
+            "{}#{}",
+            "fixture-code".repeat(3),
+            login.state.expose_secret()
+        );
+        login.complete(&input).await.unwrap();
+        assert!(manager.core.store.load().unwrap().is_some());
+        peer.await.unwrap();
+    }
+}
+
 async fn fixture(
     body: serde_json::Value,
 ) -> (

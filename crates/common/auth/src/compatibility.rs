@@ -27,7 +27,7 @@ pub enum CompatibilityDrift {
         /// Name only; discovered URLs are not retained in errors.
         field: &'static str,
     },
-    /// A token response narrowed, widened or otherwise changed the request scope.
+    /// A login grant lacks a scope required by the compiled contract.
     GrantedScope,
     /// The signing-key set has no key for the pinned algorithm.
     SigningAlgorithm,
@@ -49,9 +49,7 @@ impl CompatibilityDrift {
             Self::Endpoint { field } => {
                 format!("OIDC metadata field {field} disagrees with the compiled pin")
             }
-            Self::GrantedScope => {
-                "granted OAuth scopes disagree with the compiled request".to_owned()
-            }
+            Self::GrantedScope => "granted OAuth scopes lack a required scope".to_owned(),
             Self::SigningAlgorithm => {
                 "signing keys no longer offer the pinned algorithm".to_owned()
             }

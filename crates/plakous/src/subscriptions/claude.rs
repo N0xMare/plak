@@ -191,6 +191,12 @@ pub(super) fn map_claude_error(
     error: plakous_anthropic::ClaudeNativeAuthError,
 ) -> NativeSubscriptionError {
     let mapped = match &error {
+        plakous_anthropic::ClaudeNativeAuthError::CompatibilityDrift(reason) => {
+            NativeSubscriptionError::CompatibilityDrift {
+                provider: NativeProvider::Claude,
+                reason: reason.clone(),
+            }
+        }
         plakous_anthropic::ClaudeNativeAuthError::CompatibilityNotAccepted => {
             NativeSubscriptionError::AcceptanceRequired
         }
