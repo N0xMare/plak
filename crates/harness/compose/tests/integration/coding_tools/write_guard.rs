@@ -50,6 +50,83 @@ async fn oversized_codex_named_listing_refuses_before_any_file_is_created() -> T
 }
 
 #[tokio::test]
+async fn unreadable_write_targets_refuse_with_actionable_remedies() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut builder = ToolRegistryBuilder::default();
+    plakous_tools::register_packs(
+        &plakous_compose::standard_coding_packs_in_memory()?,
+        &mut builder,
+    )?;
+    builder.register(plakous_tool_files::FilesToolPack::edit_files_registration()?)?;
+    let registry = builder.freeze();
+    let environment = environment(root.path())?;
+    fs::write(root.path().join("binary"), b"a\0b")?;
+    let large = fs::File::create(root.path().join("large"))?;
+    large.set_len(16 * 1024 * 1024 + 1)?;
+    fs::create_dir(root.path().join("directory"))?;
+    for (index, path, message) in [
+        (
+            1,
+            "binary",
+            "Write refused: \"binary\" is binary and the file-reading tool cannot read it. Delete it in a separate tool call, then create it again; no files were changed.",
+        ),
+        (
+            2,
+            "large",
+            "File change refused: \"large\" exceeds the readable file-size limit. Use a process tool to remove or shrink it, then retry; no files were changed.",
+        ),
+        (
+            3,
+            "directory",
+            "File change refused: \"directory\" is a directory. Choose a file path, then retry; no files were changed.",
+        ),
+    ] {
+        let result = execute(&registry, environment.clone(), ids(index)?, "apply_patch", &json!({"file_path":path,"old_string":"","new_string":"replacement","replace_all":true}).to_string()).await?;
+        assert_eq!(result.kind(), ToolOutcomeKind::Failure);
+        assert_eq!(text(&result)?, message);
+        let result = execute(
+            &registry,
+            environment.clone(),
+            ids(index + 10)?,
+            "edit_files",
+            &json!({"ops":[{"op":"write","path":path,"content":"replacement"}]}).to_string(),
+        )
+        .await?;
+        assert_eq!(result.kind(), ToolOutcomeKind::Failure);
+        let expected = if path == "binary" {
+            message.to_owned()
+        } else {
+            format!("op 1: {message}")
+        };
+        assert_eq!(text(&result)?, expected);
+    }
+    assert_eq!(fs::read(root.path().join("binary"))?, b"a\0b");
+    assert_eq!(large.metadata()?.len(), 16 * 1024 * 1024 + 1);
+    assert!(root.path().join("directory").is_dir());
+    // The binary refusal's remedy is usable without authorizing a blind write.
+    let result = execute(
+        &registry,
+        environment.clone(),
+        ids(4)?,
+        "apply_patch",
+        &json!({"patch":"*** Begin Patch\n*** Delete File: binary\n*** End Patch\n"}).to_string(),
+    )
+    .await?;
+    assert_eq!(result.kind(), ToolOutcomeKind::Success);
+    let result = execute(
+        &registry,
+        environment,
+        ids(5)?,
+        "apply_patch",
+        r#"{"file_path":"binary","old_string":"","new_string":"text","replace_all":true}"#,
+    )
+    .await?;
+    assert_eq!(result.kind(), ToolOutcomeKind::Success);
+    assert_eq!(fs::read(root.path().join("binary"))?, b"text");
+    Ok(())
+}
+
+#[tokio::test]
 async fn blind_write_requires_fresh_read_and_consumes_it_even_for_noop() -> TestResult {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("a"), "old\nsecond\n")?;
@@ -221,7 +298,10 @@ async fn implicit_patch_reads_failed_reads_and_new_attachments_do_not_authorize_
         r#"{"file_path":"binary","old_string":"","new_string":"new","replace_all":true}"#,
     )
     .await?;
-    assert_eq!(text(&result)?, unread("binary"));
+    assert_eq!(
+        text(&result)?,
+        "Write refused: \"binary\" is binary and the file-reading tool cannot read it. Delete it in a separate tool call, then create it again; no files were changed."
+    );
     Ok(())
 }
 
@@ -555,5 +635,48 @@ async fn oversized_sdk_path_listing_refuses_before_any_target_is_created() -> Te
         "file change result exceeds the text bound; split the transaction"
     );
     assert_eq!(fs::read_dir(root.path())?.count(), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn writes_beneath_a_file_component_refuse_with_their_index_before_any_effect() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let mut builder = ToolRegistryBuilder::default();
+    plakous_tools::register_packs(
+        &plakous_compose::standard_coding_packs_in_memory()?,
+        &mut builder,
+    )?;
+    builder.register(plakous_tool_files::FilesToolPack::edit_files_registration()?)?;
+    let registry = builder.freeze();
+    let environment = environment(root.path())?;
+    fs::write(root.path().join("data.txt"), b"data")?;
+    let message = "File change refused: \"data.txt/child\" has a parent component that is not a directory. Choose a path inside an existing directory, then retry; no files were changed.";
+    let result = execute(
+        &registry,
+        environment.clone(),
+        ids(1)?,
+        "edit_files",
+        &json!({"ops":[
+            {"op":"write","path":"safe","content":"never published"},
+            {"op":"write","path":"data.txt/child","content":"refused"}
+        ]})
+        .to_string(),
+    )
+    .await?;
+    assert_eq!(result.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(text(&result)?, format!("op 2: {message}"));
+    let result = execute(
+        &registry,
+        environment,
+        ids(2)?,
+        "apply_patch",
+        &json!({"file_path":"data.txt/child","old_string":"","new_string":"refused","replace_all":true})
+            .to_string(),
+    )
+    .await?;
+    assert_eq!(result.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(text(&result)?, message);
+    assert_eq!(fs::read(root.path().join("data.txt"))?, b"data");
+    assert_eq!(fs::read_dir(root.path())?.count(), 1);
     Ok(())
 }

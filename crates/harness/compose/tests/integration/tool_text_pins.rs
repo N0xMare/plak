@@ -40,7 +40,7 @@ use plakous_tools::PromptDigest;
 
 /// The concatenated digest of every string this module owns.
 const CODING_PROMPTS_DIGEST: &str =
-    "3c8e41a4e3611c97f77acad1b773ad647c0701577e6f56bf3391866955757d7e";
+    "a6bb968cbcefdcfc61c4d0d9fbe51d296cafe11cf4edac4940440c0894435cbd";
 #[test]
 fn coding_prompts_digest_is_stable() {
     let combined = [
@@ -80,7 +80,7 @@ fn coding_prompts_digest_is_stable() {
 
 /// The concatenated digest of every string this module owns.
 const CODEX_PROMPTS_DIGEST: &str =
-    "62947c9b1cfa151fcddabdf53c4fa4854bd1556e841bae0ab775a78d3b6ec544";
+    "fa4df4427be0c199e13da016e1e939f0262ea47923c882cf579435c06dc6eaab";
 #[test]
 fn codex_prompts_digest_is_stable() {
     let combined = [
@@ -93,13 +93,13 @@ fn codex_prompts_digest_is_stable() {
         PromptDigest::of(&combined),
         PromptDigest::from_hex(CODEX_PROMPTS_DIGEST)
     );
-    assert!(combined.starts_with("The `apply_patch` tool"));
+    assert!(combined.contains("raw *** Begin Patch envelope, not JSON"));
     assert!(PLAKOUS_CODEX_EXEC_COMMAND_DESCRIPTION.contains(PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT));
 }
 
 /// The concatenated digest of every string this module owns.
 const GROK_PROMPTS_DIGEST: &str =
-    "601a84c057be8220774a05302954215d86956f1e790f40bcac96b1e4d3173d05";
+    "158bb753a988816c7daad029f280519f948ccaf4bbfc4d43e8f2c953a8bc23fd";
 #[test]
 fn grok_prompts_digest_is_stable() {
     let combined = [
@@ -129,7 +129,7 @@ fn grok_prompts_digest_is_stable() {
 
 /// The concatenated digest of every string this module owns.
 const ERROR_PROMPTS_DIGEST: &str =
-    "7dcd5e82fa7959201291189f267b6fd1be5da74033bab7977d244bfd363fca6a";
+    "b1cab0675f7f3811e36803b9460c9d320dd5784055704963981e6e9286a4c0e9";
 #[test]
 fn error_prompts_digest_is_stable() {
     let combined = [

@@ -6163,11 +6163,19 @@ changes. Their exact texts follow (`{path}` is a JSON-quoted workspace-relative
 path), including create races and content conflicts caught at commit:
 
 ```text
-Write refused: {path} already exists and has not been read in this session attachment. Read the file with the file-reading tool, then retry. After resume or reload, read it again.
+Write refused: {path} has no current read in this session (each change to that file, resume or reload consumes earlier reads). Read the file with the file-reading tool, then retry.
 Write refused: {path} changed on disk since its last read. Read the file again with the file-reading tool, then retry; no files were changed.
+Write refused: {path} is binary and the file-reading tool cannot read it. Delete it in a separate tool call, then create it again; no files were changed.
+File change refused: {path} exceeds the readable file-size limit. Use a process tool to remove or shrink it, then retry; no files were changed.
+File change refused: {path} is a directory. Choose a file path, then retry; no files were changed.
+File change refused: {path} has a parent component that is not a directory. Choose a path inside an existing directory, then retry; no files were changed.
 ```
 
-Containment and I/O failures retain their truthful errors; a publication
+Binary files (NUL in the first 8 KiB) cannot acquire a text-read observation;
+their overwrite refusal names delete-then-create instead of a futile reread.
+Over-limit files, directory targets and targets beneath a file or other
+non-directory component also refuse before effects, with the remedies above;
+SDK `edit_files` prefixes each with its `op N:` index. Containment and other I/O failures retain their truthful errors; a publication
 failure remains recovery-required, never a fabricated successful path listing.
 This accidental-clobber guard adds no sandbox against intentional patches or
 shell writes and no isolation from external writers or per-file publication.
@@ -6572,6 +6580,13 @@ the built-in ceilings, not the epoch's clamped values. Chapter
 03 owns the semantics of all of this.
 
 ### 6.7 The first-turn footprint
+
+Mutation descriptions and the lifecycle tool-results render pin the named-path
+contract and attachment-local content-freshness guard (§6.3), including the
+exact refusal templates. Mutation descriptions are part of compiled tool/menu
+identities. Existing history remains literal. Exact reopen refuses a plan whose
+descriptors disagree with the sealed ones and never rewrites them. Read
+observations are not persisted.
 
 The **harness environment** of a route is the dialect costume plus the family,
 product, and PTC instruction text plus the compact `tools[]` JSON. It excludes

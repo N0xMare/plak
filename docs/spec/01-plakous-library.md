@@ -5164,6 +5164,10 @@ Create-only empty-old-string calls and context-checked exact edits and patches
 keep their existing preconditions and need no prior read. The guard prevents
 accidental clobbers, not deliberate shell writes or intentional patches, and
 does not add isolation from external writers or cross-file atomic publication.
+Binary targets that cannot be text-read refuse with a separate-call
+delete-then-create remedy; over-limit targets name a process-tool remove/shrink
+remedy, and directory targets require a file path. These are definite failure
+results before effects, not runtime errors or implicit read authorizations.
 
 The `ExecutionEnvironment` owns at most 1024 in-memory read observations, shared
 by clones, keyed by owning run and canonical contained workspace path. Only the
@@ -5177,6 +5181,11 @@ eviction or loss requires rereading. Tokens survive turns, cells and compaction
 on the same attached environment, not environment reconstruction, resume/reload,
 fork/import or another agent. They are neither persisted nor reconstructed from
 transcript text. Exact unread/stale refusals are specified in chapter 02 §6.3.
+
+Mutation descriptions state these contracts in every presentation, including
+SDK enrollment. Their compiled tool/plan identities are sealed: exact reopen
+refuses a supplied fresh plan that disagrees with the persisted descriptors,
+rather than silently rewriting the session's tools.
 
 Filesystem, process, environment, and network effects require an explicit
 `ExecutionEnvironment` and `ToolPolicy`. Paths are workspace-relative and

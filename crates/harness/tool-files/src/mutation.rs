@@ -8,7 +8,11 @@ use plakous_tools::{
     backend_runtime_error, operation_control,
 };
 
-use crate::text::{PLAKOUS_TOOL_WRITE_STALE, PLAKOUS_TOOL_WRITE_UNREAD};
+use crate::text::{
+    PLAKOUS_TOOL_WRITE_BINARY, PLAKOUS_TOOL_WRITE_DIRECTORY,
+    PLAKOUS_TOOL_WRITE_PARENT_NOT_DIRECTORY, PLAKOUS_TOOL_WRITE_STALE,
+    PLAKOUS_TOOL_WRITE_TOO_LARGE, PLAKOUS_TOOL_WRITE_UNREAD,
+};
 
 pub(super) type WriteGuards = BTreeMap<PathBuf, WorkspaceExpectedFileState>;
 
@@ -32,7 +36,7 @@ pub(super) async fn blind_write_expected(
     let read = context
         .environment()
         .read_workspace(
-            WorkspaceReadSliceRequest::start(path, 1).map_err(backend_runtime_error)?,
+            WorkspaceReadSliceRequest::start(path, 8_192).map_err(backend_runtime_error)?,
             operation_control(context),
         )
         .await;
@@ -41,16 +45,40 @@ pub(super) async fn blind_write_expected(
         Err(error) if error.kind() == ExecutionBackendErrorKind::NotFound => {
             return Ok(WorkspaceExpectedFileState::Missing);
         }
-        Err(error) => return Err(backend_runtime_error(error)),
+        Err(error) => return Err(write_read_error(path, error)),
     };
-    require_read(context, path, read.content())
+    require_read(context, path, read.content(), is_binary(read.bytes()))
+}
+
+pub(super) fn is_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8_192).any(|byte| *byte == 0)
+}
+
+pub(super) fn write_read_error(path: &Path, error: ExecutionBackendError) -> ToolRuntimeError {
+    let template = match error.kind() {
+        ExecutionBackendErrorKind::ResourceLimit => PLAKOUS_TOOL_WRITE_TOO_LARGE,
+        ExecutionBackendErrorKind::IsADirectory => PLAKOUS_TOOL_WRITE_DIRECTORY,
+        ExecutionBackendErrorKind::NotADirectory => PLAKOUS_TOOL_WRITE_PARENT_NOT_DIRECTORY,
+        _ => return backend_runtime_error(error),
+    };
+    ToolRuntimeError::new(
+        ToolRuntimeErrorKind::WorkspacePolicy,
+        template.replace("{path}", &quoted_path(path)),
+    )
 }
 
 pub(super) fn require_read(
     context: &ToolContext,
     path: &Path,
     revision: plakous_tools::WorkspaceContentIdentity,
+    binary: bool,
 ) -> Result<WorkspaceExpectedFileState, ToolRuntimeError> {
+    if binary {
+        return Err(ToolRuntimeError::new(
+            ToolRuntimeErrorKind::WorkspacePolicy,
+            PLAKOUS_TOOL_WRITE_BINARY.replace("{path}", &quoted_path(path)),
+        ));
+    }
     let observed = context.environment().last_text_read(context.run_id(), path);
     match observed {
         Some(identity) if identity == revision => Ok(WorkspaceExpectedFileState::Content(identity)),

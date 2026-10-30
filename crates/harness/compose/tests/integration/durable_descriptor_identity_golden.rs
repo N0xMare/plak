@@ -97,7 +97,7 @@ fn python_harness_sdk_identity_golden() -> Result<(), TestError> {
     )?;
     assert_eq!(
         descriptor.identity().to_string(),
-        "d102c7ad56a5d5ef16e4ed4370f6b03f9a69047661b8d57fb9c4c23eb996b80d"
+        "5b04b7e539e001a201dd7f3a5a68bb9ad8e2de3a6fd2403162cee3f86b56c5f6"
     );
     Ok(())
 }
@@ -140,50 +140,50 @@ fn python_harness_sdk_compile_refuses_missing_registration_and_nested_marker()
 const DURABLE_DESCRIPTOR_PINS: &[(&str, &str, &str, &str)] = &[
     (
         "Pi",
-        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
-        "eed2e169e3e0cee54a8df5ba6d53de090735c2cdad02d2d7f23bbc12ddfb446e",
+        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
+        "3599a0f0c63407d1989e65c37bfbef4151eb800b57ea9dde4dbe79c1a64df046",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "CodexOAuth",
-        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
-        "9d04f34ffd60d429194b6c46c2a785fb65b5f536bc76be109adb2d8812279d8f",
+        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
+        "18eaa4d3576ee6d1fa875d743f48bea23266569ddedc7f09625f460bf26f4009",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "SuperGrokOAuth",
-        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
-        "84d6a6bf51b62d3a2d97a24c2aadc6c3e8e43096dca0836620dbb2035578437b",
+        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
+        "2c064d03202e5caa6e4a0c57bc8fa2405e316e429b2a53b4a9a8b58f53d498c4",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "ClaudeOAuth",
-        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
-        "dcaeb48e6266637631ba142ecb585783f653dc8163d1033c146653b81b0c3ef1",
+        "30175b4af80a42106cf1240cf9318c302873cf2212da2df79e36302347cd8265",
+        "13b0bbe32d3c96c6cdd5945066fee07de005d8c52364a14095331458fefa5490",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "Pi+topology",
-        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
-        "441721000fbf77ad646ac821f57bc0c979a8c69b896e8f11fd02b063376f0863",
+        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
+        "ce93fe257cabeabdf3b1eeeccb2fab9348dd54211cc934fff68f1f2599d1591a",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
     (
         "CodexOAuth+topology",
-        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
-        "3f530845b0c46becc974500db5c245d66a67dcbbe29bd917ae258ff4aec75583",
+        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
+        "807ebd94681bb7974c4b4d3cceb71511a3d97e985cde2f96ec4d7d43e5ae6908",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
     (
         "SuperGrokOAuth+topology",
-        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
-        "fe3ed8f866b282140203b209ec3bab061c3a40df073d58e5e50b0535a1345851",
+        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
+        "a64f7add1a1f11303e52782662fe299cba55ec53b3275ed7c67dab29d8148ce8",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
     (
         "ClaudeOAuth+topology",
-        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
-        "4ca2948af04a45db2631415a776689cb4e2a5f9e5c7c2efcbf733c149d1a03b1",
+        "a2c9e282f9be302a5ddb0a0dd8db524c33dd3ddddc67ca6a7a935cf4f57a8468",
+        "a82402d8675470925e5d99a432e2c04a1edb21de339378271a6f80e7588954f3",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
 ];

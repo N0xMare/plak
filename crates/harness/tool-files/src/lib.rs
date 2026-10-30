@@ -25,14 +25,13 @@ pub use text::{
     PLAKOUS_GROK_SEARCH_REPLACE_DESCRIPTION, PLAKOUS_GROK_WRITE_DESCRIPTION,
     PLAKOUS_TOOL_APPLY_PATCH_DESCRIPTION, PLAKOUS_TOOL_APPLY_PATCH_REQUIRES_INPUT,
     PLAKOUS_TOOL_CREATE_PATCH_NONEMPTY, PLAKOUS_TOOL_DELETE_PATCH_NONEMPTY,
-    PLAKOUS_TOOL_FILE_CHANGES_FORMAT, PLAKOUS_TOOL_IMAGE_TOO_LARGE,
-    PLAKOUS_TOOL_INSPECT_IMAGE_DESCRIPTION, PLAKOUS_TOOL_PATCH_HUNK_CONFLICT,
-    PLAKOUS_TOOL_PATCH_KIND_CHANGED, PLAKOUS_TOOL_PATCH_MALFORMED,
-    PLAKOUS_TOOL_PATCH_TARGET_NOT_UTF8, PLAKOUS_TOOL_PATCH_TARGET_TOO_LARGE,
-    PLAKOUS_TOOL_PATCH_WORKSPACE_CONFLICT, PLAKOUS_TOOL_READ_FILE_DESCRIPTION,
-    PLAKOUS_TOOL_READ_OFFSET_PAST_EOF, PLAKOUS_TOOL_SEARCH_REPLACE_AMBIGUOUS,
-    PLAKOUS_TOOL_SEARCH_REPLACE_NOT_FOUND, PLAKOUS_TOOL_SEARCH_REPLACE_NOT_UTF8,
-    PLAKOUS_TOOL_WRITE_STALE, PLAKOUS_TOOL_WRITE_UNREAD,
+    PLAKOUS_TOOL_IMAGE_TOO_LARGE, PLAKOUS_TOOL_INSPECT_IMAGE_DESCRIPTION,
+    PLAKOUS_TOOL_PATCH_HUNK_CONFLICT, PLAKOUS_TOOL_PATCH_KIND_CHANGED,
+    PLAKOUS_TOOL_PATCH_MALFORMED, PLAKOUS_TOOL_PATCH_TARGET_NOT_UTF8,
+    PLAKOUS_TOOL_PATCH_TARGET_TOO_LARGE, PLAKOUS_TOOL_PATCH_WORKSPACE_CONFLICT,
+    PLAKOUS_TOOL_READ_FILE_DESCRIPTION, PLAKOUS_TOOL_READ_OFFSET_PAST_EOF,
+    PLAKOUS_TOOL_SEARCH_REPLACE_AMBIGUOUS, PLAKOUS_TOOL_SEARCH_REPLACE_NOT_FOUND,
+    PLAKOUS_TOOL_SEARCH_REPLACE_NOT_UTF8, PLAKOUS_TOOL_WRITE_STALE, PLAKOUS_TOOL_WRITE_UNREAD,
 };
 
 use crate::codex_patch::{
@@ -76,11 +75,11 @@ fn relative_workspace_path(
 
 // Adapted from pi 1.1.0's file tool descriptions (MIT); see the README License section.
 const PI_READ_DESCRIPTION: &str = "Read the contents of a text file; images and binary files are refused. Output is truncated to 2000 lines or 50 KiB (50 * 1024 bytes), whichever is hit first, and lines longer than 2000 characters are clipped. Use offset/limit for large files. When you need the full file, continue with offset until complete. path is relative to the workspace or absolute under it, or exactly a path a bash result or completion notice named on its `full output:` line.";
-const PI_EDIT_DESCRIPTION: &str = "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes. The edits apply together or not at all.";
-const PI_WRITE_DESCRIPTION: &str = "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.";
+const PI_EDIT_DESCRIPTION: &str = "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes. The edits apply together or not at all. Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
+const PI_WRITE_DESCRIPTION: &str = "Write content to a file. Creates missing files and parent directories. Overwriting an existing file requires an explicit text read in this session attachment and unchanged content, not just unchanged mtime. Read again after each change to that file or resume/reload. Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
 const CLAUDE_READ_DESCRIPTION: &str = "Reads a file from the local filesystem.\n\n- Reads up to 2000 lines by default.\n- If you already know which part of the file to read, only read that part. This is important for larger files/context efficiency.\n- `offset` is the 1-indexed first line (omit to start at line 1). `limit` is how many lines to return (default 2000, max 2000).\n- The result is cat -n text: a 6-character file line number, a tab, then the line. Numbers are the file's real line numbers (offset 10 starts at line 10).\n- If truncated, a last line `... more lines; next_offset=N` means call again with that offset.\n- Lines longer than 2000 characters are clipped.\n- Text files only: binary files, images and PDFs are refused (there is no `pages` parameter).\n- `file_path` is an absolute path under the workspace root, a workspace-relative path without `..`, or exactly a path a Bash result or completion notice named on its `full output:` line; other paths are refused, as is a `full output:` path issued by an earlier process (before a restart or reload) or another agent.\n- A read of an output file whose writing failed ends with `[output file incomplete: write failed after N bytes]`; the file stops there.\n- An empty file succeeds with an empty body, missing file/directory returns an error.";
-const CLAUDE_EDIT_DESCRIPTION: &str = "Performs exact string replacement in a file.\n\n- `old_string` must be non-empty and match the file exactly, including indentation, and be unique — the edit fails otherwise.\n- `replace_all: true` replaces every occurrence instead.\n- Use Write to create a new file.";
-const CLAUDE_WRITE_DESCRIPTION: &str = "Writes a file to the local filesystem.\n\n- Creates the file, or overwrites it when it exists. Missing parent directories are created.\n- Prefer Edit for partial changes; read an existing file before overwriting it.";
+const CLAUDE_EDIT_DESCRIPTION: &str = "Performs exact string replacement in a file.\n\n- `old_string` must be non-empty and match the file exactly, including indentation, and be unique — the edit fails otherwise.\n- `replace_all: true` replaces every occurrence instead.\n- Use Write to create a new file.\n- Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
+const CLAUDE_WRITE_DESCRIPTION: &str = "Writes a file to the local filesystem.\n\n- Creates missing files and parent directories.\n- Overwriting an existing file requires an explicit text read in this session attachment and unchanged content, not just unchanged mtime. Read again after each change to that file or resume/reload.\n- Prefer Edit for partial changes.\n- Success returns changed_files=N followed by A/M/D and each JSON-quoted workspace-relative changed path in lexical order; unchanged files are omitted.";
 
 /// The Codex freeform patch envelope: the same apply-patch executor under the
 /// registration a Codex costume expects. It is the files pack's registration
@@ -437,12 +436,12 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.sdk.edit_files",
         text::PLAKOUS_TOOL_EDIT_FILES_DESCRIPTION,
-        "bf7713d70627a8f5bae6fcc666712b1abb873a7a45fa705cc909ec9cf2cbb53c",
+        "dcee2a43728f9bcb657cbb4df27ad6b25b0c7bdc390d7acbcef4761528d6b800",
     ),
     PromptPin::new(
         "files.write_unread",
         PLAKOUS_TOOL_WRITE_UNREAD,
-        "25c55aadb1dfd9d16eaa25393a9ae3169bba5d743d89395ffe14b19d9d3f8e49",
+        "6f381d28c4af7b70662d3eda2eedc8248ab58ce29e633f6d5c1193de735bd2d6",
     ),
     PromptPin::new(
         "files.write_stale",
@@ -450,9 +449,24 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
         "54fad0c80ee7e20e1ebfee6a254a6e667352e1328a89a34cb26b7c326eb3c35d",
     ),
     PromptPin::new(
-        "files.changes_format",
-        PLAKOUS_TOOL_FILE_CHANGES_FORMAT,
-        "0dced8c198dfdcd62fd2cab8a513ddc6efdd2a0ecf4389097d5f51f7f0d07c86",
+        "files.write_binary",
+        text::PLAKOUS_TOOL_WRITE_BINARY,
+        "8c67f8b56fa9ef3c6e14ff47384f514bae1f807c719685785dde21d04d4373ec",
+    ),
+    PromptPin::new(
+        "files.write_too_large",
+        text::PLAKOUS_TOOL_WRITE_TOO_LARGE,
+        "64d48655f955e61a3c6a545e932c8e4af794145877758bb8e71b29151ef581a4",
+    ),
+    PromptPin::new(
+        "files.write_directory",
+        text::PLAKOUS_TOOL_WRITE_DIRECTORY,
+        "beaa3b432c1811942b4722491464658d859ab9fcfecbcf74dd84e5b95ebf75cf",
+    ),
+    PromptPin::new(
+        "files.write_parent_not_directory",
+        text::PLAKOUS_TOOL_WRITE_PARENT_NOT_DIRECTORY,
+        "b25322321a815bdc22c5c95cc2657818e641a470a308e34b4583f1c2d9b45dad",
     ),
     PromptPin::new(
         "files.read_binary",
@@ -467,7 +481,7 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.apply_patch",
         PLAKOUS_TOOL_APPLY_PATCH_DESCRIPTION,
-        "ff1efc37d9bb186332d8d5ea81fde8a4b87bf80eb4d4ce413667617129cffb0c",
+        "b11431ed839144bb094d750542881fdc4b1527cf85d6d41bede82041ee58a70a",
     ),
     PromptPin::new(
         "files.inspect_image",
@@ -477,7 +491,7 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.codex.apply_patch",
         PLAKOUS_CODEX_APPLY_PATCH_FREEFORM_DESCRIPTION,
-        "0b70e9f33c3f169a4189336e2af8180b566a736274703d48fd75d04ba3dc0af9",
+        "0c5947d5946e9c81534c17cc8b8798c36532c545639c7245b6cb6d1fdd2ba605",
     ),
     PromptPin::new(
         "files.grok.read_file",
@@ -487,12 +501,12 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.grok.search_replace",
         PLAKOUS_GROK_SEARCH_REPLACE_DESCRIPTION,
-        "eb2fc3d2bb93a3fb2022c78bb646b7f7c9a4f44455abbece931ed2c7041e76b9",
+        "cc2dd681fa34e08365097be3a3d7a3db6f9c4a8458bc61b7107e18b6a9b9b06e",
     ),
     PromptPin::new(
         "files.grok.write",
         PLAKOUS_GROK_WRITE_DESCRIPTION,
-        "702c05152d0d708e25c97b1f89528dfa5afa20b58882e6a4d77ee4fc7550b34b",
+        "fcd1294f0e50d8cf6e74608a729084454f0d9ea946457d572a5ccc53cfc1c0e0",
     ),
     PromptPin::new(
         "files.pi.read",
@@ -502,12 +516,12 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.pi.edit",
         PI_EDIT_DESCRIPTION,
-        "409f9e32af7d38aac3a09b4f4303953cf9821bdb02ab81c2eca43c68ef4e536d",
+        "981680af66987fad9bee7feefb62d56c4793c895f2e618561d19bdd3173e899b",
     ),
     PromptPin::new(
         "files.pi.write",
         PI_WRITE_DESCRIPTION,
-        "c7d18538f7549a0cea0b1f47ae7309066be2a56c8217530eba35efdb45e94971",
+        "8dded374dff3a1852971fac0a1493f91b04dea942d1fb21521a6ea7620aed093",
     ),
     PromptPin::new(
         "files.claude.Read",
@@ -517,11 +531,11 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.claude.Edit",
         CLAUDE_EDIT_DESCRIPTION,
-        "9ec37949f13550d1f740faca439dea0d378bad2d61eb64ce6d5ec64c9e14960e",
+        "0bd837f20a34eb230218acf595d6ce6cf6693dc8c4a4a1eada05df70ca2d42f8",
     ),
     PromptPin::new(
         "files.claude.Write",
         CLAUDE_WRITE_DESCRIPTION,
-        "8af8c3181d6045cc674cdbb772ff58478b7119c6eba56023746cf068927a54ea",
+        "da2d0dd9555cc899559b2acb7026767964661a1c57cae321aee22ab252e35ef4",
     ),
 ];

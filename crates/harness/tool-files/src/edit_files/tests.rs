@@ -22,6 +22,7 @@ async fn sdk_dot_path_commit_races_keep_the_exact_guard_refusal()
             path.clone(),
             FileState {
                 original,
+                original_is_binary: false,
                 bytes: Some(b"replacement".to_vec()),
             },
         )]

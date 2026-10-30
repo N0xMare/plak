@@ -5,6 +5,8 @@
 
 use super::*;
 
+mod description_reopen;
+
 #[tokio::test]
 async fn pending_decision_lost_receipt_ack_capacity_recovery_stays_fenced() -> TestResult {
     for failure in [

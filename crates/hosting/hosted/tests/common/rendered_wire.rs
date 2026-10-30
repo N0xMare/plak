@@ -986,15 +986,15 @@ pub(crate) mod suite {
     const COMPACTION_WIRE_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root",
-            "4396e4a33734991f9caf0966dc93a8af0c55058268618215039952fdd48653cb",
+            "55837e9e5b7d37f91e66a924843e6b8b2b57042bb4065087a62357e70fe59fe9",
         ),
         (
             "grok.direct.root",
-            "cb1ba61e826530da8c55a67f4f7e8d600d3d1c146975a1fcaa0b15a186bfa94b",
+            "568d61271aa384dfdd56ea5707d576c5359aa80746920fb3b607a080e18e1669",
         ),
         (
             "claude.direct.root",
-            "edb0fb575c0fc2e772b3b8bb2f9d272532574220caeeba62e6fdb4e30ed36da7",
+            "1d17c48ab40709ad2bc4952a4d7ccd30aae48e9426a3b5a9969e9fc7eabd1ac8",
         ),
         (
             "openrouter-chat.direct.root",
@@ -1002,23 +1002,23 @@ pub(crate) mod suite {
         ),
         (
             "openrouter-responses.direct.root",
-            "7892b740751522a54e5bd1db786a3ac1dcb70d28a12913308222077ca31e5119",
+            "ce042bf02e0d1f1d133296656bc3f9e5e3ec2f7caac9d8917400eae1239afae9",
         ),
         (
             "openrouter-messages.direct.root",
-            "96471757d3a8393666fa124d051d7dd98ad06e902dce8caff21ec3fef5aaba0f",
+            "dfdb219764d186bcea89139e778f99a9538201ecb8e13c91725f4dbc5b8ce989",
         ),
         (
             "openai-api.direct.root.single-agent",
-            "7c458fd18b421e3610fb0bbb151ba6353f921501ad435e6902d83ba13a34760d",
+            "398e3fde37cb06795429c48fae6347496ca8c0e7132801032c461ca110634f9e",
         ),
         (
             "xai-api.direct.root.single-agent",
-            "6900e1bbdefd8f671abb6f2e765e854b1f3fef597a778812000996c471a10564",
+            "5fbf7c53de0494dc280006de2678d29b470b01e5fbf1e6232294ba8c48ba2709",
         ),
         (
             "anthropic-api.direct.root.single-agent",
-            "bbaf9db59d612e0e731e8dfd36e8321a8f84e89e7b157b75fb6e4b98442ce41c",
+            "add1d98ea8e9da118c0db73ab58587755d02d0cdbf63d641e7a7037a5c5b5ac9",
         ),
     ];
 

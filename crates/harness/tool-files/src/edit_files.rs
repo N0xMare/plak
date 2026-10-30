@@ -85,6 +85,7 @@ enum EditOp {
 
 struct FileState {
     original: WorkspaceExpectedFileState,
+    original_is_binary: bool,
     bytes: Option<Vec<u8>>,
 }
 
@@ -147,14 +148,16 @@ async fn load(
     let state = match read {
         Ok(read) if read.next().is_none() => FileState {
             original: WorkspaceExpectedFileState::Content(read.content()),
+            original_is_binary: crate::mutation::is_binary(read.bytes()),
             bytes: Some(read.bytes().to_vec()),
         },
         Ok(_) => return Err(invalid("edit_files target exceeds the text bound")),
         Err(error) if error.kind() == ExecutionBackendErrorKind::NotFound => FileState {
             original: WorkspaceExpectedFileState::Missing,
+            original_is_binary: false,
             bytes: None,
         },
-        Err(error) => return Err(backend_runtime_error(error)),
+        Err(error) => return Err(crate::mutation::write_read_error(&path, error)),
     };
     files.insert(path.clone(), state);
     Ok(path)
@@ -294,7 +297,7 @@ async fn apply_op(
     match op {
         EditOp::Write { content, .. } => {
             if let WorkspaceExpectedFileState::Content(identity) = state.original {
-                crate::mutation::require_read(context, &path, identity)
+                crate::mutation::require_read(context, &path, identity, state.original_is_binary)
                     .map_err(EditOpFailure::Guard)?;
             }
             guards.insert(path.clone(), state.original);
