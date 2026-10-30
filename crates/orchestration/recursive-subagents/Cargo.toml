@@ -38,6 +38,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "ti
 tracing.workspace = true
 
 [dev-dependencies]
+plakous-host-protocol = { workspace = true, features = ["test-support"] }
 plakous-offline-crash-harness = { path = "../../../tests/harnesses/offline-crash" }
 plakous-workspace = { workspace = true, features = ["test-support"] }
 proptest = { workspace = true, features = ["std"] }

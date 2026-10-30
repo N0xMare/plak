@@ -151,7 +151,7 @@ impl ProductAgentTree {
     /// # Errors
     ///
     /// Fails exactly as the timed-out wait it reads through.
-    #[cfg(feature = "test-support")]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn timeout_wait_rows_for_test(
         &self,
         caller_id: &str,
