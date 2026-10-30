@@ -17,14 +17,14 @@ use plakous_model::{
     ConversationView, CountCertificateKind, Digest, DigestDomain, EvidenceFreshness,
     GenerationLimits, LocalDurabilityDisposition, MeasurementCertificate, ModelAdapterProfileId,
     ModelCallContext, ModelError, ModelErrorKind, ModelEvent, ModelPreparationContext,
-    ModelRequest, OutputBoundDisposition, OutputPolicy, ParallelToolDisposition, ProtocolId,
-    Provenance, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
-    ProviderStorageDisposition, ReasoningEffortDisposition, ReasoningIncludeDisposition,
-    ReasoningSummaryDisposition, ReplayDisposition, RequestMetadata, ResponseStateDisposition,
-    RetentionDisposition, RunId, RuntimeModelAuthority, SequenceIdGenerator, TextBlock, Timestamp,
-    ToolCallBlock, ToolCallState, ToolCallerLineage, ToolChoice, ToolCorrelation,
-    ToolExecutionOwner, ToolName, ToolPresentationMode, ToolResultBlock, ToolResultKind,
-    ToolResultPart, TurnId, ValidationMode,
+    ModelPreparationErrorKind, ModelRequest, OutputBoundDisposition, OutputPolicy,
+    ParallelToolDisposition, ProtocolId, Provenance, ProviderBehaviorConfiguration,
+    ProviderProfileRevisionId, ProviderStorageDisposition, ReasoningEffortDisposition,
+    ReasoningIncludeDisposition, ReasoningSummaryDisposition, ReplayDisposition, RequestMetadata,
+    ResponseStateDisposition, RetentionDisposition, RunId, RuntimeModelAuthority,
+    SequenceIdGenerator, TextBlock, Timestamp, ToolCallBlock, ToolCallState, ToolCallerLineage,
+    ToolChoice, ToolCorrelation, ToolExecutionOwner, ToolName, ToolPresentationMode,
+    ToolResultBlock, ToolResultKind, ToolResultPart, TurnId, ValidationMode,
 };
 use plakous_openrouter::{
     ApiKey, CHAT_COMPLETIONS_FAMILY_ID, MESSAGES_FAMILY_ID, OPENROUTER_CHAT_COMPLETIONS_PATH,
@@ -2607,6 +2607,7 @@ impl
         if matches!(
             request.purpose(),
             plakous_openrouter::OpenRouterCredentialPurpose::Chat
+                | plakous_openrouter::OpenRouterCredentialPurpose::Messages
                 | plakous_openrouter::OpenRouterCredentialPurpose::Responses
         ) {
             self.physical_keys
@@ -2621,8 +2622,26 @@ impl
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum RotationWire {
+    Chat,
+    Messages,
+    Responses,
+}
+
+/// Where a rotated generation was refused. Chat and Messages must name the
+/// check: the revalidation read fails `prepare_call`, and a later read before
+/// the bearer fails with the dispatch diagnostic. The route fence's
+/// authentication refusal is a different lookup and must not satisfy either.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RotationRefusal {
+    Prepare,
+    Dispatch,
+    RouteFence,
+}
+
 async fn rotation_fixture(
-    responses: bool,
+    wire: RotationWire,
 ) -> TestResult<(
     plakous_model::ConfiguredLanguageModel,
     Arc<RotatingKeySource>,
@@ -2631,19 +2650,15 @@ async fn rotation_fixture(
 )> {
     let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut replies = discovery_replies();
-    replies.push((
-        "text/event-stream",
-        if responses {
-            responses_sse()
-        } else {
-            chat_sse()
-        },
-        if responses {
-            "x-generation-id: rotation-control\r\n"
-        } else {
-            "x-request-id: rotation-control\r\n"
-        },
-    ));
+    let (body, headers) = match wire {
+        RotationWire::Responses => (responses_sse(), "x-generation-id: rotation-control\r\n"),
+        RotationWire::Chat => (chat_sse(), "x-request-id: rotation-control\r\n"),
+        RotationWire::Messages => (
+            messages_sse().to_owned(),
+            "x-request-id: rotation-control\r\n",
+        ),
+    };
+    replies.push(("text/event-stream", body, headers));
     let replies = replies
         .into_iter()
         .map(|(kind, body, headers)| ("200 OK", kind, body, headers))
@@ -2675,24 +2690,25 @@ async fn rotation_fixture(
     let evidence = route
         .discover_chat_model(&client, MODEL, OpenRouterChatDiscoveryConfig::default())
         .await?;
-    let model = if responses {
-        OpenRouterResponsesLanguageModel::configured_gateway_managed_behavior(
-            route.clone(),
-            evidence,
-            context(
-                &route,
-                "responses-family",
-                "responses-wire-bytes-openrouter-v1",
-                "responses-canonical-openrouter-v1",
-            )?,
-            behavior(
-                "openrouter.responses.dynamic-custom-v1",
-                "openrouter-responses-integration-v1",
-            )?,
-            client,
-        )?
-    } else {
-        OpenRouterChatLanguageModel::configured_gateway_managed_behavior(
+    let model = match wire {
+        RotationWire::Responses => {
+            OpenRouterResponsesLanguageModel::configured_gateway_managed_behavior(
+                route.clone(),
+                evidence,
+                context(
+                    &route,
+                    "responses-family",
+                    "responses-wire-bytes-openrouter-v1",
+                    "responses-canonical-openrouter-v1",
+                )?,
+                behavior(
+                    "openrouter.responses.dynamic-custom-v1",
+                    "openrouter-responses-integration-v1",
+                )?,
+                client,
+            )?
+        }
+        RotationWire::Chat => OpenRouterChatLanguageModel::configured_gateway_managed_behavior(
             route.clone(),
             evidence,
             context(
@@ -2703,13 +2719,85 @@ async fn rotation_fixture(
             )?,
             behavior("openrouter.chat.dynamic-v1", "openrouter-chat-retention-v1")?,
             client,
-        )?
+        )?,
+        RotationWire::Messages => {
+            OpenRouterMessagesLanguageModel::configured_gateway_managed_behavior(
+                route.clone(),
+                evidence,
+                context(
+                    &route,
+                    MESSAGES_FAMILY_ID,
+                    "openrouter-messages-wire-v1",
+                    "openrouter-messages-canonical-v2",
+                )?,
+                behavior(
+                    "openrouter.messages.dynamic-custom-v1",
+                    "openrouter-messages-integration-v1",
+                )?,
+                client,
+            )?
+        }
     };
     Ok((model, source, connections, peer))
 }
 
-async fn assert_rotation_boundary(responses: bool, lookup: usize) -> TestResult<bool> {
-    let (configured, source, connections, peer) = rotation_fixture(responses).await?;
+fn assert_refused_before_bearer(
+    source: &RotatingKeySource,
+    connections: &std::sync::atomic::AtomicUsize,
+    wire: RotationWire,
+    lookup: usize,
+    detail: &str,
+) {
+    assert!(
+        source.rotated.load(std::sync::atomic::Ordering::SeqCst),
+        "{wire:?}, lookup={lookup}, {detail}"
+    );
+    assert_eq!(
+        source
+            .physical_keys
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{wire:?}, lookup={lookup}"
+    );
+    assert_eq!(
+        connections.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "{wire:?}, lookup={lookup}"
+    );
+}
+
+fn prepare_generation_refusal(wire: RotationWire, lookup: usize, error: &str) -> RotationRefusal {
+    assert!(
+        error.contains("credential generation changed"),
+        "{wire:?}, lookup={lookup} left prepare_call without the generation refusal: {error}"
+    );
+    assert!(
+        !error.contains("authentication failed"),
+        "{wire:?}, lookup={lookup} prepare_call hit the route fence: {error}"
+    );
+    RotationRefusal::Prepare
+}
+
+fn dispatch_generation_refusal(wire: RotationWire, lookup: usize, detail: &str) -> RotationRefusal {
+    if detail.contains("dispatch credential changed") {
+        assert!(
+            !detail.contains("authentication failed"),
+            "{wire:?}, lookup={lookup} dispatch compare fell through to the route fence: {detail}"
+        );
+        return RotationRefusal::Dispatch;
+    }
+    assert!(
+        detail.contains("authentication failed") || detail.contains("fence-authentication"),
+        "{wire:?}, lookup={lookup} refused without the dispatch compare or the route fence: {detail}"
+    );
+    RotationRefusal::RouteFence
+}
+
+async fn assert_rotation_boundary(
+    wire: RotationWire,
+    lookup: usize,
+) -> TestResult<Option<RotationRefusal>> {
+    let (configured, source, connections, peer) = rotation_fixture(wire).await?;
     let request = request_rooted(&configured, 1, true)?;
     let attempt = request.metadata().attempt_id();
     let plan = configured
@@ -2717,17 +2805,38 @@ async fn assert_rotation_boundary(responses: bool, lookup: usize) -> TestResult<
         .descriptor()
         .validate_request(request, ValidationMode::Strict)?;
     let model = configured.model();
+    // Count every generation read from revalidation onward, not only dispatch.
+    source
+        .rotate_on_lookup
+        .store(lookup, std::sync::atomic::Ordering::SeqCst);
     let authority = model
         .clone()
         .revalidate_runtime_authority(review_clock().now())
         .await?;
-    let prepared = model.prepare_call(
+    let prepared = match model.prepare_call(
         plan,
         ModelPreparationContext::new(authority, review_clock().now()),
-    )?;
-    source
-        .rotate_on_lookup
-        .store(lookup, std::sync::atomic::Ordering::SeqCst);
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            peer.abort();
+            let _ = peer.await;
+            let detail = error.to_string();
+            assert_refused_before_bearer(&source, &connections, wire, lookup, &detail);
+            assert_eq!(
+                error.rejection_kind(),
+                Some(ModelPreparationErrorKind::InvalidConfiguration),
+                "{wire:?}, lookup={lookup}, {detail}"
+            );
+            // A rotation on the revalidation read is this error, before start.
+            // Chat and Messages name it; Responses has no prepare-time generation
+            // compare and must not invent one.
+            if matches!(wire, RotationWire::Chat | RotationWire::Messages) {
+                prepare_generation_refusal(wire, lookup, &detail);
+            }
+            return Ok(Some(RotationRefusal::Prepare));
+        }
+    };
     let outcome = timeout(
         Duration::from_secs(30),
         prepared.start(ModelCallContext::new(
@@ -2762,46 +2871,65 @@ async fn assert_rotation_boundary(responses: bool, lookup: usize) -> TestResult<
     peer.abort();
     let _ = peer.await;
     let rotated = source.rotated.load(std::sync::atomic::Ordering::SeqCst);
-    if rotated {
-        assert!(
-            rejected && !completed,
-            "responses={responses}, lookup={lookup}"
-        );
-        assert_eq!(
-            source
-                .physical_keys
-                .load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "responses={responses}, lookup={lookup}"
-        );
-        assert_eq!(
-            connections.load(std::sync::atomic::Ordering::SeqCst),
-            2,
-            "responses={responses}, lookup={lookup}"
-        );
-    } else {
+    if !rotated {
         assert!(
             completed && !rejected,
-            "unrotated control failed: responses={responses}, lookup={lookup}, errors={diagnostics:?}"
+            "unrotated control failed: {wire:?}, lookup={lookup}, errors={diagnostics:?}"
         );
+        return Ok(None);
     }
-    Ok(rotated)
+    assert!(
+        rejected && !completed,
+        "{wire:?}, lookup={lookup}, errors={diagnostics:?}"
+    );
+    let detail = format!("{diagnostics:?}");
+    assert_refused_before_bearer(&source, &connections, wire, lookup, &detail);
+    Ok(Some(match wire {
+        RotationWire::Chat | RotationWire::Messages => {
+            dispatch_generation_refusal(wire, lookup, &detail)
+        }
+        RotationWire::Responses => RotationRefusal::RouteFence,
+    }))
 }
 
 #[tokio::test]
-async fn generation_rotation_after_admission_refuses_chat_and_responses_before_connection()
--> TestResult {
-    for responses in [false, true] {
+async fn generation_rotation_before_revalidation_refuses_every_wire_before_bearer() -> TestResult {
+    for wire in [
+        RotationWire::Chat,
+        RotationWire::Messages,
+        RotationWire::Responses,
+    ] {
         let mut fenced = 0;
-        // Sweep every generation read after admission until the unrotated
-        // control completes. No exact internal read count is part of the test.
+        let mut prepared = 0;
+        let mut dispatched = 0;
+        // Sweep every generation read from revalidation through dispatch until
+        // the unrotated control completes. No exact internal read count is
+        // part of the test. Chat and Messages must each fail prepare_call on
+        // the revalidation read and name a later read as the dispatch compare;
+        // either site disappearing means the route fence masked it.
         for lookup in 1..=32 {
-            if !assert_rotation_boundary(responses, lookup).await? {
-                break;
+            match assert_rotation_boundary(wire, lookup).await? {
+                None => break,
+                Some(RotationRefusal::Prepare) => prepared += 1,
+                Some(RotationRefusal::Dispatch) => dispatched += 1,
+                Some(RotationRefusal::RouteFence) => {}
             }
             fenced += 1;
         }
-        assert!(fenced > 0 && fenced < 32, "rotation sweep was not bounded");
+        assert!(
+            fenced > 0 && fenced < 32,
+            "rotation sweep was not bounded: {wire:?}"
+        );
+        if matches!(wire, RotationWire::Chat | RotationWire::Messages) {
+            assert!(
+                prepared > 0,
+                "{wire:?}: a rotation on the revalidation read did not fail prepare_call"
+            );
+            assert!(
+                dispatched > 0,
+                "{wire:?}: a rotation between prepare and dispatch did not report the dispatch credential change"
+            );
+        }
     }
     Ok(())
 }

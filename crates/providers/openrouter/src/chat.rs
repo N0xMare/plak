@@ -641,6 +641,9 @@ pub struct OpenRouterChatLanguageModel {
     client: Client,
     config: OpenRouterChatHttpConfig,
     configuration: CompiledProviderConfiguration,
+    /// Generation admitted with the compiled runtime authority. Dispatch
+    /// refuses a later lookup before bearer resolution.
+    generation: OpenRouterKeyGeneration,
     clock: Arc<dyn Clock>,
 }
 
@@ -697,7 +700,7 @@ impl OpenRouterChatLanguageModel {
             behavior,
         )?;
         let model = Arc::new(Self::new(target, selected, client)?);
-        let authority = model.target.runtime_authority(model.clock.now())?;
+        let authority = model.seal_admitted_authority()?;
         ConfiguredLanguageModel::custom(model.clone(), model.configuration.clone(), authority)
             .map_err(OpenRouterChatBuildError::from)
     }
@@ -736,7 +739,7 @@ impl OpenRouterChatLanguageModel {
             profile,
         )?;
         let model = Arc::new(Self::new(target, selected, client)?);
-        let authority = model.target.runtime_authority(model.clock.now())?;
+        let authority = model.seal_admitted_authority()?;
         ConfiguredLanguageModel::custom(model.clone(), model.configuration.clone(), authority)
             .map_err(OpenRouterChatBuildError::from)
     }
@@ -777,15 +780,30 @@ impl OpenRouterChatLanguageModel {
             return Err(OpenRouterChatBuildError::MissingRetentionPolicy);
         }
         let clock = Arc::clone(&target.route.clock);
+        let generation = target.route.current_credential_generation_grant()?;
         let runtime = target.runtime_authority(clock.now())?;
+        if generation_number(&generation) != runtime.credential_generation() {
+            return Err(OpenRouterChatBuildError::Configuration);
+        }
         let configuration = compile_chat_configuration(&target, selected, &runtime)?;
         Ok(Self {
             target,
             client,
             config,
             configuration,
+            generation,
             clock,
         })
+    }
+
+    /// Re-reads authority and refuses when it no longer names the generation
+    /// admitted above. The sealed model and its dispatch fence stay on one grant.
+    fn seal_admitted_authority(&self) -> Result<RuntimeModelAuthority, OpenRouterChatBuildError> {
+        let authority = self.target.runtime_authority(self.clock.now())?;
+        if authority.credential_generation() != generation_number(&self.generation) {
+            return Err(OpenRouterChatBuildError::Configuration);
+        }
+        Ok(authority)
     }
 
     /// Returns the immutable selected/effective configuration binding.
@@ -911,6 +929,12 @@ impl LanguageModel for OpenRouterChatLanguageModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
+        if context.authority().credential_generation() != generation_number(&self.generation) {
+            return Err(rejection(
+                ModelPreparationErrorKind::InvalidConfiguration,
+                "OpenRouter Chat credential generation changed",
+            ));
+        }
         let descriptor = self.target.descriptor();
         OPENROUTER_CHAT_WIRE.admit_plan(descriptor, &self.configuration, &plan, &context)?;
         if context.active_family_artifact().is_some() {
@@ -957,12 +981,7 @@ impl LanguageModel for OpenRouterChatLanguageModel {
         let hooks = OpenRouterChatHooks {
             target: self.target.clone(),
             clock: Arc::clone(&self.clock),
-            generation: current_generation(&self.target).map_err(|_| {
-                rejection(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "OpenRouter Chat credential generation is unavailable",
-                )
-            })?,
+            generation: self.generation.clone(),
         };
         let origin = Origin::parse(identity.origin().as_str()).map_err(|_| {
             rejection(
@@ -1272,12 +1291,6 @@ fn chat_model_error(descriptor: &ResolvedModelDescriptor, error: &ChatAttemptErr
         ),
         _ => model_error,
     }
-}
-
-fn current_generation(
-    target: &OpenRouterChatTarget,
-) -> Result<OpenRouterKeyGeneration, crate::OpenRouterAuthError> {
-    target.route.current_credential_generation_grant()
 }
 
 fn openrouter_disabled_reasoning_wire(

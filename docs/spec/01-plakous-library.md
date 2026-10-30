@@ -2676,8 +2676,9 @@ The four API-key integrations retain their own origin and source-owned authority
 type. A source returns non-secret generation metadata before reservation; bearer
 resolution takes the integration's concrete request and the exact admitted
 grant. Metadata-only selection cannot substitute for a physical request proof.
-OpenRouter Responses retains the model's admitted generation through dispatch;
-a later metadata lookup cannot replace it before bearer resolution.
+OpenRouter Chat, Messages and Responses each retain the model's admitted
+generation through dispatch; a later metadata lookup cannot replace it before
+bearer resolution.
 There are no default source methods, cross-route fallback or branded secret
 wrappers. Key construction rejects empty, over-64-KiB or control-byte text;
 xAI product key loading applies its 16-KiB ASCII-graphic bound before granting

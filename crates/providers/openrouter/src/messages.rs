@@ -218,6 +218,9 @@ pub struct OpenRouterMessagesLanguageModel {
     client: Client,
     config: OpenRouterMessagesHttpConfig,
     configuration: CompiledProviderConfiguration,
+    /// Generation admitted with the compiled runtime authority. Dispatch
+    /// refuses a later lookup before bearer resolution.
+    generation: OpenRouterKeyGeneration,
     clock: Arc<dyn Clock>,
 }
 
@@ -267,7 +270,7 @@ impl OpenRouterMessagesLanguageModel {
         client: Client,
     ) -> Result<ConfiguredLanguageModel, OpenRouterMessagesBuildError> {
         let model = Arc::new(Self::new(target, selected, client)?);
-        let authority = model.target.runtime_authority(model.clock.now())?;
+        let authority = model.seal_admitted_authority()?;
         ConfiguredLanguageModel::custom(model.clone(), model.configuration.clone(), authority)
             .map_err(OpenRouterMessagesBuildError::ProviderConfiguration)
     }
@@ -301,15 +304,32 @@ impl OpenRouterMessagesLanguageModel {
             return Err(OpenRouterMessagesBuildError::InvalidPolicy);
         }
         let clock = Arc::clone(&target.route.clock);
+        let generation = target.route.current_credential_generation_grant()?;
         let runtime = target.runtime_authority(clock.now())?;
+        if generation_number(&generation) != runtime.credential_generation() {
+            return Err(OpenRouterMessagesBuildError::Configuration);
+        }
         let configuration = compile_configuration(&target, selected, &runtime)?;
         Ok(Self {
             target,
             client,
             config,
             configuration,
+            generation,
             clock,
         })
+    }
+
+    /// Re-reads authority and refuses when it no longer names the generation
+    /// admitted above. The sealed model and its dispatch fence stay on one grant.
+    fn seal_admitted_authority(
+        &self,
+    ) -> Result<RuntimeModelAuthority, OpenRouterMessagesBuildError> {
+        let authority = self.target.runtime_authority(self.clock.now())?;
+        if authority.credential_generation() != generation_number(&self.generation) {
+            return Err(OpenRouterMessagesBuildError::Configuration);
+        }
+        Ok(authority)
     }
 
     /// Returns exact selected/effective configuration authority.
@@ -420,6 +440,12 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
+        if context.authority().credential_generation() != generation_number(&self.generation) {
+            return Err(rejection(
+                ModelPreparationErrorKind::InvalidConfiguration,
+                "OpenRouter Messages credential generation changed",
+            ));
+        }
         let descriptor = self.target.descriptor();
         OPENROUTER_MESSAGES_WIRE.admit_plan(descriptor, &self.configuration, &plan, &context)?;
         let identity = self.target.route.identity();
@@ -464,16 +490,7 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
         let hooks = OpenRouterMessagesHooks {
             target: self.target.clone(),
             clock: Arc::clone(&self.clock),
-            generation: self
-                .target
-                .route
-                .current_credential_generation_grant()
-                .map_err(|_| {
-                    rejection(
-                        ModelPreparationErrorKind::InvalidConfiguration,
-                        "OpenRouter Messages credential generation is unavailable",
-                    )
-                })?,
+            generation: self.generation.clone(),
         };
         let origin = Origin::parse(identity.origin().as_str()).map_err(|_| {
             rejection(
