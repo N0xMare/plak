@@ -2686,6 +2686,13 @@ measurement on a shared machine is evidence, not a gate, which is also why the
 named render benchmark asserts nothing itself. The restricted comparison refuses
 to call a swing in either noisy metric a regression.
 
+**Build-closure evidence.** The opt-in build producer emits
+`plakous.perf-build.v10`, fixture revision 10, over 18 profiles, including one
+`responses` profile for `plakous-responses`. The validator treats v9, fixture
+revision 9, as an immutable archived 19-profile contract with separate
+`responses-kernel` and `responses-host` profiles. Campaign validation selects
+the exact profile set and fixture revision belonging to its schema.
+
 **Benchmark workloads.** Three deterministic offline `cargo bench` executables
 are outside every gate (§1.2). `perf_core` (`-p plakous`) times
 `Agent::prompt` to the authoritative result handle on a fresh agent, asserts
@@ -2798,7 +2805,7 @@ The turn retry policy (spec 01 §13.1) is pinned at three levels. Unit tests in
 `Retry-After` clamping and equal jitter through an injected sample. Loopback
 tests pin each family:
 
-- Responses, `attempt_host/tests.rs` in `plakous-responses-dialect`: a reset
+- Responses, `attempt_host/tests.rs` in `plakous-responses`: a reset
   after send is replayed for a cost-only turn and never for a server-effect or
   session-workflow request; a stream cut before any tool call is replayed with
   the retry marker ahead of the replay's events; an in-band `rate_limit_exceeded`

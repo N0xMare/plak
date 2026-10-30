@@ -86,7 +86,7 @@ use plakous_offline_crash_harness::{
     BoundaryController, scripted_code_mode_runtime_binding, scripted_pi_runtime_binding,
     scripted_runtime_binding_with_cursor,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesRequestConfig, ResponsesRequestPolicy, ResponsesStoragePolicy, lower_responses_request,
 };
 use serde::{Deserialize, Serialize};

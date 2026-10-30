@@ -2,9 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use plakous_responses::{
-    ResponsesFieldError, optional_provider_label, optional_string, required_provider_label,
-    required_string, required_u64,
+use crate::{
+    optional_provider_label, optional_string, required_provider_label, required_string,
+    required_u64,
 };
 use serde_json::{Map, Value};
 
@@ -13,21 +13,19 @@ use super::{
     ResponsesHostDecodeError, ResponsesIncompleteDetails, ResponsesOutputItem,
     ResponsesProviderError, ResponsesProviderErrorClass, ResponsesProviderErrorPolicy,
     ResponsesReasoningContentPart, ResponsesReasoningSummaryPart, ResponsesResponseLimits,
-    ResponsesUsageError,
 };
 
 /// Parses one output item from a JSON value.
 ///
 /// # Errors
 ///
-/// Returns `E` for structural failures.
-pub fn parse_output_item<E>(value: &Value) -> Result<ResponsesOutputItem, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
+/// Returns `ResponsesHostDecodeError` for structural failures.
+pub(crate) fn parse_output_item(
+    value: &Value,
+) -> Result<ResponsesOutputItem, ResponsesHostDecodeError> {
     let object = value
         .as_object()
-        .ok_or_else(|| E::invalid_field("output item"))?;
+        .ok_or_else(|| ResponsesHostDecodeError::invalid_field("output item"))?;
     let kind = required_provider_label(object, "type")?;
     match kind {
         "message" => parse_message(object, value),
@@ -50,7 +48,11 @@ where
             required_string(object, "result")?;
             match required_provider_label(object, "status")? {
                 "in_progress" | "completed" | "incomplete" => {}
-                _ => return Err(E::invalid_field("program_output status")),
+                _ => {
+                    return Err(ResponsesHostDecodeError::invalid_field(
+                        "program_output status",
+                    ));
+                }
             }
             Ok(ResponsesOutputItem::Opaque {
                 kind: kind.to_owned(),
@@ -79,22 +81,19 @@ where
 ///
 /// # Errors
 ///
-/// Returns `E` for structural failures.
-pub fn parse_message<E>(
+/// Returns `ResponsesHostDecodeError` for structural failures.
+fn parse_message(
     object: &Map<String, Value>,
     native: &Value,
-) -> Result<ResponsesOutputItem, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
+) -> Result<ResponsesOutputItem, ResponsesHostDecodeError> {
     let content = object
         .get("content")
-        .ok_or_else(|| E::missing_field("content"))?
+        .ok_or_else(|| ResponsesHostDecodeError::missing_field("content"))?
         .as_array()
-        .ok_or_else(|| E::invalid_field("content"))?
+        .ok_or_else(|| ResponsesHostDecodeError::invalid_field("content"))?
         .iter()
-        .map(|part| parse_content_part::<E>(part))
-        .collect::<Result<Vec<_>, E>>()?;
+        .map(parse_content_part)
+        .collect::<Result<Vec<_>, ResponsesHostDecodeError>>()?;
     Ok(ResponsesOutputItem::Message {
         id: optional_provider_label(object, "id")?.map(str::to_owned),
         status: optional_provider_label(object, "status")?.map(str::to_owned),
@@ -108,14 +107,11 @@ where
 ///
 /// # Errors
 ///
-/// Returns `E` for structural failures.
-pub fn parse_content_part<E>(value: &Value) -> Result<ResponsesContentPart, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
+/// Returns `ResponsesHostDecodeError` for structural failures.
+fn parse_content_part(value: &Value) -> Result<ResponsesContentPart, ResponsesHostDecodeError> {
     let object = value
         .as_object()
-        .ok_or_else(|| E::invalid_field("message content part"))?;
+        .ok_or_else(|| ResponsesHostDecodeError::invalid_field("message content part"))?;
     let kind = required_provider_label(object, "type")?;
     match kind {
         "output_text" => Ok(ResponsesContentPart::OutputText {
@@ -124,10 +120,10 @@ where
                 None => Vec::new(),
                 Some(value) => value
                     .as_array()
-                    .ok_or_else(|| E::invalid_field("annotations"))?
+                    .ok_or_else(|| ResponsesHostDecodeError::invalid_field("annotations"))?
                     .iter()
-                    .map(parse_annotation::<E>)
-                    .collect::<Result<Vec<_>, E>>()?,
+                    .map(parse_annotation)
+                    .collect::<Result<Vec<_>, ResponsesHostDecodeError>>()?,
             },
         }),
         "refusal" => Ok(ResponsesContentPart::Refusal {
@@ -144,14 +140,13 @@ where
 ///
 /// # Errors
 ///
-/// Returns `E` for malformed documented citation fields.
-pub fn parse_annotation<E>(value: &Value) -> Result<ResponsesAnnotation, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
+/// Returns `ResponsesHostDecodeError` for malformed documented citation fields.
+pub(crate) fn parse_annotation(
+    value: &Value,
+) -> Result<ResponsesAnnotation, ResponsesHostDecodeError> {
     let object = value
         .as_object()
-        .ok_or_else(|| E::invalid_field("annotation"))?;
+        .ok_or_else(|| ResponsesHostDecodeError::invalid_field("annotation"))?;
     let kind = required_provider_label(object, "type")?;
     if kind != "url_citation" {
         return Ok(ResponsesAnnotation::Opaque {
@@ -162,12 +157,12 @@ where
     let start_index = required_u64(object, "start_index")?;
     let end_index = required_u64(object, "end_index")?;
     if start_index > end_index {
-        return Err(E::invalid_field("citation range"));
+        return Err(ResponsesHostDecodeError::invalid_field("citation range"));
     }
     let url = required_string(object, "url")?;
     let title = required_string(object, "title")?;
     if url.is_empty() || title.is_empty() || title.len() > MAX_URL_CITATION_TITLE_BYTES {
-        return Err(E::invalid_field("citation"));
+        return Err(ResponsesHostDecodeError::invalid_field("citation"));
     }
     Ok(ResponsesAnnotation::UrlCitation {
         start_index,
@@ -182,26 +177,23 @@ where
 ///
 /// # Errors
 ///
-/// Returns `E` for structural failures.
-pub fn parse_reasoning<E>(
+/// Returns `ResponsesHostDecodeError` for structural failures.
+fn parse_reasoning(
     object: &Map<String, Value>,
     native: &Value,
-) -> Result<ResponsesOutputItem, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
+) -> Result<ResponsesOutputItem, ResponsesHostDecodeError> {
     let summary = match object.get("summary") {
         None => Vec::new(),
         Some(value) => value
             .as_array()
             .cloned()
-            .ok_or_else(|| E::invalid_field("summary"))?,
+            .ok_or_else(|| ResponsesHostDecodeError::invalid_field("summary"))?,
     }
     .into_iter()
     .map(|value| {
         let object = value
             .as_object()
-            .ok_or_else(|| E::invalid_field("reasoning summary part"))?;
+            .ok_or_else(|| ResponsesHostDecodeError::invalid_field("reasoning summary part"))?;
         let kind = required_provider_label(object, "type")?;
         if kind == "summary_text" {
             Ok(ResponsesReasoningSummaryPart::SummaryText(
@@ -214,25 +206,27 @@ where
             })
         }
     })
-    .collect::<Result<Vec<_>, E>>()?;
+    .collect::<Result<Vec<_>, ResponsesHostDecodeError>>()?;
     let content = match object.get("content") {
         None => Vec::new(),
         Some(value) => value
             .as_array()
-            .ok_or_else(|| E::invalid_field("reasoning content"))?
+            .ok_or_else(|| ResponsesHostDecodeError::invalid_field("reasoning content"))?
             .iter()
             .map(|value| {
-                let object = value
-                    .as_object()
-                    .ok_or_else(|| E::invalid_field("reasoning content part"))?;
+                let object = value.as_object().ok_or_else(|| {
+                    ResponsesHostDecodeError::invalid_field("reasoning content part")
+                })?;
                 if required_provider_label(object, "type")? != "reasoning_text" {
-                    return Err(E::invalid_field("reasoning content part"));
+                    return Err(ResponsesHostDecodeError::invalid_field(
+                        "reasoning content part",
+                    ));
                 }
                 Ok(ResponsesReasoningContentPart::ReasoningText(
                     required_string(object, "text")?.to_owned(),
                 ))
             })
-            .collect::<Result<Vec<_>, E>>()?,
+            .collect::<Result<Vec<_>, ResponsesHostDecodeError>>()?,
     };
     Ok(ResponsesOutputItem::Reasoning {
         id: optional_provider_label(object, "id")?.map(str::to_owned),
@@ -248,14 +242,11 @@ where
 ///
 /// # Errors
 ///
-/// Returns `E` for structural failures.
-pub fn parse_function_call<E>(
+/// Returns `ResponsesHostDecodeError` for structural failures.
+fn parse_function_call(
     object: &Map<String, Value>,
     native: &Value,
-) -> Result<ResponsesOutputItem, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
+) -> Result<ResponsesOutputItem, ResponsesHostDecodeError> {
     Ok(ResponsesOutputItem::FunctionCall {
         id: optional_provider_label(object, "id")?.map(str::to_owned),
         status: optional_provider_label(object, "status")?.map(str::to_owned),
@@ -270,14 +261,11 @@ where
 ///
 /// # Errors
 ///
-/// Returns `E` for structural failures.
-pub fn parse_custom_tool_call<E>(
+/// Returns `ResponsesHostDecodeError` for structural failures.
+fn parse_custom_tool_call(
     object: &Map<String, Value>,
     native: &Value,
-) -> Result<ResponsesOutputItem, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
+) -> Result<ResponsesOutputItem, ResponsesHostDecodeError> {
     Ok(ResponsesOutputItem::CustomToolCall {
         id: optional_provider_label(object, "id")?.map(str::to_owned),
         status: optional_provider_label(object, "status")?.map(str::to_owned),
@@ -290,7 +278,7 @@ where
 
 /// Returns the provider item status when present.
 #[must_use]
-pub fn output_item_status(item: &ResponsesOutputItem) -> Option<&str> {
+pub(crate) fn output_item_status(item: &ResponsesOutputItem) -> Option<&str> {
     match item {
         ResponsesOutputItem::Message { status, .. }
         | ResponsesOutputItem::Reasoning { status, .. }
@@ -307,18 +295,17 @@ pub fn output_item_status(item: &ResponsesOutputItem) -> Option<&str> {
 ///
 /// # Errors
 ///
-/// Returns `E` when roles or correlation IDs are inconsistent.
-pub fn validate_output_identity_roles<E>(output: &[ResponsesOutputItem]) -> Result<(), E>
-where
-    E: ResponsesUsageError,
-{
+/// Returns `ResponsesHostDecodeError` when roles or correlation IDs are inconsistent.
+pub(crate) fn validate_output_identity_roles(
+    output: &[ResponsesOutputItem],
+) -> Result<(), ResponsesHostDecodeError> {
     let mut item_ids = BTreeSet::new();
     let mut remote_call_ids = BTreeSet::new();
     for item in output {
         let item_id = match item {
             ResponsesOutputItem::Message { id, role, .. } => {
                 if role != "assistant" {
-                    return Err(E::invalid_field("output role"));
+                    return Err(ResponsesHostDecodeError::invalid_field("output role"));
                 }
                 id.as_deref()
             }
@@ -327,37 +314,40 @@ where
             ResponsesOutputItem::FunctionCall { id, call_id, .. }
             | ResponsesOutputItem::CustomToolCall { id, call_id, .. } => {
                 if !remote_call_ids.insert(call_id.as_str()) {
-                    return Err(E::invalid_field("function call_id"));
+                    return Err(ResponsesHostDecodeError::invalid_field("function call_id"));
                 }
-                validate_program_caller::<E>(item.native())?;
+                validate_program_caller(item.native())?;
                 id.as_deref()
             }
             ResponsesOutputItem::Opaque { kind, native } => {
                 if kind == "program" {
-                    let _call_id = native
-                        .get("call_id")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| E::missing_field("program call_id"))?;
+                    let _call_id =
+                        native
+                            .get("call_id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| {
+                                ResponsesHostDecodeError::missing_field("program call_id")
+                            })?;
                 } else if kind == "program_output" {
-                    let _call_id = native
-                        .get("call_id")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| E::missing_field("program_output call_id"))?;
+                    let _call_id =
+                        native
+                            .get("call_id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| {
+                                ResponsesHostDecodeError::missing_field("program_output call_id")
+                            })?;
                 }
                 native.get("id").and_then(Value::as_str)
             }
         };
         if item_id.is_some_and(|item_id| !item_ids.insert(item_id)) {
-            return Err(E::invalid_field("output item id"));
+            return Err(ResponsesHostDecodeError::invalid_field("output item id"));
         }
     }
     Ok(())
 }
 
-fn validate_program_caller<E>(native: &Value) -> Result<(), E>
-where
-    E: ResponsesUsageError,
-{
+fn validate_program_caller(native: &Value) -> Result<(), ResponsesHostDecodeError> {
     let Some(caller) = native.get("caller") else {
         return Ok(());
     };
@@ -366,18 +356,18 @@ where
     }
     let object = caller
         .as_object()
-        .ok_or_else(|| E::invalid_field("tool caller"))?;
+        .ok_or_else(|| ResponsesHostDecodeError::invalid_field("tool caller"))?;
     if object.len() == 1 && object.get("type").and_then(Value::as_str) == Some("direct") {
         return Ok(());
     }
     if object.len() != 2 || object.get("type").and_then(Value::as_str) != Some("program") {
-        return Err(E::invalid_field("tool caller"));
+        return Err(ResponsesHostDecodeError::invalid_field("tool caller"));
     }
     let _caller_id = object
         .get("caller_id")
         .and_then(Value::as_str)
         .filter(|caller_id| !caller_id.is_empty())
-        .ok_or_else(|| E::missing_field("tool caller_id"))?;
+        .ok_or_else(|| ResponsesHostDecodeError::missing_field("tool caller_id"))?;
     Ok(())
 }
 

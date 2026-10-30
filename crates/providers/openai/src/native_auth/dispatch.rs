@@ -35,7 +35,7 @@ impl CodexDispatchGuard {
     }
 }
 
-impl plakous_responses_dialect::ResponsesRetrievalGuard for CodexDispatchGuard {
+impl plakous_responses::ResponsesRetrievalGuard for CodexDispatchGuard {
     fn transport_failed(&mut self, failure: plakous_http::Failure) {
         Self::transport_failed(self, failure);
     }
@@ -324,10 +324,10 @@ pub(crate) async fn codex_side_request(
         &plakous_model::SystemIdGenerator,
     )
     .map_err(|_| "Codex side request id could not be generated")?;
-    let operation = plakous_responses_dialect::ResponsesOperationBinding::retrieval_side_request(
+    let operation = plakous_responses::ResponsesOperationBinding::retrieval_side_request(
         body,
         plakous_attempt::LedgerPolicy::OPENAI_STRICT,
-        plakous_responses_dialect::ResponsesAuthSlots::Secondary,
+        plakous_responses::ResponsesAuthSlots::Secondary,
     )
     .map_err(|_| "Codex side request binding could not be built")?;
     let physical = plakous_attempt::PhysicalRequestBinding::new(

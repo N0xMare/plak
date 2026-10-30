@@ -210,7 +210,7 @@ pub fn project_canonical_terminal_with_hosted_programs(
     mut hosted_programs: ResponsesHostedProgramContext,
 ) -> Result<ResponsesCanonicalTerminal, ResponsesCanonicalProjectError> {
     let response = terminal.response();
-    if data.model_binding == plakous_responses::ResponseModelBinding::ExactRequest
+    if data.model_binding == crate::ResponseModelBinding::ExactRequest
         && response.model() != data.expected_model.as_str()
     {
         return Err(ResponsesCanonicalProjectError::InvalidTerminal(

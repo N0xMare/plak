@@ -34,7 +34,7 @@ use plakous_model::{
     WorkingProjection,
 };
 use plakous_responses::{RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION};
-use plakous_responses_dialect::{ResponsesRequestConfig, lower_responses_request};
+use plakous_responses::{ResponsesRequestConfig, lower_responses_request};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};

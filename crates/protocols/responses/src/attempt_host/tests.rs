@@ -106,6 +106,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+use crate::{
+    CanonicalIdSources, LifecycleDialectPolicy, ResponsesDialectProfile,
+    ResponsesSemanticRevisions, ResponsesStreamLimits,
+};
 use plakous_attempt::ProviderAcceptance;
 use plakous_http::{HeaderMap, HeaderValue, Limits, Method, Origin, TlsConfigIdentity};
 use plakous_model::{
@@ -117,10 +121,6 @@ use plakous_model::{
     ResolvedModelDescriptor, RouteId, RunId, SessionWorkflowRootId, Support, TextBlock, Timestamp,
     ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolName, ToolOutputContract,
     TurnId, Usage, ValidationMode,
-};
-use plakous_responses::{
-    CanonicalIdSources, LifecycleDialectPolicy, ResponsesDialectProfile,
-    ResponsesSemanticRevisions, ResponsesStreamLimits,
 };
 use rcgen::{CertifiedKey, generate_simple_self_signed};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -3648,7 +3648,7 @@ fn long_function_arguments_cross_the_old_budget_and_count_the_terminal() {
     assert_eq!(defaults.max_events(), 100_000);
     assert!(defaults.max_events() >= EVENTS);
     assert_eq!(
-        plakous_responses::ResponsesDecodeLimits::default()
+        crate::ResponsesDecodeLimits::default()
             .stream_limits()
             .max_events(),
         defaults.max_events()

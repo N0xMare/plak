@@ -8,6 +8,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::{
+    CanonicalIdSources, FamilyProjectionError, ProjectedBlock, ProjectedItemKind, ProjectorLimits,
+    ProjectorPolicy, ReasoningEmitMode, ResponseProjectorCore, ToolArgsFinishPolicy,
+};
 use plakous_model::{
     Actor, BlockCompleted, BlockStart, BlockStarted, CitationAdded, CitationBlock, CitationRange,
     CitationSource, CitationTarget, CitationUnit, CompactionBlock, ContentBlock, ConversationItem,
@@ -16,10 +20,6 @@ use plakous_model::{
     ReasoningDelta, ReasoningVisibility, RefusalBlock, ResponseStarted, TextBlock, TextDelta,
     TextPhase, ToolCallBlock, ToolCallState, ToolCorrelation, ToolExecutionOwner, ToolInputDelta,
     ToolName, UsageUpdate,
-};
-use plakous_responses::{
-    CanonicalIdSources, FamilyProjectionError, ProjectedBlock, ProjectedItemKind, ProjectorLimits,
-    ProjectorPolicy, ReasoningEmitMode, ResponseProjectorCore, ToolArgsFinishPolicy,
 };
 use serde_json::Value;
 use serde_json::value::RawValue;
@@ -248,7 +248,7 @@ impl ResponsesCanonicalPolicy {
 #[derive(Clone, Debug)]
 pub struct ResponsesCanonicalDialectData {
     expected_model: ModelId,
-    model_binding: plakous_responses::ResponseModelBinding,
+    model_binding: crate::ResponseModelBinding,
     policy: ResponsesCanonicalPolicy,
     limits: ProjectorLimits,
     max_unknown_event_bytes: usize,
@@ -299,7 +299,7 @@ impl ResponsesCanonicalDialectData {
         }
         Ok(Self {
             expected_model,
-            model_binding: plakous_responses::ResponseModelBinding::ExactRequest,
+            model_binding: crate::ResponseModelBinding::ExactRequest,
             policy,
             limits,
             max_unknown_event_bytes,
@@ -362,7 +362,7 @@ impl ResponsesCanonicalDialectData {
             tools,
         )?;
         // ChatGPT Codex OAuth may echo a snapshot or routed backend id.
-        data.model_binding = plakous_responses::ResponseModelBinding::ProviderReported;
+        data.model_binding = crate::ResponseModelBinding::ProviderReported;
         Ok(data)
     }
 
@@ -400,7 +400,7 @@ impl ResponsesCanonicalDialectData {
             1024 * 1024,
             tools,
         )?;
-        data.model_binding = plakous_responses::ResponseModelBinding::ProviderReported;
+        data.model_binding = crate::ResponseModelBinding::ProviderReported;
         Ok(data)
     }
 
@@ -417,7 +417,7 @@ impl ResponsesCanonicalDialectData {
             1024 * 1024,
             [],
         )?;
-        data.model_binding = plakous_responses::ResponseModelBinding::ProviderReported;
+        data.model_binding = crate::ResponseModelBinding::ProviderReported;
         Ok(data)
     }
 
@@ -489,7 +489,7 @@ impl ResponsesCanonicalDialectData {
 
     /// Returns how provider-reported response model identity is bound.
     #[must_use]
-    pub const fn model_binding(&self) -> plakous_responses::ResponseModelBinding {
+    pub const fn model_binding(&self) -> crate::ResponseModelBinding {
         self.model_binding
     }
 
@@ -961,7 +961,7 @@ impl ResponsesCanonicalObservationProjector {
         model: &str,
         output: &mut Vec<ModelEvent>,
     ) -> Result<(), ResponsesCanonicalProjectError> {
-        if self.data.model_binding == plakous_responses::ResponseModelBinding::ExactRequest
+        if self.data.model_binding == crate::ResponseModelBinding::ExactRequest
             && model != self.data.expected_model.as_str()
         {
             return Err(ResponsesCanonicalProjectError::InvalidTerminal(

@@ -1,9 +1,72 @@
 use super::*;
 use plakous_model::{
-    DataClassification, ModelId, ProtocolId, ReplayKindId, ReplayScope, ToolExecutionOwner,
-    ToolName,
+    DataClassification, ModelId, ProtocolId, ReplayKindId, ReplayScope, ToolCallerLineage,
+    ToolExecutionOwner, ToolName,
 };
 use serde_json::value::RawValue;
+
+fn openai_policy() -> ProjectorPolicy {
+    ProjectorPolicy {
+        tool_args: ToolArgsFinishPolicy::SoftSeedEmptyOnly,
+        reasoning_emit: ReasoningEmitMode::DeferToFinish,
+    }
+}
+
+impl ResponseProjectorCore {
+    fn finish_deferred_reasoning(
+        &mut self,
+        provider_index: u32,
+        replay: &ReplayEnvelope,
+        output: &mut Vec<ModelEvent>,
+    ) -> ProjResult<()> {
+        let entry_id = self.item(provider_index)?.entry_id;
+        let provider_blocks: Vec<u32> = self
+            .item(provider_index)?
+            .provider_blocks
+            .keys()
+            .copied()
+            .collect();
+        for provider_block in provider_blocks {
+            let location = self.location(provider_index, provider_block)?;
+            let (chunks, complete) = match self.block_mut(location)? {
+                ProjectedBlock::Reasoning {
+                    chunks,
+                    complete,
+                    replay: slot,
+                    ..
+                } => {
+                    *slot = Some(replay.clone());
+                    (chunks.clone(), *complete)
+                }
+                _ => {
+                    return Err(FamilyProjectionError::InvalidState(
+                        "reasoning item contains a non-reasoning block",
+                    ));
+                }
+            };
+            if !complete {
+                return Err(FamilyProjectionError::InvalidState(
+                    "reasoning output item done before summary part completion",
+                ));
+            }
+            output.push(ModelEvent::BlockStarted(BlockStarted::new(
+                entry_id,
+                location,
+                BlockStart::Reasoning {
+                    visibility: ReasoningVisibility::Summary,
+                    replay: Some(replay.clone()),
+                },
+            )));
+            for chunk in chunks {
+                output.push(ModelEvent::ReasoningDelta(ReasoningDelta::new(
+                    location, chunk,
+                )));
+            }
+            output.push(ModelEvent::BlockCompleted(BlockCompleted::new(location)));
+        }
+        Ok(())
+    }
+}
 
 fn empty_core(policy: ProjectorPolicy) -> ResponseProjectorCore {
     core_with_byte_limit(policy, ProjectorLimits::default().max_accumulated_bytes)
@@ -46,15 +109,16 @@ fn start_function(core: &mut ResponseProjectorCore) -> EntryId {
         )
         .expect("register");
     let name = ToolName::new("lookup").expect("name");
-    core.start_tool_block(
-        ToolBlockStart {
-            provider_index: 0,
-            entry_id: entry,
-            call_id_remote: "call_1",
-            name,
-            owner: ToolExecutionOwner::Local,
-            initial_arguments: "",
-        },
+    core.start_tool_block_with(
+        0,
+        entry,
+        ToolCorrelation::new(Some("call_1".into()), None, ToolCallerLineage::Direct)
+            .expect("correlation"),
+        name,
+        ToolExecutionOwner::Local,
+        ToolCallState::Requested,
+        "",
+        true,
         &mut out,
     )
     .expect("tool start");
@@ -63,7 +127,7 @@ fn start_function(core: &mut ResponseProjectorCore) -> EntryId {
 
 #[test]
 fn soft_seed_empty_only_seeds_when_deltas_empty() {
-    let mut core = empty_core(ProjectorPolicy::openai_platform());
+    let mut core = empty_core(openai_policy());
     let _ = start_function(&mut core);
     let mut out = Vec::new();
     core.finish_function_arguments(0, r#"{"q":1}"#, &mut out)
@@ -87,7 +151,7 @@ fn soft_seed_empty_only_seeds_when_deltas_empty() {
 
 #[test]
 fn soft_seed_empty_only_keeps_non_empty_deltas() {
-    let mut core = empty_core(ProjectorPolicy::openai_platform());
+    let mut core = empty_core(openai_policy());
     let _ = start_function(&mut core);
     let mut out = Vec::new();
     core.append_tool(0, r#"{"q":1}"#, &mut out).expect("delta");
@@ -114,15 +178,15 @@ fn soft_seed_empty_only_keeps_non_empty_deltas() {
 
 #[test]
 fn soft_seed_semantic_diverge_prefers_done_payload() {
-    let mut core = empty_core(ProjectorPolicy::openai_platform());
+    let mut core = empty_core(openai_policy());
     let _ = start_function(&mut core);
     let mut out = Vec::new();
     core.append_tool(0, r#"{"q":1}"#, &mut out).expect("delta");
-    assert_eq!(core.accumulated_bytes(), r#"{"q":1}"#.len());
+    assert_eq!(core.accumulated_bytes, r#"{"q":1}"#.len());
     out.clear();
     core.finish_function_arguments(0, r#"{"q":1,"extra":true}"#, &mut out)
         .expect("finish");
-    assert_eq!(core.accumulated_bytes(), r#"{"q":1,"extra":true}"#.len());
+    assert_eq!(core.accumulated_bytes, r#"{"q":1,"extra":true}"#.len());
     let location = core.location(0, 0).expect("loc");
     match core.block(location).expect("block") {
         ProjectedBlock::Tool {
@@ -140,19 +204,19 @@ fn soft_seed_semantic_diverge_prefers_done_payload() {
 
 #[test]
 fn soft_seed_semantically_equivalent_repeated_finish_is_idempotent() {
-    let mut core = empty_core(ProjectorPolicy::openai_platform());
+    let mut core = empty_core(openai_policy());
     let _ = start_function(&mut core);
     let mut out = Vec::new();
     core.append_tool(0, r#"{"q":1}"#, &mut out).expect("delta");
     core.finish_function_arguments(0, r#"{"q": 1}"#, &mut out)
         .expect("first finish");
-    let accumulated = core.accumulated_bytes();
+    let accumulated = core.accumulated_bytes;
     out.clear();
 
     core.finish_function_arguments(0, r#"{ "q" : 1 }"#, &mut out)
         .expect("idempotent repeated finish");
 
-    assert_eq!(core.accumulated_bytes(), accumulated);
+    assert_eq!(core.accumulated_bytes, accumulated);
     assert_eq!(out, [] as [ModelEvent; 0]);
     let location = core.location(0, 0).expect("location");
     let ProjectedBlock::Tool {
@@ -167,7 +231,7 @@ fn soft_seed_semantically_equivalent_repeated_finish_is_idempotent() {
 
 #[test]
 fn soft_seed_empty_only_empty_done_becomes_object() {
-    let mut core = empty_core(ProjectorPolicy::openai_platform());
+    let mut core = empty_core(openai_policy());
     let _ = start_function(&mut core);
     let mut out = Vec::new();
     core.finish_function_arguments(0, "", &mut out)
@@ -190,7 +254,7 @@ fn done_replacement_accounting_is_exact_and_fail_closed_at_boundaries() {
                 let initial = "a".repeat(initial_len);
                 let replacement = "b".repeat(replacement_len);
                 core.append_tool(0, &initial, &mut out).expect("initial");
-                assert_eq!(core.accumulated_bytes(), initial_len);
+                assert_eq!(core.accumulated_bytes, initial_len);
 
                 let result = core.finish_function_arguments_with(
                     0,
@@ -208,7 +272,7 @@ fn done_replacement_accounting_is_exact_and_fail_closed_at_boundaries() {
                 };
                 if replacement_len <= limit {
                     result.expect("replacement within bound");
-                    assert_eq!(core.accumulated_bytes(), replacement_len);
+                    assert_eq!(core.accumulated_bytes, replacement_len);
                     assert_eq!(bytes, replacement.as_bytes());
                     assert!(*complete);
                 } else {
@@ -216,7 +280,7 @@ fn done_replacement_accounting_is_exact_and_fail_closed_at_boundaries() {
                         result,
                         Err(FamilyProjectionError::ResourceLimit("projected bytes"))
                     ));
-                    assert_eq!(core.accumulated_bytes(), initial_len);
+                    assert_eq!(core.accumulated_bytes, initial_len);
                     assert_eq!(bytes, initial.as_bytes());
                     assert!(!*complete);
                 }
@@ -240,7 +304,7 @@ fn rejected_empty_seed_reservation_leaves_byte_ledger_unchanged() {
         ),
         Err(FamilyProjectionError::ResourceLimit("projected bytes"))
     ));
-    assert_eq!(core.accumulated_bytes(), 0);
+    assert_eq!(core.accumulated_bytes, 0);
     let location = core.location(0, 0).expect("location");
     let ProjectedBlock::Tool {
         bytes, complete, ..
@@ -254,7 +318,7 @@ fn rejected_empty_seed_reservation_leaves_byte_ledger_unchanged() {
 
 #[test]
 fn defer_reasoning_buffers_until_finish() {
-    let mut core = empty_core(ProjectorPolicy::openai_platform());
+    let mut core = empty_core(openai_policy());
     let mut out = Vec::new();
     core.start_response(
         "resp_r".into(),

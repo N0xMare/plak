@@ -23,7 +23,7 @@ use plakous_responses::{
     CanonicalIdSources, LifecycleDialectPolicy, ResponsesDialectProfile,
     ResponsesSemanticRevisions, ResponsesStorageMode,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     PreparedResponsesModelExecution, ResponsesArtifactReplayBridge, ResponsesAttemptDialectData,
     ResponsesAttemptService, ResponsesAttemptTarget, ResponsesAuthSlot, ResponsesAuthSlots,
     ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData, ResponsesCredentialAuthority,
@@ -247,7 +247,7 @@ impl OpenAiPlatformModel {
             authority: authority.clone(),
             client: client.clone(),
         });
-        let probe = plakous_responses_dialect::bind_reachability_probe(
+        let probe = plakous_responses::bind_reachability_probe(
             client.clone(),
             execution.dial_origin.clone(),
             descriptor.route().clone(),
@@ -498,7 +498,7 @@ impl LanguageModel for OpenAiPlatformModel {
             // An artifact covering a different canonical or stable prefix is
             // not this request's, so prepare fresh rather than refuse. Same rule as the
             // Codex route.
-            .or_else(|error: plakous_responses_dialect::ResponsesRequestError| {
+            .or_else(|error: plakous_responses::ResponsesRequestError| {
                 error
                     .artifact_is_not_for_this_request()
                     .then_some(None)
@@ -895,7 +895,7 @@ pub enum OpenAiPlatformBuildError {
     NonLocalAuthority,
     /// The selected provider behavior is not admitted.
     #[error(transparent)]
-    Policy(#[from] plakous_responses_dialect::ResponsesProviderConfigurationError),
+    Policy(#[from] plakous_responses::ResponsesProviderConfigurationError),
     /// Complete selected/effective configuration or fresh authority disagreed.
     #[error("OpenAI Platform provider configuration is invalid")]
     Configuration,

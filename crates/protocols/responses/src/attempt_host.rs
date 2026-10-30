@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
+use crate::{ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits};
 pub use authority::{
     ResponsesAccountSlot, ResponsesAuthSlot, ResponsesAuthSlots, ResponsesCredentialAuthority,
     ResponsesHeaderBinding,
@@ -45,7 +46,6 @@ use plakous_model::{
     AttemptId, CancellationToken, Digest, DigestDomain, ModelOperationRoot, ModelProviderRequestId,
     ModelRequest, ModelRetry, ModelRetryCause, ModelTransportFault, ResolvedModelDescriptor,
 };
-use plakous_responses::{ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits};
 use retry::{
     RetryStep, credential_rejection_retry_eligible, in_band_retryable, refresh_credential,
     refused_connection, retryable, wait_to_retry,

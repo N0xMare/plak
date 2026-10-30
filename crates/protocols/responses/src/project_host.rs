@@ -6,6 +6,12 @@
 
 use std::fmt;
 
+use crate::{
+    RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION, ResponsesArtifact,
+    ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesArtifactError,
+    ResponsesArtifactProduction, ResponsesArtifactReplayKind, ResponsesContinuation,
+    ResponsesReplayContract, ResponsesReplayItem, ResponsesReplayPurpose, ResponsesStorageMode,
+};
 use plakous_model::{
     Actor, CanonicalItemPrefixIdentity, CitationUnit, ContentBlock, ConversationItem,
     DataClassification, Digest, DigestDomain, FamilyArtifactProducerFacts, FinishDetails,
@@ -13,12 +19,6 @@ use plakous_model::{
     Provenance, ReasoningVisibility, ReplayEnvelope, ReplayKindId, ReplayScope,
     SealedFamilyArtifactCandidate, TextPhase, Timestamp, ToolCallState, ToolExecutionOwner,
     ToolInputContract, Usage, ValidatedRequestPlan,
-};
-use plakous_responses::{
-    RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION, ResponsesArtifact,
-    ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesArtifactError,
-    ResponsesArtifactProduction, ResponsesArtifactReplayKind, ResponsesContinuation,
-    ResponsesReplayContract, ResponsesReplayItem, ResponsesReplayPurpose, ResponsesStorageMode,
 };
 use serde_json::value::RawValue;
 
@@ -715,7 +715,7 @@ pub(crate) fn project_terminal_response(
         replay,
         storage,
         provider_request,
-        plakous_responses::ResponseModelBinding::ExactRequest,
+        crate::ResponseModelBinding::ExactRequest,
     )
 }
 
@@ -726,9 +726,9 @@ pub(crate) fn project_terminal_response_with_model_binding(
     replay: &ResponsesReplayProjection,
     storage: ResponsesStorageMode,
     provider_request: ResponsesProviderRequestBinding,
-    model_binding: plakous_responses::ResponseModelBinding,
+    model_binding: crate::ResponseModelBinding,
 ) -> Result<ResponsesTerminalProjection, ResponsesProjectError> {
-    if model_binding == plakous_responses::ResponseModelBinding::ExactRequest
+    if model_binding == crate::ResponseModelBinding::ExactRequest
         && response.model() != replay.model.as_str()
     {
         return Err(ResponsesProjectError::InvalidTerminal(

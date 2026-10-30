@@ -1,6 +1,6 @@
 # plakous-responses
 
-Responses-family protocol kernel primitives for Plakous. This crate is part of
+Responses-family wire protocol and shared dialect hosts for Plakous. This crate is part of
 [Plak](https://github.com/N0xMare/plak), an embeddable single-agent
 multi-provider harness library (Plakous) and the command-line and terminal
 product built on it. It is a published-internal package: it releases in the

@@ -52,7 +52,6 @@ plakous-http.workspace = true
 plakous-attempt.workspace = true
 plakous-model.workspace = true
 plakous-responses.workspace = true
-plakous-responses-dialect.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = { workspace = true, optional = true }

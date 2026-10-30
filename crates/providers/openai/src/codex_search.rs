@@ -18,12 +18,12 @@ use std::sync::Arc;
 use plakous_attempt::ReplaySafety;
 #[cfg(feature = "native-auth")]
 use plakous_model::CancellationToken;
-use plakous_responses_dialect::{
+use plakous_responses::{
     RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS, ResponsesRetrievalError, ResponsesRetrievalErrorKind,
     ResponsesRetrievalOutcome, ResponsesRetrievalSource, ResponsesRetrievalUsage,
 };
 #[cfg(feature = "native-auth")]
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesCredentialRefresh, ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch,
     ResponsesRetrievalLimits, ResponsesRetrievalQuery, ResponsesRetrievalTransport,
     run_responses_json_side_request,

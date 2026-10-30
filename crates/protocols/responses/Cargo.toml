@@ -1,6 +1,6 @@
 [package]
 name = "plakous-responses"
-description = "Responses-family protocol kernel primitives for Plakous"
+description = "Responses-family wire protocol and shared dialect hosts for Plakous"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,17 +18,32 @@ layer = "protocol"
 class = "published-internal"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 2
-too-many-arguments-ceiling = 4
+too-many-lines-ceiling = 28
+too-many-arguments-ceiling = 14
 large-file-ceiling = 0
 reason = "Existing item-local protocol debt; tool starts and terminal lifecycle checks use typed inputs."
 
 [dependencies]
+base64.workspace = true
+futures-core.workspace = true
+httpdate.workspace = true
+plakous-attempt.workspace = true
+plakous-exchange.workspace = true
 plakous-http.workspace = true
 plakous-model.workspace = true
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2 = { version = "0.11", default-features = false }
 thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
+uuid.workspace = true
+
+[dev-dependencies]
+plakous-http = { workspace = true, features = ["fault-injection"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [lints]
 workspace = true

@@ -34,9 +34,7 @@ use plakous_model::{
 };
 use plakous_responses::ResponsesStreamLimits;
 #[cfg(feature = "native-auth")]
-use plakous_responses::{ResponsesSemanticRevisions, ResponsesStorageMode};
-#[cfg(feature = "native-auth")]
-use plakous_responses_dialect::{
+use plakous_responses::{
     PreparedResponsesModelExecution, ResponsesArtifactReplayBridge, ResponsesAttemptDialectData,
     ResponsesAttemptService, ResponsesAttemptTarget, ResponsesAuthSlots,
     ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData, ResponsesProviderErrorPolicy,
@@ -44,10 +42,12 @@ use plakous_responses_dialect::{
     ResponsesResponseLimits, ResponsesStreamDialectData, canonical_local_tools,
     is_native_compaction_request, prepare_responses_attempt, start_prepared_responses_model_call,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesProviderConfigurationError, ResponsesRequestPolicy, ResponsesStoragePolicy,
     compile_provider_configuration,
 };
+#[cfg(feature = "native-auth")]
+use plakous_responses::{ResponsesSemanticRevisions, ResponsesStorageMode};
 use thiserror::Error;
 
 #[cfg(feature = "native-auth")]
@@ -402,7 +402,7 @@ fn codex_dispatch_service(
 #[cfg(feature = "native-auth")]
 impl OpenAiLanguageModel {
     fn artifact_preparation_error(
-        error: plakous_responses_dialect::ResponsesRequestError,
+        error: plakous_responses::ResponsesRequestError,
     ) -> ModelPreparationError {
         preparation_rejection(
             ModelPreparationErrorKind::ArtifactReuse,
@@ -731,8 +731,7 @@ fn codex_artifact_replay_bridge(
     request: &ModelRequest,
     authority: ResponsesRequestAuthority,
     now: Timestamp,
-) -> Result<Option<ResponsesArtifactReplayBridge>, plakous_responses_dialect::ResponsesRequestError>
-{
+) -> Result<Option<ResponsesArtifactReplayBridge>, plakous_responses::ResponsesRequestError> {
     let Some(artifact) = active else {
         return Ok(None);
     };

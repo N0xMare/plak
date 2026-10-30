@@ -9,7 +9,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use plakous_model::CancellationToken;
-use plakous_responses_dialect::{
+use plakous_responses::{
     RESPONSES_IMAGE_EXCHANGE_TIMEOUT, ResponsesImageAuthorization, ResponsesImageEndpoint,
     ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageTransport, ResponsesRetrievalError,
     ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, run_responses_image,
@@ -19,7 +19,7 @@ use plakous_responses_dialect::{
 use crate::XaiLanguageModel;
 use crate::XaiPlatformModel;
 #[cfg(feature = "native-auth")]
-use plakous_responses_dialect::ResponsesRetrievalDispatch;
+use plakous_responses::ResponsesRetrievalDispatch;
 
 /// The image model the xAI API route generates with.
 pub const XAI_IMAGE_MODEL: &str = "grok-imagine-image-2.0";
@@ -127,7 +127,7 @@ impl ResponsesImageTransport for XaiImages {
         })
     }
 
-    fn credential_rejected(&self) -> plakous_responses_dialect::ResponsesCredentialRefresh<'_> {
+    fn credential_rejected(&self) -> plakous_responses::ResponsesCredentialRefresh<'_> {
         match &self.executor {
             Executor::Api(_) => Box::pin(std::future::ready(false)),
             #[cfg(feature = "native-auth")]

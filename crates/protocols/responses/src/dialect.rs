@@ -29,11 +29,11 @@ pub enum SequencePolicy {
 #[non_exhaustive]
 pub enum TerminalPolicy {
     /// A typed terminal event is required; `[DONE]` is forbidden.
-    TypedOnly,
+    Only,
     /// A typed terminal event must be followed by exactly one `[DONE]` marker.
-    TypedThenDone,
+    ThenDone,
     /// A typed terminal event is required; `[DONE]` after it is optional.
-    TypedOptionalDone,
+    OptionalDone,
 }
 
 /// How EOF treats residual SSE fields that never received a blank-line dispatch.
@@ -89,7 +89,7 @@ impl ResponsesDialectProfile {
     pub const fn openai_platform() -> Self {
         Self {
             sequence: SequencePolicy::RequiredStrict,
-            terminal: TerminalPolicy::TypedOptionalDone,
+            terminal: TerminalPolicy::OptionalDone,
             finish: FinishPolicy::AutoDispatchResidual,
             bom: BomPolicy::Ignore,
         }
@@ -106,7 +106,7 @@ impl ResponsesDialectProfile {
             sequence: SequencePolicy::OptionalMonotonic {
                 fields: XAI_SEQUENCE_FIELDS,
             },
-            terminal: TerminalPolicy::TypedOnly,
+            terminal: TerminalPolicy::Only,
             finish: FinishPolicy::BlankLineClosed,
             bom: BomPolicy::Ignore,
         }
@@ -123,7 +123,7 @@ impl ResponsesDialectProfile {
             sequence: SequencePolicy::OptionalMonotonic {
                 fields: OPENROUTER_SEQUENCE_FIELDS,
             },
-            terminal: TerminalPolicy::TypedThenDone,
+            terminal: TerminalPolicy::ThenDone,
             finish: FinishPolicy::BlankLineClosed,
             bom: BomPolicy::Strip,
         }
@@ -174,24 +174,6 @@ impl SequenceState {
             presence: None,
             expected: 0,
         }
-    }
-
-    /// Returns the last accepted sequence number, if any.
-    #[must_use]
-    pub const fn last(&self) -> Option<u64> {
-        self.last
-    }
-
-    /// Returns established optional presence, if decided.
-    #[must_use]
-    pub const fn presence(&self) -> Option<bool> {
-        self.presence
-    }
-
-    /// Returns the next expected sequence under strict policy.
-    #[must_use]
-    pub const fn expected(&self) -> u64 {
-        self.expected
     }
 }
 
@@ -304,15 +286,15 @@ pub const fn decide_done_marker(
     done_marker_seen: bool,
 ) -> DoneMarkerDecision {
     match policy {
-        TerminalPolicy::TypedOnly => DoneMarkerDecision::Forbidden,
-        TerminalPolicy::TypedThenDone => {
+        TerminalPolicy::Only => DoneMarkerDecision::Forbidden,
+        TerminalPolicy::ThenDone => {
             if typed_terminal_seen && !done_marker_seen {
                 DoneMarkerDecision::Accept
             } else {
                 DoneMarkerDecision::OutOfOrder
             }
         }
-        TerminalPolicy::TypedOptionalDone => {
+        TerminalPolicy::OptionalDone => {
             if typed_terminal_seen {
                 // OpenAI Platform ignores extra `[DONE]` after a typed terminal.
                 DoneMarkerDecision::Accept
@@ -331,8 +313,8 @@ pub const fn terminal_finish_ok(
     done_marker_seen: bool,
 ) -> bool {
     match policy {
-        TerminalPolicy::TypedOnly | TerminalPolicy::TypedOptionalDone => typed_terminal_seen,
-        TerminalPolicy::TypedThenDone => typed_terminal_seen && done_marker_seen,
+        TerminalPolicy::Only | TerminalPolicy::OptionalDone => typed_terminal_seen,
+        TerminalPolicy::ThenDone => typed_terminal_seen && done_marker_seen,
     }
 }
 

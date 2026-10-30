@@ -18,13 +18,15 @@ use crate::json_fields::{ResponsesFieldError, optional_u64_fields};
 use super::bom::BomLead;
 use super::error::resource;
 use super::framing::is_comment_only_unfinished;
-use super::hooks::DialectStreamHooks;
 use super::limits::ResponsesStreamLimits;
+use crate::stream_host::{
+    ResponsesFamilyHooks, ResponsesFamilyStreamError, ResponsesFamilyStreamEvent,
+};
 
 /// Shared Responses-family SSE stream lifecycle (front-half kernel).
 ///
 /// Dialects hold plugin state outside this struct and pass
-/// [`DialectStreamHooks`] into [`Self::push`] / [`Self::finish`].
+/// `ResponsesFamilyHooks` into [`Self::push`] / [`Self::finish`].
 #[derive(Clone)]
 pub struct ResponsesStreamKernel {
     profile: ResponsesDialectProfile,
@@ -88,39 +90,18 @@ impl ResponsesStreamKernel {
         self
     }
 
-    /// Returns the dialect profile fixed for this kernel.
-    #[must_use]
-    pub const fn profile(&self) -> ResponsesDialectProfile {
-        self.profile
-    }
-
-    /// Returns the stream resource limits.
-    #[must_use]
-    pub const fn limits(&self) -> ResponsesStreamLimits {
-        self.limits
-    }
-
     /// Returns whether a typed terminal event was accepted.
+    #[cfg(test)]
     #[must_use]
     pub const fn typed_terminal_seen(&self) -> bool {
         self.typed_terminal_seen
     }
 
     /// Returns whether a `[DONE]` marker was accepted.
+    #[cfg(test)]
     #[must_use]
     pub const fn done_marker_seen(&self) -> bool {
         self.done_marker_seen
-    }
-
-    /// Returns the sequence tracker.
-    #[must_use]
-    pub const fn sequence(&self) -> &SequenceState {
-        &self.sequence
-    }
-
-    /// Marks the kernel terminally failed (dialect outer transactional push).
-    pub fn mark_failed(&mut self) {
-        self.failed = true;
     }
 
     /// Feeds transport bytes and returns newly completed dialect events.
@@ -129,13 +110,13 @@ impl ResponsesStreamKernel {
     ///
     /// Returns a dialect-mapped error for limits, framing, sequence, `[DONE]`,
     /// or hook decode failures. On error the kernel is marked failed.
-    pub fn push<H: DialectStreamHooks>(
+    pub fn push(
         &mut self,
         chunk: &[u8],
-        hooks: &mut H,
-    ) -> Result<Vec<H::Event>, H::Error> {
+        hooks: &mut ResponsesFamilyHooks,
+    ) -> Result<Vec<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
         if self.failed {
-            return Err(H::map_sse_error(
+            return Err(ResponsesFamilyHooks::map_sse_error(
                 plakous_http::SseError::AlreadyFailed,
                 &self.limits,
             ));
@@ -149,11 +130,11 @@ impl ResponsesStreamKernel {
         }
     }
 
-    fn push_inner<H: DialectStreamHooks>(
+    fn push_inner(
         &mut self,
         chunk: &[u8],
-        hooks: &mut H,
-    ) -> Result<Vec<H::Event>, H::Error> {
+        hooks: &mut ResponsesFamilyHooks,
+    ) -> Result<Vec<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
         if self.content_closed() && self.typed_terminal_cutoff {
             return Ok(Vec::new());
         }
@@ -162,7 +143,7 @@ impl ResponsesStreamKernel {
         }
         self.total_bytes = self.total_bytes.saturating_add(chunk.len());
         if self.total_bytes > self.limits.max_total_bytes() {
-            return Err(H::map_resource_limit(
+            return Err(ResponsesFamilyHooks::map_resource_limit(
                 resource::TOTAL_STREAM_BYTES,
                 self.limits.max_total_bytes(),
             ));
@@ -173,7 +154,7 @@ impl ResponsesStreamKernel {
         let messages = self
             .sse
             .push(&feed)
-            .map_err(|error| H::map_sse_error(error, &self.limits))?;
+            .map_err(|error| ResponsesFamilyHooks::map_sse_error(error, &self.limits))?;
         if self.content_closed() {
             if self.typed_terminal_cutoff {
                 return Ok(Vec::new());
@@ -182,7 +163,7 @@ impl ResponsesStreamKernel {
                 || self.sse.has_undelivered_event()
                 || !is_comment_only_unfinished(self.sse.unfinished_line())
             {
-                return Err(H::map_event_after_terminal());
+                return Err(ResponsesFamilyHooks::map_event_after_terminal());
             }
             return Ok(Vec::new());
         }
@@ -191,12 +172,12 @@ impl ResponsesStreamKernel {
             if let Some(event) = self.decode_message(message, hooks)? {
                 self.event_count = self.event_count.saturating_add(1);
                 if self.event_count > self.limits.max_events() {
-                    return Err(H::map_resource_limit(
+                    return Err(ResponsesFamilyHooks::map_resource_limit(
                         resource::SSE_EVENTS,
                         self.limits.max_events(),
                     ));
                 }
-                let terminal = H::event_is_terminal(&event);
+                let terminal = ResponsesFamilyHooks::event_is_terminal(&event);
                 staged.push(event);
                 // Codex and xAI treat the typed terminal as the event-stream
                 // boundary and drop the response body at that point. Bytes
@@ -211,11 +192,11 @@ impl ResponsesStreamKernel {
         Ok(staged)
     }
 
-    fn push_to_typed_terminal<H: DialectStreamHooks>(
+    fn push_to_typed_terminal(
         &mut self,
         chunk: &[u8],
-        hooks: &mut H,
-    ) -> Result<Vec<H::Event>, H::Error> {
+        hooks: &mut ResponsesFamilyHooks,
+    ) -> Result<Vec<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
         let mut staged = Vec::new();
         let mut start = 0;
         for end in chunk
@@ -231,7 +212,7 @@ impl ResponsesStreamKernel {
             start = end;
             self.total_bytes = self.total_bytes.saturating_add(physical.len());
             if self.total_bytes > self.limits.max_total_bytes() {
-                return Err(H::map_resource_limit(
+                return Err(ResponsesFamilyHooks::map_resource_limit(
                     resource::TOTAL_STREAM_BYTES,
                     self.limits.max_total_bytes(),
                 ));
@@ -242,17 +223,17 @@ impl ResponsesStreamKernel {
             let messages = self
                 .sse
                 .push(&feed)
-                .map_err(|error| H::map_sse_error(error, &self.limits))?;
+                .map_err(|error| ResponsesFamilyHooks::map_sse_error(error, &self.limits))?;
             for message in &messages {
                 if let Some(event) = self.decode_message(message, hooks)? {
                     self.event_count = self.event_count.saturating_add(1);
                     if self.event_count > self.limits.max_events() {
-                        return Err(H::map_resource_limit(
+                        return Err(ResponsesFamilyHooks::map_resource_limit(
                             resource::SSE_EVENTS,
                             self.limits.max_events(),
                         ));
                     }
-                    let terminal = H::event_is_terminal(&event);
+                    let terminal = ResponsesFamilyHooks::event_is_terminal(&event);
                     staged.push(event);
                     if terminal {
                         return Ok(staged);
@@ -276,12 +257,12 @@ impl ResponsesStreamKernel {
     ///
     /// Returns truncated-frame, missing-terminal, missing-`[DONE]`, or residual
     /// decode errors mapped through hooks. On error the kernel is marked failed.
-    pub fn finish<H: DialectStreamHooks>(
+    pub fn finish(
         &mut self,
-        hooks: &mut H,
-    ) -> Result<Vec<H::Event>, H::Error> {
+        hooks: &mut ResponsesFamilyHooks,
+    ) -> Result<Vec<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
         if self.failed {
-            return Err(H::map_sse_error(
+            return Err(ResponsesFamilyHooks::map_sse_error(
                 plakous_http::SseError::AlreadyFailed,
                 &self.limits,
             ));
@@ -295,15 +276,15 @@ impl ResponsesStreamKernel {
         }
     }
 
-    fn finish_inner<H: DialectStreamHooks>(
+    fn finish_inner(
         &mut self,
-        hooks: &mut H,
-    ) -> Result<Vec<H::Event>, H::Error> {
+        hooks: &mut ResponsesFamilyHooks,
+    ) -> Result<Vec<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
         if self.typed_terminal_cutoff && self.typed_terminal_seen {
             return Ok(Vec::new());
         }
         if self.bom_lead.has_pending_bytes() {
-            return Err(H::map_truncated());
+            return Err(ResponsesFamilyHooks::map_truncated());
         }
         let residual = match self.profile.finish() {
             FinishPolicy::BlankLineClosed => {
@@ -312,21 +293,21 @@ impl ResponsesStreamKernel {
                 if self.sse.has_undelivered_event()
                     || !is_comment_only_unfinished(self.sse.unfinished_line())
                 {
-                    return Err(H::map_truncated());
+                    return Err(ResponsesFamilyHooks::map_truncated());
                 }
                 Vec::new()
             }
             FinishPolicy::AutoDispatchResidual => self
                 .sse
                 .finish()
-                .map_err(|error| H::map_sse_error(error, &self.limits))?,
+                .map_err(|error| ResponsesFamilyHooks::map_sse_error(error, &self.limits))?,
         };
         let mut staged = Vec::new();
         for message in &residual {
             if let Some(event) = self.decode_message(message, hooks)? {
                 self.event_count = self.event_count.saturating_add(1);
                 if self.event_count > self.limits.max_events() {
-                    return Err(H::map_resource_limit(
+                    return Err(ResponsesFamilyHooks::map_resource_limit(
                         resource::SSE_EVENTS,
                         self.limits.max_events(),
                     ));
@@ -336,10 +317,10 @@ impl ResponsesStreamKernel {
         }
         let terminal = self.profile.terminal();
         if !self.typed_terminal_seen {
-            return Err(H::map_missing_terminal());
+            return Err(ResponsesFamilyHooks::map_missing_terminal());
         }
-        if matches!(terminal, TerminalPolicy::TypedThenDone) && !self.done_marker_seen {
-            return Err(H::map_missing_done());
+        if matches!(terminal, TerminalPolicy::ThenDone) && !self.done_marker_seen {
+            return Err(ResponsesFamilyHooks::map_missing_done());
         }
         debug_assert!(terminal_finish_ok(
             terminal,
@@ -351,9 +332,9 @@ impl ResponsesStreamKernel {
 
     /// Whether the stream rejects further content at the push level.
     ///
-    /// - [`TerminalPolicy::TypedOnly`]: after typed terminal (xAI).
-    /// - [`TerminalPolicy::TypedThenDone`]: after accepted `[DONE]` (`OpenRouter`).
-    /// - [`TerminalPolicy::TypedOptionalDone`]: never early-closed at the byte
+    /// - [`TerminalPolicy::Only`]: after typed terminal (xAI).
+    /// - [`TerminalPolicy::ThenDone`]: after accepted `[DONE]` (`OpenRouter`).
+    /// - [`TerminalPolicy::OptionalDone`]: never early-closed at the byte
     ///   API so fragmented optional DONE markers remain decodable. The
     ///   transport owner stops pulling at the typed terminal boundary; buffered
     ///   trailers in that same push are ignored by the event loop above.
@@ -362,17 +343,17 @@ impl ResponsesStreamKernel {
             return true;
         }
         match self.profile.terminal() {
-            TerminalPolicy::TypedOnly => self.typed_terminal_seen,
-            TerminalPolicy::TypedThenDone => self.done_marker_seen,
-            TerminalPolicy::TypedOptionalDone => false,
+            TerminalPolicy::Only => self.typed_terminal_seen,
+            TerminalPolicy::ThenDone => self.done_marker_seen,
+            TerminalPolicy::OptionalDone => false,
         }
     }
 
-    fn decode_message<H: DialectStreamHooks>(
+    fn decode_message(
         &mut self,
         message: &SseMessage,
-        hooks: &mut H,
-    ) -> Result<Option<H::Event>, H::Error> {
+        hooks: &mut ResponsesFamilyHooks,
+    ) -> Result<Option<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
         let data = message.data();
         if data.is_empty() && message.event().is_none() {
             return Ok(None);
@@ -388,19 +369,19 @@ impl ResponsesStreamKernel {
                     Ok(None)
                 }
                 DoneMarkerDecision::Forbidden | DoneMarkerDecision::OutOfOrder => {
-                    Err(H::map_done_forbidden())
+                    Err(ResponsesFamilyHooks::map_done_forbidden())
                 }
             };
         }
         if self.typed_terminal_seen {
-            return Err(H::map_event_after_terminal());
+            return Err(ResponsesFamilyHooks::map_event_after_terminal());
         }
         let event_name = message.event().filter(|name| !name.is_empty());
         let sequence = self.extract_and_validate_sequence(data, hooks)?;
         let Some(event) = hooks.decode_json_event(data, event_name, sequence)? else {
             return Ok(None);
         };
-        if H::event_is_terminal(&event) {
+        if ResponsesFamilyHooks::event_is_terminal(&event) {
             self.typed_terminal_seen = true;
         }
         Ok(Some(event))
@@ -410,18 +391,18 @@ impl ResponsesStreamKernel {
     ///
     /// Non-object / non-JSON payloads skip kernel sequence validation so dialect
     /// hooks can emit their native JSON errors. Field-type failures on optional
-    /// sequence keys fail closed via [`DialectStreamHooks::map_field_error`].
-    fn extract_and_validate_sequence<H: DialectStreamHooks>(
+    /// sequence keys fail closed via `ResponsesFamilyHooks::map_field_error`.
+    fn extract_and_validate_sequence(
         &mut self,
         data: &str,
-        _hooks: &H,
-    ) -> Result<Option<u64>, H::Error> {
+        _hooks: &ResponsesFamilyHooks,
+    ) -> Result<Option<u64>, ResponsesFamilyStreamError> {
         match peek_sequence(self.profile.sequence(), data) {
             SequencePeek::NotObject => Ok(None),
-            SequencePeek::FieldError(error) => Err(H::map_field_error(error)),
+            SequencePeek::FieldError(error) => Err(ResponsesFamilyHooks::map_field_error(error)),
             SequencePeek::Value(sequence) => {
                 validate_next_sequence(self.profile.sequence(), &mut self.sequence, sequence)
-                    .map_err(H::map_sequence_error)?;
+                    .map_err(ResponsesFamilyHooks::map_sequence_error)?;
                 Ok(sequence)
             }
         }

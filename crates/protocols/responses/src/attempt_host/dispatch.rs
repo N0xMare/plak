@@ -455,7 +455,7 @@ pub(super) async fn decode_body(
         .finish()
         .map_err(|failure| fail_decoded_stream(attempt, failure, retain))?;
     deliver(attempt, &mut delivery, residual);
-    if model_binding == plakous_responses::ResponseModelBinding::ExactRequest
+    if model_binding == crate::ResponseModelBinding::ExactRequest
         && terminal
             .response_model()
             .is_some_and(|model| model != attempt.authority.artifact_binding().model().as_str())
@@ -732,7 +732,7 @@ pub(super) fn project_terminal(
     replay: &ResponsesReplayProjection,
     storage: ResponsesStorageMode,
     provider_request: ResponsesProviderRequestBinding,
-    model_binding: plakous_responses::ResponseModelBinding,
+    model_binding: crate::ResponseModelBinding,
 ) -> Result<ResponsesAttemptTerminal, ResponsesProjectError> {
     Ok(match terminal {
         RawTerminal::Completed(response) => {

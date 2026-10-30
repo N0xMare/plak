@@ -20,6 +20,11 @@ fn binding_mismatch_is_treated_as_not_this_request() {
     assert!(!foreign.artifact_is_not_for_this_request());
 }
 
+use crate::{
+    ResponsesArtifactCodec, ResponsesArtifactProduction, ResponsesArtifactReplayKind,
+    ResponsesContinuation, ResponsesReplayContract, ResponsesReplayItem,
+    ResponsesSemanticRevisions,
+};
 use plakous_model::{
     AttemptId, BranchId, CallId, CanonicalHistory, Capability, CapabilityConstraints,
     CapabilityRequirement, CapabilitySet, CompactionBlock, ConfiguredTool,
@@ -35,11 +40,6 @@ use plakous_model::{
     ToolCallBlock, ToolCallState, ToolCallerDisposition, ToolCallerLineage, ToolConcurrency,
     ToolCorrelation, ToolEffect, ToolExecutionDisposition, ToolInputContract, ToolOutputContract,
     ToolResultBlock, ToolResultKind, TurnId, ValidationMode, WorkingProjection,
-};
-use plakous_responses::{
-    ResponsesArtifactCodec, ResponsesArtifactProduction, ResponsesArtifactReplayKind,
-    ResponsesContinuation, ResponsesReplayContract, ResponsesReplayItem,
-    ResponsesSemanticRevisions,
 };
 use uuid::Uuid;
 
@@ -4768,7 +4768,7 @@ fn check_programmatic_second_pause(storage: ResponsesStorageMode) -> TestResult 
     });
     let mut completed_programs = second_bridge.hosted_programs().clone();
     completed_programs.admit_replayed_output(
-        &parse_output_item::<ResponsesHostDecodeError>(&final_program_output)?,
+        &parse_output_item(&final_program_output)?,
         crate::ResponsesCanonicalPolicy::openai_platform(),
     )?;
     assert_eq!(completed_programs.live_program_count(), 0);
@@ -6536,7 +6536,7 @@ fn artifact_append_rejects_foreign_account_and_accountless_output() -> TestResul
         );
         assert_eq!(
             rejected.err(),
-            Some(plakous_responses::ResponsesArtifactError::ReplayBindingMismatch { index: 0 })
+            Some(crate::ResponsesArtifactError::ReplayBindingMismatch { index: 0 })
         );
     }
     Ok(())

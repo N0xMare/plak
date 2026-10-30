@@ -458,7 +458,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "ebc6183bab0f1f33a2ee8f48c1ee83e5c0db9a33b04c0224d52aec3d1efecfbf",
     "plakous-js-runtime": "ed321c92092e4cb542b36fa116ad3084aaa0ae1f42e8efd7a7239c4f47424496",
-    "plakous": "d749651e34497e95033b9d735451e70b1d464d191e2f39fa942c179dc9c3dbdf",
+    "plakous": "bcf172b3068f9c00d7542c3d6b51a3015550a619dde4cad9374674b8d6159700",
     "plakous-agent": "a19134205d444cf4b88520e8da37268e19e9527aae92ac337ffb68691c7bdba7",
     "plakous-anthropic": "8633d4d85d5d34e24b95ef99f2dfdcb4b508482a0dfdfb49dfd811501cbfcecb",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
@@ -470,7 +470,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "ce7a257bc2a1e8e92a83f0c8398bbd4360f92353c891a7989719104e9132b929",
     "plakous-messages": "eae7f4a067455ca31bab364c39a597256a19c84e636a17af6b6012bba40284b1",
     "plakous-model": "772c69cc6d702bfe410256b2f5c1d9572f189164832fec6181bb82f2433fe651",
-    "plakous-openai": "245c035951bf08445c2c7d617f876ee870908aa4a9587ae7d262b897ec2a7ee6",
+    "plakous-openai": "3fe06a92bc52ac907b0c2df165c41e69de4d8c3ce2efa34964d5a2bf1130eacf",
     "plakous-tool-files": "f91b59c3d65dff91d2fe462da36376abf3d82c44a5a86abf209d435cd046f759",
     "plakous-tool-plan": "7e57f5a8c4b1b39a7967fe97dbb83d7d78822878b40638d823e49c5a7d0b021c",
     "plakous-tool-process": "f70f0cd80a32e357f1b8381a78eeb0aa69861bb7f5fad614f0c52831a029c5cb",
@@ -478,12 +478,11 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-tool-web": "928dd7ad73b6660b8ed288f93fef0928f83701d952d7cdb24c9c19a18ca4d3c1",
     "plakous-compose": "03528287f0b94dff33643625af2dbc244727cb8a940d3d5a54a59f8195cc196f",
     "plakous-prompts": "da32ae7e9b35e762a8f7ff3a5b6c1b967b29339d4c5586af82804c2c9e59bc74",
-    "plakous-openrouter": "803e6032f8c4eeff39c667c8db63331429d320586387998b8ed1a73914370cc7",
-    "plakous-responses": "620bdf545cb14d698a0e9048689a324825fd53c5c04ef58a9506ead157a30ccb",
-    "plakous-responses-dialect": "ecb393c3e1e3e992a2ea6c57380fae4e96ca0c0dae13e25ac8ef198b6059a3ab",
+    "plakous-openrouter": "8d7049bf4a200b1b02aa0022990d90c77cdf861cfa86d536903221f6640bcd3c",
+    "plakous-responses": "49012ffd675d654725a1f7dd3ec5e444f17abec0bc56f18b622dcee58e5bbe0c",
     "plakous-store": "64f90ad9ab7d4143c47844d30dfcc4ce41fe06a980d80d6bfba681a3ae378015",
     "plakous-tools": "1140b910a06b7b83f425d6e0ed50a9466d7adc8e2da6a07b4885d4a3c0a737a0",
-    "plakous-xai": "bfdc8ccb6f48d35fbfd32ebeaeb973f4be1b369368166276ecb4163c1b395cad",
+    "plakous-xai": "e36c3961aee9e8e158e47cb626bfda4246fa44b05dd2b26458f65673dea317c0",
 }
 
 

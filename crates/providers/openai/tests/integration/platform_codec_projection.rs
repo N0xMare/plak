@@ -3,7 +3,7 @@
 use std::error::Error;
 
 use plakous_responses::{LifecycleDialectPolicy, ResponsesDialectProfile, ResponsesStreamLimits};
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesContentPart, ResponsesFamilySseDecoder, ResponsesFamilyStreamError,
     ResponsesOutputItem, ResponsesResponseLimits, ResponsesResponseStatus,
     ResponsesStreamCapabilities, ResponsesStreamDialectData, ResponsesStreamEventKind,
@@ -68,8 +68,8 @@ fn platform_codec_projects_exact_terminal_without_dispatch() -> TestResult {
     assert_eq!(
         codec.finish()?,
         [] as [ResponsesStreamEventKind<
-            plakous_responses_dialect::ResponsesResponse,
-            plakous_responses_dialect::ResponsesProviderError,
+            plakous_responses::ResponsesResponse,
+            plakous_responses::ResponsesProviderError,
         >; 0]
     );
     let response = events
@@ -105,7 +105,7 @@ fn platform_codec_projects_exact_terminal_without_dispatch() -> TestResult {
 fn platform_ptc_second_pause_aggregate_and_final_stream_preserve_native_lineage() -> TestResult {
     let aggregate: serde_json::Value =
         serde_json::from_slice(include_bytes!("../fixtures/platform_ptc_second_pause.json"))?;
-    let parsed = plakous_responses_dialect::ResponsesResponse::parse(
+    let parsed = plakous_responses::ResponsesResponse::parse(
         &aggregate,
         ResponsesUsagePolicy::DeriveTotalWhenOmitted,
         ResponsesResponseLimits::default(),
@@ -229,8 +229,8 @@ fn platform_stream_keeps_terminal_reasoning_ciphertext_when_only_that_field_chan
     assert_eq!(
         codec.finish()?,
         [] as [ResponsesStreamEventKind<
-            plakous_responses_dialect::ResponsesResponse,
-            plakous_responses_dialect::ResponsesProviderError,
+            plakous_responses::ResponsesResponse,
+            plakous_responses::ResponsesProviderError,
         >; 0]
     );
     let done = events.iter().find_map(|event| match event {

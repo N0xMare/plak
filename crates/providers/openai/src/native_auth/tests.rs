@@ -2323,7 +2323,7 @@ async fn cross_account_request_authority_is_rejected_before_codex_preflight() ->
         target_a.route().account_binding()?,
         plakous_responses::ResponsesSemanticRevisions::new(2, 1, 4)?,
         None,
-        plakous_responses_dialect::ResponsesStoragePolicy::Stateless,
+        plakous_responses::ResponsesStoragePolicy::Stateless,
     )?;
     assert_eq!(
         validate_codex_request_authority(&target_a, &authority),

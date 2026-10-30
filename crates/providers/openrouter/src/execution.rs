@@ -23,7 +23,7 @@ use plakous_model::{
 use plakous_responses::{
     CanonicalIdSources, ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     PreparedResponsesModelExecution, ResponsesArtifactReplayBridge, ResponsesAttemptDialectData,
     ResponsesAttemptService, ResponsesAttemptTarget, ResponsesAuthSlot, ResponsesAuthSlots,
     ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData, ResponsesCredentialAuthority,
@@ -243,7 +243,7 @@ impl OpenRouterResponsesLanguageModel {
             .identity()
             .retention_policy()
             .ok_or(OpenRouterResponsesLanguageModelConfigError::Configuration)?;
-        let router = plakous_responses_dialect::ResponsesRouterPolicy::gateway_managed(
+        let router = plakous_responses::ResponsesRouterPolicy::gateway_managed(
             retention.data_collection().map(str::to_owned),
             retention.zdr(),
         )
@@ -267,7 +267,7 @@ impl OpenRouterResponsesLanguageModel {
         )
         .and_then(|data| data.with_router_policy(router))
         .map_err(|_| OpenRouterResponsesLanguageModelConfigError::SharedBinding)?;
-        let probe = plakous_responses_dialect::bind_reachability_probe(
+        let probe = plakous_responses::bind_reachability_probe(
             client.clone(),
             Origin::parse(route.identity().origin().as_str())
                 .map_err(|_| OpenRouterResponsesLanguageModelConfigError::SharedBinding)?,
@@ -374,7 +374,7 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
                     active,
                     request,
                     authority.clone(),
-                    plakous_responses_dialect::ResponsesReplayKind::new(
+                    plakous_responses::ResponsesReplayKind::new(
                         crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_KIND,
                         crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION,
                     ),
@@ -386,7 +386,7 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
             .transpose()
             // An artifact covering a different canonical or stable prefix is
             // not this request's, so prepare fresh rather than refuse.
-            .or_else(|error: plakous_responses_dialect::ResponsesRequestError| {
+            .or_else(|error: plakous_responses::ResponsesRequestError| {
                 error
                     .artifact_is_not_for_this_request()
                     .then_some(None)
@@ -518,7 +518,7 @@ impl OpenRouterResponsesLanguageModel {
         .map_err(|error| {
             let kind = if matches!(
                 error,
-                plakous_responses_dialect::ResponsesReplayError::IncompleteAuthority
+                plakous_responses::ResponsesReplayError::IncompleteAuthority
             ) {
                 ModelPreparationErrorKind::InvalidConfiguration
             } else {
@@ -535,7 +535,7 @@ impl OpenRouterResponsesLanguageModel {
         &self,
         plan: &ValidatedRequestPlan,
         context: &ModelPreparationContext,
-        prepared_attempt: &plakous_responses_dialect::PreparedResponsesAttempt,
+        prepared_attempt: &plakous_responses::PreparedResponsesAttempt,
     ) -> Result<PreparedCallRecord, ModelPreparationError> {
         let wire_digest = prepared_attempt.wire_digest();
         let wire_size = u64::try_from(prepared_attempt.wire_size()).map_err(|_| {

@@ -28,8 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/checks"))
 import vcs_listing  # noqa: E402
 
-SCHEMA = "plakous.perf-build.v9"
-FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 9}
+SCHEMA = "plakous.perf-build.v10"
+FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 10}
 SUPPORTED_PUBLIC_BUILD_PROFILES = {
     "minimal": ("plakous", ("--lib",), ()),
     "subscriptions": ("plakous", ("--lib",), ("codex", "grok", "claude",)),
@@ -72,8 +72,7 @@ COMPONENT_BUILD_PROFILES = {
 INTERNAL_TOPOLOGY_BUILD_PROFILES = {
     **COMPONENT_BUILD_PROFILES,
     "attempt": ("plakous-attempt", ("--lib",), ()),
-    "responses-kernel": ("plakous-responses", ("--lib",), ()),
-    "responses-host": ("plakous-responses-dialect", ("--lib",), ()),
+    "responses": ("plakous-responses", ("--lib",), ()),
     "messages": ("plakous-messages", ("--lib",), ()),
 }
 PRODUCT_TOPOLOGY_BUILD_PROFILES = {

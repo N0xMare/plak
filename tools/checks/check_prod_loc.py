@@ -97,7 +97,6 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         ("plakous-exchange", "src/"),
         ("plakous-messages", "src/"),
         ("plakous-responses", "src/"),
-        ("plakous-responses-dialect", "src/"),
     )),
     ("provider glue", (
         ("plakous-openai", "src/"),

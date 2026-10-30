@@ -394,7 +394,7 @@ mod shared_host_model {
     use plakous_responses::{
         CanonicalIdSources, ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits,
     };
-    use plakous_responses_dialect::{
+    use plakous_responses::{
         PreparedResponsesModelExecution, ResponsesArtifactReplayBridge,
         ResponsesAttemptDialectData, ResponsesAttemptService, ResponsesAttemptTarget,
         ResponsesAuthSlots, ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData,
@@ -660,7 +660,7 @@ mod shared_host_model {
                 )
                 .map_err(|_| XaiLanguageModelConfigError::SharedBinding)?;
             let authorization = supergrok_authorization()?;
-            let response_limits = plakous_responses_dialect::ResponsesResponseLimits::default();
+            let response_limits = plakous_responses::ResponsesResponseLimits::default();
             let target = ResponsesAttemptTarget::from_admitted_target(
                 &descriptor,
                 route
@@ -745,7 +745,7 @@ mod shared_host_model {
         /// the model's ladder admits.
         #[must_use]
         pub fn retrieval(self: &Arc<Self>) -> crate::XaiRetrieval {
-            let effort = plakous_responses_dialect::lowest_responses_effort(
+            let effort = plakous_responses::lowest_responses_effort(
                 crate::subscription_model_reasoning_effort_options(
                     self.descriptor.requested_model().as_str(),
                 ),
@@ -936,7 +936,7 @@ mod shared_host_model {
                     .as_str(),
             )
             .ok()?;
-            Some(plakous_responses_dialect::bind_reachability_probe(
+            Some(plakous_responses::bind_reachability_probe(
                 self.client.clone(),
                 origin,
                 self.current_target()
@@ -1360,10 +1360,10 @@ mod shared_host_model {
         )
         .map_err(|error| {
             let message = match error {
-                plakous_responses_dialect::ResponsesReplayError::IncompleteAuthority => {
+                plakous_responses::ResponsesReplayError::IncompleteAuthority => {
                     "SuperGrok request authority is incomplete for the admitted operation"
                 }
-                plakous_responses_dialect::ResponsesReplayError::AuthorityConstruction => {
+                plakous_responses::ResponsesReplayError::AuthorityConstruction => {
                     "SuperGrok request authority identity construction failed"
                 }
                 _ => "SuperGrok request authority does not match the admitted operation",

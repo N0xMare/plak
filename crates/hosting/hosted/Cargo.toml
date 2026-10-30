@@ -57,7 +57,7 @@ plakous-offline-crash-harness = { path = "../../../tests/harnesses/offline-crash
 plakous-http.workspace = true
 plakous-openai.workspace = true
 plakous-openrouter = { workspace = true, features = ["test-clock"] }
-plakous-responses-dialect.workspace = true
+plakous-responses.workspace = true
 proptest = { workspace = true, features = ["std"] }
 rusqlite.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

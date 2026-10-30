@@ -150,8 +150,8 @@ use crate::{
     OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiLanguageModel, OpenAiRoute, OpenAiTarget,
     StandardOpenAiHttpConfig, StorageMode, config::OPENAI_CODEX_MODELS_PATH,
 };
-use plakous_responses_dialect::ResponsesPhysicalRequestBinding;
-use plakous_responses_dialect::{
+use plakous_responses::ResponsesPhysicalRequestBinding;
+use plakous_responses::{
     CredentialGenerationFingerprint, ResponsesAccountSlot, ResponsesAuthSlot,
     ResponsesCredentialAuthority, ResponsesDispatchRejection, ResponsesHeaderBinding,
     ResponsesPreflightFuture, ResponsesPreflightRequest, ResponsesPreparedPhysicalRequest,

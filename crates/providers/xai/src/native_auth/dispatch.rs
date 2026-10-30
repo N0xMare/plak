@@ -61,7 +61,7 @@ impl SuperGrokDispatchGuard {
     }
 }
 
-impl plakous_responses_dialect::ResponsesRetrievalGuard for SuperGrokDispatchGuard {
+impl plakous_responses::ResponsesRetrievalGuard for SuperGrokDispatchGuard {
     fn transport_failed(&mut self, failure: plakous_http::Failure) {
         Self::transport_failed(self, failure);
     }
@@ -389,7 +389,7 @@ pub(super) fn supergrok_generation_fingerprint(
     binding.extend_from_slice(&(selection_epoch.len() as u64).to_be_bytes());
     binding.extend_from_slice(selection_epoch.as_bytes());
     match CredentialGenerationFingerprint::mint_exact(
-        plakous_responses_dialect::CredentialProviderTag::XaiPlatform,
+        plakous_responses::CredentialProviderTag::XaiPlatform,
         &binding,
     ) {
         Ok(fingerprint) => fingerprint,

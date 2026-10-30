@@ -328,18 +328,18 @@ impl NativeSubscriptions {
     }
 }
 fn responses_configuration_error(
-    error: plakous_responses_dialect::ResponsesProviderConfigurationError,
+    error: plakous_responses::ResponsesProviderConfigurationError,
 ) -> NativeSubscriptionError {
     match error {
-        plakous_responses_dialect::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
+        plakous_responses::ResponsesProviderConfigurationError::PolicyMismatch(field) => {
             NativeSubscriptionError::ProviderConfigurationPolicyMismatch(field)
         }
-        plakous_responses_dialect::ResponsesProviderConfigurationError::Identity => {
+        plakous_responses::ResponsesProviderConfigurationError::Identity => {
             NativeSubscriptionError::ProviderConfigurationIdentityRejected
         }
-        plakous_responses_dialect::ResponsesProviderConfigurationError::ProviderConfiguration(
-            error,
-        ) => NativeSubscriptionError::ProviderConfigurationCompileRejected(error),
+        plakous_responses::ResponsesProviderConfigurationError::ProviderConfiguration(error) => {
+            NativeSubscriptionError::ProviderConfigurationCompileRejected(error)
+        }
         _ => NativeSubscriptionError::ProviderConfigurationRejected,
     }
 }

@@ -8,6 +8,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 
+use crate::{
+    FunctionToolChoiceWire, FunctionToolWire, RESPONSES_ARTIFACT_CODEC_REVISION,
+    RESPONSES_ARTIFACT_SCHEMA_REVISION, ReasoningEffortWire, ResponsesArtifact,
+    ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesReplayPurpose,
+    ResponsesSemanticRevisions, ResponsesStorageMode, function_call_item,
+    function_call_output_item, input_text_part, join_instruction_texts, message_item,
+    output_text_part,
+};
 use input::{ToolResultMatches, derive_tool_calls, lower_item};
 #[cfg(test)]
 use input::{lower_program_caller, lower_tool_result};
@@ -26,14 +34,6 @@ use plakous_model::{
     ToolCallerDisposition, ToolCallerLineage, ToolChoice, ToolDefinition, ToolExecutionDisposition,
     ToolExecutionOwner, ToolInputContract, ToolName, ToolResultBlock, ToolResultKind,
     ToolResultPart, ToolResultUpdateBlock, ValidatedRequestPlan,
-};
-use plakous_responses::{
-    FunctionToolChoiceWire, FunctionToolWire, RESPONSES_ARTIFACT_CODEC_REVISION,
-    RESPONSES_ARTIFACT_SCHEMA_REVISION, ReasoningEffortWire, ResponsesArtifact,
-    ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesReplayPurpose,
-    ResponsesSemanticRevisions, ResponsesStorageMode, function_call_item,
-    function_call_output_item, input_text_part, join_instruction_texts, message_item,
-    output_text_part,
 };
 #[cfg(test)]
 use policy::validate_tools;
@@ -68,7 +68,7 @@ use tools::{
 
 use crate::ResponsesCanonicalTool;
 use crate::project_host::validate_output_semantic_pair;
-use crate::response_host::{ResponsesHostDecodeError, parse_output_item};
+use crate::response_host::parse_output_item;
 
 mod error;
 

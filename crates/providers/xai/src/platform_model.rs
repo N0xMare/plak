@@ -28,7 +28,7 @@ use plakous_responses::{
     ResponsesDialectProfile, ResponsesSemanticRevisions, ResponsesStorageMode,
     ResponsesStreamLimits,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     PreparedResponsesModelExecution, ResponsesArtifactReplayBridge, ResponsesAttemptDialectData,
     ResponsesAttemptService, ResponsesAttemptTarget, ResponsesAuthSlot, ResponsesAuthSlots,
     ResponsesAuthorizationAdapter, ResponsesCanonicalDialectData, ResponsesCanonicalPolicy,
@@ -404,7 +404,7 @@ impl XaiPlatformModel {
 impl LanguageModel for XaiPlatformModel {
     fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
         let origin = self.execution.origin.clone();
-        Some(plakous_responses_dialect::bind_reachability_probe(
+        Some(plakous_responses::bind_reachability_probe(
             self.execution.client.clone(),
             origin,
             self.descriptor.route().clone(),
@@ -505,7 +505,7 @@ impl LanguageModel for XaiPlatformModel {
             // An artifact covering a different canonical or stable prefix is
             // not this request's, so prepare fresh rather than refuse. Same rule as the
             // SuperGrok route.
-            .or_else(|error: plakous_responses_dialect::ResponsesRequestError| {
+            .or_else(|error: plakous_responses::ResponsesRequestError| {
                 error
                     .artifact_is_not_for_this_request()
                     .then_some(None)

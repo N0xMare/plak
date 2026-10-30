@@ -12,7 +12,7 @@ use plakous_model::{
     TextBlock, Timestamp, TurnId,
 };
 use plakous_responses::ResponsesStreamLimits;
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesFamilySseDecoder, ResponsesFamilyStreamError, ResponsesRequestConfig,
     ResponsesRequestPolicy, ResponsesStreamDialectData, ResponsesStreamEventKind,
     lower_responses_request,
@@ -141,8 +141,8 @@ fn openrouter_sse_requires_ordered_typed_terminal_then_done() -> TestResult {
     assert_eq!(
         valid.finish()?,
         [] as [ResponsesStreamEventKind<
-            plakous_responses_dialect::ResponsesResponse,
-            plakous_responses_dialect::ResponsesProviderError,
+            plakous_responses::ResponsesResponse,
+            plakous_responses::ResponsesProviderError,
         >; 0]
     );
 
@@ -196,8 +196,8 @@ fn pinned_official_sparse_lifecycle_uses_only_prepared_model_and_completed_items
     assert_eq!(
         sparse.finish()?,
         [] as [ResponsesStreamEventKind<
-            plakous_responses_dialect::ResponsesResponse,
-            plakous_responses_dialect::ResponsesProviderError,
+            plakous_responses::ResponsesResponse,
+            plakous_responses::ResponsesProviderError,
         >; 0]
     );
 

@@ -10,7 +10,7 @@
 //! | Sequence policy | yes | map sequence errors; receive validated sequence |
 //! | `[DONE]` / typed-terminal finish | yes (profile) | map policy failures |
 //! | Item/content/reasoning lifecycle | yes ([`ResponsesLifecycle`]) | parse JSON → natives; call lifecycle; map errors |
-//! | JSON event shape parse | — | [`DialectStreamHooks::decode_json_event`] |
+//! | JSON event shape parse | — | concrete family decoder |
 //!
 //! xAI, OpenRouter, and OpenAI Platform call [`ResponsesLifecycle`] for wire
 //! correlation. OpenAI ModelEvent projection is dialect-local (the
@@ -19,13 +19,10 @@
 mod bom;
 mod error;
 mod framing;
-mod hooks;
 mod kernel;
 mod lifecycle;
 mod limits;
 
-pub use framing::is_comment_only_unfinished;
-pub use hooks::DialectStreamHooks;
 pub use kernel::ResponsesStreamKernel;
 pub use lifecycle::{
     LifecycleDialectPolicy, ReasoningLifecycleMode, ResponseModelBinding, ResponsesLifecycle,

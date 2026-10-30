@@ -2,7 +2,7 @@
 
 use plakous_model::{ModelFamilyId, ModelId, ProtocolId, ReplayKindId};
 use plakous_responses::{LifecycleDialectPolicy, ResponsesDialectProfile};
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesReplayProjection, ResponsesRequestPolicy, ResponsesStreamDialectData,
     ResponsesUsagePolicy,
 };
@@ -90,14 +90,13 @@ impl OpenRouterDialect {
         model_family: Option<ModelFamilyId>,
         model: ModelId,
         account: plakous_model::Digest,
-    ) -> Result<ResponsesReplayProjection, plakous_responses_dialect::ResponsesProjectError> {
+    ) -> Result<ResponsesReplayProjection, plakous_responses::ResponsesProjectError> {
         ResponsesReplayProjection::new(
             protocol,
             model_family,
             model,
-            ReplayKindId::new(OPENROUTER_OUTPUT_ITEM_REPLAY_KIND).map_err(|_| {
-                plakous_responses_dialect::ResponsesProjectError::ProjectionIdentity
-            })?,
+            ReplayKindId::new(OPENROUTER_OUTPUT_ITEM_REPLAY_KIND)
+                .map_err(|_| plakous_responses::ResponsesProjectError::ProjectionIdentity)?,
             OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION,
             account,
         )

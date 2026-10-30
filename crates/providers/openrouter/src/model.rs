@@ -11,7 +11,7 @@ use plakous_model::{
     ResolvedProviderAuthorityBinding, RuntimeModelAuthority, SelectedProviderConfiguration,
     Support, Timestamp,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesProviderConfigurationError, ResponsesRouterPolicy,
     compile_provider_configuration_with_implementation_and_router_policy,
 };

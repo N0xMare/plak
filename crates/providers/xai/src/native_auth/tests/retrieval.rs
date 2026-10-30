@@ -1,7 +1,7 @@
 //! SuperGrok side requests over loopback TLS: path, OAuth costume, permit
 //! and authorization order, and refusal before the socket.
 
-use plakous_responses_dialect::{ResponsesRetrievalErrorKind, ResponsesRetrievalQuery};
+use plakous_responses::{ResponsesRetrievalErrorKind, ResponsesRetrievalQuery};
 
 use super::*;
 

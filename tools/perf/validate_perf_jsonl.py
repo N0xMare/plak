@@ -20,6 +20,7 @@ V6_BUILD_FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 6}
 V7_BUILD_FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 7}
 V8_BUILD_FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 8}
 V9_BUILD_FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 9}
+V10_BUILD_FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 10}
 V5_TARGET_UNIT_PROFILE_SETTINGS: dict[str, dict[str, object]] = {
     "dev": {
         "opt-level": 0,
@@ -261,12 +262,21 @@ V9_BUILD_PROFILE_CONTRACTS = {
     for profile, contract in V8_BUILD_PROFILE_CONTRACTS.items()
     if profile != "paid-platform"
 }
+V10_BUILD_PROFILE_CONTRACTS = {
+    **{
+        profile: contract
+        for profile, contract in V9_BUILD_PROFILE_CONTRACTS.items()
+        if profile not in {"responses-kernel", "responses-host"}
+    },
+    "responses": ("internal-topology-baseline", "plakous-responses", ["--lib"], []),
+}
 CURRENT_BUILD_SCHEMAS = {
     "plakous.perf-build.v5",
     "plakous.perf-build.v6",
     "plakous.perf-build.v7",
     "plakous.perf-build.v8",
     "plakous.perf-build.v9",
+    "plakous.perf-build.v10",
 }
 SUPPORTED_SCHEMAS = {
     "plakous.perf-build.v2",
@@ -277,6 +287,7 @@ SUPPORTED_SCHEMAS = {
     "plakous.perf-build.v7",
     "plakous.perf-build.v8",
     "plakous.perf-build.v9",
+    "plakous.perf-build.v10",
     "plakous.perf-core.v2",
     "plakous.perf-core.v3",
     "plakous.perf-core.v5",
@@ -460,6 +471,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
         "plakous.perf-build.v7",
         "plakous.perf-build.v8",
         "plakous.perf-build.v9",
+        "plakous.perf-build.v10",
     }:
         profile = field(metadata, "cargo", "build_profile")
         scope = field(metadata, "cargo", "build_profile_scope")
@@ -484,6 +496,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
             "plakous.perf-build.v7": V7_BUILD_PROFILE_CONTRACTS,
             "plakous.perf-build.v8": V8_BUILD_PROFILE_CONTRACTS,
             "plakous.perf-build.v9": V9_BUILD_PROFILE_CONTRACTS,
+            "plakous.perf-build.v10": V10_BUILD_PROFILE_CONTRACTS,
         }.get(schema, LEGACY_BUILD_PROFILE_CONTRACTS)
         contract = contracts.get(profile)
         if contract is None:
@@ -526,6 +539,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
             "plakous.perf-build.v7",
             "plakous.perf-build.v8",
             "plakous.perf-build.v9",
+            "plakous.perf-build.v10",
         }:
             host_id = field(metadata, "host", "host_id")
             if (
@@ -553,6 +567,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
             "plakous.perf-build.v7",
             "plakous.perf-build.v8",
             "plakous.perf-build.v9",
+            "plakous.perf-build.v10",
         }:
             exact(rows[1], profile, "build_profile")
             exact(rows[1], scope, "build_profile_scope")
@@ -563,6 +578,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
                 "plakous.perf-build.v7",
                 "plakous.perf-build.v8",
                 "plakous.perf-build.v9",
+                "plakous.perf-build.v10",
             }:
                 exact(rows[1], operation, "operation")
                 exact(rows[1], operation_contracts[operation], "operation_semantics")
@@ -592,6 +608,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
             "plakous.perf-build.v7",
             "plakous.perf-build.v8",
             "plakous.perf-build.v9",
+            "plakous.perf-build.v10",
         }:
             exact(sample, profile, "build_profile")
             exact(sample, scope, "build_profile_scope")
@@ -602,6 +619,7 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
                 "plakous.perf-build.v7",
                 "plakous.perf-build.v8",
                 "plakous.perf-build.v9",
+                "plakous.perf-build.v10",
             }:
                 exact(sample, operation, "operation")
                 exact(sample, operation_contracts[operation], "operation_semantics")
@@ -714,9 +732,10 @@ def validate_current_build_fixture(metadata: dict[str, Any]) -> None:
         "plakous.perf-build.v7": V7_BUILD_FIXTURE,
         "plakous.perf-build.v8": V8_BUILD_FIXTURE,
         "plakous.perf-build.v9": V9_BUILD_FIXTURE,
+        "plakous.perf-build.v10": V10_BUILD_FIXTURE,
     }.get(field(metadata, "schema"))
     if fixture is None:
-        fail("perf-build fixture validation requires schema v5, v6, v7, v8, or v9")
+        fail("perf-build fixture validation requires schema v5, v6, v7, v8, v9, or v10")
     exact(metadata, fixture, "fixture")
 
 
@@ -729,11 +748,12 @@ def validate_current_build_sample_fixture(sample: dict[str, Any]) -> None:
         "plakous.perf-build.v7": V7_BUILD_FIXTURE,
         "plakous.perf-build.v8": V8_BUILD_FIXTURE,
         "plakous.perf-build.v9": V9_BUILD_FIXTURE,
+        "plakous.perf-build.v10": V10_BUILD_FIXTURE,
     }.get(schema)
     if fixture is None:
         fail(
             "perf-build sample fixture validation requires schema "
-            "v5, v6, v7, v8, or v9"
+            "v5, v6, v7, v8, v9, or v10"
         )
     exact(sample, fixture["revision"], "fixture_revision")
 
@@ -1516,6 +1536,7 @@ VALIDATORS = {
     "plakous.perf-build.v7": validate_build,
     "plakous.perf-build.v8": validate_build,
     "plakous.perf-build.v9": validate_build,
+    "plakous.perf-build.v10": validate_build,
     "plakous.perf-core.v2": validate_core,
     "plakous.perf-core.v3": validate_core,
     "plakous.perf-core.v5": validate_core,
@@ -1615,9 +1636,16 @@ def validate_v8_campaign(directory: Path) -> None:
 
 
 def validate_v9_campaign(directory: Path) -> None:
-    """Validate the current 19-profile post-paid-platform-removal v9 cohort."""
+    """Validate the immutable 19-profile post-paid-platform-removal v9 cohort."""
     validate_build_campaign(
         directory, "plakous.perf-build.v9", V9_BUILD_PROFILE_CONTRACTS
+    )
+
+
+def validate_v10_campaign(directory: Path) -> None:
+    """Validate the current 18-profile merged-Responses v10 cohort."""
+    validate_build_campaign(
+        directory, "plakous.perf-build.v10", V10_BUILD_PROFILE_CONTRACTS
     )
 
 
@@ -1654,6 +1682,12 @@ def main() -> int:
         metavar="DIRECTORY",
         help="validate the exact 19-profile measured perf-build v9 cohort",
     )
+    parser.add_argument(
+        "--campaign-v10",
+        type=Path,
+        metavar="DIRECTORY",
+        help="validate the exact 18-profile measured perf-build v10 cohort",
+    )
     args = parser.parse_args()
     modes = (
         bool(args.paths)
@@ -1662,6 +1696,7 @@ def main() -> int:
         + bool(args.campaign_v7)
         + bool(args.campaign_v8)
         + bool(args.campaign_v9)
+        + bool(args.campaign_v10)
     )
     if modes != 1:
         parser.error("provide paths or exactly one campaign directory")
@@ -1695,6 +1730,12 @@ def main() -> int:
             print(
                 f"validated {args.campaign_v9}: plakous.perf-build.v9 campaign, "
                 f"{len(V9_BUILD_PROFILE_CONTRACTS)} profiles"
+            )
+        elif args.campaign_v10:
+            validate_v10_campaign(args.campaign_v10)
+            print(
+                f"validated {args.campaign_v10}: plakous.perf-build.v10 campaign, "
+                f"{len(V10_BUILD_PROFILE_CONTRACTS)} profiles"
             )
         else:
             for path in args.paths:

@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use plakous_chat_completions::ChatPhysicalRequestBinding;
 use plakous_messages::MessagesPhysicalRequestBinding;
-use plakous_responses_dialect::{CredentialGenerationFingerprint, ResponsesPhysicalRequestBinding};
+use plakous_responses::{CredentialGenerationFingerprint, ResponsesPhysicalRequestBinding};
 
 use crate::{OpenRouterAccessMode, OpenRouterRouteKind};
 
@@ -406,12 +406,10 @@ impl fmt::Debug for OpenRouterApiKeyGenerationGrant {
 
 fn mint_openrouter_generation(
     binding: &[u8],
-) -> Result<
-    CredentialGenerationFingerprint,
-    plakous_responses_dialect::CredentialGenerationFingerprintError,
-> {
+) -> Result<CredentialGenerationFingerprint, plakous_responses::CredentialGenerationFingerprintError>
+{
     CredentialGenerationFingerprint::mint_exact(
-        plakous_responses_dialect::CredentialProviderTag::OpenRouterPlatform,
+        plakous_responses::CredentialProviderTag::OpenRouterPlatform,
         binding,
     )
 }

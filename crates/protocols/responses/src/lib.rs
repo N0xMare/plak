@@ -1,49 +1,9 @@
-//! Responses-family protocol kernel primitives.
+//! Shared Responses-family wire protocol, lifecycle, projection and dialect hosts.
 //!
-//! ## Ownership
-//!
-//! | Layer | This crate | Dialect plugins (`OpenAI` / xAI / `OpenRouter`, …) |
-//! | --- | --- | --- |
-//! | Wire grammar tables | Sequence, terminal/`[DONE]`, BOM policies | Choose a [`ResponsesDialectProfile`] |
-//! | Stream front-half | Framing, BOM, limits, sequence, `[DONE]`/terminal finish via [`ResponsesStreamKernel`] | [`DialectStreamHooks`] JSON event-shape parse |
-//! | Stream lifecycle | Pure [`ResponsesLifecycle`] (items/content/reasoning/function correlation) | Parse → native `Value`s; call lifecycle; map [`ResponsesLifecycleError`] |
-//! | Stage-2 ModelEvent projection | Shared [`ResponseProjectorCore`] (xAI / OpenRouter / OpenAI host) | Event-kind dispatch, tool admission, replay kinds, residual dialect hooks |
-//! | Request wire | Pure `request` helpers (effort, tool_choice, items, flags) | Origin, paths, auth, dialect deltas (`provider{}`, SuperGrok omit `tool_choice`, `previous_response_id`) |
-//! | Attempt authority | Never — lives in `plakous-attempt` | Origin, paths, headers, auth, catalog, dialect observation |
-//! | Model-facing policy | Never | Never in this crate |
-//!
-//! **Attempt lifecycle / ledger / await** is family-agnostic and owned by
-//! `plakous-attempt`. Depend on that crate directly; this kernel is pure wire.
-//!
-//! **Anthropic is Messages-family** and is deliberately **not** hosted here
-//! for wire/event machines. Messages may adopt `plakous-attempt` commons only.
-//! Do not merge Messages stream semantics into this kernel for LOC alone.
-//!
-//! ### Stream kernel status
-//!
-//! [`ResponsesStreamKernel`] centralizes SSE framing, optional BOM strip,
-//! total-byte/event limits, sequence validation, and terminal/`[DONE]` policy.
-//! [`ResponsesLifecycle`] centralizes response item/content/reasoning/function
-//! lifecycle correlation (xAI, OpenRouter, and OpenAI Platform). Stage-2
-//! ModelEvent projection is shared via [`ResponseProjectorCore`] (xAI/OpenRouter
-//! live/strict; OpenAI Platform host with SoftSeedEmptyOnly + DeferToFinish).
-//! Dialects own event-shape parsing in [`DialectStreamHooks::decode_json_event`]
-//! and residual hooks (citations, custom tools, incomplete terminals).
-//!
-//! ### Request helpers
-//!
-//! Pure wire helpers for common body fields (reasoning effort labels,
-//! function `tool_choice`, function tool defs, instruction join, stream/store,
-//! input-item Value builders). Dialects own full encode/prepare and
-//! fail-closed deltas.
-//!
-//! ## Not in this crate
-//!
-//! - Provider HTTP clients, credentials, or route identities
-//! - Agent loop / session / history stacks
-//! - Anthropic Messages event machines
-//! - Canonical model type definitions: the projector emits `plakous-model`
-//!   events but defines none
+//! Commercial integrations select closed policy data and supply exact route,
+//! credential and model authority. This crate owns framing, parsing and the
+//! shared request, response and attempt hosts; `plakous-attempt` owns the
+//! family-independent dispatch ledger. Messages remains a separate wire family.
 
 #![forbid(unsafe_code)]
 // Protocol docs name OpenAI/OpenRouter/SuperGrok; Result-heavy pure wire helpers;
@@ -54,6 +14,13 @@
     clippy::struct_excessive_bools,
     clippy::must_use_candidate,
     reason = "product names in ownership docs; pure Result helpers; policy bool tables"
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::needless_pass_by_value,
+        reason = "scenario tests spell out whole wire exchanges and own their fixtures"
+    )
 )]
 
 mod artifact;
@@ -72,21 +39,20 @@ pub use artifact::{
     ResponsesCacheFact, ResponsesContinuation, ResponsesReplayContract, ResponsesReplayItem,
     ResponsesReplayPurpose, ResponsesSemanticRevisions, ResponsesStorageMode,
 };
-pub use dialect::{
-    BomPolicy, DoneMarkerDecision, FinishPolicy, OPENAI_PLATFORM_SEQUENCE_FIELDS,
-    OPENROUTER_SEQUENCE_FIELDS, ResponsesDialectProfile, SequencePolicy, SequenceState,
-    SequenceValidationError, TerminalPolicy, UTF8_BOM, XAI_SEQUENCE_FIELDS, decide_done_marker,
-    terminal_finish_ok, validate_next_sequence,
+pub(crate) use dialect::{
+    BomPolicy, FinishPolicy, SequencePolicy, SequenceValidationError, TerminalPolicy,
 };
-pub use json_fields::{
-    MAX_PROVIDER_LABEL_BYTES, ResponsesFieldError, optional_object, optional_provider_label,
-    optional_string, optional_u64, optional_u64_fields, required_object, required_provider_label,
-    required_string, required_u32, required_u64, required_value, validate_provider_label,
+pub use dialect::{OPENAI_PLATFORM_SEQUENCE_FIELDS, ResponsesDialectProfile};
+pub(crate) use json_fields::{
+    ResponsesFieldError, optional_object, optional_provider_label, required_object,
+    required_provider_label, required_string, required_u32, required_u64, validate_provider_label,
 };
-pub use project::{
-    CanonicalIdSources, FamilyProjectionError, ProjectedBlock, ProjectedItem, ProjectedItemKind,
-    ProjectorLimits, ProjectorPolicy, ReasoningEmitMode, ResponseProjectorCore,
-    ToolArgsFinishPolicy, ToolBlockStart,
+pub use json_fields::{optional_string, optional_u64};
+pub use project::FamilyProjectionError;
+pub use project::{CanonicalIdSources, ProjectorLimits};
+pub(crate) use project::{
+    ProjectedBlock, ProjectedItemKind, ProjectorPolicy, ReasoningEmitMode, ResponseProjectorCore,
+    ToolArgsFinishPolicy,
 };
 pub use request::{
     FunctionToolChoiceWire, FunctionToolWire, REASONING_SUMMARY_AUTO, ReasoningConfigWire,
@@ -94,8 +60,125 @@ pub use request::{
     insert_stream_store, join_instruction_texts, message_item, output_text_part, reasoning_object,
 };
 pub use stream::{
-    DialectStreamHooks, LifecycleDialectPolicy, ReasoningLifecycleMode, ResponseModelBinding,
-    ResponsesDecodeLimitError, ResponsesDecodeLimits, ResponsesLifecycle, ResponsesLifecycleError,
-    ResponsesStreamKernel, ResponsesStreamLimitError, ResponsesStreamLimits, TerminalResponseInput,
-    is_comment_only_unfinished,
+    LifecycleDialectPolicy, ResponseModelBinding, ResponsesDecodeLimitError, ResponsesDecodeLimits,
+    ResponsesStreamLimitError, ResponsesStreamLimits,
 };
+pub(crate) use stream::{
+    ReasoningLifecycleMode, ResponsesLifecycle, ResponsesLifecycleError, ResponsesStreamKernel,
+    TerminalResponseInput,
+};
+
+mod attempt_host;
+mod canonical_host;
+mod credential;
+mod images;
+mod model_host;
+mod project_host;
+mod request_host;
+mod response_host;
+mod retrieval;
+mod stream_host;
+mod wire_accounting;
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "closed test fixtures use literal values"
+)]
+mod test_support;
+
+pub use attempt_host::{
+    PreparedResponsesAttempt, ResponsesAccountSlot, ResponsesAttempt, ResponsesAttemptBinding,
+    ResponsesAttemptBuildError, ResponsesAttemptDialectData, ResponsesAttemptError,
+    ResponsesAttemptFuture, ResponsesAttemptResponse, ResponsesAttemptService,
+    ResponsesAttemptTarget, ResponsesAttemptTerminal, ResponsesAuthSlot, ResponsesAuthSlots,
+    ResponsesAuthorizationAdapter, ResponsesCredentialAuthority, ResponsesDispatchRejection,
+    ResponsesHeaderBinding, ResponsesHttpStatusClass, ResponsesObservation,
+    ResponsesOperationBinding, ResponsesPhysicalDispatchBinding, ResponsesPhysicalRequestBinding,
+    ResponsesPreflightFn, ResponsesPreflightFuture, ResponsesPreflightRequest,
+    ResponsesPreparedPhysicalRequest, ResponsesRevalidateFn, ResponsesRevalidationRequest,
+    prepare_responses_attempt,
+};
+pub use canonical_host::{
+    ResponsesCanonicalDialectData, ResponsesCanonicalObservationProjector,
+    ResponsesCanonicalPolicy, ResponsesCanonicalProjectError, ResponsesCanonicalTerminal,
+    ResponsesCanonicalTool, ResponsesCanonicalToolKind, ResponsesCanonicalToolOwner,
+    ResponsesHostedProgramContext, project_canonical_terminal,
+    project_canonical_terminal_with_hosted_programs,
+};
+pub use credential::{
+    CredentialGenerationFingerprint, CredentialGenerationFingerprintError, CredentialProviderTag,
+};
+pub use images::{
+    RESPONSES_IMAGE_EXCHANGE_TIMEOUT, RESPONSES_IMAGE_MAX_IMAGE_BYTES,
+    RESPONSES_IMAGE_MAX_RESPONSE_BYTES, ResponsesImageAuthorization, ResponsesImageEndpoint,
+    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource, ResponsesImageTransport,
+    decode_responses_image, run_responses_image,
+};
+pub use model_host::{
+    PreparedResponsesModelExecution, ResponsesModelBuildError, ResponsesModelErrorHook,
+    bind_reachability_probe, start_prepared_responses_model_call,
+};
+pub use project_host::{
+    ResponsesArtifactCandidateInput, ResponsesPairedArtifactCandidate,
+    ResponsesPairedTerminalProjection, ResponsesProjectError, ResponsesProviderRequestBinding,
+    ResponsesReplayProjection, ResponsesSealedArtifactCandidate, ResponsesTerminalProjection,
+    seal_responses_family_artifact,
+};
+pub use request_host::{
+    CustomToolPolicy, FunctionStrictPolicy, InstructionPlacementPolicy, LoweredResponsesRequest,
+    MaxOutputTokensPolicy, ParallelToolCallsFieldPolicy, PromptCachePolicy,
+    RESPONSES_FAMILY_POLICY_COMPILER_REVISION, RESPONSES_FAMILY_POLICY_SCHEMA_REVISION,
+    RESPONSES_REQUEST_POLICY_EXECUTION_REVISION, ReasoningEffortPolicy, ReasoningIncludePolicy,
+    ReasoningSummaryPolicy, ResponsesArtifactReplayBridge, ResponsesOutputReplayCoordinate,
+    ResponsesPrefixBinding, ResponsesProtectedToolError, ResponsesProviderConfigurationError,
+    ResponsesReplayContext, ResponsesReplayError, ResponsesReplayKind, ResponsesReplayMode,
+    ResponsesReplayPolicy, ResponsesRequestAuthority, ResponsesRequestConfig,
+    ResponsesRequestContentError, ResponsesRequestError, ResponsesRequestOptionError,
+    ResponsesRequestPolicy, ResponsesRouterPolicy, ResponsesStoragePolicy, StoreFieldPolicy,
+    StructuredOutputPolicy, ToolChoiceFieldPolicy, canonical_local_tools,
+    compile_provider_configuration, compile_provider_configuration_with_implementation,
+    compile_provider_configuration_with_implementation_and_router_policy,
+    is_native_compaction_request, is_string_custom_tool_definition,
+    is_unprojected_string_custom_tool_definition, lower_responses_request,
+    validate_supported_family_policy,
+};
+pub use response_host::{
+    MAX_URL_CITATION_TITLE_BYTES, ResponsesAnnotation, ResponsesContentPart,
+    ResponsesHostDecodeError, ResponsesIncompleteDetails, ResponsesOutputItem,
+    ResponsesProviderError, ResponsesProviderErrorClass, ResponsesProviderErrorPolicy,
+    ResponsesReasoningContentPart, ResponsesReasoningSummaryPart, ResponsesResponse,
+    ResponsesResponseLimits, ResponsesResponseStatus, ResponsesUsage, ResponsesUsagePolicy,
+    parse_provider_error_with_policy,
+};
+pub(crate) use response_host::{output_item_status, parse_unique_json_value};
+pub use retrieval::{
+    RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS, RESPONSES_WEB_SEARCH_SOURCES_INCLUDE,
+    RESPONSES_WEB_SEARCH_TOOL_TYPE, RESPONSES_X_SEARCH_TOOL_TYPE, ResponsesCredentialRefresh,
+    ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch, ResponsesRetrievalError,
+    ResponsesRetrievalErrorKind, ResponsesRetrievalFlavor, ResponsesRetrievalGuard,
+    ResponsesRetrievalLimits, ResponsesRetrievalOutcome, ResponsesRetrievalQuery,
+    ResponsesRetrievalRequest, ResponsesRetrievalSource, ResponsesRetrievalTransport,
+    ResponsesRetrievalUsage, classify_responses_retrieval_body, lowest_responses_effort,
+    run_responses_json_side_request, run_responses_retrieval,
+};
+pub use stream_host::{
+    ResponsesEventPolicy, ResponsesFamilySseDecoder, ResponsesFamilyStreamError,
+    ResponsesFamilyStreamEvent, ResponsesJsonPolicy, ResponsesStreamCapabilities,
+    ResponsesStreamDialectData, ResponsesStreamEventKind,
+};
+pub use wire_accounting::{ResponsesWireOccurrence, ResponsesWireOccurrenceCounts};
+
+#[cfg(test)]
+mod host_pins {
+    use super::ResponsesResponseStatus;
+
+    #[test]
+    fn completed_status_is_terminal() {
+        assert!(ResponsesResponseStatus::Completed.is_terminal());
+        assert_eq!(
+            ResponsesResponseStatus::parse("completed"),
+            ResponsesResponseStatus::Completed
+        );
+    }
+}

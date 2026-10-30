@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use plakous_responses::{
+use crate::{
     ResponsesFieldError, optional_object, optional_provider_label, optional_string, optional_u64,
     required_provider_label, required_u64,
 };
@@ -16,13 +16,11 @@ use serde_json::{Map, Value};
 
 mod parse;
 
+pub use parse::parse_provider_error_with_policy;
+use parse::validate_output_identity_roles;
 use parse::{encoded_len, parse_incomplete_details};
-pub use parse::{
-    output_item_status, parse_annotation, parse_content_part, parse_custom_tool_call,
-    parse_function_call, parse_message, parse_output_item, parse_provider_error_with_policy,
-    parse_reasoning, validate_output_identity_roles,
-};
 pub(crate) use parse::{
+    output_item_status, parse_annotation, parse_output_item,
     parse_provider_error_with_canonical_type, provider_error_object, validate_bounded_unknown_item,
 };
 
@@ -36,7 +34,7 @@ pub const MAX_URL_CITATION_TITLE_BYTES: usize = 4 * 1024;
 /// # Errors
 ///
 /// Returns the JSON decoder error for malformed JSON or any duplicate object member.
-pub fn parse_unique_json_value(input: &str) -> Result<Value, serde_json::Error> {
+pub(crate) fn parse_unique_json_value(input: &str) -> Result<Value, serde_json::Error> {
     struct Unique(Value);
     struct UniqueVisitor;
 
@@ -230,12 +228,11 @@ impl From<ResponsesFieldError> for ResponsesHostDecodeError {
         match error {
             ResponsesFieldError::Missing { field } => Self::MissingField(field),
             ResponsesFieldError::Invalid { field } => Self::InvalidField(field),
-            _ => Self::InvalidField("unknown Responses field"),
         }
     }
 }
 
-impl ResponsesUsageError for ResponsesHostDecodeError {
+impl ResponsesHostDecodeError {
     fn invalid_usage_accounting() -> Self {
         Self::InvalidUsageAccounting
     }
@@ -331,11 +328,8 @@ impl ResponsesUsage {
     ///
     /// # Errors
     ///
-    /// Returns `E` when accounting is inconsistent or fields have the wrong type.
-    pub fn parse<E>(value: &Value) -> Result<Self, E>
-    where
-        E: From<ResponsesFieldError> + ResponsesUsageError,
-    {
+    /// Returns `ResponsesHostDecodeError` when accounting is inconsistent or fields have the wrong type.
+    pub fn parse(value: &Value) -> Result<Self, ResponsesHostDecodeError> {
         Self::parse_with_policy(value, ResponsesUsagePolicy::RequireTotal)
     }
 
@@ -343,17 +337,19 @@ impl ResponsesUsage {
     ///
     /// # Errors
     ///
-    /// Returns `E` when accounting is inconsistent or fields have the wrong type.
-    pub fn parse_with_policy<E>(value: &Value, policy: ResponsesUsagePolicy) -> Result<Self, E>
-    where
-        E: From<ResponsesFieldError> + ResponsesUsageError,
-    {
-        let object = value.as_object().ok_or_else(|| E::invalid_field("usage"))?;
+    /// Returns `ResponsesHostDecodeError` when accounting is inconsistent or fields have the wrong type.
+    pub fn parse_with_policy(
+        value: &Value,
+        policy: ResponsesUsagePolicy,
+    ) -> Result<Self, ResponsesHostDecodeError> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| ResponsesHostDecodeError::invalid_field("usage"))?;
         let input_tokens = required_u64(object, "input_tokens")?;
         let output_tokens = required_u64(object, "output_tokens")?;
         let computed_total = input_tokens
             .checked_add(output_tokens)
-            .ok_or_else(E::invalid_usage_accounting)?;
+            .ok_or_else(ResponsesHostDecodeError::invalid_usage_accounting)?;
         let total_tokens = match policy {
             ResponsesUsagePolicy::RequireTotal => required_u64(object, "total_tokens")?,
             ResponsesUsagePolicy::DeriveTotalWhenOmitted => {
@@ -361,7 +357,7 @@ impl ResponsesUsage {
             }
         };
         if computed_total != total_tokens {
-            return Err(E::invalid_usage_accounting());
+            return Err(ResponsesHostDecodeError::invalid_usage_accounting());
         }
         let input_details = optional_object(object, "input_tokens_details")?;
         let output_details = optional_object(object, "output_tokens_details")?;
@@ -376,7 +372,7 @@ impl ResponsesUsage {
         if cached_input_tokens.is_some_and(|cached| cached > input_tokens)
             || reasoning_tokens.is_some_and(|reasoning| reasoning > output_tokens)
         {
-            return Err(E::invalid_usage_accounting());
+            return Err(ResponsesHostDecodeError::invalid_usage_accounting());
         }
         Ok(Self {
             input_tokens: Some(input_tokens),
@@ -423,16 +419,6 @@ impl ResponsesUsage {
     pub const fn native(&self) -> &Value {
         &self.native
     }
-}
-
-/// Dialect decode errors that can surface usage accounting failures.
-pub trait ResponsesUsageError {
-    /// Inconsistent totals or detail subsets.
-    fn invalid_usage_accounting() -> Self;
-    /// Wrong JSON type for a named field.
-    fn invalid_field(field: &'static str) -> Self;
-    /// Missing required field.
-    fn missing_field(field: &'static str) -> Self;
 }
 
 /// Safe classification for an untrusted provider error payload.
@@ -593,7 +579,7 @@ impl ResponsesProviderError {
         request_id: Option<&str>,
     ) -> Result<Self, ResponsesFieldError> {
         if let Some(request_id) = request_id {
-            plakous_responses::validate_provider_label(request_id, "request_id")?;
+            crate::validate_provider_label(request_id, "request_id")?;
             self.request_id = Some(request_id.to_owned());
         }
         Ok(self)
@@ -958,9 +944,9 @@ impl ResponsesResponse {
         }
         let output = output_values
             .iter()
-            .map(parse_output_item::<ResponsesHostDecodeError>)
+            .map(parse_output_item)
             .collect::<Result<Vec<_>, _>>()?;
-        validate_output_identity_roles::<ResponsesHostDecodeError>(&output)?;
+        validate_output_identity_roles(&output)?;
         for item in &output {
             validate_bounded_unknown_item(item, limits)?;
         }
@@ -1033,18 +1019,16 @@ impl ResponsesResponse {
         }
         let output = output_values
             .iter()
-            .map(parse_output_item::<ResponsesHostDecodeError>)
+            .map(parse_output_item)
             .collect::<Result<Vec<_>, _>>()?;
-        validate_output_identity_roles::<ResponsesHostDecodeError>(&output)?;
+        validate_output_identity_roles(&output)?;
         for item in &output {
             validate_bounded_unknown_item(item, limits)?;
         }
         let usage = object
             .get("usage")
             .filter(|value| !value.is_null())
-            .map(|value| {
-                ResponsesUsage::parse_with_policy::<ResponsesHostDecodeError>(value, usage_policy)
-            })
+            .map(|value| ResponsesUsage::parse_with_policy(value, usage_policy))
             .transpose()?;
         let incomplete_details = object
             .get("incomplete_details")

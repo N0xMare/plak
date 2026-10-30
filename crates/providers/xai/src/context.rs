@@ -11,7 +11,7 @@ use plakous_model::{
     ContextEvidenceSource, CountCertificateKind, CountObservation, Digest, EvidenceFreshness,
     MeasurementCertificate, ProtocolId, RuntimeModelAuthority, Timestamp,
 };
-use plakous_responses_dialect::{ResponsesWireOccurrence, ResponsesWireOccurrenceCounts};
+use plakous_responses::{ResponsesWireOccurrence, ResponsesWireOccurrenceCounts};
 use thiserror::Error;
 
 use crate::native_auth::grok_enrollment;

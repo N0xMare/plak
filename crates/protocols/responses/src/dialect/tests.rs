@@ -4,7 +4,7 @@ use super::*;
 fn openai_profile_matches_platform_defaults() {
     let profile = ResponsesDialectProfile::openai_platform();
     assert_eq!(profile.sequence(), SequencePolicy::RequiredStrict);
-    assert_eq!(profile.terminal(), TerminalPolicy::TypedOptionalDone);
+    assert_eq!(profile.terminal(), TerminalPolicy::OptionalDone);
     assert_eq!(profile.finish(), FinishPolicy::AutoDispatchResidual);
     assert_eq!(profile.bom(), BomPolicy::Ignore);
 }
@@ -18,7 +18,7 @@ fn xai_profile_matches_typed_only_defaults() {
             fields: XAI_SEQUENCE_FIELDS,
         }
     );
-    assert_eq!(profile.terminal(), TerminalPolicy::TypedOnly);
+    assert_eq!(profile.terminal(), TerminalPolicy::Only);
     assert_eq!(profile.finish(), FinishPolicy::BlankLineClosed);
     assert_eq!(profile.bom(), BomPolicy::Ignore);
     assert_eq!(
@@ -38,7 +38,7 @@ fn openrouter_profile_requires_done_and_strips_bom() {
             fields: OPENROUTER_SEQUENCE_FIELDS,
         }
     );
-    assert_eq!(profile.terminal(), TerminalPolicy::TypedThenDone);
+    assert_eq!(profile.terminal(), TerminalPolicy::ThenDone);
     assert_eq!(profile.finish(), FinishPolicy::BlankLineClosed);
     assert_eq!(profile.bom(), BomPolicy::Strip);
     assert_eq!(
@@ -64,8 +64,8 @@ fn required_strict_accepts_contiguous_from_zero() {
     validate_next_sequence(policy, &mut state, Some(0)).expect("0");
     validate_next_sequence(policy, &mut state, Some(1)).expect("1");
     validate_next_sequence(policy, &mut state, Some(2)).expect("2");
-    assert_eq!(state.expected(), 3);
-    assert_eq!(state.last(), Some(2));
+    assert_eq!(state.expected, 3);
+    assert_eq!(state.last, Some(2));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn optional_monotonic_allows_absent_or_contiguous() {
     let mut absent = SequenceState::new();
     validate_next_sequence(policy, &mut absent, None).expect("absent");
     validate_next_sequence(policy, &mut absent, None).expect("still absent");
-    assert_eq!(absent.presence(), Some(false));
+    assert_eq!(absent.presence, Some(false));
 
     let mut present = SequenceState::new();
     validate_next_sequence(policy, &mut present, Some(1)).expect("first any");
@@ -144,7 +144,7 @@ fn optional_monotonic_rejects_presence_flip() {
 
 #[test]
 fn typed_optional_done_accepts_after_terminal_only() {
-    let policy = TerminalPolicy::TypedOptionalDone;
+    let policy = TerminalPolicy::OptionalDone;
     assert_eq!(
         decide_done_marker(policy, false, false),
         DoneMarkerDecision::OutOfOrder

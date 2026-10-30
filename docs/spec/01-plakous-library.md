@@ -2667,11 +2667,7 @@ the feed, never the events.
 
 ## 6. Providers, protocol families, and admission
 
-The published-internal Responses tool-start and terminal-lifecycle APIs accept
-`ToolBlockStart` and `TerminalResponseInput`; Messages request-policy construction
-accepts `MessagesRequestPolicyInput`. These typed inputs retain the exact target,
-replay authority, correlation and terminal fields; they do not change request
-bytes, validation order or canonical projection.
+`plakous-responses` owns the Responses wire kernel and its shared dialect hosts.
 
 ### 6.1 Three kernels, thin dialects
 
@@ -4813,7 +4809,7 @@ locally executed `ConfiguredTool` built with `with_mcp_owner(server)` names its
 MCP server, `ModelRequest::local_tool_owner(exposed)` answers the owner of a
 provider-visible name (through the V2 projection's canonical name when there is
 one), and Messages defaults an advertised tool's `ToolOwnership` entry and
-responses-dialect `canonical_local_tools` its `ResponsesCanonicalToolOwner`
+`plakous-responses` `canonical_local_tools` its `ResponsesCanonicalToolOwner`
 from it. Plak sets it on every Direct tool from the frozen registry's owner. A
 configured MCP owner is part of the provider configuration: it is serialized
 only when present (the field is absent for every other tool, so their encoding
@@ -5031,7 +5027,7 @@ never overwritten. The result is `image_gen wrote <path>: media_type=<type>
 dimensions=<w>x<h> bytes=<n>` and an image part when the file is at most
 196,608 bytes. Under the local write-ahead claim a crash after the claim
 settles `OutcomeUnknown` and is never replayed, so recovery never pays for a
-second image. The Responses kernel (`plakous-responses-dialect`,
+second image. The Responses kernel (`plakous-responses`,
 `run_responses_image`) sends one JSON body to `images/generations`, or
 `images/edits` when inputs are named: `{model, prompt, n:1, size?}` with
 `images[].image_url` data URLs on OpenAI and Codex (at most 16 and 5 inputs),
@@ -6286,7 +6282,7 @@ calls, other annotation types, a second choice and unknown message fields;
 main-exchange streams keep refusing annotations. Binding precedes model
 construction on API routes, so the plan binds a deferred port the executor
 connects once; a call before that connection is an ordinary tool error.
-The Responses kernel (`plakous-responses-dialect`) runs one exchange per side
+The Responses kernel (`plakous-responses`) runs one exchange per side
 request: a one-message `input`, one hosted tool, `tool_choice:"required"`,
 `max_output_tokens` 4,096, `store:false`, the lowest effort the model's ladder
 admits, and `include:["web_search_call.action.sources"]` for web search. Its

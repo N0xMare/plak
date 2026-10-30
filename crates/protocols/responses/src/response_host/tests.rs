@@ -80,7 +80,7 @@ fn opaque_output_items_may_omit_status() {
         "type": "codex_something",
         "encrypted_content": "ciphertext"
     });
-    let Ok(item) = parse_output_item::<ResponsesHostDecodeError>(&value) else {
+    let Ok(item) = parse_output_item(&value) else {
         panic!("opaque item without status must parse");
     };
     assert!(matches!(
@@ -180,7 +180,7 @@ fn unknown_output_item_is_opaque_and_member_preserving() {
     let native = serde_json::json!({
         "type":"future_provider_item","id":"future_1","future_member":{"nested":true}
     });
-    let Ok(item) = parse_output_item::<ResponsesHostDecodeError>(&native) else {
+    let Ok(item) = parse_output_item(&native) else {
         panic!("bounded unknown output item must decode");
     };
     assert!(

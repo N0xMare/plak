@@ -110,12 +110,7 @@ class PerfBuildProfileTests(unittest.TestCase):
             {
                 **perf_build.COMPONENT_BUILD_PROFILES,
                 "attempt": ("plakous-attempt", ("--lib",), ()),
-                "responses-kernel": ("plakous-responses", ("--lib",), ()),
-                "responses-host": (
-                    "plakous-responses-dialect",
-                    ("--lib",),
-                    (),
-                ),
+                "responses": ("plakous-responses", ("--lib",), ()),
                 "messages": ("plakous-messages", ("--lib",), ()),
             },
         )
@@ -134,7 +129,7 @@ class PerfBuildProfileTests(unittest.TestCase):
                 **perf_build.PRODUCT_TOPOLOGY_BUILD_PROFILES,
             },
         )
-        self.assertEqual(len(perf_build.BUILD_PROFILES), 19)
+        self.assertEqual(len(perf_build.BUILD_PROFILES), 18)
         for profile in perf_build.SUPPORTED_PUBLIC_BUILD_PROFILES:
             self.assertEqual(
                 perf_build.build_profile_scope(profile), "supported-public"
@@ -330,8 +325,8 @@ class PerfBuildProfileTests(unittest.TestCase):
                 features,
             ) in perf_build.BUILD_PROFILES.items()
         }
-        self.assertEqual(produced, perf_validator.V9_BUILD_PROFILE_CONTRACTS)
-        self.assertEqual(perf_build.SCHEMA, "plakous.perf-build.v9")
+        self.assertEqual(produced, perf_validator.V10_BUILD_PROFILE_CONTRACTS)
+        self.assertEqual(perf_build.SCHEMA, "plakous.perf-build.v10")
 
     def test_closure_facts_are_sorted_deduplicated_and_content_addressed(self) -> None:
         raw = (
@@ -691,11 +686,26 @@ class PerfBuildProfileTests(unittest.TestCase):
             "benchmark-component",
         )
 
-    def test_v9_fixture_and_archived_contracts_are_exact(self) -> None:
-        self.assertEqual(perf_build.FIXTURE, perf_validator.V9_BUILD_FIXTURE)
+    def test_campaign_v10_selects_its_own_contract(self) -> None:
+        directory = Path("v10-campaign")
+        with patch.object(sys, "argv", ["validator", "--campaign-v10", str(directory)]), patch.object(perf_validator, "validate_v10_campaign") as validate:
+            self.assertEqual(perf_validator.main(), 0)
+        validate.assert_called_once_with(directory)
+
+    def test_v10_fixture_and_archived_contracts_are_exact(self) -> None:
+        self.assertEqual(perf_build.FIXTURE, perf_validator.V10_BUILD_FIXTURE)
+        self.assertEqual(len(perf_validator.V10_BUILD_PROFILE_CONTRACTS), 18)
+        self.assertNotIn("paid-platform", perf_validator.V10_BUILD_PROFILE_CONTRACTS)
+        self.assertNotIn("plak-app", perf_validator.V10_BUILD_PROFILE_CONTRACTS)
         self.assertEqual(len(perf_validator.V9_BUILD_PROFILE_CONTRACTS), 19)
-        self.assertNotIn("paid-platform", perf_validator.V9_BUILD_PROFILE_CONTRACTS)
-        self.assertNotIn("plak-app", perf_validator.V9_BUILD_PROFILE_CONTRACTS)
+        self.assertNotIn("responses", perf_validator.V9_BUILD_PROFILE_CONTRACTS)
+        self.assertEqual(perf_validator.V9_BUILD_PROFILE_CONTRACTS["responses-kernel"][1], "plakous-responses")
+        self.assertEqual(perf_validator.V9_BUILD_PROFILE_CONTRACTS["responses-host"][1], "plakous-responses-dialect")
+        for version, fixture in [(9, perf_validator.V9_BUILD_FIXTURE), (10, perf_validator.V10_BUILD_FIXTURE)]:
+            perf_validator.validate_current_build_fixture({"schema": f"plakous.perf-build.v{version}", "fixture": fixture})
+            perf_validator.validate_current_build_sample_fixture({"schema": f"plakous.perf-build.v{version}", "fixture_revision": version})
+            with self.assertRaises(perf_validator.ValidationError):
+                perf_validator.validate_current_build_sample_fixture({"schema": f"plakous.perf-build.v{version}", "fixture_revision": 10 if version == 9 else 9})
         self.assertEqual(len(perf_validator.V8_BUILD_PROFILE_CONTRACTS), 20)
         self.assertIn("paid-platform", perf_validator.V8_BUILD_PROFILE_CONTRACTS)
         self.assertNotIn("plak-app", perf_validator.V8_BUILD_PROFILE_CONTRACTS)

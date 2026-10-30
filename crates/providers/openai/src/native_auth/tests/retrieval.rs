@@ -3,7 +3,7 @@
 
 use plakous_attempt::ReplaySafety;
 use plakous_auth::subscription_limit::SubscriptionRequestClass;
-use plakous_responses_dialect::{ResponsesRetrievalErrorKind, ResponsesRetrievalQuery};
+use plakous_responses::{ResponsesRetrievalErrorKind, ResponsesRetrievalQuery};
 
 use super::*;
 

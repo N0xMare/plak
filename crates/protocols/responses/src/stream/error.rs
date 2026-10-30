@@ -1,7 +1,7 @@
 //! Kernel-local error classification helpers for stream lifecycle failures.
 //!
 //! Dialects never see this module's types on the public wire; they map through
-//! [`super::hooks::DialectStreamHooks`] into provider error enums.
+//! the concrete family decoder into provider error enums.
 
 /// Resource category strings used when the kernel enforces byte/event caps.
 pub mod resource {

@@ -5,11 +5,11 @@ use super::{
     MAX_REPLAY_KIND_BYTES, MAX_RESPONSE_ID_BYTES, ModelFamilyId, ModelRequest,
     RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION, RawValue,
     ReplayEnvelope, ReplayKindId, ResolvedModelDescriptor, ResponsesArtifact,
-    ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesHostDecodeError,
-    ResponsesReplayError, ResponsesReplayMode, ResponsesReplayPolicy, ResponsesReplayPurpose,
-    ResponsesRequestConfig, ResponsesRequestError, ResponsesRequestPolicy,
-    ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStoragePolicy, Timestamp,
-    ValidatedRequestPlan, Value, fmt, parse_output_item, validate_output_semantic_pair,
+    ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesReplayError, ResponsesReplayMode,
+    ResponsesReplayPolicy, ResponsesReplayPurpose, ResponsesRequestConfig, ResponsesRequestError,
+    ResponsesRequestPolicy, ResponsesSemanticRevisions, ResponsesStorageMode,
+    ResponsesStoragePolicy, Timestamp, ValidatedRequestPlan, Value, fmt, parse_output_item,
+    validate_output_semantic_pair,
 };
 
 /// One versioned replay-envelope kind admitted by the selected dialect.
@@ -79,10 +79,10 @@ impl ResponsesRequestAuthority {
             cache_affinity,
         )
         .map_err(|error| match error {
-            plakous_responses::ResponsesArtifactError::MissingHarnessPlanIdentity => {
+            crate::ResponsesArtifactError::MissingHarnessPlanIdentity => {
                 ResponsesReplayError::IncompleteAuthority
             }
-            plakous_responses::ResponsesArtifactError::AdmissionMismatch => {
+            crate::ResponsesArtifactError::AdmissionMismatch => {
                 ResponsesReplayError::AuthorityMismatch
             }
             _ => ResponsesReplayError::AuthorityConstruction,
@@ -382,11 +382,11 @@ impl ResponsesArtifactReplayBridge {
         let reuse = artifact
             .validate_for_reuse(authority.artifact_binding(), request, now)
             .map_err(|error| match error {
-                plakous_responses::ResponsesArtifactError::BindingMismatch => {
+                crate::ResponsesArtifactError::BindingMismatch => {
                     ResponsesReplayError::ArtifactBindingMismatch
                 }
-                plakous_responses::ResponsesArtifactError::CanonicalCoordinateMismatch
-                | plakous_responses::ResponsesArtifactError::UnauthorizedReplayTail { .. } => {
+                crate::ResponsesArtifactError::CanonicalCoordinateMismatch
+                | crate::ResponsesArtifactError::UnauthorizedReplayTail { .. } => {
                     ResponsesReplayError::ArtifactCanonicalMismatch
                 }
                 _ => ResponsesReplayError::InvalidArtifact,
@@ -508,7 +508,7 @@ impl ResponsesArtifactReplayBridge {
                 if canonical_position >= producing_prefix {
                     let native: Value = serde_json::from_str(envelope.payload().get())
                         .map_err(|_| ResponsesReplayError::MalformedEnvelope)?;
-                    let raw = parse_output_item::<ResponsesHostDecodeError>(&native)
+                    let raw = parse_output_item(&native)
                         .map_err(|_| ResponsesReplayError::MalformedEnvelope)?;
                     validate_output_semantic_pair(&raw, envelope, canonical_item, request)
                         .map_err(|_| ResponsesReplayError::SemanticPairMismatch)?;
@@ -921,8 +921,8 @@ pub(super) fn validated_hosted_programs(
         }
         let native = crate::parse_unique_json_value(replay.payload().get())
             .map_err(|_| ResponsesReplayError::MalformedEnvelope)?;
-        let output = parse_output_item::<ResponsesHostDecodeError>(&native)
-            .map_err(|_| ResponsesReplayError::MalformedEnvelope)?;
+        let output =
+            parse_output_item(&native).map_err(|_| ResponsesReplayError::MalformedEnvelope)?;
         // Each replay was paired under its producing route's canonical policy.
         // This pass only reconstructs hosted-program lineage; the exact Lite
         // functions namespace must remain admissible for that replay.

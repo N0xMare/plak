@@ -53,7 +53,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 38 packages: five supported, 30 published internal
+The workspace contains 37 packages: five supported, 29 published internal
 (the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
@@ -105,8 +105,7 @@ classes and directory policy.
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |
-| `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family kernel: wire grammar, stream framing, limits, sequencing |
-| `plakous-responses-dialect` | `crates/protocols/responses-dialect` | `protocol` | Generic Responses dialect host shapes shared by the Responses commercial routes |
+| `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family wire grammar, stream lifecycle, projection and shared dialect hosts |
 | `plakous-messages` | `crates/protocols/messages` | `protocol` | Messages-family kernel: request grammar, block ordering, thinking/signature replay, stream grammar, wire accounting |
 | `plakous-chat-completions` | `crates/protocols/chat-completions` | `protocol` | Chat Completions kernel: message lowering, one-choice streaming lifecycle, indexed function calls, exact usage, SSE `[DONE]` |
 | `plakous-exchange` | `crates/protocols/exchange` | `protocol` | Physical-exchange plumbing shared by the kernels and providers: transport failure to network-failure facts, bounded error-body reads, the cancellation race, and the turn-retry decline ladder |

@@ -159,7 +159,7 @@ impl LifecycleDialectPolicy {
     /// Codex / ChatGPT subscription Responses dialect (soft terminal / tool-arg).
     ///
     /// **Mirrors OpenRouter** for: required create identity,
-    /// [`ReasoningLifecycleMode::FullParts`], `content_text_done`, and
+    /// `ReasoningLifecycleMode::FullParts`, `content_text_done`, and
     /// `item_id` / `output_index` intermediate correlation.
     ///
     /// **Differs from OpenRouter:**

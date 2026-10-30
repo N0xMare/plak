@@ -45,7 +45,7 @@ pub fn required_value<'a>(
 /// # Errors
 ///
 /// Missing → [`ResponsesFieldError::Missing`]; non-object →
-/// [`ResponsesFieldError::Invalid`].
+/// `ResponsesFieldError::Invalid`.
 pub fn required_object<'a>(
     object: &'a Map<String, Value>,
     field: &'static str,
@@ -60,7 +60,7 @@ pub fn required_object<'a>(
 /// # Errors
 ///
 /// Missing → [`ResponsesFieldError::Missing`]; non-string →
-/// [`ResponsesFieldError::Invalid`].
+/// `ResponsesFieldError::Invalid`.
 pub fn required_string<'a>(
     object: &'a Map<String, Value>,
     field: &'static str,
@@ -77,7 +77,7 @@ pub fn required_string<'a>(
 ///
 /// # Errors
 ///
-/// Returns [`ResponsesFieldError::Invalid`] when the field is present and not a
+/// Returns `ResponsesFieldError::Invalid` when the field is present and not a
 /// string (and not null).
 pub fn optional_string<'a>(
     object: &'a Map<String, Value>,
@@ -95,7 +95,7 @@ pub fn optional_string<'a>(
 /// # Errors
 ///
 /// Missing → [`ResponsesFieldError::Missing`]; non-u64-compatible number or
-/// overflow of `u32` → [`ResponsesFieldError::Invalid`].
+/// overflow of `u32` → `ResponsesFieldError::Invalid`.
 pub fn required_u32(
     object: &Map<String, Value>,
     field: &'static str,
@@ -109,7 +109,7 @@ pub fn required_u32(
 /// # Errors
 ///
 /// Missing → [`ResponsesFieldError::Missing`]; non-u64 JSON number →
-/// [`ResponsesFieldError::Invalid`].
+/// `ResponsesFieldError::Invalid`.
 pub fn required_u64(
     object: &Map<String, Value>,
     field: &'static str,
@@ -125,7 +125,7 @@ pub fn required_u64(
 ///
 /// # Errors
 ///
-/// Returns [`ResponsesFieldError::Invalid`] when the field is present and not a
+/// Returns `ResponsesFieldError::Invalid` when the field is present and not a
 /// JSON u64 (and not null).
 pub fn optional_u64(
     object: &Map<String, Value>,
@@ -144,7 +144,7 @@ pub fn optional_u64(
 ///
 /// # Errors
 ///
-/// Returns [`ResponsesFieldError::Invalid`] when the field is present and not an
+/// Returns `ResponsesFieldError::Invalid` when the field is present and not an
 /// object (and not null).
 pub fn optional_object<'a>(
     object: &'a Map<String, Value>,
@@ -168,7 +168,7 @@ pub const MAX_PROVIDER_LABEL_BYTES: usize = 256;
 ///
 /// # Errors
 ///
-/// Returns [`ResponsesFieldError::Invalid`] when the label is empty, longer than
+/// Returns `ResponsesFieldError::Invalid` when the label is empty, longer than
 /// [`MAX_PROVIDER_LABEL_BYTES`], or contains a Unicode control character.
 pub fn validate_provider_label(
     value: &str,
@@ -218,7 +218,7 @@ pub fn optional_provider_label<'a>(
 ///
 /// Intended for [`crate::SequencePolicy::OptionalMonotonic`] wire keys (for
 /// example `sequence_number` then `sequence`). If **more than one** listed
-/// field is present, fails closed with [`ResponsesFieldError::Invalid`] on the
+/// field is present, fails closed with `ResponsesFieldError::Invalid` on the
 /// first listed field that appears (xAI dual-field conflict semantics).
 ///
 /// Dialects that forbid additional aliases (e.g. `OpenRouter` rejecting

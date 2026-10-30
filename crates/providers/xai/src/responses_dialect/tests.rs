@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use super::*;
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesProviderErrorPolicy, ResponsesResponseLimits, parse_provider_error_with_policy,
 };
 use serde_json::json;

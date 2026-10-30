@@ -245,7 +245,7 @@ impl<Response, ProviderError> ResponsesStreamEventKind<Response, ProviderError> 
     ///
     /// # Errors
     ///
-    /// Propagates [`ResponsesLifecycleError`] from the pure lifecycle machine.
+    /// Propagates `ResponsesLifecycleError` from the pure lifecycle machine.
     #[allow(
         clippy::too_many_lines,
         reason = "one linear host step whose ordering is the invariant"

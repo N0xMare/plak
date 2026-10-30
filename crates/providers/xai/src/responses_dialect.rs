@@ -12,10 +12,8 @@ use plakous_model::{
 use plakous_model::{ModelFamilyId, ModelId, ProtocolId, ReasoningEffort, ReplayKindId};
 use plakous_responses::{LifecycleDialectPolicy, ResponsesDialectProfile};
 #[cfg(feature = "native-auth")]
-use plakous_responses_dialect::{
-    ResponsesProviderConfigurationError, compile_provider_configuration,
-};
-use plakous_responses_dialect::{
+use plakous_responses::{ResponsesProviderConfigurationError, compile_provider_configuration};
+use plakous_responses::{
     ResponsesProviderErrorClass, ResponsesReplayKind, ResponsesReplayProjection,
     ResponsesRequestPolicy, ResponsesStreamDialectData, ResponsesUsagePolicy,
 };
@@ -195,22 +193,20 @@ impl SuperGrokResponsesDialect {
         model_family: Option<ModelFamilyId>,
         model: ModelId,
         account: plakous_model::Digest,
-    ) -> Result<ResponsesReplayProjection, plakous_responses_dialect::ResponsesProjectError> {
+    ) -> Result<ResponsesReplayProjection, plakous_responses::ResponsesProjectError> {
         ResponsesReplayProjection::new(
             protocol,
             model_family,
             model,
-            ReplayKindId::new(SUPERGROK_OUTPUT_ITEM_REPLAY_KIND).map_err(|_| {
-                plakous_responses_dialect::ResponsesProjectError::ProjectionIdentity
-            })?,
+            ReplayKindId::new(SUPERGROK_OUTPUT_ITEM_REPLAY_KIND)
+                .map_err(|_| plakous_responses::ResponsesProjectError::ProjectionIdentity)?,
             SUPERGROK_OUTPUT_ITEM_REPLAY_VERSION,
             account,
         )?
         .requiring_encrypted_reasoning()
         .with_opaque_output_kind(
-            ReplayKindId::new(SUPERGROK_OPAQUE_OUTPUT_REPLAY_KIND).map_err(|_| {
-                plakous_responses_dialect::ResponsesProjectError::ProjectionIdentity
-            })?,
+            ReplayKindId::new(SUPERGROK_OPAQUE_OUTPUT_REPLAY_KIND)
+                .map_err(|_| plakous_responses::ResponsesProjectError::ProjectionIdentity)?,
             SUPERGROK_OPAQUE_OUTPUT_REPLAY_VERSION,
         )
     }

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use crate::{CanonicalIdSources, ResponsesArtifactBinding};
 use futures_core::Stream;
 use plakous_attempt::{FailureRisk, RetryClass, TerminalFacts};
 use plakous_exchange::network_failure;
@@ -29,7 +30,6 @@ use plakous_model::{
     ModelRetryRisk, ModelRetryability, ModelStream, ResolvedModelDescriptor, StartModelCall,
     ValidatedRequestPlan,
 };
-use plakous_responses::{CanonicalIdSources, ResponsesArtifactBinding};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -919,7 +919,7 @@ fn seal_terminal_events(
         // continuation, or cache fact. In that case the correct family
         // artifact is absence; canonical terminal authority remains complete.
         Err(crate::ResponsesProjectError::Artifact(
-            plakous_responses::ResponsesArtifactError::EmptyArtifact,
+            crate::ResponsesArtifactError::EmptyArtifact,
         )) => None,
         Err(error) => {
             let diagnostic = match error {
@@ -936,22 +936,22 @@ fn seal_terminal_events(
                     "Responses terminal artifact rejected committed coverage"
                 }
                 crate::ResponsesProjectError::Artifact(error) => match error {
-                    plakous_responses::ResponsesArtifactError::IncompleteReplayCoverage => {
+                    crate::ResponsesArtifactError::IncompleteReplayCoverage => {
                         "Responses terminal artifact had incomplete native replay coverage"
                     }
-                    plakous_responses::ResponsesArtifactError::SecretReplayMaterial { .. } => {
+                    crate::ResponsesArtifactError::SecretReplayMaterial { .. } => {
                         "Responses terminal artifact contained forbidden raw secret replay"
                     }
-                    plakous_responses::ResponsesArtifactError::ReplayBindingMismatch { .. } => {
+                    crate::ResponsesArtifactError::ReplayBindingMismatch { .. } => {
                         "Responses terminal artifact replay binding disagreed"
                     }
-                    plakous_responses::ResponsesArtifactError::ReplayPurposeKindMismatch {
-                        ..
-                    } => "Responses terminal artifact replay kind disagreed",
-                    plakous_responses::ResponsesArtifactError::ProductionBindingMismatch => {
+                    crate::ResponsesArtifactError::ReplayPurposeKindMismatch { .. } => {
+                        "Responses terminal artifact replay kind disagreed"
+                    }
+                    crate::ResponsesArtifactError::ProductionBindingMismatch => {
                         "Responses terminal artifact production binding disagreed"
                     }
-                    plakous_responses::ResponsesArtifactError::InvalidCoordinates => {
+                    crate::ResponsesArtifactError::InvalidCoordinates => {
                         "Responses terminal artifact production coordinates disagreed"
                     }
                     _ => "Responses terminal artifact rejected family-local facts",

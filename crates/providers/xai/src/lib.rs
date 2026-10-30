@@ -59,10 +59,8 @@ pub use native_auth::{
     subscription_coding_model_ids, subscription_model_reasoning_effort_options,
     subscription_model_supports_reasoning,
 };
-pub use plakous_responses_dialect::{
-    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource,
-};
-pub use plakous_responses_dialect::{
+pub use plakous_responses::{ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource};
+pub use plakous_responses::{
     ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
     ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalSource,
     ResponsesRetrievalUsage, lowest_responses_effort,

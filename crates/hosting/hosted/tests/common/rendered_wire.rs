@@ -43,7 +43,7 @@ pub(crate) mod suite {
         CHAT_COMPLETIONS_FAMILY_ID, OPENROUTER_CHAT_PROTOCOL_ID, OPENROUTER_MESSAGES_PROTOCOL_ID,
         OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterAttribution,
     };
-    use plakous_responses_dialect::{
+    use plakous_responses::{
         ResponsesRequestConfig, ResponsesRequestPolicy, ResponsesRouterPolicy,
         lower_responses_request,
     };

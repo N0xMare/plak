@@ -676,12 +676,12 @@ fn accepted_hosted_effect_capability_suppresses_automatic_retry() {
     );
 }
 
+use crate::ResponsesStorageMode;
 use crate::{
     ResponsesProviderRequestBinding, ResponsesReplayProjection, ResponsesResponse,
     ResponsesUsagePolicy, project_host::project_terminal_response,
 };
 use plakous_model::{Digest, DigestDomain, FinishReason, FixedClock, ReplayKindId, Timestamp};
-use plakous_responses::ResponsesStorageMode;
 use serde_json::json;
 
 #[test]

@@ -23,7 +23,7 @@ impl LanguageModel for OpenAiLanguageModel {
             self.current_target().ok()?.target.route().origin().as_str(),
         )
         .ok()?;
-        Some(plakous_responses_dialect::bind_reachability_probe(
+        Some(plakous_responses::bind_reachability_probe(
             self.client.clone(),
             origin,
             self.descriptor.route().clone(),

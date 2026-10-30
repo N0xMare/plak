@@ -1018,7 +1018,7 @@ dependencies = [
  "plakous-openai",
  "plakous-openrouter",
  "plakous-prompts",
- "plakous-responses-dialect",
+ "plakous-responses",
  "plakous-store",
  "plakous-tool-files",
  "plakous-tool-plan",
@@ -1297,7 +1297,6 @@ dependencies = [
  "plakous-http",
  "plakous-model",
  "plakous-responses",
- "plakous-responses-dialect",
  "secrecy",
  "serde",
  "serde_json",
@@ -1320,7 +1319,6 @@ dependencies = [
  "plakous-messages",
  "plakous-model",
  "plakous-responses",
- "plakous-responses-dialect",
  "secrecy",
  "serde",
  "serde_json",
@@ -1355,17 +1353,6 @@ dependencies = [
 name = "plakous-responses"
 version = "0.0.2"
 dependencies = [
- "plakous-http",
- "plakous-model",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "plakous-responses-dialect"
-version = "0.0.2"
-dependencies = [
  "base64 0.22.1",
  "futures-core",
  "httpdate",
@@ -1373,7 +1360,6 @@ dependencies = [
  "plakous-exchange",
  "plakous-http",
  "plakous-model",
- "plakous-responses",
  "serde",
  "serde_json",
  "sha2",
@@ -1497,7 +1483,6 @@ dependencies = [
  "plakous-http",
  "plakous-model",
  "plakous-responses",
- "plakous-responses-dialect",
  "serde",
  "serde_json",
  "sha2",

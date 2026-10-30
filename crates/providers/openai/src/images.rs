@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use plakous_model::CancellationToken;
 #[cfg(feature = "native-auth")]
-use plakous_responses_dialect::ResponsesRetrievalDispatch;
-use plakous_responses_dialect::{
+use plakous_responses::ResponsesRetrievalDispatch;
+use plakous_responses::{
     RESPONSES_IMAGE_EXCHANGE_TIMEOUT, ResponsesImageAuthorization, ResponsesImageEndpoint,
     ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageTransport, ResponsesRetrievalError,
     ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, run_responses_image,
@@ -198,7 +198,7 @@ impl ResponsesImageTransport for CodexImageRequest<'_> {
         })
     }
 
-    fn credential_rejected(&self) -> plakous_responses_dialect::ResponsesCredentialRefresh<'_> {
+    fn credential_rejected(&self) -> plakous_responses::ResponsesCredentialRefresh<'_> {
         Box::pin(self.images.model.codex_side_request_rejected())
     }
 }

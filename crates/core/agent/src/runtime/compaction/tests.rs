@@ -357,7 +357,7 @@ mod placeholders {
         );
     }
 
-    /// Pins the projection that responses-dialect's
+    /// Pins the projection that `plakous-responses`'s
     /// `fresh_codex_body_matches_portable_reasoning_projection` reproduces:
     /// reasoning is dropped and an item left without blocks is elided.
     #[test]

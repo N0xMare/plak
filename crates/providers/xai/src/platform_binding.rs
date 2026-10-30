@@ -14,7 +14,7 @@ use plakous_model::{
     ProviderRouteSelection, ResolvedModelDescriptor, RouteId, RuntimeModelAuthority,
     SelectedProviderConfiguration, Support, Timestamp,
 };
-use plakous_responses_dialect::{CredentialGenerationFingerprint, CredentialProviderTag};
+use plakous_responses::{CredentialGenerationFingerprint, CredentialProviderTag};
 use std::{collections::BTreeMap, fmt, num::NonZeroU64};
 use zeroize::Zeroizing;
 

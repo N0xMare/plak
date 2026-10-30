@@ -96,11 +96,9 @@ pub use native_auth::{
     SubscriptionIntegrationProvenance, release_enrolled_codex_model,
     release_enrolled_codex_tool_mode,
 };
-pub use plakous_responses_dialect::ResponsesProviderConfigurationError;
-pub use plakous_responses_dialect::{
-    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource,
-};
-pub use plakous_responses_dialect::{
+pub use plakous_responses::ResponsesProviderConfigurationError;
+pub use plakous_responses::{ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource};
+pub use plakous_responses::{
     ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
     ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalSource,
     ResponsesRetrievalUsage, lowest_responses_effort,

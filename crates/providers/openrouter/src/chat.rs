@@ -907,7 +907,7 @@ impl OpenRouterChatLanguageModel {
 impl LanguageModel for OpenRouterChatLanguageModel {
     fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
         let origin = Origin::parse(self.target.route.identity().origin().as_str()).ok()?;
-        Some(plakous_responses_dialect::bind_reachability_probe(
+        Some(plakous_responses::bind_reachability_probe(
             self.client.clone(),
             origin,
             self.target.descriptor().route().clone(),

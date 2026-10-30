@@ -998,7 +998,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 38)
+        self.assertEqual(len(workspace.packages), 37)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -1085,7 +1085,6 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-openai",
                 "plakous-openrouter",
                 "plakous-responses",
-                "plakous-responses-dialect",
                 "plakous-store",
                 "plakous-xai",
             },
@@ -1097,7 +1096,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 38)
+        self.assertEqual(sum(map(len, actual.values())), 37)
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
@@ -1229,7 +1228,7 @@ class RepositoryPolicyTests(unittest.TestCase):
             self.workspace.policy.edge_exceptions,
             {
                 "plakous-compose": ("plakous-codex-code-mode-protocol",),
-                "plakous": ("plakous-exchange", "plakous-responses-dialect"),
+                "plakous": ("plakous-exchange", "plakous-responses"),
                 "plakous-auth": ("plakous-model",),
                 "plak": (
                     "plakous-host-protocol",
@@ -2381,7 +2380,7 @@ class FeaturePolicyTests(unittest.TestCase):
         )
         self.assertEqual(edges["plakous-agent"], {"plakous-model", "plakous-tools"})
         self.assertEqual(edges["plakous-store"], {"plakous-agent"})
-        self.assertIn("plakous-responses-dialect", edges["plakous-openai"])
+        self.assertIn("plakous-responses", edges["plakous-openai"])
         self.assertIn("plakous-codex-code-mode-protocol", edges["plakous-compose"])
         self.assertEqual(edges["plakous-codex-code-mode-protocol"], set())
         self.assertNotIn("plakous-dispatch", edges)

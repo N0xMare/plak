@@ -1,7 +1,7 @@
 //! Codex-only recovery advice for subscription usage-limit refusals.
 
 use plakous_model::{ModelError, ResolvedModelDescriptor};
-use plakous_responses_dialect::ResponsesAttemptError;
+use plakous_responses::ResponsesAttemptError;
 
 pub(super) fn model_error(
     error: &ResponsesAttemptError,
@@ -48,10 +48,10 @@ mod tests {
             ),
         );
         let fixture = serde_json::json!({"error":{"type":"usage_limit_reached","code":"usage_limit_reached","resets_at":4_102_444_812_u64}});
-        let provider = plakous_responses_dialect::parse_provider_error_with_policy(
+        let provider = plakous_responses::parse_provider_error_with_policy(
             &fixture["error"],
-            plakous_responses_dialect::ResponsesResponseLimits::default(),
-            plakous_responses_dialect::ResponsesProviderErrorPolicy::OpenAiCompatible,
+            plakous_responses::ResponsesResponseLimits::default(),
+            plakous_responses::ResponsesProviderErrorPolicy::OpenAiCompatible,
         )?
         .with_request_id(Some("req_usage_limit_fixture"))?;
         for (provider_acceptance, hosted_effects_possible) in [
@@ -72,7 +72,7 @@ mod tests {
             let error = ResponsesAttemptError::HttpStatus {
                 physical: None,
                 status: plakous_http::StatusCode::TOO_MANY_REQUESTS,
-                class: plakous_responses_dialect::ResponsesHttpStatusClass::Quota,
+                class: plakous_responses::ResponsesHttpStatusClass::Quota,
                 provider: Some(provider.clone()),
                 retry_after: None,
                 retry_disabled: true,

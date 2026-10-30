@@ -5,33 +5,32 @@
 
 use std::fmt;
 
+use crate::{
+    BomPolicy, FinishPolicy, LifecycleDialectPolicy, ReasoningLifecycleMode, ResponsesDecodeLimits,
+    ResponsesDialectProfile, ResponsesFieldError, ResponsesLifecycle, ResponsesLifecycleError,
+    ResponsesStreamLimits, SequencePolicy, SequenceValidationError, TerminalPolicy,
+    required_object, required_provider_label, required_string, required_u32,
+};
 pub use event_kind::ResponsesStreamEventKind;
 use plakous_http::SseError;
 use plakous_model::{Digest, DigestDomain};
-use plakous_responses::{
-    BomPolicy, DialectStreamHooks, FinishPolicy, LifecycleDialectPolicy, ReasoningLifecycleMode,
-    ResponsesDecodeLimits, ResponsesDialectProfile, ResponsesFieldError, ResponsesLifecycle,
-    ResponsesLifecycleError, ResponsesStreamLimits, SequencePolicy, SequenceValidationError,
-    TerminalPolicy, required_object, required_provider_label, required_string, required_u32,
-};
 use serde_json::{Map, Value};
 
 use crate::response_host::{
-    ResponsesAnnotation, ResponsesHostDecodeError, ResponsesOutputItem,
-    ResponsesProviderErrorPolicy, ResponsesResponse, ResponsesResponseLimits,
-    ResponsesResponseStatus, ResponsesUsagePolicy, parse_annotation, parse_output_item,
-    parse_provider_error_with_canonical_type, parse_unique_json_value,
+    ResponsesAnnotation, ResponsesOutputItem, ResponsesProviderErrorPolicy, ResponsesResponse,
+    ResponsesResponseLimits, ResponsesResponseStatus, ResponsesUsagePolicy, parse_annotation,
+    parse_output_item, parse_provider_error_with_canonical_type, parse_unique_json_value,
     validate_bounded_unknown_item,
 };
 
 mod decoder;
 mod error;
 
-pub use decoder::{ResponsesFamilySseDecoder, ResponsesSseDecoderFront, required_output_index};
+pub use decoder::ResponsesFamilySseDecoder;
 use error::map_lifecycle_error;
 pub use error::{
-    ResponsesFamilyStreamError, ResponsesFamilyStreamEvent, ResponsesStreamHostError,
-    map_sequence_error_standard, map_sse_error_standard,
+    ResponsesFamilyStreamError, ResponsesFamilyStreamEvent, map_sequence_error_standard,
+    map_sse_error_standard,
 };
 
 mod event_kind;
@@ -283,7 +282,7 @@ impl ResponsesStreamDialectData {
 
     /// Returns how provider-reported response model identity is bound.
     #[must_use]
-    pub const fn model_binding(&self) -> plakous_responses::ResponseModelBinding {
+    pub const fn model_binding(&self) -> crate::ResponseModelBinding {
         self.lifecycle.model_binding
     }
 
@@ -295,34 +294,27 @@ impl ResponsesStreamDialectData {
                 owned.extend(fields.iter().map(|field| field.as_bytes().to_vec()));
                 b"optional-monotonic".as_slice()
             }
-            _ => return None,
         };
         let terminal = match self.profile.terminal() {
-            TerminalPolicy::TypedOnly => b"typed-only".as_slice(),
-            TerminalPolicy::TypedThenDone => b"typed-then-done".as_slice(),
-            TerminalPolicy::TypedOptionalDone => b"typed-optional-done".as_slice(),
-            _ => return None,
+            TerminalPolicy::Only => b"typed-only".as_slice(),
+            TerminalPolicy::ThenDone => b"typed-then-done".as_slice(),
+            TerminalPolicy::OptionalDone => b"typed-optional-done".as_slice(),
         };
         let finish = match self.profile.finish() {
             FinishPolicy::BlankLineClosed => b"blank-line-closed".as_slice(),
             FinishPolicy::AutoDispatchResidual => b"auto-dispatch-residual".as_slice(),
-            _ => return None,
         };
         let bom = match self.profile.bom() {
             BomPolicy::Strip => b"strip".as_slice(),
             BomPolicy::Ignore => b"ignore".as_slice(),
-            _ => return None,
         };
         let reasoning = match self.lifecycle.reasoning {
             ReasoningLifecycleMode::DeltaOnly => b"delta-only".as_slice(),
             ReasoningLifecycleMode::FullParts => b"full-parts".as_slice(),
-            _ => return None,
         };
         let model_binding = match self.lifecycle.model_binding {
-            plakous_responses::ResponseModelBinding::ExactRequest => b"exact-request".as_slice(),
-            plakous_responses::ResponseModelBinding::ProviderReported => {
-                b"provider-reported".as_slice()
-            }
+            crate::ResponseModelBinding::ExactRequest => b"exact-request".as_slice(),
+            crate::ResponseModelBinding::ProviderReported => b"provider-reported".as_slice(),
         };
         let usage = match self.usage_policy {
             ResponsesUsagePolicy::RequireTotal => b"require-total".as_slice(),
@@ -384,13 +376,13 @@ impl ResponsesStreamDialectData {
     }
 }
 
-struct ResponsesFamilyHooks {
+pub(crate) struct ResponsesFamilyHooks {
     data: ResponsesStreamDialectData,
     lifecycle: ResponsesLifecycle,
 }
 
 impl ResponsesFamilyHooks {
-    fn new(data: ResponsesStreamDialectData) -> Self {
+    pub(crate) fn new(data: ResponsesStreamDialectData) -> Self {
         let lifecycle = ResponsesLifecycle::new(data.lifecycle);
         Self { data, lifecycle }
     }
@@ -400,7 +392,7 @@ impl ResponsesFamilyHooks {
         object: &Map<String, Value>,
         output_index: u32,
     ) -> Result<Option<String>, ResponsesFamilyStreamError> {
-        let item_id = plakous_responses::optional_provider_label(object, "item_id")?;
+        let item_id = crate::optional_provider_label(object, "item_id")?;
         if self.data.event_policy == ResponsesEventPolicy::OpenRouter && item_id.is_none() {
             return Err(ResponsesFamilyStreamError::InvalidField("item_id"));
         }
@@ -447,10 +439,8 @@ impl ResponsesFamilyHooks {
             "response.created" => {
                 let response = required_object(object, "response")?;
                 ResponsesStreamEventKind::ResponseCreated {
-                    response_id: plakous_responses::optional_provider_label(response, "id")?
-                        .map(str::to_owned),
-                    model: plakous_responses::optional_provider_label(response, "model")?
-                        .map(str::to_owned),
+                    response_id: crate::optional_provider_label(response, "id")?.map(str::to_owned),
+                    model: crate::optional_provider_label(response, "model")?.map(str::to_owned),
                 }
             }
             "response.in_progress" => {
@@ -468,7 +458,7 @@ impl ResponsesFamilyHooks {
                 }
             }
             "response.output_item.added" | "response.output_item.done" => {
-                let output_index = required_output_index::<ResponsesFamilyStreamError>(
+                let output_index = required_output_index(
                     object,
                     ResponsesDecodeLimits::new(
                         self.data.response_limits.max_unknown_bytes(),
@@ -478,7 +468,7 @@ impl ResponsesFamilyHooks {
                     )
                     .map_err(|_| ResponsesFamilyStreamError::ResourceLimit("decode limits"))?,
                 )?;
-                let item = parse_output_item::<ResponsesHostDecodeError>(
+                let item = parse_output_item(
                     object
                         .get("item")
                         .ok_or(ResponsesFamilyStreamError::InvalidField("item"))?,
@@ -734,7 +724,7 @@ impl ResponsesFamilyHooks {
                 {
                     return Err(ResponsesFamilyStreamError::Unsupported("citations"));
                 }
-                let annotation = parse_annotation::<ResponsesHostDecodeError>(
+                let annotation = parse_annotation(
                     object
                         .get("annotation")
                         .ok_or(ResponsesFamilyStreamError::InvalidField("annotation"))?,
@@ -763,9 +753,8 @@ impl ResponsesFamilyHooks {
             }
             "response.error" if self.data.event_policy == ResponsesEventPolicy::OpenRouter => {
                 let payload = object.get("error").unwrap_or(value);
-                let request_id = plakous_responses::optional_provider_label(object, "request_id")?;
-                let canonical_error_type =
-                    plakous_responses::optional_provider_label(object, "error_type")?;
+                let request_id = crate::optional_provider_label(object, "request_id")?;
+                let canonical_error_type = crate::optional_provider_label(object, "error_type")?;
                 ResponsesStreamEventKind::Error(
                     parse_provider_error_with_canonical_type(
                         payload,
@@ -778,10 +767,10 @@ impl ResponsesFamilyHooks {
             }
             "error" => {
                 let payload = object.get("error").unwrap_or(value);
-                let request_id = plakous_responses::optional_provider_label(object, "request_id")?;
+                let request_id = crate::optional_provider_label(object, "request_id")?;
                 let canonical_error_type =
                     if self.data.error_policy == ResponsesProviderErrorPolicy::OpenRouter {
-                        plakous_responses::optional_provider_label(object, "error_type")?
+                        crate::optional_provider_label(object, "error_type")?
                     } else {
                         None
                     };
@@ -880,8 +869,7 @@ impl ResponsesFamilyHooks {
             self.data.error_policy,
             self.data.response_limits,
         )?;
-        if self.data.lifecycle.model_binding
-            == plakous_responses::ResponseModelBinding::ExactRequest
+        if self.data.lifecycle.model_binding == crate::ResponseModelBinding::ExactRequest
             && response.model() != self.data.expected_model
         {
             return Err(ResponsesFamilyStreamError::InvalidLifecycle);
@@ -923,7 +911,7 @@ impl ResponsesFamilyHooks {
             .map(ResponsesOutputItem::native)
             .collect::<Vec<_>>();
         self.lifecycle
-            .terminal_response(plakous_responses::TerminalResponseInput {
+            .terminal_response(crate::TerminalResponseInput {
                 response_id: response.id(),
                 response_model: Some(response.model()),
                 event_status: expected_status,
@@ -958,56 +946,59 @@ impl ResponsesFamilyHooks {
     }
 }
 
-impl DialectStreamHooks for ResponsesFamilyHooks {
-    type Event = ResponsesFamilyStreamEvent;
-    type Error = ResponsesFamilyStreamError;
-
-    fn map_sse_error(error: SseError, limits: &ResponsesStreamLimits) -> Self::Error {
+impl ResponsesFamilyHooks {
+    pub(crate) fn map_sse_error(
+        error: SseError,
+        limits: &ResponsesStreamLimits,
+    ) -> ResponsesFamilyStreamError {
         map_sse_error_standard(error, limits)
     }
 
-    fn map_sequence_error(error: SequenceValidationError) -> Self::Error {
+    pub(crate) fn map_sequence_error(error: SequenceValidationError) -> ResponsesFamilyStreamError {
         map_sequence_error_standard(error)
     }
 
-    fn map_done_forbidden() -> Self::Error {
+    pub(crate) fn map_done_forbidden() -> ResponsesFamilyStreamError {
         ResponsesFamilyStreamError::DonePolicy
     }
 
-    fn map_event_after_terminal() -> Self::Error {
+    pub(crate) fn map_event_after_terminal() -> ResponsesFamilyStreamError {
         ResponsesFamilyStreamError::EventAfterTerminal
     }
 
-    fn map_truncated() -> Self::Error {
+    pub(crate) fn map_truncated() -> ResponsesFamilyStreamError {
         ResponsesFamilyStreamError::Truncated
     }
 
-    fn map_missing_terminal() -> Self::Error {
+    pub(crate) fn map_missing_terminal() -> ResponsesFamilyStreamError {
         ResponsesFamilyStreamError::MissingTerminal
     }
 
-    fn map_missing_done() -> Self::Error {
+    pub(crate) fn map_missing_done() -> ResponsesFamilyStreamError {
         ResponsesFamilyStreamError::DonePolicy
     }
 
-    fn map_resource_limit(resource: &'static str, _maximum: usize) -> Self::Error {
+    pub(crate) fn map_resource_limit(
+        resource: &'static str,
+        _maximum: usize,
+    ) -> ResponsesFamilyStreamError {
         ResponsesFamilyStreamError::ResourceLimit(resource)
     }
 
-    fn map_field_error(error: ResponsesFieldError) -> Self::Error {
+    pub(crate) fn map_field_error(error: ResponsesFieldError) -> ResponsesFamilyStreamError {
         error.into()
     }
 
-    fn event_is_terminal(event: &Self::Event) -> bool {
+    pub(crate) fn event_is_terminal(event: &ResponsesFamilyStreamEvent) -> bool {
         event.is_terminal()
     }
 
-    fn decode_json_event(
+    pub(crate) fn decode_json_event(
         &mut self,
         data: &str,
         event_name: Option<&str>,
         _sequence: Option<u64>,
-    ) -> Result<Option<Self::Event>, Self::Error> {
+    ) -> Result<Option<ResponsesFamilyStreamEvent>, ResponsesFamilyStreamError> {
         let value: Value = match self.data.json_policy {
             ResponsesJsonPolicy::Standard => serde_json::from_str(data),
             ResponsesJsonPolicy::UniqueMembers => parse_unique_json_value(data),
@@ -1030,6 +1021,22 @@ fn output_index(
 ) -> Result<u32, ResponsesFamilyStreamError> {
     let index = required_u32(object, "output_index")?;
     if usize::try_from(index).map_or(true, |index| index >= limits.max_output_items()) {
+        return Err(ResponsesFamilyStreamError::ResourceLimit("output items"));
+    }
+    Ok(index)
+}
+
+fn required_output_index(
+    object: &Map<String, Value>,
+    limits: ResponsesDecodeLimits,
+) -> Result<u32, ResponsesFamilyStreamError> {
+    let index = required_u32(object, "output_index")?;
+    let index_usize = usize::try_from(index).map_err(|_| {
+        ResponsesFamilyStreamError::from(ResponsesFieldError::Invalid {
+            field: "output_index",
+        })
+    })?;
+    if index_usize >= limits.max_output_items() {
         return Err(ResponsesFamilyStreamError::ResourceLimit("output items"));
     }
     Ok(index)

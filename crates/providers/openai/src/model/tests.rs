@@ -21,7 +21,7 @@ use plakous_responses::{
     ResponsesArtifactReplayKind, ResponsesReplayContract, ResponsesReplayItem,
     ResponsesReplayPurpose, ResponsesSemanticRevisions, ResponsesStorageMode,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesReplayMode, ResponsesRequestAuthority, ResponsesRequestConfig, ResponsesStoragePolicy,
     lower_responses_request,
 };
@@ -474,8 +474,8 @@ fn transition_fixture() -> TestResult<TransitionFixture> {
 
 fn lower(
     request: &ModelRequest,
-    bridge: Option<&plakous_responses_dialect::ResponsesArtifactReplayBridge>,
-) -> TestResult<plakous_responses_dialect::LoweredResponsesRequest> {
+    bridge: Option<&plakous_responses::ResponsesArtifactReplayBridge>,
+) -> TestResult<plakous_responses::LoweredResponsesRequest> {
     let descriptor = descriptor(OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID)?;
     Ok(lower_responses_request(
         request,
@@ -484,7 +484,7 @@ fn lower(
             descriptor.model_family(),
             descriptor.requested_model(),
             codex_request_policy(&descriptor, false),
-            bridge.map(plakous_responses_dialect::ResponsesArtifactReplayBridge::context),
+            bridge.map(plakous_responses::ResponsesArtifactReplayBridge::context),
         ),
     )?)
 }
@@ -610,7 +610,7 @@ fn native_artifact_hard_refusals_keep_typed_preparation_provenance() -> TestResu
 fn native_compaction_keeps_the_anchored_encrypted_replay_items_exact() -> TestResult {
     let fixture = encrypted_transition_fixture()?;
     let bridge = |request: &ModelRequest| -> TestResult<
-        Option<plakous_responses_dialect::ResponsesArtifactReplayBridge>,
+        Option<plakous_responses::ResponsesArtifactReplayBridge>,
     > {
         codex_artifact_replay_bridge(
             Some(&fixture.active),
@@ -661,10 +661,8 @@ fn native_compaction_keeps_the_anchored_encrypted_replay_items_exact() -> TestRe
             authority(&native, "foreign.route")?,
             now()?,
         ),
-        Err(plakous_responses_dialect::ResponsesRequestError::Replay(
-            plakous_responses_dialect::ResponsesReplayError::ArtifactTargetMismatch {
-                axis: "route"
-            }
+        Err(plakous_responses::ResponsesRequestError::Replay(
+            plakous_responses::ResponsesReplayError::ArtifactTargetMismatch { axis: "route" }
         ))
     ));
     Ok(())

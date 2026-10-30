@@ -12,8 +12,8 @@ use std::sync::Arc;
 use plakous_http::Client;
 use plakous_model::CancellationToken;
 #[cfg(feature = "native-auth")]
-use plakous_responses_dialect::ResponsesRetrievalDispatch;
-use plakous_responses_dialect::{
+use plakous_responses::ResponsesRetrievalDispatch;
+use plakous_responses::{
     ResponsesRetrievalAuthorization, ResponsesRetrievalError, ResponsesRetrievalErrorKind,
     ResponsesRetrievalFlavor, ResponsesRetrievalLimits, ResponsesRetrievalOutcome,
     ResponsesRetrievalQuery, ResponsesRetrievalRequest, ResponsesRetrievalTransport,
@@ -118,7 +118,7 @@ impl ResponsesRetrievalTransport for XaiRetrieval {
         })
     }
 
-    fn credential_rejected(&self) -> plakous_responses_dialect::ResponsesCredentialRefresh<'_> {
+    fn credential_rejected(&self) -> plakous_responses::ResponsesCredentialRefresh<'_> {
         match &self.executor {
             Executor::Api(_) => Box::pin(std::future::ready(false)),
             #[cfg(feature = "native-auth")]

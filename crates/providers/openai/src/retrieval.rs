@@ -10,7 +10,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use plakous_model::CancellationToken;
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesRetrievalAuthorization, ResponsesRetrievalError, ResponsesRetrievalErrorKind,
     ResponsesRetrievalFlavor, ResponsesRetrievalLimits, ResponsesRetrievalOutcome,
     ResponsesRetrievalQuery, ResponsesRetrievalRequest, ResponsesRetrievalTransport,

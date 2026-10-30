@@ -52,7 +52,7 @@ vt100.workspace = true
 # is spelled as User/Instruction: a shape every dialect can carry.
 plakous-chat-completions.workspace = true
 plakous-messages.workspace = true
-plakous-responses-dialect.workspace = true
+plakous-responses.workspace = true
 tempfile.workspace = true
 
 [lints]

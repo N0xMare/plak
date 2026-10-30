@@ -3831,7 +3831,7 @@ dependencies = [
  "plakous-openai",
  "plakous-openrouter",
  "plakous-prompts",
- "plakous-responses-dialect",
+ "plakous-responses",
  "plakous-store",
  "plakous-test-support",
  "plakous-tool-files",
@@ -4049,7 +4049,7 @@ dependencies = [
  "plakous-openrouter",
  "plakous-recursive-subagents",
  "plakous-recursive-subagents-store",
- "plakous-responses-dialect",
+ "plakous-responses",
  "plakous-tools",
  "plakous-workspace",
  "proptest",
@@ -4199,7 +4199,7 @@ dependencies = [
  "plakous-http",
  "plakous-messages",
  "plakous-model",
- "plakous-responses-dialect",
+ "plakous-responses",
  "plakous-store",
  "portable-pty",
  "rusqlite",
@@ -4225,7 +4225,6 @@ dependencies = [
  "plakous-http",
  "plakous-model",
  "plakous-responses",
- "plakous-responses-dialect",
  "plakous-test-support",
  "plakous-tools",
  "rcgen",
@@ -4256,7 +4255,6 @@ dependencies = [
  "plakous-messages",
  "plakous-model",
  "plakous-responses",
- "plakous-responses-dialect",
  "plakous-tools",
  "rcgen",
  "rustls",
@@ -4337,17 +4335,6 @@ dependencies = [
 name = "plakous-responses"
 version = "0.0.2"
 dependencies = [
- "plakous-http",
- "plakous-model",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "plakous-responses-dialect"
-version = "0.0.2"
-dependencies = [
  "base64 0.22.1",
  "futures-core",
  "httpdate",
@@ -4355,7 +4342,6 @@ dependencies = [
  "plakous-exchange",
  "plakous-http",
  "plakous-model",
- "plakous-responses",
  "rcgen",
  "rustls",
  "serde",
@@ -4524,7 +4510,6 @@ dependencies = [
  "plakous-http",
  "plakous-model",
  "plakous-responses",
- "plakous-responses-dialect",
  "plakous-test-support",
  "rcgen",
  "ring",

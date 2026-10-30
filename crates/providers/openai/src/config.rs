@@ -30,9 +30,9 @@ use plakous_model::{
     ModelRequest, ProtocolId, ResolvedModelDescriptor, RouteId, Support, SystemClock,
     ValidatedRequestPlan,
 };
-use plakous_responses_dialect::CredentialGenerationFingerprint;
+use plakous_responses::CredentialGenerationFingerprint;
 #[cfg(feature = "native-auth")]
-use plakous_responses_dialect::ResponsesPhysicalRequestBinding;
+use plakous_responses::ResponsesPhysicalRequestBinding;
 use secrecy::{ExposeSecret as _, SecretString as SecrecyString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
@@ -676,12 +676,10 @@ impl OpenAiApiKeyGenerationGrant {
 
 pub(crate) fn mint_openai_generation(
     binding: &[u8],
-) -> Result<
-    CredentialGenerationFingerprint,
-    plakous_responses_dialect::CredentialGenerationFingerprintError,
-> {
+) -> Result<CredentialGenerationFingerprint, plakous_responses::CredentialGenerationFingerprintError>
+{
     CredentialGenerationFingerprint::mint_exact(
-        plakous_responses_dialect::CredentialProviderTag::OpenAiPlatform,
+        plakous_responses::CredentialProviderTag::OpenAiPlatform,
         binding,
     )
 }

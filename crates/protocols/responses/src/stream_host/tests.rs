@@ -13,8 +13,7 @@ fn stream_identity_covers_model_binding_and_reasoning_text_lifecycle() -> Result
     let base_identity = base.execution_identity().ok_or("base identity")?;
 
     let mut different_binding = base.clone();
-    different_binding.lifecycle.model_binding =
-        plakous_responses::ResponseModelBinding::ExactRequest;
+    different_binding.lifecycle.model_binding = crate::ResponseModelBinding::ExactRequest;
     assert_ne!(
         base_identity,
         different_binding

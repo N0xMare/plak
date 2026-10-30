@@ -5,35 +5,17 @@ use std::fmt;
 use std::sync::Arc;
 
 use plakous_model::{
-    Actor, BlockCompleted, BlockStart, BlockStarted, CallId, Clock, ContentBlock, ConversationItem,
-    Digest, EntryId, IdGenerator, ModelEvent, ModelResponseMetadata, OutputLocation, Provenance,
-    ReasoningBlock, ReasoningDelta, ReasoningVisibility, RefusalBlock, ReplayEnvelope,
-    ResponseStarted, SystemClock, SystemIdGenerator, TextBlock, TextDelta, TextPhase,
-    ToolCallBlock, ToolCallState, ToolCallerLineage, ToolCorrelation, ToolExecutionOwner,
-    ToolInputDelta, ToolName,
+    BlockCompleted, BlockStart, BlockStarted, CallId, Clock, ContentBlock, Digest, EntryId,
+    IdGenerator, ModelEvent, ModelResponseMetadata, OutputLocation, ReasoningBlock, ReasoningDelta,
+    ReasoningVisibility, RefusalBlock, ReplayEnvelope, ResponseStarted, SystemClock,
+    SystemIdGenerator, TextBlock, TextDelta, TextPhase, ToolCallBlock, ToolCallState,
+    ToolCorrelation, ToolExecutionOwner, ToolInputDelta, ToolName,
 };
 use serde_json::Value;
 
 use super::error::FamilyProjectionError;
 
 type ProjResult<T> = Result<T, FamilyProjectionError>;
-
-/// One function-call tool block's provider identity and initial arguments.
-#[derive(Debug)]
-pub struct ToolBlockStart<'a> {
-    /// Provider output index.
-    pub provider_index: u32,
-    /// Canonical owning entry.
-    pub entry_id: EntryId,
-    /// Exact provider call identity.
-    pub call_id_remote: &'a str,
-    /// Admitted tool name.
-    pub name: ToolName,
-    /// Admitted execution owner.
-    pub owner: ToolExecutionOwner,
-    /// Initial serialized arguments.
-    pub initial_arguments: &'a str,
-}
 
 /// Injectable canonical identity sources used once per projected item and call.
 #[derive(Clone)]
@@ -113,8 +95,7 @@ impl Default for ProjectorLimits {
 
 /// How function/tool argument `done` interacts with streamed deltas.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum ToolArgsFinishPolicy {
+pub(crate) enum ToolArgsFinishPolicy {
     /// Empty known seeds from done; non-empty disagree → error (xAI/OR default).
     #[default]
     Strict,
@@ -126,8 +107,7 @@ pub enum ToolArgsFinishPolicy {
 
 /// When reasoning summary deltas become ModelEvents.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum ReasoningEmitMode {
+pub(crate) enum ReasoningEmitMode {
     /// Emit `BlockStarted` / `ReasoningDelta` / `BlockCompleted` live (xAI/OR).
     #[default]
     Live,
@@ -137,36 +117,16 @@ pub enum ReasoningEmitMode {
 
 /// Options that pin dialect policy on a shared projector core.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ProjectorPolicy {
+pub(crate) struct ProjectorPolicy {
     /// Tool-args finish behaviour.
     pub tool_args: ToolArgsFinishPolicy,
     /// Reasoning delta emission timing.
     pub reasoning_emit: ReasoningEmitMode,
 }
 
-impl ProjectorPolicy {
-    /// xAI / OpenRouter defaults.
-    #[must_use]
-    pub const fn live_strict() -> Self {
-        Self {
-            tool_args: ToolArgsFinishPolicy::Strict,
-            reasoning_emit: ReasoningEmitMode::Live,
-        }
-    }
-
-    /// OpenAI Platform / Codex product defaults.
-    #[must_use]
-    pub const fn openai_platform() -> Self {
-        Self {
-            tool_args: ToolArgsFinishPolicy::SoftSeedEmptyOnly,
-            reasoning_emit: ReasoningEmitMode::DeferToFinish,
-        }
-    }
-}
-
 /// In-progress or completed projected content block.
 #[derive(Debug)]
-pub enum ProjectedBlock {
+pub(crate) enum ProjectedBlock {
     /// Streaming text.
     Text {
         /// Optional phase.
@@ -215,7 +175,7 @@ pub enum ProjectedBlock {
 
 /// Kind of a projected output item.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ProjectedItemKind {
+pub(crate) enum ProjectedItemKind {
     /// Assistant message.
     Message,
     /// Reasoning item.
@@ -228,7 +188,7 @@ pub enum ProjectedItemKind {
 
 /// One projected output item with provider-index correlation.
 #[derive(Debug)]
-pub struct ProjectedItem {
+pub(crate) struct ProjectedItem {
     /// Contiguous canonical item index.
     pub canonical_index: u32,
     /// Stable entry identity.
@@ -248,7 +208,7 @@ pub struct ProjectedItem {
 }
 
 /// Shared block/item state machine for one Responses-family projection.
-pub struct ResponseProjectorCore {
+pub(crate) struct ResponseProjectorCore {
     ids: CanonicalIdSources,
     limits: ProjectorLimits,
     policy: ProjectorPolicy,
@@ -267,16 +227,9 @@ pub struct ResponseProjectorCore {
 }
 
 impl ResponseProjectorCore {
-    /// Creates an empty projector core with live/strict defaults (xAI/OR).
-    #[must_use]
-    pub fn new(ids: CanonicalIdSources, limits: ProjectorLimits) -> Self {
-        Self::new_with_policy(ids, limits, ProjectorPolicy::live_strict())
-    }
-
     /// Creates an empty projector core with an explicit dialect policy.
     ///
-    /// OpenAI Platform must use [`ProjectorPolicy::openai_platform`]
-    /// (`SoftSeedEmptyOnly` + `DeferToFinish`).
+    /// The caller supplies the exact tool and reasoning emission policies.
     #[must_use]
     pub fn new_with_policy(
         ids: CanonicalIdSources,
@@ -302,37 +255,10 @@ impl ResponseProjectorCore {
         }
     }
 
-    /// Projector limits.
-    #[must_use]
-    pub const fn limits(&self) -> ProjectorLimits {
-        self.limits
-    }
-
-    /// Dialect policy pinned at construction.
-    #[must_use]
-    pub const fn policy(&self) -> ProjectorPolicy {
-        self.policy
-    }
-
-    /// Accumulated projected byte counter (content + residual reserves).
-    #[must_use]
-    pub const fn accumulated_bytes(&self) -> usize {
-        self.accumulated_bytes
-    }
     /// Whether response started.
     #[must_use]
     pub const fn started(&self) -> bool {
         self.started
-    }
-    /// Whether terminal.
-    #[must_use]
-    pub const fn terminal(&self) -> bool {
-        self.terminal
-    }
-    /// Whether failed.
-    #[must_use]
-    pub const fn failed(&self) -> bool {
-        self.failed
     }
     /// Mark failed.
     pub fn mark_failed(&mut self) {
@@ -344,22 +270,6 @@ impl ResponseProjectorCore {
     pub fn response_id(&self) -> Option<&str> {
         self.response_id.as_deref()
     }
-    /// Response metadata when set.
-    #[must_use]
-    pub fn response_metadata(&self) -> Option<&ModelResponseMetadata> {
-        self.response_metadata.as_ref()
-    }
-    /// Provider → canonical item map.
-    #[must_use]
-    pub const fn provider_items(&self) -> &BTreeMap<u32, u32> {
-        &self.provider_items
-    }
-    /// Projected items.
-    #[must_use]
-    pub const fn items(&self) -> &BTreeMap<u32, ProjectedItem> {
-        &self.items
-    }
-
     /// Accept one more stream event (limits + terminal guard).
     pub fn begin_event(&mut self) -> ProjResult<()> {
         if self.terminal || self.failed {
@@ -460,38 +370,6 @@ impl ResponseProjectorCore {
         Ok(entry_id)
     }
 
-    /// Start a function-call tool block at provider block 0 (emit + Requested).
-    pub fn start_tool_block(
-        &mut self,
-        input: ToolBlockStart<'_>,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<()> {
-        let ToolBlockStart {
-            provider_index,
-            entry_id,
-            call_id_remote,
-            name,
-            owner,
-            initial_arguments,
-        } = input;
-        let correlation = ToolCorrelation::new(
-            Some(call_id_remote.to_owned()),
-            None,
-            ToolCallerLineage::Direct,
-        )?;
-        self.start_tool_block_with(
-            provider_index,
-            entry_id,
-            correlation,
-            name,
-            owner,
-            ToolCallState::Requested,
-            initial_arguments,
-            true,
-            output,
-        )
-    }
-
     /// Start a tool block with full correlation / emit control (OpenAI custom/program).
     #[allow(
         clippy::too_many_arguments,
@@ -563,7 +441,7 @@ impl ResponseProjectorCore {
     /// Start a reasoning summary block (part-added path).
     ///
     /// Under [`ReasoningEmitMode::DeferToFinish`], only reserves block state —
-    /// no `BlockStarted` is emitted until [`Self::finish_deferred_reasoning`].
+    /// no `BlockStarted` is emitted while reasoning chunks are buffered.
     pub fn start_reasoning_block(
         &mut self,
         provider_index: u32,
@@ -1013,64 +891,6 @@ impl ResponseProjectorCore {
         self.complete_provider_block_with_emit(provider_index, 0, emit_events, output)
     }
 
-    /// Emit deferred OpenAI-style reasoning for one item (started + deltas + completed).
-    ///
-    /// Requires [`ReasoningEmitMode::DeferToFinish`]. Binds `replay` onto every
-    /// summary block and emits the canonical event sequence at terminal finish.
-    pub fn finish_deferred_reasoning(
-        &mut self,
-        provider_index: u32,
-        replay: &ReplayEnvelope,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<()> {
-        let entry_id = self.item(provider_index)?.entry_id;
-        let provider_blocks: Vec<u32> = self
-            .item(provider_index)?
-            .provider_blocks
-            .keys()
-            .copied()
-            .collect();
-        for provider_block in provider_blocks {
-            let location = self.location(provider_index, provider_block)?;
-            let (chunks, complete) = match self.block_mut(location)? {
-                ProjectedBlock::Reasoning {
-                    chunks,
-                    complete,
-                    replay: slot,
-                    ..
-                } => {
-                    *slot = Some(replay.clone());
-                    (chunks.clone(), *complete)
-                }
-                _ => {
-                    return Err(FamilyProjectionError::InvalidState(
-                        "reasoning item contains a non-reasoning block",
-                    ));
-                }
-            };
-            if !complete {
-                return Err(FamilyProjectionError::InvalidState(
-                    "reasoning output item done before summary part completion",
-                ));
-            }
-            output.push(ModelEvent::BlockStarted(BlockStarted::new(
-                entry_id,
-                location,
-                BlockStart::Reasoning {
-                    visibility: ReasoningVisibility::Summary,
-                    replay: Some(replay.clone()),
-                },
-            )));
-            for chunk in chunks {
-                output.push(ModelEvent::ReasoningDelta(ReasoningDelta::new(
-                    location, chunk,
-                )));
-            }
-            output.push(ModelEvent::BlockCompleted(BlockCompleted::new(location)));
-        }
-        Ok(())
-    }
-
     /// Bind reasoning replay onto an existing streaming block.
     pub fn bind_reasoning_replay(
         &mut self,
@@ -1130,45 +950,6 @@ impl ResponseProjectorCore {
             self.bind_reasoning_replay(location, replay.clone(), output)?;
         }
         self.complete_provider_block(provider_index, provider_block, output)
-    }
-
-    /// Build contiguous completed conversation items.
-    pub fn canonical_items(&self) -> ProjResult<Vec<ConversationItem>> {
-        let mut output = Vec::with_capacity(self.items.len());
-        for index in 0..self.items.len() {
-            let index = u32::try_from(index)
-                .map_err(|_| FamilyProjectionError::ResourceLimit("canonical item index"))?;
-            let item = self
-                .items
-                .get(&index)
-                .ok_or(FamilyProjectionError::InvalidState(
-                    "canonical output item indices are not contiguous",
-                ))?;
-            if !item.done {
-                return Err(FamilyProjectionError::InvalidState(
-                    "canonical output item did not complete",
-                ));
-            }
-            let mut blocks = Vec::with_capacity(item.blocks.len());
-            for block_index in 0..item.blocks.len() {
-                let block_index = u32::try_from(block_index)
-                    .map_err(|_| FamilyProjectionError::ResourceLimit("canonical block index"))?;
-                let block =
-                    item.blocks
-                        .get(&block_index)
-                        .ok_or(FamilyProjectionError::InvalidState(
-                            "canonical block indices are not contiguous",
-                        ))?;
-                blocks.push(canonical_block(block)?);
-            }
-            output.push(ConversationItem::new(
-                item.entry_id,
-                Actor::Assistant,
-                blocks,
-                Provenance::ModelOutput,
-            )?);
-        }
-        Ok(output)
     }
 
     /// Insert a block under a provider index.
@@ -1287,26 +1068,6 @@ impl ResponseProjectorCore {
         Ok(())
     }
 
-    /// Tool block correlation for dialect residual checks.
-    pub fn tool_correlation(
-        &self,
-        provider_index: u32,
-    ) -> ProjResult<(ToolName, ToolCorrelation, ToolExecutionOwner, CallId)> {
-        let location = self.location(provider_index, 0)?;
-        match self.block(location)? {
-            ProjectedBlock::Tool {
-                call_id,
-                name,
-                owner,
-                correlation,
-                ..
-            } => Ok((name.clone(), correlation.clone(), owner.clone(), *call_id)),
-            _ => Err(FamilyProjectionError::InvalidState(
-                "tool output block is missing",
-            )),
-        }
-    }
-
     /// Materialise a completed tool block into a [`ContentBlock`] (custom-tool finish).
     pub fn materialize_tool_block(&self, provider_index: u32) -> ProjResult<ContentBlock> {
         let location = self.location(provider_index, 0)?;
@@ -1322,14 +1083,6 @@ impl ResponseProjectorCore {
                 "output arrived before response start",
             ))
         }
-    }
-
-    /// Text/refusal complete blocks from strings.
-    pub fn text_block(text: String) -> ProjResult<ContentBlock> {
-        Ok(ContentBlock::Text(TextBlock::new(
-            text,
-            Some(TextPhase::Final),
-        )?))
     }
 
     /// Match streamed text/refusal bytes to expected.

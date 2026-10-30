@@ -1,7 +1,7 @@
-use plakous_http::SseError;
-use plakous_responses::{
+use crate::{
     ResponsesFieldError, ResponsesLifecycleError, ResponsesStreamLimits, SequenceValidationError,
 };
+use plakous_http::SseError;
 
 use crate::response_host::{ResponsesHostDecodeError, ResponsesProviderError, ResponsesResponse};
 
@@ -68,7 +68,6 @@ impl From<ResponsesFieldError> for ResponsesFamilyStreamError {
             ResponsesFieldError::Missing { field } | ResponsesFieldError::Invalid { field } => {
                 Self::InvalidField(field)
             }
-            _ => Self::InvalidField("unknown Responses field"),
         }
     }
 }
@@ -83,68 +82,6 @@ impl From<ResponsesHostDecodeError> for ResponsesFamilyStreamError {
                 Self::InvalidField("usage accounting")
             }
         }
-    }
-}
-
-impl ResponsesStreamHostError for ResponsesFamilyStreamError {
-    fn invalid_utf8() -> Self {
-        Self::InvalidUtf8
-    }
-
-    fn resource_limit_frame(_maximum: usize) -> Self {
-        Self::ResourceLimit("SSE frame bytes")
-    }
-
-    fn resource_limit(resource: &'static str, _maximum: usize) -> Self {
-        Self::ResourceLimit(resource)
-    }
-
-    fn decoder_failed() -> Self {
-        Self::DecoderFailed
-    }
-
-    fn malformed_sse() -> Self {
-        Self::MalformedSse
-    }
-
-    fn duplicate_or_reordered(_previous: u64, _sequence: u64) -> Self {
-        Self::InvalidSequence
-    }
-
-    fn sequence_gap(_expected: u64, _sequence: u64) -> Self {
-        Self::InvalidSequence
-    }
-
-    fn inconsistent_sequence_presence() -> Self {
-        Self::InvalidSequence
-    }
-
-    fn done_forbidden() -> Self {
-        Self::DonePolicy
-    }
-
-    fn event_after_terminal() -> Self {
-        Self::EventAfterTerminal
-    }
-
-    fn truncated() -> Self {
-        Self::Truncated
-    }
-
-    fn missing_terminal() -> Self {
-        Self::MissingTerminal
-    }
-
-    fn missing_done() -> Self {
-        Self::DonePolicy
-    }
-
-    fn attempt_not_admitted() -> Self {
-        Self::InvalidLifecycle
-    }
-
-    fn from_field_error(error: ResponsesFieldError) -> Self {
-        error.into()
     }
 }
 
@@ -167,42 +104,7 @@ pub(super) fn map_lifecycle_error(error: ResponsesLifecycleError) -> ResponsesFa
         | ResponsesLifecycleError::InvalidField { field } => {
             ResponsesFamilyStreamError::InvalidField(field)
         }
-        _ => ResponsesFamilyStreamError::InvalidLifecycle,
     }
-}
-
-/// Stream-error factories for shared SSE / sequence maps.
-pub trait ResponsesStreamHostError: Sized {
-    /// Invalid UTF-8 in an SSE frame.
-    fn invalid_utf8() -> Self;
-    /// SSE frame byte limit.
-    fn resource_limit_frame(maximum: usize) -> Self;
-    /// Named resource limit.
-    fn resource_limit(resource: &'static str, maximum: usize) -> Self;
-    /// Decoder already failed.
-    fn decoder_failed() -> Self;
-    /// Malformed SSE.
-    fn malformed_sse() -> Self;
-    /// Duplicate or reordered sequence.
-    fn duplicate_or_reordered(previous: u64, sequence: u64) -> Self;
-    /// Sequence gap.
-    fn sequence_gap(expected: u64, sequence: u64) -> Self;
-    /// Sequence presence inconsistency.
-    fn inconsistent_sequence_presence() -> Self;
-    /// Forbidden / unexpected `[DONE]`.
-    fn done_forbidden() -> Self;
-    /// Event after terminal.
-    fn event_after_terminal() -> Self;
-    /// Truncated frame.
-    fn truncated() -> Self;
-    /// Missing typed terminal.
-    fn missing_terminal() -> Self;
-    /// Missing required `[DONE]`.
-    fn missing_done() -> Self;
-    /// Attempt not admitted / not decoding.
-    fn attempt_not_admitted() -> Self;
-    /// Map field errors.
-    fn from_field_error(error: ResponsesFieldError) -> Self;
 }
 
 /// Standard SSE framing error map used by OpenRouter / xAI-style dialects.
@@ -210,32 +112,22 @@ pub trait ResponsesStreamHostError: Sized {
     clippy::needless_pass_by_value,
     reason = "owned value matches the dialect hook and caller ownership"
 )]
-pub fn map_sse_error_standard<E: ResponsesStreamHostError>(
+pub fn map_sse_error_standard(
     error: SseError,
-    limits: &ResponsesStreamLimits,
-) -> E {
+    _limits: &ResponsesStreamLimits,
+) -> ResponsesFamilyStreamError {
     match error {
-        SseError::InvalidUtf8 => E::invalid_utf8(),
+        SseError::InvalidUtf8 => ResponsesFamilyStreamError::InvalidUtf8,
         SseError::ResourceLimit("SSE line bytes" | "SSE event bytes") => {
-            E::resource_limit_frame(limits.max_frame_bytes())
+            ResponsesFamilyStreamError::ResourceLimit("SSE frame bytes")
         }
-        SseError::ResourceLimit(resource) => E::resource_limit(resource, limits.max_frame_bytes()),
-        SseError::AlreadyFailed => E::decoder_failed(),
-        _ => E::malformed_sse(),
+        SseError::ResourceLimit(resource) => ResponsesFamilyStreamError::ResourceLimit(resource),
+        SseError::AlreadyFailed => ResponsesFamilyStreamError::DecoderFailed,
+        _ => ResponsesFamilyStreamError::MalformedSse,
     }
 }
 
 /// Standard sequence-policy error map.
-pub fn map_sequence_error_standard<E: ResponsesStreamHostError>(
-    error: SequenceValidationError,
-) -> E {
-    match error {
-        SequenceValidationError::DuplicateOrReordered { previous, sequence } => {
-            E::duplicate_or_reordered(previous, sequence)
-        }
-        SequenceValidationError::Gap { expected, sequence } => E::sequence_gap(expected, sequence),
-        SequenceValidationError::MissingRequired
-        | SequenceValidationError::InconsistentPresence
-        | _ => E::inconsistent_sequence_presence(),
-    }
+pub fn map_sequence_error_standard(_error: SequenceValidationError) -> ResponsesFamilyStreamError {
+    ResponsesFamilyStreamError::InvalidSequence
 }

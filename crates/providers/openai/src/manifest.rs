@@ -210,10 +210,7 @@ pub(crate) fn validate_unscoped_adapter_request(request: &ModelRequest) -> Resul
 
 fn validate_adapter_request(request: &ModelRequest) -> Result<(), ConfigError> {
     if request.tools().iter().any(|tool| {
-        plakous_responses_dialect::is_unprojected_string_custom_tool_definition(
-            request,
-            tool.definition(),
-        )
+        plakous_responses::is_unprojected_string_custom_tool_definition(request, tool.definition())
     }) {
         return Err(ConfigError::UnsupportedToolForm);
     }

@@ -24,7 +24,7 @@ use plakous_responses::{
     ResponsesArtifactReplayKind, ResponsesReplayContract, ResponsesReplayItem,
     ResponsesReplayPurpose,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     ResponsesAttemptBuildError, ResponsesRequestConfig, lower_responses_request,
 };
 use serde_json::json;
@@ -194,7 +194,7 @@ fn authority(
 fn replay_envelope(
     descriptor: &ResolvedModelDescriptor,
     raw: serde_json::Value,
-    kind: plakous_responses_dialect::ResponsesReplayKind<'_>,
+    kind: plakous_responses::ResponsesReplayKind<'_>,
 ) -> TestResult<ReplayEnvelope> {
     Ok(ReplayEnvelope::new(
         descriptor.protocol().clone(),

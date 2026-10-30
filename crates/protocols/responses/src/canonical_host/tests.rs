@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use crate::{ResponsesStorageMode, ResponsesStreamLimits};
 use plakous_model::{
     AttemptId, ContentBlock, DigestDomain, FinishReason, FixedClock, ModelEvent, ModelRequest,
     ModelResponseAssembler, ProtocolId, ReplayKindId, RequestMetadata, RunId, SequenceIdGenerator,
     Timestamp, ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolOutputContract,
     TurnId, Usage,
 };
-use plakous_responses::{ResponsesStorageMode, ResponsesStreamLimits};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -188,7 +188,7 @@ fn observation_projector(
 }
 
 fn parsed_output_item(value: Value) -> ResponsesOutputItem {
-    crate::parse_output_item::<crate::ResponsesHostDecodeError>(&value).expect("test output item")
+    crate::response_host::parse_output_item(&value).expect("test output item")
 }
 
 fn add_observed_item(
@@ -252,7 +252,7 @@ fn grok_preserves_consistent_provider_reported_actual_model() {
         &replay_projection(),
         ResponsesStorageMode::Stateless,
         provider_request(),
-        plakous_responses::ResponseModelBinding::ProviderReported,
+        crate::ResponseModelBinding::ProviderReported,
     )
     .expect("provider-reported projection");
     let grok =

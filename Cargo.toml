@@ -30,7 +30,6 @@ members = [
     "crates/protocols/responses",
     "crates/orchestration/recursive-subagents",
     "crates/orchestration/recursive-subagents-store",
-    "crates/protocols/responses-dialect",
     "crates/store",
     "crates/harness/tool-files",
     "crates/harness/tool-plan",
@@ -142,7 +141,6 @@ plakous-prompts = { version = "0.0.2", path = "crates/harness/prompts", default-
 plakous-recursive-subagents = { version = "0.0.2", path = "crates/orchestration/recursive-subagents", default-features = false }
 plakous-recursive-subagents-store = { version = "0.0.2", path = "crates/orchestration/recursive-subagents-store", default-features = false }
 plakous-responses = { version = "0.0.2", path = "crates/protocols/responses", default-features = false }
-plakous-responses-dialect = { version = "0.0.2", path = "crates/protocols/responses-dialect", default-features = false }
 plakous-store = { version = "0.0.2", path = "crates/store", default-features = false }
 plakous-tool-files = { version = "0.0.2", path = "crates/harness/tool-files", default-features = false }
 plakous-tool-plan = { version = "0.0.2", path = "crates/harness/tool-plan", default-features = false }
@@ -191,7 +189,7 @@ vendor = []
 # The composition compiler owns the pinned Codex description/grammar renderer.
 plakous-compose = ["plakous-codex-code-mode-protocol"]
 # Shared lookup backoff and the Responses configuration error vocabulary.
-plakous = ["plakous-exchange", "plakous-responses-dialect"]
+plakous = ["plakous-exchange", "plakous-responses"]
 # Credential dispatch uses the neutral classified gate without owning its vocabulary.
 plakous-auth = ["plakous-model"]
 plak = [

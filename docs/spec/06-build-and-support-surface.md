@@ -76,7 +76,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely and never published |
 
-The workspace holds 38 packages: five supported, 30 published internal, three
+The workspace holds 37 packages: five supported, 29 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -88,7 +88,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (30)**
+**Published internal (29)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
@@ -97,9 +97,11 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 `plakous-compose`, `plakous-exchange`,
 `plakous-http`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`,
-`plakous-responses`, `plakous-responses-dialect`, `plakous-store`,
+`plakous-responses`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
 `plakous-tool-search`, `plakous-tool-web`, `plakous-xai`.
+
+A retired package stops at its last published version; that version is not yanked.
 
 **Repository-only (3)**
 
@@ -153,7 +155,7 @@ constrains what the binary's `tui` module may name.
 
 The facade's optional native-route edge to `plakous-exchange` is an explicit
 exception for shared model-lookup backoff policy. Its Grok route also names
-the shared `plakous-responses-dialect` configuration error type, without linking
+the shared `plakous-responses` configuration error type, without linking
 another provider for that vocabulary. Neither exception moves catalog
 transport, parsing or provider admission into the facade. A separate narrow
 `plakous-auth` to `plakous-model` exception lets the credential HTTP adapter

@@ -259,7 +259,7 @@ FORBIDDEN_NEUTRAL_DEPENDENCY_PARTS = (
 )
 
 # Retired packages that must never come back under any path.
-RETIRED_PACKAGES = ("plak-compose-host",)
+RETIRED_PACKAGES = ("plak-compose-host", "plakous-responses-dialect")
 
 # OpenRouter is a Responses dialect, never a peer protocol stack.
 RETIRED_SOURCES = {
@@ -4607,7 +4607,7 @@ def main() -> int:
             if (ROOT / package.relative(relative)).exists():
                 errors.append(
                     f"{package.relative(relative)}: OpenRouter peer Responses stack is forbidden; "
-                    "use plakous-responses-dialect hosts"
+                    "use plakous-responses hosts"
                 )
 
     if errors:

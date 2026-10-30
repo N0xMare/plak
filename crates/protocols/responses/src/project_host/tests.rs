@@ -1,9 +1,11 @@
+use crate::response_host::parse_output_item;
 use std::collections::BTreeMap;
 
 use super::*;
 use crate::response_host::{
-    ResponsesHostDecodeError, ResponsesResponseLimits, ResponsesUsagePolicy, parse_output_item,
+    ResponsesHostDecodeError, ResponsesResponseLimits, ResponsesUsagePolicy,
 };
+use crate::{MAX_RESPONSES_ARTIFACT_BYTES, ResponsesSemanticRevisions};
 use plakous_model::{
     Actor, AttemptId, CallId, Capability, CapabilityConstraints, CapabilitySet, EntryId,
     FactProvenance, FactSource, FeatureSupport, McpServerId, ModelAdapterProfileId, ModelResponse,
@@ -12,7 +14,6 @@ use plakous_model::{
     ToolCorrelation, ToolEffect, ToolInputContract, ToolName, ToolOutputContract, ToolResultBlock,
     ToolResultKind, ToolResultPart, TurnId, ValidationMode,
 };
-use plakous_responses::{MAX_RESPONSES_ARTIFACT_BYTES, ResponsesSemanticRevisions};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -449,7 +450,7 @@ fn item(value: u128, blocks: Vec<ContentBlock>) -> ConversationItem {
 }
 
 fn raw_item(value: serde_json::Value) -> ResponsesOutputItem {
-    parse_output_item::<ResponsesHostDecodeError>(&value).expect("raw item")
+    parse_output_item(&value).expect("raw item")
 }
 
 fn envelope(value: &serde_json::Value) -> ReplayEnvelope {

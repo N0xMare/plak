@@ -101,7 +101,7 @@ use plakous_model::{
     RuntimeModelAuthorityError, SubscriptionUsageCredentialState, SubscriptionUsageRead,
     SubscriptionUsageUnavailable, Timestamp,
 };
-use plakous_responses_dialect::{
+use plakous_responses::{
     CredentialGenerationFingerprint, ResponsesAuthSlot, ResponsesCredentialAuthority,
     ResponsesDispatchRejection, ResponsesHeaderBinding, ResponsesPreflightFuture,
     ResponsesPreflightRequest, ResponsesPreparedPhysicalRequest, ResponsesRevalidationRequest,
