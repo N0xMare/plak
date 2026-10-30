@@ -375,11 +375,12 @@ async fn await_chatty_terminal_deduplicates_and_reports_consumed_jobs() -> Resul
     let id = sessions
         .session_for_number(u32::try_from(handle)?)
         .ok_or("missing id")?;
-    // Acknowledge each byte before the next write so each is a distinct record,
-    // independent of pipe buffering or scheduler timing.
+    // One more than the requested record bound proves the terminal tail is
+    // paged, without thousands of pipe round trips. Acknowledge each byte so
+    // record count does not depend on pipe buffering or scheduler timing.
     let mut cursor = JoinedProcessOutputCursor::new(0);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    for _ in 0..16_385 {
+    for _ in 0..257 {
         sessions.write_stdin(id, b"x", JoinedProcessInputDisposition::KeepOpen)?;
         loop {
             let poll = plakous_tools::internal::process_session_tail(&sessions, id, 1, 1)?;
@@ -399,6 +400,11 @@ async fn await_chatty_terminal_deduplicates_and_reports_consumed_jobs() -> Resul
         assert!(std::time::Instant::now() < deadline, "cat did not exit");
         std::thread::yield_now();
     }
+    assert!(
+        sessions
+            .poll_from(id, JoinedProcessOutputCursor::new(0), 4096, 256)?
+            .more_output()
+    );
     let request = CanonicalProcessAwaitRequest {
         session_ids: vec![handle, handle],
         wake: None,
@@ -411,6 +417,12 @@ async fn await_chatty_terminal_deduplicates_and_reports_consumed_jobs() -> Resul
     assert_eq!(value["tasks"][0]["status"], "exited");
     assert_eq!(value["tasks"].as_array().ok_or("tasks")?.len(), 1);
     assert_eq!(value["tasks"][0]["exit_code"], 0);
+    assert!(
+        value["tasks"][0]["output"]
+            .as_str()
+            .ok_or("output")?
+            .contains("bytes of output omitted")
+    );
     plakous_tools::internal::consume_jobs(&sessions, &[u32::try_from(handle)?]);
     let outcome = ProcessSessionTools::await_canonical(&environment, &request, &control).await?;
     let value: Value = serde_json::from_str(&outcome.joined_text())?;
