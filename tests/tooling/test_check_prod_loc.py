@@ -1,5 +1,4 @@
 import importlib.util
-import re
 import sys
 import tempfile
 import unittest
@@ -8,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/checks"))
+import check_workspace as checker
 SPEC = importlib.util.spec_from_file_location("check_prod_loc", ROOT / "tools/checks/check_prod_loc.py")
 assert SPEC and SPEC.loader
 LOC = importlib.util.module_from_spec(SPEC)
@@ -145,6 +145,9 @@ class ResponsibilityReportTests(unittest.TestCase):
             src = ROOT / package.directory / "src"
             if not src.is_dir():
                 continue
+            files = {path.relative_to(src).as_posix(): path.read_text(encoding="utf-8")
+                     for path in src.rglob("*.rs")}
+            declared = checker.declared_test_module_paths(files, {"lib.rs", "main.rs"})
             for path in sorted(src.rglob("*.rs")):
                 if not LOC.is_test_only_file_name(path.name):
                     continue
@@ -156,33 +159,8 @@ class ResponsibilityReportTests(unittest.TestCase):
                     self.assertIn("#[cfg(test)]", text, path)
                     self.assertNotIn("\npub fn ", text, path)
                 else:
-                    # `tests.rs` must be declared by `#[cfg(test)] mod tests;`
-                    # or `#[cfg(all(test, ...))] mod tests;` (test-only bodies
-                    # further restricted by platform or compiled features).
-                    parent = path.parent
-                    # A crate root declares `mod tests;` too (e.g. a crate
-                    # whose whole body is one module).
-                    declarers = [
-                        parent / "mod.rs",
-                        parent / "lib.rs",
-                        parent.with_suffix(".rs"),
-                    ]
-                    # Feature-selected surface modules can declare an explicit
-                    # sibling tests.rs with #[path = "tests.rs"].
-                    declarers.extend(
-                        candidate
-                        for candidate in parent.glob("*.rs")
-                        if '#[path = "tests.rs"]' in candidate.read_text(encoding="utf-8")
-                    )
-                    declared = any(
-                        candidate.is_file()
-                        and re.search(
-                            r"#\[cfg\((?:test|all\(test,[^()]*\))\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod tests;",
-                            candidate.read_text(encoding="utf-8"),
-                        )
-                        for candidate in declarers
-                    )
-                    self.assertTrue(declared, f"{path} is not a #[cfg(test)] mod tests; target")
+                    self.assertIn(path.relative_to(src).as_posix(), declared,
+                                  f"{path} is not a test-only module target")
         # Fail closed if the conventions stop matching anything at all.
         self.assertGreaterEqual(len(matched), 4, matched)
 

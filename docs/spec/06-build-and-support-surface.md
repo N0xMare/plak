@@ -291,8 +291,11 @@ test-seam and environment placement debt separately, with exact current
 `feature-ceiling`, `test-seam-ceiling` and `env-ceiling` inventories and a
 review reason. Missing ceilings mean zero; growth fails and reductions require
 lowering the ceiling in the same change. Test-only items and test source
-trees are excluded; `cfg(any(test, feature = ...))` still ships under the
-feature and is counted. Comments and literals are not configuration sites.
+trees are excluded. A cfg predicate is test-only when it implies `test`:
+`test` itself, an `all(...)` with any test-only child, or a non-empty
+`any(...)` whose every child is test-only. Negation is not treated as proof.
+`cfg(any(test, feature = ...))` still ships under the feature and is counted.
+Comments and literals are not configuration sites.
 
 The same checker ratchets lint and size debt through each package's own
 `[package.metadata.plakous-lint]`, so a split edits only the manifest of the
@@ -311,10 +314,16 @@ tracked Rust file of the package, tests included:
   one fails, so no new crate gains one; a listed one that is gone must be
   dropped.
 - `large-file-ceiling` bounds the files with more than 1500 non-blank physical
-  lines (comments included) once every `#[cfg(test)]` item is blanked (inline
-  test modules and other cfg(test) items). Files of `tests/` and `benches/`
-  targets and files behind `#[cfg(test)] mod name;` are not counted; a
-  feature-gated support module or an example is.
+  lines (comments included) once every test-only item is blanked, using the
+  same cfg implication rule. Files of `tests/` and `benches/` targets and
+  out-of-line test modules are not counted. Test module targets are resolved
+  by Rust's module path rules, including inline ancestry and top-level
+  `#[path]` declarations. Declarations inside test-only modules are transitively
+  test-only. Files that production code also references stay counted, even
+  inside a test module directory or when shared by target roots. A test module
+  declared under an inline ancestor with a path override, or inside a macro
+  definition, is not resolved and its file stays counted. A feature-gated
+  support module or an example is counted.
 - The ceilings were frozen at the counts on main when the ratchet landed,
   under the `clippy.toml` thresholds the checker pins (`too-many-lines` 100,
   the clippy default, and `too-many-arguments` 7). They follow the cfg rule:

@@ -51,6 +51,18 @@ class ConfigurationPlacementTests(unittest.TestCase):
         self.assertEqual(len(debt["feature"]), 1)
         self.assertEqual(len(debt["test-seam"]), 1)
 
+    def test_compound_test_only_imports_are_not_feature_debt(self):
+        source = '''
+        #[cfg(all(feature = "x", test))] use a::b;
+        #[cfg(all(test, any(feature = "a", feature = "b")))] use c;
+        #[cfg(feature = "x")] #[cfg(test)] fn fixture() {}
+        #[cfg(feature = "x")] #[cfg(test)] use fixture;
+        #[cfg(any(test, feature = "x"))] fn seam() {}
+        '''
+        debt = self.debt(source)
+        self.assertEqual(len(debt["feature"]), 1)
+        self.assertFalse(debt["test-seam"])
+
     def test_test_seams_only_on_support_modules_in_libraries(self):
         source = '''
         #[cfg(feature = "test-support")] mod test_support;

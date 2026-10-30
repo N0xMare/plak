@@ -1523,11 +1523,42 @@ fn production() {}
         production = workspace_policy.production_rust_source(source)
         self.assertNotIn("vars_os", production)
         self.assertIn("fn production()", production)
-        self.assertIsNotNone(
-            workspace_policy.CFG_TEST_MODULE_DECLARATION.search(
-                workspace_policy._blank_rust_non_code(source)
-            )
-        )
+        self.assertIn(Path("src/perf_gate.rs"),
+                      {target.path for target in workspace_policy.test_module_targets(
+                          Path("src/lib.rs"), source, True,
+                      ) if target.test_only})
+
+    def test_test_only_const_function_does_not_hide_production(self) -> None:
+        for qualifier in ("const", "pub const", "pub(crate) const", "const unsafe",
+                          'const extern "C"', 'pub const unsafe extern "C"', "const extern"):
+            for gate in ("test", 'all(feature = "x", test)'):
+                with self.subTest(qualifier=qualifier, gate=gate):
+                    source = f"#[cfg({gate})] {qualifier} fn t() -> u8 {{ 1 }}\n"
+                    source += "pub fn production() { x(); }\nconst AFTER: u8 = 1;"
+                    production = workspace_policy.production_rust_source(source)
+                    self.assertNotIn("fn t()", production)
+                    self.assertIn("pub fn production() { x(); }", production)
+                    self.assertIn("const AFTER: u8 = 1;", production)
+
+    def test_cfg_predicate_implication_for_block_and_semicolon_items(self) -> None:
+        hidden = [
+            "test", "all(test, unix)", 'all(feature = "x", test)',
+            "all(test, any(unix, windows))", 'all(test, not(feature = "x"))',
+            "all(\n unix,\n test,\n)", "any(all(test, unix), all(test, windows))",
+        ]
+        kept = [
+            'any(test, feature = "x")', "not(test)", "all(unix, not(test))",
+            'not(any(test, feature = "x"))', 'feature = "test"', "all(test_utils)",
+            "not(not(test))", "any()",
+        ]
+        for predicate in hidden + kept:
+            for item in ("fn marker() {}", "use marker;", "mod marker;", "const marker: u8 = 1;"):
+                for prefix in ("", '#[cfg(feature = "outer")]\n'):
+                    with self.subTest(predicate=predicate, item=item, prefix=prefix):
+                        source = f"{prefix}#[cfg({predicate})]\n{item}\nfn after() {{}}"
+                        production = workspace_policy.production_rust_source(source)
+                        self.assertEqual("marker" not in production, predicate in hidden)
+                        self.assertIn("fn after()", production)
 
     def test_cfg_test_text_in_a_literal_does_not_truncate_production(self) -> None:
         source = 'const TEXT: &str = "#[cfg(test)]";\nfn after() { env::vars(); }\n'
@@ -2137,6 +2168,155 @@ fn render_transcript() {}
             {path.relative_to(root).as_posix() for path in files},
             {"package/src/lib.rs"},
         )
+
+    def test_test_module_resolution_preserves_ancestry_and_production(self) -> None:
+        cases = [
+            # File-form and directory-form parents, two inline ancestors.
+            (parent, '#[cfg(feature = "x")] mod outer { mod inner { '
+             '#[cfg(all(unix, test))] mod suite; } }',
+             {f"{base}/outer/inner/suite.rs", f"{base}/outer/inner/suite/child.rs"},
+             {f"{base}/suite.rs", f"{base}/outer/suite.rs"})
+            for parent, base in (("src/foo.rs", "src/foo"), ("src/foo/mod.rs", "src/foo"))
+        ] + [
+            ("src/foo.rs", "mod nested { #[cfg(test)] mod tests; } mod tests;",
+             {"src/foo/nested/tests.rs"}, {"src/foo/tests.rs"}),
+            ("src/foo.rs", "#[cfg(test)] mod tests;",
+             {"src/foo/tests.rs"}, {"src/tests.rs"}),
+            ("src/lib.rs", "#[cfg(any(test, feature = \"x\"))] mod suite;\n"
+             "#[cfg(not(test))] mod other;", set(), {"src/suite.rs", "src/other.rs"}),
+            ("src/lib.rs", "#[cfg(test)] mod suite;",
+             {"src/suite.rs", "src/suite/child.rs", "src/suite/nested/grandchild.rs"}, set()),
+            ("src/foo.rs", "#[cfg(all(test, unix))] mod tests { mod a; }",
+             {"src/foo/tests/a.rs", "src/foo/tests/a/child.rs"}, {"src/foo/a.rs"}),
+            ("src/foo.rs", '#[cfg(test)] #[path = "model_tests.rs"] mod suite;',
+             {"src/model_tests.rs"}, {"src/foo/suite.rs", "src/model_tests/real.rs"}),
+            ("src/foo.rs", '#[path = r"model_tests.rs"] #[cfg(test)] mod suite;',
+             {"src/model_tests.rs"}, {"src/foo/suite.rs"}),
+            ("src/foo.rs", 'mod inner { #[cfg(test)] #[path = "suite.rs"] mod suite; }',
+             set(), {"src/suite.rs", "src/foo/inner/suite.rs"}),
+            ("src/foo.rs", '// #[cfg(test)] mod suite;\nmod suite;',
+             set(), {"src/foo/suite.rs"}),
+        ]
+        for parent, declaration, hidden, kept in cases:
+            with self.subTest(parent=parent, declaration=declaration):
+                contents = {path: "fn body() {}" for path in hidden | kept}
+                contents[parent] = declaration
+                contents.setdefault("src/lib.rs", "mod foo; mod tests;")
+                # A path-loaded file resolves children as siblings, not under its stem.
+                if parent == "src/foo.rs" and 'path = "model_tests.rs"' in declaration:
+                    contents["src/model_tests.rs"] = '#[path = "model_tests/child.rs"] mod child;'
+                    contents["src/model_tests/child.rs"] = "fn body() {}"
+                    hidden = hidden | {"src/model_tests/child.rs"}
+                roots = {"src/lib.rs"}
+                self.assertEqual(workspace_policy.declared_test_module_paths(contents, roots), hidden)
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    for path, body in contents.items():
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_text(body, encoding="utf-8")
+                    package = {"targets": [{"kind": ["lib"], "src_path": str(root / "src/lib.rs")}]}
+                    sources, errors = workspace_policy.production_rust_sources(package, root)
+                    self.assertEqual(errors, [])
+                    self.assertEqual({path.relative_to(root).as_posix() for path in sources},
+                                     set(contents) - hidden)
+
+    def test_nonstandard_target_root_resolves_modules_from_its_parent(self) -> None:
+        files = {"src/entry.rs": "#[cfg(test)] mod suite;", "src/suite.rs": "fn test() {}",
+                 "src/entry/suite.rs": "fn production() {}"}
+        self.assertEqual(workspace_policy.declared_test_module_paths(files, {"src/entry.rs"}),
+                         {"src/suite.rs"})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path, source in files.items():
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(source, encoding="utf-8")
+            package = {"targets": [{"kind": ["lib"], "src_path": str(root / "src/entry.rs")}]}
+            sources, errors = workspace_policy.production_rust_sources(package, root)
+            self.assertEqual(errors, [])
+            self.assertEqual({path.relative_to(root).as_posix() for path in sources},
+                             {"src/entry.rs", "src/entry/suite.rs"})
+
+    def assert_module_files(self, contents, roots, hidden) -> None:
+        self.assertEqual(workspace_policy.declared_test_module_paths(contents, roots), hidden)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path, source in contents.items():
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(source, encoding="utf-8")
+            package = {"targets": [{"kind": ["lib"], "src_path": str(root / path)}
+                                   for path in sorted(roots)]}
+            sources, errors = workspace_policy.production_rust_sources(package, root)
+            self.assertEqual(errors, [])
+            self.assertEqual({path.relative_to(root).as_posix() for path in sources},
+                             set(contents) - hidden)
+
+    def test_production_references_override_test_directory_exclusion(self) -> None:
+        for reference in (
+            'include!("tests/shared.rs");',
+            'const TEXT: &str = include_str!("tests/shared.rs");',
+            '#[path = "tests/shared.rs"] pub mod shared;',
+            '#[cfg_attr(feature = "x", path = "tests/shared.rs")] pub mod shared;',
+        ):
+            with self.subTest(reference=reference):
+                self.assert_module_files({
+                    "src/lib.rs": '#[cfg(test)] mod tests;\n' + reference,
+                    "src/tests.rs": "mod hidden;",
+                    "src/tests/hidden.rs": "fn hidden() {}",
+                    "src/tests/shared.rs": 'include!("shared/child.rs");',
+                    "src/tests/shared/child.rs": "fn production() {}",
+                }, {"src/lib.rs"}, {"src/tests.rs", "src/tests/hidden.rs"})
+
+    def test_path_loaded_test_files_follow_declared_children_not_stem_directories(self) -> None:
+        self.assert_module_files({
+            "src/lib.rs": '#[cfg(test)] #[path = "gen_tests.rs"] mod t;\n'
+                          '#[path = "gen_tests/real.rs"] pub mod real;',
+            "src/gen_tests.rs": 'mod sibling; #[path = "gen_tests/nested.rs"] mod nested;',
+            "src/sibling.rs": "fn test() {}",
+            "src/gen_tests/nested.rs": "fn test() {}",
+            "src/gen_tests/real.rs": "fn production() {}",
+            "src/gen_tests/orphan.rs": "fn production() {}",
+        }, {"src/lib.rs"}, {"src/gen_tests.rs", "src/sibling.rs", "src/gen_tests/nested.rs"})
+
+    def test_path_overridden_inline_ancestors_stay_counted(self) -> None:
+        self.assert_module_files({
+            "src/lib.rs": '#[path = "alt"] mod outer { #[cfg(test)] mod helpers; }',
+            "src/outer/helpers.rs": "fn production() {}",
+            "src/alt/helpers.rs": "fn helper() {}",
+        }, {"src/lib.rs"}, set())
+
+    def test_macro_module_declarations_do_not_define_ancestors_or_test_targets(self) -> None:
+        for left, right in (("{", "}"), ("(", ")"), ("[", "]")):
+            with self.subTest(delimiter=left):
+                self.assert_module_files({
+                    "src/lib.rs": f'macro_rules! declare {left} () => {{ mod outer {{ '
+                                  '#[cfg(test)] mod helpers; } }; ' + right + ';\n'
+                                  'macro_rules! direct { () => { #[cfg(test)] mod suite; }; }',
+                    "src/outer/helpers.rs": "fn production() {}",
+                    "src/suite.rs": "fn production() {}",
+                }, {"src/lib.rs"}, set())
+
+    def test_a_file_shared_with_a_production_root_stays_counted_transitively(self) -> None:
+        self.assert_module_files({
+            "src/lib.rs": "#[cfg(test)] mod shared;",
+            "src/main.rs": "mod shared; fn main() {}",
+            "src/shared.rs": "mod child; #[cfg(test)] mod only_test;",
+            "src/shared/child.rs": "fn production() {}",
+            "src/shared/only_test.rs": "fn test() {}",
+        }, {"src/lib.rs", "src/main.rs"}, {"src/shared/only_test.rs"})
+
+    def test_non_root_lib_and_main_files_use_their_stem_directory(self) -> None:
+        for stem in ("lib", "main", "build"):
+            with self.subTest(stem=stem):
+                self.assert_module_files({
+                    "src/lib.rs": "mod net;",
+                    "src/net/mod.rs": f"mod {stem}; mod suite;",
+                    f"src/net/{stem}.rs": "#[cfg(test)] mod suite;",
+                    f"src/net/{stem}/suite.rs": "fn test() {}",
+                    "src/net/suite.rs": "fn production() {}",
+                }, {"src/lib.rs"}, {f"src/net/{stem}/suite.rs"})
 
     def test_nonliteral_include_target_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

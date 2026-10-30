@@ -273,38 +273,34 @@ RETIRED_SOURCES = {
     ),
 }
 
-# A test-only cfg predicate: `cfg(test)` or `cfg(all(test, ...))`.
-_CFG_TEST_PREDICATE = r"cfg\s*\(\s*(?:test|all\s*\(\s*test\s*,[^()]*\))\s*\)"
+# Capture the whole predicate, including nested parentheses; classify it below.
+_CFG_TEST_PREDICATE = r"cfg\s*\((?P<predicate>[^\]]*)\)"
 # Attribute bodies may span lines (e.g. multi-line `#[allow(..., reason = "...")]`).
 _CFG_ATTR = r"#\s*\[[^\]]*\]\s*"
 CFG_TEST_BLOCK_ITEM = re.compile(
-    rf"#\s*\[\s*{_CFG_TEST_PREDICATE}\s*\]\s*"
-    rf"(?:{_CFG_ATTR})*"
+    rf"(?P<attributes>(?:{_CFG_ATTR})*#\s*\[\s*{_CFG_TEST_PREDICATE}\s*\]\s*"
+    rf"(?:{_CFG_ATTR})*)"
     r"(?:pub(?:\([^)]*\))?\s+)?"
-    r"(?:(?:async|unsafe)\s+)*"
+    r"(?:(?:const|async|unsafe|extern(?:\s*\"[^\"]*\")?)\s+)*"
     r"(?:mod\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*|"
     r"fn\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*[^;{]*|"
     r"impl\b[^;{]*|trait\b[^;{]*|enum\b[^;{]*|struct\b[^;{]*)\s*\{",
     re.MULTILINE,
 )
 CFG_TEST_SEMICOLON_ITEM = re.compile(
-    rf"#\s*\[\s*{_CFG_TEST_PREDICATE}\s*\]\s*"
-    rf"(?:{_CFG_ATTR})*"
-    r"(?:pub(?:\([^)]*\))?\s+)?(?:const|static|type|use|mod)\b[^;]*;",
+    rf"(?P<attributes>(?:{_CFG_ATTR})*#\s*\[\s*{_CFG_TEST_PREDICATE}\s*\]\s*"
+    rf"(?:{_CFG_ATTR})*)"
+    r"(?:pub(?:\([^)]*\))?\s+)?"
+    r"(?:const(?!\s+(?:(?:async|unsafe|extern(?:\s*\"[^\"]*\")?)\s+)*fn\b)|static|type|use|mod)\b[^;]*;",
     re.MULTILINE,
 )
 
-# An out-of-line `#[cfg(test)] mod name;` declaration. The file behind it is a
-# whole-file test body: nothing in it is compiled into a production build, so it
-# is skipped for every production rule instead of being scanned as shipping
-# code. This mirrors the whole-file rule the density meter applies through
-# `is_test_only_file_name` in check_prod_loc.py.
-CFG_TEST_MODULE_DECLARATION = re.compile(
-    rf"#\s*\[\s*{_CFG_TEST_PREDICATE}\s*\]\s*"
-    rf"(?:{_CFG_ATTR})*"
-    r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(?:r#)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*;",
+MODULE_ITEM = re.compile(
+    rf"(?P<attributes>(?:{_CFG_ATTR})*)"
+    r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(?:r#)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?P<body>[;{])",
     re.MULTILINE,
 )
+CFG_ATTRIBUTE = re.compile(rf"#\s*\[\s*{_CFG_TEST_PREDICATE}\s*\]")
 
 # ---------------------------------------------------------------------------
 # Security pins. Hardcoded by design; keyed by (package, package-relative path)
@@ -1611,26 +1607,71 @@ def _blank_rust_non_code(source: str) -> str:
     return "".join(masked)
 
 
+def cfg_implies_test(predicate: str) -> bool:
+    """Conservatively prove that a masked cfg predicate requires `test`."""
+    predicate = predicate.strip()
+    if predicate == "test":
+        return True
+    match = re.fullmatch(r"(all|any)\s*\((.*)\)", predicate, re.DOTALL)
+    if match is None:
+        return False
+    children: list[str] = []
+    depth = 0
+    start = 0
+    body = match.group(2)
+    for index, character in enumerate(body):
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+        elif character == "," and depth == 0:
+            children.append(body[start:index])
+            start = index + 1
+    if depth:
+        return False
+    if body[start:].strip():
+        children.append(body[start:])
+    implied = [cfg_implies_test(child) for child in children]
+    return any(implied) if match.group(1) == "all" else bool(implied) and all(implied)
+
+
+def _block_end(masked: str, opening: int) -> int:
+    left = masked[opening]
+    right = {"{": "}", "(": ")", "[": "]"}[left]
+    depth = 0
+    for index in range(opening, len(masked)):
+        if masked[index] == left:
+            depth += 1
+        elif masked[index] == right:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return len(masked)
+
+
 def production_rust_source(source: str) -> str:
-    """Remove cfg(test) modules without truncating later production items."""
+    """Blank test-only items without truncating later production items."""
     masked = _blank_rust_non_code(source)
     spans: list[tuple[int, int]] = []
     cursor = 0
     while match := CFG_TEST_BLOCK_ITEM.search(masked, cursor):
-        opening = match.end() - 1
-        depth = 0
-        closing = len(masked)
-        for index in range(opening, len(masked)):
-            if masked[index] == "{":
-                depth += 1
-            elif masked[index] == "}":
-                depth -= 1
-                if depth == 0:
-                    closing = index + 1
-                    break
+        # A production gate may precede a test gate on the same item.
+        cursor = match.start() + 1
+        if not any(cfg_implies_test(gate.group("predicate"))
+                   for gate in CFG_ATTRIBUTE.finditer(match.group("attributes"))):
+            continue
+        closing = _block_end(masked, match.end() - 1)
         spans.append((match.start(), closing))
         cursor = closing
-    for match in CFG_TEST_SEMICOLON_ITEM.finditer(masked):
+    cursor = 0
+    while match := CFG_TEST_SEMICOLON_ITEM.search(masked, cursor):
+        cursor = match.start() + 1
+        if not any(cfg_implies_test(gate.group("predicate"))
+                   for gate in CFG_ATTRIBUTE.finditer(match.group("attributes"))):
+            continue
+        cursor = match.end()
         if not any(start <= match.start() < end for start, end in spans):
             spans.append((match.start(), match.end()))
 
@@ -2494,11 +2535,21 @@ def discover_rust_files(
         has_explicit_source_target = (
             re.search(r"#\s*\[\s*path\s*=", source_text) is not None
             or "cfg_attr" in source_text
-            or re.search(r"\binclude\s*!", source_text) is not None
+            or re.search(r"\binclude(?:_str)?\s*!", source_text) is not None
         )
         if source not in module_discovery_sources and not has_explicit_source_target:
             continue
-        tokens = rust_tokens(source_text)
+        # An inline module's path attribute names a directory, not a source file.
+        discovery_source = list(production_rust_source(source_text))
+        masked = _blank_rust_non_code("".join(discovery_source))
+        for module in MODULE_ITEM.finditer(masked):
+            if module.group("body") != "{":
+                continue
+            for attribute in re.finditer(r"#\s*\[\s*path\s*=[^\]]*\]", module.group("attributes")):
+                offset = module.start("attributes")
+                for index in range(offset + attribute.start(), offset + attribute.end()):
+                    discovery_source[index] = " "
+        tokens = rust_tokens("".join(discovery_source))
         for index in range(len(tokens) - 2) if source in module_discovery_sources else ():
             if not (
                 tokens[index] == RustToken("identifier", "mod")
@@ -2588,13 +2639,19 @@ def discover_rust_files(
 
         for index in range(len(tokens) - 3):
             if not (
-                tokens[index] == RustToken("identifier", "include")
+                tokens[index].kind == "identifier"
+                and tokens[index].value in {"include", "include_str"}
                 and tokens[index + 1].value == "!"
                 and tokens[index + 2].value in {"(", "[", "{"}
             ):
                 continue
             closing = {"(": ")", "[": "]", "{": "}"}[tokens[index + 2].value]
             cursor = index + 3
+            if tokens[index].value == "include_str" and (
+                cursor >= len(tokens) or tokens[cursor].kind != "string"
+                or Path(tokens[cursor].value).suffix != ".rs"
+            ):
+                continue
             if cursor >= len(tokens) or tokens[cursor].kind != "string":
                 errors.append(
                     "production Rust include! target must be a direct string literal: "
@@ -2615,44 +2672,134 @@ def discover_rust_files(
     return sorted(files, key=lambda item: item.as_posix()), sorted(set(errors))
 
 
-def cfg_test_module_files(sources: Iterable[Path]) -> set[Path]:
-    """Resolve the files behind out-of-line `#[cfg(test)] mod name;` items.
+class ModuleTarget(NamedTuple):
+    path: Path
+    directory: Path | None
+    test_only: bool
+    redirected: bool
 
-    Such a file is a whole-file test body, so production rules (macros, process
-    commands and imports, environment reads, provider names in core, ...) must
-    not scan it. Only the declaration form is trusted: an inline
-    `#[cfg(test)] mod name { ... }` is already blanked by
-    `production_rust_source`, and a `#[path]`-redirected module keeps its own
-    explicit handling.
+
+def test_module_targets(
+    path: Path, source: str, crate_root: bool,
+) -> list[ModuleTarget]:
+    """Resolve module edges, retaining test gates and Rust's child directory.
+
+    Path attributes inside inline modules have different Rust resolution rules;
+    leave those counted rather than guessing a target and hiding production.
     """
+    targets: list[ModuleTarget] = []
+    masked = _blank_rust_non_code(source)
+    base = path.parent
+    if not crate_root and path.name != "mod.rs":
+        base /= path.stem
+    macros = [
+        (match.start(), _block_end(masked, match.end() - 1))
+        for match in re.finditer(r"\bmacro_rules\s*!\s*(?:r#)?\w+\s*[{([]", masked)
+    ]
+    inline: list[tuple[int, int, str, bool, bool]] = []
+    for match in MODULE_ITEM.finditer(masked):
+        if any(start <= match.start() < end for start, end in macros):
+            continue
+        ancestors = [span for span in inline if span[0] <= match.start() < span[1]]
+        attributes = match.group("attributes")
+        gated = any(span[3] for span in ancestors) or any(
+            cfg_implies_test(gate.group("predicate"))
+            for gate in CFG_ATTRIBUTE.finditer(attributes)
+        )
+        has_path = re.search(r"\bpath\s*=", attributes) is not None
+        name = match.group("name")
+        if match.group("body") == "{":
+            inline.append((match.end(), _block_end(masked, match.end() - 1), name, gated, has_path))
+            continue
+        if any(span[4] for span in ancestors):
+            continue
+        redirect = re.search(r"#\s*\[\s*path\s*=[^\]]*\]", attributes)
+        if redirect is not None:
+            if ancestors:
+                continue
+            offset = match.start("attributes")
+            tokens = rust_tokens(source[offset + redirect.start():offset + redirect.end()])
+            if len(tokens) != 6 or tokens[4].kind != "string":
+                continue
+            target = Path(os.path.normpath(path.parent / tokens[4].value))
+            targets.append(ModuleTarget(target, target.parent if target.name == "mod.rs" else None,
+                                        gated, True))
+        elif has_path:
+            # A conditional path override is not a default-path declaration.
+            continue
+        else:
+            directory = base.joinpath(*(span[2] for span in ancestors), name)
+            targets.extend((ModuleTarget(directory.with_suffix(".rs"), directory, gated, False),
+                            ModuleTarget(directory / "mod.rs", directory, gated, False)))
+    return targets
+
+
+def explicit_rust_source_targets(path: Path, source: str) -> set[Path]:
+    """Literal source references that must keep a production file counted."""
+    targets: set[Path] = set()
+    tokens = rust_tokens(source)
+    for index in range(len(tokens) - 2):
+        if (tokens[index] == RustToken("identifier", "path")
+                and tokens[index + 1].value == "=" and tokens[index + 2].kind == "string"):
+            targets.add(Path(os.path.normpath(path.parent / tokens[index + 2].value)))
+        if (index + 3 < len(tokens) and tokens[index].value in {"include", "include_str"}
+                and tokens[index + 1].value == "!" and tokens[index + 2].value in {"(", "[", "{"}
+                and tokens[index + 3].kind == "string"):
+            target = Path(os.path.normpath(path.parent / tokens[index + 3].value))
+            if target.suffix == ".rs":
+                targets.add(target)
+    return targets
+
+
+def _test_module_files(files: dict[Path, str], crate_roots: set[Path]) -> set[Path]:
+    """Follow test module edges, then restore every production-reachable file."""
     excluded: set[Path] = set()
+    path_loaded = {
+        target.path for path, source in files.items()
+        for target in test_module_targets(path, source, path in crate_roots)
+        if target.redirected
+    }
+    edges = {path: test_module_targets(path, source, path in crate_roots or path in path_loaded)
+             for path, source in files.items()}
+    while True:
+        previous = excluded.copy()
+        for path, targets in edges.items():
+            for target in targets:
+                if target.path not in files:
+                    continue
+                if not target.test_only and path not in excluded:
+                    continue
+                excluded.add(target.path)
+                if target.directory is not None:
+                    excluded.update(other for other in files if other.is_relative_to(target.directory))
+        if previous == excluded:
+            break
+
+    # Shared files are production even if another root reaches them only in tests.
+    excluded.difference_update(crate_roots)
+    while True:
+        restored: set[Path] = set()
+        for path in files.keys() - excluded:
+            source = files[path]
+            restored.update(explicit_rust_source_targets(path, source))
+            restored.update(target.path for target in edges[path] if not target.test_only)
+        restored.intersection_update(excluded)
+        if not restored:
+            return excluded
+        excluded.difference_update(restored)
+
+
+def cfg_test_module_files(
+    sources: Iterable[Path], crate_roots: set[Path],
+) -> set[Path]:
+    """Exclude module files reachable only from test code."""
+    files: dict[Path, str] = {}
     for source in sources:
         try:
-            text = source.read_text(encoding="utf-8")
+            files[source] = source.read_text(encoding="utf-8")
         except OSError:
             continue
-        masked = _blank_rust_non_code(text)
-        for match in CFG_TEST_MODULE_DECLARATION.finditer(masked):
-            module = match.group("name")
-            bases = [source.parent]
-            if source.name not in {"lib.rs", "main.rs", "mod.rs", "build.rs"}:
-                bases.append(source.parent / source.stem)
-            for base in bases:
-                excluded.add(Path(os.path.abspath(base / f"{module}.rs")))
-                directory = Path(os.path.abspath(base / module))
-                root_module = directory / "mod.rs"
-                if not root_module.is_file():
-                    continue
-                # The directory form carries its own submodules; every one of
-                # them is reachable only through the cfg(test) root.
-                excluded.add(root_module)
-                for current, _dirnames, filenames in os.walk(
-                    directory, followlinks=False
-                ):
-                    for name in filenames:
-                        if name.endswith(".rs"):
-                            excluded.add(Path(os.path.abspath(Path(current) / name)))
-    return excluded
+    return _test_module_files(files, crate_roots)
 
 
 def production_rust_sources(
@@ -2667,7 +2814,8 @@ def production_rust_sources(
         source = Path(target["src_path"])
         targets.append((source, kinds == {"custom-build"}))
     sources, errors = discover_rust_files(repository, targets)
-    test_only = cfg_test_module_files(sources)
+    crate_roots = {Path(os.path.abspath(repository / target)) for target, _ in targets}
+    test_only = cfg_test_module_files(sources, crate_roots)
     sources = [
         source
         for source in sources
@@ -3423,7 +3571,7 @@ def lint_suppressions(source: str, crate_root: bool = False) -> list[tuple[str, 
 
 def non_test_lines(source: str) -> int:
     """Non-blank physical lines left after `production_rust_source` blanks
-    every `#[cfg(test)]` item (inline test modules and other cfg(test) items).
+    every item whose cfg predicates imply `test`.
     Comments count."""
     return sum(1 for line in production_rust_source(source).splitlines() if line.strip())
 
@@ -3438,8 +3586,7 @@ def lint_ratchet_inventory(
 ) -> dict[str, Any]:
     """Item-level suppressions per lint, crate-wide allows and large files.
 
-    `test_files` defaults to the files behind out-of-line `#[cfg(test)] mod`
-    declarations among `files`.
+    `test_files` defaults to the test-only module files declared among `files`.
     """
     items: dict[str, list[str]] = {lint: [] for lint in RATCHET_LINTS}
     crate_wide: list[str] = []
@@ -3457,7 +3604,7 @@ def lint_ratchet_inventory(
         and sum(1 for line in source.splitlines() if line.strip()) > LARGE_FILE_LINES
     ]
     if candidates and test_files is None:
-        test_files = declared_test_module_paths(files)
+        test_files = declared_test_module_paths(files, crate_roots)
     for path in candidates:
         if path in (test_files or set()):
             continue
@@ -3467,23 +3614,13 @@ def lint_ratchet_inventory(
     return {"items": items, "crate-wide": sorted(set(crate_wide)), "large-files": large}
 
 
-def declared_test_module_paths(files: dict[str, str]) -> set[str]:
-    """Package-relative files behind `#[cfg(test)] mod name;` declarations."""
-    declared: set[str] = set()
-    for path, source in files.items():
-        if "cfg(test)" not in source:
-            continue
-        for match in CFG_TEST_MODULE_DECLARATION.finditer(source):
-            module = match.group("name")
-            parent = Path(path).parent
-            bases = [parent]
-            if Path(path).name not in {"lib.rs", "main.rs", "mod.rs", "build.rs"}:
-                bases.append(parent / Path(path).stem)
-            for base in bases:
-                declared.add((base / f"{module}.rs").as_posix())
-                prefix = f"{(base / module).as_posix()}/"
-                declared.update(other for other in files if other.startswith(prefix))
-    return declared
+def declared_test_module_paths(
+    files: dict[str, str], crate_roots: set[str],
+) -> set[str]:
+    """Package-relative test-only module files, shared with production scans."""
+    return {path.as_posix() for path in _test_module_files(
+        {Path(path): source for path, source in files.items()}, {Path(path) for path in crate_roots},
+    )}
 
 
 def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) -> list[str]:

@@ -95,6 +95,29 @@ class LintRatchetInventoryTests(unittest.TestCase):
                          ["examples/demo.rs (1600)", "src/big.rs (1501)", "src/test_support.rs (1600)"])
 
 
+    def test_compound_nested_and_redirected_test_files_are_not_large(self):
+        inventory = self.inventory({
+            "src/foo.rs": '#[cfg(feature = "x")] mod outer { mod inner { '
+                          '#[cfg(all(test, any(unix, windows)))] mod suite; } }',
+            "src/foo/outer/inner/suite.rs": long_file(1600),
+            "src/foo/outer/inner/suite/child.rs": long_file(1600),
+            "src/compound.rs": '#[cfg(all(test, not(feature = "x")))] mod suite;',
+            "src/compound/suite.rs": long_file(1600),
+            "src/reversed.rs": '#[cfg(all(feature = "x", test))] mod suite;',
+            "src/reversed/suite.rs": long_file(1600),
+            "src/inline.rs": long_file(1450) + '#[cfg(all(test, unix))] mod tests {\n'
+                             + long_file(100) + '}\n',
+            "src/redirect.rs": '#[path = "model_tests.rs"] #[cfg(test)] mod tests;',
+            "src/model_tests.rs": long_file(1600),
+            "src/lib.rs": '#[cfg(any(test, feature = "x"))] mod suite;\n'
+                          '// #[cfg(test)] mod commented;',
+            "src/suite.rs": long_file(1600),
+            "src/commented.rs": long_file(1600),
+        })
+        self.assertEqual(inventory["large-files"],
+                         ["src/commented.rs (1600)", "src/suite.rs (1600)"])
+
+
 class LintRatchetValidationTests(unittest.TestCase):
     INVENTORY = {
         "items": {"too_many_lines": ["src/a.rs:1", "src/b.rs:2"], "too_many_arguments": []},
