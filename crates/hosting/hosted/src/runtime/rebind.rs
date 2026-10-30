@@ -199,90 +199,18 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
         .target
         .native_subscriptions()
         .ok_or_else(|| CliFailure::new("subscription authority is missing"))?;
-    let candidate = match &config.target {
-        HostTargetAuthority::Native {
-            catalog_candidates, ..
-        } => catalog_candidates
-            .iter()
-            .find(|candidate| candidate.account == account && candidate.exact_id == model),
-        HostTargetAuthority::OpenRouter { .. } | HostTargetAuthority::Platform { .. } => None,
-
-        HostTargetAuthority::Registered { .. } => None,
-    };
-    let (reasoning_efforts, service_tiers, native_tool_mode) = if let Some(candidate) = candidate {
-        (
-            candidate.reasoning_efforts.clone(),
-            candidate
-                .service_tiers
-                .iter()
-                .map(|tier| tier.0.clone())
-                .collect::<Vec<_>>(),
-            candidate.native_tool_mode,
-        )
-    } else {
-        let catalog = run_watched(
-            executor,
-            watch,
-            bounded_rebind_lookup(subscriptions.model_catalog(provider)),
-        )
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|()| CliFailure::new("rebind catalog refresh timed out; source unchanged"))?
-        .map_err(rebind_catalog_failure)?;
-        let catalog_entry = catalog
-            .models()
-            .iter()
-            .find(|entry| entry.exact_id() == model)
-            .ok_or_else(|| {
-                CliFailure::new("rebind model is absent from the authenticated catalog")
-            })?;
-        (
-            catalog_entry.reasoning_efforts().to_vec(),
-            catalog_entry
-                .service_tiers()
-                .iter()
-                .map(|tier| tier.id().to_owned())
-                .collect(),
-            catalog_entry.native_tool_mode(),
-        )
-    };
-    if reasoning_efforts.is_empty() {
-        if explicit {
-            return Err(CliFailure::new(
-                "rebind target does not admit a reasoning effort",
-            ));
-        }
-    } else if !explicit {
-        return Err(CliFailure::new(
-            "reasoning rebind target requires an explicit effort",
-        ));
-    } else if !reasoning_efforts.contains(&parsed_effort) {
-        return Err(CliFailure::new(
-            "rebind target effort is absent from the authenticated catalog",
-        ));
-    }
+    let (reasoning_efforts, service_tiers, native_tool_mode) = rebind_model_capabilities(
+        executor,
+        watch,
+        config,
+        subscriptions,
+        provider,
+        account,
+        model,
+    )?;
+    admit_rebind_effort(&reasoning_efforts, explicit, parsed_effort)?;
     let target_effort = explicit.then_some(parsed_effort);
-    let processing_tier = match target_selection {
-        TargetSelection::Native => ProcessingTierDisposition::Standard,
-        TargetSelection::NativePriority
-            if provider == NativeProvider::Codex
-                && service_tiers.iter().any(|tier| tier == "priority") =>
-        {
-            ProcessingTierDisposition::ProviderNamed(
-                ProviderServiceTierId::new("priority")
-                    .map_err(|_| CliFailure::new("Codex priority tier identity is invalid"))?,
-            )
-        }
-        TargetSelection::NativePriority => {
-            return Err(CliFailure::new(
-                "Fast is absent from this exact authenticated Codex model row",
-            ));
-        }
-        TargetSelection::OpenRouter { .. } | TargetSelection::Platform { .. } => {
-            return Err(CliFailure::new(
-                "OpenRouter target selection cannot be used for a native OAuth rebind",
-            ));
-        }
-    };
+    let processing_tier = rebind_processing_tier(target_selection, provider, &service_tiers)?;
     let selected = selected_coding_provider_configuration_with_processing_tier(
         provider,
         model_id,
@@ -509,39 +437,22 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     super::jobs_transition_guard(config, opened)?;
     watch.begin();
     let started = Instant::now();
-    if let Some(reason) = tree_epoch_rebind_refusal(&config.topology_rows(), &config.session) {
-        return Err(CliFailure::new(reason));
-    }
-    if !session_rebind_boundary_ready(&config.session) {
-        return Err(CliFailure::new(
-            "rebind requires an idle session with no queued or unresolved product work",
-        ));
-    }
+    refuse_unready_rebind(config)?;
     let account = account.to_owned();
     // A Code Mode (native-ptc) prefix is replayable onto every presentation:
     // each kernel re-projects `exec`/`wait` cells truthfully at dispatch
     // (Responses/Chat carry the original string input, Messages wraps it as
     // `{"input": ...}`), so the rebind branches at the canonical checkpoint
     // like any other and nothing is refused up front.
-    let target_selection =
-        profile_target_selection(&account, extra, protocol).map_err(CliFailure::new)?;
-    let api_root = target_selection.api_target().is_some();
-    let (effort_label, composition) = if api_root {
-        // An API root carries no catalog row to follow; it binds as a new
-        // session from the same template would.
-        api_root_binding(
-            &target_selection,
-            model,
-            effort,
-            composition.unwrap_or(crate::binding::CompositionSelection::FollowCatalog),
-        )
-        .map_err(CliFailure::new)?
-    } else {
-        (
-            validate_rebind_effort(&config.ready_catalog.accounts, &account, model, effort)?,
-            composition.unwrap_or(config.session.composition),
-        )
-    };
+    let (target_selection, api_root, effort_label, composition) = profile_rebind_selection(
+        config,
+        &account,
+        model,
+        effort,
+        extra,
+        composition,
+        protocol,
+    )?;
     // refuse before the first resolution round-trip,
     // while no durable rebind work exists to roll back.
     if watch.observe_now() {
@@ -558,6 +469,146 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {
         return Err(CliFailure::new(refusal));
     }
+    let (operation, target_product_id, own_tree, topology_tree_id) =
+        stage_profile_fork(config, opened, &account, model, composition, roster)?;
+    let target = resolve_profile_target(
+        executor,
+        watch,
+        config,
+        ProfileTargetInput {
+            api_root,
+            account: &account,
+            model,
+            effort_label: &effort_label,
+            composition,
+            target_selection: &target_selection,
+            target_product_id: &target_product_id,
+            operation: &operation,
+            topology_tree_id: &topology_tree_id,
+        },
+    )?;
+    observe_phase(
+        events,
+        HostLifecyclePhase::RebindResolveTarget,
+        started,
+        config.session.pending_queue.len(),
+    );
+    let instructions_before = instruction_sources(opened);
+    let mut attached_tree = None;
+    let branched = attach_profile_branch(
+        executor,
+        watch,
+        config,
+        opened,
+        stderr_buf,
+        events,
+        ProfileBranchInput {
+            target,
+            own_tree,
+            topology_tree_id: &topology_tree_id,
+            effort_label: &effort_label,
+            attached_tree: &mut attached_tree,
+            started,
+            account: &account,
+            model,
+            composition,
+            target_selection,
+            operation: &operation,
+        },
+    );
+    if let Some(tree_id) = attached_tree {
+        release_profile_build_lease(executor, events, &tree_id)?;
+    }
+    if matches!(branched, Ok(Rebound::Switched)) {
+        note_reread_instructions(events, instructions_before, opened);
+    }
+    branched
+}
+
+struct ProfileTargetInput<'a> {
+    api_root: bool,
+    account: &'a String,
+    model: &'a str,
+    effort_label: &'a Option<String>,
+    composition: crate::binding::CompositionSelection,
+    target_selection: &'a TargetSelection,
+    target_product_id: &'a String,
+    operation: &'a String,
+    topology_tree_id: &'a str,
+}
+
+struct ProfileBranchInput<'a> {
+    target: ProfileTarget,
+    own_tree: bool,
+    topology_tree_id: &'a str,
+    effort_label: &'a Option<String>,
+    attached_tree: &'a mut Option<String>,
+    started: Instant,
+    account: &'a str,
+    model: &'a str,
+    composition: crate::binding::CompositionSelection,
+    target_selection: TargetSelection,
+    operation: &'a str,
+}
+
+fn refuse_unready_rebind<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+) -> CliResult<()> {
+    if let Some(reason) = tree_epoch_rebind_refusal(&config.topology_rows(), &config.session) {
+        return Err(CliFailure::new(reason));
+    }
+    if !session_rebind_boundary_ready(&config.session) {
+        return Err(CliFailure::new(
+            "rebind requires an idle session with no queued or unresolved product work",
+        ));
+    }
+    Ok(())
+}
+
+fn profile_rebind_selection<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    account: &str,
+    model: &str,
+    effort: Option<&str>,
+    extra: Option<&str>,
+    composition: Option<crate::binding::CompositionSelection>,
+    protocol: Option<crate::binding::ProtocolSelection>,
+) -> CliResult<(
+    TargetSelection,
+    bool,
+    Option<String>,
+    crate::binding::CompositionSelection,
+)> {
+    let target_selection =
+        profile_target_selection(account, extra, protocol).map_err(CliFailure::new)?;
+    let api_root = target_selection.api_target().is_some();
+    let (effort_label, composition) = if api_root {
+        // An API root carries no catalog row to follow; it binds as a new
+        // session from the same template would.
+        api_root_binding(
+            &target_selection,
+            model,
+            effort,
+            composition.unwrap_or(crate::binding::CompositionSelection::FollowCatalog),
+        )
+        .map_err(CliFailure::new)?
+    } else {
+        (
+            validate_rebind_effort(&config.ready_catalog.accounts, account, model, effort)?,
+            composition.unwrap_or(config.session.composition),
+        )
+    };
+    Ok((target_selection, api_root, effort_label, composition))
+}
+
+fn stage_profile_fork<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    opened: &AttachedCodingSession,
+    account: &str,
+    model: &str,
+    composition: crate::binding::CompositionSelection,
+    roster: &crate::orchestration::RosterInput,
+) -> CliResult<(String, String, bool, String)> {
     let operation = format!("plak:rebind:{}", uuid::Uuid::new_v4());
     let target_product_id = sessions::projector::WorkflowRequest {
         operation_id: operation.clone(),
@@ -573,7 +624,7 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
             &target_product_id,
             &config.session.workspace_root,
             model,
-            &account,
+            account,
             roster.clone(),
         )?;
     }
@@ -582,12 +633,32 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     } else {
         decided_topology_tree_id(config, own_tree, &target_product_id)
     };
+    Ok((operation, target_product_id, own_tree, topology_tree_id))
+}
+
+fn resolve_profile_target<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    watch: InterruptWatch<'_, P>,
+    config: &HostConfig<P>,
+    input: ProfileTargetInput<'_>,
+) -> CliResult<ProfileTarget> {
+    let ProfileTargetInput {
+        api_root,
+        account,
+        model,
+        effort_label,
+        composition,
+        target_selection,
+        target_product_id,
+        operation,
+        topology_tree_id,
+    } = input;
     let target = if api_root {
         let mut record = SessionRecord::new(config.session.workspace_root.clone());
-        record.id.clone_from(&target_product_id);
+        record.id.clone_from(target_product_id);
         record.account = Some(account.clone());
         record.model = Some(model.to_owned());
-        record.effort.clone_from(&effort_label);
+        record.effort.clone_from(effort_label);
         record.composition = composition;
         record.target_selection = target_selection.clone();
         record.source_product_session_id = Some(config.session.id.clone());
@@ -600,99 +671,222 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
             executor,
             watch,
             config,
-            &account,
+            account,
             model,
             effort_label.as_deref(),
-            &target_product_id,
+            target_product_id,
             composition,
-            &target_selection,
-            &topology_tree_id,
+            target_selection,
+            topology_tree_id,
         )?))
     };
+    Ok(target)
+}
+
+fn attach_profile_branch<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    watch: InterruptWatch<'_, P>,
+    config: &mut HostConfig<P>,
+    opened: &mut AttachedCodingSession,
+    stderr_buf: &mut Vec<u8>,
+    events: &Sender<P>,
+    input: ProfileBranchInput<'_>,
+) -> CliResult<Rebound> {
+    let ProfileBranchInput {
+        target,
+        own_tree,
+        topology_tree_id,
+        effort_label,
+        attached_tree,
+        started,
+        account,
+        model,
+        composition,
+        target_selection,
+        operation,
+    } = input;
+    let (runtime, target) = prepare_profile_runtime(
+        executor,
+        watch,
+        config,
+        stderr_buf,
+        target,
+        ProfileRuntimeInput {
+            own_tree,
+            topology_tree_id,
+            effort_label: effort_label.as_deref(),
+        },
+        attached_tree,
+    )?;
     observe_phase(
         events,
-        HostLifecyclePhase::RebindResolveTarget,
+        HostLifecyclePhase::RebindPrepareRuntime,
         started,
         config.session.pending_queue.len(),
     );
-    let instructions_before = instruction_sources(opened);
-    let mut attached_tree = None;
-    let branched = (|| -> CliResult<Rebound> {
-        let (runtime, target) = prepare_profile_runtime(
-            executor,
-            watch,
-            config,
-            stderr_buf,
-            target,
-            ProfileRuntimeInput {
-                own_tree,
-                topology_tree_id: &topology_tree_id,
-                effort_label: effort_label.as_deref(),
-            },
-            &mut attached_tree,
-        )?;
-        observe_phase(
-            events,
-            HostLifecyclePhase::RebindPrepareRuntime,
+    // the target is resolved but nothing durable exists yet, so
+    // an intent observed here refuses without creating a branch.
+    if watch.observe_now() {
+        return Err(interrupted_before_dispatch("rebind"));
+    }
+    let workflow_kind = rebind_workflow_kind(
+        &target,
+        account,
+        model,
+        effort_label.as_deref(),
+        composition,
+        target_selection,
+    )?;
+    let attached_locator = publish_rebind_intent(
+        executor,
+        watch,
+        config,
+        opened,
+        events,
+        RebindIntent {
+            operation,
+            workflow_kind,
             started,
-            config.session.pending_queue.len(),
-        );
-        // the target is resolved but nothing durable exists yet, so
-        // an intent observed here refuses without creating a branch.
-        if watch.observe_now() {
-            return Err(interrupted_before_dispatch("rebind"));
-        }
-        let workflow_kind = rebind_workflow_kind(
-            &target,
-            &account,
-            model,
-            effort_label.as_deref(),
-            composition,
-            target_selection,
-        )?;
-        let attached_locator = publish_rebind_intent(
-            executor,
-            watch,
-            config,
-            opened,
-            events,
-            RebindIntent {
-                operation: &operation,
-                workflow_kind,
-                started,
-            },
-        )?;
-        let source_locator = detach_prepared_rebind(
-            executor,
-            watch,
-            config,
-            opened,
-            stderr_buf,
-            &operation,
-            attached_locator,
-        )?;
-        complete_rebind(
-            executor,
-            watch,
-            config,
-            opened,
-            stderr_buf,
-            events,
-            &operation,
-            source_locator,
-            target,
-            runtime,
-            started,
+        },
+    )?;
+    let source_locator = detach_prepared_rebind(
+        executor,
+        watch,
+        config,
+        opened,
+        stderr_buf,
+        operation,
+        attached_locator,
+    )?;
+    complete_rebind(
+        executor,
+        watch,
+        config,
+        opened,
+        stderr_buf,
+        events,
+        operation,
+        source_locator,
+        target,
+        runtime,
+        started,
+    )
+    .map(|()| Rebound::Switched)
+}
+
+fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    watch: InterruptWatch<'_, P>,
+    config: &HostConfig<P>,
+    subscriptions: &plakous::subscriptions::NativeSubscriptions,
+    provider: NativeProvider,
+    account: &str,
+    model: &str,
+) -> CliResult<(
+    Vec<plakous::model::ReasoningEffort>,
+    Vec<String>,
+    Option<plakous::subscriptions::NativeToolMode>,
+)> {
+    let candidate = match &config.target {
+        HostTargetAuthority::Native {
+            catalog_candidates, ..
+        } => catalog_candidates
+            .iter()
+            .find(|candidate| candidate.account == account && candidate.exact_id == model),
+        HostTargetAuthority::OpenRouter { .. } | HostTargetAuthority::Platform { .. } => None,
+
+        HostTargetAuthority::Registered { .. } => None,
+    };
+    let (reasoning_efforts, service_tiers, native_tool_mode) = if let Some(candidate) = candidate {
+        (
+            candidate.reasoning_efforts.clone(),
+            candidate
+                .service_tiers
+                .iter()
+                .map(|tier| tier.0.clone())
+                .collect::<Vec<_>>(),
+            candidate.native_tool_mode,
         )
-        .map(|()| Rebound::Switched)
-    })();
-    if let Some(tree_id) = attached_tree {
-        release_profile_build_lease(executor, events, &tree_id)?;
+    } else {
+        let catalog = run_watched(
+            executor,
+            watch,
+            bounded_rebind_lookup(subscriptions.model_catalog(provider)),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map_err(|()| CliFailure::new("rebind catalog refresh timed out; source unchanged"))?
+        .map_err(rebind_catalog_failure)?;
+        let catalog_entry = catalog
+            .models()
+            .iter()
+            .find(|entry| entry.exact_id() == model)
+            .ok_or_else(|| {
+                CliFailure::new("rebind model is absent from the authenticated catalog")
+            })?;
+        (
+            catalog_entry.reasoning_efforts().to_vec(),
+            catalog_entry
+                .service_tiers()
+                .iter()
+                .map(|tier| tier.id().to_owned())
+                .collect(),
+            catalog_entry.native_tool_mode(),
+        )
+    };
+    Ok((reasoning_efforts, service_tiers, native_tool_mode))
+}
+
+fn admit_rebind_effort(
+    reasoning_efforts: &[plakous::model::ReasoningEffort],
+    explicit: bool,
+    parsed_effort: plakous::model::ReasoningEffort,
+) -> CliResult<()> {
+    if reasoning_efforts.is_empty() {
+        if explicit {
+            return Err(CliFailure::new(
+                "rebind target does not admit a reasoning effort",
+            ));
+        }
+    } else if !explicit {
+        return Err(CliFailure::new(
+            "reasoning rebind target requires an explicit effort",
+        ));
+    } else if !reasoning_efforts.contains(&parsed_effort) {
+        return Err(CliFailure::new(
+            "rebind target effort is absent from the authenticated catalog",
+        ));
     }
-    if matches!(branched, Ok(Rebound::Switched)) {
-        note_reread_instructions(events, instructions_before, opened);
-    }
-    branched
+    Ok(())
+}
+
+fn rebind_processing_tier(
+    target_selection: &TargetSelection,
+    provider: NativeProvider,
+    service_tiers: &[String],
+) -> CliResult<ProcessingTierDisposition> {
+    let processing_tier = match target_selection {
+        TargetSelection::Native => ProcessingTierDisposition::Standard,
+        TargetSelection::NativePriority
+            if provider == NativeProvider::Codex
+                && service_tiers.iter().any(|tier| tier == "priority") =>
+        {
+            ProcessingTierDisposition::ProviderNamed(
+                ProviderServiceTierId::new("priority")
+                    .map_err(|_| CliFailure::new("Codex priority tier identity is invalid"))?,
+            )
+        }
+        TargetSelection::NativePriority => {
+            return Err(CliFailure::new(
+                "Fast is absent from this exact authenticated Codex model row",
+            ));
+        }
+        TargetSelection::OpenRouter { .. } | TargetSelection::Platform { .. } => {
+            return Err(CliFailure::new(
+                "OpenRouter target selection cannot be used for a native OAuth rebind",
+            ));
+        }
+    };
+    Ok(processing_tier)
 }
 
 struct ProfileRuntimeInput<'a> {
