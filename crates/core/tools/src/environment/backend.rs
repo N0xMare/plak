@@ -17,6 +17,8 @@ pub use workspace_types::{
     WorkspaceReadCursor, WorkspaceReadSlice, WorkspaceReadSliceRequest, WorkspaceReplacement,
 };
 mod deterministic;
+#[cfg(test)]
+mod read_observation_tests;
 pub use deterministic::{
     DeterministicBackendStatus, DeterministicExecutionBackend, DeterministicProcessPolicy,
     DeterministicProcessStep, DeterministicServiceEndpoint, DeterministicServiceStep,

@@ -40,5 +40,10 @@ fn read_observations_are_bounded_shared_contained_and_attachment_local()
     assert_eq!(fresh.last_text_read(run, path), None);
     clone.invalidate_text_read(run, path);
     assert_eq!(environment.last_text_read(run, path), None);
+    environment.record_text_read(run, path, content);
+    std::fs::remove_file(root.path().join(path))?;
+    clone.invalidate_text_read(run, path);
+    std::fs::write(root.path().join(path), "old")?;
+    assert_eq!(environment.last_text_read(run, path), None);
     Ok(())
 }

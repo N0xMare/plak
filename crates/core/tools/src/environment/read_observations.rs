@@ -64,9 +64,16 @@ impl ExecutionEnvironment {
     }
 
     /// Invalidates observations for a workspace-relative mutation target.
-    /// Call before publication, including deletes, so aliases still resolve.
+    /// Call around publication, including deletes, so observations recorded
+    /// concurrently during staging are consumed too.
     pub(crate) fn invalidate_text_read(&self, run: RunId, path: &Path) {
-        let Some(key) = self.read_observation_key(run, path) else {
+        let key = self.read_observation_key(run, path).or_else(|| {
+            self.workspace()
+                .relative_input(path)
+                .ok()
+                .map(|path| (run, self.root().join(path)))
+        });
+        let Some(key) = key else {
             return;
         };
         let Ok(mut observations) = self.read_observations.0.lock() else {
