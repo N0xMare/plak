@@ -1,5 +1,5 @@
-/// `openai` API models enrolled as `CodeModeOnly`. Reviewed 2026-10-07 against
-/// the `tool_mode` of the same model ids in the Codex 0.162.1 reference
+/// `openai` API models enrolled as `CodeModeOnly`. Reviewed 2026-10-30 against
+/// the `tool_mode` of the same model ids in the Codex 0.166.0 reference
 /// catalog; a test holds this table to that fixture.
 pub(super) const OPENAI_API_CODE_MODE_ONLY: &[&str] = &[
     "gpt-6-sol",

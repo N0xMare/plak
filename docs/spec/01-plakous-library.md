@@ -3031,7 +3031,7 @@ The lookup inventory is:
 
 | Route | Lookup before binding | Existing cache/credential behavior |
 | --- | --- | --- |
-| Codex subscription | `GET /backend-api/codex/models?client_version=0.162.1` on `chatgpt.com` | Authenticated catalog evidence lasts 6 h; the existing credential refresh path is separate |
+| Codex subscription | `GET /backend-api/codex/models?client_version=0.166.0` on `chatgpt.com` | Authenticated catalog evidence lasts 6 h; the existing credential refresh path is separate |
 | Grok subscription | `GET /v1/models` on `cli-chat-proxy.grok.com` | Authenticated catalog evidence lasts the access-token window (6 h); renewal/refresh remains separate |
 | Claude subscription | Pinned enrolled catalog, no network model lookup | Credential/profile GETs are not model catalogs and do not enter this retry policy |
 | OpenRouter | `GET /api/v1/models`, then the exact model's `/api/v1/models/{author}/{slug}/endpoints` on `openrouter.ai` | Both discovery GETs use the policy; binding uses the successful exact evidence |
@@ -3160,20 +3160,17 @@ Platform credentials never cross origins or fall back to one another, and
 catalog, inference, receipts, cache, continuation, usage, and retry state stay
 profile-isolated.
 
-The Codex OAuth reference client is `0.162.1`; the authenticated catalog request
-sends `client_version=0.162.1`. Its catalog contract is the `rust-v0.162.1`
-source revision's `models.json`, which is unchanged from `rust-v0.160.0` in
-every field Plak pins (tool mode, reasoning levels, windows, truncation,
-Responses Lite, parallel calls, service tiers). The 2026-10-24 review against
-stable `rust-v0.164.0` (revision `6aaac694803004a63c6f393d153c96d22521a6b9`),
-after the 2026-10-22 review against `rust-v0.163.0`
-(`83086188ae0614bd882818ff1aa23f3194962012`), found no change to pinned facts;
-upstream `minimal_client_version` is also unchanged (not yet consumed). The
-reviewed `models.json` SHA-256 is
-`943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b`,
-byte-identical at both revisions. OAuth client, scopes, endpoints, callback and
-originator/header contract are unchanged; the review changes only the review
-date.
+The Codex OAuth reference client is `0.166.0`; the authenticated catalog request
+sends `client_version=0.166.0`. Its catalog contract is the `rust-v0.166.0`
+source revision's `codex-rs/models-manager/models.json` at commit
+`6ff1e1ca3b30fc8b914720681fcf5fe62e95f856`. The 2026-10-30 review found
+no changes to existing enrolled rows' tool modes, reasoning levels, windows,
+truncation, Responses Lite, parallel calls, service tiers or minimum versions.
+The catalog adds `gpt-6.1-terra`, which remains unenrolled. The reviewed file's
+SHA-256 is `1384625c0b6b3e67d3c60da29becea2b017f2c283fc1e2d05b8edafb4698eb10`.
+OAuth client, scopes, endpoints, callback and truthful Plak identity are
+unchanged. The native 0.166.0 capture confirms the reference-version header
+and Responses Lite request shape; the adapter does not borrow its originator.
 Plak retains its pinned reference version and truthful identity. The reference
 client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
@@ -3184,7 +3181,7 @@ dispatch. The backend keys prompt caching on this header, not the body field.
 A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
 does not borrow client identity: `originator=plak` and the truthful Plak user
 agent remain unchanged. Its compiled compatibility
-profile was reviewed on 2026-10-24 and expires at 2027-01-22T00:00:00Z, 90 days
+profile was reviewed on 2026-10-30 and expires at 2027-01-28T00:00:00Z, 90 days
 after the review (§7.1); a re-review that changes no contract keeps every
 earlier acceptance current (§7.2).
 The hidden, non-default `test-clock` feature alone exposes the Codex manager
@@ -3367,7 +3364,7 @@ lifecycle with its `deprecated_at` and `retires_at` times (Sonnet 4.5,
 `claude-sonnet-4-5-20250929`, is deprecated from 2026-09-30 and retires
 2026-11-30; Anthropic names `claude-sonnet-5-5` as its replacement, which the
 table does not record), the input price threshold where the pricing page
-publishes one (Haiku 5.5: 100,000 tokens, rechecked on 2026-10-24) and
+publishes one (Haiku 5.5: 100,000 tokens, rechecked on 2026-10-30) and
 the hosted features its docs list (`featureMetadata.supportedModels`:
 compaction, hosted programmatic tool calling, tool search, web search, web
 fetch, code execution; recorded, not yet used). Classification
@@ -3396,10 +3393,10 @@ domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
 
 The OpenAI Platform manifest and xAI Platform binding were re-reviewed on
-2026-10-24 against their official model, Responses, tool-calling, reasoning and
+2026-10-30 against their official model, Responses, tool-calling, reasoning and
 storage documentation. The review found no change to pinned facts on either
 surface; `gpt-6.1-sol` exists and is not admitted. They are documented public
-APIs, so their reviews are due again at 2027-01-22T00:00:00Z (90 days after the
+APIs, so their reviews are due again at 2027-01-28T00:00:00Z (90 days after the
 review) but
 never refuse on the calendar: construction, preparation and runtime
 revalidation ignore the review date, built-in facts carry no expiry, and a
@@ -3661,8 +3658,8 @@ final usage chunk that repeats `finish_reason`, `reasoning` and
 `reasoning_details`, tool calls, and the pre-commit JSON and mid-stream
 `error` shapes were last reviewed against the public
 [OpenRouter docs](https://openrouter.ai/docs/api_reference/streaming) on
-2026-10-24, with no change to pinned facts. The review is due again at
-2027-01-22T00:00:00Z, 90 days later. OpenRouter is a documented public API, so
+2026-10-30, with no change to pinned facts. The review is due again at
+2027-01-28T00:00:00Z, 90 days later. OpenRouter is a documented public API, so
 the review-due date never refuses the route: an authority's validity is the
 discovery evidence's expiry alone, and the built-in dialect facts carry no
 expiry. The test-only `test-clock` feature permits a route clock shared by
@@ -4044,17 +4041,18 @@ limit (`InvalidTokenResponse`). Body transport failures preserve their network
 classification. These paths use the shared `AuthBodyError` directly, not a
 usage-only alias, and never retain response bodies in diagnostics.
 
-SuperGrok's `x-grok-client-version` is `1.0.46`, the value native Grok Build
-1.0.46 sends. Native Grok derives this proxy version-gate value from its CLI
-version, not a fixed protocol version. At the 2026-10-24 review the latest Grok
-Build was 1.0.67; the reference lags it until a native 1.0.67 request capture
-is reviewed, and the OIDC discovery document at `auth.x.ai` matched every pin.
+SuperGrok's `x-grok-client-version` is `1.0.70`, the value native Grok Build
+1.0.70 sends. Native Grok derives this proxy version-gate value from its CLI
+version, not a fixed protocol version. The 2026-10-30 offline native request
+capture confirms 1.0.70 and the existing proxy headers and Responses request
+shape. The wire change advances the xAI Responses adapter revision to v8;
+the OIDC client, scope, endpoint and consent pins are unchanged.
 
-Claude OAuth Messages inference uses the pinned Claude Code 2.1.295 gateway
+Claude OAuth Messages inference uses the pinned Claude Code 2.1.314 gateway
 costume — HTTP attribution plus `system[0]`/`system[1]`, with native `cch` body
-attestation. At the 2026-10-24 review the latest Claude Code was 2.1.310; the
-reference lags it until a native 2.1.310 Messages request capture (beta order,
-`cc_version`, `cch`) is reviewed. The inference costume revision does not alter the OAuth client,
+attestation. The 2026-10-30 review captured all six enrolled models through the
+interactive native TUI against an isolated recorder with synthetic credentials.
+The inference costume revision does not alter the OAuth client,
 credential slot, token exchange, or compatibility acceptance/source revision
 and must not require a fresh login or consent. Billing attribution carries the
 entry UUID of the direct user prompt that opened the turn (§10.6), fixed across
@@ -4069,7 +4067,7 @@ provider-issued request identifiers, not invented native session identifiers.
 A rooted direct customer prompt also carries `cc_prompt_index=<p>; cc_turn_index=<t>;`
 after `cc_turn_origin`, the root turn's 1-based session position: `t` counts
 every root turn (prompts and host wakes) through the current one, `p` only the
-turns a person submitted. The 2.1.295 captures (three human turns, one with two
+turns a person submitted. The 2.1.314 captures (three human turns, one with two
 tool rounds, one answered after a 529 retry, then `--continue` and a fourth)
 show 1, 2, 3 and 4: the position is fixed per turn, unchanged across tool
 continuations and retries, and continues across resume. Plakous derives it from
@@ -4118,21 +4116,24 @@ preceding comma within the current scan range. The fallback-array scan respects
 nested arrays and quoted strings. Retained bytes are never reserialized, and all
 excluded fields remain unchanged on the wire; only the five billing-placeholder
 bytes are overwritten. Bodies without billing attribution remain untouched.
-The 2.1.295 costume is reviewed against native interactive request captures
-(mock origin, synthetic OAuth): user agent `claude-cli/2.1.295 (external, cli)`,
-Stainless package `0.128.0`, and billing `cc_version=2.1.295.<suffix>`
-(`hello` is `05c`, empty first text `8a8`); the `cch` attestation algorithm is
-verified against a 2.1.295 body. The
+The refreshed header omits `mid-conversation-system-2026-04-07`;
+`thinking-token-count-2026-05-13` follows the optional per-turn/tool flags.
+The 2.1.314 costume is reviewed against native interactive request captures
+(mock origin, synthetic OAuth): user agent `claude-cli/2.1.314 (external, cli)`,
+Stainless package `0.128.0`, runtime `v26.12.1`, and billing `cc_version=2.1.314.<suffix>`
+(`hello` is `ece`, empty first text `cfe`); the `cch` attestation algorithm is
+verified against raw 2.1.314 bodies for every enrolled model; its seed, salt and
+byte exclusions are unchanged. The
 `anthropic-beta` header and the Messages `max_tokens` value come from that
 model's enrollment row, not from one shared list. Every enrolled row, Fable 5.1
-included, has its own 2.1.295 capture. Header
-order is: Sonnet 5 sends the 14-beta baseline and `max_tokens`
+included, has its own 2.1.314 capture. Header
+order is: Sonnet 5 sends the 13-beta baseline and `max_tokens`
 64000; Opus 5 adds `mid-conversation-tool-changes-2026-07-01` after
-`mid-conversation-system-2026-04-07` and sends 64000; Sonnet 5.5 and Opus 5.5
-add that beta and `per-turn-control-2026-07-01` (16 betas) and send 128000;
-Haiku 5.5 sends those same 16 with `claude-code-20250219` seventh and sends
+`prompt-caching-scope-2026-01-05` and before `thinking-token-count-2026-05-13` and sends 64000; Sonnet 5.5 and Opus 5.5
+add that beta and `per-turn-control-2026-07-01` (15 betas) and send 128000;
+Haiku 5.5 sends those same 15 with `claude-code-20250219` fifth and sends
 128000. Fable sets both flags and a 64000 request default, and
-its id is not Haiku, so it takes the non-Haiku 16-beta header. Effort does
+its id is not Haiku, so it takes the non-Haiku 15-beta header. Effort does
 not change the header. The 128000 figure remains the output ceiling: the
 descriptor maximum and the product output bound. It is not the
 semantic-compaction bound. Compaction asks for the minimum of the turn's
@@ -4147,13 +4148,13 @@ reasoning, which Sonnet 5, Opus 5 and Fable admit, sends none. That edit is
 request-only; it does not rewrite canonical thinking or the response
 `applied_edits` parser. These request-lowering semantics are bound by
 `anthropic.claude.oauth.lowering.2026-10-09.v12` (adapter revision
-`anthropic.claude.oauth.2026-10-09.v8`) and the
+`anthropic.claude.oauth.2026-10-30.v9`) and the
 prepared wire/context projection by `messages.projection.v3`. The native
 context reference pins still identify Claude Code 2.1.284 executables. The
 context reference is deliberately decoupled from the costume: a costume
 refresh does not move it, and it moves only in a separate cutover that records
 reviewed Linux executable identities for the new version (none is recorded for
-2.1.295). The macOS arm64
+2.1.314). The macOS arm64
 identity comes from the installed native binary; Linux x86_64 and arm64
 identities come from the same official manifest.
 Those binary identities do not by themselves establish captured wire behavior.
@@ -4193,10 +4194,10 @@ route it is admitted by the reviewed table and family rules (§6.3). Its family
 is `claude-5-haiku`. It uses the shared enrollment
 window: 1,000,000 context tokens and 128,000 output tokens, with adaptive
 thinking and low/medium/high/xhigh/max effort. Picker order places it after
-the Sonnet rows. The 2.1.295 low capture (synthetic OAuth, no provider acceptance) shows the exact model id, a
+the Sonnet rows. The 2.1.314 low capture (synthetic OAuth, no provider acceptance) shows the exact model id, a
 128,000-token output request, adaptive thinking with updates, and
 `output_config.effort`. Its enrollment row supplies the Haiku beta header
-(`claude-code-20250219` seventh, including `per-turn-control-2026-07-01` and
+(`claude-code-20250219` fifth, including `per-turn-control-2026-07-01` and
 `mid-conversation-tool-changes-2026-07-01`) and the 128000 request default.
 The OAuth `context_management` edit is on this request because Haiku admits
 only adaptive thinking. User agent,
@@ -5321,7 +5322,7 @@ promote because a notice or observation ledger is full, it remains foreground
 until promotion is possible or it finishes, under the original cancellation and
 hard runtime limits; ledger saturation never kills that command.
 
-The Grok Build 1.0.46 process vocabulary is
+The Grok Build 1.0.70 process vocabulary is
 `run_terminal_command {command, block_until_ms, description}`,
 `get_command_or_subagent_output {task_ids, timeout_ms}` and
 `kill_command_or_subagent {task_id}`. Starts return a `task_id` (`pN`) when
@@ -6552,7 +6553,7 @@ native Code Mode eligibility all read it through `NativeProvider::enrolls` and
 `NativeProvider::enrolled_tool_mode`, and the neutral tools and composition
 crates hold no model ids. Provider catalog admission alone cannot make a
 product session executable.
-The reviewed Codex 0.162.1 `CodeModeOnly` rows use Responses Lite and do not
+The reviewed Codex 0.166.0 `CodeModeOnly` rows use Responses Lite and do not
 advertise parallel tool calls. Their selected product configuration disables
 parallel calls for native, Direct, JavaScript and Python presentations so it
 can compile against the exact resolved descriptor. A future catalog row with
@@ -8296,7 +8297,7 @@ native item, or ciphertext mismatch refuses preparation as `ProtectedHistory`.
 Codex input metering substitutes each such compaction item's and each
 `reasoning` item's serialized bytes, when `encrypted_content` is a string, with
 `max(0, len(encrypted_content) * 3 / 4 − 650)` before `ceil(bytes / 4)`,
-matching the pinned Codex `rust-v0.162.1` `estimate_reasoning_length` rule for
+matching the pinned Codex `rust-v0.166.0` `estimate_reasoning_length` rule for
 both encrypted Reasoning and Compaction items. The enrolled measurement
 revision is `codex-complete-input-utf8-bytes-div4-encrypted-v6`.
 The family artifact stays

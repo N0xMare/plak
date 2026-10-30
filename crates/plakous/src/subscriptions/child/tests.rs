@@ -41,7 +41,7 @@ async fn server(replies: Vec<Reply>) -> (Origin, Arc<AtomicUsize>, tokio::task::
             }
             assert!(
                 head.starts_with(
-                    b"GET /backend-api/codex/models?client_version=0.162.1 HTTP/1.1\r\n"
+                    b"GET /backend-api/codex/models?client_version=0.166.0 HTTP/1.1\r\n"
                 )
             );
             counted.fetch_add(1, Ordering::SeqCst);
@@ -76,7 +76,7 @@ async fn lookup(
     let request = Request::new(
         origin.clone(),
         Method::GET,
-        "/backend-api/codex/models?client_version=0.162.1",
+        "/backend-api/codex/models?client_version=0.166.0",
         HeaderMap::new(),
         Bytes::new(),
         client.limits(),

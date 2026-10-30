@@ -22,7 +22,7 @@ const MANUAL_THINKING_MINIMUM_TOKENS: u32 = 1_024;
 pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVISION: &str =
     "anthropic.platform.admission.2026-09-22.v3";
 /// UTC review time of the immutable admission manifest.
-pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS: u64 = 1_792_800_000;
+pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS: u64 = 1_793_318_400;
 /// When the admission manifest is due for re-review, 90 days after its review.
 ///
 /// It drives only doctor and status notes and the publish floor; the route

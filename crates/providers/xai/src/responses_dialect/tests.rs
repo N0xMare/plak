@@ -46,7 +46,7 @@ fn request_route_and_revision_facts_match_the_supergrok_golden() {
             "protocol": "xai.responses.grok-subscription.2026-07",
             "origin": "https://cli-chat-proxy.grok.com",
             "path": "/v1/responses",
-            "adapter_revision": "plakous-xai-responses-adapter-v7",
+            "adapter_revision": "plakous-xai-responses-adapter-v8",
             "feature_revision": "plak-xai-subscription-feature-matrix-v8",
             "research_baseline": "2026-08-22",
             "store": false,

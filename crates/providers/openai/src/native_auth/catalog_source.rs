@@ -226,7 +226,7 @@ impl CodexCatalogSource {
                     | CatalogShellType::UnifiedExec
                     | CatalogShellType::ShellCommand
             );
-            // Codex 0.162.1 omits parallel tool calls for Responses Lite rows.
+            // Codex 0.166.0 omits parallel tool calls for Responses Lite rows.
             // The standard request builder can still enable them with tools.
             let parallel_tools = tools && !model.use_responses_lite;
             // The descriptor records the coarse existence of reasoning. The

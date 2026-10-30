@@ -353,10 +353,10 @@ const HEADER_GROK_CONV_ID: HeaderName = HeaderName::from_static("x-grok-conv-id"
 const HEADER_X_USER_ID: HeaderName = HeaderName::from_static("x-userid");
 const XAI_TOKEN_AUTH_VALUE: &str = "xai-grok-cli";
 const AUTHENTICATE_RESPONSE_VALUE: &str = "authenticate-response";
-// Grok Build 1.0.46 (2765805b9442) derives this
+// Grok Build 1.0.70 (f50904eaee6c) derives this
 // version-gate header from its CLI version. It is not a fixed protocol
 // version. Product identity stays separate: Plakous does not claim grok-shell.
-const SUPERGROK_CLIENT_COMPATIBILITY_VERSION: &str = "1.0.46";
+const SUPERGROK_CLIENT_COMPATIBILITY_VERSION: &str = crate::SUPERGROK_REFERENCE_CLIENT_VERSION;
 const PLAKOUS_XAI_CLIENT_IDENTIFIER: &str = "plakous";
 // Plakous runs a continuing agent session rather than Grok Build's one-shot
 // `-p` path. This is the corresponding pinned client-mode value.

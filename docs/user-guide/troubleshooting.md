@@ -606,11 +606,11 @@ re-reviewed build that changes no pinned contract keeps your acceptance and
 your login. A build whose notice changed asks you to accept it again, without
 a new login; a build whose OAuth contract changed carries a new profile and
 needs `plak login <account>`. This build's subscription profiles (Codex, Grok,
-Claude) are valid until 2027-01-22T00:00:00Z.
+Claude) are valid until 2027-01-28T00:00:00Z.
 
 The documented API routes (OpenAI and xAI Platform, Anthropic API, OpenRouter
 Chat) never refuse on the calendar. Their reviews are due 90 days after the
-review date (2027-01-22T00:00:00Z for every API route in this build); after
+review date (2027-01-28T00:00:00Z for every API route in this build); after
 that the routes keep working and a newer build carries re-reviewed facts.
 
 `plak doctor` and both forms of `plak status` write one line 14 days before

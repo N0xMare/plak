@@ -752,7 +752,7 @@ fn assert_oauth_billing_attested(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let text = system0["text"].as_str().ok_or("billing text")?;
     assert!(
-        text.starts_with("x-anthropic-billing-header: cc_version=2.1.295."),
+        text.starts_with("x-anthropic-billing-header: cc_version=2.1.314."),
         "{text}"
     );
     assert!(text.contains("; cc_entrypoint=cli; cch="), "{text}");
@@ -1388,25 +1388,25 @@ fn costume_oauth_plan(
     Ok((resolved, plan))
 }
 
-/// Claude Code 2.1.295 `anthropic-beta` and Messages `max_tokens` are per model.
+/// Claude Code 2.1.314 `anthropic-beta` and Messages `max_tokens` are per model.
 ///
-/// Every row was captured under 2.1.295 (low effort); headers and `max_tokens`
-/// match the earlier rows. Sonnet 5 is the 14-beta
+/// Every row was captured under 2.1.314 (low effort); headers and `max_tokens`
+/// match the earlier rows. Sonnet 5 is the 13-beta
 /// baseline; Opus 5 adds `mid-conversation-tool-changes`; Sonnet 5.5, Opus 5.5,
-/// and Fable add that and `per-turn-control`; Haiku 5.5 sends the same 16 with
-/// `claude-code-20250219` seventh. Fable's id is not Haiku, so it takes the
-/// non-Haiku 16-beta header. Effort does not change the header.
+/// and Fable add that and `per-turn-control`; Haiku 5.5 sends the same 15 with
+/// `claude-code-20250219` fifth. Fable's id is not Haiku, so it takes the
+/// non-Haiku 15-beta header. Effort does not change the header.
 /// An OAuth body sends `context_management` when thinking is enabled or
 /// adaptive, and a first request sends `diagnostics` with a `null` previous id.
 #[test]
 fn claude_oauth_costume_is_per_enrolled_model() -> TestResult {
-    const SONNET_5: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-    const OPUS_5: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-    const BOTH: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-    const HAIKU: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,claude-code-20250219,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+    const SONNET_5: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+    const OPUS_5: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+    const BOTH: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+    const HAIKU: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
     assert_eq!(
         CLAUDE_OAUTH_MESSAGES_USER_AGENT,
-        "claude-cli/2.1.295 (external, cli)"
+        "claude-cli/2.1.314 (external, cli)"
     );
     assert_eq!(CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION, "0.128.0");
     let rows = [
@@ -1595,7 +1595,7 @@ fn oauth_billing_carries_truthful_prompt_and_previous_request_before_attestation
     let prepared = translator.translate(&first_plan, ToolOwnership::default())?;
     let body: serde_json::Value = serde_json::from_slice(prepared.body())?;
     let header = body["system"][0]["text"].as_str().ok_or("billing")?;
-    assert!(header.starts_with("x-anthropic-billing-header: cc_version=2.1.295.05c;"));
+    assert!(header.starts_with("x-anthropic-billing-header: cc_version=2.1.314.ece;"));
     assert!(
         header.ends_with(
             "; cc_prompt_id=00000000-0000-0000-0000-000000000065; cc_turn_origin=human;"
@@ -1633,12 +1633,12 @@ fn oauth_billing_carries_truthful_prompt_and_previous_request_before_attestation
     )?;
     let body: serde_json::Value = serde_json::from_slice(prepared.body())?;
     let header = body["system"][0]["text"].as_str().ok_or("billing")?;
-    assert!(header.starts_with("x-anthropic-billing-header: cc_version=2.1.295.05c;"));
+    assert!(header.starts_with("x-anthropic-billing-header: cc_version=2.1.314.ece;"));
     assert!(header.ends_with(
         "; cc_prev_req=req_prior-123; cc_prompt_id=00000000-0000-0000-0000-0000000000c9; cc_turn_origin=human;"
     ));
     assert_oauth_billing_attested(prepared.body(), &body["system"][0])?;
-    // Claude Code 2.1.295 captures: the indices follow `cc_turn_origin`, and
+    // Claude Code 2.1.314 captures: the indices follow `cc_turn_origin`, and
     // `diagnostics` names the response that `cc_prev_req` names.
     let continued = translator
         .clone()
@@ -1955,7 +1955,7 @@ fn translator_debug_redacts_logical_session_identity() -> TestResult {
     Ok(())
 }
 
-/// Claude Code 2.1.295 emits `context_management` only when
+/// Claude Code 2.1.314 emits `context_management` only when
 /// `thinking.type !== "disabled"`. Disabled reasoning sends none.
 #[test]
 fn disabled_thinking_omits_claude_oauth_context_management() -> TestResult {

@@ -58,7 +58,7 @@ same low–max effort and the shared 1,000,000/128,000 window. It has no live
 acceptance yet. Disabled thinking is refused before dispatch. Forced tool choice is admitted
 and unqualified: Claude Code demotes it to auto while thinking is active.
 The OAuth
-inference request uses the pinned Claude Code 2.1.295 client identity,
+inference request uses the pinned Claude Code 2.1.314 client identity,
 headers, system identity text and billing attestation, including Claude Code's
 per-turn prompt and turn numbers and its previous-response diagnostics. The beta header and
 `max_tokens` follow the selected model. An OAuth request sends the

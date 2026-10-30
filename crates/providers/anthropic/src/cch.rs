@@ -7,22 +7,22 @@
 //! The `cc_version` three-hex suffix is `SHA-256(salt + msg[4,7,20] + VERSION)[:3]`
 //! over the first user text. This module is that exact pair, applied to the
 //! serialized Messages JSON Plakous sends. The costume pin is Claude Code
-//! 2.1.295; the hash seed and salt are the native Bun/JS pair.
+//! 2.1.314; the hash seed and salt are the native Bun/JS pair.
 
 use plakous_model::{Actor, ContentBlock, SessionLineage, ValidatedRequestPlan, sha256_hex};
 use std::fmt::Write as _;
 
 /// Official Claude Code version the OAuth Messages costume still pins.
-pub(crate) const CLAUDE_OAUTH_CC_VERSION: &str = "2.1.295";
+pub(crate) const CLAUDE_OAUTH_CC_VERSION: &str = "2.1.314";
 /// JS-layer placeholder the native HTTP stack overwrites in place.
 pub(crate) const CLAUDE_OAUTH_CCH_PLACEHOLDER: &str = "cch=00000";
 #[cfg(test)]
-/// Empty first-user-text root billing header before attestation (suffix `8a8`).
+/// Empty first-user-text root billing header before attestation (suffix `cfe`).
 pub(crate) const CLAUDE_OAUTH_BILLING_HEADER: &str =
-    "x-anthropic-billing-header: cc_version=2.1.295.8a8; cc_entrypoint=cli; cch=00000;";
+    "x-anthropic-billing-header: cc_version=2.1.314.cfe; cc_entrypoint=cli; cch=00000;";
 #[cfg(test)]
 /// Empty first-user-text spawned-child billing header before attestation.
-pub(crate) const CLAUDE_OAUTH_BILLING_HEADER_SUBAGENT: &str = "x-anthropic-billing-header: cc_version=2.1.295.8a8; cc_entrypoint=cli; cch=00000; cc_is_subagent=true;";
+pub(crate) const CLAUDE_OAUTH_BILLING_HEADER_SUBAGENT: &str = "x-anthropic-billing-header: cc_version=2.1.314.cfe; cc_entrypoint=cli; cch=00000; cc_is_subagent=true;";
 
 const BILLING_MARKER: &[u8] = b"x-anthropic-billing-header:";
 const CCH_PLACEHOLDER: &[u8] = b"cch=00000";
@@ -34,9 +34,9 @@ const VERSION_INDICES: [usize; 3] = [4, 7, 20];
 /// Builds `system[0]` with a version suffix, `cch=00000` placeholder, and
 /// optional `cc_is_subagent` from session lineage.
 ///
-/// Claude Code 2.1.295 billing blocks carry a trailing semicolon after `cch`
+/// Claude Code 2.1.314 billing blocks carry a trailing semicolon after `cch`
 /// (and after `cc_is_subagent` on spawned children). Empty first-user-text is
-/// suffix `8a8`; `"hello"` is `05c` (the 2.1.295 native capture's suffix).
+/// suffix `cfe`; `"hello"` is `ece` (the 2.1.314 native capture's suffix).
 #[must_use]
 pub(crate) fn billing_header_prefix(lineage: SessionLineage, first_user_text: &str) -> String {
     let suffix = cc_version_suffix(first_user_text, CLAUDE_OAUTH_CC_VERSION);

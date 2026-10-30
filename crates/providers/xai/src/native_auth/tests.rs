@@ -722,7 +722,7 @@ async fn subscription_usage_sends_exact_one_attempt_profile_and_retains_ready_le
         "authorization: Bearer opaque-usage-access\r\n",
         "x-userid: usage-subject\r\n",
         "x-xai-token-auth: xai-grok-cli\r\n",
-        "x-grok-client-version: 1.0.46\r\n",
+        "x-grok-client-version: 1.0.70\r\n",
         "x-grok-client-mode: interactive\r\n",
     ] {
         assert!(request.contains(header), "missing exact header {header:?}");
@@ -2943,7 +2943,7 @@ async fn resolver_rejects_requested_alias_or_bogus_id_before_credentials_and_wir
     assert!(catalog_wire.contains("authorization: bearer resolver-access"));
     assert!(catalog_wire.contains("x-xai-token-auth: xai-grok-cli"));
     assert!(catalog_wire.contains("x-userid: resolver-subject"));
-    assert!(catalog_wire.contains("x-grok-client-version: 1.0.46"));
+    assert!(catalog_wire.contains("x-grok-client-version: 1.0.70"));
     assert!(catalog_wire.contains("x-grok-client-identifier: plakous"));
     assert!(catalog_wire.contains("x-grok-client-mode: interactive"));
     assert!(!catalog_wire.contains("x-authenticateresponse"));
@@ -5195,7 +5195,7 @@ async fn native_subscription_uses_direct_responses_and_retains_grant_to_head() -
     assert!(wire.contains("user-agent: plak/"));
     assert!(wire.contains("x-xai-token-auth: xai-grok-cli"));
     assert!(wire.contains("x-authenticateresponse: authenticate-response"));
-    assert!(wire.contains("x-grok-client-version: 1.0.46"));
+    assert!(wire.contains("x-grok-client-version: 1.0.70"));
     assert!(wire.contains("x-grok-client-identifier: plakous"));
     assert!(wire.contains("x-grok-client-mode: interactive"));
     assert!(wire.contains(&format!(

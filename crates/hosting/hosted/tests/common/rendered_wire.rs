@@ -618,7 +618,10 @@ pub(crate) mod suite {
                     "x-authenticateresponse".into(),
                     "authenticate-response".into(),
                 ));
-                headers.push(("x-grok-client-version".into(), "1.0.46".into()));
+                headers.push((
+                    "x-grok-client-version".into(),
+                    plakous::xai::SUPERGROK_REFERENCE_CLIENT_VERSION.into(),
+                ));
                 headers.push(("x-grok-client-identifier".into(), "plakous".into()));
                 headers.push(("x-grok-client-mode".into(), "interactive".into()));
             }
@@ -991,7 +994,7 @@ pub(crate) mod suite {
         ),
         (
             "claude.direct.root",
-            "8aa95160c334af6e887ae8e9e2f0e28e664df18a9aa266c84064ba99238de0ba",
+            "edb0fb575c0fc2e772b3b8bb2f9d272532574220caeeba62e6fdb4e30ed36da7",
         ),
         (
             "openrouter-chat.direct.root",

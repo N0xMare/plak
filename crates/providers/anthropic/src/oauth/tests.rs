@@ -123,11 +123,11 @@ fn compatibility_envelope_is_pinned_to_claude_code_messages_costume() {
     assert!(CLAUDE_OAUTH_USER_AGENT.starts_with("plak/"));
     assert_eq!(
         CLAUDE_OAUTH_MESSAGES_USER_AGENT,
-        "claude-cli/2.1.295 (external, cli)"
+        "claude-cli/2.1.314 (external, cli)"
     );
     assert_eq!(
         crate::cch::CLAUDE_OAUTH_BILLING_HEADER,
-        "x-anthropic-billing-header: cc_version=2.1.295.8a8; cc_entrypoint=cli; cch=00000;"
+        "x-anthropic-billing-header: cc_version=2.1.314.cfe; cc_entrypoint=cli; cch=00000;"
     );
     assert_eq!(
         CLAUDE_OAUTH_IDENTITY,
@@ -245,7 +245,7 @@ fn enrolled_context_and_output_facts_come_from_one_table_and_unknowns_fail_close
             .position(|token| *token == "claude-code-20250219")
             .expect("claude-code beta");
         if model.contains("haiku") {
-            assert_eq!(code_at, 6, "{model} puts claude-code seventh");
+            assert_eq!(code_at, 4, "{model} puts claude-code fifth");
         } else {
             assert_eq!(code_at, 0, "{model} puts claude-code first");
         }

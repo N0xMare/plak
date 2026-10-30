@@ -19,6 +19,8 @@ fn empty_prompt_suffix_matches_the_current_native_version() {
     assert_eq!(cc_version_suffix("hello", "2.1.293"), "72d");
     assert_eq!(cc_version_suffix("", "2.1.295"), "8a8");
     assert_eq!(cc_version_suffix("hello", "2.1.295"), "05c");
+    assert_eq!(cc_version_suffix("", "2.1.314"), "cfe");
+    assert_eq!(cc_version_suffix("hello", "2.1.314"), "ece");
     assert_eq!(
         billing_header_prefix(SessionLineage::Root, ""),
         CLAUDE_OAUTH_BILLING_HEADER
@@ -27,7 +29,7 @@ fn empty_prompt_suffix_matches_the_current_native_version() {
         billing_header_prefix(SessionLineage::SpawnedChild, ""),
         CLAUDE_OAUTH_BILLING_HEADER_SUBAGENT
     );
-    assert!(billing_header_prefix(SessionLineage::Root, "hello").contains("2.1.295.05c;"));
+    assert!(billing_header_prefix(SessionLineage::Root, "hello").contains("2.1.314.ece;"));
     assert!(
         billing_header_prefix(SessionLineage::SpawnedChild, "hello")
             .ends_with("cch=00000; cc_is_subagent=true;")

@@ -93,7 +93,7 @@ impl CodexCatalogEntry {
 
     /// Returns the exact recognized `tool_mode` advertised by this row.
     ///
-    /// The pinned Codex 0.162.1 reference client defaults an omitted value to
+    /// The pinned Codex 0.166.0 reference client defaults an omitted value to
     /// Direct. Unknown future values return `None`; callers must not infer a
     /// mode from the model slug, shell type, or neighboring rows.
     #[must_use]
@@ -696,7 +696,7 @@ impl CatalogToolMode {
             Self::Direct => Some(CodexCatalogToolMode::Direct),
             Self::CodeMode => Some(CodexCatalogToolMode::CodeMode),
             Self::CodeModeOnly => Some(CodexCatalogToolMode::CodeModeOnly),
-            // Exact Codex 0.162.1 reference-client semantics.
+            // Exact Codex 0.166.0 reference-client semantics.
             Self::Missing => Some(CodexCatalogToolMode::Direct),
             Self::Other(_) => None,
         }
@@ -904,7 +904,7 @@ pub(super) struct ResolvedCatalog {
     pub(super) credential_fence: CredentialFence,
 }
 
-/// Exact Codex 0.162.1 model rows accepted for executable catalog intersection.
+/// Exact Codex 0.166.0 model rows accepted for executable catalog intersection.
 ///
 /// This list is bound to the reviewed reference-client/catalog contract.
 /// Authenticated catalog observation remains independently required, including for server-delivered rows that

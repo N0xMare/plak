@@ -30,8 +30,10 @@ pub const SUPERGROK_RESPONSES_ORIGIN: &str = "https://cli-chat-proxy.grok.com";
 pub(crate) const SUPERGROK_MODELS_PATH: &str = "/v1/models";
 /// Exact SuperGrok Responses resource path.
 pub const SUPERGROK_RESPONSES_PATH: &str = "/v1/responses";
+/// Reviewed native reference version sent in subscription request headers.
+pub const SUPERGROK_REFERENCE_CLIENT_VERSION: &str = "1.0.70";
 /// Stable request/adapter revision retained by admission and recovery facts.
-pub const XAI_RESPONSES_ADAPTER_REVISION: &str = "plakous-xai-responses-adapter-v7";
+pub const XAI_RESPONSES_ADAPTER_REVISION: &str = "plakous-xai-responses-adapter-v8";
 /// Exact reviewed route/model capability-table revision.
 pub(crate) const SUPERGROK_FEATURE_REVISION: &str = "plak-xai-subscription-feature-matrix-v8";
 /// Closed shared-host behavior revision for this dialect table.

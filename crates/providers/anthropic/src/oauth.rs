@@ -2,7 +2,7 @@
 //!
 //! This is the Messages-family OAuth *route* costume, not Claude Code's product
 //! loop. Login/token shapes match the documented Claude Code OAuth contract.
-//! Inference pins the reviewed Claude Code 2.1.295 Messages costume (HTTP
+//! Inference pins the reviewed Claude Code 2.1.314 Messages costume (HTTP
 //! attribution plus `system[0]` billing with native `cch` attestation and
 //! `system[1]` gateway identity).
 //! The Plak product prompt remains a later system block.
@@ -46,7 +46,7 @@ pub struct ClaudeEnrollment {
     /// Input window in tokens. The Anthropic Models API reports
     /// `max_input_tokens` = 1,000,000 for every enrolled row (2026-09-26).
     pub context_window: u64,
-    /// Output ceiling (`max_output_tokens.upper` in Claude Code 2.1.295).
+    /// Output ceiling (`max_output_tokens.upper` in Claude Code 2.1.314).
     /// Product output bounds, the descriptor maximum and compaction reservation
     /// use this. It is not the Messages `max_tokens` value.
     pub max_output_tokens: u32,
@@ -64,7 +64,7 @@ struct RequestCostume {
     request_max_tokens: u32,
     per_turn_effort: bool,
     mid_conv_tool_change: bool,
-    /// Haiku puts `claude-code-20250219` after the six-beta prefix.
+    /// Haiku puts `claude-code-20250219` after the four-beta prefix.
     claude_code_after_prefix: bool,
 }
 
@@ -91,10 +91,10 @@ const fn claude(
 
 /// Every enrolled Claude coding model, in picker order.
 ///
-/// Every row is reviewed against its own 2.1.295 native capture (low effort);
-/// betas and `max_tokens` match the earlier rows, and Fable 5.1, previously
-/// carried, takes the non-Haiku 16-beta header and 64000. Haiku is the only
-/// row whose id puts `claude-code-20250219` after the prefix (seventh).
+/// Every row is reviewed against its own 2.1.314 native capture (low effort);
+/// betas and `max_tokens` follow the model-specific rows, and Fable 5.1,
+/// previously carried, takes the non-Haiku 15-beta header and 64000. Haiku is the only
+/// row whose id puts `claude-code-20250219` after the prefix (fifth).
 pub const CLAUDE_ENROLLMENTS: [ClaudeEnrollment; 6] = [
     claude(
         "claude-sonnet-5",
@@ -228,7 +228,7 @@ pub(crate) const CLAUDE_OAUTH_NOTICE_REVISION: &str = "anthropic.claude.oauth.no
 pub const CLAUDE_OAUTH_KILL_SWITCH_REVISION: &str = "anthropic.claude.oauth.kill.2026-08-20.r1";
 /// UTC review time for the Claude OAuth pin table.
 #[cfg(feature = "native-auth")]
-pub(crate) const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_792_800_000;
+pub(crate) const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_793_318_400;
 /// Exclusive expiry for the Claude OAuth pin table, 00:00Z.
 #[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 =
@@ -236,23 +236,23 @@ pub(crate) const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 =
 /// Protocol identity shared with the Messages kernel.
 pub const CLAUDE_OAUTH_PROTOCOL_ID: &str = "anthropic.messages";
 /// Adapter revision for Claude OAuth lowering.
-pub const CLAUDE_OAUTH_ADAPTER_REVISION: &str = "anthropic.claude.oauth.2026-10-09.v8";
+pub const CLAUDE_OAUTH_ADAPTER_REVISION: &str = "anthropic.claude.oauth.2026-10-30.v9";
 
 /// OAuth beta header for a model with neither extra flag and `claude-code` first.
 ///
 /// This is `claude-sonnet-5`'s captured header. It is not a shared costume:
 /// every enrolled row carries its own [`ClaudeEnrollment::oauth_betas`].
-pub const CLAUDE_OAUTH_BASELINE_BETAS: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+pub const CLAUDE_OAUTH_BASELINE_BETAS: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
 
-const OAUTH_BETA_MID_TOOLS: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-const OAUTH_BETA_PER_TURN: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-const OAUTH_BETA_BOTH: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-const OAUTH_BETA_HAIKU_BASELINE: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,claude-code-20250219,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-const OAUTH_BETA_HAIKU_TOOLS: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,claude-code-20250219,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-const OAUTH_BETA_HAIKU_PER_TURN: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,claude-code-20250219,per-turn-control-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
-const OAUTH_BETA_HAIKU_BOTH: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,claude-code-20250219,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+const OAUTH_BETA_MID_TOOLS: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+const OAUTH_BETA_PER_TURN: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+const OAUTH_BETA_BOTH: &str = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+const OAUTH_BETA_HAIKU_BASELINE: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+const OAUTH_BETA_HAIKU_TOOLS: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+const OAUTH_BETA_HAIKU_PER_TURN: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,per-turn-control-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
+const OAUTH_BETA_HAIKU_BOTH: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,mid-conversation-system-clear-at-2026-08-21,effort-2025-11-24,thinking-binding-controls-2026-08-01,thinking-display-updates-2026-08-18,extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07";
 
-/// Header order from Claude Code 2.1.295: the prefix, then `claude-code` when
+/// Header order from Claude Code 2.1.314: the prefix, then `claude-code` when
 /// the model id is Haiku, then `per-turn-control` for `per_turn_effort`, then
 /// `mid-conversation-tool-changes` for `mid_conv_tool_change`, then the tail.
 const fn oauth_betas(
@@ -302,19 +302,19 @@ pub const CLAUDE_OAUTH_IDENTITY: &str = "You are Claude Code, Anthropic's offici
 /// Plak User-Agent used by OAuth token exchange and non-inference traffic.
 #[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_USER_AGENT: &str = concat!("plak/", env!("CARGO_PKG_VERSION"));
-/// Claude Code 2.1.295 Messages `User-Agent` (edge costume, not token exchange).
-pub const CLAUDE_OAUTH_MESSAGES_USER_AGENT: &str = "claude-cli/2.1.295 (external, cli)";
+/// Claude Code 2.1.314 Messages `User-Agent` (edge costume, not token exchange).
+pub const CLAUDE_OAUTH_MESSAGES_USER_AGENT: &str = "claude-cli/2.1.314 (external, cli)";
 /// Stainless `x-stainless-lang` observed on Claude Code 2.1.270 Messages.
 pub const CLAUDE_OAUTH_STAINLESS_LANG: &str = "js";
-/// Stainless package version observed on Claude Code 2.1.295 Messages.
+/// Stainless package version observed on Claude Code 2.1.314 Messages.
 pub const CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION: &str = "0.128.0";
 /// Stainless runtime observed on Claude Code 2.1.270 Messages.
 pub const CLAUDE_OAUTH_STAINLESS_RUNTIME: &str = "node";
-/// Stainless runtime version observed on Claude Code 2.1.295 Messages.
-pub const CLAUDE_OAUTH_STAINLESS_RUNTIME_VERSION: &str = "v26.3.0";
+/// Stainless runtime version observed on Claude Code 2.1.314 Messages.
+pub const CLAUDE_OAUTH_STAINLESS_RUNTIME_VERSION: &str = "v26.12.1";
 /// Stainless retry count observed on a first Claude Code Messages attempt.
 pub const CLAUDE_OAUTH_STAINLESS_RETRY_COUNT: &str = "0";
-/// Stainless timeout seconds observed on Claude Code 2.1.295 Messages.
+/// Stainless timeout seconds observed on Claude Code 2.1.314 Messages.
 pub const CLAUDE_OAUTH_STAINLESS_TIMEOUT: &str = "600";
 
 /// Stainless arch label matching the official CLI (`x64` / `arm64`).

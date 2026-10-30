@@ -271,7 +271,7 @@ and later present no TaskOutput (a background task's output file is read with
 `Read`), so the Claude pack presents no output tool. Its five-tool surface
 (`Bash`, `Edit`, `Read`, `TaskStop`, `Write`) is pinned by exact exposed-name
 tests on every catalog path, and the retired `BashOutput`, `Grep`, `Glob` and
-`TodoWrite` names are tested to fail to lower. The Claude Code 2.1.295 native
+`TodoWrite` names are tested to fail to lower. The Claude Code 2.1.314 native
 interactive captures (mock origin, synthetic OAuth) are the costume evidence for
 the user agent and billing `cc_version` pin; the capture tool's scripted
 multi-turn mode (`--claude-scenario multiturn`: two `tool_use` rounds, one 529

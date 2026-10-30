@@ -3,7 +3,7 @@ use plakous_auth::oauth_pins::{
 };
 
 /// Review date of the Grok compatibility profile (00:00Z).
-const XAI_REVIEWED_AT_UNIX: u64 = 1_792_800_000;
+const XAI_REVIEWED_AT_UNIX: u64 = 1_793_318_400;
 
 const XAI_LOOPBACK_PORTS: &[u16] = &[56121];
 

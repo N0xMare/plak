@@ -140,7 +140,7 @@ impl CodexModelResolutionEvidence {
 
     /// Returns the exact recognized authenticated catalog `tool_mode`.
     ///
-    /// Omission resolves to Direct under the pinned 0.162.1 contract. `None`
+    /// Omission resolves to Direct under the pinned 0.166.0 contract. `None`
     /// is deliberately non-qualifying and covers unknown future values.
     #[must_use]
     pub const fn tool_mode(&self) -> Option<CodexCatalogToolMode> {

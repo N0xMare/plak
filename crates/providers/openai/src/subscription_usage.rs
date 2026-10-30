@@ -17,8 +17,8 @@ pub(crate) const MAX_CODEX_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;
 struct UsagePayload {
     #[serde(default)]
     plan_type: Option<String>,
-    /// Account e-mail, when the wire carries one. The pinned 0.162.1 reference
-    /// client (source `rust-v0.160.0`) does not document this field, so it is
+    /// Account e-mail, when the wire carries one. The pinned 0.166.0 reference
+    /// client (source `rust-v0.166.0`) does not document this field, so it is
     /// optional and never inferred.
     #[serde(default)]
     email: Option<String>,
