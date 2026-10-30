@@ -49,7 +49,6 @@ mod build_identity;
 mod capabilities;
 mod carry;
 mod cli;
-#[path = "product_cli_output.rs"]
 pub(crate) mod cli_output;
 mod command;
 #[doc(hidden)]
