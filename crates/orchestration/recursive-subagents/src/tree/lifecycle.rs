@@ -1,6 +1,10 @@
 //! Node lifecycle: spawn, followup, interrupt, close, and the per-attempt
 //! contract.
 
+mod followup;
+mod spawn;
+mod turns;
+
 use std::collections::BTreeSet;
 
 use super::{
@@ -16,872 +20,6 @@ use super::{
 };
 
 impl ProductAgentTree {
-    /// Spawns a child inline: reserve, run the mint the reservation owes
-    /// through the tree's own port, commit. The in-process convenience for
-    /// the tree's own tests and for `inherit` spawns, which mint nothing.
-    ///
-    /// Production drives [`Self::spawn_reserve`] / [`Self::spawn_commit`]
-    /// through the runtime so the mint runs with the tree mutex released.
-    ///
-    pub fn spawn_agent(
-        &mut self,
-        caller_id: &str,
-        request: &SpawnAgentRequest,
-        operation_id: Option<&str>,
-    ) -> Result<SpawnAgentOutput, TopologyError> {
-        match self.spawn_reserve(caller_id, request, operation_id)? {
-            SpawnAdmission::Replayed(output) => Ok(output),
-            SpawnAdmission::Reserved(reservation, None) => self.spawn_commit(*reservation, None),
-            SpawnAdmission::Reserved(reservation, Some(ticket)) => match ticket.mint(self.vcs()) {
-                Ok(minted) => self.spawn_commit(*reservation, Some(minted)),
-                Err(error) => Err(self.spawn_abort(*reservation, topology_error_from_vcs(error))),
-            },
-        }
-    }
-
-    /// The admission half of a spawn: every budget,
-    /// grant, template, and schema check, the child id, and the workspace
-    /// plan — with no subprocess. A copying tier comes back as a
-    /// [`MintTicket`](super::MintTicket) the caller runs with the mutex
-    /// released; the reserved id is held in the tree's `minting` set until
-    /// [`Self::spawn_commit`] or [`Self::spawn_abort`] gives it back, so a
-    /// second spawn racing this one cannot mint over the same copy.
-    pub fn spawn_reserve(
-        &mut self,
-        caller_id: &str,
-        request: &SpawnAgentRequest,
-        operation_id: Option<&str>,
-    ) -> Result<SpawnAdmission, TopologyError> {
-        if let Some(prior) = self.replay_typed(operation_id, "spawn_agent", request)? {
-            return Ok(SpawnAdmission::Replayed(prior));
-        }
-        // the `call_id` digest above dedups retries of one call;
-        // `request_key` dedups two independent calls, which it cannot.
-        if let Some(receipt) = self.replay_request_key(caller_id, request)? {
-            return Ok(SpawnAdmission::Replayed(receipt));
-        }
-        self.require_live()?;
-        request.validate().map_err(|code| {
-            TopologyError::new(
-                code,
-                "spawn request shape is invalid: prompt and output_schema_json are required, \
-                 inputs holds at most 8 non-empty ids, and inherit takes no inputs",
-            )
-        })?;
-        self.bound_text(&request.description)?;
-        self.bound_text(&request.prompt)?;
-        self.bound_text(&request.output_schema_json)?;
-        let caller_depth = self.node(caller_id)?.depth;
-        let grant = self.grant(caller_id)?.clone();
-        if !grant.may_spawn {
-            return Err(TopologyError::new(
-                TopologyErrorCode::GrantDenied,
-                "caller may not spawn",
-            ));
-        }
-        if caller_depth >= grant.max_depth || caller_depth >= MAX_TREE_DEPTH {
-            return Err(TopologyError::new(
-                TopologyErrorCode::DepthExhausted,
-                "spawn would exceed grant or tree depth",
-            ));
-        }
-        // Dormancy derives from settlement and delivery. Unresolved recovery
-        // still reserves tree capacity even though it cannot execute.
-        let live_nodes = self
-            .nodes
-            .values()
-            .filter(|node| self.holds_tree_slot(node))
-            .count();
-        let node_ceiling = MAX_TREE_NODES.min(usize::from(grant.max_nodes));
-        if live_nodes >= node_ceiling {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SpawnBudget,
-                format!(
-                    "tree node budget is exhausted ({live_nodes} of {node_ceiling} live, root \
-                     included); finished children release slots after result delivery"
-                ),
-            ));
-        }
-        // Settled, delivered children release direct slots without closing
-        // their nodes or discarding their still-adoptable candidates.
-        // Recovery-required nodes run nothing and likewise hold no direct slot.
-        let children: Vec<&NodeRecord> = self
-            .nodes
-            .values()
-            .filter(|node| {
-                node.parent_agent_id.as_deref() == Some(caller_id)
-                    && self.holds_direct_child_slot(node)
-            })
-            .collect();
-        let child_ceiling = MAX_DIRECT_CHILDREN.min(usize::from(grant.max_children));
-        if children.len() >= child_ceiling {
-            // Checked before running capacity. Undelivered finished children
-            // still hold slots. The refusal names the
-            // set the same way `capacity` does so the caller can pick what to
-            // close.
-            let listed: Vec<String> = children
-                .iter()
-                .map(|node| {
-                    format!(
-                        "{} ({})",
-                        node.agent_id,
-                        serde_json::to_value(node.status)
-                            .ok()
-                            .and_then(|value| value.as_str().map(str::to_owned))
-                            .unwrap_or_default()
-                    )
-                })
-                .collect();
-            return Err(TopologyError::new(
-                TopologyErrorCode::SpawnBudget,
-                format!(
-                    "direct child budget is exhausted ({} of {child_ceiling}); settled children \
-                     hold slots until their result is delivered (or they are closed). children: {}",
-                    children.len(),
-                    listed.join(", ")
-                ),
-            ));
-        }
-        if usize::try_from(self.pending_spawns).unwrap_or(usize::MAX) >= MAX_PENDING_SPAWNS {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SpawnBudget,
-                "pending spawn budget is exhausted",
-            ));
-        }
-        if self.attempt_budget_exhausted() {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SpawnBudget,
-                format!(
-                    "attempt budget for this prompt is exhausted ({} of {})",
-                    self.attempts_this_prompt(),
-                    self.max_attempts
-                ),
-            ));
-        }
-        let (output_schema_json, schema_digest) = admit_output_schema(&request.output_schema_json)?;
-        let caller_template = self
-            .node(caller_id)?
-            .template
-            .as_ref()
-            .map(TemplateName::as_str);
-        // Menu before account and schema checks, so an off-menu card is
-        // `template_not_spawnable` even when its account would not bind.
-        // A name the epoch does not carry stays `template_unknown`.
-        if self.snapshot.binding(&request.template).is_none() {
-            return Err(TopologyError::new(
-                TopologyErrorCode::TemplateUnknown,
-                format!(
-                    "template {} is not in this tree epoch's roster",
-                    request.template
-                ),
-            ));
-        }
-        if !self
-            .snapshot
-            .menu_contains(caller_template, &request.template)
-        {
-            return Err(TopologyError::new(
-                TopologyErrorCode::TemplateNotSpawnable,
-                format!(
-                    "template {} is not on this node's spawn menu: the root spawns the working \
-                     set, every other node its own template's spawns list minus itself",
-                    request.template
-                ),
-            ));
-        }
-        let (binding, account, tuple_id, effort) =
-            self.resolve_template_binding(&request.template)?;
-        // above the ceiling lands at the ceiling; not an error.
-        let tier = request.tier.clipped_to(binding.max_tier);
-        // an `inputs` entry names the sealed candidate the child
-        // starts from, instead of its parent's live state.
-        let input_base = self.resolve_input_base(request.input_ids())?;
-
-        self.pending_spawns = self.pending_spawns.saturating_add(1);
-        let agent_id = next_child_id(
-            self.collected_child_floor(),
-            &self.tree_id,
-            &self.nodes,
-            &self.workspaces,
-            &self.minting,
-            &self.launch_checkout,
-        );
-        let plan = match self.plan_workspace(
-            caller_id,
-            tier,
-            request.workspace,
-            &agent_id,
-            input_base.as_ref(),
-            request.input_ids().first().map(String::as_str),
-        ) {
-            Ok(plan) => plan,
-            Err(error) => {
-                self.pending_spawns = self.pending_spawns.saturating_sub(1);
-                if let Some(id) = operation_id
-                    && error.code == TopologyErrorCode::MintUnavailable
-                {
-                    self.remember_failure(id, caller_id, "spawn_agent", request, error.code)?;
-                }
-                return Err(error);
-            }
-        };
-        let child_depth = caller_depth.saturating_add(1);
-        let mut child_grant = TopologyGrant {
-            visible_ids: vec![caller_id.to_owned(), agent_id.clone()],
-            max_depth: grant.max_depth,
-            max_nodes: grant.max_nodes,
-            max_children: grant.max_children,
-            ..TopologyGrant::default()
-        };
-        let mut parent_grant = grant.clone();
-        TopologyGrant::apply_spawn(&mut parent_grant, &mut child_grant, caller_id, &agent_id);
-        // Delegation authority is the child template's own menu, bounded by
-        // depth. Adoption presumes a subtree, so it follows the grant's
-        // may_spawn.
-        child_grant.may_spawn = self
-            .snapshot
-            .spawnable_template_names(Some(request.template.as_str()))
-            .next()
-            .is_some()
-            && child_depth < grant.max_depth;
-        child_grant.may_adopt = binding.may_adopt && child_grant.may_spawn;
-        child_grant.visible_ids = vec![caller_id.to_owned(), agent_id.clone()];
-        let attempt_id = AttemptId::new(&agent_id, 1);
-        let (bound, ticket, mode, caller_path) = match plan {
-            WorkspacePlan::Inherit(bound) => {
-                let mode = bound.mode;
-                let caller_path = bound.path.clone();
-                (Some(bound), None, mode, caller_path)
-            }
-            WorkspacePlan::Mint(ticket) => {
-                let mode = ticket.mode();
-                let caller_path = ticket.caller_path.clone();
-                self.minting.insert(agent_id.clone());
-                (None, Some(ticket), mode, caller_path)
-            }
-        };
-        Ok(SpawnAdmission::Reserved(
-            Box::new(SpawnReservation {
-                caller_id: caller_id.to_owned(),
-                caller_path,
-                request: request.clone(),
-                operation_id: operation_id.map(str::to_owned),
-                agent_id,
-                attempt_id,
-                child_depth,
-                tier,
-                account,
-                tuple_id,
-                effort,
-                output_schema_json,
-                schema_digest,
-                template: request.template.clone(),
-                mode,
-                parent_grant,
-                child_grant,
-                bound,
-            }),
-            ticket,
-        ))
-    }
-
-    /// Writes the reserved spawn's rows once its mint has answered.
-    /// `minted` is `None` exactly when the reservation
-    /// carried no ticket — an `inherit` bind.
-    pub fn spawn_commit(
-        &mut self,
-        reservation: SpawnReservation,
-        minted: Option<MintedCopy>,
-    ) -> Result<SpawnAgentOutput, TopologyError> {
-        let SpawnReservation {
-            caller_id,
-            caller_path,
-            request,
-            operation_id,
-            agent_id,
-            attempt_id,
-            child_depth,
-            tier,
-            account,
-            tuple_id,
-            effort,
-            output_schema_json,
-            schema_digest,
-            template,
-            mode,
-            parent_grant,
-            child_grant,
-            bound,
-        } = reservation;
-        self.minting.remove(&agent_id);
-        let bound = match (bound, minted) {
-            (Some(bound), _) => bound,
-            (None, Some(minted)) => self.record_minted(
-                &caller_id,
-                &agent_id,
-                mode,
-                minted,
-                request
-                    .input_ids()
-                    .first()
-                    .cloned()
-                    .map(CandidateId::from_persisted),
-            ),
-            (None, None) => {
-                self.pending_spawns = self.pending_spawns.saturating_sub(1);
-                return Err(TopologyError::new(
-                    TopologyErrorCode::OperationRecoveryRequired,
-                    "spawn reservation was committed without the copy its mint owed",
-                ));
-            }
-        };
-        let spawn_identity = request
-            .request_key
-            .as_ref()
-            .map(|_| SpawnIdentity::admitted(&caller_id, &request, schema_digest.clone()));
-        let child = NodeRecord {
-            fold_order: Some(0),
-            abandoned_turn: None,
-            agent_id: agent_id.clone(),
-            parent_agent_id: Some(caller_id.clone()),
-            depth: child_depth,
-            description: request.description.clone(),
-            prompt: request.prompt.clone(),
-            output_schema_json: output_schema_json.clone(),
-            schema_digest: schema_digest.clone(),
-            template: Some(template),
-            tuple_id,
-            account,
-            effort,
-            status: NodeStatus::Running,
-            workspace_id: bound.workspace_id.clone(),
-            tier,
-            attempt_id: Some(attempt_id.clone()),
-            session_locator: None,
-            path: bound.path,
-            branch: bound.branch,
-            active_turn: false,
-        };
-        self.nodes.insert(agent_id.clone(), child);
-        self.grants.insert(caller_id.clone(), parent_grant);
-        self.grants.insert(agent_id.clone(), child_grant);
-        self.attempts.insert(
-            attempt_id.clone(),
-            AttemptRecord {
-                output_schema_json,
-                schema_digest,
-                attempt_id: attempt_id.clone(),
-                agent_id: agent_id.clone(),
-                retry_of: None,
-                request_key: request.request_key.clone(),
-                spawn_identity,
-                started_at: now_unix_millis(),
-                ended_at: None,
-                blocked: None,
-                failure: None,
-                usage: UsageRow::default(),
-                status: AttemptStatus::Running,
-                turn_token: 1,
-                turn_id: None,
-                applied_terminal_read_seqs: BTreeSet::new(),
-                output_json: None,
-                submit_harness_nudge: SubmitNudgeBudget::NONE,
-                candidate_id: None,
-            },
-        );
-        self.inbound.entry(agent_id.clone()).or_default();
-        self.bump();
-        let output = SpawnAgentOutput {
-            agent_id,
-            attempt_id,
-            status: NodeStatus::Running,
-            tier,
-            workspace: WorkspaceReceipt {
-                id: bound.workspace_id,
-                mode: bound.mode,
-                base: bound.base,
-            },
-        };
-        let remembered = if let Some(id) = &operation_id {
-            self.remember_success(id, &caller_id, "spawn_agent", &request, &output)
-        } else {
-            Ok(())
-        };
-        self.pending_spawns = self.pending_spawns.saturating_sub(1);
-        remembered?;
-        // the template's `on_mint` runs once in the fresh copy,
-        // with the mutex released, before any session binds to it.
-        if let Some(hook) = self.mint_hook(
-            &output.agent_id,
-            &caller_id,
-            &caller_path,
-            &request,
-            operation_id.as_deref(),
-        ) {
-            self.effects.hooks.push(hook);
-        }
-        Ok(output)
-    }
-
-    /// Gives a reservation back when its mint refused. No row
-    /// was ever written, so the tree is exactly where `spawn_reserve` found
-    /// it; the ledger records the refusal so a retry of the same call replays
-    /// it rather than minting again, and a prepared operation is closed
-    /// rather than left non-terminal for the next reopen to fault.
-    pub fn spawn_abort(
-        &mut self,
-        reservation: SpawnReservation,
-        error: TopologyError,
-    ) -> TopologyError {
-        self.minting.remove(&reservation.agent_id);
-        self.pending_spawns = self.pending_spawns.saturating_sub(1);
-        if let Some(id) = &reservation.operation_id
-            && let Err(failed) = self.remember_failure(
-                id,
-                &reservation.caller_id,
-                "spawn_agent",
-                &reservation.request,
-                error.code,
-            )
-        {
-            return failed;
-        }
-        error
-    }
-
-    pub(super) fn holds_direct_child_slot(&self, node: &NodeRecord) -> bool {
-        if matches!(
-            node.status,
-            NodeStatus::Closed | NodeStatus::RecoveryRequired
-        ) {
-            return false;
-        }
-        if node.active_turn {
-            return true;
-        }
-        !(node
-            .parent_agent_id
-            .as_deref()
-            .is_some_and(|parent| self.delivered_to(parent, &node.agent_id))
-            && self
-                .wait_row(&node.agent_id)
-                .is_ok_and(|row| self.row_settled(&row) && row.attempt.is_stopped()))
-    }
-
-    fn holds_tree_slot(&self, node: &NodeRecord) -> bool {
-        node.parent_agent_id.is_none()
-            || node.status == NodeStatus::RecoveryRequired
-            || self.holds_direct_child_slot(node)
-    }
-
-    /// `request_key` dedup. A repeat with the same key and the
-    /// same brief returns the first child's receipt and spawns nothing; a
-    /// repeat with a different brief is refused rather than silently aliased,
-    /// because the caller believes it asked for two different things.
-    ///
-    /// Identity is the brief the key was first spent on: caller, template,
-    /// description, prompt, the admitted output schema, the checkout choice
-    /// (`workspace`), and the candidate the copy was minted over (`inputs`).
-    /// The requested tier is not part of it — the receipt reports the
-    /// effective tier after the template clip, so a second ask above the
-    /// ceiling is the same spawn.
-    pub(super) fn replay_request_key(
-        &self,
-        caller_id: &str,
-        request: &SpawnAgentRequest,
-    ) -> Result<Option<SpawnAgentOutput>, TopologyError> {
-        let Some(key) = request
-            .request_key
-            .as_deref()
-            .filter(|value| !value.is_empty())
-        else {
-            return Ok(None);
-        };
-        let Some(attempt) = self
-            .attempts
-            .values()
-            .find(|attempt| attempt.request_key.as_deref() == Some(key))
-        else {
-            return Ok(None);
-        };
-        let agent_id = attempt.agent_id.clone();
-        let Some(identity) = attempt.spawn_identity.as_ref() else {
-            return Err(TopologyError::new(
-                TopologyErrorCode::OperationRecoveryRequired,
-                "keyed spawn has no admitted request identity",
-            ));
-        };
-        if identity.caller_id != caller_id {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RequestKeyConflict,
-                format!("request_key {key} is already spent by another caller; choose a new key"),
-            ));
-        }
-        let same_brief =
-            admit_output_schema(&request.output_schema_json).is_ok_and(|(_, digest)| {
-                *identity == SpawnIdentity::admitted(caller_id, request, digest)
-            });
-        if !same_brief {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RequestKeyConflict,
-                format!(
-                    "request_key {key} already spawned {agent_id} with a different brief; \
-                     repeat that request or choose a new key"
-                ),
-            ));
-        }
-        self.spawn_receipt(&agent_id).map(Some)
-    }
-
-    /// Resolves a spawn's `inputs` to the base its copy is minted over.
-    ///
-    ///
-    /// One entry is admitted: a copy has one merge base, and two candidates
-    /// would be a merge the spawn is not authorized to perform — that is what
-    /// `adopt_candidate` is for. Inherit has already been refused by
-    /// `validate`, since a candidate can only be given a minted copy. An id
-    /// that is not a sealed candidate is `input_not_sealed`, not
-    /// `candidate_unknown`: an attempt id is a legal thing to name and simply
-    /// has not sealed.
-    pub(super) fn resolve_input_base(
-        &self,
-        inputs: &[String],
-    ) -> Result<Option<VcsSnapshot>, TopologyError> {
-        let Some(first) = inputs.first() else {
-            return Ok(None);
-        };
-        if inputs.len() > 1 {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SchemaMismatch,
-                "a copy is minted over one base: name a single candidate input and adopt the \
-                 rest into it",
-            ));
-        }
-        let candidate = self
-            .candidates
-            .get(&CandidateId::from_persisted(first.clone()))
-            .ok_or_else(|| {
-            TopologyError::new(
-                TopologyErrorCode::InputNotSealed,
-                format!(
-                    "input {first} is not a sealed candidate; wait for the producing attempt to \
-                     seal and pass the candidate id from its wait row"
-                ),
-            )
-        })?;
-        if candidate.kind == super::CandidateKind::Conflict
-            && let Some(reason) = self.resolution_refusal(candidate)
-        {
-            return Err(TopologyError::new(
-                TopologyErrorCode::AdoptNotApplicable,
-                reason,
-            ));
-        }
-        // Adopted records retain their pins after copy removal. Only an
-        // explicit discard of unadopted work relinquishes this input.
-        if candidate.adopted_by.is_none()
-            && self
-                .workspaces
-                .get(&candidate.workspace_id)
-                .is_some_and(|row| {
-                    !self.reclaimed(&row.workspace_id)
-                        && matches!(
-                            row.status,
-                            WorkspaceStatus::Discarding
-                                | WorkspaceStatus::Discarded
-                                | WorkspaceStatus::CleanRemoved
-                        )
-                })
-        {
-            return Err(TopologyError::new(
-                TopologyErrorCode::InputNotSealed,
-                format!(
-                    "input {first} was explicitly discarded; its snapshot is no longer retained"
-                ),
-            ));
-        }
-        Ok(Some(VcsSnapshot {
-            history_left_base: false,
-            commit: candidate.commit.clone(),
-            content: candidate.content.clone(),
-            change_id: candidate.change_id.clone(),
-        }))
-    }
-
-    /// The spawn receipt as the tree holds it now.
-    pub(super) fn spawn_receipt(&self, agent_id: &str) -> Result<SpawnAgentOutput, TopologyError> {
-        let node = self.node(agent_id)?;
-        let workspace = self.workspaces.get(&node.workspace_id);
-        Ok(SpawnAgentOutput {
-            agent_id: node.agent_id.clone(),
-            attempt_id: node
-                .attempt_id
-                .clone()
-                .unwrap_or_else(|| AttemptId::new(agent_id, 1)),
-            status: node.status,
-            tier: node.tier,
-            workspace: WorkspaceReceipt {
-                id: node.workspace_id.clone(),
-                mode: workspace.map_or(WorkspaceMode::Inherit, |row| row.mode),
-                base: workspace.and_then(|row| row.base_commit.clone()),
-            },
-        })
-    }
-
-    /// Admits a `followup` and resolves the schema the new
-    /// attempt will carry.
-    ///
-    /// `followup` re-tasks an **idle** child: finished, or interrupted with
-    /// its turn already ended (an interrupt cancels a turn,
-    /// not the node). A running child is not re-tasked — `priority=urgent`
-    /// steers the turn it is already in, and a second brief on a live turn
-    /// would silently replace the first. `Closed` and `RecoveryRequired` can
-    /// never run again, and neither can a failed spawn that never produced a
-    /// session: there is nothing to re-task.
-    pub(super) fn admit_followup(
-        &self,
-        agent_id: &str,
-        status: NodeStatus,
-        active_turn: bool,
-        output_schema_json: Option<&str>,
-    ) -> Result<(String, String), TopologyError> {
-        if self
-            .nodes
-            .get(agent_id)
-            .is_some_and(|node| self.refresh_pending(&node.workspace_id))
-        {
-            return Err(TopologyError::new(
-                TopologyErrorCode::WorkspaceRecoveryRequired,
-                "workspace refresh is pending; settle it before following up",
-            ));
-        }
-        if self.seal_pending(agent_id) {
-            return Err(TopologyError::new(
-                TopologyErrorCode::FollowupNotIdle,
-                "recipient still owns an unfinished seal",
-            ));
-        }
-        match status {
-            NodeStatus::Failed
-                if self
-                    .current_attempt(agent_id)
-                    .is_some_and(AttemptRecord::never_created) =>
-            {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::FollowupClosed,
-                    "this agent never produced a session and cannot be re-tasked; spawn a new \
-                     agent",
-                ));
-            }
-            NodeStatus::Completed | NodeStatus::Failed if !active_turn => {}
-            NodeStatus::Interrupted
-                if !active_turn
-                    && self
-                        .current_attempt(agent_id)
-                        .is_none_or(|attempt| attempt.turn_id.is_none()) => {}
-            NodeStatus::Closed => {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::FollowupClosed,
-                    if self.conversation_retired(agent_id) {
-                        "conversation was retired and cannot accept follow-up; its sealed work remains usable"
-                    } else {
-                        "recipient is closed and cannot accept another attempt"
-                    },
-                ));
-            }
-            NodeStatus::RecoveryRequired => {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::FollowupRecoveryRequired,
-                    "recipient requires recovery before another attempt can be admitted",
-                ));
-            }
-            _ => {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::FollowupNotIdle,
-                    "recipient is not an idle finished child; steer a running child with \
-                     priority=urgent instead",
-                ));
-            }
-        }
-        // A re-task runs in the child's copy. A discarded or adopting copy has
-        // no live path to run in, so the node is idle but not re-taskable. An
-        // adopted copy still exists: the followup's seal is a new candidate
-        // that diverges from the adopted state and adopting it integrates
-        // only the delta.
-        let workspace_status = self
-            .nodes
-            .get(agent_id)
-            .and_then(|node| self.workspaces.get(&node.workspace_id))
-            .map(|row| row.status);
-        if let Some(status) = workspace_status
-            && !matches!(status, WorkspaceStatus::Active | WorkspaceStatus::Adopted)
-            && !self
-                .nodes
-                .get(agent_id)
-                .is_some_and(|node| self.reclaimed(&node.workspace_id))
-        {
-            return Err(TopologyError::new(
-                if matches!(
-                    status,
-                    WorkspaceStatus::Discarded | WorkspaceStatus::CleanRemoved
-                ) {
-                    TopologyErrorCode::FollowupWorkspaceGone
-                } else {
-                    TopologyErrorCode::FollowupNotIdle
-                },
-                format!(
-                    "recipient's workspace is {} and cannot host another attempt; spawn a new \
-                     child instead",
-                    serde_json::to_value(status)
-                        .ok()
-                        .and_then(|value| value.as_str().map(str::to_owned))
-                        .unwrap_or_default()
-                ),
-            ));
-        }
-        let node = self.node(agent_id)?;
-        if !self.holds_tree_slot(node)
-            && let Some(parent) = node.parent_agent_id.as_deref()
-        {
-            let ceiling = MAX_TREE_NODES.min(usize::from(self.grant(parent)?.max_nodes));
-            let held = self
-                .nodes
-                .values()
-                .filter(|node| self.holds_tree_slot(node))
-                .count();
-            if held >= ceiling {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::SpawnBudget,
-                    "tree node budget is exhausted; followup would reactivate a dormant child",
-                ));
-            }
-        }
-        if !self.holds_direct_child_slot(node)
-            && let Some(parent) = node.parent_agent_id.as_deref()
-        {
-            let ceiling = MAX_DIRECT_CHILDREN.min(usize::from(self.grant(parent)?.max_children));
-            let held = self
-                .nodes
-                .values()
-                .filter(|child| {
-                    child.parent_agent_id.as_deref() == Some(parent)
-                        && self.holds_direct_child_slot(child)
-                })
-                .count();
-            if held >= ceiling {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::SpawnBudget,
-                    "direct child budget is exhausted; followup would reactivate a released slot",
-                ));
-            }
-        }
-        if self.attempt_budget_exhausted() {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SpawnBudget,
-                format!(
-                    "attempt budget for this prompt is exhausted ({} of {})",
-                    self.attempts_this_prompt(),
-                    self.max_attempts
-                ),
-            ));
-        }
-        if let Some(raw) = output_schema_json.filter(|value| !value.is_empty()) {
-            self.bound_text(raw)?;
-            admit_output_schema(raw)
-        } else {
-            let node = self.node(agent_id)?;
-            Ok((node.output_schema_json.clone(), node.schema_digest.clone()))
-        }
-    }
-
-    /// Opens the next attempt on an idle finished node.
-    ///
-    /// The previous attempt row keeps its own `output_json`, `usage`, and
-    /// candidate: the node is re-tasked, its history is not overwritten. The
-    /// turn token advances so a late submission against the old attempt is
-    /// still refused as stale.
-    pub(super) fn open_followup_attempt(
-        &mut self,
-        agent_id: &str,
-        opener: &str,
-        output_schema_json: String,
-        schema_digest: String,
-    ) -> Result<AttemptId, TopologyError> {
-        self.require_fold_started(agent_id)?;
-        let previous = self.node(agent_id)?.attempt_id.clone();
-        let rollback = {
-            let node = self.node(agent_id)?;
-            FollowupRollback {
-                opener: opener.to_owned(),
-                // Filled in below, once the new attempt has an id.
-                opened: AttemptId::new(agent_id, 0),
-                previous: previous
-                    .as_ref()
-                    .and_then(|id| self.attempts.get(id))
-                    .map(|attempt| (attempt.status, attempt.ended_at)),
-                node_attempt_id: node.attempt_id.clone(),
-                node_status: node.status,
-                node_active_turn: node.active_turn,
-                workspace_id: node.workspace_id.clone(),
-                workspace_status: self
-                    .workspaces
-                    .get(&node.workspace_id)
-                    .map(|row| row.status),
-                workspace_generation: self
-                    .workspaces
-                    .get(&node.workspace_id)
-                    .map(|row| row.generation),
-                fault_reason: self.fault_reasons.get(agent_id).cloned(),
-                node_fold_order: node.fold_order,
-                prior_operations: self.operations.keys().cloned().collect(),
-                prior_commands: self.commands.keys().cloned().collect(),
-            }
-        };
-        let seq = self
-            .attempts
-            .values()
-            .filter(|attempt| attempt.agent_id == agent_id)
-            .count()
-            .saturating_add(1);
-        let attempt_id = AttemptId::new(agent_id, u32::try_from(seq).unwrap_or(u32::MAX));
-        let turn_token = previous
-            .as_ref()
-            .and_then(|id| self.attempts.get(id))
-            .map_or(1, |attempt| attempt.turn_token.saturating_add(1));
-        self.attempts.insert(
-            attempt_id.clone(),
-            AttemptRecord {
-                output_schema_json: output_schema_json.clone(),
-                schema_digest: schema_digest.clone(),
-                attempt_id: attempt_id.clone(),
-                agent_id: agent_id.to_owned(),
-                retry_of: previous,
-                request_key: None,
-                spawn_identity: None,
-                started_at: now_unix_millis(),
-                ended_at: None,
-                blocked: None,
-                failure: None,
-                usage: UsageRow::default(),
-                status: AttemptStatus::Running,
-                turn_token,
-                turn_id: None,
-                applied_terminal_read_seqs: BTreeSet::new(),
-                output_json: None,
-                submit_harness_nudge: SubmitNudgeBudget::NONE,
-                candidate_id: None,
-            },
-        );
-        self.record_followup_opening(
-            agent_id,
-            rollback,
-            attempt_id.clone(),
-            output_schema_json,
-            schema_digest,
-        )?;
-        Ok(attempt_id)
-    }
-
     /// Interrupts one descendant's running turn. The node stays
     /// alive and re-steerable; only the turn ends.
     ///
@@ -1091,609 +229,6 @@ impl ProductAgentTree {
         self.bump();
         self.pending_close_folds.extend(closed.iter().cloned());
         Ok(closed)
-    }
-
-    /// caller with no open attempt.
-    ///
-    /// Remedy names stay the grant's slot names (`wait_agent`). Callers that
-    /// present those slots under another spelling use
-    /// [`Self::submit_result_presented`].
-    pub fn submit_result(
-        &mut self,
-        caller_id: &str,
-        request: &SubmitResultRequest,
-        operation_id: Option<&str>,
-    ) -> Result<SubmitResultOutput, TopologyError> {
-        self.submit_result_presented(caller_id, request, operation_id, |name| name)
-    }
-
-    /// [`Self::submit_result`] with remedy names mapped through the caller's
-    /// vocabulary. `present` is the identity for the Plak names.
-    pub fn submit_result_presented(
-        &mut self,
-        caller_id: &str,
-        request: &SubmitResultRequest,
-        operation_id: Option<&str>,
-        present: impl Fn(&'static str) -> &'static str,
-    ) -> Result<SubmitResultOutput, TopologyError> {
-        if let Some(prior) = self.replay_typed(operation_id, "submit_result", request)? {
-            return Ok(prior);
-        }
-        request
-            .validate(caller_id == self.root_agent_id)
-            .map_err(|code| {
-                TopologyError::new(code, topology_submit_request_invalid_message(code, request))
-            })?;
-        let running = self.live_child_ids(caller_id);
-        if !running.is_empty() {
-            let remedies: Vec<_> = self
-                .compiled_tool_names(caller_id)?
-                .into_iter()
-                .filter(|name| matches!(*name, "wait_agent" | "close_agent" | "interrupt_agent"))
-                .map(present)
-                .collect();
-            return Err(TopologyError::new(
-                TopologyErrorCode::LiveWork,
-                format!(
-                    "live work: children {}; finish them with {} before submitting",
-                    running.join(", "),
-                    remedies.join(", ")
-                ),
-            ));
-        }
-        let attempt = self.current_attempt(caller_id).ok_or_else(|| {
-            TopologyError::new(
-                TopologyErrorCode::GrantDenied,
-                "caller has no delegated attempt",
-            )
-        })?;
-        if request.turn_token != attempt.turn_token {
-            return Err(TopologyError::new(
-                TopologyErrorCode::SubmitStaleToken,
-                format!(
-                    "turn token is not the current attempt token; expected {}",
-                    attempt.turn_token
-                ),
-            ));
-        }
-        if attempt.status.is_stopped() {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RecipientAttemptTerminal,
-                "attempt is already terminal",
-            ));
-        }
-        if let Some(prior) = attempt.output_json.as_ref() {
-            if prior == &request.output_json {
-                let output = SubmitResultOutput {
-                    agent_id: caller_id.to_owned(),
-                    attempt: attempt.status,
-                    candidate: attempt.candidate_id.clone(),
-                };
-                if let Some(id) = operation_id {
-                    self.remember_success(id, caller_id, "submit_result", request, &output)?;
-                }
-                return Ok(output);
-            }
-            return Err(TopologyError::new(
-                TopologyErrorCode::SubmitDuplicateConflict,
-                "attempt already submitted a different output",
-            ));
-        }
-        let schema_json = self.node(caller_id)?.output_schema_json.clone();
-        validate_output_json(&schema_json, &request.output_json)?;
-        let attempt = self.current_attempt(caller_id).ok_or_else(|| {
-            TopologyError::new(TopologyErrorCode::GrantDenied, "attempt is missing")
-        })?;
-        let candidate = attempt.candidate_id.clone();
-        self.record_operator_intent(
-            caller_id,
-            Some(attempt.attempt_id.clone()),
-            super::operator_intents::Decision::Submitted {
-                output_json: request.output_json.clone(),
-            },
-        )?;
-        let output = SubmitResultOutput {
-            agent_id: caller_id.to_owned(),
-            attempt: AttemptStatus::Submitted,
-            candidate,
-        };
-        if let Some(id) = operation_id {
-            self.remember_success(id, caller_id, "submit_result", request, &output)?;
-        }
-        Ok(output)
-    }
-
-    /// Records that one node's turn ended, moving its attempt to the terminal
-    /// status the turn earned — completed, or completed without a submission.
-    ///
-    /// Queues the copy's seal, so a node that diverged leaves a candidate
-    /// whether or not it remembered to submit.
-    ///
-    /// # Errors
-    ///
-    /// Refuses an unknown agent.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn record_turn_completed(
-        &mut self,
-        agent_id: &str,
-    ) -> Result<AttemptStatus, TopologyError> {
-        if self.node(agent_id)?.status == NodeStatus::Closed {
-            return Ok(self
-                .current_attempt(agent_id)
-                .map_or(AttemptStatus::Cancelled, |attempt| attempt.status));
-        }
-        let attempt = self.current_attempt(agent_id).ok_or_else(|| {
-            TopologyError::new(TopologyErrorCode::GrantDenied, "attempt is missing")
-        })?;
-        if self.node(agent_id)?.status == NodeStatus::RecoveryRequired {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RecipientRecoveryRequired,
-                "completed turn cannot clobber recovery required",
-            ));
-        }
-        if attempt.status.is_stopped() {
-            return Ok(attempt.status);
-        }
-        let turn_id = attempt
-            .turn_id
-            .clone()
-            .unwrap_or_else(|| "test-only-terminal".to_owned());
-        let terminal = super::ChildTerminal {
-            attempt_id: attempt.attempt_id.clone(),
-            turn_id: turn_id.clone(),
-            committed_at_ms: now_unix_millis(),
-            seq: self.fold_anchor_now(agent_id)?.seq,
-            outcome: plakous::sessions::feed::FeedTurnOutcome::Completed {
-                finish: plakous::model::FinishReason::Stop,
-            },
-        };
-        self.record_child_finalization(
-            agent_id,
-            &turn_id,
-            super::ChildFinalizationDecision::Finalize,
-            true,
-            Some(terminal),
-        )?;
-        self.fold_due(agent_id)?;
-        self.fold_reserved_closes()?;
-        Ok(self
-            .current_attempt(agent_id)
-            .map_or(AttemptStatus::Cancelled, |attempt| attempt.status))
-    }
-
-    pub(super) fn record_attempt_completed_at(
-        &mut self,
-        agent_id: &str,
-        attempt_id: &AttemptId,
-        ended_at: u64,
-        reserve_effects: bool,
-        recorded_turns_spent: Option<bool>,
-    ) -> Result<AttemptStatus, TopologyError> {
-        let current = self.node(agent_id)?.attempt_id.as_ref() == Some(attempt_id);
-        let reserve_effects = reserve_effects && current;
-        let node_status = self.node(agent_id)?.status;
-        if current && matches!(node_status, NodeStatus::Closed) {
-            return Ok(self
-                .current_attempt(agent_id)
-                .map(|attempt| attempt.status)
-                .unwrap_or(AttemptStatus::Cancelled));
-        }
-        if current && node_status == NodeStatus::RecoveryRequired {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RecipientRecoveryRequired,
-                "completed turn cannot clobber recovery required",
-            ));
-        }
-        if current {
-            self.retire_wait_receipts(agent_id);
-        }
-        // Completion is idempotent even after acknowledged result history
-        // has been pruned: terminal attempts cannot push another result.
-        if let Some(attempt) = self.attempts.get(attempt_id)
-            && attempt.status.is_stopped()
-        {
-            return Ok(attempt.status);
-        }
-        // the template's `max_turns` is spent on this attempt.
-        // It ends `blocked` with whatever partial output it has rather than
-        // being handed another round by the submit harness or a steer.
-        if reserve_effects {
-            self.record_close_live_descendants(agent_id, ended_at)?;
-        }
-        let turns_spent = recorded_turns_spent.unwrap_or_else(|| {
-            self.attempt_turn_ceiling(agent_id).is_some_and(|ceiling| {
-                self.attempts
-                    .get(attempt_id)
-                    .is_some_and(|attempt| attempt.usage.turns >= ceiling)
-            })
-        });
-        let account = self.node(agent_id)?.account.clone();
-        let status = {
-            let attempt = self.attempts.get_mut(attempt_id).ok_or_else(|| {
-                TopologyError::new(TopologyErrorCode::GrantDenied, "attempt is missing")
-            })?;
-            attempt.usage.elapsed_ms = ended_at
-                .saturating_sub(attempt.started_at)
-                .max(attempt.usage.elapsed_ms);
-            attempt.status = if attempt.output_json.is_some() {
-                AttemptStatus::Completed
-            } else if turns_spent {
-                attempt.blocked = Some(BlockedReason {
-                    quota: "max_turns".to_owned(),
-                    account,
-                    resets_at: None,
-                });
-                AttemptStatus::Blocked
-            } else {
-                AttemptStatus::CompletedWithoutSubmission
-            };
-            attempt.ended_at = Some(ended_at);
-            attempt.status
-        };
-        let mutate_workspace = self.nodes.get(agent_id).and_then(|node| {
-            node.tier
-                .allows_file_writes()
-                .then(|| node.workspace_id.clone())
-        });
-        if current && let Some(node) = self.nodes.get_mut(agent_id) {
-            node.active_turn = false;
-            if reserve_effects || node_status != NodeStatus::Sealing {
-                node.status = if status == AttemptStatus::Completed {
-                    NodeStatus::Completed
-                } else {
-                    NodeStatus::Failed
-                };
-            }
-        }
-        if reserve_effects && let Some(workspace_id) = mutate_workspace {
-            self.bump_workspace_generation(&workspace_id);
-        }
-        // Forked copies seal at turn completion so the parent's `result` mail
-        // can name the candidate. Inherit seals nothing; completion pushes
-        // from here instead.
-        if reserve_effects && !self.begin_seal(agent_id) {
-            self.push_result_unless_sealing(agent_id);
-        }
-        self.bump();
-        Ok(status)
-    }
-
-    /// The template's per-attempt turn ceiling (`max_turns`).
-    pub(super) fn attempt_turn_ceiling(&self, agent_id: &str) -> Option<u32> {
-        let template = self.nodes.get(agent_id)?.template.as_ref()?;
-        self.snapshot.binding(template)?.max_turns
-    }
-
-    /// Whether the current attempt has spent that ceiling.
-    #[must_use]
-    pub fn attempt_turns_spent(&self, agent_id: &str) -> bool {
-        let Some(ceiling) = self.attempt_turn_ceiling(agent_id) else {
-            return false;
-        };
-        self.current_attempt(agent_id)
-            .is_some_and(|attempt| attempt.usage.turns >= ceiling)
-    }
-
-    /// A provider quota refusal ends this attempt.
-    ///
-    /// The **attempt** carries `blocked { quota, account, resets_at? }` and the
-    /// **node** goes `Failed` — a blocked attempt has no node status of its own,
-    /// and the TUI reads the attempt for `resets_at`. Partial work still seals
-    /// through the slice-0 seam. Nothing auto-retries, and no other account's
-    /// quota is spent without the user saying so.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn record_attempt_blocked(
-        &mut self,
-        agent_id: &str,
-        reason: BlockedReason,
-    ) -> Result<(), TopologyError> {
-        if self.node(agent_id)?.status == NodeStatus::Closed {
-            return Ok(());
-        }
-        if self
-            .current_attempt(agent_id)
-            .is_some_and(|attempt| attempt.status.is_stopped())
-        {
-            return Ok(());
-        }
-        self.record_host_turn_failure(
-            agent_id,
-            super::turn_outcome::FailedTurnDisposition::Blocked(reason),
-            String::new(),
-            Vec::new(),
-        )?;
-        self.fold_due(agent_id)?;
-        self.fold_reserved_closes()?;
-        Ok(())
-    }
-
-    /// Marks whether a turn is in flight on this node. A terminal node may
-    /// retain an unwinding turn, but cannot start a new one.
-    ///
-    /// # Errors
-    ///
-    /// Refuses an unknown agent and an active turn on a terminal node.
-    pub fn set_active_turn(&mut self, agent_id: &str, active: bool) -> Result<(), TopologyError> {
-        if active {
-            let node = self.node(agent_id)?;
-            if node.status.is_terminal() {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::RecipientClosed,
-                    "terminal node cannot hold an active turn",
-                ));
-            }
-            if self
-                .current_attempt(agent_id)
-                .is_some_and(|attempt| attempt.status.is_stopped())
-            {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::RecipientAttemptTerminal,
-                    "terminal attempt cannot hold an active turn",
-                ));
-            }
-        }
-        let node = self
-            .nodes
-            .get_mut(agent_id)
-            .ok_or_else(|| TopologyError::new(TopologyErrorCode::GrantDenied, "node is missing"))?;
-        node.active_turn = active;
-        // A turn starting on an interrupted node is its resume:
-        // the node runs again.
-        if active && node.status == NodeStatus::Interrupted {
-            node.status = NodeStatus::Running;
-        }
-        self.bump();
-        Ok(())
-    }
-
-    /// Records the child session a binder opened for this node, once.
-    ///
-    /// # Errors
-    ///
-    /// Refuses an unknown agent and a node that already carries a locator —
-    /// a second bind would mean two sessions behind one node.
-    pub fn bind_session_locator(
-        &mut self,
-        agent_id: &str,
-        locator: impl Into<String>,
-    ) -> Result<(), TopologyError> {
-        {
-            let node = self.nodes.get_mut(agent_id).ok_or_else(|| {
-                TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
-            })?;
-            if node.session_locator.is_some() {
-                return Err(TopologyError::new(
-                    TopologyErrorCode::OperationRecoveryRequired,
-                    "session locator is already bound",
-                ));
-            }
-            node.session_locator = Some(locator.into());
-        }
-        self.bump();
-        Ok(())
-    }
-
-    /// Records the authoritative terminal failure without discarding submitted
-    /// output or an existing candidate. An unresolved outcome forbids a new seal.
-    pub fn record_turn_failure(
-        &mut self,
-        agent_id: &str,
-        disposition: super::turn_outcome::FailedTurnDisposition,
-        message: String,
-    ) -> Result<(), TopologyError> {
-        let attempt_id = self.node(agent_id)?.attempt_id.clone();
-        self.record_attempt_failure(
-            agent_id,
-            attempt_id.as_ref(),
-            disposition,
-            message,
-            true,
-            now_unix_millis(),
-        )?;
-        self.fold_reserved_closes()?;
-        Ok(())
-    }
-
-    pub(super) fn record_attempt_failure(
-        &mut self,
-        agent_id: &str,
-        attempt_id: Option<&AttemptId>,
-        disposition: super::turn_outcome::FailedTurnDisposition,
-        message: String,
-        reserve_effects: bool,
-        observed_at_ms: u64,
-    ) -> Result<(), TopologyError> {
-        use super::turn_outcome::FailedTurnDisposition;
-        let current = self.node(agent_id)?.attempt_id.as_ref() == attempt_id;
-        if attempt_id
-            .and_then(|id| self.attempts.get(id))
-            .is_some_and(AttemptRecord::settled_by_abandonment)
-        {
-            return Ok(());
-        }
-        let closed = (current && self.node(agent_id)?.status == NodeStatus::Closed)
-            || attempt_id
-                .and_then(|id| self.attempts.get(id))
-                .is_some_and(|attempt| attempt.status == AttemptStatus::Closed);
-        if let Some(prior) = attempt_id
-            .and_then(|id| self.attempts.get(id))
-            .filter(|attempt| attempt.has_unresolved_session_failure())
-            .and_then(|attempt| attempt.failure.clone())
-        {
-            if current && let Some(node) = self.nodes.get_mut(agent_id) {
-                node.active_turn = false;
-                node.status = NodeStatus::RecoveryRequired;
-            }
-            let combined = format!("{}; {message}", prior.message);
-            if let Some(attempt) = attempt_id.and_then(|id| self.attempts.get_mut(id)) {
-                attempt.status = if closed {
-                    AttemptStatus::Closed
-                } else {
-                    AttemptStatus::RecoveryRequired
-                };
-                attempt.failure = Some(AttemptFailure {
-                    kind: "turn_recovery_required".into(),
-                    message: combined.clone(),
-                });
-            }
-            if current {
-                self.record_fault(agent_id, combined);
-            }
-            if current && !closed && reserve_effects {
-                self.push_result_unless_sealing(agent_id);
-            }
-            return Ok(());
-        }
-        let unresolved = matches!(disposition, FailedTurnDisposition::RecoveryRequired);
-        let (node_status, attempt_status, kind) = match &disposition {
-            FailedTurnDisposition::Failed { kind } => {
-                (NodeStatus::Failed, AttemptStatus::Failed, *kind)
-            }
-            FailedTurnDisposition::Blocked(_) => {
-                (NodeStatus::Failed, AttemptStatus::Blocked, "quota")
-            }
-            FailedTurnDisposition::RecoveryRequired => (
-                NodeStatus::RecoveryRequired,
-                AttemptStatus::RecoveryRequired,
-                "turn_recovery_required",
-            ),
-        };
-        if current {
-            let node = self.nodes.get_mut(agent_id).ok_or_else(|| {
-                TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
-            })?;
-            node.active_turn = false;
-            if unresolved || node.status != NodeStatus::Closed {
-                node.status = node_status;
-            }
-        }
-        if let Some(attempt) = attempt_id.and_then(|id| self.attempts.get_mut(id)) {
-            attempt.status = if closed && unresolved {
-                AttemptStatus::Closed
-            } else {
-                attempt_status
-            };
-            let ended_at = *attempt.ended_at.get_or_insert(observed_at_ms);
-            attempt.usage.elapsed_ms = ended_at
-                .saturating_sub(attempt.started_at)
-                .max(attempt.usage.elapsed_ms);
-            if let FailedTurnDisposition::Blocked(reason) = disposition {
-                attempt.blocked = Some(reason);
-                attempt.failure = None;
-            } else {
-                attempt.failure = Some(AttemptFailure {
-                    kind: kind.into(),
-                    message: message.clone(),
-                });
-            }
-        }
-        if current {
-            self.record_fault(agent_id, message);
-        }
-        if current && !unresolved && reserve_effects {
-            self.record_close_live_descendants(agent_id, observed_at_ms)?;
-            self.begin_seal(agent_id);
-        }
-        if current && (!unresolved || !closed) && reserve_effects {
-            self.push_result_unless_sealing(agent_id);
-        }
-        Ok(())
-    }
-
-    /// Records what a reopen of this node's session had to abandon.
-    ///
-    /// A child session is opened inside the caller's tool work, away from any
-    /// face, so the node carries the fact until a face reads it. Recording it
-    /// twice for one reopen would say it twice, so the last one wins rather
-    /// than accumulating.
-    ///
-    /// # Errors
-    ///
-    /// Refuses an unknown agent.
-    pub fn record_abandoned_turn(
-        &mut self,
-        agent_id: &str,
-        abandoned: AbandonedChildTurn,
-    ) -> Result<(), TopologyError> {
-        let node = self.nodes.get_mut(agent_id).ok_or_else(|| {
-            TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
-        })?;
-        node.abandoned_turn = Some(abandoned);
-        self.bump();
-        Ok(())
-    }
-
-    /// Moves a bound node's locator forward as its session advances, so a
-    /// reopen finds the head rather than the checkpoint the bind recorded.
-    ///
-    /// # Errors
-    ///
-    /// Refuses an unknown agent.
-    pub fn advance_session_locator(
-        &mut self,
-        agent_id: &str,
-        locator: impl Into<String>,
-    ) -> Result<(), TopologyError> {
-        let node = self.nodes.get_mut(agent_id).ok_or_else(|| {
-            TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
-        })?;
-        node.session_locator = Some(locator.into());
-        self.bump();
-        Ok(())
-    }
-
-    /// Forgets the attempt's bound turn once that turn has ended by an
-    /// interrupt. The attempt stays `running` and the node
-    /// `Interrupted`; with no bound turn the next mail is `Started`, i.e. a
-    /// fresh turn on the same attempt, rather than a rejoin of a turn that no
-    /// longer exists.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn release_attempt_turn(&mut self, agent_id: &str) -> Result<(), TopologyError> {
-        let attempt = self.current_attempt_mut(agent_id).ok_or_else(|| {
-            TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
-        })?;
-        if attempt.status.is_stopped() {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RecipientAttemptTerminal,
-                "terminal attempt has no turn to release",
-            ));
-        }
-        attempt.turn_id = None;
-        if let Some(node) = self.nodes.get_mut(agent_id) {
-            node.active_turn = false;
-        }
-        // A cancelled turn closed its exchange in canonical history before
-        // its terminal was published, so its awaits can never roll back.
-        self.retire_wait_receipts(agent_id);
-        self.release_turn_owner(agent_id);
-        self.bump();
-        Ok(())
-    }
-
-    /// Names the runtime turn now driving this attempt, so an interrupt can
-    /// find the turn to cancel.
-    ///
-    /// # Errors
-    ///
-    /// Refuses an agent with no open attempt.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn bind_attempt_turn(
-        &mut self,
-        agent_id: &str,
-        turn_id: impl Into<String>,
-    ) -> Result<(), TopologyError> {
-        let attempt = self.current_attempt_mut(agent_id).ok_or_else(|| {
-            TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
-        })?;
-        let turn_id = turn_id.into();
-        // one bound turn is one turn of this attempt's budget.
-        // Rebinding the same turn after a reopen is not a second one.
-        if attempt.turn_id.as_deref() != Some(turn_id.as_str()) {
-            attempt.usage.turns = attempt.usage.turns.saturating_add(1);
-        }
-        attempt.turn_id = Some(turn_id);
-        self.bump();
-        Ok(())
     }
 
     /// Records a host turn waiter for `agent_id`: the waiter releases or
@@ -1920,6 +455,518 @@ impl ProductAgentTree {
             self.bump();
         }
         Ok(closed)
+    }
+}
+
+impl ProductAgentTree {
+    /// The spawn receipt as the tree holds it now.
+    pub(super) fn spawn_receipt(&self, agent_id: &str) -> Result<SpawnAgentOutput, TopologyError> {
+        let node = self.node(agent_id)?;
+        let workspace = self.workspaces.get(&node.workspace_id);
+        Ok(SpawnAgentOutput {
+            agent_id: node.agent_id.clone(),
+            attempt_id: node
+                .attempt_id
+                .clone()
+                .unwrap_or_else(|| AttemptId::new(agent_id, 1)),
+            status: node.status,
+            tier: node.tier,
+            workspace: WorkspaceReceipt {
+                id: node.workspace_id.clone(),
+                mode: workspace.map_or(WorkspaceMode::Inherit, |row| row.mode),
+                base: workspace.and_then(|row| row.base_commit.clone()),
+            },
+        })
+    }
+}
+
+impl ProductAgentTree {
+    /// Resolves a spawn's `inputs` to the base its copy is minted over.
+    ///
+    ///
+    /// One entry is admitted: a copy has one merge base, and two candidates
+    /// would be a merge the spawn is not authorized to perform — that is what
+    /// `adopt_candidate` is for. Inherit has already been refused by
+    /// `validate`, since a candidate can only be given a minted copy. An id
+    /// that is not a sealed candidate is `input_not_sealed`, not
+    /// `candidate_unknown`: an attempt id is a legal thing to name and simply
+    /// has not sealed.
+    pub(super) fn resolve_input_base(
+        &self,
+        inputs: &[String],
+    ) -> Result<Option<VcsSnapshot>, TopologyError> {
+        let Some(first) = inputs.first() else {
+            return Ok(None);
+        };
+        if inputs.len() > 1 {
+            return Err(TopologyError::new(
+                TopologyErrorCode::SchemaMismatch,
+                "a copy is minted over one base: name a single candidate input and adopt the \
+                 rest into it",
+            ));
+        }
+        let candidate = self
+            .candidates
+            .get(&CandidateId::from_persisted(first.clone()))
+            .ok_or_else(|| {
+            TopologyError::new(
+                TopologyErrorCode::InputNotSealed,
+                format!(
+                    "input {first} is not a sealed candidate; wait for the producing attempt to \
+                     seal and pass the candidate id from its wait row"
+                ),
+            )
+        })?;
+        if candidate.kind == super::CandidateKind::Conflict
+            && let Some(reason) = self.resolution_refusal(candidate)
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::AdoptNotApplicable,
+                reason,
+            ));
+        }
+        // Adopted records retain their pins after copy removal. Only an
+        // explicit discard of unadopted work relinquishes this input.
+        if candidate.adopted_by.is_none()
+            && self
+                .workspaces
+                .get(&candidate.workspace_id)
+                .is_some_and(|row| {
+                    !self.reclaimed(&row.workspace_id)
+                        && matches!(
+                            row.status,
+                            WorkspaceStatus::Discarding
+                                | WorkspaceStatus::Discarded
+                                | WorkspaceStatus::CleanRemoved
+                        )
+                })
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::InputNotSealed,
+                format!(
+                    "input {first} was explicitly discarded; its snapshot is no longer retained"
+                ),
+            ));
+        }
+        Ok(Some(VcsSnapshot {
+            history_left_base: false,
+            commit: candidate.commit.clone(),
+            content: candidate.content.clone(),
+            change_id: candidate.change_id.clone(),
+        }))
+    }
+
+    /// [`Self::submit_result`] with remedy names mapped through the caller's
+    /// vocabulary. `present` is the identity for the Plak names.
+    pub fn submit_result_presented(
+        &mut self,
+        caller_id: &str,
+        request: &SubmitResultRequest,
+        operation_id: Option<&str>,
+        present: impl Fn(&'static str) -> &'static str,
+    ) -> Result<SubmitResultOutput, TopologyError> {
+        if let Some(prior) = self.replay_typed(operation_id, "submit_result", request)? {
+            return Ok(prior);
+        }
+        request
+            .validate(caller_id == self.root_agent_id)
+            .map_err(|code| {
+                TopologyError::new(code, topology_submit_request_invalid_message(code, request))
+            })?;
+        let running = self.live_child_ids(caller_id);
+        if !running.is_empty() {
+            let remedies: Vec<_> = self
+                .compiled_tool_names(caller_id)?
+                .into_iter()
+                .filter(|name| matches!(*name, "wait_agent" | "close_agent" | "interrupt_agent"))
+                .map(present)
+                .collect();
+            return Err(TopologyError::new(
+                TopologyErrorCode::LiveWork,
+                format!(
+                    "live work: children {}; finish them with {} before submitting",
+                    running.join(", "),
+                    remedies.join(", ")
+                ),
+            ));
+        }
+        let attempt = self.current_attempt(caller_id).ok_or_else(|| {
+            TopologyError::new(
+                TopologyErrorCode::GrantDenied,
+                "caller has no delegated attempt",
+            )
+        })?;
+        if request.turn_token != attempt.turn_token {
+            return Err(TopologyError::new(
+                TopologyErrorCode::SubmitStaleToken,
+                format!(
+                    "turn token is not the current attempt token; expected {}",
+                    attempt.turn_token
+                ),
+            ));
+        }
+        if attempt.status.is_stopped() {
+            return Err(TopologyError::new(
+                TopologyErrorCode::RecipientAttemptTerminal,
+                "attempt is already terminal",
+            ));
+        }
+        if let Some(prior) = attempt.output_json.as_ref() {
+            if prior == &request.output_json {
+                let output = SubmitResultOutput {
+                    agent_id: caller_id.to_owned(),
+                    attempt: attempt.status,
+                    candidate: attempt.candidate_id.clone(),
+                };
+                if let Some(id) = operation_id {
+                    self.remember_success(id, caller_id, "submit_result", request, &output)?;
+                }
+                return Ok(output);
+            }
+            return Err(TopologyError::new(
+                TopologyErrorCode::SubmitDuplicateConflict,
+                "attempt already submitted a different output",
+            ));
+        }
+        let schema_json = self.node(caller_id)?.output_schema_json.clone();
+        validate_output_json(&schema_json, &request.output_json)?;
+        let attempt = self.current_attempt(caller_id).ok_or_else(|| {
+            TopologyError::new(TopologyErrorCode::GrantDenied, "attempt is missing")
+        })?;
+        let candidate = attempt.candidate_id.clone();
+        self.record_operator_intent(
+            caller_id,
+            Some(attempt.attempt_id.clone()),
+            super::operator_intents::Decision::Submitted {
+                output_json: request.output_json.clone(),
+            },
+        )?;
+        let output = SubmitResultOutput {
+            agent_id: caller_id.to_owned(),
+            attempt: AttemptStatus::Submitted,
+            candidate,
+        };
+        if let Some(id) = operation_id {
+            self.remember_success(id, caller_id, "submit_result", request, &output)?;
+        }
+        Ok(output)
+    }
+
+    pub(super) fn record_attempt_completed_at(
+        &mut self,
+        agent_id: &str,
+        attempt_id: &AttemptId,
+        ended_at: u64,
+        reserve_effects: bool,
+        recorded_turns_spent: Option<bool>,
+    ) -> Result<AttemptStatus, TopologyError> {
+        let current = self.node(agent_id)?.attempt_id.as_ref() == Some(attempt_id);
+        let reserve_effects = reserve_effects && current;
+        let node_status = self.node(agent_id)?.status;
+        if current && matches!(node_status, NodeStatus::Closed) {
+            return Ok(self
+                .current_attempt(agent_id)
+                .map(|attempt| attempt.status)
+                .unwrap_or(AttemptStatus::Cancelled));
+        }
+        if current && node_status == NodeStatus::RecoveryRequired {
+            return Err(TopologyError::new(
+                TopologyErrorCode::RecipientRecoveryRequired,
+                "completed turn cannot clobber recovery required",
+            ));
+        }
+        if current {
+            self.retire_wait_receipts(agent_id);
+        }
+        // Completion is idempotent even after acknowledged result history
+        // has been pruned: terminal attempts cannot push another result.
+        if let Some(attempt) = self.attempts.get(attempt_id)
+            && attempt.status.is_stopped()
+        {
+            return Ok(attempt.status);
+        }
+        // the template's `max_turns` is spent on this attempt.
+        // It ends `blocked` with whatever partial output it has rather than
+        // being handed another round by the submit harness or a steer.
+        if reserve_effects {
+            self.record_close_live_descendants(agent_id, ended_at)?;
+        }
+        let turns_spent = recorded_turns_spent.unwrap_or_else(|| {
+            self.attempt_turn_ceiling(agent_id).is_some_and(|ceiling| {
+                self.attempts
+                    .get(attempt_id)
+                    .is_some_and(|attempt| attempt.usage.turns >= ceiling)
+            })
+        });
+        let account = self.node(agent_id)?.account.clone();
+        let status = {
+            let attempt = self.attempts.get_mut(attempt_id).ok_or_else(|| {
+                TopologyError::new(TopologyErrorCode::GrantDenied, "attempt is missing")
+            })?;
+            attempt.usage.elapsed_ms = ended_at
+                .saturating_sub(attempt.started_at)
+                .max(attempt.usage.elapsed_ms);
+            attempt.status = if attempt.output_json.is_some() {
+                AttemptStatus::Completed
+            } else if turns_spent {
+                attempt.blocked = Some(BlockedReason {
+                    quota: "max_turns".to_owned(),
+                    account,
+                    resets_at: None,
+                });
+                AttemptStatus::Blocked
+            } else {
+                AttemptStatus::CompletedWithoutSubmission
+            };
+            attempt.ended_at = Some(ended_at);
+            attempt.status
+        };
+        let mutate_workspace = self.nodes.get(agent_id).and_then(|node| {
+            node.tier
+                .allows_file_writes()
+                .then(|| node.workspace_id.clone())
+        });
+        if current && let Some(node) = self.nodes.get_mut(agent_id) {
+            node.active_turn = false;
+            if reserve_effects || node_status != NodeStatus::Sealing {
+                node.status = if status == AttemptStatus::Completed {
+                    NodeStatus::Completed
+                } else {
+                    NodeStatus::Failed
+                };
+            }
+        }
+        if reserve_effects && let Some(workspace_id) = mutate_workspace {
+            self.bump_workspace_generation(&workspace_id);
+        }
+        // Forked copies seal at turn completion so the parent's `result` mail
+        // can name the candidate. Inherit seals nothing; completion pushes
+        // from here instead.
+        if reserve_effects && !self.begin_seal(agent_id) {
+            self.push_result_unless_sealing(agent_id);
+        }
+        self.bump();
+        Ok(status)
+    }
+
+    /// A provider quota refusal ends this attempt.
+    ///
+    /// The **attempt** carries `blocked { quota, account, resets_at? }` and the
+    /// **node** goes `Failed` — a blocked attempt has no node status of its own,
+    /// and the TUI reads the attempt for `resets_at`. Partial work still seals
+    /// through the slice-0 seam. Nothing auto-retries, and no other account's
+    /// quota is spent without the user saying so.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn record_attempt_blocked(
+        &mut self,
+        agent_id: &str,
+        reason: BlockedReason,
+    ) -> Result<(), TopologyError> {
+        if self.node(agent_id)?.status == NodeStatus::Closed {
+            return Ok(());
+        }
+        if self
+            .current_attempt(agent_id)
+            .is_some_and(|attempt| attempt.status.is_stopped())
+        {
+            return Ok(());
+        }
+        self.record_host_turn_failure(
+            agent_id,
+            super::turn_outcome::FailedTurnDisposition::Blocked(reason),
+            String::new(),
+            Vec::new(),
+        )?;
+        self.fold_due(agent_id)?;
+        self.fold_reserved_closes()?;
+        Ok(())
+    }
+
+    /// Records the authoritative terminal failure without discarding submitted
+    /// output or an existing candidate. An unresolved outcome forbids a new seal.
+    pub fn record_turn_failure(
+        &mut self,
+        agent_id: &str,
+        disposition: super::turn_outcome::FailedTurnDisposition,
+        message: String,
+    ) -> Result<(), TopologyError> {
+        let attempt_id = self.node(agent_id)?.attempt_id.clone();
+        self.record_attempt_failure(
+            agent_id,
+            attempt_id.as_ref(),
+            disposition,
+            message,
+            true,
+            now_unix_millis(),
+        )?;
+        self.fold_reserved_closes()?;
+        Ok(())
+    }
+
+    pub(super) fn record_attempt_failure(
+        &mut self,
+        agent_id: &str,
+        attempt_id: Option<&AttemptId>,
+        disposition: super::turn_outcome::FailedTurnDisposition,
+        message: String,
+        reserve_effects: bool,
+        observed_at_ms: u64,
+    ) -> Result<(), TopologyError> {
+        use super::turn_outcome::FailedTurnDisposition;
+        let current = self.node(agent_id)?.attempt_id.as_ref() == attempt_id;
+        if attempt_id
+            .and_then(|id| self.attempts.get(id))
+            .is_some_and(AttemptRecord::settled_by_abandonment)
+        {
+            return Ok(());
+        }
+        let closed = (current && self.node(agent_id)?.status == NodeStatus::Closed)
+            || attempt_id
+                .and_then(|id| self.attempts.get(id))
+                .is_some_and(|attempt| attempt.status == AttemptStatus::Closed);
+        if let Some(prior) = attempt_id
+            .and_then(|id| self.attempts.get(id))
+            .filter(|attempt| attempt.has_unresolved_session_failure())
+            .and_then(|attempt| attempt.failure.clone())
+        {
+            if current && let Some(node) = self.nodes.get_mut(agent_id) {
+                node.active_turn = false;
+                node.status = NodeStatus::RecoveryRequired;
+            }
+            let combined = format!("{}; {message}", prior.message);
+            if let Some(attempt) = attempt_id.and_then(|id| self.attempts.get_mut(id)) {
+                attempt.status = if closed {
+                    AttemptStatus::Closed
+                } else {
+                    AttemptStatus::RecoveryRequired
+                };
+                attempt.failure = Some(AttemptFailure {
+                    kind: "turn_recovery_required".into(),
+                    message: combined.clone(),
+                });
+            }
+            if current {
+                self.record_fault(agent_id, combined);
+            }
+            if current && !closed && reserve_effects {
+                self.push_result_unless_sealing(agent_id);
+            }
+            return Ok(());
+        }
+        let unresolved = matches!(disposition, FailedTurnDisposition::RecoveryRequired);
+        let (node_status, attempt_status, kind) = match &disposition {
+            FailedTurnDisposition::Failed { kind } => {
+                (NodeStatus::Failed, AttemptStatus::Failed, *kind)
+            }
+            FailedTurnDisposition::Blocked(_) => {
+                (NodeStatus::Failed, AttemptStatus::Blocked, "quota")
+            }
+            FailedTurnDisposition::RecoveryRequired => (
+                NodeStatus::RecoveryRequired,
+                AttemptStatus::RecoveryRequired,
+                "turn_recovery_required",
+            ),
+        };
+        if current {
+            let node = self.nodes.get_mut(agent_id).ok_or_else(|| {
+                TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
+            })?;
+            node.active_turn = false;
+            if unresolved || node.status != NodeStatus::Closed {
+                node.status = node_status;
+            }
+        }
+        if let Some(attempt) = attempt_id.and_then(|id| self.attempts.get_mut(id)) {
+            attempt.status = if closed && unresolved {
+                AttemptStatus::Closed
+            } else {
+                attempt_status
+            };
+            let ended_at = *attempt.ended_at.get_or_insert(observed_at_ms);
+            attempt.usage.elapsed_ms = ended_at
+                .saturating_sub(attempt.started_at)
+                .max(attempt.usage.elapsed_ms);
+            if let FailedTurnDisposition::Blocked(reason) = disposition {
+                attempt.blocked = Some(reason);
+                attempt.failure = None;
+            } else {
+                attempt.failure = Some(AttemptFailure {
+                    kind: kind.into(),
+                    message: message.clone(),
+                });
+            }
+        }
+        if current {
+            self.record_fault(agent_id, message);
+        }
+        if current && !unresolved && reserve_effects {
+            self.record_close_live_descendants(agent_id, observed_at_ms)?;
+            self.begin_seal(agent_id);
+        }
+        if current && (!unresolved || !closed) && reserve_effects {
+            self.push_result_unless_sealing(agent_id);
+        }
+        Ok(())
+    }
+}
+
+impl ProductAgentTree {
+    /// Records that one node's turn ended, moving its attempt to the terminal
+    /// status the turn earned — completed, or completed without a submission.
+    ///
+    /// Queues the copy's seal, so a node that diverged leaves a candidate
+    /// whether or not it remembered to submit.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an unknown agent.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn record_turn_completed(
+        &mut self,
+        agent_id: &str,
+    ) -> Result<AttemptStatus, TopologyError> {
+        if self.node(agent_id)?.status == NodeStatus::Closed {
+            return Ok(self
+                .current_attempt(agent_id)
+                .map_or(AttemptStatus::Cancelled, |attempt| attempt.status));
+        }
+        let attempt = self.current_attempt(agent_id).ok_or_else(|| {
+            TopologyError::new(TopologyErrorCode::GrantDenied, "attempt is missing")
+        })?;
+        if self.node(agent_id)?.status == NodeStatus::RecoveryRequired {
+            return Err(TopologyError::new(
+                TopologyErrorCode::RecipientRecoveryRequired,
+                "completed turn cannot clobber recovery required",
+            ));
+        }
+        if attempt.status.is_stopped() {
+            return Ok(attempt.status);
+        }
+        let turn_id = attempt
+            .turn_id
+            .clone()
+            .unwrap_or_else(|| "test-only-terminal".to_owned());
+        let terminal = super::ChildTerminal {
+            attempt_id: attempt.attempt_id.clone(),
+            turn_id: turn_id.clone(),
+            committed_at_ms: now_unix_millis(),
+            seq: self.fold_anchor_now(agent_id)?.seq,
+            outcome: plakous::sessions::feed::FeedTurnOutcome::Completed {
+                finish: plakous::model::FinishReason::Stop,
+            },
+        };
+        self.record_child_finalization(
+            agent_id,
+            &turn_id,
+            super::ChildFinalizationDecision::Finalize,
+            true,
+            Some(terminal),
+        )?;
+        self.fold_due(agent_id)?;
+        self.fold_reserved_closes()?;
+        Ok(self
+            .current_attempt(agent_id)
+            .map_or(AttemptStatus::Cancelled, |attempt| attempt.status))
     }
 }
 
