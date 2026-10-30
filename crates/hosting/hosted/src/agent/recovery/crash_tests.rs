@@ -28,7 +28,7 @@ use crate::agent::{
 };
 use crate::agent_tree::{ProductAgentTree, TreeStore as _};
 use crate::agent_tree_protocol::{
-    NodeStatus, SendAgentMessageRequest, SpawnAgentRequest, WriterMode,
+    NodeStatus, SendAgentMessageRequest, SpawnAgentRequest, TopologyErrorCode, WriterMode,
 };
 use crate::binding::{CompositionSelection, ResolvedProtocol};
 use crate::driver::ledger::{BatchRule, CommandIntent, CommandKind, CommandLedger};
@@ -537,7 +537,19 @@ impl Fixture {
             .unwrap();
         let before = self.abandonments(id).await;
         assert_eq!(before, usize::from(abandoned));
-        assert!(!recoverer.recover(id.into(), None).await.unwrap().recovered);
+        let outcome = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                match recoverer.recover(id.into(), None).await {
+                    Err(error) if error.code == TopologyErrorCode::RecoveryOwnerLive => {
+                        tokio::task::yield_now().await;
+                    }
+                    result => break result.unwrap(),
+                }
+            }
+        })
+        .await
+        .expect("the asynchronous retirement owner settles within 20 seconds");
+        assert!(!outcome.recovered);
         let _ = super::run_tree_recovery_pass(&self.tree_id).await;
         assert_eq!(self.abandonments(id).await, before);
         assert_eq!(self.commands(), commands);
