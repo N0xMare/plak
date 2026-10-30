@@ -1761,8 +1761,16 @@ fn parity_clear_then_turn() {
         || {
             vec![
                 prompt_step("run the loopback"),
-                step(UserAction::ClearSession, |event| {
-                    matches!(event, HostEvent::ClearView)
+                step(UserAction::ClearSession, {
+                    let cleared = std::cell::Cell::new(false);
+                    move |event| match event {
+                        HostEvent::ClearView => {
+                            cleared.set(true);
+                            false
+                        }
+                        HostEvent::Status { phase, .. } => cleared.get() && phase == "idle",
+                        _ => false,
+                    }
                 }),
                 prompt_step("run it again"),
             ]
