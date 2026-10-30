@@ -13,6 +13,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
+use plakous_attempt::Jitter;
+use plakous_http::{Failure as HttpFailure, Request as HttpRequest};
+use std::time::Duration;
 
 /// A named change to an allowlisted body.
 type Case = (&'static str, fn(&mut Value));

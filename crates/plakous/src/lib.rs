@@ -375,6 +375,16 @@ mod responses_images;
     feature = "grok"
 ))]
 mod responses_retrieval;
+#[cfg(any(
+    feature = "anthropic",
+    feature = "claude",
+    feature = "codex",
+    feature = "grok",
+    feature = "openai",
+    feature = "openrouter",
+    feature = "xai"
+))]
+mod retrieval_outcome;
 #[cfg(test)]
 mod test_model;
 

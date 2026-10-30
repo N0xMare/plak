@@ -20,6 +20,7 @@
 pub mod catalog;
 pub mod family;
 pub mod lookup;
+pub mod side_request;
 
 use std::future::Future;
 use std::time::Duration;

@@ -14,6 +14,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
+use plakous_attempt::Jitter;
+use plakous_http::Request as HttpRequest;
+use std::time::Duration;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -334,6 +337,7 @@ impl ChatRetrievalTransport for Fixed {
                 &Limits::default(),
             )
             .map_err(|_| ChatRetrievalError::invalid_request("fixture request"))
+            .map(Into::into)
         })
     }
 }
@@ -345,7 +349,9 @@ fn fixed(origins: Vec<Origin>) -> Fixed {
     }
 }
 
-async fn run(transport: &Fixed) -> Result<ChatRetrievalOutcome, ChatRetrievalError> {
+async fn run(
+    transport: &dyn ChatRetrievalTransport,
+) -> Result<ChatRetrievalOutcome, ChatRetrievalError> {
     let client = Client::new_http1(Limits::default())
         .map_err(|_| ChatRetrievalError::invalid_request("fixture client"))?;
     run_chat_retrieval(
@@ -359,6 +365,72 @@ async fn run(transport: &Fixed) -> Result<ChatRetrievalOutcome, ChatRetrievalErr
         },
     )
     .await
+}
+
+struct Renewing {
+    transport: Fixed,
+    renewals: AtomicUsize,
+}
+
+impl ChatRetrievalTransport for Renewing {
+    fn authorize<'a>(&'a self, body: &'a [u8]) -> ChatRetrievalAuthorization<'a> {
+        self.transport.authorize(body)
+    }
+    fn credential_rejected(&self) -> side_request::CredentialRefresh<'_> {
+        Box::pin(async move {
+            self.renewals.fetch_add(1, Ordering::SeqCst);
+            true
+        })
+    }
+}
+
+#[tokio::test]
+async fn optional_credential_renewal_reauthorizes_once_and_never_loops_on_a_second_401()
+-> TestResult {
+    for refused_again in [false, true] {
+        let peer = peer(vec![
+            http_response(401, "", "{}"),
+            if refused_again {
+                http_response(401, "", "{}")
+            } else {
+                sse_response(&answered())
+            },
+            sse_response(&answered()),
+        ])
+        .await?;
+        let transport = Renewing {
+            transport: fixed(vec![peer.origin.clone()]),
+            renewals: AtomicUsize::new(0),
+        };
+        let result = run(&transport).await;
+        if refused_again {
+            let error = result.err().ok_or("second rejection was replayed")?;
+            assert_eq!(error.kind(), ChatRetrievalErrorKind::Unauthorized);
+            assert_eq!(error.physical_requests(), 2);
+            assert_eq!(error.status(), Some(401));
+        } else {
+            assert_eq!(result?.text, "Rust 1.99 shipped.");
+        }
+        assert_eq!(transport.renewals.load(Ordering::SeqCst), 1);
+        assert_eq!(transport.transport.authorized.load(Ordering::SeqCst), 2);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_401_without_credential_renewal_is_not_sent_again() -> TestResult {
+    let peer = peer(vec![
+        http_response(401, "", "{}"),
+        sse_response(&answered()),
+    ])
+    .await?;
+    let transport = fixed(vec![peer.origin.clone()]);
+    let error = run(&transport).await.err().ok_or("401 was renewed")?;
+    assert_eq!(error.kind(), ChatRetrievalErrorKind::Unauthorized);
+    assert_eq!(error.status(), Some(401));
+    assert_eq!(error.physical_requests(), 1);
+    assert_eq!(transport.authorized.load(Ordering::SeqCst), 1);
+    Ok(())
 }
 
 #[tokio::test]

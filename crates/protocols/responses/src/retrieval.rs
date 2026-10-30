@@ -9,24 +9,12 @@
 //! hosted item.
 
 use std::collections::BTreeSet;
-use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::time::Duration;
 
-use plakous_attempt::{
-    FailurePoint, Jitter, ObservationSnapshot, ProviderAcceptance, ReplaySafety, RetryPolicy,
-    TerminalFacts,
-};
-use plakous_exchange::{cancellable, read_bounded_body};
-use plakous_http::{
-    CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
-    Phase, Request as HttpRequest, SseDecoder, SseLimits, TransmissionFact,
-};
+use plakous_attempt::ReplaySafety;
+use plakous_http::{Client, SseDecoder, SseLimits};
 use plakous_model::{CancellationToken, ReasoningEffort};
 use serde::Serialize;
 use serde_json::{Value, json};
-use tokio::time::Instant;
 
 /// The hosted web search tool type a side request names.
 pub const RESPONSES_WEB_SEARCH_TOOL_TYPE: &str = "web_search";
@@ -37,7 +25,6 @@ pub const RESPONSES_WEB_SEARCH_SOURCES_INCLUDE: &str = "web_search_call.action.s
 /// Output cap of one side request.
 pub const RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS: u32 = 4096;
 
-pub(crate) const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 const MAX_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTPUT_ITEMS: usize = 256;
 const SSE_LIMITS: SseLimits = SseLimits {
@@ -340,229 +327,23 @@ pub fn classify_responses_retrieval_body(body: &[u8]) -> ReplaySafety {
     ReplaySafety::CostOnly
 }
 
-/// One source the provider reported.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResponsesRetrievalSource {
-    /// The URL.
-    pub url: String,
-    /// The title, when reported.
-    pub title: Option<String>,
-}
-
-/// What a side request consumed.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ResponsesRetrievalUsage {
-    /// Input tokens.
-    pub input_tokens: u64,
-    /// Output tokens.
-    pub output_tokens: u64,
-    /// Hosted tool calls the response reported.
-    pub hosted_requests: u64,
-}
-
-/// The completed side request.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ResponsesRetrievalOutcome {
-    /// The answer: the assistant message text.
-    pub text: String,
-    /// Sources from tool call actions and URL citations, first-reported
-    /// order, URLs unique.
-    pub sources: Vec<ResponsesRetrievalSource>,
-    /// Usage of the side request.
-    pub usage: ResponsesRetrievalUsage,
-}
-
-/// Why a side request failed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum ResponsesRetrievalErrorKind {
-    /// The body is not an allowlisted side request or could not be built.
-    InvalidRequest,
-    /// Admission or the credential is no longer current, or HTTP 401/403.
-    Unauthorized,
-    /// The provider refused the request (a non-retryable status or failure).
-    Rejected,
-    /// The provider stayed unreachable or failing through the retry budget.
-    Unavailable,
-    /// The response broke the side-request grammar or its bounds.
-    InvalidResponse,
-    /// The caller cancelled.
-    Cancelled,
-}
-
-/// A failed side request with a redaction-safe message.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResponsesRetrievalError {
-    kind: ResponsesRetrievalErrorKind,
-    message: String,
-    pub(crate) status: Option<u16>,
-    pub(crate) physical_requests: u32,
-}
-
-impl ResponsesRetrievalError {
-    /// A failure of `kind`.
-    #[must_use]
-    pub fn new(kind: ResponsesRetrievalErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            status: None,
-            physical_requests: 0,
-        }
-    }
-
-    fn invalid_request(message: &str) -> Self {
-        Self::new(ResponsesRetrievalErrorKind::InvalidRequest, message)
-    }
-
-    fn invalid_response(message: impl Into<String>) -> Self {
-        Self::new(ResponsesRetrievalErrorKind::InvalidResponse, message)
-    }
-
-    /// The failure class.
-    #[must_use]
-    pub const fn kind(&self) -> ResponsesRetrievalErrorKind {
-        self.kind
-    }
-
-    /// The HTTP status of the final refusal, when there was one.
-    #[must_use]
-    pub const fn status(&self) -> Option<u16> {
-        self.status
-    }
-
-    /// Physical requests the side request sent, retries included.
-    #[must_use]
-    pub const fn physical_requests(&self) -> u32 {
-        self.physical_requests
-    }
-
-    /// The message.
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-impl fmt::Display for ResponsesRetrievalError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ResponsesRetrievalError {}
-
-/// What a route retains from authorization through the response head of one
-/// physical side request, such as a credential lease and an inference permit.
-pub trait ResponsesRetrievalGuard: Send {
-    /// The physical request failed before its response head.
-    fn transport_failed(&mut self, failure: HttpFailure);
-}
-
-/// One authorized physical side request and what the route retains until
-/// its response head.
-pub struct ResponsesRetrievalDispatch {
-    pub(crate) request: HttpRequest,
-    pub(crate) guard: Option<Box<dyn ResponsesRetrievalGuard>>,
-}
-
-impl ResponsesRetrievalDispatch {
-    /// A request that retains nothing.
-    #[must_use]
-    pub fn new(request: HttpRequest) -> Self {
-        Self {
-            request,
-            guard: None,
-        }
-    }
-
-    /// Retains `guard` until the response head, or reports a transport
-    /// failure before it to the guard.
-    #[must_use]
-    pub fn with_guard(mut self, guard: impl ResponsesRetrievalGuard + 'static) -> Self {
-        self.guard = Some(Box::new(guard));
-        self
-    }
-}
-
-impl From<HttpRequest> for ResponsesRetrievalDispatch {
-    fn from(request: HttpRequest) -> Self {
-        Self::new(request)
-    }
-}
-
-impl fmt::Debug for ResponsesRetrievalDispatch {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ResponsesRetrievalDispatch")
-            .field("guarded", &self.guard.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-/// The future [`ResponsesRetrievalTransport::authorize`] returns.
-pub type ResponsesRetrievalAuthorization<'a> = Pin<
-    Box<
-        dyn Future<Output = Result<ResponsesRetrievalDispatch, ResponsesRetrievalError>>
-            + Send
-            + 'a,
-    >,
->;
-
-/// The future [`ResponsesRetrievalTransport::credential_rejected`] returns:
-/// whether a claimed refresh renewed the credential.
-pub type ResponsesCredentialRefresh<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
-
-/// The route's half of a side request.
-pub trait ResponsesRetrievalTransport: Send + Sync {
-    /// Revalidates admission and the credential, then builds the exact
-    /// authorized request carrying `body`. Called before every physical
-    /// request, retries included.
-    fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a>;
-
-    /// After an HTTP 401 head, forces one claimed refresh of the login the
-    /// request carried, as a model round does; `true` sends the side request
-    /// once more under the renewed grant. The default, for a credential
-    /// nothing can renew, keeps the 401.
-    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
-        Box::pin(std::future::ready(false))
-    }
-}
-
-/// The one claimed refresh and re-dispatch a side request gets after a 401,
-/// shared by every side-request loop.
-pub(crate) async fn refreshed_after_rejection(
-    refreshed: &mut bool,
-    refresh: ResponsesCredentialRefresh<'_>,
-) -> bool {
-    if *refreshed {
-        return false;
-    }
-    *refreshed = true;
-    refresh.await
-}
-
-/// Exchange bounds of one side request.
-#[derive(Clone, Copy, Debug)]
-pub struct ResponsesRetrievalLimits {
-    /// Bound of one physical exchange up to its response head and of its
-    /// streamed body.
-    pub exchange_timeout: Duration,
-    /// The backoff sample; `None` draws one per wait.
-    pub jitter: Option<Jitter>,
-}
-
-impl Default for ResponsesRetrievalLimits {
-    fn default() -> Self {
-        Self {
-            exchange_timeout: Duration::from_secs(120),
-            jitter: None,
-        }
-    }
-}
+use plakous_exchange::side_request::{
+    self, BodyCollector, Broken, Document, ResponseReader, bounded_line,
+};
+pub use plakous_exchange::side_request::{
+    CredentialRefresh as ResponsesCredentialRefresh,
+    RetrievalDispatch as ResponsesRetrievalDispatch, RetrievalGuard as ResponsesRetrievalGuard,
+};
+pub use plakous_exchange::side_request::{
+    RetrievalAuthorization as ResponsesRetrievalAuthorization,
+    RetrievalError as ResponsesRetrievalError, RetrievalErrorKind as ResponsesRetrievalErrorKind,
+    RetrievalLimits as ResponsesRetrievalLimits, RetrievalOutcome as ResponsesRetrievalOutcome,
+    RetrievalSource as ResponsesRetrievalSource, RetrievalTransport as ResponsesRetrievalTransport,
+    RetrievalUsage as ResponsesRetrievalUsage,
+};
 
 /// Runs one side request to its answer under the bounded retry of
-/// [`RetryPolicy::TURN`].
+/// [`plakous_attempt::RetryPolicy::TURN`].
 ///
 /// # Errors
 ///
@@ -581,8 +362,15 @@ pub async fn run_responses_retrieval(
             "side request body is outside the hosted retrieval allowlist",
         ));
     }
-    let Received::Terminal(terminal) =
-        exchange_with_retry(client, transport, &body, Reply::Sse, cancellation, limits).await?
+    let Received::Terminal(terminal) = side_request::exchange_with_retry(
+        client,
+        transport,
+        &body,
+        ResponsesReader(Reply::Sse),
+        cancellation,
+        limits,
+    )
+    .await?
     else {
         return Err(ResponsesRetrievalError::invalid_response(
             "side request reply was not a stream",
@@ -612,7 +400,16 @@ pub async fn run_responses_json_side_request(
             "side request body is outside the hosted retrieval allowlist",
         ));
     }
-    match exchange_with_retry(client, transport, body, Reply::Json, cancellation, limits).await? {
+    match side_request::exchange_with_retry(
+        client,
+        transport,
+        body,
+        ResponsesReader(Reply::Json),
+        cancellation,
+        limits,
+    )
+    .await?
+    {
         Received::Document(document) => Ok(document),
         Received::Terminal(_) => Err(ResponsesRetrievalError::invalid_response(
             "side request reply was not a document",
@@ -633,275 +430,6 @@ enum Received {
     Terminal(Value),
     Document(Vec<u8>),
 }
-
-enum Attempted {
-    Done(Received),
-    Retry {
-        point: FailurePoint,
-        retry_after: Option<Duration>,
-        error: ResponsesRetrievalError,
-    },
-    /// HTTP 401: the credential was rejected.
-    Rejected(ResponsesRetrievalError),
-}
-
-async fn exchange_with_retry(
-    client: &Client,
-    transport: &dyn ResponsesRetrievalTransport,
-    body: &[u8],
-    reply: Reply,
-    cancellation: &CancellationToken,
-    limits: ResponsesRetrievalLimits,
-) -> Result<Received, ResponsesRetrievalError> {
-    let mut physical = 0_u32;
-    let mut waited = Duration::ZERO;
-    let mut refreshed = false;
-    loop {
-        if cancellation.is_cancelled() {
-            return Err(cancelled());
-        }
-        physical = physical.saturating_add(1);
-        let (point, retry_after, mut error) =
-            match exchange_once(client, transport, body, reply, cancellation, limits).await {
-                Ok(Attempted::Done(terminal)) => return Ok(terminal),
-                Ok(Attempted::Rejected(mut error)) => {
-                    if refreshed_after_rejection(&mut refreshed, transport.credential_rejected())
-                        .await
-                    {
-                        continue;
-                    }
-                    error.physical_requests = physical;
-                    return Err(error);
-                }
-                Ok(Attempted::Retry {
-                    point,
-                    retry_after,
-                    error,
-                }) => (point, retry_after, error),
-                Err(mut error) => {
-                    error.physical_requests = physical;
-                    return Err(error);
-                }
-            };
-        let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
-            physical_attempts: physical,
-            provider_acceptance: ProviderAcceptance::NotAccepted,
-            visible_output: false,
-            replay_safety: ReplaySafety::CostOnly,
-            hosted_effects_possible: false,
-            logical_success: false,
-        });
-        let jitter = limits.jitter.unwrap_or_else(Jitter::random);
-        let Some(delay) = RetryPolicy::TURN.next_delay(facts, point, retry_after, waited, jitter)
-        else {
-            error.physical_requests = physical;
-            return Err(error);
-        };
-        waited = waited.saturating_add(delay);
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            () = cancellation.clone().cancelled() => return Err(cancelled()),
-        }
-    }
-}
-
-pub(crate) fn cancelled() -> ResponsesRetrievalError {
-    ResponsesRetrievalError::new(
-        ResponsesRetrievalErrorKind::Cancelled,
-        "the side request was cancelled",
-    )
-}
-
-async fn exchange_once(
-    client: &Client,
-    transport: &dyn ResponsesRetrievalTransport,
-    body: &[u8],
-    reply: Reply,
-    cancellation: &CancellationToken,
-    limits: ResponsesRetrievalLimits,
-) -> Result<Attempted, ResponsesRetrievalError> {
-    let ResponsesRetrievalDispatch { request, mut guard } = transport.authorize(body).await?;
-    let http_cancellation = HttpCancellationToken::new();
-    let started = Instant::now();
-    let deadline = started
-        .checked_add(limits.exchange_timeout)
-        .unwrap_or(started);
-    let exchanged = cancellable(
-        client.execute(
-            request,
-            ExchangeControl::streaming(deadline.into_std(), http_cancellation.clone())
-                .with_body_deadline(Some(deadline.into_std())),
-        ),
-        cancellation,
-        &http_cancellation,
-    )
-    .await;
-    if exchanged.cancelled {
-        return Err(cancelled());
-    }
-    let response = match exchanged.value {
-        Ok(response) => response,
-        Err(failure) => {
-            if let Some(guard) = guard.as_mut() {
-                guard.transport_failed(failure);
-            }
-            return Ok(Attempted::Retry {
-                point: transport_point(failure),
-                retry_after: None,
-                error: unavailable(failure),
-            });
-        }
-    };
-    drop(guard);
-    let status = response.status().as_u16();
-    if status != 200 {
-        let retry_after = response
-            .headers()
-            .get(&plakous_http::HeaderName::from_static("retry-after"))
-            .and_then(|value| value.to_str().ok())
-            .and_then(plakous_attempt::retry_after_seconds);
-        let body = read_bounded_body(
-            response.into_body(),
-            cancellation,
-            &http_cancellation,
-            MAX_ERROR_BODY_BYTES,
-        )
-        .await
-        .unwrap_or_default();
-        let mut error = status_error(status, &body);
-        if let Some(point) = RetryPolicy::status_failure_point(status) {
-            return Ok(Attempted::Retry {
-                point,
-                retry_after,
-                error,
-            });
-        }
-        error.status = Some(status);
-        if status == 401 {
-            return Ok(Attempted::Rejected(error));
-        }
-        return Err(error);
-    }
-    let body = response.into_body();
-    match reply {
-        Reply::Sse => read_stream(body, cancellation, &http_cancellation).await,
-        Reply::Json => read_document(body, cancellation, &http_cancellation).await,
-    }
-}
-
-async fn read_document(
-    mut body: plakous_http::ResponseBody,
-    cancellation: &CancellationToken,
-    http_cancellation: &HttpCancellationToken,
-) -> Result<Attempted, ResponsesRetrievalError> {
-    let mut document = Vec::new();
-    loop {
-        let next = cancellable(body.next_chunk(), cancellation, http_cancellation).await;
-        if next.cancelled {
-            let _ = body.close().await;
-            return Err(cancelled());
-        }
-        match next.value {
-            Some(Ok(chunk)) => {
-                if document.len().saturating_add(chunk.len()) > MAX_DOCUMENT_BYTES {
-                    let _ = body.close().await;
-                    return Err(ResponsesRetrievalError::invalid_response(
-                        "side request reply exceeded its bound",
-                    ));
-                }
-                document.extend_from_slice(&chunk);
-            }
-            Some(Err(failure)) => {
-                return Ok(Attempted::Retry {
-                    point: FailurePoint::MidStream,
-                    retry_after: None,
-                    error: unavailable(failure),
-                });
-            }
-            None => return Ok(Attempted::Done(Received::Document(document))),
-        }
-    }
-}
-
-async fn read_stream(
-    mut body: plakous_http::ResponseBody,
-    cancellation: &CancellationToken,
-    http_cancellation: &HttpCancellationToken,
-) -> Result<Attempted, ResponsesRetrievalError> {
-    let mut collector = Collector::default();
-    loop {
-        let next = cancellable(body.next_chunk(), cancellation, http_cancellation).await;
-        if next.cancelled {
-            let _ = body.close().await;
-            return Err(cancelled());
-        }
-        match next.value {
-            Some(Ok(chunk)) => match collector.push(&chunk) {
-                Ok(()) => {}
-                Err(Broken::Transient(error)) => {
-                    let _ = body.close().await;
-                    return Ok(Attempted::Retry {
-                        point: FailurePoint::MidStream,
-                        retry_after: None,
-                        error,
-                    });
-                }
-                Err(Broken::Fatal(error)) => {
-                    let _ = body.close().await;
-                    return Err(error);
-                }
-            },
-            Some(Err(failure)) => {
-                return Ok(Attempted::Retry {
-                    point: FailurePoint::MidStream,
-                    retry_after: None,
-                    error: unavailable(failure),
-                });
-            }
-            None => break,
-        }
-    }
-    match collector.finish() {
-        Ok(terminal) => Ok(Attempted::Done(Received::Terminal(terminal))),
-        Err(Broken::Transient(error)) => Ok(Attempted::Retry {
-            point: FailurePoint::MidStream,
-            retry_after: None,
-            error,
-        }),
-        Err(Broken::Fatal(error)) => Err(error),
-    }
-}
-
-pub(crate) fn transport_point(failure: HttpFailure) -> FailurePoint {
-    match failure.transmission() {
-        TransmissionFact::NotStarted
-            if matches!(
-                failure.phase(),
-                Phase::Resolution | Phase::Connect | Phase::Tls
-            ) =>
-        {
-            FailurePoint::Unreachable
-        }
-        TransmissionFact::NotStarted | TransmissionFact::RequestIncomplete => FailurePoint::Refused,
-        TransmissionFact::MayHaveTransmitted => FailurePoint::AfterSend,
-    }
-}
-
-pub(crate) fn unavailable(failure: HttpFailure) -> ResponsesRetrievalError {
-    let phase = match failure.phase() {
-        Phase::Resolution => "DNS resolution",
-        Phase::Connect => "connect",
-        Phase::Tls => "TLS",
-        Phase::RequestWrite | Phase::RequestWriteOrResponseHead => "request write",
-        Phase::ResponseHead => "response head",
-        _ => "response stream",
-    };
-    ResponsesRetrievalError::new(
-        ResponsesRetrievalErrorKind::Unavailable,
-        format!("the provider was unreachable ({phase} failed)"),
-    )
-}
-
 /// One bounded line from a provider error body, never the raw body: the
 /// OpenAI shape `error.{type|code}: error.message` or the xAI shape
 /// `code: error`.
@@ -936,27 +464,39 @@ pub(crate) fn status_error(status: u16, body: &[u8]) -> ResponsesRetrievalError 
     ResponsesRetrievalError::new(kind, message)
 }
 
-fn bounded_line(text: &str, max: usize) -> String {
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.len() <= max {
-        return line;
-    }
-    let mut end = max;
-    while !line.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &line[..end])
+struct ResponsesReader(Reply);
+enum ResponsesBody {
+    Stream(Box<Collector>),
+    Document(Document),
 }
-
-enum Broken {
-    /// The provider reported a transient failure or the stream was cut.
-    Transient(ResponsesRetrievalError),
-    Fatal(ResponsesRetrievalError),
+impl ResponseReader for ResponsesReader {
+    type Collector = ResponsesBody;
+    fn start(&self, _: &plakous_http::Response) -> ResponsesBody {
+        match self.0 {
+            Reply::Sse => ResponsesBody::Stream(Box::default()),
+            Reply::Json => ResponsesBody::Document(Document::new(
+                MAX_DOCUMENT_BYTES,
+                "side request reply exceeded its bound",
+            )),
+        }
+    }
+    fn status_error(&self, status: u16, body: &[u8]) -> ResponsesRetrievalError {
+        status_error(status, body)
+    }
 }
-
-impl From<ResponsesRetrievalError> for Broken {
-    fn from(error: ResponsesRetrievalError) -> Self {
-        Self::Fatal(error)
+impl BodyCollector for ResponsesBody {
+    type Output = Received;
+    fn push(&mut self, bytes: &[u8]) -> Result<(), Broken> {
+        match self {
+            Self::Stream(collector) => collector.push(bytes),
+            Self::Document(document) => document.push(bytes),
+        }
+    }
+    fn finish(self) -> Result<Received, Broken> {
+        match self {
+            Self::Stream(collector) => (*collector).finish().map(Received::Terminal),
+            Self::Document(document) => document.finish().map(Received::Document),
+        }
     }
 }
 
@@ -1213,6 +753,7 @@ fn assemble(
         ));
     }
     Ok(ResponsesRetrievalOutcome {
+        exchanges: 1,
         text,
         sources,
         usage: ResponsesRetrievalUsage {

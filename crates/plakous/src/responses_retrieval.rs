@@ -1,12 +1,13 @@
 //! The neutral retrieval port over the OpenAI API, Codex, xAI API and
 //! SuperGrok side-request executors.
 
+use crate::retrieval_outcome::{error_of, outcome};
 use std::future::Future;
 use std::sync::Arc;
 
 use plakous_tools::{
     ExecutionOperationControl, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
-    RetrievalOutcome, RetrievalPort, RetrievalRequest, RetrievalSource, RetrievalUsage,
+    RetrievalPort, RetrievalRequest,
 };
 
 #[cfg(any(feature = "openai", feature = "codex"))]
@@ -16,10 +17,7 @@ use plakous_openai as responses;
     not(any(feature = "openai", feature = "codex"))
 ))]
 use plakous_xai as responses;
-use responses::{
-    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalOutcome,
-    ResponsesRetrievalQuery,
-};
+use responses::{ResponsesRetrievalError, ResponsesRetrievalOutcome, ResponsesRetrievalQuery};
 
 #[cfg(feature = "openai")]
 mod openai;
@@ -87,40 +85,10 @@ fn query(request: RetrievalRequest) -> Result<ResponsesRetrievalQuery, Retrieval
     }
 }
 
-fn outcome(outcome: ResponsesRetrievalOutcome) -> RetrievalOutcome {
-    RetrievalOutcome {
-        text: outcome.text,
-        sources: outcome
-            .sources
-            .into_iter()
-            .map(|source| RetrievalSource {
-                url: source.url,
-                title: source.title,
-            })
-            .collect(),
-        usage: RetrievalUsage {
-            input_tokens: outcome.usage.input_tokens,
-            output_tokens: outcome.usage.output_tokens,
-            hosted_requests: outcome.usage.hosted_requests,
-        },
-    }
-}
-
-pub(crate) fn error_of(error: &ResponsesRetrievalError) -> RetrievalError {
-    let kind = match error.kind() {
-        ResponsesRetrievalErrorKind::InvalidRequest => RetrievalErrorKind::InvalidRequest,
-        ResponsesRetrievalErrorKind::Unauthorized => RetrievalErrorKind::Unauthorized,
-        ResponsesRetrievalErrorKind::Rejected => RetrievalErrorKind::Rejected,
-        ResponsesRetrievalErrorKind::Cancelled => RetrievalErrorKind::Cancelled,
-        ResponsesRetrievalErrorKind::InvalidResponse => RetrievalErrorKind::InvalidResponse,
-        _ => RetrievalErrorKind::Unavailable,
-    };
-    RetrievalError::new(kind, error.message())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use responses::ResponsesRetrievalErrorKind;
 
     #[tokio::test]
     async fn requests_and_errors_map_onto_the_side_request() {

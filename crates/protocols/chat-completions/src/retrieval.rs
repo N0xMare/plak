@@ -10,24 +10,12 @@
 //! keep classifying an enabled plugin as a server effect.
 
 use std::collections::BTreeSet;
-use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::time::Duration;
 
-use plakous_attempt::{
-    FailurePoint, Jitter, ObservationSnapshot, ProviderAcceptance, ReplaySafety, RetryPolicy,
-    TerminalFacts,
-};
-use plakous_exchange::{cancellable, read_bounded_body};
-use plakous_http::{
-    CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
-    Phase, Request as HttpRequest, SseDecoder, SseLimits, TransmissionFact,
-};
+use plakous_attempt::ReplaySafety;
+use plakous_http::{Client, Failure as HttpFailure, SseDecoder, SseLimits};
 use plakous_model::CancellationToken;
 use serde::Serialize;
 use serde_json::{Map, Value};
-use tokio::time::Instant;
 
 /// The gateway plugin a web search side request enables.
 pub const CHAT_WEB_PLUGIN_ID: &str = "web";
@@ -39,7 +27,6 @@ pub const CHAT_WEB_PLUGIN_MAX_RESULTS: u32 = 5;
 /// Output cap of one side request.
 pub const CHAT_RETRIEVAL_MAX_TOKENS: u32 = 4096;
 
-const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 const MAX_JSON_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ANSWER_BYTES: usize = 1024 * 1024;
 const MAX_SOURCES: usize = 256;
@@ -262,152 +249,18 @@ pub fn classify_chat_retrieval_body(body: &[u8]) -> ReplaySafety {
     ReplaySafety::CostOnly
 }
 
-/// One source the provider cited.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChatRetrievalSource {
-    /// The URL.
-    pub url: String,
-    /// The title, when reported.
-    pub title: Option<String>,
-}
-
-/// What a side request consumed.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ChatRetrievalUsage {
-    /// Prompt tokens.
-    pub input_tokens: u64,
-    /// Completion tokens.
-    pub output_tokens: u64,
-    /// Web searches: `usage.server_tool_use.web_search_requests` when the
-    /// gateway reports it, otherwise the plugin's one search per request.
-    pub hosted_requests: u64,
-}
-
-/// The completed side request.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ChatRetrievalOutcome {
-    /// The answer text.
-    pub text: String,
-    /// Sources from `url_citation` annotations, first-reported order, URLs
-    /// unique.
-    pub sources: Vec<ChatRetrievalSource>,
-    /// Usage of the side request.
-    pub usage: ChatRetrievalUsage,
-}
-
-/// Why a side request failed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum ChatRetrievalErrorKind {
-    /// The body is not an allowlisted side request or could not be built.
-    InvalidRequest,
-    /// Admission or the credential is no longer current, or HTTP 401/403.
-    Unauthorized,
-    /// The provider refused the request (a non-retryable status or refusal).
-    Rejected,
-    /// The provider stayed unreachable or failing through the retry budget.
-    Unavailable,
-    /// The response broke the side-request grammar or its bounds.
-    InvalidResponse,
-    /// The caller cancelled.
-    Cancelled,
-}
-
-/// A failed side request with a redaction-safe message.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChatRetrievalError {
-    kind: ChatRetrievalErrorKind,
-    message: String,
-    status: Option<u16>,
-    physical_requests: u32,
-}
-
-impl ChatRetrievalError {
-    /// A failure of `kind`.
-    #[must_use]
-    pub fn new(kind: ChatRetrievalErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            status: None,
-            physical_requests: 0,
-        }
-    }
-
-    fn invalid_request(message: &str) -> Self {
-        Self::new(ChatRetrievalErrorKind::InvalidRequest, message)
-    }
-
-    fn invalid_response(message: impl Into<String>) -> Self {
-        Self::new(ChatRetrievalErrorKind::InvalidResponse, message)
-    }
-
-    /// The failure class.
-    #[must_use]
-    pub const fn kind(&self) -> ChatRetrievalErrorKind {
-        self.kind
-    }
-
-    /// The HTTP status of the final refusal, when there was one.
-    #[must_use]
-    pub const fn status(&self) -> Option<u16> {
-        self.status
-    }
-
-    /// Physical requests the side request sent, retries included.
-    #[must_use]
-    pub const fn physical_requests(&self) -> u32 {
-        self.physical_requests
-    }
-
-    /// The message.
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-impl fmt::Display for ChatRetrievalError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ChatRetrievalError {}
-
-/// The future [`ChatRetrievalTransport::authorize`] returns.
-pub type ChatRetrievalAuthorization<'a> =
-    Pin<Box<dyn Future<Output = Result<HttpRequest, ChatRetrievalError>> + Send + 'a>>;
-
-/// The route's half of a side request.
-pub trait ChatRetrievalTransport: Send + Sync {
-    /// Revalidates admission and the credential, then builds the exact
-    /// authorized request carrying `body`. Called before every physical
-    /// request, retries included.
-    fn authorize<'a>(&'a self, body: &'a [u8]) -> ChatRetrievalAuthorization<'a>;
-}
-
-/// Exchange bounds of one side request.
-#[derive(Clone, Copy, Debug)]
-pub struct ChatRetrievalLimits {
-    /// Bound of one physical exchange up to its response head and of its
-    /// body.
-    pub exchange_timeout: Duration,
-    /// The backoff sample; `None` draws one per wait.
-    pub jitter: Option<Jitter>,
-}
-
-impl Default for ChatRetrievalLimits {
-    fn default() -> Self {
-        Self {
-            exchange_timeout: Duration::from_secs(120),
-            jitter: None,
-        }
-    }
-}
+use plakous_exchange::side_request::{
+    self, BodyCollector, Broken, Document, ResponseReader, bounded_line,
+};
+pub use plakous_exchange::side_request::{
+    RetrievalAuthorization as ChatRetrievalAuthorization, RetrievalError as ChatRetrievalError,
+    RetrievalErrorKind as ChatRetrievalErrorKind, RetrievalLimits as ChatRetrievalLimits,
+    RetrievalOutcome as ChatRetrievalOutcome, RetrievalSource as ChatRetrievalSource,
+    RetrievalTransport as ChatRetrievalTransport, RetrievalUsage as ChatRetrievalUsage,
+};
 
 /// Runs one side request to its answer under the bounded retry of
-/// [`RetryPolicy::TURN`].
+/// [`plakous_attempt::RetryPolicy::TURN`].
 ///
 /// # Errors
 ///
@@ -426,249 +279,10 @@ pub async fn run_chat_retrieval(
             "side request body is outside the hosted retrieval allowlist",
         ));
     }
-    let mut physical = 0_u32;
-    let mut waited = Duration::ZERO;
-    loop {
-        if cancellation.is_cancelled() {
-            return Err(cancelled());
-        }
-        physical = physical.saturating_add(1);
-        let (point, retry_after, error) =
-            match exchange_once(client, transport, &body, cancellation, limits).await {
-                Ok(Attempted::Done(outcome)) => return Ok(outcome),
-                Ok(Attempted::Retry {
-                    point,
-                    retry_after,
-                    error,
-                }) => (point, retry_after, error),
-                Err(mut error) => {
-                    error.physical_requests = physical;
-                    return Err(error);
-                }
-            };
-        let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
-            physical_attempts: physical,
-            provider_acceptance: ProviderAcceptance::NotAccepted,
-            visible_output: false,
-            replay_safety: ReplaySafety::CostOnly,
-            hosted_effects_possible: false,
-            logical_success: false,
-        });
-        let jitter = limits.jitter.unwrap_or_else(Jitter::random);
-        let Some(delay) = RetryPolicy::TURN.next_delay(facts, point, retry_after, waited, jitter)
-        else {
-            let mut error = error;
-            error.physical_requests = physical;
-            return Err(error);
-        };
-        waited = waited.saturating_add(delay);
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            () = cancellation.clone().cancelled() => return Err(cancelled()),
-        }
-    }
-}
-
-enum Attempted {
-    Done(ChatRetrievalOutcome),
-    Retry {
-        point: FailurePoint,
-        retry_after: Option<Duration>,
-        error: ChatRetrievalError,
-    },
-}
-
-fn cancelled() -> ChatRetrievalError {
-    ChatRetrievalError::new(
-        ChatRetrievalErrorKind::Cancelled,
-        "the side request was cancelled",
-    )
-}
-
-async fn exchange_once(
-    client: &Client,
-    transport: &dyn ChatRetrievalTransport,
-    body: &[u8],
-    cancellation: &CancellationToken,
-    limits: ChatRetrievalLimits,
-) -> Result<Attempted, ChatRetrievalError> {
-    let request = transport.authorize(body).await?;
-    let http_cancellation = HttpCancellationToken::new();
-    let started = Instant::now();
-    let deadline = started
-        .checked_add(limits.exchange_timeout)
-        .unwrap_or(started);
-    let exchanged = cancellable(
-        client.execute(
-            request,
-            ExchangeControl::streaming(deadline.into_std(), http_cancellation.clone())
-                .with_body_deadline(Some(deadline.into_std())),
-        ),
-        cancellation,
-        &http_cancellation,
-    )
-    .await;
-    if exchanged.cancelled {
-        return Err(cancelled());
-    }
-    let response = match exchanged.value {
-        Ok(response) => response,
-        Err(failure) => {
-            return Ok(Attempted::Retry {
-                point: transport_point(failure),
-                retry_after: None,
-                error: unavailable(failure),
-            });
-        }
-    };
-    let status = response.status().as_u16();
-    if status != 200 {
-        let retry_after = response
-            .headers()
-            .get(&plakous_http::HeaderName::from_static("retry-after"))
-            .and_then(|value| value.to_str().ok())
-            .and_then(plakous_attempt::retry_after_seconds);
-        let body = read_bounded_body(
-            response.into_body(),
-            cancellation,
-            &http_cancellation,
-            MAX_ERROR_BODY_BYTES,
-        )
+    side_request::exchange_with_retry(client, transport, &body, ChatReader, cancellation, limits)
         .await
-        .unwrap_or_default();
-        let mut error = status_error(status, &body);
-        if let Some(point) = RetryPolicy::status_failure_point(status) {
-            return Ok(Attempted::Retry {
-                point,
-                retry_after,
-                error,
-            });
-        }
-        error.status = Some(status);
-        return Err(error);
-    }
-    let streamed = response
-        .headers()
-        .get(&plakous_http::HeaderName::from_static("content-type"))
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .is_some_and(|media| media.trim().eq_ignore_ascii_case("text/event-stream"));
-    if !streamed {
-        let body = read_bounded_body(
-            response.into_body(),
-            cancellation,
-            &http_cancellation,
-            MAX_JSON_BODY_BYTES,
-        )
-        .await;
-        return whole(body, cancellation);
-    }
-    read_stream(response.into_body(), cancellation, &http_cancellation).await
 }
 
-/// A streamed 200 body through the side-request grammar.
-async fn read_stream(
-    mut body: plakous_http::ResponseBody,
-    cancellation: &CancellationToken,
-    http_cancellation: &HttpCancellationToken,
-) -> Result<Attempted, ChatRetrievalError> {
-    let mut collector = Collector::default();
-    loop {
-        let next = cancellable(body.next_chunk(), cancellation, http_cancellation).await;
-        if next.cancelled {
-            let _ = body.close().await;
-            return Err(cancelled());
-        }
-        match next.value {
-            Some(Ok(chunk)) => match collector.push(&chunk) {
-                Ok(()) => {}
-                Err(Broken::Transient(error)) => {
-                    let _ = body.close().await;
-                    return Ok(Attempted::Retry {
-                        point: FailurePoint::MidStream,
-                        retry_after: None,
-                        error,
-                    });
-                }
-                Err(Broken::Fatal(error)) => {
-                    let _ = body.close().await;
-                    return Err(error);
-                }
-            },
-            Some(Err(failure)) => {
-                return Ok(Attempted::Retry {
-                    point: FailurePoint::MidStream,
-                    retry_after: None,
-                    error: unavailable(failure),
-                });
-            }
-            None => break,
-        }
-    }
-    match collector.finish() {
-        Ok(outcome) => Ok(Attempted::Done(outcome)),
-        Err(Broken::Transient(error)) => Ok(Attempted::Retry {
-            point: FailurePoint::MidStream,
-            retry_after: None,
-            error,
-        }),
-        Err(Broken::Fatal(error)) => Err(error),
-    }
-}
-
-/// A non-streamed 200 body, read whole.
-fn whole(
-    body: Result<Vec<u8>, HttpFailure>,
-    cancellation: &CancellationToken,
-) -> Result<Attempted, ChatRetrievalError> {
-    if cancellation.is_cancelled() {
-        return Err(cancelled());
-    }
-    match body {
-        Ok(body) if body.len() <= MAX_JSON_BODY_BYTES => completed(&body).map(Attempted::Done),
-        Ok(_) => Err(ChatRetrievalError::invalid_response(
-            "side request body exceeded its byte bound",
-        )),
-        Err(failure) => Ok(Attempted::Retry {
-            point: FailurePoint::MidStream,
-            retry_after: None,
-            error: unavailable(failure),
-        }),
-    }
-}
-
-fn transport_point(failure: HttpFailure) -> FailurePoint {
-    match failure.transmission() {
-        TransmissionFact::NotStarted
-            if matches!(
-                failure.phase(),
-                Phase::Resolution | Phase::Connect | Phase::Tls
-            ) =>
-        {
-            FailurePoint::Unreachable
-        }
-        TransmissionFact::NotStarted | TransmissionFact::RequestIncomplete => FailurePoint::Refused,
-        TransmissionFact::MayHaveTransmitted => FailurePoint::AfterSend,
-    }
-}
-
-fn unavailable(failure: HttpFailure) -> ChatRetrievalError {
-    let phase = match failure.phase() {
-        Phase::Resolution => "DNS resolution",
-        Phase::Connect => "connect",
-        Phase::Tls => "TLS",
-        Phase::RequestWrite | Phase::RequestWriteOrResponseHead => "request write",
-        Phase::ResponseHead => "response head",
-        _ => "response stream",
-    };
-    ChatRetrievalError::new(
-        ChatRetrievalErrorKind::Unavailable,
-        format!("the provider was unreachable ({phase} failed)"),
-    )
-}
-
-/// One bounded line from a provider error body: its `error.message`, never
-/// the raw body.
 fn status_error(status: u16, body: &[u8]) -> ChatRetrievalError {
     let detail = serde_json::from_slice::<Value>(body)
         .ok()
@@ -691,27 +305,54 @@ fn status_error(status: u16, body: &[u8]) -> ChatRetrievalError {
     ChatRetrievalError::new(kind, message)
 }
 
-fn bounded_line(text: &str, max: usize) -> String {
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.len() <= max {
-        return line;
-    }
-    let mut end = max;
-    while !line.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &line[..end])
+struct ChatReader;
+enum ChatBody {
+    Stream(Box<Collector>),
+    Document(Document),
 }
-
-enum Broken {
-    /// A cut stream or a transient provider failure: the retry decides.
-    Transient(ChatRetrievalError),
-    Fatal(ChatRetrievalError),
+impl ResponseReader for ChatReader {
+    type Collector = ChatBody;
+    fn start(&self, response: &plakous_http::Response) -> ChatBody {
+        let streamed = response
+            .headers()
+            .get(&plakous_http::HeaderName::from_static("content-type"))
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .is_some_and(|media| media.trim().eq_ignore_ascii_case("text/event-stream"));
+        if streamed {
+            ChatBody::Stream(Box::default())
+        } else {
+            ChatBody::Document(Document::new(
+                MAX_JSON_BODY_BYTES,
+                "side request body exceeded its byte bound",
+            ))
+        }
+    }
+    fn status_error(&self, status: u16, body: &[u8]) -> ChatRetrievalError {
+        status_error(status, body)
+    }
 }
-
-impl From<ChatRetrievalError> for Broken {
-    fn from(error: ChatRetrievalError) -> Self {
-        Self::Fatal(error)
+impl BodyCollector for ChatBody {
+    type Output = ChatRetrievalOutcome;
+    fn push(&mut self, bytes: &[u8]) -> Result<(), Broken> {
+        match self {
+            Self::Stream(collector) => collector.push(bytes),
+            Self::Document(document) => document.push(bytes),
+        }
+    }
+    fn finish(self) -> Result<Self::Output, Broken> {
+        match self {
+            Self::Stream(collector) => (*collector).finish(),
+            Self::Document(document) => completed(&document.finish()?).map_err(Broken::Fatal),
+        }
+    }
+    fn transport_failure(self, failure: HttpFailure) -> Result<Self::Output, Broken> {
+        match self {
+            Self::Document(document) if failure.kind() != plakous_http::ErrorKind::Internal => {
+                completed(&document.finish()?).map_err(Broken::Fatal)
+            }
+            _ => Err(Broken::Transient(side_request::unavailable(failure))),
+        }
     }
 }
 
@@ -894,6 +535,7 @@ impl Answer {
             self.usage.hosted_requests = 1;
         }
         Ok(ChatRetrievalOutcome {
+            exchanges: 1,
             text: self.text,
             sources: self.sources,
             usage: self.usage,

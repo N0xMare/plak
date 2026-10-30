@@ -201,6 +201,7 @@ pub fn decode_codex_search_response(
         ));
     }
     Ok(ResponsesRetrievalOutcome {
+        exchanges: 1,
         text,
         sources,
         usage: ResponsesRetrievalUsage {

@@ -1011,7 +1011,6 @@ dependencies = [
  "plakous-model",
  "serde",
  "serde_json",
- "tokio",
  "unicode-general-category",
 ]
 
@@ -1109,7 +1108,6 @@ dependencies = [
  "plakous-model",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]

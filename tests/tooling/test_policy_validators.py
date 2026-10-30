@@ -1576,7 +1576,7 @@ class SourceScanTests(unittest.TestCase):
         self.assertTrue(validate(mutated))
         self.assertTrue(validate(mutated + '\nconst DECOY: &str = "' + comparison + '";'))
 
-    def test_facade_exchange_edge_names_only_the_shared_backoff(self) -> None:
+    def test_facade_exchange_edge_names_only_shared_backoff_and_side_request(self) -> None:
         workspace = policy_module.load_workspace(ROOT)
         sources, errors = workspace_policy.production_rust_sources(
             workspace.packages["plakous"].metadata, ROOT
@@ -1590,7 +1590,7 @@ class SourceScanTests(unittest.TestCase):
                 workspace_policy.production_rust_source(path.read_text()),
             )
         }
-        self.assertEqual(names, {"lookup::retry_backoff"})
+        self.assertEqual(names, {"lookup::retry_backoff", "side_request"})
 
     def test_cfg_test_module_does_not_hide_later_production_code(self) -> None:
         source = """

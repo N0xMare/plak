@@ -1,15 +1,13 @@
 //! The neutral retrieval port over the Anthropic API and Claude OAuth
 //! side-request executor.
 
+use crate::retrieval_outcome::{error_of, outcome};
 use std::sync::Arc;
 
-use plakous_anthropic::{
-    AnthropicRetrieval, MessagesRetrievalError, MessagesRetrievalErrorKind,
-    MessagesRetrievalOutcome, MessagesRetrievalQuery,
-};
+use plakous_anthropic::{AnthropicRetrieval, MessagesRetrievalQuery};
 use plakous_tools::{
     ExecutionOperationControl, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
-    RetrievalOutcome, RetrievalPort, RetrievalRequest, RetrievalSource, RetrievalUsage,
+    RetrievalPort, RetrievalRequest,
 };
 
 const KINDS: [RetrievalKind; 2] = [RetrievalKind::WebSearch, RetrievalKind::PageFetch];
@@ -71,40 +69,10 @@ fn query(request: RetrievalRequest) -> Result<MessagesRetrievalQuery, RetrievalE
     }
 }
 
-fn outcome(outcome: MessagesRetrievalOutcome) -> RetrievalOutcome {
-    RetrievalOutcome {
-        text: outcome.text,
-        sources: outcome
-            .sources
-            .into_iter()
-            .map(|source| RetrievalSource {
-                url: source.url,
-                title: source.title,
-            })
-            .collect(),
-        usage: RetrievalUsage {
-            input_tokens: outcome.usage.input_tokens,
-            output_tokens: outcome.usage.output_tokens,
-            hosted_requests: outcome.usage.hosted_requests,
-        },
-    }
-}
-
-fn error_of(error: &MessagesRetrievalError) -> RetrievalError {
-    let kind = match error.kind() {
-        MessagesRetrievalErrorKind::InvalidRequest => RetrievalErrorKind::InvalidRequest,
-        MessagesRetrievalErrorKind::Unauthorized => RetrievalErrorKind::Unauthorized,
-        MessagesRetrievalErrorKind::Rejected => RetrievalErrorKind::Rejected,
-        MessagesRetrievalErrorKind::Cancelled => RetrievalErrorKind::Cancelled,
-        MessagesRetrievalErrorKind::InvalidResponse => RetrievalErrorKind::InvalidResponse,
-        _ => RetrievalErrorKind::Unavailable,
-    };
-    RetrievalError::new(kind, error.message())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plakous_anthropic::{MessagesRetrievalError, MessagesRetrievalErrorKind};
 
     #[test]
     fn requests_and_errors_map_onto_the_side_request() {

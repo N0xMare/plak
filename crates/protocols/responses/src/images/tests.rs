@@ -7,6 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
+use plakous_attempt::Jitter;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -338,5 +339,35 @@ async fn a_refusal_or_server_error_is_never_sent_again() -> TestResult {
     assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unavailable);
     assert_eq!(error.physical_requests(), 1);
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_401_without_credential_renewal_is_not_sent_again() -> TestResult {
+    let peer = peer(vec![http_response(401, "", "{}"), image_response()]).await?;
+    let transport = fixed(vec![peer.origin.clone()]);
+    let error = run(&transport, &generation(ResponsesImageFlavor::OpenAi))
+        .await
+        .err()
+        .ok_or("401 was renewed")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unauthorized);
+    assert_eq!(error.status(), Some(401));
+    assert_eq!(error.physical_requests(), 1);
+    assert_eq!(transport.authorized.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_possible_paid_image_is_never_reissued_after_the_peer_reads_its_body() -> TestResult {
+    let peer = peer(vec![Vec::new(), image_response()]).await?;
+    let transport = fixed(vec![peer.origin.clone()]);
+    let error = run(&transport, &generation(ResponsesImageFlavor::OpenAi))
+        .await
+        .err()
+        .ok_or("ambiguous image was replayed")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unavailable);
+    assert_eq!(error.physical_requests(), 1);
+    assert_eq!(transport.authorized.load(Ordering::SeqCst), 1);
+    assert_eq!(peer.requests.lock().map_err(|_| "requests lock")?.len(), 1);
     Ok(())
 }

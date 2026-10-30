@@ -13,6 +13,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
+use plakous_attempt::Jitter;
+use plakous_http::Request as HttpRequest;
+use std::time::Duration;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -184,7 +187,7 @@ fn collect(body: &str) -> Result<Finished, MessagesRetrievalError> {
     let mut collector = Collector::new(false);
     for chunk in body.as_bytes().chunks(11) {
         collector.push(chunk).map_err(|broken| match broken {
-            Broken::Overloaded(error) | Broken::Fatal(error) => error,
+            Broken::Transient(error) | Broken::Fatal(error) => error,
         })?;
     }
     collector.finish()
@@ -412,6 +415,7 @@ impl MessagesRetrievalTransport for Fixed {
                 &Limits::default(),
             )
             .map_err(|_| MessagesRetrievalError::invalid_request("fixture request"))
+            .map(Into::into)
         })
     }
 }

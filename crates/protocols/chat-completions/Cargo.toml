@@ -31,7 +31,6 @@ plakous-http.workspace = true
 plakous-model.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["raw_value"] }
-tokio = { workspace = true, features = ["macros", "time"] }
 unicode-general-category.workspace = true
 
 [dev-dependencies]

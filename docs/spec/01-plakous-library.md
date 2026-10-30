@@ -6336,6 +6336,20 @@ per-tool replay knob; any future control may only tighten it. The existing
 | Hosted MCP/connectors, background, conversation/stateful objects, unknown fields | Stop: `OutcomeUnknown` |
 | Standalone compaction, including Codex native | Retry only provably unsent, never after possible acceptance |
 
+Chat, Messages, Responses and image side requests share one bounded executor
+(`plakous-exchange::side_request`): exact-route authorization before each
+physical request, lease or permit retention through the response head, bounded
+body reads, and the turn retry budget. A 401 is not a transport retry. The
+transport may report one claimed refresh of the rejected login; when it does
+not, the refusal ends the side request and no further physical request is
+sent. Each family still owns its request builder, typed replay allowlist,
+provider status interpretation and result collector. Retrieval normalizes to
+one outcome (text, ordered sources, usage and the successful exchange count)
+at the facade, without changing model-visible retrieval text. Images keep
+their own result and a stricter policy: only a proven-unsent request and HTTP
+429 may retry, never a request the peer may have accepted. These types add no
+persisted or wire encoding.
+
 Every compaction is a separate `SessionWorkflow` operation: harness summaries,
 Codex native, and future OpenAI/Anthropic server compaction. Inline compaction
 edits are not used. Only typed evidence that the peer lacked the whole request

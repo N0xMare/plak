@@ -213,7 +213,7 @@ fn invalid_request(message: &str) -> ChatRetrievalError {
 
 impl ChatRetrievalTransport for OpenRouterRetrieval {
     fn authorize<'a>(&'a self, body: &'a [u8]) -> ChatRetrievalAuthorization<'a> {
-        Box::pin(async move { self.authorized(body) })
+        Box::pin(async move { self.authorized(body).map(Into::into) })
     }
 }
 

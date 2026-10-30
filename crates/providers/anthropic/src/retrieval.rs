@@ -202,6 +202,7 @@ impl MessagesRetrievalTransport for AnthropicRetrieval {
                         body,
                     )
                     .map_err(|error| unauthorized(&error))
+                    .map(Into::into)
                 }
                 #[cfg(feature = "native-auth")]
                 Executor::ClaudeOAuth { model, session_id } => {
@@ -242,6 +243,7 @@ impl MessagesRetrievalTransport for AnthropicRetrieval {
                         &attested,
                     )
                     .map_err(|error| unauthorized(&error))
+                    .map(Into::into)
                 }
             }
         })

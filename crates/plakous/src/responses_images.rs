@@ -15,7 +15,7 @@ use plakous_openai as responses;
 use plakous_xai as responses;
 use responses::{ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource};
 
-use crate::responses_retrieval::error_of;
+use crate::retrieval_outcome::error_of;
 
 #[cfg(feature = "openai")]
 mod openai;

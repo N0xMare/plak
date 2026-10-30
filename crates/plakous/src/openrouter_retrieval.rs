@@ -1,13 +1,12 @@
 //! The neutral retrieval port over the OpenRouter side-request executor.
 
+use crate::retrieval_outcome::{error_of, outcome};
 use std::sync::Arc;
 
-use plakous_openrouter::{
-    ChatRetrievalError, ChatRetrievalErrorKind, ChatRetrievalOutcome, OpenRouterRetrieval,
-};
+use plakous_openrouter::OpenRouterRetrieval;
 use plakous_tools::{
     ExecutionOperationControl, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
-    RetrievalOutcome, RetrievalPort, RetrievalRequest, RetrievalSource, RetrievalUsage,
+    RetrievalPort, RetrievalRequest,
 };
 
 const KINDS: [RetrievalKind; 1] = [RetrievalKind::WebSearch];
@@ -57,44 +56,15 @@ impl RetrievalPort for OpenRouterRetrievalPort {
     }
 }
 
-fn outcome(outcome: ChatRetrievalOutcome) -> RetrievalOutcome {
-    RetrievalOutcome {
-        text: outcome.text,
-        sources: outcome
-            .sources
-            .into_iter()
-            .map(|source| RetrievalSource {
-                url: source.url,
-                title: source.title,
-            })
-            .collect(),
-        usage: RetrievalUsage {
-            input_tokens: outcome.usage.input_tokens,
-            output_tokens: outcome.usage.output_tokens,
-            hosted_requests: outcome.usage.hosted_requests,
-        },
-    }
-}
-
-fn error_of(error: &ChatRetrievalError) -> RetrievalError {
-    let kind = match error.kind() {
-        ChatRetrievalErrorKind::InvalidRequest => RetrievalErrorKind::InvalidRequest,
-        ChatRetrievalErrorKind::Unauthorized => RetrievalErrorKind::Unauthorized,
-        ChatRetrievalErrorKind::Rejected => RetrievalErrorKind::Rejected,
-        ChatRetrievalErrorKind::Cancelled => RetrievalErrorKind::Cancelled,
-        ChatRetrievalErrorKind::InvalidResponse => RetrievalErrorKind::InvalidResponse,
-        _ => RetrievalErrorKind::Unavailable,
-    };
-    RetrievalError::new(kind, error.message())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plakous_openrouter::{ChatRetrievalError, ChatRetrievalErrorKind, ChatRetrievalOutcome};
 
     #[test]
     fn outcomes_and_errors_map_onto_the_neutral_port() {
         let mapped = outcome(ChatRetrievalOutcome {
+            exchanges: 1,
             text: "answer".to_owned(),
             sources: vec![plakous_openrouter::ChatRetrievalSource {
                 url: "https://example.com/".to_owned(),

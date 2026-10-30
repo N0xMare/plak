@@ -14,20 +14,14 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use plakous_attempt::{
-    FailurePoint, Jitter, ObservationSnapshot, ProviderAcceptance, ReplaySafety, RetryPolicy,
-    TerminalFacts,
-};
-use plakous_exchange::{cancellable, read_bounded_body};
-use plakous_http::{CancellationToken as HttpCancellationToken, Client, ExchangeControl};
+use plakous_exchange::side_request::{self, BodyCollector, Broken, Document, ResponseReader};
+use plakous_http::Client;
 use plakous_model::CancellationToken;
 use serde_json::{Map, Value, json};
-use tokio::time::Instant;
 
 use crate::retrieval::{
-    MAX_ERROR_BODY_BYTES, ResponsesCredentialRefresh, ResponsesRetrievalDispatch,
-    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, cancelled,
-    refreshed_after_rejection, status_error, transport_point, unavailable,
+    ResponsesCredentialRefresh, ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch,
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, status_error,
 };
 
 /// Largest response body read, in bytes: a base64 image inside JSON.
@@ -279,7 +273,7 @@ fn decode_base64(encoded: &str) -> Result<Vec<u8>, ResponsesRetrievalError> {
 /// # Errors
 ///
 /// Returns the request's failure; only an untransmitted request and a
-/// rate-limit refusal are retried, under [`RetryPolicy::TURN`].
+/// rate-limit refusal are retried, under [`plakous_attempt::RetryPolicy::TURN`].
 pub async fn run_responses_image(
     client: &Client,
     transport: &dyn ResponsesImageTransport,
@@ -293,167 +287,66 @@ pub async fn run_responses_image(
     } else {
         ResponsesImageEndpoint::Generations
     };
-    let mut physical = 0_u32;
-    let mut waited = Duration::ZERO;
-    let mut refreshed = false;
-    loop {
-        if cancellation.is_cancelled() {
-            return Err(cancelled());
-        }
-        physical = physical.saturating_add(1);
-        let (point, retry_after, mut error) =
-            match exchange_once(client, transport, endpoint, &body, cancellation, limits).await {
-                Ok(Attempted::Done(response)) => return decode_responses_image(&response),
-                // A 401 head means the request was refused, so no image was
-                // made and sending it again under a renewed grant is safe.
-                Ok(Attempted::Rejected(mut error)) => {
-                    if refreshed_after_rejection(&mut refreshed, transport.credential_rejected())
-                        .await
-                    {
-                        continue;
-                    }
-                    error.physical_requests = physical;
-                    return Err(error);
-                }
-                Ok(Attempted::Retry {
-                    point,
-                    retry_after,
-                    error,
-                }) => (point, retry_after, error),
-                Err(mut error) => {
-                    error.physical_requests = physical;
-                    return Err(error);
-                }
-            };
-        let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
-            physical_attempts: physical,
-            provider_acceptance: ProviderAcceptance::NotAccepted,
-            visible_output: false,
-            replay_safety: ReplaySafety::CostOnly,
-            hosted_effects_possible: false,
-            logical_success: false,
-        });
-        let jitter = limits.jitter.unwrap_or_else(Jitter::random);
-        let Some(delay) = RetryPolicy::TURN.next_delay(facts, point, retry_after, waited, jitter)
-        else {
-            error.physical_requests = physical;
-            return Err(error);
-        };
-        waited = waited.saturating_add(delay);
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            () = cancellation.clone().cancelled() => return Err(cancelled()),
-        }
-    }
+    let transport = ImageTransport {
+        inner: transport,
+        endpoint,
+    };
+    let response = side_request::exchange_with_retry(
+        client,
+        &transport,
+        &body,
+        ImageReader,
+        cancellation,
+        limits,
+    )
+    .await?;
+    decode_responses_image(&response)
 }
 
-enum Attempted {
-    Done(Vec<u8>),
-    Retry {
-        point: FailurePoint,
-        retry_after: Option<Duration>,
-        error: ResponsesRetrievalError,
-    },
-    /// HTTP 401: the credential was rejected.
-    Rejected(ResponsesRetrievalError),
-}
-
-async fn exchange_once(
-    client: &Client,
-    transport: &dyn ResponsesImageTransport,
+struct ImageTransport<'a> {
+    inner: &'a dyn ResponsesImageTransport,
     endpoint: ResponsesImageEndpoint,
-    body: &[u8],
-    cancellation: &CancellationToken,
-    limits: ResponsesRetrievalLimits,
-) -> Result<Attempted, ResponsesRetrievalError> {
-    let ResponsesRetrievalDispatch { request, mut guard } =
-        transport.authorize(endpoint, body).await?;
-    let http_cancellation = HttpCancellationToken::new();
-    let started = Instant::now();
-    let deadline = started
-        .checked_add(limits.exchange_timeout)
-        .unwrap_or(started);
-    let exchanged = cancellable(
-        client.execute(
-            request,
-            ExchangeControl::streaming(deadline.into_std(), http_cancellation.clone())
-                .with_body_deadline(Some(deadline.into_std())),
-        ),
-        cancellation,
-        &http_cancellation,
-    )
-    .await;
-    if exchanged.cancelled {
-        return Err(cancelled());
+}
+impl side_request::RetrievalTransport for ImageTransport<'_> {
+    fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a> {
+        self.inner.authorize(self.endpoint, body)
     }
-    let response = match exchanged.value {
-        Ok(response) => response,
-        Err(failure) => {
-            if let Some(guard) = guard.as_mut() {
-                guard.transport_failed(failure);
-            }
-            let point = transport_point(failure);
-            let error = unavailable(failure);
-            // A request that may have reached the provider may have made
-            // the image: it is not sent again.
-            if matches!(point, FailurePoint::AfterSend | FailurePoint::MidStream) {
-                return Err(error);
-            }
-            return Ok(Attempted::Retry {
-                point,
-                retry_after: None,
-                error,
-            });
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        self.inner.credential_rejected()
+    }
+}
+struct ImageReader;
+struct ImageBody(Document);
+impl ResponseReader for ImageReader {
+    type Collector = ImageBody;
+    fn start(&self, _: &plakous_http::Response) -> ImageBody {
+        ImageBody(Document::new(
+            RESPONSES_IMAGE_MAX_RESPONSE_BYTES,
+            "the images response exceeds 48 MiB",
+        ))
+    }
+    fn status_error(&self, status: u16, body: &[u8]) -> ResponsesRetrievalError {
+        status_error(status, body)
+    }
+    fn policy(&self) -> side_request::SideRequestPolicy {
+        side_request::SideRequestPolicy::Image
+    }
+}
+impl BodyCollector for ImageBody {
+    type Output = Vec<u8>;
+    fn push(&mut self, bytes: &[u8]) -> Result<(), Broken> {
+        self.0.push(bytes)
+    }
+    fn finish(self) -> Result<Vec<u8>, Broken> {
+        self.0.finish()
+    }
+    fn transport_failure(self, failure: plakous_http::Failure) -> Result<Vec<u8>, Broken> {
+        if failure.kind() == plakous_http::ErrorKind::Internal {
+            Ok(Vec::new())
+        } else {
+            self.0.finish()
         }
-    };
-    drop(guard);
-    let status = response.status().as_u16();
-    let retry_after = response
-        .headers()
-        .get(&plakous_http::HeaderName::from_static("retry-after"))
-        .and_then(|value| value.to_str().ok())
-        .and_then(plakous_attempt::retry_after_seconds);
-    let limit = if status == 200 {
-        RESPONSES_IMAGE_MAX_RESPONSE_BYTES
-    } else {
-        MAX_ERROR_BODY_BYTES
-    };
-    let read = cancellable(
-        read_bounded_body(
-            response.into_body(),
-            cancellation,
-            &http_cancellation,
-            limit,
-        ),
-        cancellation,
-        &http_cancellation,
-    )
-    .await;
-    if read.cancelled {
-        return Err(cancelled());
     }
-    let bytes = read.value.unwrap_or_default();
-    if status != 200 {
-        let mut error = status_error(status, &bytes);
-        if status == 429
-            && let Some(point) = RetryPolicy::status_failure_point(status)
-        {
-            return Ok(Attempted::Retry {
-                point,
-                retry_after,
-                error,
-            });
-        }
-        error.status = Some(status);
-        if status == 401 {
-            return Ok(Attempted::Rejected(error));
-        }
-        return Err(error);
-    }
-    if bytes.len() > limit {
-        return Err(invalid_response("the images response exceeds 48 MiB"));
-    }
-    Ok(Attempted::Done(bytes))
 }
 
 fn invalid_request(message: &str) -> ResponsesRetrievalError {

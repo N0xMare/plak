@@ -10,24 +10,12 @@
 //! streams keep refusing every hosted block.
 
 use std::collections::BTreeSet;
-use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::time::Duration;
 
-use plakous_attempt::{
-    FailurePoint, Jitter, ObservationSnapshot, ProviderAcceptance, ReplaySafety, RetryPolicy,
-    TerminalFacts,
-};
-use plakous_exchange::{cancellable, read_bounded_body};
-use plakous_http::{
-    CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
-    Phase, Request as HttpRequest, SseDecoder, SseLimits, TransmissionFact,
-};
+use plakous_attempt::ReplaySafety;
+use plakous_http::{Client, SseDecoder, SseLimits};
 use plakous_model::CancellationToken;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use tokio::time::Instant;
 
 /// The hosted web search tool type a side request names.
 pub const MESSAGES_WEB_SEARCH_TOOL_TYPE: &str = "web_search_20260318";
@@ -41,7 +29,6 @@ pub const MESSAGES_WEB_FETCH_MAX_CONTENT_TOKENS: u32 = 20_000;
 pub const MAX_MESSAGES_RETRIEVAL_CONTINUATIONS: usize = 3;
 
 const ALLOWED_CALLERS: [&str; 1] = ["direct"];
-const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 const MAX_RETAINED_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_BLOCKS: usize = 512;
 const SSE_LIMITS: SseLimits = SseLimits {
@@ -301,153 +288,17 @@ pub fn classify_messages_retrieval_body(body: &[u8]) -> ReplaySafety {
     ReplaySafety::CostOnly
 }
 
-/// One source the provider reported.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MessagesRetrievalSource {
-    /// The URL.
-    pub url: String,
-    /// The title, when reported.
-    pub title: Option<String>,
-}
-
-/// What a side request consumed over all its exchanges.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct MessagesRetrievalUsage {
-    /// Input tokens.
-    pub input_tokens: u64,
-    /// Output tokens.
-    pub output_tokens: u64,
-    /// `server_tool_use.web_search_requests` plus `web_fetch_requests`.
-    pub hosted_requests: u64,
-}
-
-/// The completed side request.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MessagesRetrievalOutcome {
-    /// The answer: text after the last server-tool result.
-    pub text: String,
-    /// Sources from tool results and citations, first-reported order, URLs
-    /// unique.
-    pub sources: Vec<MessagesRetrievalSource>,
-    /// Usage over every exchange.
-    pub usage: MessagesRetrievalUsage,
-    /// Exchanges sent: one plus the `pause_turn` continuations.
-    pub exchanges: usize,
-}
-
-/// Why a side request failed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum MessagesRetrievalErrorKind {
-    /// The body is not an allowlisted side request or could not be built.
-    InvalidRequest,
-    /// Admission or the credential is no longer current, or HTTP 401/403.
-    Unauthorized,
-    /// The provider refused the request (a non-retryable status or refusal).
-    Rejected,
-    /// The provider stayed unreachable or failing through the retry budget.
-    Unavailable,
-    /// The stream broke the side-request grammar or its bounds.
-    InvalidResponse,
-    /// The caller cancelled.
-    Cancelled,
-}
-
-/// A failed side request with a redaction-safe message.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MessagesRetrievalError {
-    kind: MessagesRetrievalErrorKind,
-    message: String,
-    status: Option<u16>,
-    physical_requests: u32,
-}
-
-impl MessagesRetrievalError {
-    /// A failure of `kind`.
-    #[must_use]
-    pub fn new(kind: MessagesRetrievalErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            status: None,
-            physical_requests: 0,
-        }
-    }
-
-    fn invalid_request(message: &str) -> Self {
-        Self::new(MessagesRetrievalErrorKind::InvalidRequest, message)
-    }
-
-    fn invalid_response(message: impl Into<String>) -> Self {
-        Self::new(MessagesRetrievalErrorKind::InvalidResponse, message)
-    }
-
-    /// The failure class.
-    #[must_use]
-    pub const fn kind(&self) -> MessagesRetrievalErrorKind {
-        self.kind
-    }
-
-    /// The HTTP status of the final refusal, when there was one.
-    #[must_use]
-    pub const fn status(&self) -> Option<u16> {
-        self.status
-    }
-
-    /// Physical requests the failed exchange sent, retries included.
-    #[must_use]
-    pub const fn physical_requests(&self) -> u32 {
-        self.physical_requests
-    }
-
-    /// The message.
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-impl fmt::Display for MessagesRetrievalError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for MessagesRetrievalError {}
-
-/// The future [`MessagesRetrievalTransport::authorize`] returns.
-pub type MessagesRetrievalAuthorization<'a> =
-    Pin<Box<dyn Future<Output = Result<HttpRequest, MessagesRetrievalError>> + Send + 'a>>;
-
-/// The route's half of a side request.
-pub trait MessagesRetrievalTransport: Send + Sync {
-    /// Revalidates admission and the credential, then builds the exact
-    /// authorized request carrying `body`. Called before every physical
-    /// request, retries included.
-    fn authorize<'a>(&'a self, body: &'a [u8]) -> MessagesRetrievalAuthorization<'a>;
-}
-
-/// Exchange bounds of one side request.
-#[derive(Clone, Copy, Debug)]
-pub struct MessagesRetrievalLimits {
-    /// Bound of one physical exchange up to its response head and of its
-    /// streamed body.
-    pub exchange_timeout: Duration,
-    /// The backoff sample; `None` draws one per wait.
-    pub jitter: Option<Jitter>,
-}
-
-impl Default for MessagesRetrievalLimits {
-    fn default() -> Self {
-        Self {
-            exchange_timeout: Duration::from_secs(120),
-            jitter: None,
-        }
-    }
-}
+use plakous_exchange::side_request::{self, BodyCollector, Broken, ResponseReader, bounded_line};
+pub use plakous_exchange::side_request::{
+    RetrievalAuthorization as MessagesRetrievalAuthorization,
+    RetrievalError as MessagesRetrievalError, RetrievalErrorKind as MessagesRetrievalErrorKind,
+    RetrievalLimits as MessagesRetrievalLimits, RetrievalOutcome as MessagesRetrievalOutcome,
+    RetrievalSource as MessagesRetrievalSource, RetrievalTransport as MessagesRetrievalTransport,
+    RetrievalUsage as MessagesRetrievalUsage,
+};
 
 /// Runs one side request to its answer: the bounded retry of
-/// [`RetryPolicy::TURN`] inside each exchange, and up to
+/// [`plakous_attempt::RetryPolicy::TURN`] inside each exchange, and up to
 /// [`MAX_MESSAGES_RETRIEVAL_CONTINUATIONS`] `pause_turn` continuations.
 ///
 /// # Errors
@@ -471,8 +322,15 @@ pub async fn run_messages_retrieval(
             ));
         }
         let thinking = request.effort.is_some();
-        let finished =
-            exchange_with_retry(client, transport, &body, thinking, cancellation, limits).await?;
+        let finished = side_request::exchange_with_retry(
+            client,
+            transport,
+            &body,
+            MessagesReader { thinking },
+            cancellation,
+            limits,
+        )
+        .await?;
         usage.input_tokens = usage
             .input_tokens
             .saturating_add(finished.usage.input_tokens);
@@ -525,213 +383,6 @@ struct Finished {
     usage: MessagesRetrievalUsage,
 }
 
-enum Attempted {
-    Done(Finished),
-    Retry {
-        point: FailurePoint,
-        retry_after: Option<Duration>,
-        error: MessagesRetrievalError,
-    },
-}
-
-async fn exchange_with_retry(
-    client: &Client,
-    transport: &dyn MessagesRetrievalTransport,
-    body: &[u8],
-    thinking: bool,
-    cancellation: &CancellationToken,
-    limits: MessagesRetrievalLimits,
-) -> Result<Finished, MessagesRetrievalError> {
-    let mut physical = 0_u32;
-    let mut waited = Duration::ZERO;
-    loop {
-        if cancellation.is_cancelled() {
-            return Err(cancelled());
-        }
-        physical = physical.saturating_add(1);
-        let attempted =
-            exchange_once(client, transport, body, thinking, cancellation, limits).await;
-        let (point, retry_after, error) = match attempted {
-            Ok(Attempted::Done(finished)) => return Ok(finished),
-            Ok(Attempted::Retry {
-                point,
-                retry_after,
-                error,
-            }) => (point, retry_after, error),
-            Err(mut error) => {
-                error.physical_requests = physical;
-                return Err(error);
-            }
-        };
-        let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
-            physical_attempts: physical,
-            provider_acceptance: ProviderAcceptance::NotAccepted,
-            visible_output: false,
-            replay_safety: ReplaySafety::CostOnly,
-            hosted_effects_possible: false,
-            logical_success: false,
-        });
-        let jitter = limits.jitter.unwrap_or_else(Jitter::random);
-        let Some(delay) = RetryPolicy::TURN.next_delay(facts, point, retry_after, waited, jitter)
-        else {
-            let mut error = error;
-            error.physical_requests = physical;
-            return Err(error);
-        };
-        waited = waited.saturating_add(delay);
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            () = cancellation.clone().cancelled() => return Err(cancelled()),
-        }
-    }
-}
-
-fn cancelled() -> MessagesRetrievalError {
-    MessagesRetrievalError::new(
-        MessagesRetrievalErrorKind::Cancelled,
-        "the side request was cancelled",
-    )
-}
-
-async fn exchange_once(
-    client: &Client,
-    transport: &dyn MessagesRetrievalTransport,
-    body: &[u8],
-    thinking: bool,
-    cancellation: &CancellationToken,
-    limits: MessagesRetrievalLimits,
-) -> Result<Attempted, MessagesRetrievalError> {
-    let request = transport.authorize(body).await?;
-    let http_cancellation = HttpCancellationToken::new();
-    let started = Instant::now();
-    let deadline = started
-        .checked_add(limits.exchange_timeout)
-        .unwrap_or(started);
-    let exchanged = cancellable(
-        client.execute(
-            request,
-            ExchangeControl::streaming(deadline.into_std(), http_cancellation.clone())
-                .with_body_deadline(Some(deadline.into_std())),
-        ),
-        cancellation,
-        &http_cancellation,
-    )
-    .await;
-    if exchanged.cancelled {
-        return Err(cancelled());
-    }
-    let response = match exchanged.value {
-        Ok(response) => response,
-        Err(failure) => {
-            return Ok(Attempted::Retry {
-                point: transport_point(failure),
-                retry_after: None,
-                error: unavailable(failure),
-            });
-        }
-    };
-    let status = response.status().as_u16();
-    if status != 200 {
-        let retry_after = response
-            .headers()
-            .get(&plakous_http::HeaderName::from_static("retry-after"))
-            .and_then(|value| value.to_str().ok())
-            .and_then(plakous_attempt::retry_after_seconds);
-        let body = read_bounded_body(
-            response.into_body(),
-            cancellation,
-            &http_cancellation,
-            MAX_ERROR_BODY_BYTES,
-        )
-        .await
-        .unwrap_or_default();
-        let mut error = status_error(status, &body);
-        if let Some(point) = RetryPolicy::status_failure_point(status) {
-            return Ok(Attempted::Retry {
-                point,
-                retry_after,
-                error,
-            });
-        }
-        error.status = Some(status);
-        return Err(error);
-    }
-    let mut body = response.into_body();
-    let mut collector = Collector::new(thinking);
-    loop {
-        let next = cancellable(body.next_chunk(), cancellation, &http_cancellation).await;
-        if next.cancelled {
-            let _ = body.close().await;
-            return Err(cancelled());
-        }
-        match next.value {
-            Some(Ok(chunk)) => match collector.push(&chunk) {
-                Ok(()) => {}
-                Err(Broken::Overloaded(error)) => {
-                    let _ = body.close().await;
-                    return Ok(Attempted::Retry {
-                        point: FailurePoint::MidStream,
-                        retry_after: None,
-                        error,
-                    });
-                }
-                Err(Broken::Fatal(error)) => {
-                    let _ = body.close().await;
-                    return Err(error);
-                }
-            },
-            Some(Err(failure)) => {
-                return Ok(Attempted::Retry {
-                    point: FailurePoint::MidStream,
-                    retry_after: None,
-                    error: unavailable(failure),
-                });
-            }
-            None => break,
-        }
-    }
-    match collector.finish() {
-        Ok(finished) => Ok(Attempted::Done(finished)),
-        Err(error) => Ok(Attempted::Retry {
-            point: FailurePoint::MidStream,
-            retry_after: None,
-            error,
-        }),
-    }
-}
-
-fn transport_point(failure: HttpFailure) -> FailurePoint {
-    match failure.transmission() {
-        TransmissionFact::NotStarted
-            if matches!(
-                failure.phase(),
-                Phase::Resolution | Phase::Connect | Phase::Tls
-            ) =>
-        {
-            FailurePoint::Unreachable
-        }
-        TransmissionFact::NotStarted | TransmissionFact::RequestIncomplete => FailurePoint::Refused,
-        TransmissionFact::MayHaveTransmitted => FailurePoint::AfterSend,
-    }
-}
-
-fn unavailable(failure: HttpFailure) -> MessagesRetrievalError {
-    let phase = match failure.phase() {
-        Phase::Resolution => "DNS resolution",
-        Phase::Connect => "connect",
-        Phase::Tls => "TLS",
-        Phase::RequestWrite | Phase::RequestWriteOrResponseHead => "request write",
-        Phase::ResponseHead => "response head",
-        _ => "response stream",
-    };
-    MessagesRetrievalError::new(
-        MessagesRetrievalErrorKind::Unavailable,
-        format!("the provider was unreachable ({phase} failed)"),
-    )
-}
-
-/// One bounded line from a provider error body: its `error.type` and
-/// `error.message`, never the raw body.
 fn status_error(status: u16, body: &[u8]) -> MessagesRetrievalError {
     let detail = serde_json::from_slice::<Value>(body)
         .ok()
@@ -753,27 +404,25 @@ fn status_error(status: u16, body: &[u8]) -> MessagesRetrievalError {
     MessagesRetrievalError::new(kind, message)
 }
 
-fn bounded_line(text: &str, max: usize) -> String {
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.len() <= max {
-        return line;
-    }
-    let mut end = max;
-    while !line.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &line[..end])
+struct MessagesReader {
+    thinking: bool,
 }
-
-enum Broken {
-    /// The provider reported a transient overload mid-stream.
-    Overloaded(MessagesRetrievalError),
-    Fatal(MessagesRetrievalError),
+impl ResponseReader for MessagesReader {
+    type Collector = Collector;
+    fn start(&self, _: &plakous_http::Response) -> Collector {
+        Collector::new(self.thinking)
+    }
+    fn status_error(&self, status: u16, body: &[u8]) -> MessagesRetrievalError {
+        status_error(status, body)
+    }
 }
-
-impl From<MessagesRetrievalError> for Broken {
-    fn from(error: MessagesRetrievalError) -> Self {
-        Self::Fatal(error)
+impl BodyCollector for Collector {
+    type Output = Finished;
+    fn push(&mut self, bytes: &[u8]) -> Result<(), Broken> {
+        Collector::push(self, bytes)
+    }
+    fn finish(self) -> Result<Finished, Broken> {
+        Collector::finish(self).map_err(Broken::Transient)
     }
 }
 
@@ -830,7 +479,7 @@ impl Collector {
             for message in messages {
                 self.event(message.event(), message.data())
                     .map_err(|broken| match broken {
-                        Broken::Overloaded(error) | Broken::Fatal(error) => error,
+                        Broken::Transient(error) | Broken::Fatal(error) => error,
                     })?;
             }
         }
@@ -874,7 +523,7 @@ impl Collector {
                 format!("the provider failed the side request mid-stream ({error_type})"),
             );
             return Err(if error_type == "overloaded_error" {
-                Broken::Overloaded(error)
+                Broken::Transient(error)
             } else {
                 Broken::Fatal(error)
             });
