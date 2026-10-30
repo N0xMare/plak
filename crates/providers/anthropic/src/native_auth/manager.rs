@@ -157,6 +157,10 @@ impl ClaudeNativeAuthManager {
     /// e-mail Claude Code's `/status` shows. Profile failure does not fail
     /// the meters. This observation acquires no inference permit and grants
     /// no catalog, admission, retry, billing, or inference authority.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Resolve the selected Claude receipt and retain its diagnostics while classifying the bounded usage response."
+    )]
     pub async fn subscription_usage(&self) -> SubscriptionUsageRead {
         let unavailable = |reason| SubscriptionUsageRead::Unavailable {
             observed_at: Timestamp::new(system_unix_seconds().unwrap_or(0), 0)

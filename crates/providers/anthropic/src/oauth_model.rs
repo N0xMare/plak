@@ -332,6 +332,10 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Seal the Claude OAuth wire, context certificate and replay binding before any dispatch is possible."
+    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,

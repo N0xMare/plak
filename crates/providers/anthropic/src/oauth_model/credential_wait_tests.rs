@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Drive a durable Claude root through credential parking, relogin and resumed inference with controlled peers."
+)]
 use super::auth_binding_tests::configured_builder;
 use super::tests::{
     LOCAL_SUCCESS_SSE, local_peer_with_first_response_gate, local_response, manager_with_client,

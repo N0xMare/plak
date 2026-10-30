@@ -1,5 +1,9 @@
 //! Production executor qualification against a controlled TLS peer.
 #![allow(
+    clippy::too_many_lines,
+    reason = "Exercise the production Platform TLS executor through caching, tool continuation and authority-tamper scenarios."
+)]
+#![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "offline assertions"

@@ -354,6 +354,10 @@ fn native_message_id(value: &str) -> bool {
     })
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Derive the Messages policy from the exact model thinking, cache, tool and OAuth continuation facts together."
+)]
 fn policy_for(
     target: &AnthropicMessagesTargetBinding,
     plan: &ValidatedRequestPlan,
