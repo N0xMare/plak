@@ -1,8 +1,8 @@
 use std::io::Read;
 
 use super::*;
-use crate::JoinedProcessCommand;
 use crate::environment::backend::process::{JoinedSessionOutput, process_group_exists};
+use crate::{ExecutionOperationControl, JoinedProcessCommand};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -41,6 +41,7 @@ fn pipes_initial_stdin_rollback_terminates_group_before_join() -> TestResult {
         cleanup_duration: Duration::from_secs(4),
         armed: true,
         before_rollback: Some(Box::new(move || assert_stdin_still_open(input_reader))),
+        before_drain: None,
     };
     let JoinedChild::Pipes(child, _) = &mut resources.child else {
         return Err("expected pipes".into());
@@ -114,6 +115,133 @@ fn pipes_initial_stdin_rollback_terminates_group_before_join() -> TestResult {
         "joined process initial input timed out"
     );
     assert!(!process_group_exists(group));
+    assert!(resources.readers.is_empty());
+    Ok(())
+}
+
+struct DelayedPtyReader {
+    file: std::fs::File,
+    release: Option<std::sync::mpsc::Receiver<()>>,
+    workspace: tempfile::TempDir,
+}
+
+impl std::os::fd::AsFd for DelayedPtyReader {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.file.as_fd()
+    }
+}
+
+impl Read for DelayedPtyReader {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.file.read(bytes)?;
+        if count != 0
+            && let Some(release) = self.release.take()
+        {
+            // Read before macOS revokes the PTY, but withhold the byte from
+            // the output worker until the exited leader's cleanup drains it.
+            std::fs::write(self.workspace.path().join("leader-release"), b"release")?;
+            release.recv_timeout(Duration::from_secs(5)).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "PTY drain was not entered")
+            })?;
+        }
+        Ok(count)
+    }
+}
+
+fn delayed_pty() -> Result<(JoinedProcessResources, DelayedPtyReader), Box<dyn std::error::Error>> {
+    let workspace = tempfile::tempdir()?;
+    let pair = native_pty_system().openpty(PtySize::default())?;
+    let file = clone_linux_pty_master(pair.master.as_ref())?;
+    let mut command = portable_pty::CommandBuilder::new("/bin/sh");
+    command.cwd(workspace.path());
+    command.args([
+        "-c",
+        "printf x; while [ ! -f leader-release ]; do sleep 0.01; done",
+    ]);
+    let child = pair.slave.spawn_command(command)?;
+    let process_group = child
+        .process_id()
+        .and_then(|pid| i32::try_from(pid).ok())
+        .and_then(rustix::process::Pid::from_raw)
+        .ok_or("missing PTY process group")?;
+    drop(pair);
+    let (release, released) = std::sync::mpsc::sync_channel(1);
+    Ok((
+        JoinedProcessResources {
+            child: JoinedChild::Pty(child, None),
+            process_group,
+            readers: Vec::new(),
+            input_thread: None,
+            input_owner: None,
+            io_stop: Arc::new(AtomicBool::new(false)),
+            cleanup_duration: Duration::from_secs(4),
+            armed: true,
+            before_rollback: None,
+            before_drain: Some(release),
+        },
+        DelayedPtyReader {
+            file,
+            release: Some(released),
+            workspace,
+        },
+    ))
+}
+
+#[test]
+fn pty_reader_drains_after_leader_exit_before_io_stop() -> TestResult {
+    let (mut resources, reader) = delayed_pty()?;
+    let shared = Arc::new(Mutex::new(JoinedSessionShared {
+        output: JoinedSessionOutput::default(),
+        status: JoinedProcessStatus::Running,
+        elapsed: None,
+        terminal_changes: None,
+        changes: tokio::sync::watch::channel(0).0,
+        terminal: Arc::new(std::sync::Condvar::new()),
+        released: false,
+        spool: None,
+        pending_spool: None,
+        leftover: None,
+        disowned: false,
+    }));
+    let failed = Arc::new(AtomicBool::new(false));
+    let limits = ExecutionEnvironmentLimits::new(
+        4096,
+        4096,
+        8192,
+        4096,
+        Duration::from_secs(20),
+        Duration::from_secs(4),
+    )?;
+    resources.add_reader(
+        reader,
+        JoinedProcessOutputStream::Terminal,
+        &shared,
+        &failed,
+        limits,
+    )?;
+    // Hold delivery of the final physical byte until cleanup drains it. The
+    // supervisor must reap the leader and collect that byte before stop.
+    super::super::super::supervise_joined_process(
+        &mut resources,
+        limits,
+        &ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+        &super::super::AtomicU8::new(super::super::FOREGROUND),
+        &super::super::AtomicU64::new(200),
+        &AtomicBool::new(false),
+        &failed,
+        &shared,
+        false,
+    );
+    resources.disarm();
+    let shared = shared.lock().map_err(|_| "poisoned output")?;
+    let bytes: Vec<_> = shared
+        .output
+        .records
+        .iter()
+        .flat_map(|record| record.bytes.iter().copied())
+        .collect();
+    assert_eq!(bytes, b"x");
+    assert!(shared.status.is_terminal());
     assert!(resources.readers.is_empty());
     Ok(())
 }

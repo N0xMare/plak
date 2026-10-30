@@ -60,6 +60,8 @@ pub(in crate::environment::backend::process) struct JoinedProcessResources {
     armed: bool,
     #[cfg(test)]
     before_rollback: Option<Box<dyn FnOnce() + Send>>,
+    #[cfg(test)]
+    before_drain: Option<SyncSender<()>>,
 }
 
 impl JoinedSpawn<'_> {
@@ -82,6 +84,8 @@ impl JoinedSpawn<'_> {
                 armed: true,
                 #[cfg(test)]
                 before_rollback: None,
+                #[cfg(test)]
+                before_drain: None,
             },
             io,
         ))
@@ -401,6 +405,10 @@ impl JoinedProcessResources {
     }
 
     pub(in crate::environment::backend::process) fn drain_readers_until(&self, deadline: Instant) {
+        #[cfg(test)]
+        if let Some(release) = &self.before_drain {
+            let _ = release.send(());
+        }
         let started = Instant::now();
         while Instant::now() < deadline && self.readers.iter().any(|reader| !reader.is_finished()) {
             sleep_until_next_poll(started, deadline);
