@@ -52,15 +52,15 @@ impl App {
     }
 
     fn dispatch_key(&mut self, key: KeyEvent) -> Option<UserAction> {
+        if matches!(key.code, KeyCode::Modifier(_)) || key.kind == KeyEventKind::Release {
+            return None;
+        }
         self.semantic_revision = self.semantic_revision.saturating_add(1);
         // Ignore key-repeat on Ctrl+C so holding does not auto-confirm quit.
         if key.kind == KeyEventKind::Repeat
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('c' | 'C'))
         {
-            return None;
-        }
-        if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
             return None;
         }
         self.key_typing = self.typing.observe(&key, self.now());
@@ -341,9 +341,8 @@ impl App {
         let cursor = self.input_cursor;
         match code {
             KeyCode::Char('a' | 'A') => {
-                // Without the kitty enhancement flags a terminal reports
-                // Ctrl-Shift-A as an uppercase char with no SHIFT bit. Accept
-                // that as the shift signal, exactly as Ctrl-Shift-O does.
+                // Kitty alternate keys report the shifted character without
+                // SHIFT. Accept that and the explicit modifier form.
                 if shift || code == KeyCode::Char('A') {
                     // §5.2: the keyboard route to a whole-draft selection, so
                     // Ctrl+X / Ctrl+C reach the entire draft without a mouse.
@@ -353,7 +352,10 @@ impl App {
                 }
             }
             KeyCode::Char('e' | 'E') => {
-                self.move_caret_to(logical_line_end(&self.input, cursor), shift);
+                self.move_caret_to(
+                    logical_line_end(&self.input, cursor),
+                    shift || code == KeyCode::Char('E'),
+                );
             }
             KeyCode::Char('u' | 'U') => {
                 self.kill_range(logical_line_start(&self.input, cursor), cursor);

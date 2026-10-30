@@ -639,7 +639,8 @@ impl App {
     /// next key as one `Alt` chord, and that must never press the focused
     /// button.
     pub(super) fn handle_destructive_confirm_key(&mut self, key: KeyEvent) -> Option<UserAction> {
-        // A held key repeats; the press that opened the pop-up must not act.
+        // Ignore reported repeats. Plain Enter/text repeats arrive as presses
+        // in our keyboard mode and on legacy terminals, so are indistinguishable.
         if key.kind != KeyEventKind::Press {
             return None;
         }

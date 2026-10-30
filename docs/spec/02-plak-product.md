@@ -3532,6 +3532,20 @@ by page, and to either end.
 
 ### 5.2 Keybinds
 
+On kitty-protocol terminals the UI requests exactly disambiguated escape
+codes, event types and alternate keys (flags 1 | 2 | 4), never report-all.
+Printable input remains the terminal's own composed text, preserving the
+active keyboard layout, dead keys and IME input. For encoded shifted printable
+keys, crossterm supplies the shifted character and clears `Shift`; bindings
+accept that form as well as an explicit `Shift` modifier. Non-printable keys
+such as `Enter`, `Tab` and arrows retain `Shift`. Bare modifier-key events and
+key releases are ignored before they change typing state, double-tap arms or
+input routing. Terminals without the protocol retain their legacy encodings:
+some chords are indistinguishable, so the fallbacks below remain necessary.
+Even with event types requested, repeats of unmodified `Enter` and printable
+keys arrive as ordinary presses, just as on legacy terminals; repeat filtering
+cannot distinguish those from separate presses.
+
 `Ctrl+B` backgrounds top-level foreground process calls already running. It is
 a no-op when no foreground command runs, including while idle or while only a
 nested command runs. It leaves the composer draft unchanged.
@@ -3819,10 +3833,13 @@ An interrupt of compaction itself remains an ordinary parked result. A stop
 status is published even when persisting its queue pause fails.
 
 The UI paints one last frame reading `quitting…` and stops reading input.
-Restoration disables mouse reporting, bracketed paste, keyboard enhancement
-flags and focus events, discards queued tty input, ends raw mode, leaves the
-alternate screen, and shows the cursor. Mouse reporting is never enabled
-while raw mode is off.
+Restoration disables mouse reporting and bracketed paste, pops the keyboard
+enhancement flags pushed at entry (disambiguation, event types and alternate
+keys, never report-all), disables focus events, discards queued tty input,
+ends raw mode, leaves the alternate screen, and shows the cursor. Mouse
+reporting is never enabled while raw mode is off. Normal exit and terminal
+handoff pop the pushed mode; panic and forced-exit restoration also pop it
+before leaving the alternate screen.
 
 Quit is `/quit` (or `/exit`), `Ctrl+Q`, or the `Ctrl+C` ladder; each opens the
 quit pop-up (§5.7) while a root turn runs with no stop of it in flight, while
@@ -5288,11 +5305,14 @@ then the action (`[ Stop turn ]` and `[ Stop turn + processes ]`,
 `[ Reset ]`); focus starts on the primary action, and a dim
 `Enter confirms · Esc cancels` under the lines says how to confirm. Focus is
 absolute and moves the moment a key arrives: `←` and `→` move it one button
-without wrapping, and `Tab` moves right while `Shift+Tab` moves left, so a
-held or repeated arrow walks the buttons at once. `Enter` presses the focused
-button the moment it arrives, so the pop-up opens already confirmable and a
-`←` then `Enter` cancels. Over the composer a printable key or `Backspace`
-closes the pop-up and is typed into the draft; in a full-page view it does
+without wrapping, and `Tab` moves right while `Shift+Tab` moves left.
+The pop-up ignores events explicitly reported as repeats, but unmodified
+`Enter` and printable repeats are not marked in the requested keyboard mode
+or on legacy terminals; a held `Enter` can therefore press a button.
+`Enter` presses the focused button the moment it arrives, so the pop-up opens
+already confirmable and a `←` then `Enter` cancels. Over the composer a
+printable key or `Backspace` closes the pop-up and is typed into the draft;
+in a full-page view it does
 nothing and is not typed into the draft. A click on a button presses it (a
 hovered button brightens). `Esc`, a `Ctrl` or `Alt` chord or a click outside
 cancels; the wheel and a paste do nothing. Wherever a modal owns input and

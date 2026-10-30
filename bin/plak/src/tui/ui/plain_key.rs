@@ -122,15 +122,20 @@ impl App {
             }
             // Alt word ops (§4). These precede the plain `Char` arm so Alt+B
             // never types a `b` into the draft.
+            // With alternate keys reported, Alt+Shift+B arrives as `Char('B')`
+            // with SHIFT cleared; the uppercase letter is the Shift signal.
             KeyCode::Char('b' | 'B') if key_alt && !ctrl => {
                 self.move_caret_to(
                     previous_word_boundary(&self.input, self.input_cursor),
-                    shift,
+                    shift || code == KeyCode::Char('B'),
                 );
                 None
             }
             KeyCode::Char('f' | 'F') if key_alt && !ctrl => {
-                self.move_caret_to(next_word_boundary(&self.input, self.input_cursor), shift);
+                self.move_caret_to(
+                    next_word_boundary(&self.input, self.input_cursor),
+                    shift || code == KeyCode::Char('F'),
+                );
                 None
             }
             KeyCode::Backspace if key_alt => {

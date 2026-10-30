@@ -675,9 +675,11 @@ processes run, `[ Stop turn + processes ]`. Focus starts on the primary
 action, so `Enter` confirms the moment the pop-up opens (it says
 `Enter confirms · Esc cancels`). `←` and `→` move focus one button without
 wrapping, and `Tab` moves right while `Shift+Tab` moves left, so a `←` then
-`Enter` cancels; a held arrow walks the buttons at once. Over the composer a
-printable key or `Backspace` closes the pop-up and is typed into your draft,
-so typing never confirms it. In Activity, the agent view, process output and
+`Enter` cancels. Reported repeat events are ignored, but terminals send held
+unmodified `Enter` as ordinary presses, so holding it can confirm a pop-up.
+Over the composer a printable key or `Backspace` closes the pop-up and is
+typed into your draft, so typing never confirms it. In Activity, the agent
+view, process output and
 Menu a typed key or `Backspace` does nothing and is not typed into your draft.
 `Esc`, a `Ctrl` or
 `Alt` chord or a click outside cancels. In

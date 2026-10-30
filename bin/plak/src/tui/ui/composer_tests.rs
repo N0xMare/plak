@@ -19,6 +19,17 @@ use std::time::Duration;
 use unicode_width::UnicodeWidthStr as _;
 
 #[test]
+fn shifted_printable_characters_without_shift_insert_verbatim() {
+    let mut app = App::new(launch_basic(), true);
+    for ch in ['"', '!', 'A', '?', 'é', '€'] {
+        assert_eq!(app.handle_key(key(KeyCode::Char(ch))), None);
+    }
+    assert_eq!(app.input, "\"!A?é€");
+    assert!(app.control_tab.is_none());
+    assert!(!app.slash_open);
+}
+
+#[test]
 fn mark_dirty_does_not_mutate_composer_gestures_under_a_modal() {
     let mut app = App::new(launch_basic(), true);
     app.open_control_tab(super::ControlTab::Keybinds);
@@ -1171,10 +1182,18 @@ fn undo_redo_walks_coalesced_typing_and_discrete_kills() {
     // Ctrl+Shift+Z also redoes.
     app.handle_key(key_ctrl(KeyCode::Char('z')));
     assert_eq!(app.input, "");
-    let mut redo = key_ctrl(KeyCode::Char('z'));
-    redo.modifiers = KeyModifiers::CONTROL | KeyModifiers::SHIFT;
-    app.handle_key(redo);
-    assert_eq!(app.input, "hello");
+    for redo in [
+        KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ),
+        key_ctrl(KeyCode::Char('Z')),
+    ] {
+        app.handle_key(redo);
+        assert_eq!(app.input, "hello");
+        app.handle_key(key_ctrl(KeyCode::Char('z')));
+        assert_eq!(app.input, "");
+    }
 }
 
 #[test]
@@ -1406,9 +1425,57 @@ fn super_editing_bindings_select_cut_undo_and_redo() {
     assert!(app.control_tab.is_none());
     app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::SUPER));
     assert_eq!(app.input, "whole draft");
-    app.handle_key(KeyEvent::new(
-        KeyCode::Char('z'),
-        KeyModifiers::SUPER | KeyModifiers::SHIFT,
-    ));
-    assert_eq!(app.input, "");
+    for redo in [
+        KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::SUPER | KeyModifiers::SHIFT,
+        ),
+        KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::SUPER),
+    ] {
+        app.handle_key(redo);
+        assert_eq!(app.input, "");
+        app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::SUPER));
+        assert_eq!(app.input, "whole draft");
+    }
+}
+
+#[test]
+fn ctrl_shift_e_selects_to_line_end_in_both_keyboard_encodings() {
+    for event in [
+        KeyEvent::new(
+            KeyCode::Char('e'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ),
+        key_ctrl(KeyCode::Char('E')),
+    ] {
+        let mut app = App::new(launch_basic(), true);
+        app.set_input("first line\nsecond line".into());
+        app.move_caret_to(3, false);
+        app.handle_key(event);
+        assert_eq!(app.input_cursor, 10);
+        assert_eq!(app.composer_selection.range(&app.input), Some(3..10));
+    }
+}
+
+#[test]
+fn alt_shift_word_moves_select_in_both_keyboard_encodings() {
+    for (code, shift_form, start, cursor, range) in
+        [('b', 'B', 10, 6, 6..10), ('f', 'F', 0, 5, 0..5)]
+    {
+        for event in [
+            KeyEvent::new(KeyCode::Char(code), KeyModifiers::ALT | KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char(shift_form), KeyModifiers::ALT),
+        ] {
+            let mut app = App::new(launch_basic(), true);
+            app.set_input("first word".into());
+            app.move_caret_to(start, false);
+            app.handle_key(event);
+            assert_eq!(app.input_cursor, cursor, "{event:?}");
+            assert_eq!(
+                app.composer_selection.range(&app.input),
+                Some(range.clone()),
+                "{event:?}"
+            );
+        }
+    }
 }

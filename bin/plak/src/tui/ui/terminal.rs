@@ -15,6 +15,12 @@ use crate::tui::ui::pilot_sidecar::PilotSidecar;
 use crossterm::ExecutableCommand;
 use crossterm::tty::IsTty;
 
+// Keep printable input as terminal-composed text, not report-all key events.
+const KEYBOARD_ENHANCEMENT_FLAGS: KeyboardEnhancementFlags =
+    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        .union(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
+        .union(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS);
+
 pub(super) fn from_io(error: &std::io::Error) -> TuiError {
     TuiError::Io(error.to_string())
 }
@@ -243,11 +249,7 @@ pub(super) fn enable_terminal_modes(restoration: &mut TerminalRestoration, mouse
     restoration.mouse_captured = mouse_enabled && stdout().execute(EnableMouseCapture).is_ok();
     restoration.bracketed_paste = stdout().execute(EnableBracketedPaste).is_ok();
     restoration.keyboard_pushed = stdout()
-        .execute(PushKeyboardEnhancementFlags(
-            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
-        ))
+        .execute(PushKeyboardEnhancementFlags(KEYBOARD_ENHANCEMENT_FLAGS))
         .is_ok();
     restoration.focus_change = stdout().execute(EnableFocusChange).is_ok();
 }
@@ -863,6 +865,19 @@ mod lifecycle_tests;
 #[cfg(test)]
 mod tests {
     use super::forced_restore_sequence;
+
+    #[test]
+    fn keyboard_mode_preserves_terminal_text_and_reports_alternate_keys() {
+        use crossterm::Command as _;
+        let flags = super::KEYBOARD_ENHANCEMENT_FLAGS;
+        assert_eq!(flags.bits(), 1 | 2 | 4);
+        assert!(!flags.contains(super::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+        let mut sequence = String::new();
+        super::PushKeyboardEnhancementFlags(flags)
+            .write_ansi(&mut sequence)
+            .unwrap();
+        assert_eq!(sequence, "\x1b[>7u");
+    }
 
     #[test]
     fn terminal_restoration_guard_runs_on_normal_exit_and_error_return() {

@@ -3,10 +3,9 @@
 use super::terminal::osc52_sequence;
 use super::test_support::{
     PINNED_UNIX_MS, assert_visible_transcript_rows_match_projection, blocks_contain,
-    compose_transcript_app, key, key_alt, key_ctrl, key_ctrl_shift, launch_basic, left_click,
-    left_mouse, live_compose, live_compose_child, pin_clock, queue_item, restore_snapshot,
-    resume_fixture, say, serialize_frame, settings_row, status_row, tool_item, tool_line,
-    transcript_fixture,
+    compose_transcript_app, key, key_alt, key_ctrl, launch_basic, left_click, left_mouse,
+    live_compose, live_compose_child, pin_clock, queue_item, restore_snapshot, resume_fixture, say,
+    serialize_frame, settings_row, status_row, tool_item, tool_line, transcript_fixture,
 };
 use super::{
     App, DisplayMode, MAX_LIVE_TRANSCRIPT_BLOCKS, MAX_LIVE_TRANSCRIPT_BYTES,
@@ -1256,7 +1255,7 @@ fn a_manual_fold_survives_streaming_and_ctrl_shift_o_clears_it() {
         "a block the operator opened must not snap shut under them"
     );
 
-    assert!(app.handle_key(key_ctrl_shift(KeyCode::Char('O'))).is_none());
+    assert!(app.handle_key(key_ctrl(KeyCode::Char('O'))).is_none());
     assert!(
         !app.pane.blocks[0].is_manual(),
         "Ctrl+Shift+O clears overrides"

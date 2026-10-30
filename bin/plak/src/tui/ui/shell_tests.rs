@@ -18,7 +18,10 @@ use crate::tui::redraw::{FrameWork, RedrawReason, RedrawSchedule, RedrawState, R
 use crate::tui::{
     HostEvent, QueueDrainState, TuiError, TuiHandoff, TuiLaunch, UserAction, user_action_channel,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
@@ -986,6 +989,80 @@ fn ctrl_c_idle_empty_double_tap_quits() {
         Some(UserAction::Quit)
     );
     assert!(app.should_quit);
+}
+
+#[test]
+fn bare_control_between_ctrl_c_presses_does_not_disarm_quit() {
+    let mut app = App::new(launch_basic(), true);
+    super::test_support::pin_clock(&mut app);
+    assert_eq!(app.handle_key(key_ctrl(KeyCode::Char('c'))), None);
+    let armed = app.quit_arm.clone();
+    assert!(armed.is_some());
+    for kind in [KeyEventKind::Release, KeyEventKind::Press] {
+        let modifier = KeyEvent::new_with_kind(
+            KeyCode::Modifier(ModifierKeyCode::LeftControl),
+            KeyModifiers::CONTROL,
+            kind,
+        );
+        assert_eq!(app.handle_key(modifier), None);
+        assert_eq!(app.quit_arm, armed);
+    }
+    assert_eq!(
+        app.handle_key(key_ctrl(KeyCode::Char('c'))),
+        Some(UserAction::Quit)
+    );
+}
+
+#[test]
+fn bare_modifiers_leave_typing_esc_arm_and_composer_untouched() {
+    for kind in [
+        KeyEventKind::Press,
+        KeyEventKind::Repeat,
+        KeyEventKind::Release,
+    ] {
+        for (code, modifiers) in [
+            (ModifierKeyCode::LeftControl, KeyModifiers::CONTROL),
+            (ModifierKeyCode::LeftShift, KeyModifiers::SHIFT),
+            (ModifierKeyCode::LeftAlt, KeyModifiers::ALT),
+            (ModifierKeyCode::LeftSuper, KeyModifiers::SUPER),
+        ] {
+            let mut app = App::new(launch_basic(), true);
+            super::test_support::pin_clock(&mut app);
+            typed(&mut app, "draft");
+            app.handle_key(key(KeyCode::Esc));
+            let armed = app.esc_clear_arm.clone();
+            assert!(armed.is_some());
+            let typing = app.key_typing;
+            let revision = app.semantic_revision;
+            app.transcript_gesture = true;
+            super::test_support::pass_time(&mut app, 100);
+            let mut guard = app.typing;
+            let expected = guard.observe(&key(KeyCode::Right), app.now());
+            assert_eq!(
+                app.handle_key(KeyEvent::new_with_kind(
+                    KeyCode::Modifier(code),
+                    modifiers,
+                    kind
+                )),
+                None
+            );
+            assert_eq!(app.esc_clear_arm, armed);
+            assert_eq!(app.key_typing, typing);
+            assert_eq!(app.semantic_revision, revision);
+            assert!(app.transcript_gesture);
+            assert_eq!(
+                app.typing.observe(&key(KeyCode::Right), app.now()),
+                expected
+            );
+            assert_eq!(app.input, "draft");
+            assert_eq!(app.input_cursor, 5);
+            app.handle_key(key(KeyCode::Esc));
+            assert!(
+                app.input.is_empty(),
+                "the second Esc still clears the draft"
+            );
+        }
+    }
 }
 
 #[test]

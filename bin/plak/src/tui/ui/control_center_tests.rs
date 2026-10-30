@@ -1056,15 +1056,19 @@ fn ctrl_shift_a_selects_the_whole_draft_and_is_on_the_sheet() {
     assert!(app.composer_selection.range(&app.input).is_none());
 
     // Ctrl+Shift+A selects everything, whichever case the terminal reports.
-    for code in [KeyCode::Char('a'), KeyCode::Char('A')] {
+    for event in [
+        ctrl_shift(KeyCode::Char('a')),
+        ctrl_shift(KeyCode::Char('A')),
+        key_ctrl(KeyCode::Char('A')),
+    ] {
         let mut app = App::new(launch_basic(), true);
         app.set_input("first line\nsecond line".into());
         app.input_cursor = 3;
-        app.handle_key(ctrl_shift(code));
+        app.handle_key(event);
         assert_eq!(
             app.composer_selection.range(&app.input),
             Some(0..app.input.chars().count()),
-            "{code:?} must select the whole draft"
+            "{event:?} must select the whole draft"
         );
         assert_eq!(app.input_cursor, app.input.chars().count());
     }
