@@ -1,5 +1,5 @@
-# Plak / Plakous recipes (Linux/macOS). `just fast` while iterating,
-# `just check` before each commit, `just full` at batch boundaries.
+# Plak / Plakous recipes (Linux/macOS). Workers run `just fast <packages>` plus the groups their change needs;
+# each integration batch tip passes `just full`, the strict crash sweep, musl native and macOS platform.
 # Module files live beside this justfile, so their recipes run from the
 # repository root (just uses the module file's directory as the working
 # directory).
@@ -20,9 +20,9 @@ mod harbor
 fast *PACKAGES:
     scripts/dev-check.sh --fast {{PACKAGES}}
 
-# Linux pre-commit: fmt/clippy, structure checks, default/maintainer builds,
+# Linux workspace gate: fmt/clippy, structure checks, default/maintainer builds,
 # parallel and serial lanes, public contracts and tooling. No durability lane.
-[doc("pre-commit: fmt, clippy, structure, builds, parallel and serial, contracts, tooling")]
+[doc("Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel and serial, contracts, tooling")]
 check:
     scripts/dev-check.sh
 

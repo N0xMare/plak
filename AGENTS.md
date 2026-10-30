@@ -26,8 +26,12 @@ history, never prerequisite reading, and never cited as authority.
 
 MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
-cargo-nextest and cargo-deny. Run `just fast` while iterating and `just check`
-before each commit. Before `just install maintainer`, run `just full` and a
+cargo-nextest and cargo-deny. Worker branches iterate and finish with
+`just fast <packages>` plus the groups their change needs. Main advances one
+integration batch at a time: before a batch lands, its tip tree passes the
+integration batch gate (`just full`, `just dev crash-sweep --strict` and
+`just musl native` on Linux, and `just platform` on macOS); commits inside a
+batch are not gated individually. Before `just install maintainer`, run `just full` and a
 strict crash sweep (`just dev crash-sweep --strict`) on Linux, plus
 `just platform` on macOS and `just musl native` on Linux. The full strict
 crash sweep runs at publication boundaries.
@@ -37,7 +41,7 @@ offline image `plak-qual-base:2f225fd7`, which is not published (spec 06).
 ```text
 just fast [PKG...]        # static checks, then the parallel lane for the diff's packages and dependents
 just steps GROUPS         # exactly those comma-separated groups, in canonical order
-just check                # pre-commit: fmt, clippy, structure, builds, parallel+serial, contracts, tooling
+just check                # Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel+serial, contracts, tooling
 just platform             # per install: fmt, clippy, builds, parallel, serial, durability
 just full                 # every group: check, plus variants, rustdoc, durability and the publish dry run
 just fmt                  # cargo fmt --all
@@ -91,7 +95,8 @@ tree as the evidence `just publish` requires. Later commits that change only
 `just steps package` on the new tree (spec 06 §6.5).
 `just fast` maps the working-tree diff against HEAD to packages (a root Cargo
 input means all of them), runs static and the parallel lane over `rdeps(...)`
-of those packages; it is iteration evidence, not a substitute for check. Every
+of those packages; it is worker evidence, not a substitute for the integration
+batch gate. Every
 selected group runs even after another group fails; the final summary names
 all failed groups and the gate exits non-zero. Explicit groups do not imply
 other groups; Rust test groups still prepare their real-worker prerequisite.

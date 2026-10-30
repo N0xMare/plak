@@ -22,13 +22,16 @@ platforms are Apple Silicon macOS and Linux x86_64 musl.
 
 ```sh
 just dev-tools install   # once: pinned cargo-nextest and cargo-deny
-just fast                # while iterating: packages you touched and their dependents
-just check               # before every commit
+just fast PKG...         # worker gate: named packages and their dependents
+just check               # Linux workspace gate (no durability)
 ```
 
 There is no CI except the release workflow, which runs only when a release
-tag is pushed. `just check` on your machine is the gate; say in the pull request
-that it passed, and on which platform.
+tag is pushed. Worker branches iterate and finish with `just fast <packages>`
+plus the groups their change needs; say in the pull request which gates passed
+and on which platform. Before an integration batch lands, its tip tree passes
+`just full`, `just dev crash-sweep --strict` and `just musl native` on Linux,
+and `just platform` on macOS. Commits inside a batch are not gated individually.
 
 ## Pull requests
 

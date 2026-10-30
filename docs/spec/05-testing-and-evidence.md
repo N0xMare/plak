@@ -584,7 +584,7 @@ of it.
 
 ```text
 scripts/dev-check.sh --fast [PKG...]   # just fast: iteration, no serial lanes
-scripts/dev-check.sh                   # just check: pre-commit gate (Linux)
+scripts/dev-check.sh                   # just check: Linux workspace gate (no durability)
 scripts/dev-check.sh --platform        # just platform: per-install platform evidence
 scripts/dev-check.sh --full            # just full: every group; gate changes, installs, publication
 scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these groups (independent lanes)
@@ -610,9 +610,10 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | `--platform` | `static` (fmt/clippy only), `builds`, `tests-parallel`, `tests-serial`, `tests-durability` |
 | `--full` | Every group |
 
-The tiers are not nested. Check is the Linux pre-commit gate: structure
+The tiers are not nested. Check is the Linux workspace gate: structure
 checkers, feature builds, the parallel and serial lanes, contracts and tooling,
-but no durability lane. Platform is the per-install, per-platform gate:
+but no durability lane; no landing, install or publication rule requires it.
+Platform is the per-install, per-platform gate:
 fmt/clippy, feature builds and all three lanes, without the
 platform-independent structure checkers and contracts. Full is their union
 plus variants, rustdoc and the package dry run; a passing full run that started and ended
@@ -626,6 +627,12 @@ rejects unknown or empty groups, and implies no other group; test groups still
 prepare their real Monty-worker prerequisite. Independent runners must use
 separate checkout, target and temporary roots. Each group prints a
 `== group: <name> ==` banner and a `== time: <name> <seconds> s ==` line.
+
+Worker branches iterate and finish with `just fast <packages>` plus the groups
+their change needs. Main advances one integration batch at a time: before a
+batch lands, its tip tree passes the integration batch gate (`just full`,
+`just dev crash-sweep --strict` and `just musl native` on Linux, and
+`just platform` on macOS); commits inside a batch are not gated individually.
 
 After argument validation and the prerequisite check, every selected group runs
 even if an earlier group fails. The static group also runs every step (fmt,
@@ -649,8 +656,8 @@ lint, format or nextest config, `.cargo/`), or any path under `vendor/`
 package. Its parallel
 lane passes `-E 'rdeps(=<pkg>) | ...'`, which nextest intersects with the
 profile's own filter; an empty selection passes, and no touched package runs
-only static. Fast leaves the serial lanes to check and is not pre-commit
-evidence.
+only static. Fast is worker evidence, not a substitute for the integration
+batch gate; workers select serial and other groups when their change needs them.
 
 Public compile contracts isolate fixture feature graphs from workspace
 artifacts in a persistent `.public-contracts/<target-dir-name>/<target-triple>`

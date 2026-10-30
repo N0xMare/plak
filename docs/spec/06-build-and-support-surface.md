@@ -1631,9 +1631,15 @@ the external `monty-proto` / `monty-types` / `monty-alloc` at
 Some controls cannot live in the worktree. Authorized signed commits go directly
 to `main`, and local verification is the authoritative gate. **The repository
 uses local gates and has no CI except the release workflow** (§6.6), which
-builds and publishes a pushed tag and checks nothing else. A contributor runs
-`just check` before each commit on their own machine, and `just full` runs at
-batch and publication boundaries.
+builds and publishes a pushed tag and checks nothing else. Check is the Linux
+workspace gate: structure checkers, feature builds, the parallel and serial
+lanes, contracts and tooling, but no durability lane; no landing, install or
+publication rule requires it. Worker branches iterate and finish with
+`just fast <packages>` plus the groups their change needs. Main advances one
+integration batch at a time: before a batch lands, its tip tree passes the
+integration batch gate (`just full`, `just dev crash-sweep --strict` and
+`just musl native` on Linux, and `just platform` on macOS); commits inside a
+batch are not gated individually.
 
 This does not weaken release requirements, nor claim that an unprotected branch
 is suitable for public collaboration. The desired remote settings are:
