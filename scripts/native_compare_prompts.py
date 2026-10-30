@@ -1362,7 +1362,12 @@ def generate_mitm_certs(directory: Path) -> tuple[Path, Path, Path]:
     ext.write_text(
         "subjectAltName=DNS:chatgpt.com,DNS:*.chatgpt.com,DNS:chat.openai.com,"
         "DNS:api.openai.com,DNS:api.anthropic.com,DNS:chatgpt-staging.com\n"
-        "extendedKeyUsage=serverAuth\n",
+        "extendedKeyUsage=serverAuth\n"
+        # Python 3.13+ verifies with VERIFY_X509_STRICT, which requires the
+        # key identifiers a real issuer chain carries.
+        "basicConstraints=critical,CA:FALSE\n"
+        "subjectKeyIdentifier=hash\n"
+        "authorityKeyIdentifier=keyid,issuer\n",
         encoding="utf-8",
     )
     subprocess.run(
@@ -1385,6 +1390,8 @@ def generate_mitm_certs(directory: Path) -> tuple[Path, Path, Path]:
             "basicConstraints=critical,CA:TRUE",
             "-addext",
             "keyUsage=critical,keyCertSign,cRLSign",
+            "-addext",
+            "subjectKeyIdentifier=hash",
         ],
         check=True,
         capture_output=True,
