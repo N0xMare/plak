@@ -1062,6 +1062,15 @@ fn injected_real_pty_long_work_transitions_remain_ordered_and_reopen_quiescent()
         )
     })?;
     assert_eq!(forked.prompt_history, [AFTER_FORK]);
+    // The assistant row is committed before the host returns to idle. A
+    // session mutation must wait for the idle presentation, not just the row.
+    child.wait_stable_where("idle before clearing the forked turn", |screen| {
+        screen.contains("loopback turn committed")
+            && screen.contains("/ commands")
+            && !screen.contains("thinking")
+            && !screen.contains("responding")
+            && !screen.contains("waiting for model")
+    })?;
     {
         let mut store = crate::store::ProductStore::open(&paths)?;
         let source_id = forked
