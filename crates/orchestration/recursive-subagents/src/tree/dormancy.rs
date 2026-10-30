@@ -397,6 +397,10 @@ impl ProductAgentTree {
 
     /// Resumes acknowledged lifecycle intents, and reserves idle/LRU copies.
     /// The host must stop each returned owner's jobs before draining effects.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "dormancy admission orders retained-candidate, live-turn, occupancy and trim-backoff checks"
+    )]
     pub fn reclaim_dormant(
         &mut self,
         now: u64,
@@ -560,6 +564,10 @@ impl ProductAgentTree {
         self.complete_dormancy_at(ticket, answer, now_unix_millis())
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "dormancy completion reconciles the same workspace generation with unmint and snapshot outcomes"
+    )]
     fn complete_dormancy_at(
         &mut self,
         ticket: DormancyTicket,

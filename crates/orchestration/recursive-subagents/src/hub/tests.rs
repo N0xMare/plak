@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "hub scenarios retain release barriers, deadlines and exact-slot assertions through each full retirement"
+)]
+
 use super::test_support;
 use super::test_support::{bootstrap, memory_store, unique_tree_id};
 use super::*;

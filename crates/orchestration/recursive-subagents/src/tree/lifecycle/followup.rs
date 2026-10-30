@@ -15,6 +15,10 @@ impl ProductAgentTree {
     /// would silently replace the first. `Closed` and `RecoveryRequired` can
     /// never run again, and neither can a failed spawn that never produced a
     /// session: there is nothing to re-task.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "followup admission validates schema, budget, workspace and prior attempt state before installing its rollback boundary"
+    )]
     pub(in crate::tree) fn admit_followup(
         &self,
         agent_id: &str,

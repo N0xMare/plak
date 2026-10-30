@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "conflict scenarios verify source, resolver and accepted-target provenance across the entire landing"
+)]
 #![allow(clippy::unwrap_used, reason = "real Git conflict collection fixtures")]
 
 use crate::protocol::WriterMode;

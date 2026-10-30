@@ -38,6 +38,10 @@ impl ProductAgentTree {
     /// released; the reserved id is held in the tree's `minting` set until
     /// [`Self::spawn_commit`] or [`Self::spawn_abort`] gives it back, so a
     /// second spawn racing this one cannot mint over the same copy.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "spawn admission validates grants, roster, schema and capacity before reserving a single workspace identity"
+    )]
     pub fn spawn_reserve(
         &mut self,
         caller_id: &str,
@@ -280,6 +284,10 @@ impl ProductAgentTree {
     /// Writes the reserved spawn's rows once its mint has answered.
     /// `minted` is `None` exactly when the reservation
     /// carried no ticket — an `inherit` bind.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "spawn commit installs the reserved node, attempt, grant and workspace as one acknowledged transition"
+    )]
     pub fn spawn_commit(
         &mut self,
         reservation: SpawnReservation,

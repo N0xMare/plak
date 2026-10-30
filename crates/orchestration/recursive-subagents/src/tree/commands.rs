@@ -315,6 +315,10 @@ impl ProductAgentTree {
         self.clear_scoped_feed_views(Some((agent, session)));
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "epoch changes remove all scoped feed cursors and derived command, compaction and terminal evidence together"
+    )]
     fn clear_scoped_feed_views(&mut self, scope: Option<(&str, &str)>) {
         self.compaction_views.retain(|id, _| {
             scope.is_some_and(|(agent, _)| {

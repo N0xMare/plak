@@ -67,6 +67,16 @@ async fn startup_results_owned(startups: Vec<(String, ChildStartup)>) -> Vec<Res
 pub(super) async fn shutdown_runtime(
     runtime: Arc<ProductTopologyRuntime>,
 ) -> Result<(), TopologyShutdownError> {
+    let mut failure = close_runtime_admission(&runtime).await;
+    join_runtime_children(runtime, &mut failure).await;
+    if failure.tree_failure.is_none() && failure.child_failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failure)
+    }
+}
+
+async fn close_runtime_admission(runtime: &ProductTopologyRuntime) -> TopologyShutdownError {
     runtime.close_for_shutdown();
     // A recovery pass reopens child sessions; it ends (or is aborted) before
     // the drain, so no reopen outlives the leases this shutdown releases.
@@ -102,6 +112,13 @@ pub(super) async fn shutdown_runtime(
     } else {
         failure.tree_failure = Some("topology tree lock is poisoned".into());
     }
+    failure
+}
+
+async fn join_runtime_children(
+    runtime: Arc<ProductTopologyRuntime>,
+    failure: &mut TopologyShutdownError,
+) {
     let startups = {
         let live = runtime.live.lock().await;
         live.starting
@@ -194,10 +211,5 @@ pub(super) async fn shutdown_runtime(
             );
             failure.child_failures.push((id, error));
         }
-    }
-    if failure.tree_failure.is_none() && failure.child_failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failure)
     }
 }

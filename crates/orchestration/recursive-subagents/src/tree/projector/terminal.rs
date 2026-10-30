@@ -6,6 +6,10 @@ use super::{
 };
 
 impl ProductAgentTree {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "terminal projection classifies completion, failure and cancellation before settling the bound attempt once"
+    )]
     #[allow(clippy::too_many_arguments, reason = "one terminal fact's fields")]
     pub(super) fn apply_terminal(
         &mut self,

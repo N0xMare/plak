@@ -225,6 +225,10 @@ impl AwaitOutput {
     /// its position. Withheld outputs leave their rows
     /// undelivered and withheld mail stays unread, so the next await returns
     /// them at once.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "bounded wait output trims each retained field in priority order before dropping whole rows"
+    )]
     pub(crate) fn fit_budget(&mut self) {
         enum Item {
             Output(usize),

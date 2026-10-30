@@ -163,6 +163,10 @@ impl ProductAgentTree {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "followup withdrawal restores the captured node, attempt, workspace and receipt state only under its opener guard"
+    )]
     pub(crate) fn withdraw_unstarted_followup(
         &mut self,
         agent_id: &str,

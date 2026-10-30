@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "candidate scenarios retain base pins, conflict lineage and adoption assertions across complete transitions"
+)]
+
 use super::SEAL_OUTCOME_KIND;
 use super::merge_conflict_message;
 use crate::tree::test_support::*;

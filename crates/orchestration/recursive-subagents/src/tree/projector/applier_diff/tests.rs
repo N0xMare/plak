@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "the differential scenario exercises every derived view mutation against its full scratch-clone oracle"
+)]
+
 use crate::tree::test_support::{fake_tree, spawn_req};
 
 #[test]

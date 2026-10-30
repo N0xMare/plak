@@ -354,6 +354,10 @@ impl ProductAgentTree {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "seal replay checks workspace, attempt and candidate evidence before consuming exact ownership"
+    )]
     pub(super) fn join_seal_outcome(
         &mut self,
         agent_id: &str,
@@ -698,6 +702,10 @@ impl ProductAgentTree {
     /// Authority, sealing, and freshness checks; marks the candidate's
     /// workspace row `Adopting` and queues the ticket the landing runs on.
     /// The receipt comes back from [`Self::complete`].
+    #[allow(
+        clippy::too_many_lines,
+        reason = "adoption validates lineage, conflict authority, occupancy and provenance before reserving one landing"
+    )]
     pub fn begin_adopt(
         &mut self,
         caller_id: &str,
@@ -1061,6 +1069,10 @@ impl ProductAgentTree {
     }
 
     /// Re-lock half of the adopt: commits the receipt or restores the row.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "adoption completion records success or conflict evidence and releases the exact in-flight ownership"
+    )]
     pub fn finish_adopt(
         &mut self,
         ticket: &AdoptTicket,

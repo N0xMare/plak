@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "driver scenarios exercise acknowledged publication, effect settlement and capacity outage recovery end to end"
+)]
+
 //! Tree driver: folds, commits, saves, settles and their refusals.
 
 use super::*;

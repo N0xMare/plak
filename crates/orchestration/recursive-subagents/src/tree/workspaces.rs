@@ -725,6 +725,10 @@ impl ProductAgentTree {
     ///
     /// Refuses a caller that does not own the row, an unknown row, and live
     /// occupants or dependencies on the copy.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "discard validates candidate ownership and occupancy before reserving the exact workspace removal"
+    )]
     pub fn discard_workspace(
         &mut self,
         caller_id: &str,
@@ -1108,6 +1112,10 @@ impl ProductAgentTree {
         true
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "unmint acknowledgement preserves retry evidence on failure and retires only the matching workspace generation"
+    )]
     pub(super) fn finish_unmint(
         &mut self,
         ticket: UnmintTicket,

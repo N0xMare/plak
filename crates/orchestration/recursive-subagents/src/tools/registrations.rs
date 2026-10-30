@@ -14,6 +14,10 @@ fn object_schema(properties: Value, required: &[&str]) -> Value {
 
 /// The spawn enum is this node's menu (the working set for the root, its
 /// own card's `spawns` list otherwise), never a fixed set.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the topology tool vocabulary declares each bounded request schema in one match"
+)]
 pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Value {
     match kind {
         TopologyKind::Spawn => object_schema(

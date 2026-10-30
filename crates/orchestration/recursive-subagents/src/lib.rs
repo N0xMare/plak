@@ -57,7 +57,6 @@
     clippy::missing_panics_doc,
     clippy::must_use_candidate,
     clippy::doc_markdown,
-    clippy::too_many_lines,
     clippy::map_unwrap_or,
     clippy::needless_pass_by_value,
     clippy::unnecessary_wraps,

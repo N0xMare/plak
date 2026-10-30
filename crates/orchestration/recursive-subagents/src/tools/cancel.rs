@@ -114,6 +114,10 @@ impl TopologyTool {
         ToolOutcome::success_text(payload_text)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "close receipts retain the captured targets through cancellation, job stop and effect settlement"
+    )]
     pub(super) async fn close_with(
         &self,
         operation_id: String,

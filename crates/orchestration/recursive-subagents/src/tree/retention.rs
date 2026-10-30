@@ -353,6 +353,10 @@ impl ProductAgentTree {
         Ok(tickets)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "retention completion reconciles prune, fold, locator and removal evidence before allowing workspace reclamation"
+    )]
     pub(crate) fn finish_child_retention(
         &mut self,
         ticket: &RetirementTicket,

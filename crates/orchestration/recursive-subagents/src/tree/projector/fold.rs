@@ -321,6 +321,10 @@ impl ProductAgentTree {
         intents
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "intent folding orders host observations with feed anchors and refuses unmatched captured targets"
+    )]
     fn fold_intents_through(
         &mut self,
         agent_id: &str,

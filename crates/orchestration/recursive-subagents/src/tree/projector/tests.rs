@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "projector scenarios retain feed sequences, host intents and rebuild oracles through complete interleavings"
+)]
+
 //! The tree projector's laws (spec 05) and the derivations it owns (spec 03
 //! §4.4, §8, §14.1): wait settlement, the withheld-mail return, a discarded
 //! host wake's batch, and child command binding.
@@ -3342,10 +3347,6 @@ fn generated_finalization(
     settle_generated_effects(tree)
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "generated live interleavings and their rebuild oracle"
-)]
 fn assert_generated_host_interleavings(steps: &[HostInterleaving]) -> Result<(), TestCaseError> {
     let (_tmp, vcs, mut live) = fake_tree();
     let spawned = live.spawn_agent("root", &mint_req(), None).unwrap();

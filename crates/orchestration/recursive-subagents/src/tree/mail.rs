@@ -322,6 +322,10 @@ impl ProductAgentTree {
     ///
     /// Refuses an oversized body, a recipient the caller may not address, and
     /// a recipient that is already terminal.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "mail admission distinguishes steer, queue and followup while recording one immutable replay receipt"
+    )]
     pub fn send_agent_message(
         &mut self,
         caller_id: &str,
@@ -553,6 +557,10 @@ impl ProductAgentTree {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "result mail retains exact attempt output, candidate provenance and failure evidence in its bounded notice"
+    )]
     pub(super) fn enqueue_result_mail(&mut self, agent_id: &str) {
         if self.result_effect_reserved(agent_id) {
             return;

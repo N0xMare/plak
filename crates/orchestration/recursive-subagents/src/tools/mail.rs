@@ -251,6 +251,10 @@ impl TopologyTool {
     /// the send waits (behind a parked wait on the mail, or for an
     /// interrupted recipient's turn to unwind), never mid-delivery, and a
     /// cancelled send leaves its mail unread under its original receipt.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "mail admission and delivery retain the same attempt and independently owned operation receipt"
+    )]
     pub(super) async fn send_cancellable(
         &self,
         operation_id: String,

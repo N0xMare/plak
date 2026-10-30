@@ -70,6 +70,10 @@ impl TopologyTool {
     /// children, their mail and its own processes, with one receipt kind.
     /// `presented` is the presentation's own request; a same-call replay
     /// must present it again.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "wait admission retains its provisional receipt through wake, timeout, cancellation and publication"
+    )]
     pub(super) async fn await_operation<R: serde::Serialize>(
         &self,
         operation_id: &str,

@@ -133,6 +133,10 @@ impl TopologyTool {
     /// rebase/squash) subprocesses with the lock released, then the receipt
     /// under the lock again. Every other tool call and TUI read proceeds while
     /// the landing runs.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "adoption preserves the prepared receipt across unlocked landing and acknowledged tree publication"
+    )]
     pub(super) fn adopt_with(
         &self,
         operation_id: &str,
@@ -392,6 +396,10 @@ impl TopologyTool {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "spawn coordinates reservation, mint, bind, startup ownership and receipt completion without replaying effects"
+    )]
     pub(super) async fn spawn_with(
         &self,
         operation_id: String,

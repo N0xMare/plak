@@ -138,6 +138,10 @@ impl ProductAgentTree {
         )
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "intent folding reconciles submitted, interrupted and closed outcomes against the exact captured turn"
+    )]
     pub(super) fn join_operator_intent(
         &mut self,
         agent_id: &str,

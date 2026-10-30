@@ -107,6 +107,29 @@ impl ProductAgentTree {
             generation: 0,
             adopter_agent_id: None,
         };
+        Ok(Self::bootstrap_root_records(
+            vcs,
+            tree_id,
+            selected_tuple,
+            writer_mode,
+            root,
+            grant,
+            workspace,
+        ))
+    }
+
+    fn bootstrap_root_records(
+        vcs: Arc<dyn VcsOps>,
+        tree_id: String,
+        selected_tuple: String,
+        writer_mode: WriterMode,
+        root: NodeRecord,
+        grant: TopologyGrant,
+        workspace: WorkspaceRecord,
+    ) -> Self {
+        let root_agent_id = root.agent_id.clone();
+        let launch_checkout = root.path.clone();
+        let workspace_id = workspace.workspace_id.clone();
         let mut nodes = BTreeMap::new();
         nodes.insert(root_agent_id.clone(), root);
         let mut grants = BTreeMap::new();
@@ -115,7 +138,7 @@ impl ProductAgentTree {
         workspaces.insert(workspace_id.clone(), workspace);
         let mut allowed = BTreeSet::new();
         allowed.insert(selected_tuple.clone());
-        Ok(Self {
+        Self {
             tree_id,
             root_agent_id,
             revision: 1,
@@ -175,7 +198,7 @@ impl ProductAgentTree {
             cell_budget: Arc::new(CellAgentBudget::for_snapshot(
                 &OrchestrationSnapshot::unpinned(String::new()),
             )),
-        })
+        }
     }
 
     pub(super) fn vcs(&self) -> &dyn VcsOps {
