@@ -3846,7 +3846,17 @@ keys, never report-all), disables focus events, discards queued tty input,
 ends raw mode, leaves the alternate screen, and shows the cursor. Mouse
 reporting is never enabled while raw mode is off. Normal exit and terminal
 handoff pop the pushed mode; panic and forced-exit restoration also pop it
-before leaving the alternate screen.
+before leaving the alternate screen. While a light theme is active and this
+process holds the terminal, the text cursor color is that theme's text color
+(OSC 12). Dark themes do not change the cursor color. A frame painted after
+the terminal is released does not set the color. Exit, handoff, panic and
+forced-exit restoration send OSC 112 on those same paths, and only if this
+process set the color, before the alternate screen is left. A frame does not
+hide or show the caret again, and moves it only when the caret moved or the
+frame drew cells. While the TUI owns the terminal the caret is a steady
+block, because that move restarts the terminal blink timer. Those same
+restoration paths restore the terminal's cursor shape before the alternate
+screen is left.
 
 Quit is `/quit` (or `/exit`), `Ctrl+Q`, or the `Ctrl+C` ladder; each opens the
 quit pop-up (§5.7) while a root turn runs with no stop of it in flight, while

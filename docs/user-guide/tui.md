@@ -620,7 +620,11 @@ row of its own.
 Six, in menu order: `default-dark`, `default-light`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`. The chooser
 previews live as you move through it. `dark` and `light` remain accepted aliases
-of the two defaults in `config.toml`.
+of the two defaults in `config.toml`. On a light theme the composer's cursor
+takes the theme's text color, and Plak restores the terminal's own cursor
+color when it leaves the screen. Dark themes leave the cursor color alone.
+While Plak owns the terminal the caret is a steady block, and leaving
+restores the terminal's cursor shape.
 
 ## Activity
 

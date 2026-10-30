@@ -14,11 +14,11 @@ use crossterm::event::{
     PushKeyboardEnhancementFlags,
 };
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
-use ratatui::{DefaultTerminal, Frame};
 use unicode_width::UnicodeWidthStr;
 
 /// Wall clock in unix seconds, for the durations the product renders against
@@ -1125,6 +1125,7 @@ mod composer_chrome;
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test assertions")]
 mod composer_chrome_tests;
 mod control_center;
+mod cursor_backend;
 mod destructive_confirm;
 #[cfg(test)]
 #[allow(

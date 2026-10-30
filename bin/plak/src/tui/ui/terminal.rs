@@ -1,18 +1,23 @@
 //! Terminal lifecycle, event loop, and action dispatch.
 
+use super::cursor_backend::SteadyCursor;
 use super::{
-    App, BeginSynchronizedUpdate, ControlTab, DefaultTerminal, DisableBracketedPaste,
-    DisableFocusChange, DisableMouseCapture, Duration, EnableBracketedPaste, EnableFocusChange,
-    EnableMouseCapture, EndSynchronizedUpdate, Event, FrameWork, HostEvent, Instant,
-    KeyboardEnhancementFlags, MAX_HOST_EVENTS_PER_FRAME, MAX_INPUT_DRAIN_PER_FRAME, Path,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags, RedrawSchedule, ScrollBlock,
-    SettingsMenu, ShowCursor, TuiError, TuiHandoff, TuiLaunch, TuiOutcome, UserAction, event,
-    local_echo_line, stdout,
+    App, BeginSynchronizedUpdate, ControlTab, DisableBracketedPaste, DisableFocusChange,
+    DisableMouseCapture, Duration, EnableBracketedPaste, EnableFocusChange, EnableMouseCapture,
+    EndSynchronizedUpdate, Event, FrameWork, HostEvent, Instant, KeyboardEnhancementFlags,
+    MAX_HOST_EVENTS_PER_FRAME, MAX_INPUT_DRAIN_PER_FRAME, Path, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags, RedrawSchedule, ScrollBlock, SettingsMenu, ShowCursor, Theme,
+    TuiError, TuiHandoff, TuiLaunch, TuiOutcome, UserAction, event, local_echo_line, stdout,
 };
+
+/// The process terminal, with repeated cursor commands suppressed.
+type PlakTerminal =
+    ratatui::Terminal<SteadyCursor<ratatui::backend::CrosstermBackend<std::io::Stdout>>>;
 use crate::tui::SurfaceIntent;
 #[cfg(feature = "test-hooks")]
 use crate::tui::ui::pilot_sidecar::PilotSidecar;
 use crossterm::ExecutableCommand;
+use crossterm::cursor::SetCursorStyle;
 use crossterm::tty::IsTty;
 
 // Keep printable input as terminal-composed text, not report-all key events.
@@ -50,6 +55,134 @@ pub(super) fn copy_text_osc52(text: &str) {
     let mut terminal = stdout();
     let _ = terminal.write_all(seq.as_bytes());
     let _ = terminal.flush();
+}
+
+/// OSC 112, reset text cursor color. Sent only after this process set it.
+const CURSOR_COLOR_RESET: &str = "\x1b]112\x07";
+
+/// Packed `0x00RRGGBB`, or [`CURSOR_COLOR_UNSET`] when the terminal's own
+/// cursor color is still in force. Atomic so a panic or forced exit on
+/// another thread can reset it without taking a lock the painter holds.
+const CURSOR_COLOR_UNSET: u32 = u32::MAX;
+static CURSOR_COLOR: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(CURSOR_COLOR_UNSET);
+
+/// Set when this process switched the caret to a steady block. Restore paths
+/// send the terminal's own shape only if this is set.
+static CURSOR_STYLE_STEADY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn pack_cursor_rgb(rgb: Option<(u8, u8, u8)>) -> u32 {
+    match rgb {
+        Some((red, green, blue)) => {
+            (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
+        }
+        None => CURSOR_COLOR_UNSET,
+    }
+}
+
+fn unpack_cursor_rgb(packed: u32) -> Option<(u8, u8, u8)> {
+    if packed == CURSOR_COLOR_UNSET {
+        return None;
+    }
+    Some((
+        u8::try_from((packed >> 16) & 0xff).unwrap_or(0),
+        u8::try_from((packed >> 8) & 0xff).unwrap_or(0),
+        u8::try_from(packed & 0xff).unwrap_or(0),
+    ))
+}
+
+/// OSC 12 sets the cursor color; `None` is OSC 112.
+pub(super) fn cursor_color_sequence(rgb: Option<(u8, u8, u8)>) -> String {
+    match rgb {
+        Some((red, green, blue)) => format!("\x1b]12;#{red:02x}{green:02x}{blue:02x}\x07"),
+        None => CURSOR_COLOR_RESET.to_owned(),
+    }
+}
+
+/// Light themes use the theme text color. Dark themes leave the cursor alone.
+pub(super) fn light_theme_cursor_rgb(theme: &Theme) -> Option<(u8, u8, u8)> {
+    theme.id.is_light().then(|| {
+        let text = theme.colors.text;
+        (text.red, text.green, text.blue)
+    })
+}
+
+/// Bytes to emit when the desired cursor color differs from `current`.
+pub(super) fn cursor_color_change(
+    current: Option<(u8, u8, u8)>,
+    desired: Option<(u8, u8, u8)>,
+) -> Option<String> {
+    (current != desired).then(|| cursor_color_sequence(desired))
+}
+
+fn emit_cursor_color(sequence: &str) {
+    use std::io::Write as _;
+    let mut terminal = stdout();
+    let _ = terminal.write_all(sequence.as_bytes());
+    let _ = terminal.flush();
+}
+
+/// Set or clear the cursor color when the active theme requires it.
+///
+/// A paint after release must not set the color: the restore path may already
+/// have sent OSC 112. The held flag is taken for the whole emit so a forced
+/// exit cannot reset the color and then lose the race to this write.
+pub(super) fn sync_terminal_cursor_color(theme: &Theme) {
+    let held = TERMINAL_HELD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !*held {
+        return;
+    }
+    let desired = light_theme_cursor_rgb(theme);
+    let current = unpack_cursor_rgb(CURSOR_COLOR.load(std::sync::atomic::Ordering::Relaxed));
+    let Some(sequence) = cursor_color_change(current, desired) else {
+        return;
+    };
+    CURSOR_COLOR.store(
+        pack_cursor_rgb(desired),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    emit_cursor_color(&sequence);
+}
+
+fn emit_cursor_style(style: SetCursorStyle) {
+    let _ = stdout().execute(style);
+}
+
+/// Steady block for as long as this process holds the terminal.
+///
+/// A frame that drew cells has to move the caret back, and that move restarts
+/// the blink timer. A steady shape does not show the restart.
+fn set_steady_cursor_style() {
+    emit_cursor_style(SetCursorStyle::SteadyBlock);
+    CURSOR_STYLE_STEADY.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn reset_terminal_cursor_style() {
+    if !take_cursor_style_override() {
+        return;
+    }
+    emit_cursor_style(SetCursorStyle::DefaultUserShape);
+}
+
+fn take_cursor_style_override() -> bool {
+    CURSOR_STYLE_STEADY.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// OSC 112 if this process set a cursor color. Dark themes never did.
+fn reset_terminal_cursor_color() {
+    if !take_cursor_color_override() {
+        return;
+    }
+    emit_cursor_color(CURSOR_COLOR_RESET);
+}
+
+/// Take the override flag for a restore path that writes its own bytes.
+fn take_cursor_color_override() -> bool {
+    unpack_cursor_rgb(CURSOR_COLOR.swap(CURSOR_COLOR_UNSET, std::sync::atomic::Ordering::Relaxed))
+        .is_some()
 }
 
 /// Pure PTY-test hook for the exact bounded OSC52 payload emitted by copy.
@@ -135,6 +268,8 @@ impl TerminalRestoration {
         {
             errors.push(format!("focus change: {error}"));
         }
+        reset_terminal_cursor_color();
+        reset_terminal_cursor_style();
         // Mouse reporting is off above and raw mode is still on here: input
         // that reached the tty while the UI was not reading (a mouse moved
         // over a quitting screen) is discarded now, so it is never handed to
@@ -161,13 +296,24 @@ static TERMINAL_HELD: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 const FORCED_RESTORE_LOCK_WAIT: Duration = Duration::from_millis(500);
 
 /// The bytes that hand a TUI-held terminal back, in restoration order.
-fn forced_restore_sequence() -> String {
+///
+/// `reset_cursor_color` appends OSC 112 before the alternate screen is left,
+/// and only when this process set the cursor color for a light theme.
+/// `reset_cursor_style` appends the terminal's own cursor shape on that same
+/// side of the leave, and only when this process set the steady block.
+fn forced_restore_sequence(reset_cursor_color: bool, reset_cursor_style: bool) -> String {
     use crossterm::Command as _;
     let mut sequence = String::new();
     let _ = DisableMouseCapture.write_ansi(&mut sequence);
     let _ = DisableBracketedPaste.write_ansi(&mut sequence);
     let _ = PopKeyboardEnhancementFlags.write_ansi(&mut sequence);
     let _ = DisableFocusChange.write_ansi(&mut sequence);
+    if reset_cursor_color {
+        sequence.push_str(CURSOR_COLOR_RESET);
+    }
+    if reset_cursor_style {
+        let _ = SetCursorStyle::DefaultUserShape.write_ansi(&mut sequence);
+    }
     let _ = crossterm::terminal::LeaveAlternateScreen.write_ansi(&mut sequence);
     let _ = ShowCursor.write_ansi(&mut sequence);
     sequence
@@ -195,7 +341,8 @@ pub(crate) fn force_restore_terminal() {
     if !std::mem::replace(&mut *held, false) {
         return;
     }
-    let sequence = forced_restore_sequence();
+    let sequence =
+        forced_restore_sequence(take_cursor_color_override(), take_cursor_style_override());
     let mut bytes = sequence.as_bytes();
     while !bytes.is_empty() {
         match rustix::io::write(stdout(), bytes) {
@@ -240,6 +387,8 @@ pub(super) fn install_terminal_panic_hook() {
         let _ = out.execute(DisableBracketedPaste);
         let _ = out.execute(PopKeyboardEnhancementFlags);
         let _ = out.execute(DisableFocusChange);
+        reset_terminal_cursor_color();
+        reset_terminal_cursor_style();
         let _ = ratatui::try_restore();
         let _ = out.execute(ShowCursor);
     });
@@ -263,7 +412,7 @@ enum InitStep {
 
 fn initialize_terminal(
     #[cfg(test)] mut after_step: impl FnMut(InitStep) -> Result<(), TuiError>,
-) -> Result<(DefaultTerminal, TerminalRestoration), TuiError> {
+) -> Result<(PlakTerminal, TerminalRestoration), TuiError> {
     let restoration = TerminalRestoration::new();
     super::terminal_panic::claim();
     // The library's init helper installs an unconditional panic hook.
@@ -275,15 +424,17 @@ fn initialize_terminal(
         .map_err(|error| from_io(&error))?;
     #[cfg(test)]
     after_step(InitStep::AlternateScreen)?;
-    let terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(stdout()))
-        .map_err(|error| from_io(&error))?;
+    let terminal = ratatui::Terminal::new(SteadyCursor::new(
+        ratatui::backend::CrosstermBackend::new(stdout()),
+    ))
+    .map_err(|error| from_io(&error))?;
     Ok((terminal, restoration))
 }
 
 /// Owns one initialized terminal across TUI handoffs so resume stays in the
 /// alternate screen instead of flashing the host shell.
 pub struct PersistentTerminal {
-    pub(super) terminal: DefaultTerminal,
+    pub(super) terminal: PlakTerminal,
     pub(super) restoration: TerminalRestoration,
     pub(super) mouse_enabled: bool,
 }
@@ -305,9 +456,14 @@ impl PersistentTerminal {
             |_| Ok(()),
         )?;
         enable_terminal_modes(&mut restoration, mouse_enabled);
-        *TERMINAL_HELD
+        // Held across the style write, so a forced exit either waits and then
+        // restores the shape, or runs before the terminal is marked held.
+        let mut held = TERMINAL_HELD
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *held = true;
+        set_steady_cursor_style();
+        drop(held);
         crate::lookup_status::tui_active(true);
         Ok(Self {
             terminal,
@@ -484,7 +640,8 @@ pub(super) fn drain_host_events(
 
 /// Paint one frame inside a synchronized-update bracket when the terminal
 /// honours DEC 2026, so a partially composed frame never reaches the screen.
-pub(super) fn draw_frame(terminal: &mut DefaultTerminal, app: &mut App) -> Result<(), TuiError> {
+pub(super) fn draw_frame(terminal: &mut PlakTerminal, app: &mut App) -> Result<(), TuiError> {
+    sync_terminal_cursor_color(&app.theme);
     let synchronized = stdout().execute(BeginSynchronizedUpdate).is_ok();
     let result = terminal
         .draw(|frame| app.draw(frame))
@@ -500,7 +657,7 @@ pub(super) fn draw_frame(terminal: &mut DefaultTerminal, app: &mut App) -> Resul
     reason = "The terminal event loop orders host drains, input, redraw, resize, and quit settlement around one terminal owner."
 )]
 pub(super) fn run_app(
-    terminal: &mut DefaultTerminal,
+    terminal: &mut PlakTerminal,
     mut app: App,
     actions: Option<&crate::tui::UserActionSender>,
     events: Option<&crate::tui::HostEventReceiver>,
@@ -907,7 +1064,7 @@ mod tests {
     /// is left, the cursor shown after it.
     #[test]
     fn the_forced_restore_releases_every_mode_before_leaving() {
-        let sequence = forced_restore_sequence();
+        let sequence = forced_restore_sequence(false, false);
         let at = |needle: &str| {
             sequence
                 .find(needle)
@@ -918,5 +1075,83 @@ mod tests {
             assert!(at(mode) < leave, "{mode:?} must precede the leave");
         }
         assert!(at("\x1b[?25h") > leave);
+        assert!(
+            !sequence.contains("\x1b]112"),
+            "a dark session must not reset a cursor color it never set"
+        );
+    }
+
+    #[test]
+    fn a_light_theme_cursor_reset_precedes_leaving_the_alternate_screen() {
+        let theme = super::Theme::for_id(crate::tui::theme::ThemeId::DefaultLight);
+        let rgb = super::light_theme_cursor_rgb(&theme).expect("light themes set a color");
+        assert_eq!(
+            super::cursor_color_sequence(Some(rgb)),
+            "\x1b]12;#181a1f\x07"
+        );
+        assert!(
+            super::light_theme_cursor_rgb(&super::Theme::for_id(
+                crate::tui::theme::ThemeId::DefaultDark
+            ))
+            .is_none()
+        );
+        assert_eq!(
+            super::cursor_color_change(None, Some(rgb)).as_deref(),
+            Some("\x1b]12;#181a1f\x07")
+        );
+        assert!(super::cursor_color_change(Some(rgb), Some(rgb)).is_none());
+        assert_eq!(
+            super::cursor_color_change(Some(rgb), None).as_deref(),
+            Some("\x1b]112\x07")
+        );
+
+        let sequence = forced_restore_sequence(true, false);
+        let at = |needle: &str| {
+            sequence
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle:?} missing from {sequence:?}"))
+        };
+        let leave = at("\x1b[?1049l");
+        assert!(at("\x1b]112\x07") < leave);
+        assert!(
+            !sequence.contains("\x1b[0 q"),
+            "a color reset does not imply a cursor-shape reset"
+        );
+    }
+
+    #[test]
+    fn a_steady_cursor_shape_is_restored_before_leaving_the_alternate_screen() {
+        let sequence = forced_restore_sequence(false, true);
+        let at = |needle: &str| {
+            sequence
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle:?} missing from {sequence:?}"))
+        };
+        assert!(at("\x1b[0 q") < at("\x1b[?1049l"));
+        assert!(!forced_restore_sequence(false, false).contains("\x1b[0 q"));
+    }
+
+    #[test]
+    fn a_paint_after_release_does_not_set_the_cursor_color() {
+        use std::sync::atomic::Ordering;
+        let theme = super::Theme::for_id(crate::tui::theme::ThemeId::DefaultLight);
+        let was_held = {
+            let mut held = super::TERMINAL_HELD
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let was_held = *held;
+            *held = false;
+            was_held
+        };
+        let before = super::CURSOR_COLOR.load(Ordering::Relaxed);
+        super::sync_terminal_cursor_color(&theme);
+        assert_eq!(
+            super::CURSOR_COLOR.load(Ordering::Relaxed),
+            before,
+            "a released terminal must not take a cursor color"
+        );
+        *super::TERMINAL_HELD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = was_held;
     }
 }
