@@ -1049,6 +1049,10 @@ mod shared_host_model {
             })
         }
 
+        #[allow(
+            clippy::too_many_lines,
+            reason = "Seal the SuperGrok authority, replay artifact, wire measurement and prepared execution under the same target."
+        )]
         fn prepare_call(
             self: Arc<Self>,
             plan: ValidatedRequestPlan,

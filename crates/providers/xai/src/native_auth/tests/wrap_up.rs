@@ -4,7 +4,6 @@
 //! binding leaves tool selection out of its prefix identity, so the wrap-up
 //! keeps the live artifact's bound replay and the next turn binds the
 //! wrap-up's own artifact. Any other stable-prefix difference lowers fresh.
-
 use plakous_model::{InstructionBlock, InstructionSource, ToolChoice};
 
 use super::*;

@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Exercise exact SuperGrok preparation and artifact tamper, binding, revision and authority refusals end to end."
+)]
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::str::FromStr;

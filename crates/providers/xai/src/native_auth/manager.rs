@@ -165,6 +165,10 @@ impl XaiNativeAuthManager {
     /// would leave the store on a refresh token the provider may have retired.
     /// An expired access token is reported as `RefreshRequired` without network
     /// I/O; the next turn refreshes it.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Resolve the selected Grok receipt and retain its diagnostics while classifying the bounded usage response."
+    )]
     pub async fn subscription_usage(&self) -> SubscriptionUsageRead {
         let unavailable = |reason| SubscriptionUsageRead::Unavailable {
             observed_at: Timestamp::new(system_unix_seconds().unwrap_or(0), 0)

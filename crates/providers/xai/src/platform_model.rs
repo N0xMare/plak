@@ -425,6 +425,10 @@ impl LanguageModel for XaiPlatformModel {
             Ok(runtime)
         })
     }
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Validate exact xAI Platform authority and seal the Responses wire and context projection without dispatch."
+    )]
     fn prepare_call(
         self: Arc<Self>,
         plan: ValidatedRequestPlan,

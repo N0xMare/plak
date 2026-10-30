@@ -16,6 +16,10 @@ use plakous_auth::oauth_orchestrator::{AudienceClaim, SubjectClaim};
 use zeroize::Zeroize as _;
 
 impl ManagerCore {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Verify signed Grok identity, account continuity, refresh retention and selection epoch before sealing stored tokens."
+    )]
     pub(super) async fn validate_tokens(
         &self,
         mut tokens: TokenResponse,

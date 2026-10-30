@@ -73,6 +73,10 @@ impl fmt::Debug for SuperGrokDispatchGuard {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "Revalidate the SuperGrok catalog and credential fence and select the one authorized refresh outcome before dispatch."
+)]
 pub(crate) fn supergrok_responses_preflight<'a>(
     dialect: &'a SuperGrokResponsesExecution,
     request: ResponsesPreflightRequest<'a>,

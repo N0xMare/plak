@@ -1,3 +1,7 @@
+#![allow(
+    clippy::too_many_lines,
+    reason = "Exercise exact Grok login, catalog, credential rotation and two-round Responses inference through controlled peers."
+)]
 use std::error::Error;
 use std::fs;
 use std::num::NonZeroU32;
@@ -1176,10 +1180,6 @@ fn login_stage_errors_are_payload_free_and_redaction_safe() {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear test proves the complete payload-free login-stage matrix"
-)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn browser_and_device_login_failures_report_only_the_narrow_stage() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
@@ -4301,10 +4301,6 @@ async fn generation_rotation_before_dispatch_keeps_prepared_wire_and_uses_renewe
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the linear two-round rotation schedule keeps the exact dispatch boundary visible"
-)]
 async fn generation_rotation_between_tool_rounds_renews_before_later_dispatch() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
     let temp = tempdir()?;

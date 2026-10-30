@@ -11,7 +11,6 @@
     clippy::match_same_arms,
     clippy::missing_errors_doc,
     clippy::needless_pass_by_value,
-    clippy::too_many_lines,
     clippy::unnecessary_wraps,
     reason = "provider product names, closed error mappings, and bounded auth/test flows"
 )]
