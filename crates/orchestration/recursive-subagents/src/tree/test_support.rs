@@ -1,10 +1,11 @@
 //! Shared fixtures for the `agent_tree` unit tests.
 
+use crate::epoch::BindHints;
 pub(super) use crate::protocol::{DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS};
 
 use super::{
-    AdoptCandidateRequest, Arc, AttemptScopedRequest, AwaitAgents, BindHints, CandidateId,
-    MailRecord, MessagePurpose, PathBuf, ProductAgentTree, RosterBinding, SendAgentMessageRequest,
+    AdoptCandidateRequest, Arc, AttemptScopedRequest, AwaitAgents, CandidateId, MailRecord,
+    MessagePurpose, PathBuf, ProductAgentTree, RosterBinding, SendAgentMessageRequest,
     SpawnAgentRequest, SpawnWorkspace, SubmitNudgeBudget, Tier, WriterMode,
 };
 

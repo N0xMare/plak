@@ -1600,42 +1600,6 @@ impl ProductAgentTree {
         Ok(())
     }
 
-    /// Spends one admitted submit-harness Start on the current attempt.
-    /// The budget is persisted, so a crash-cut rejoin cannot
-    /// reset it, and the harness counts against the template's turn ceiling
-    /// like any other turn.
-    ///
-    /// # Errors
-    ///
-    /// Refuses an unknown agent and an attempt with no turns left.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn record_submit_harness_round(
-        &mut self,
-        agent_id: &str,
-        nudge: SubmitNudgeBudget,
-    ) -> Result<(), TopologyError> {
-        // the harness is another turn on the attempt, so it may
-        // not run past the template's `max_turns`.
-        if self.attempt_turns_spent(agent_id) {
-            return Err(TopologyError::new(
-                TopologyErrorCode::QuotaBlocked,
-                "attempt has spent its template max_turns; no further turn is admitted",
-            ));
-        }
-        let attempt = self.current_attempt_mut(agent_id).ok_or_else(|| {
-            TopologyError::new(TopologyErrorCode::GrantDenied, "attempt is missing")
-        })?;
-        if attempt.output_json.is_some() || attempt.status.is_stopped() {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RecipientAttemptTerminal,
-                "terminal attempt cannot admit a submit harness round",
-            ));
-        }
-        attempt.submit_harness_nudge = nudge;
-        self.bump();
-        Ok(())
-    }
-
     /// Records what a reopen of this node's session had to abandon.
     ///
     /// A child session is opened inside the caller's tool work, away from any
