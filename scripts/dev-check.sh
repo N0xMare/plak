@@ -240,6 +240,7 @@ run_group() {
       echo "== rustdoc =="
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"}
       for package in "${supported_packages[@]}"; do
+        echo "== rustdoc: $package alone =="
         RUSTDOCFLAGS="-D warnings" cargo doc -p "$package" --no-deps --locked ${target_args[@]+"${target_args[@]}"}
       done ;;
     tests-parallel)

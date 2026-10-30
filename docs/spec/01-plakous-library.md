@@ -1041,10 +1041,10 @@ As defense-in-depth parity, both memory and SQLite require the exact
 `checkpoint_commit_identity` on create recovery/replay and commit replay,
 returning `IdentityConflict` for a mismatch even though checkpoint integrity
 already covers that identity.
-Create validates the supplied genesis before comparing a replay receipt on
-either backend, so invalid genesis topology takes precedence over a receipt
-identity conflict. Replay identity reads the bundle's validated checkpoint;
-it does not copy the supplied object publication.
+Create (not create recovery) validates the supplied genesis before comparing
+a replay receipt on either backend, so invalid genesis topology takes
+precedence over a receipt identity conflict; create recovery checks only the
+bundle's validity before the receipt.
 
 Every accepted mutation that changes session authority — create (including a
 seeded create), commit, fork and rebind, lease release, prune and archive —
