@@ -32,7 +32,7 @@ fn only_enrolled_literals_with_a_reported_window_have_a_contract()
 #[test]
 fn grok_47_window_is_the_catalog_window() -> Result<(), Box<dyn std::error::Error>> {
     let facts: Value = serde_json::from_str(include_str!(
-        "../tests/fixtures/context/grok-4.7-enrollment.json"
+        "../../tests/fixtures/context/grok-4.7-enrollment.json"
     ))?;
     assert_eq!(facts["revision"], XAI_GROK_47_ENROLLMENT_REVISION);
     assert_eq!(facts["model"], XAI_GROK_47_CODING_MODEL);
